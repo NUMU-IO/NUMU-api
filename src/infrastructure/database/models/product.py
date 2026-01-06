@@ -1,0 +1,75 @@
+"""Product database model."""
+
+from decimal import Decimal
+
+from sqlalchemy import Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.core.entities.product import ProductStatus, ProductType
+from src.infrastructure.database import Base
+from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
+
+
+class ProductModel(Base, UUIDMixin, TimestampMixin):
+    """Product database model."""
+
+    __tablename__ = "products"
+
+    store_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stores.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    sku: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    short_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    product_type: Mapped[ProductType] = mapped_column(
+        Enum(ProductType),
+        default=ProductType.PHYSICAL,
+        nullable=False,
+    )
+    status: Mapped[ProductStatus] = mapped_column(
+        Enum(ProductStatus),
+        default=ProductStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    
+    # Pricing (stored in cents)
+    price_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    price_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    compare_at_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    
+    # Inventory
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    low_stock_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    
+    # Physical properties
+    weight: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    dimensions: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    
+    # Media and categorization
+    images: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
+    category_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
+    
+    # Additional data
+    attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+
+    # Relationships
+    store = relationship("StoreModel", back_populates="products", lazy="selectin")
+    category = relationship("CategoryModel", back_populates="products", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<ProductModel(id={self.id}, name={self.name})>"
