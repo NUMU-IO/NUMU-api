@@ -16,11 +16,21 @@ from src.infrastructure.tenancy.repository import TenantRepository
 logger = logging.getLogger(__name__)
 
 # Routes that don't require tenant context
-PUBLIC_PATHS = ("/health", "/docs", "/redoc", "/openapi.json", "/api/v1/public", "/api/v1/auth")
+PUBLIC_PATHS = (
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/api/v1/public",
+    "/api/v1/auth",
+)
 
 
 class TenantMiddleware(BaseHTTPMiddleware):
+    """Middleware to identify and set tenant context from subdomain."""
+    
     async def dispatch(self, request: Request, call_next):
+        """Process request and set tenant context if applicable."""
         # Skip for public routes, docs, and health checks
         if request.url.path.startswith(PUBLIC_PATHS):
             request.state.tenant = None
@@ -48,7 +58,10 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 tenant = await tenant_repo.get_by_subdomain(subdomain)
             
             if not tenant or not tenant.is_active:
-                raise HTTPException(status_code=404, detail=f"Store '{subdomain}' not found or inactive.")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Store '{subdomain}' not found or inactive."
+                )
             
             # Set tenant context
             request.state.tenant = tenant
@@ -62,8 +75,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             reset_tenant_schema()
     
     def _extract_subdomain(self, host: str) -> str | None:
-        """
-        Extract subdomain from host.
+        """Extract subdomain from host.
         
         Examples:
         - store1.octyrafiy.com -> store1

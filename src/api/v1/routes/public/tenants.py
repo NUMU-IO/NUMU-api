@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import get_current_user_id, require_roles
 from src.api.dependencies.database import get_db_session
-from src.api.v1.schemas.tenant import (
+from src.api.v1.schemas.public.tenant import (
     CreateTenantRequest,
     TenantCreatedResponse,
     TenantResponse,
@@ -17,8 +17,8 @@ from src.api.v1.schemas.tenant import (
 )
 from src.config import settings
 from src.core.entities.user import UserRole
-from src.tenants.repository import TenantRepository
-from src.tenants.service import TenantService
+from src.infrastructure.tenancy.repository import TenantRepository
+from src.infrastructure.tenancy.service import TenantService
 
 logger = logging.getLogger(__name__)
 

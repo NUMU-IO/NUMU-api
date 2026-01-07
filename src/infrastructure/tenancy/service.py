@@ -1,22 +1,33 @@
+"""Tenant service for schema provisioning and management."""
+
 import hashlib
-import re
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
-from src.tenants.repository import TenantRepository
-from src.infrastructure.database.connection import engine, Base
+import re
+
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.infrastructure.database.connection import Base, engine
+from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = logging.getLogger(__name__)
 
 
 class TenantService:
+    """Service for managing tenants and their database schemas."""
+    
     def __init__(self, db: AsyncSession):
         self.db = db
         self.tenant_repo = TenantRepository(db)
     
-    async def create_tenant(self, name: str, subdomain: str, owner_id: str = None, plan: str = "free"):
-        """
-        Create a new tenant with its own database schema.
+    async def create_tenant(
+        self,
+        name: str,
+        subdomain: str,
+        owner_id: str = None,
+        plan: str = "free"
+    ):
+        """Create a new tenant with its own database schema.
         
         Args:
             name: Display name for the store
@@ -54,6 +65,7 @@ class TenantService:
                 name=name,
                 subdomain=subdomain,
                 schema_name=schema_name,
+                owner_id=owner_id,
                 plan=plan,
                 is_active=True
             )
@@ -84,8 +96,7 @@ class TenantService:
         return f"tenant_{safe_subdomain}_{schema_hash}"
     
     async def _provision_schema(self, schema_name: str):
-        """
-        Create and initialize a tenant schema with all required tables.
+        """Create and initialize a tenant schema with all required tables.
         
         Uses the engine directly for DDL operations to avoid transaction issues.
         """

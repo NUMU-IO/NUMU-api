@@ -1,4 +1,4 @@
-"""Product database model."""
+"""Product database model (tenant schema)."""
 
 from decimal import Decimal
 
@@ -7,14 +7,15 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.product import ProductStatus, ProductType
-from src.infrastructure.database import Base
+from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 
 class ProductModel(Base, UUIDMixin, TimestampMixin):
-    """Product database model."""
+    """Product database model (tenant schema)."""
 
     __tablename__ = "products"
+    # No schema specified - will use the tenant's search_path
 
     store_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),

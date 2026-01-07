@@ -1,7 +1,11 @@
-from sqlalchemy import Boolean, Column, String, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+"""Tenant database model (public schema)."""
+
 from datetime import datetime, timezone
 import uuid
+
+from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy.dialects.postgresql import UUID
+
 from src.infrastructure.database.connection import Base
 
 
@@ -11,7 +15,11 @@ def utc_now():
 
 
 class Tenant(Base):
-    """Tenant model representing a store/merchant in the platform."""
+    """Tenant model representing a store/merchant in the platform.
+    
+    This model lives in the 'public' PostgreSQL schema and is used
+    to track all tenants and their corresponding database schemas.
+    """
     __tablename__ = "tenants"
     __table_args__ = {"schema": "public"}
 
@@ -25,3 +33,6 @@ class Tenant(Base):
     settings = Column(String, nullable=True)  # JSON string for tenant-specific settings
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    def __repr__(self) -> str:
+        return f"<Tenant(id={self.id}, subdomain={self.subdomain})>"

@@ -13,18 +13,21 @@ from alembic import context
 from src.config import settings
 from src.infrastructure.database.connection import Base
 
-# Import all models so they are registered with Base.metadata
-from src.infrastructure.database.models import (  # noqa: F401
-    CategoryModel,
-    CustomerModel,
-    OrderModel,
-    ProductModel,
-    StoreModel,
+# Import PUBLIC schema models for migrations
+from src.infrastructure.database.models.public import (  # noqa: F401
+    Tenant,
     UserModel,
 )
 
-# Import Tenant model so it's included in migrations
-from src.tenants.models import Tenant  # noqa: F401
+# Import TENANT schema models for tenant schema provisioning
+# These are created per-tenant via TenantService, not via Alembic migrations
+# from src.infrastructure.database.models.tenant import (  # noqa: F401
+#     CategoryModel,
+#     CustomerModel,
+#     OrderModel,
+#     ProductModel,
+#     StoreModel,
+# )
 
 # this is the Alembic Config object
 config = context.config
@@ -57,6 +60,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_schemas=True,  # Enable multi-schema support
+        version_table_schema="public",  # Keep version table in public
     )
 
     with context.begin_transaction():
@@ -64,7 +69,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_schemas=True,
+        version_table_schema="public",
+    )
 
     with context.begin_transaction():
         context.run_migrations()

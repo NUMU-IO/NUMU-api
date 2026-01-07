@@ -1,17 +1,20 @@
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from src.tenants.models import Tenant
-from src.core.interfaces.repositories.tenant_repository import ITenantRepository
+"""Tenant repository for database operations."""
+
 from typing import Optional
 from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.interfaces.repositories.tenant_repository import ITenantRepository
+from src.infrastructure.database.models.public import Tenant
 
 
 class TenantRepository(ITenantRepository):
     """Repository for managing Tenant records in the public schema."""
     
     def __init__(self, session: AsyncSession):
-        """
-        Initialize with a database session.
+        """Initialize with a database session.
         
         Note: The session should be configured to query the PUBLIC schema
         since tenants table is always in public.

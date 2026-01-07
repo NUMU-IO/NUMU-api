@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 
-from src.tenants.models import Tenant
+from src.infrastructure.database.models.public import Tenant
 
 
 async def get_current_tenant(request: Request) -> Tenant:

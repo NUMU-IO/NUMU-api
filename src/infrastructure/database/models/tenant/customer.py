@@ -1,17 +1,22 @@
-"""Customer database model."""
+"""Customer database model (tenant schema)."""
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.infrastructure.database import Base
+from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 
 class CustomerModel(Base, UUIDMixin, TimestampMixin):
-    """Customer database model."""
+    """Customer database model (tenant schema).
+    
+    Note: user_id references a user in the public.users table for linking
+    customer profiles to user accounts.
+    """
 
     __tablename__ = "customers"
+    # No schema specified - will use the tenant's search_path
 
     store_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
@@ -21,7 +26,6 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin):
     )
     user_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

@@ -1,17 +1,26 @@
 """Database models module."""
 
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
-from src.infrastructure.database.models.category import CategoryModel
-from src.infrastructure.database.models.customer import CustomerModel
-from src.infrastructure.database.models.order import OrderModel
-from src.infrastructure.database.models.product import ProductModel
-from src.infrastructure.database.models.store import StoreModel
-from src.infrastructure.database.models.user import UserModel
+
+# Public schema models
+from src.infrastructure.database.models.public import Tenant, UserModel
+
+# Tenant schema models
+from src.infrastructure.database.models.tenant import (
+    CategoryModel,
+    CustomerModel,
+    OrderModel,
+    ProductModel,
+    StoreModel,
+)
 
 __all__ = [
     "TimestampMixin",
     "UUIDMixin",
+    # Public
+    "Tenant",
     "UserModel",
+    # Tenant
     "StoreModel",
     "ProductModel",
     "CategoryModel",

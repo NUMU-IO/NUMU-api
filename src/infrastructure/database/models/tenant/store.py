@@ -1,4 +1,4 @@
-"""Store database model."""
+"""Store database model (tenant schema)."""
 
 from sqlalchemy import Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -6,20 +6,24 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.store import StoreStatus
 from src.core.value_objects.money import Currency
-from src.infrastructure.database import Base
+from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 
 class StoreModel(Base, UUIDMixin, TimestampMixin):
-    """Store database model."""
+    """Store database model (tenant schema).
+    
+    This represents the store configuration within a tenant's schema.
+    Note: The owner_id references a user in the public.users table.
+    """
 
     __tablename__ = "stores"
+    # No schema specified - will use the tenant's search_path
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     owner_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -42,8 +46,7 @@ class StoreModel(Base, UUIDMixin, TimestampMixin):
     social_links: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
-    # Relationships
-    owner = relationship("UserModel", back_populates="stores", lazy="selectin")
+    # Relationships (within tenant schema)
     products = relationship("ProductModel", back_populates="store", lazy="selectin")
     categories = relationship("CategoryModel", back_populates="store", lazy="selectin")
     customers = relationship("CustomerModel", back_populates="store", lazy="selectin")

@@ -1,17 +1,18 @@
-"""Category database model."""
+"""Category database model (tenant schema)."""
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.infrastructure.database import Base
+from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 
 class CategoryModel(Base, UUIDMixin, TimestampMixin):
-    """Category database model."""
+    """Category database model (tenant schema)."""
 
     __tablename__ = "categories"
+    # No schema specified - will use the tenant's search_path
 
     store_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),

@@ -1,35 +1,38 @@
 """API v1 schemas module."""
 
-from src.api.v1.schemas.auth import (
+# Import from public schemas
+from src.api.v1.schemas.public import (
     AuthResponse,
     ChangePasswordRequest,
+    CreateTenantRequest,
+    DeleteResponse,
     LoginRequest,
+    MessageResponse,
+    PaginatedListResponse,
+    PaginationParams,
     PasswordResetConfirm,
     PasswordResetRequest,
     RefreshTokenRequest,
     RegisterRequest,
+    TenantCreatedResponse,
+    TenantResponse,
     TokenResponse,
+    UpdateTenantRequest,
     UserResponse,
 )
-from src.api.v1.schemas.common import (
-    DeleteResponse,
-    MessageResponse,
-    PaginatedListResponse,
-    PaginationParams,
-)
-from src.api.v1.schemas.product import (
+
+# Import from tenant schemas
+from src.api.v1.schemas.tenant import (
     CreateProductRequest,
-    ProductResponse,
-    UpdateProductRequest,
-)
-from src.api.v1.schemas.store import (
     CreateStoreRequest,
+    ProductResponse,
     StoreResponse,
+    UpdateProductRequest,
     UpdateStoreRequest,
 )
 
 __all__ = [
-    # Auth
+    # Auth (public)
     "RegisterRequest",
     "LoginRequest",
     "TokenResponse",
@@ -39,11 +42,16 @@ __all__ = [
     "PasswordResetRequest",
     "PasswordResetConfirm",
     "ChangePasswordRequest",
-    # Store
+    # Tenant management (public)
+    "CreateTenantRequest",
+    "UpdateTenantRequest",
+    "TenantResponse",
+    "TenantCreatedResponse",
+    # Store (tenant)
     "CreateStoreRequest",
     "UpdateStoreRequest",
     "StoreResponse",
-    # Product
+    # Product (tenant)
     "CreateProductRequest",
     "UpdateProductRequest",
     "ProductResponse",
