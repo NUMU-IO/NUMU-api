@@ -1,11 +1,26 @@
 """Database connection and session management."""
 
 from collections.abc import AsyncGenerator
+from contextvars import ContextVar
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from src.config import settings
+
+# Context variable to store current tenant schema
+_tenant_schema: ContextVar[str] = ContextVar("tenant_schema", default="public")
+
+
+def set_tenant_schema(schema_name: str) -> None:
+    """Set the current tenant schema."""
+    _tenant_schema.set(schema_name)
+
+
+def get_tenant_schema() -> str:
+    """Get the current tenant schema."""
+    return _tenant_schema.get()
 
 
 class Base(DeclarativeBase):
@@ -32,9 +47,27 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+def reset_tenant_schema() -> None:
+    """Reset tenant schema to public (for cleanup)."""
+    _tenant_schema.set("public")
+
+
+def _validate_schema_name(schema: str) -> str:
+    """Validate schema name to prevent SQL injection."""
+    import re
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema):
+        raise ValueError(f"Invalid schema name: {schema}")
+    return schema
+
+
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get database session dependency."""
+    """Get database session dependency with schema switching."""
     async with AsyncSessionLocal() as session:
+        # Set the search path for the session
+        schema = get_tenant_schema()
+        safe_schema = _validate_schema_name(schema)
+        await session.execute(text(f"SET search_path TO {safe_schema}"))
+        
         try:
             yield session
             await session.commit()

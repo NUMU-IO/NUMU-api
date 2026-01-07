@@ -31,7 +31,7 @@ class CategoryModel(Base, UUIDMixin, TimestampMixin):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Relationships
     store = relationship("StoreModel", back_populates="categories", lazy="selectin")

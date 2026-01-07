@@ -18,3 +18,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+# Alias for consistency with connection.py naming
+get_db_session = get_db

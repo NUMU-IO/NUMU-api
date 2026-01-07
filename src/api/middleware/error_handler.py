@@ -9,11 +9,11 @@ from fastapi.responses import JSONResponse
 from src.core.exceptions import (
     AuthenticationError,
     AuthorizationError,
-    DomainError,
+    DomainException,
     EntityNotFoundError,
     InvalidTokenError,
     PaymentError,
-    StorageError,
+    ExternalServiceError,
     TokenExpiredError,
     ValidationError,
 )
@@ -120,19 +120,19 @@ def setup_exception_handlers(app: FastAPI) -> None:
             },
         )
 
-    @app.exception_handler(StorageError)
-    async def storage_error_handler(request: Request, exc: StorageError):
+    @app.exception_handler(ExternalServiceError)
+    async def storage_error_handler(request: Request, exc: ExternalServiceError):
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
                 "success": False,
-                "message": "Storage operation failed",
-                "error_code": "STORAGE_ERROR",
+                "message": "External service operation failed",
+                "error_code": "EXTERNAL_SERVICE_ERROR",
             },
         )
 
-    @app.exception_handler(DomainError)
-    async def domain_error_handler(request: Request, exc: DomainError):
+    @app.exception_handler(DomainException)
+    async def domain_error_handler(request: Request, exc: DomainException):
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={

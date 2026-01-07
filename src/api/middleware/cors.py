@@ -9,13 +9,11 @@ from src.config import settings
 def setup_cors(app: FastAPI) -> None:
     """Configure CORS for the application."""
     
-    # Parse allowed origins from settings
-    origins = []
-    if settings.CORS_ORIGINS:
-        origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
+    # Get allowed origins from settings (already a list)
+    origins = settings.cors_origins or []
     
     # In development, allow all origins
-    if settings.DEBUG:
+    if settings.debug:
         origins = ["*"]
     
     app.add_middleware(

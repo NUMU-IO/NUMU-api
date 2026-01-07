@@ -75,8 +75,8 @@ class OrderModel(Base, UUIDMixin, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Metadata
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    # Extra Data
+    extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     
     # Timestamps
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

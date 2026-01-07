@@ -6,6 +6,7 @@ from src.core.interfaces.repositories.customer_repository import ICustomerReposi
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.interfaces.repositories.tenant_repository import ITenantRepository
 from src.core.interfaces.repositories.user_repository import IUserRepository
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "ICustomerRepository",
     "IOrderRepository",
     "ICategoryRepository",
+    "ITenantRepository",
 ]

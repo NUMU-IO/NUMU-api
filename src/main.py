@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api.middleware import (
+    TenantMiddleware,
     logging_middleware,
     setup_cors,
     setup_exception_handlers,
@@ -16,7 +17,7 @@ from src.infrastructure.database import engine
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    level=logging.DEBUG if settings.debug else logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -27,8 +28,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     logger.info("Starting Octyrafiy API...")
-    logger.info(f"Debug mode: {settings.DEBUG}")
-    logger.info(f"API Version: {settings.API_VERSION}")
+    logger.info(f"Debug mode: {settings.debug}")
+    logger.info(f"API Version: {settings.app_version}")
     
     yield
     
@@ -41,12 +42,12 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
-        title=settings.APP_NAME,
+        title=settings.app_name,
         description="E-commerce platform API for Octyrafiy",
-        version=settings.API_VERSION,
-        docs_url="/docs" if settings.DEBUG else None,
-        redoc_url="/redoc" if settings.DEBUG else None,
-        openapi_url="/openapi.json" if settings.DEBUG else None,
+        version=settings.app_version,
+        docs_url="/docs" if settings.debug else None,
+        redoc_url="/redoc" if settings.debug else None,
+        openapi_url="/openapi.json" if settings.debug else None,
         lifespan=lifespan,
     )
     
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     setup_exception_handlers(app)
     
     # Add middleware
+    app.add_middleware(TenantMiddleware)
     app.middleware("http")(logging_middleware)
     
     # Include routers
@@ -76,5 +78,5 @@ if __name__ == "__main__":
         "src.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=settings.DEBUG,
+        reload=settings.debug,
     )

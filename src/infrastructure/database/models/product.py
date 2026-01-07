@@ -65,7 +65,7 @@ class ProductModel(Base, UUIDMixin, TimestampMixin):
     
     # Additional data
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Relationships
     store = relationship("StoreModel", back_populates="products", lazy="selectin")

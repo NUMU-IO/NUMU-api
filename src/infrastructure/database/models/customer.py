@@ -38,7 +38,7 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin):
     )
     total_orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_spent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # In cents
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Relationships
     store = relationship("StoreModel", back_populates="customers", lazy="selectin")

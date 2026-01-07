@@ -11,13 +11,26 @@ from alembic import context
 
 # Import your models for autogenerate support
 from src.config import settings
-from src.infrastructure.database.models import Base
+from src.infrastructure.database.connection import Base
+
+# Import all models so they are registered with Base.metadata
+from src.infrastructure.database.models import (  # noqa: F401
+    CategoryModel,
+    CustomerModel,
+    OrderModel,
+    ProductModel,
+    StoreModel,
+    UserModel,
+)
+
+# Import Tenant model so it's included in migrations
+from src.tenants.models import Tenant  # noqa: F401
 
 # this is the Alembic Config object
 config = context.config
 
 # Set the database URL from settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:
