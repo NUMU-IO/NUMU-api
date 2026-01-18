@@ -1,5 +1,7 @@
 """OpenAI service implementation."""
 
+import json
+
 from openai import AsyncOpenAI
 
 from src.config import settings
@@ -58,7 +60,6 @@ Format your response as JSON with keys: short_description, long_description, seo
                 response_format={"type": "json_object"},
             )
             
-            import json
             data = json.loads(response.choices[0].message.content)
             
             return ProductDescription(
@@ -154,7 +155,6 @@ Provide 10-15 relevant SEO keywords as a JSON array of strings."""
                 response_format={"type": "json_object"},
             )
             
-            import json
             data = json.loads(response.choices[0].message.content)
             return data.get("keywords", [])
         except Exception as e:

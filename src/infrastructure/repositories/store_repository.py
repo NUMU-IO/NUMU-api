@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.entities.store import Store, StoreStatus
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency
-from src.infrastructure.database.models.store import StoreModel
+from src.infrastructure.database.models import StoreModel
 
 
 class StoreRepository(IStoreRepository):

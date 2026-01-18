@@ -16,7 +16,7 @@ from src.infrastructure.tenancy.repository import TenantRepository
 logger = logging.getLogger(__name__)
 
 # Routes that don't require tenant context
-PUBLIC_PATHS = ("/health", "/docs", "/redoc", "/openapi.json", "/api/v1/public", "/api/v1/auth")
+PUBLIC_PATHS = ("/health", "/docs", "/redoc", "/openapi.json", "/api/v1/public", "/api/v1/auth", "/admin")
 
 
 class TenantMiddleware(BaseHTTPMiddleware):

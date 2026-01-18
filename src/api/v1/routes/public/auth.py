@@ -24,6 +24,7 @@ from src.application.use_cases.auth import (
     RefreshTokenUseCase,
     RegisterUserUseCase,
 )
+from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.external_services import PasswordService, TokenService
 from src.infrastructure.repositories import UserRepository
 
@@ -170,7 +171,6 @@ async def get_current_user(
     user = await user_repo.get_by_id(user_id)
     
     if not user:
-        from src.core.exceptions import EntityNotFoundError
         raise EntityNotFoundError("User", str(user_id))
     
     return SuccessResponse(

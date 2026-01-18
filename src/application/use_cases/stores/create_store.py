@@ -1,5 +1,6 @@
 """Create store use case."""
 
+import uuid
 from uuid import UUID
 
 from slugify import slugify
@@ -25,7 +26,6 @@ class CreateStoreUseCase:
         # Check if slug already exists
         if await self.store_repository.slug_exists(slug):
             # Append a random suffix to make it unique
-            import uuid
             slug = f"{slug}-{str(uuid.uuid4())[:8]}"
 
         # Parse currency
