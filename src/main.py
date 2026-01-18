@@ -3,6 +3,8 @@
 import logging
 from contextlib import asynccontextmanager
 
+import uvicorn
+
 from fastapi import FastAPI
 
 from src.api.middleware import (
@@ -11,6 +13,7 @@ from src.api.middleware import (
     setup_cors,
     setup_exception_handlers,
 )
+from src.api.admin import setup_admin
 from src.api.v1.routes import api_router
 from src.config import settings
 from src.infrastructure.database import engine
@@ -57,12 +60,15 @@ def create_app() -> FastAPI:
     # Setup exception handlers
     setup_exception_handlers(app)
     
-    # Add middleware
+    # Add middleware (order matters: first added = outermost)
     app.add_middleware(TenantMiddleware)
     app.middleware("http")(logging_middleware)
     
     # Include routers
     app.include_router(api_router)
+    
+    # Setup admin panel (public schema only)
+    setup_admin(app)
     
     return app
 
@@ -72,8 +78,6 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    import uvicorn
-    
     uvicorn.run(
         "src.main:app",
         host="0.0.0.0",

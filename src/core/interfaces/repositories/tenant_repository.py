@@ -1,7 +1,8 @@
 """Tenant repository interface."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Optional
 from uuid import UUID
 
 
@@ -13,27 +14,27 @@ class ITenantRepository(ABC):
     """
 
     @abstractmethod
-    async def get_by_id(self, tenant_id: UUID) -> Optional["Tenant"]:
+    async def get_by_id(self, tenant_id: UUID) -> Tenant | None:
         """Get tenant by ID."""
         ...
 
     @abstractmethod
-    async def get_by_subdomain(self, subdomain: str) -> Optional["Tenant"]:
+    async def get_by_subdomain(self, subdomain: str) -> Tenant | None:
         """Get tenant by subdomain."""
         ...
 
     @abstractmethod
-    async def get_by_schema_name(self, schema_name: str) -> Optional["Tenant"]:
+    async def get_by_schema_name(self, schema_name: str) -> Tenant | None:
         """Get tenant by database schema name."""
         ...
 
     @abstractmethod
-    async def create(self, **kwargs) -> "Tenant":
+    async def create(self, **kwargs) -> Tenant:
         """Create a new tenant record."""
         ...
 
     @abstractmethod
-    async def update(self, tenant: "Tenant") -> "Tenant":
+    async def update(self, tenant: Tenant) -> Tenant:
         """Update an existing tenant."""
         ...
 
@@ -43,12 +44,8 @@ class ITenantRepository(ABC):
         ...
 
     @abstractmethod
-    async def list_active(self, skip: int = 0, limit: int = 100) -> list["Tenant"]:
+    async def list_active(self, skip: int = 0, limit: int = 100) -> list[Tenant]:
         """List all active tenants with pagination."""
         ...
 
-
-# Avoid circular import - use string annotation for Tenant
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from src.tenants.models import Tenant
+from src.infrastructure.database.models.public import Tenant

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.value_objects.money import Currency, Money
-from src.infrastructure.database.models.product import ProductModel
+from src.infrastructure.database.models import ProductModel
 
 
 class ProductRepository(IProductRepository):

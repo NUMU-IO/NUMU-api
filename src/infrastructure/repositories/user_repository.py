@@ -9,7 +9,7 @@ from src.core.entities.user import User, UserRole, UserStatus
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber
-from src.infrastructure.database.models.user import UserModel
+from src.infrastructure.database.models import StoreModel, UserModel
 
 
 class UserRepository(IUserRepository):
@@ -148,8 +148,6 @@ class UserRepository(IUserRepository):
         limit: int = 100,
     ) -> list[User]:
         """Get all users associated with a store (via store ownership)."""
-        from src.infrastructure.database.models.store import StoreModel
-        
         result = await self.session.execute(
             select(UserModel)
             .join(StoreModel, StoreModel.owner_id == UserModel.id)

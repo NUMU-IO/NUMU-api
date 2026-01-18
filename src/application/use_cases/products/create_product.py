@@ -1,5 +1,6 @@
 """Create product use case."""
 
+import uuid
 from uuid import UUID
 
 from slugify import slugify
@@ -44,7 +45,6 @@ class CreateProductUseCase:
         # Check if slug already exists in store
         existing = await self.product_repository.get_by_slug(store_id, slug)
         if existing:
-            import uuid
             slug = f"{slug}-{str(uuid.uuid4())[:8]}"
 
         # Parse currency and create Money

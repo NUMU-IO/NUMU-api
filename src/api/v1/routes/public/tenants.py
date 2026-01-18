@@ -5,6 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import get_current_user_id, require_roles
@@ -94,8 +95,6 @@ async def check_subdomain_availability(
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict:
     """Check if a subdomain is available."""
-    from sqlalchemy import text
-    
     # Ensure we're querying public schema
     await db.execute(text("SET search_path TO public"))
     
@@ -125,8 +124,6 @@ async def list_tenants(
     limit: int = 100,
 ) -> list[TenantResponse]:
     """List all tenants (admin only)."""
-    from sqlalchemy import text
-    
     await db.execute(text("SET search_path TO public"))
     
     tenant_repo = TenantRepository(db)
@@ -147,8 +144,6 @@ async def get_tenant(
     _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
 ) -> TenantResponse:
     """Get tenant by ID (admin only)."""
-    from sqlalchemy import text
-    
     await db.execute(text("SET search_path TO public"))
     
     tenant_repo = TenantRepository(db)
@@ -176,8 +171,6 @@ async def update_tenant(
     _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
 ) -> TenantResponse:
     """Update tenant settings (admin only)."""
-    from sqlalchemy import text
-    
     await db.execute(text("SET search_path TO public"))
     
     tenant_repo = TenantRepository(db)
@@ -215,8 +208,6 @@ async def deactivate_tenant(
     _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
 ) -> None:
     """Deactivate a tenant (admin only)."""
-    from sqlalchemy import text
-    
     await db.execute(text("SET search_path TO public"))
     
     tenant_repo = TenantRepository(db)
