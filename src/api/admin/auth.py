@@ -1,5 +1,7 @@
 """Admin authentication backend for SQLAdmin."""
 
+import logging
+
 from sqladmin.authentication import AuthenticationBackend
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
@@ -9,6 +11,8 @@ from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models import UserModel
 from src.infrastructure.external_services.password_service import password_service
 from src.core.entities.user import UserRole
+
+logger = logging.getLogger(__name__)
 
 
 class AdminAuth(AuthenticationBackend):
@@ -54,7 +58,7 @@ class AdminAuth(AuthenticationBackend):
                 })
                 return True
         except Exception as e:
-            print(f"Admin login error: {e}")
+            logger.exception("Admin login error: %s", e)
             return False
 
     async def logout(self, request: Request) -> bool:
