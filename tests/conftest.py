@@ -15,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 from src.api.dependencies import get_db
 from src.config import settings
-from src.infrastructure.database.models import Base
+from src.infrastructure.database.connection import Base
 from src.main import app
 
 # Test database URL (use SQLite for tests)
