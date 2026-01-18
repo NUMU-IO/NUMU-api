@@ -96,6 +96,9 @@ class UserAdmin(ModelView, model=UserModel):
     }
 
     # Add custom password fields
+    # Note: validators.Optional() is used because the same form serves both
+    # create and edit operations. Required validation for creation is handled
+    # in on_model_change() to distinguish between create and update scenarios.
     form_extra_fields = {
         "password": PasswordField(
             "Password",
