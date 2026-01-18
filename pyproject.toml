@@ -39,6 +39,10 @@ dependencies = [
     "python-slugify>=8.0.1",
     "phonenumbers>=8.13.27",
     "Pillow>=10.2.0",
+    
+    # Admin Panel
+    "sqladmin>=0.16.0",
+    "wtforms>=3.1.0",
 ]
 
 [project.optional-dependencies]
