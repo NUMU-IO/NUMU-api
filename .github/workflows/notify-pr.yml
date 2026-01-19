@@ -46,11 +46,8 @@ jobs:
           if [ -z "$PR_BODY" ]; then
             echo "description=No description provided" >> $GITHUB_OUTPUT
           else
-            {
-              echo "description<<EOF"
-              echo "$PR_BODY"
-              echo "EOF"
-            } >> $GITHUB_OUTPUT
+            ESCAPED_MSG=$(python3 -c 'import json, sys; print(json.dumps(sys.stdin.read())[1:-1])' <<< "$PR_BODY")
+            echo "description=$ESCAPED_MSG" >> $GITHUB_OUTPUT
           fi
 
       - name: Send Slack notification
