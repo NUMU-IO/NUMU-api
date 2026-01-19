@@ -1,4 +1,4 @@
-"""Order database model (tenant schema)."""
+"""Order database model (public schema with tenant_id discriminator)."""
 
 from datetime import datetime
 
@@ -8,24 +8,24 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.order import FulfillmentStatus, OrderStatus, PaymentStatus
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
 
 
-class OrderModel(Base, UUIDMixin, TimestampMixin):
-    """Order database model (tenant schema)."""
+class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """Order database model with tenant_id discriminator."""
 
     __tablename__ = "orders"
-    # No schema specified - will use the tenant's search_path
+    __table_args__ = {"schema": "public"}
 
     store_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("stores.id", ondelete="CASCADE"),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     customer_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("customers.id", ondelete="CASCADE"),
+        ForeignKey("public.customers.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -33,18 +33,18 @@ class OrderModel(Base, UUIDMixin, TimestampMixin):
     
     # Status
     status: Mapped[OrderStatus] = mapped_column(
-        Enum(OrderStatus),
+        Enum(OrderStatus, name="orderstatus", schema="public"),
         default=OrderStatus.PENDING,
         nullable=False,
         index=True,
     )
     payment_status: Mapped[PaymentStatus] = mapped_column(
-        Enum(PaymentStatus),
+        Enum(PaymentStatus, name="paymentstatus", schema="public"),
         default=PaymentStatus.PENDING,
         nullable=False,
     )
     fulfillment_status: Mapped[FulfillmentStatus] = mapped_column(
-        Enum(FulfillmentStatus),
+        Enum(FulfillmentStatus, name="fulfillmentstatus", schema="public"),
         default=FulfillmentStatus.UNFULFILLED,
         nullable=False,
     )

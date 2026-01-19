@@ -13,21 +13,16 @@ from alembic import context
 from src.config import settings
 from src.infrastructure.database.connection import Base
 
-# Import PUBLIC schema models for migrations
-from src.infrastructure.database.models.public import (  # noqa: F401
-    Tenant,
+# Import all models for migration autogenerate support
+from src.infrastructure.database.models import (  # noqa: F401
+    TenantModel,
     UserModel,
+    StoreModel,
+    ProductModel,
+    CategoryModel,
+    CustomerModel,
+    OrderModel,
 )
-
-# Import TENANT schema models for tenant schema provisioning
-# These are created per-tenant via TenantService, not via Alembic migrations
-# from src.infrastructure.database.models.tenant import (  # noqa: F401
-#     CategoryModel,
-#     CustomerModel,
-#     OrderModel,
-#     ProductModel,
-#     StoreModel,
-# )
 
 # this is the Alembic Config object
 config = context.config

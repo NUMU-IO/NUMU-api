@@ -8,12 +8,14 @@ from uuid import uuid4
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.config import settings
-from src.core.entities.user import UserRole
+from src.core.entities.user import UserRole, UserStatus
+from src.core.entities.store import StoreStatus
+from src.core.entities.product import ProductStatus, ProductType
+from src.core.value_objects.money import Currency
 from src.infrastructure.database import AsyncSessionLocal
 from src.infrastructure.database.models import (
+    TenantModel,
     CategoryModel,
     ProductModel,
     StoreModel,
@@ -35,75 +37,88 @@ async def seed_database():
             print("Database already seeded. Skipping...")
             return
         
-        # Create super admin
+        # Create super admin user
         admin_id = uuid4()
         admin_password = password_service.hash_password("admin123456")
         admin = UserModel(
             id=admin_id,
             email="admin@octyrafiy.com",
-            password_hash=admin_password,
+            hashed_password=admin_password,
             first_name="Super",
             last_name="Admin",
-            role=UserRole.SUPER_ADMIN.value,
-            is_active=True,
-            is_verified=True,
+            role=UserRole.SUPER_ADMIN,
+            status=UserStatus.ACTIVE,
         )
         session.add(admin)
-        print(f"Created admin user: admin@octyrafiy.com")
+        print("Created admin user: admin@octyrafiy.com")
         
-        # Create store owner
+        # Create store owner user
         owner_id = uuid4()
         owner_password = password_service.hash_password("owner123456")
         owner = UserModel(
             id=owner_id,
             email="owner@example.com",
-            password_hash=owner_password,
+            hashed_password=owner_password,
             first_name="Store",
             last_name="Owner",
-            role=UserRole.STORE_OWNER.value,
-            is_active=True,
-            is_verified=True,
+            role=UserRole.STORE_OWNER,
+            status=UserStatus.ACTIVE,
         )
         session.add(owner)
-        print(f"Created store owner: owner@example.com")
+        print("Created store owner: owner@example.com")
         
-        # Create customer
+        # Create customer user
         customer_id = uuid4()
         customer_password = password_service.hash_password("customer123456")
         customer = UserModel(
             id=customer_id,
             email="customer@example.com",
-            password_hash=customer_password,
+            hashed_password=customer_password,
             first_name="Test",
             last_name="Customer",
-            role=UserRole.CUSTOMER.value,
-            is_active=True,
-            is_verified=True,
+            role=UserRole.CUSTOMER,
+            status=UserStatus.ACTIVE,
         )
         session.add(customer)
-        print(f"Created customer: customer@example.com")
+        print("Created customer: customer@example.com")
         
-        # Create sample store
+        # Flush to ensure users are created before tenant references them
+        await session.flush()
+        
+        # Create a tenant for the store owner
+        tenant_id = uuid4()
+        tenant = TenantModel(
+            id=tenant_id,
+            name="Demo Company",
+            subdomain="demo",
+            owner_id=owner_id,
+            plan="pro",
+            is_active=True,
+        )
+        session.add(tenant)
+        print("Created tenant: Demo Company (subdomain: demo)")
+        
+        # Create sample store (with tenant_id)
         store_id = uuid4()
         store = StoreModel(
             id=store_id,
+            tenant_id=tenant_id,
             owner_id=owner_id,
             name="Demo Store",
             slug="demo-store",
             description="A sample demo store for testing",
-            email="store@example.com",
-            currency="USD",
-            country="US",
-            is_active=True,
-            is_verified=True,
+            status=StoreStatus.ACTIVE,
+            default_currency=Currency.USD,
+            contact_email="store@example.com",
         )
         session.add(store)
-        print(f"Created store: Demo Store")
+        print("Created store: Demo Store")
         
-        # Create categories
+        # Create categories (with tenant_id)
         electronics_id = uuid4()
         electronics = CategoryModel(
             id=electronics_id,
+            tenant_id=tenant_id,
             store_id=store_id,
             name="Electronics",
             slug="electronics",
@@ -115,6 +130,7 @@ async def seed_database():
         clothing_id = uuid4()
         clothing = CategoryModel(
             id=clothing_id,
+            tenant_id=tenant_id,
             store_id=store_id,
             name="Clothing",
             slug="clothing",
@@ -124,50 +140,55 @@ async def seed_database():
         session.add(clothing)
         print("Created categories: Electronics, Clothing")
         
-        # Create sample products
+        # Create sample products (with tenant_id)
         products = [
             ProductModel(
                 id=uuid4(),
+                tenant_id=tenant_id,
                 store_id=store_id,
                 category_id=electronics_id,
                 name="Wireless Headphones",
                 slug="wireless-headphones",
                 description="High-quality wireless headphones with noise cancellation",
-                price=9999,  # $99.99 in cents
-                currency="USD",
+                price_amount=9999,  # $99.99 in cents
+                price_currency="USD",
                 sku="WH-001",
                 quantity=50,
                 images=["https://example.com/headphones.jpg"],
-                is_active=True,
+                product_type=ProductType.PHYSICAL,
+                status=ProductStatus.ACTIVE,
             ),
             ProductModel(
                 id=uuid4(),
+                tenant_id=tenant_id,
                 store_id=store_id,
                 category_id=electronics_id,
                 name="Smart Watch",
                 slug="smart-watch",
                 description="Feature-rich smartwatch with health tracking",
-                price=19999,  # $199.99 in cents
-                currency="USD",
+                price_amount=19999,  # $199.99 in cents
+                price_currency="USD",
                 sku="SW-001",
                 quantity=30,
                 images=["https://example.com/smartwatch.jpg"],
-                is_active=True,
-                is_featured=True,
+                product_type=ProductType.PHYSICAL,
+                status=ProductStatus.ACTIVE,
             ),
             ProductModel(
                 id=uuid4(),
+                tenant_id=tenant_id,
                 store_id=store_id,
                 category_id=clothing_id,
                 name="Classic T-Shirt",
                 slug="classic-t-shirt",
                 description="Comfortable cotton t-shirt",
-                price=2499,  # $24.99 in cents
-                currency="USD",
+                price_amount=2499,  # $24.99 in cents
+                price_currency="USD",
                 sku="TS-001",
                 quantity=100,
                 images=["https://example.com/tshirt.jpg"],
-                is_active=True,
+                product_type=ProductType.PHYSICAL,
+                status=ProductStatus.ACTIVE,
             ),
         ]
         
@@ -186,6 +207,11 @@ async def seed_database():
         print("Admin:    admin@octyrafiy.com / admin123456")
         print("Owner:    owner@example.com / owner123456")
         print("Customer: customer@example.com / customer123456")
+        print("=" * 50)
+        print("\nTENANT INFO:")
+        print("=" * 50)
+        print("Tenant:   Demo Company")
+        print("Subdomain: demo")
         print("=" * 50)
 
 

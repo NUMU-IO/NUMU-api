@@ -1,26 +1,26 @@
-"""Customer database model (tenant schema)."""
+"""Customer database model (public schema with tenant_id discriminator)."""
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
 
 
-class CustomerModel(Base, UUIDMixin, TimestampMixin):
-    """Customer database model (tenant schema).
+class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """Customer database model with tenant_id discriminator.
     
     Note: user_id references a user in the public.users table for linking
     customer profiles to user accounts.
     """
 
     __tablename__ = "customers"
-    # No schema specified - will use the tenant's search_path
+    __table_args__ = {"schema": "public"}
 
     store_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("stores.id", ondelete="CASCADE"),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

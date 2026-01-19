@@ -30,14 +30,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-    logger.info("Starting Octyrafiy API...")
+    logger.info("Starting NUMU API...")
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"API Version: {settings.app_version}")
     
     yield
     
     # Shutdown
-    logger.info("Shutting down Octyrafiy API...")
+    logger.info("Shutting down NUMU API...")
     await engine.dispose()
     logger.info("Database connection closed")
 
@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title=settings.app_name,
-        description="E-commerce platform API for Octyrafiy",
+        description="E-commerce platform API for NUMU",
         version=settings.app_version,
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
@@ -59,6 +59,10 @@ def create_app() -> FastAPI:
     
     # Setup exception handlers
     setup_exception_handlers(app)
+    
+    # Add SessionMiddleware for admin panel cookie-based auth
+    from starlette.middleware.sessions import SessionMiddleware
+    app.add_middleware(SessionMiddleware, secret_key=settings.jwt_secret_key)
     
     # Add middleware (order matters: first added = outermost)
     app.add_middleware(TenantMiddleware)

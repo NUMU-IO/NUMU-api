@@ -1,6 +1,6 @@
 """Tenant-scoped database models.
 
-These models are created in each tenant's PostgreSQL schema.
+These models use tenant_id discriminator for multi-tenancy.
 They include all e-commerce related data that is specific to a store.
 """
 

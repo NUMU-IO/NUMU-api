@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = "Octyrafiy API"
+    app_name: str = "NUMU API"
     app_version: str = "0.1.0"
-    debug: bool = False
+    debug: bool = True
     environment: Literal["development", "staging", "production"] = "development"
 
     # API
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     postgres_user: str = "postgres"
     postgres_password: str = "postgres"
-    postgres_db: str = "octyrafiy"
+    postgres_db: str = "numu"
 
     @computed_field
     @property
