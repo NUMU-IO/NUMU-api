@@ -1,5 +1,7 @@
 """Database connection and session management."""
 
+import re
+
 from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 
@@ -54,7 +56,6 @@ def reset_tenant_schema() -> None:
 
 def _validate_schema_name(schema: str) -> str:
     """Validate schema name to prevent SQL injection."""
-    import re
     if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema):
         raise ValueError(f"Invalid schema name: {schema}")
     return schema

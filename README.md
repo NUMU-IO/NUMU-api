@@ -1,4 +1,4 @@
-# Octyrafiy Backend
+# NUMU Backend
 
 A modern e-commerce platform API built with FastAPI following Clean Architecture principles.
 

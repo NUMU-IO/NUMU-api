@@ -97,3 +97,7 @@ clean:
 	find . -type d -name "htmlcov" -exec rm -rf {} +
 	find . -type f -name ".coverage" -delete
 	find . -type f -name "*.pyc" -delete
+
+# create Superuser
+createsuperuser:
+	python scripts/create_superuser.py

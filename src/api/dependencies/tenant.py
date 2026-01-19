@@ -1,9 +1,11 @@
 """Tenant dependencies for FastAPI routes."""
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 
+from src.api.dependencies.auth import get_current_user_id
 from src.infrastructure.database.models.public import Tenant
 
 
@@ -56,9 +58,6 @@ def require_tenant_owner():
         ):
             ...
     """
-    from src.api.dependencies.auth import get_current_user_id
-    from uuid import UUID
-    
     async def check_ownership(
         tenant: Annotated[Tenant, Depends(get_current_tenant)],
         user_id: Annotated[UUID, Depends(get_current_user_id)],
