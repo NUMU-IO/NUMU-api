@@ -21,28 +21,43 @@ jobs:
         run: |
           if [ "${{ github.event.action }}" == "closed" ] && [ "${{ github.event.pull_request.merged }}" == "true" ]; then
             echo "status=merged" >> $GITHUB_OUTPUT
-            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "emoji=✅" >> $GITHUB_OUTPUT
             echo "color=#36a64f" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.action }}" == "closed" ]; then
             echo "status=closed" >> $GITHUB_OUTPUT
-            echo "emoji=:x:" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
             echo "color=#ff0000" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.action }}" == "ready_for_review" ]; then
             echo "status=ready for review" >> $GITHUB_OUTPUT
-            echo "emoji=:eyes:" >> $GITHUB_OUTPUT
+            echo "emoji=👀" >> $GITHUB_OUTPUT
             echo "color=#0066cc" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.action }}" == "reopened" ]; then
             echo "status=reopened" >> $GITHUB_OUTPUT
-            echo "emoji=:recycle:" >> $GITHUB_OUTPUT
+            echo "emoji=♻️" >> $GITHUB_OUTPUT
             echo "color=#ffa500" >> $GITHUB_OUTPUT
           else
             echo "status=opened" >> $GITHUB_OUTPUT
-            echo "emoji=:rocket:" >> $GITHUB_OUTPUT
+            echo "emoji=🚀" >> $GITHUB_OUTPUT
             echo "color=#0066cc" >> $GITHUB_OUTPUT
+          fi
+          
+          # Get PR description and handle empty case
+          PR_BODY="${{ github.event.pull_request.body }}"
+          if [ -z "$PR_BODY" ]; then
+            echo "description=No description provided" >> $GITHUB_OUTPUT
+          else
+            {
+              echo "description<<EOF"
+              echo "$PR_BODY"
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
           fi
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
           payload: |
             {
@@ -80,7 +95,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Description:*\n${{ github.event.pull_request.body || 'No description provided' }}"
+                    "text": "*Description:*\n${{ steps.pr-status.outputs.description }}"
                   }
                 },
                 {
@@ -116,6 +131,3 @@ jobs:
                 }
               ]
             }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

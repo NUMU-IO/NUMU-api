@@ -23,11 +23,14 @@ jobs:
       - name: Get commit info
         id: commit-info
         run: |
-          # Get commit message
+          # Get commit message and properly escape it
           COMMIT_MSG=$(git log -1 --pretty=%B)
-          echo "message<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Use printf to properly handle the message
+          {
+            echo "message<<EOF"
+            echo "$COMMIT_MSG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
           
           # Get short SHA
           echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
@@ -38,40 +41,46 @@ jobs:
           
           # Determine commit type emoji
           if echo "$COMMIT_MSG" | grep -qiE "^(feat|feature)"; then
-            echo "emoji=:sparkles:" >> $GITHUB_OUTPUT
+            echo "emoji=✨" >> $GITHUB_OUTPUT
             echo "type=Feature" >> $GITHUB_OUTPUT
           elif echo "$COMMIT_MSG" | grep -qiE "^fix"; then
-            echo "emoji=:bug:" >> $GITHUB_OUTPUT
+            echo "emoji=🐛" >> $GITHUB_OUTPUT
             echo "type=Bug Fix" >> $GITHUB_OUTPUT
           elif echo "$COMMIT_MSG" | grep -qiE "^(docs|doc)"; then
-            echo "emoji=:memo:" >> $GITHUB_OUTPUT
+            echo "emoji=📝" >> $GITHUB_OUTPUT
             echo "type=Documentation" >> $GITHUB_OUTPUT
           elif echo "$COMMIT_MSG" | grep -qiE "^(refactor|refact)"; then
-            echo "emoji=:recycle:" >> $GITHUB_OUTPUT
+            echo "emoji=♻️" >> $GITHUB_OUTPUT
             echo "type=Refactor" >> $GITHUB_OUTPUT
           elif echo "$COMMIT_MSG" | grep -qiE "^test"; then
-            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "emoji=✅" >> $GITHUB_OUTPUT
             echo "type=Test" >> $GITHUB_OUTPUT
           elif echo "$COMMIT_MSG" | grep -qiE "^(chore|build|ci)"; then
-            echo "emoji=:wrench:" >> $GITHUB_OUTPUT
+            echo "emoji=🔧" >> $GITHUB_OUTPUT
             echo "type=Chore" >> $GITHUB_OUTPUT
           elif echo "$COMMIT_MSG" | grep -qiE "^perf"; then
-            echo "emoji=:zap:" >> $GITHUB_OUTPUT
+            echo "emoji=⚡" >> $GITHUB_OUTPUT
             echo "type=Performance" >> $GITHUB_OUTPUT
           elif echo "$COMMIT_MSG" | grep -qiE "^(hotfix|urgent)"; then
-            echo "emoji=:fire:" >> $GITHUB_OUTPUT
+            echo "emoji=🔥" >> $GITHUB_OUTPUT
             echo "type=Hotfix" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^merge"; then
+            echo "emoji=🔀" >> $GITHUB_OUTPUT
+            echo "type=Merge" >> $GITHUB_OUTPUT
           else
-            echo "emoji=:package:" >> $GITHUB_OUTPUT
+            echo "emoji=📦" >> $GITHUB_OUTPUT
             echo "type=Update" >> $GITHUB_OUTPUT
           fi
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
           payload: |
             {
-              "text": "${{ steps.commit-info.outputs.emoji }} New commit pushed to ${{ github.ref_name }}: ${{ steps.commit-info.outputs.message }}",
+              "text": "${{ steps.commit-info.outputs.emoji }} New commit pushed to ${{ github.ref_name }}",
               "blocks": [
                 {
                   "type": "header",
@@ -105,7 +114,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Commit Message:*\n```${{ steps.commit-info.outputs.message }}```"
+                    "text": "*Commit Message:*\n```\n${{ steps.commit-info.outputs.message }}\n```"
                   }
                 },
                 {
@@ -135,12 +144,9 @@ jobs:
                   "elements": [
                     {
                       "type": "mrkdwn",
-                      "text": "${{ steps.commit-info.outputs.files_changed }} files changed | Pushed at <!date^${{ github.event.head_commit.timestamp }}^{date_short_pretty} {time}|${{ github.event.head_commit.timestamp }}>"
+                      "text": "${{ steps.commit-info.outputs.files_changed }} files changed"
                     }
                   ]
                 }
               ]
             }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
