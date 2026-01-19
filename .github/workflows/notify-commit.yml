@@ -20,55 +20,140 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Get commit info
-        id: commit-info
+      - name: Prepare Slack Payload
+        id: prepare-payload
+        shell: python
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
+          PUSHER_NAME: ${{ github.event.pusher.name }}
+          HEAD_COMMIT_URL: ${{ github.event.head_commit.url }}
+          REPO_URL: ${{ github.event.repository.html_url }}
         run: |
-          # Get commit message
-          COMMIT_MSG=$(git log -1 --pretty=%B)
+          import os
+          import json
+          import subprocess
+          import re
+
+          def get_commit_info():
+              # Get commit message safely using subprocess
+              commit_msg = subprocess.check_output(["git", "log", "-1", "--pretty=%B"], text=True).strip()
+              short_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+              
+              # Get files changed count
+              try:
+                  files_changed = subprocess.check_output("git diff-tree --no-commit-id --name-only -r HEAD | wc -l", shell=True, text=True).strip()
+              except:
+                  files_changed = "0"
+
+              # Determine type and emoji
+              emoji = "📦"
+              commit_type = "Update"
+              
+              msg_lower = commit_msg.lower()
+              if re.search(r"^(feat|feature)", msg_lower):
+                  emoji = "✨"; commit_type = "Feature"
+              elif re.search(r"^fix", msg_lower):
+                  emoji = "🐛"; commit_type = "Bug Fix"
+              elif re.search(r"^(docs|doc)", msg_lower):
+                  emoji = "📝"; commit_type = "Documentation"
+              elif re.search(r"^(refactor|refact)", msg_lower):
+                  emoji = "♻️"; commit_type = "Refactor"
+              elif re.search(r"^test", msg_lower):
+                  emoji = "✅"; commit_type = "Test"
+              elif re.search(r"^(chore|build|ci)", msg_lower):
+                  emoji = "🔧"; commit_type = "Chore"
+              elif re.search(r"^perf", msg_lower):
+                  emoji = "⚡"; commit_type = "Performance"
+              elif re.search(r"^(hotfix|urgent)", msg_lower):
+                  emoji = "🔥"; commit_type = "Hotfix"
+              elif re.search(r"^merge", msg_lower):
+                  emoji = "🔀"; commit_type = "Merge"
+
+              return commit_msg, short_sha, files_changed, emoji, commit_type
+
+          commit_msg, short_sha, files_changed, emoji, commit_type = get_commit_info()
           
-          # Escape for JSON using Python to handle newlines and quotes correctly
-          ESCAPED_MSG=$(python3 -c 'import json, sys; print(json.dumps(sys.stdin.read())[1:-1])' <<< "$COMMIT_MSG")
-          echo "message=$ESCAPED_MSG" >> $GITHUB_OUTPUT
-          
-          # Get short SHA
-          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          
-          # Get files changed
-          FILES_CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD | wc -l)
-          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
-          
-          # Determine commit type emoji
-          if echo "$COMMIT_MSG" | grep -qiE "^(feat|feature)"; then
-            echo "emoji=✨" >> $GITHUB_OUTPUT
-            echo "type=Feature" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^fix"; then
-            echo "emoji=🐛" >> $GITHUB_OUTPUT
-            echo "type=Bug Fix" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^(docs|doc)"; then
-            echo "emoji=📝" >> $GITHUB_OUTPUT
-            echo "type=Documentation" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^(refactor|refact)"; then
-            echo "emoji=♻️" >> $GITHUB_OUTPUT
-            echo "type=Refactor" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^test"; then
-            echo "emoji=✅" >> $GITHUB_OUTPUT
-            echo "type=Test" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^(chore|build|ci)"; then
-            echo "emoji=🔧" >> $GITHUB_OUTPUT
-            echo "type=Chore" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^perf"; then
-            echo "emoji=⚡" >> $GITHUB_OUTPUT
-            echo "type=Performance" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^(hotfix|urgent)"; then
-            echo "emoji=🔥" >> $GITHUB_OUTPUT
-            echo "type=Hotfix" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -qiE "^merge"; then
-            echo "emoji=🔀" >> $GITHUB_OUTPUT
-            echo "type=Merge" >> $GITHUB_OUTPUT
-          else
-            echo "emoji=📦" >> $GITHUB_OUTPUT
-            echo "type=Update" >> $GITHUB_OUTPUT
-          fi
+          ref_name = os.environ['REF_NAME']
+          repo_name = os.environ['REPO_NAME']
+          pusher_name = os.environ['PUSHER_NAME']
+          head_commit_url = os.environ['HEAD_COMMIT_URL']
+          repo_url = os.environ['REPO_URL']
+
+          payload = {
+              "text": f"{emoji} New commit pushed to {ref_name}",
+              "blocks": [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": f"{emoji} {commit_type} Commit to {ref_name}"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "fields": [
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Repository:*\n{repo_name}"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Branch:*\n`{ref_name}`"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Author:*\n{pusher_name}"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Commit:*\n`{short_sha}`"
+                          }
+                      ]
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*Commit Message:*\n```\n{commit_msg}\n```"
+                      }
+                  },
+                  {
+                      "type": "actions",
+                      "elements": [
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View Commit"
+                              },
+                              "url": head_commit_url,
+                              "style": "primary"
+                          },
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View Repository"
+                              },
+                              "url": repo_url
+                          }
+                      ]
+                  },
+                  {
+                      "type": "context",
+                      "elements": [
+                          {
+                              "type": "mrkdwn",
+                              "text": f"{files_changed} files changed"
+                          }
+                      ]
+                  }
+              ]
+          }
+
+          with open('payload-commit.json', 'w') as f:
+              json.dump(payload, f)
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.25.0
@@ -76,75 +161,4 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
-          payload: |
-            {
-              "text": "${{ steps.commit-info.outputs.emoji }} New commit pushed to ${{ github.ref_name }}",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "${{ steps.commit-info.outputs.emoji }} ${{ steps.commit-info.outputs.type }} Commit to ${{ github.ref_name }}"
-                  }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Repository:*\n${{ github.repository }}"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Branch:*\n`${{ github.ref_name }}`"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Author:*\n${{ github.event.pusher.name }}"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Commit:*\n`${{ steps.commit-info.outputs.short_sha }}`"
-                    }
-                  ]
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Commit Message:*\n```\n${{ steps.commit-info.outputs.message }}\n```"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Commit"
-                      },
-                      "url": "${{ github.event.head_commit.url }}",
-                      "style": "primary"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Repository"
-                      },
-                      "url": "${{ github.event.repository.html_url }}"
-                    }
-                  ]
-                },
-                {
-                  "type": "context",
-                  "elements": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "${{ steps.commit-info.outputs.files_changed }} files changed"
-                    }
-                  ]
-                }
-              ]
-            }
+          payload-file-path: ./payload-commit.json
