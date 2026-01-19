@@ -1,0 +1,121 @@
+name: Notify Slack on Pull Request
+
+on:
+  pull_request:
+    types: [opened, reopened, closed, ready_for_review]
+    branches:
+      - dev
+      - master
+      - stage
+      - prod
+
+jobs:
+  notify-slack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine PR status
+        id: pr-status
+        run: |
+          if [ "${{ github.event.action }}" == "closed" ] && [ "${{ github.event.pull_request.merged }}" == "true" ]; then
+            echo "status=merged" >> $GITHUB_OUTPUT
+            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "color=#36a64f" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.action }}" == "closed" ]; then
+            echo "status=closed" >> $GITHUB_OUTPUT
+            echo "emoji=:x:" >> $GITHUB_OUTPUT
+            echo "color=#ff0000" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.action }}" == "ready_for_review" ]; then
+            echo "status=ready for review" >> $GITHUB_OUTPUT
+            echo "emoji=:eyes:" >> $GITHUB_OUTPUT
+            echo "color=#0066cc" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.action }}" == "reopened" ]; then
+            echo "status=reopened" >> $GITHUB_OUTPUT
+            echo "emoji=:recycle:" >> $GITHUB_OUTPUT
+            echo "color=#ffa500" >> $GITHUB_OUTPUT
+          else
+            echo "status=opened" >> $GITHUB_OUTPUT
+            echo "emoji=:rocket:" >> $GITHUB_OUTPUT
+            echo "color=#0066cc" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "${{ steps.pr-status.outputs.emoji }} Pull Request ${{ steps.pr-status.outputs.status }}: ${{ github.event.pull_request.title }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ steps.pr-status.outputs.emoji }} PR ${{ steps.pr-status.outputs.status }}: ${{ github.event.pull_request.title }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n`${{ github.event.pull_request.head.ref }}` → `${{ github.event.pull_request.base.ref }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Author:*\n${{ github.event.pull_request.user.login }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Status:*\n${{ steps.pr-status.outputs.status }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Description:*\n${{ github.event.pull_request.body || 'No description provided' }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Pull Request"
+                      },
+                      "url": "${{ github.event.pull_request.html_url }}",
+                      "style": "primary"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Changes"
+                      },
+                      "url": "${{ github.event.pull_request.html_url }}/files"
+                    }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "PR #${{ github.event.pull_request.number }} | +${{ github.event.pull_request.additions }} -${{ github.event.pull_request.deletions }} | ${{ github.event.pull_request.changed_files }} files changed"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

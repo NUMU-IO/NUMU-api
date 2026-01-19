@@ -1,0 +1,146 @@
+name: Notify Slack on Commit
+
+on:
+  push:
+    branches:
+      - dev
+      - master
+      - stage
+      - prod
+      - 'feat/**'
+      - 'fix/**'
+      - 'hotfix/**'
+
+jobs:
+  notify-slack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get commit info
+        id: commit-info
+        run: |
+          # Get commit message
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          # Get short SHA
+          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          
+          # Get files changed
+          FILES_CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD | wc -l)
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          
+          # Determine commit type emoji
+          if echo "$COMMIT_MSG" | grep -qiE "^(feat|feature)"; then
+            echo "emoji=:sparkles:" >> $GITHUB_OUTPUT
+            echo "type=Feature" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^fix"; then
+            echo "emoji=:bug:" >> $GITHUB_OUTPUT
+            echo "type=Bug Fix" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^(docs|doc)"; then
+            echo "emoji=:memo:" >> $GITHUB_OUTPUT
+            echo "type=Documentation" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^(refactor|refact)"; then
+            echo "emoji=:recycle:" >> $GITHUB_OUTPUT
+            echo "type=Refactor" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^test"; then
+            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "type=Test" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^(chore|build|ci)"; then
+            echo "emoji=:wrench:" >> $GITHUB_OUTPUT
+            echo "type=Chore" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^perf"; then
+            echo "emoji=:zap:" >> $GITHUB_OUTPUT
+            echo "type=Performance" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -qiE "^(hotfix|urgent)"; then
+            echo "emoji=:fire:" >> $GITHUB_OUTPUT
+            echo "type=Hotfix" >> $GITHUB_OUTPUT
+          else
+            echo "emoji=:package:" >> $GITHUB_OUTPUT
+            echo "type=Update" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "${{ steps.commit-info.outputs.emoji }} New commit pushed to ${{ github.ref_name }}: ${{ steps.commit-info.outputs.message }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ steps.commit-info.outputs.emoji }} ${{ steps.commit-info.outputs.type }} Commit to ${{ github.ref_name }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n`${{ github.ref_name }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Author:*\n${{ github.event.pusher.name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n`${{ steps.commit-info.outputs.short_sha }}`"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Commit Message:*\n```${{ steps.commit-info.outputs.message }}```"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Commit"
+                      },
+                      "url": "${{ github.event.head_commit.url }}",
+                      "style": "primary"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Repository"
+                      },
+                      "url": "${{ github.event.repository.html_url }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "${{ steps.commit-info.outputs.files_changed }} files changed | Pushed at <!date^${{ github.event.head_commit.timestamp }}^{date_short_pretty} {time}|${{ github.event.head_commit.timestamp }}>"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
