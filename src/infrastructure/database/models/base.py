@@ -1,9 +1,9 @@
 """Base model mixins for SQLAlchemy models."""
 
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID as PyUUID, uuid4
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,8 +27,23 @@ class TimestampMixin:
 class UUIDMixin:
     """Mixin for UUID primary key."""
 
-    id: Mapped[str] = mapped_column(
+    id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid4,
+    )
+
+
+class TenantMixin:
+    """Mixin for multi-tenancy with tenant_id discriminator.
+    
+    All tenant-scoped models should inherit from this mixin.
+    The tenant_id references the public.tenants table.
+    """
+
+    tenant_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )

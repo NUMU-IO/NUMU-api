@@ -6,10 +6,10 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request, status
 
 from src.api.dependencies.auth import get_current_user_id
-from src.infrastructure.database.models.public import Tenant
+from src.infrastructure.database.models.public import TenantModel
 
 
-async def get_current_tenant(request: Request) -> Tenant:
+async def get_current_tenant(request: Request) -> TenantModel:
     """
     Get the current tenant from the request state.
     
@@ -20,7 +20,7 @@ async def get_current_tenant(request: Request) -> Tenant:
         HTTPException: If no tenant context is available.
     
     Returns:
-        Tenant: The current tenant object.
+        TenantModel: The current tenant object.
     """
     tenant = getattr(request.state, "tenant", None)
     
@@ -33,14 +33,14 @@ async def get_current_tenant(request: Request) -> Tenant:
     return tenant
 
 
-async def get_optional_tenant(request: Request) -> Tenant | None:
+async def get_optional_tenant(request: Request) -> TenantModel | None:
     """
     Get the current tenant from request state, or None if not available.
     
     Use this in routes that can work both with and without tenant context.
     
     Returns:
-        Tenant | None: The current tenant or None.
+        TenantModel | None: The current tenant or None.
     """
     return getattr(request.state, "tenant", None)
 
@@ -52,14 +52,14 @@ def require_tenant_owner():
     Usage:
         @router.put("/settings")
         async def update_settings(
-            tenant: Annotated[Tenant, Depends(get_current_tenant)],
+            tenant: Annotated[TenantModel, Depends(get_current_tenant)],
             user_id: Annotated[UUID, Depends(get_current_user_id)],
             _: Annotated[None, Depends(require_tenant_owner())],
         ):
             ...
     """
     async def check_ownership(
-        tenant: Annotated[Tenant, Depends(get_current_tenant)],
+        tenant: Annotated[TenantModel, Depends(get_current_tenant)],
         user_id: Annotated[UUID, Depends(get_current_user_id)],
     ) -> None:
         if tenant.owner_id != user_id:
@@ -72,5 +72,5 @@ def require_tenant_owner():
 
 
 # Type alias for dependency injection
-CurrentTenant = Annotated[Tenant, Depends(get_current_tenant)]
-OptionalTenant = Annotated[Tenant | None, Depends(get_optional_tenant)]
+CurrentTenant = Annotated[TenantModel, Depends(get_current_tenant)]
+OptionalTenant = Annotated[TenantModel | None, Depends(get_optional_tenant)]

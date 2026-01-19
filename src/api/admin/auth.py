@@ -27,7 +27,10 @@ class AdminAuth(AuthenticationBackend):
         email = form.get("username")  # SQLAdmin uses 'username' field
         password = form.get("password")
 
+        logger.info(f"Admin login attempt for: {email}")
+
         if not email or not password:
+            logger.warning("Missing email or password")
             return False
 
         try:
@@ -41,14 +44,17 @@ class AdminAuth(AuthenticationBackend):
                 user = result.scalar_one_or_none()
 
                 if not user:
+                    logger.warning(f"User not found: {email}")
                     return False
 
                 # Verify password
                 if not password_service.verify_password(str(password), user.hashed_password):
+                    logger.warning(f"Invalid password for: {email}")
                     return False
 
                 # Check if user is a super admin
                 if user.role != UserRole.SUPER_ADMIN:
+                    logger.warning(f"User {email} is not a SUPER_ADMIN, role: {user.role}")
                     return False
 
                 # Store user info in session
@@ -56,6 +62,7 @@ class AdminAuth(AuthenticationBackend):
                     "admin_user_id": str(user.id),
                     "admin_email": user.email,
                 })
+                logger.info(f"Admin login successful for: {email}")
                 return True
         except Exception as e:
             logger.exception("Admin login error: %s", e)

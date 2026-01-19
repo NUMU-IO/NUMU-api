@@ -7,50 +7,40 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.interfaces.repositories.tenant_repository import ITenantRepository
-from src.infrastructure.database.models.public import Tenant
+from src.infrastructure.database.models.public import TenantModel
 
 
 class TenantRepository(ITenantRepository):
     """Repository for managing Tenant records in the public schema."""
     
     def __init__(self, session: AsyncSession):
-        """Initialize with a database session.
-        
-        Note: The session should be configured to query the PUBLIC schema
-        since tenants table is always in public.
-        """
+        """Initialize with a database session."""
         self.session = session
 
-    async def get_by_id(self, tenant_id: UUID) -> Optional[Tenant]:
+    async def get_by_id(self, tenant_id: UUID) -> Optional[TenantModel]:
         """Get tenant by ID."""
-        query = select(Tenant).where(Tenant.id == tenant_id)
+        query = select(TenantModel).where(TenantModel.id == tenant_id)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_by_subdomain(self, subdomain: str) -> Optional[Tenant]:
+    async def get_by_subdomain(self, subdomain: str) -> Optional[TenantModel]:
         """Get tenant by subdomain."""
-        query = select(Tenant).where(Tenant.subdomain == subdomain.lower())
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
-    
-    async def get_by_schema_name(self, schema_name: str) -> Optional[Tenant]:
-        """Get tenant by schema name."""
-        query = select(Tenant).where(Tenant.schema_name == schema_name)
+        query = select(TenantModel).where(TenantModel.subdomain == subdomain.lower())
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def create(self, **kwargs) -> Tenant:
+    async def create(self, **kwargs) -> TenantModel:
         """Create a new tenant."""
         # Ensure subdomain is lowercase
         if 'subdomain' in kwargs:
             kwargs['subdomain'] = kwargs['subdomain'].lower()
         
-        tenant = Tenant(**kwargs)
+        tenant = TenantModel(**kwargs)
         self.session.add(tenant)
         await self.session.flush()
         return tenant
     
-    async def update(self, tenant: Tenant) -> Tenant:
+    async def update(self, tenant: TenantModel) -> TenantModel:
         """Update an existing tenant."""
         self.session.add(tenant)
         await self.session.flush()
@@ -65,14 +55,14 @@ class TenantRepository(ITenantRepository):
             return True
         return False
     
-    async def list_active(self, skip: int = 0, limit: int = 100) -> list[Tenant]:
+    async def list_active(self, skip: int = 0, limit: int = 100) -> list[TenantModel]:
         """List all active tenants with pagination."""
         query = (
-            select(Tenant)
-            .where(Tenant.is_active == True)
+            select(TenantModel)
+            .where(TenantModel.is_active == True)
             .offset(skip)
             .limit(limit)
-            .order_by(Tenant.created_at.desc())
+            .order_by(TenantModel.created_at.desc())
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())

@@ -1,4 +1,4 @@
-"""Product database model (tenant schema)."""
+"""Product database model (public schema with tenant_id discriminator)."""
 
 from decimal import Decimal
 
@@ -8,18 +8,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.product import ProductStatus, ProductType
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
 
 
-class ProductModel(Base, UUIDMixin, TimestampMixin):
-    """Product database model (tenant schema)."""
+class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """Product database model with tenant_id discriminator."""
 
     __tablename__ = "products"
-    # No schema specified - will use the tenant's search_path
+    __table_args__ = {"schema": "public"}
 
     store_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("stores.id", ondelete="CASCADE"),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -29,12 +29,12 @@ class ProductModel(Base, UUIDMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     product_type: Mapped[ProductType] = mapped_column(
-        Enum(ProductType),
+        Enum(ProductType, name="producttype", schema="public"),
         default=ProductType.PHYSICAL,
         nullable=False,
     )
     status: Mapped[ProductStatus] = mapped_column(
-        Enum(ProductStatus),
+        Enum(ProductStatus, name="productstatus", schema="public"),
         default=ProductStatus.DRAFT,
         nullable=False,
         index=True,
@@ -58,7 +58,7 @@ class ProductModel(Base, UUIDMixin, TimestampMixin):
     images: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
     category_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("categories.id", ondelete="SET NULL"),
+        ForeignKey("public.categories.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

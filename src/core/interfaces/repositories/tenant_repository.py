@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from src.infrastructure.database.models.public import TenantModel
 
 
 class ITenantRepository(ABC):
@@ -14,27 +18,22 @@ class ITenantRepository(ABC):
     """
 
     @abstractmethod
-    async def get_by_id(self, tenant_id: UUID) -> Tenant | None:
+    async def get_by_id(self, tenant_id: UUID) -> "TenantModel | None":
         """Get tenant by ID."""
         ...
 
     @abstractmethod
-    async def get_by_subdomain(self, subdomain: str) -> Tenant | None:
+    async def get_by_subdomain(self, subdomain: str) -> "TenantModel | None":
         """Get tenant by subdomain."""
         ...
 
     @abstractmethod
-    async def get_by_schema_name(self, schema_name: str) -> Tenant | None:
-        """Get tenant by database schema name."""
-        ...
-
-    @abstractmethod
-    async def create(self, **kwargs) -> Tenant:
+    async def create(self, **kwargs) -> "TenantModel":
         """Create a new tenant record."""
         ...
 
     @abstractmethod
-    async def update(self, tenant: Tenant) -> Tenant:
+    async def update(self, tenant: "TenantModel") -> "TenantModel":
         """Update an existing tenant."""
         ...
 
@@ -44,8 +43,6 @@ class ITenantRepository(ABC):
         ...
 
     @abstractmethod
-    async def list_active(self, skip: int = 0, limit: int = 100) -> list[Tenant]:
+    async def list_active(self, skip: int = 0, limit: int = 100) -> list["TenantModel"]:
         """List all active tenants with pagination."""
         ...
-
-from src.infrastructure.database.models.public import Tenant

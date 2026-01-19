@@ -33,12 +33,12 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole),
+        Enum(UserRole, name="userrole", schema="public"),
         default=UserRole.CUSTOMER,
         nullable=False,
     )
     status: Mapped[UserStatus] = mapped_column(
-        Enum(UserStatus),
+        Enum(UserStatus, name="userstatus", schema="public"),
         default=UserStatus.PENDING_VERIFICATION,
         nullable=False,
     )
@@ -50,6 +50,9 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    # Relationships
+    owned_tenants = relationship("TenantModel", back_populates="owner", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<UserModel(id={self.id}, email={self.email})>"

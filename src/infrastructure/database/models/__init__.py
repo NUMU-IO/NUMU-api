@@ -1,11 +1,11 @@
 """Database models module."""
 
-from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
 
 # Public schema models
-from src.infrastructure.database.models.public import Tenant, UserModel
+from src.infrastructure.database.models.public import TenantModel, UserModel
 
-# Tenant schema models
+# Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
     CategoryModel,
     CustomerModel,
@@ -17,10 +17,11 @@ from src.infrastructure.database.models.tenant import (
 __all__ = [
     "TimestampMixin",
     "UUIDMixin",
+    "TenantMixin",
     # Public
-    "Tenant",
+    "TenantModel",
     "UserModel",
-    # Tenant
+    # Tenant-scoped
     "StoreModel",
     "ProductModel",
     "CategoryModel",
