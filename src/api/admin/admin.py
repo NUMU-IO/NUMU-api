@@ -22,7 +22,6 @@ def setup_admin(app: FastAPI) -> Admin:
     admin = Admin(
         app=app,
         engine=engine,
-        authentication_backend=AdminAuth(secret_key=settings.jwt_secret_key),
         title="NUMU Admin",
         base_url="/admin",
     )
