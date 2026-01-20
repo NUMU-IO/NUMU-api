@@ -19,6 +19,7 @@ from src.api.v1.schemas import (
     TokenResponse,
     UserResponse,
 )
+from src.application.dto.auth import LoginDTO, RefreshTokenDTO, RegisterDTO
 from src.application.use_cases.auth import (
     LoginUserUseCase,
     RefreshTokenUseCase,
@@ -50,13 +51,14 @@ async def register(
         token_service=token_service,
     )
     
-    result = await use_case.execute(
+    dto = RegisterDTO(
         email=request.email,
         password=request.password,
         first_name=request.first_name,
         last_name=request.last_name,
         phone=request.phone,
     )
+    result = await use_case.execute(dto)
     
     return SuccessResponse(
         data=AuthResponse(
@@ -65,17 +67,19 @@ async def register(
                 email=result.user.email,
                 first_name=result.user.first_name,
                 last_name=result.user.last_name,
+                full_name=result.user.full_name,
                 phone=result.user.phone,
                 role=result.user.role,
-                is_active=result.user.is_active,
+                status=result.user.status,
+                avatar_url=result.user.avatar_url,
                 is_verified=result.user.is_verified,
-                created_at=result.user.created_at,
+                created_at=str(result.user.created_at),
+                updated_at=str(result.user.updated_at),
             ),
             tokens=TokenResponse(
-                access_token=result.access_token,
-                refresh_token=result.refresh_token,
+                access_token=result.tokens.access_token,
+                refresh_token=result.tokens.refresh_token,
                 token_type="bearer",
-                expires_in=result.expires_in,
             ),
         ),
         message="User registered successfully",
@@ -100,10 +104,11 @@ async def login(
         token_service=token_service,
     )
     
-    result = await use_case.execute(
+    dto = LoginDTO(
         email=request.email,
         password=request.password,
     )
+    result = await use_case.execute(dto)
     
     return SuccessResponse(
         data=AuthResponse(
@@ -112,17 +117,19 @@ async def login(
                 email=result.user.email,
                 first_name=result.user.first_name,
                 last_name=result.user.last_name,
+                full_name=result.user.full_name,
                 phone=result.user.phone,
                 role=result.user.role,
-                is_active=result.user.is_active,
+                status=result.user.status,
+                avatar_url=result.user.avatar_url,
                 is_verified=result.user.is_verified,
-                created_at=result.user.created_at,
+                created_at=str(result.user.created_at),
+                updated_at=str(result.user.updated_at),
             ),
             tokens=TokenResponse(
-                access_token=result.access_token,
-                refresh_token=result.refresh_token,
+                access_token=result.tokens.access_token,
+                refresh_token=result.tokens.refresh_token,
                 token_type="bearer",
-                expires_in=result.expires_in,
             ),
         ),
         message="Login successful",
@@ -179,6 +186,7 @@ async def get_current_user(
             email=user.email.value,
             first_name=user.first_name,
             last_name=user.last_name,
+            full_name=f"{user.first_name} {user.last_name}",
             phone=user.phone.value if user.phone else None,
             role=user.role.value,
             is_active=user.is_active,

@@ -24,6 +24,7 @@ class UserDTO(BaseDTO):
     is_verified: bool
     created_at: datetime
     updated_at: datetime
+    is_active: bool
 
     @classmethod
     def from_entity(cls, entity: User) -> "UserDTO":
@@ -41,6 +42,7 @@ class UserDTO(BaseDTO):
             is_verified=entity.is_verified,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
+            is_active=entity.is_active,
         )
 
 
