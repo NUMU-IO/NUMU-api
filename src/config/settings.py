@@ -99,14 +99,14 @@ class Settings(BaseSettings):
 
     # Resend (Email)
     resend_api_key: str | None = None
-    email_from_address: str = "noreply@octyrafiy.com"
-    email_from_name: str = "Octyrafiy"
+    email_from_address: str = "noreply@numu.com"
+    email_from_name: str = "numu"
 
     # Cloudflare R2
     r2_account_id: str | None = None
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None
-    r2_bucket_name: str = "octyrafiy"
+    r2_bucket_name: str = "numu"
     r2_public_url: str | None = None
 
     # Shippo
