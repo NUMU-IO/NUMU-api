@@ -1,5 +1,10 @@
 """Pytest configuration and fixtures."""
 
+# Import configuration fixtures
+pytest_plugins = [
+    "tests.fixtures.configuration_fixtures",
+]
+
 import asyncio
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
