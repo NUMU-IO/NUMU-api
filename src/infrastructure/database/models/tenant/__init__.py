@@ -4,6 +4,7 @@ These models use tenant_id discriminator for multi-tenancy.
 They include all e-commerce related data that is specific to a store.
 """
 
+from src.infrastructure.database.models.tenant.address import CustomerAddressModel
 from src.infrastructure.database.models.tenant.category import CategoryModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.order import OrderModel
@@ -15,5 +16,7 @@ __all__ = [
     "ProductModel",
     "CategoryModel",
     "CustomerModel",
+    "CustomerAddressModel",
     "OrderModel",
 ]
+

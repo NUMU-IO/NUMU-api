@@ -30,10 +30,12 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         index=True,
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     accepts_marketing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
     default_address_id: Mapped[str | None] = mapped_column(
@@ -47,6 +49,13 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Relationships
     store = relationship("StoreModel", back_populates="customers", lazy="selectin")
     orders = relationship("OrderModel", back_populates="customer", lazy="selectin")
+    addresses = relationship(
+        "CustomerAddressModel",
+        back_populates="customer",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<CustomerModel(id={self.id}, email={self.email})>"
+

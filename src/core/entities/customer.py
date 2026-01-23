@@ -18,6 +18,7 @@ class Customer(BaseEntity):
         first_name: str,
         last_name: str,
         phone: PhoneNumber | None = None,
+        password_hash: str | None = None,
         user_id: UUID | None = None,
         accepts_marketing: bool = False,
         notes: str | None = None,
@@ -25,6 +26,7 @@ class Customer(BaseEntity):
         default_address_id: UUID | None = None,
         total_orders: int = 0,
         total_spent: int = 0,  # In cents
+        is_verified: bool = False,
         metadata: dict | None = None,
         id: UUID | None = None,
         created_at: datetime | None = None,
@@ -36,6 +38,7 @@ class Customer(BaseEntity):
         self.first_name = first_name
         self.last_name = last_name
         self.phone = phone
+        self.password_hash = password_hash
         self.user_id = user_id
         self.accepts_marketing = accepts_marketing
         self.notes = notes
@@ -43,6 +46,7 @@ class Customer(BaseEntity):
         self.default_address_id = default_address_id
         self.total_orders = total_orders
         self.total_spent = total_spent
+        self.is_verified = is_verified
         self.metadata = metadata or {}
 
     @property
@@ -55,3 +59,14 @@ class Customer(BaseEntity):
         self.total_orders += 1
         self.total_spent += order_total
         self.updated_at = datetime.utcnow()
+
+    def update_password(self, password_hash: str) -> None:
+        """Update customer password hash."""
+        self.password_hash = password_hash
+        self.updated_at = datetime.utcnow()
+
+    def verify(self) -> None:
+        """Mark customer as verified."""
+        self.is_verified = True
+        self.updated_at = datetime.utcnow()
+

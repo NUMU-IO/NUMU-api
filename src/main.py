@@ -30,22 +30,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-<<<<<<< Updated upstream
-    logger.info("Starting NUMU API...")
-=======
     logger.info("Starting numu API...")
->>>>>>> Stashed changes
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"API Version: {settings.app_version}")
     
     yield
     
     # Shutdown
-<<<<<<< Updated upstream
-    logger.info("Shutting down NUMU API...")
-=======
     logger.info("Shutting down numu API...")
->>>>>>> Stashed changes
     await engine.dispose()
     logger.info("Database connection closed")
 
@@ -54,11 +46,7 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title=settings.app_name,
-<<<<<<< Updated upstream
-        description="E-commerce platform API for NUMU",
-=======
         description="E-commerce platform API for numu",
->>>>>>> Stashed changes
         version=settings.app_version,
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,

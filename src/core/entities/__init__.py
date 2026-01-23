@@ -1,5 +1,6 @@
 """Core domain entities."""
 
+from src.core.entities.address import AddressLabel, CustomerAddress
 from src.core.entities.base import BaseEntity
 from src.core.entities.category import Category
 from src.core.entities.customer import Customer
@@ -27,6 +28,8 @@ __all__ = [
     "ProductType",
     "Category",
     "Customer",
+    "CustomerAddress",
+    "AddressLabel",
     "Order",
     "OrderStatus",
     "PaymentStatus",
@@ -34,3 +37,4 @@ __all__ = [
     "OrderLineItem",
     "ShippingAddress",
 ]
+

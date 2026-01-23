@@ -27,6 +27,11 @@ class ICustomerRepository(BaseRepository[Customer]):
         ...
 
     @abstractmethod
+    async def email_exists(self, store_id: UUID, email: Email) -> bool:
+        """Check if email already exists for a store."""
+        ...
+
+    @abstractmethod
     async def get_by_user_id(self, store_id: UUID, user_id: UUID) -> Customer | None:
         """Get customer by user ID within a store."""
         ...
@@ -55,3 +60,21 @@ class ICustomerRepository(BaseRepository[Customer]):
     async def count_by_store(self, store_id: UUID) -> int:
         """Get total count of customers for a store."""
         ...
+
+    @abstractmethod
+    async def update_password(self, customer_id: UUID, password_hash: str) -> Customer | None:
+        """Update customer password hash."""
+        ...
+
+    @abstractmethod
+    async def update_default_address(
+        self, customer_id: UUID, address_id: UUID | None
+    ) -> Customer | None:
+        """Update customer's default address."""
+        ...
+
+    @abstractmethod
+    async def verify_customer(self, customer_id: UUID) -> Customer | None:
+        """Mark customer as verified."""
+        ...
+

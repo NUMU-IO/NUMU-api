@@ -1,5 +1,6 @@
 """Repository interfaces."""
 
+from src.core.interfaces.repositories.address_repository import ICustomerAddressRepository
 from src.core.interfaces.repositories.base import BaseRepository
 from src.core.interfaces.repositories.category_repository import ICategoryRepository
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
@@ -15,7 +16,9 @@ __all__ = [
     "IStoreRepository",
     "IProductRepository",
     "ICustomerRepository",
+    "ICustomerAddressRepository",
     "IOrderRepository",
     "ICategoryRepository",
     "ITenantRepository",
 ]
+

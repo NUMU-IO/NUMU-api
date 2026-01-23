@@ -35,6 +35,7 @@ class Store(BaseEntity):
         address: dict | None = None,
         social_links: dict | None = None,
         settings: dict | None = None,
+        tenant_id: UUID | None = None,
         id: UUID | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
@@ -53,6 +54,7 @@ class Store(BaseEntity):
         self.address = address or {}
         self.social_links = social_links or {}
         self.settings = settings or {}
+        self.tenant_id = tenant_id
 
     @property
     def is_active(self) -> bool:

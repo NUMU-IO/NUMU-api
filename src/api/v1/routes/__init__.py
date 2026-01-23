@@ -5,6 +5,7 @@ from fastapi import APIRouter
 # Public routes (no tenant context required)
 from src.api.v1.routes.public import (
     auth_router,
+    customers_router,
     health_router,
     tenants_admin_router,
     tenants_router,
@@ -22,8 +23,12 @@ api_router.include_router(auth_router, prefix="/public", tags=["public"])
 api_router.include_router(tenants_router, tags=["public"])
 api_router.include_router(tenants_admin_router, tags=["admin"])
 
+# Storefront routes (customer-facing, tenant-scoped via store_id)
+api_router.include_router(customers_router, prefix="/storefront", tags=["storefront"])
+
 # Tenant routes (require subdomain)
 api_router.include_router(stores_router, tags=["tenant"])
 api_router.include_router(products_router, tags=["tenant"])
 
 __all__ = ["api_router"]
+
