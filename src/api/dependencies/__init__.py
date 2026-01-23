@@ -9,6 +9,8 @@ from src.api.dependencies.auth import (
 )
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
+    get_customer_address_repository,
+    get_customer_repository,
     get_product_repository,
     get_store_repository,
     get_user_repository,
@@ -35,6 +37,8 @@ __all__ = [
     "get_user_repository",
     "get_store_repository",
     "get_product_repository",
+    "get_customer_repository",
+    "get_customer_address_repository",
     # Services
     "get_password_service",
     "get_token_service",
@@ -43,3 +47,4 @@ __all__ = [
     "get_storage_service",
     "get_ai_service",
 ]
+

@@ -23,6 +23,7 @@ PUBLIC_PATHS = (
     "/openapi.json",
     "/api/v1/public",
     "/api/v1/auth",
+    "/api/v1/storefront",
 )
 
 
@@ -83,7 +84,12 @@ class TenantMiddleware(BaseHTTPMiddleware):
         - localhost -> None
         - octyrafiy.com -> None
         - www.octyrafiy.com -> www (might want to skip 'www')
+        - 127.0.0.1 -> None (IP address)
         """
+        # Skip IP addresses (both IPv4 and localhost)
+        if host.replace(".", "").isdigit() or host == "localhost":
+            return None
+        
         parts = host.split(".")
         
         # Need at least 2 parts to have a subdomain
@@ -97,3 +103,4 @@ class TenantMiddleware(BaseHTTPMiddleware):
             return None
         
         return subdomain
+

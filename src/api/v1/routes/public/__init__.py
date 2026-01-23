@@ -4,9 +4,11 @@ These routes are accessible without a tenant subdomain:
 - Authentication (login, register, refresh)
 - Health checks
 - Tenant registration/management
+- Customer storefront (registration, login, profile, addresses)
 """
 
 from src.api.v1.routes.public.auth import router as auth_router
+from src.api.v1.routes.public.customers import router as customers_router
 from src.api.v1.routes.public.health import router as health_router
 from src.api.v1.routes.public.tenants import (
     admin_router as tenants_admin_router,
@@ -18,4 +20,6 @@ __all__ = [
     "health_router",
     "tenants_router",
     "tenants_admin_router",
+    "customers_router",
 ]
+

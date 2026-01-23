@@ -8,6 +8,7 @@ from src.infrastructure.database.models.public import TenantModel, UserModel
 # Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
     CategoryModel,
+    CustomerAddressModel,
     CustomerModel,
     OrderModel,
     ProductModel,
@@ -26,5 +27,7 @@ __all__ = [
     "ProductModel",
     "CategoryModel",
     "CustomerModel",
+    "CustomerAddressModel",
     "OrderModel",
 ]
+

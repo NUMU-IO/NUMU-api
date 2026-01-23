@@ -11,7 +11,7 @@ class PhoneNumber:
     """Phone number value object with validation."""
 
     value: str
-    country_code: str = "US"
+    country_code: str = "EG"
 
     def __post_init__(self) -> None:
         """Validate and normalize phone number."""

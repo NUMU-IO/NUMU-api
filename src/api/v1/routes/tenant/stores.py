@@ -18,6 +18,7 @@ from src.api.v1.schemas import (
     StoreResponse,
     UpdateStoreRequest,
 )
+from src.application.dto.store import CreateStoreDTO, UpdateStoreDTO
 from src.application.use_cases.stores import (
     CreateStoreUseCase,
     DeleteStoreUseCase,
@@ -44,17 +45,16 @@ async def create_store(
     """Create a new store."""
     use_case = CreateStoreUseCase(store_repository=store_repo)
     
-    result = await use_case.execute(
-        owner_id=user_id,
+    dto = CreateStoreDTO(
         name=request.name,
+        slug=request.slug,
         description=request.description,
-        logo_url=request.logo_url,
-        website=request.website,
-        email=request.email,
-        phone=request.phone,
-        currency=request.currency,
-        country=request.country,
+        default_currency=request.default_currency,
+        contact_email=request.contact_email,
+        contact_phone=request.contact_phone,
     )
+    
+    result = await use_case.execute(dto, owner_id=user_id)
     
     return SuccessResponse(
         data=StoreResponse(
@@ -64,15 +64,15 @@ async def create_store(
             slug=result.slug,
             description=result.description,
             logo_url=result.logo_url,
-            website=result.website,
-            email=result.email,
-            phone=result.phone,
-            currency=result.currency,
-            country=result.country,
-            is_active=result.is_active,
-            is_verified=result.is_verified,
-            created_at=result.created_at,
-            updated_at=result.updated_at,
+            banner_url=result.banner_url,
+            status=result.status,
+            default_currency=result.default_currency,
+            contact_email=result.contact_email,
+            contact_phone=result.contact_phone,
+            address=result.address,
+            social_links=result.social_links,
+            created_at=str(result.created_at),
+            updated_at=str(result.updated_at),
         ),
         message="Store created successfully",
     )
@@ -93,9 +93,8 @@ async def list_stores(
     use_case = ListStoresUseCase(store_repository=store_repo)
     
     result = await use_case.execute(
-        skip=(page - 1) * limit,
-        limit=limit,
-        is_active=is_active,
+        page=page,
+        page_size=limit,
     )
     
     stores = [
@@ -106,17 +105,17 @@ async def list_stores(
             slug=store.slug,
             description=store.description,
             logo_url=store.logo_url,
-            website=store.website,
-            email=store.email,
-            phone=store.phone,
-            currency=store.currency,
-            country=store.country,
-            is_active=store.is_active,
-            is_verified=store.is_verified,
-            created_at=store.created_at,
-            updated_at=store.updated_at,
+            banner_url=store.banner_url,
+            status=store.status,
+            default_currency=store.default_currency,
+            contact_email=store.contact_email,
+            contact_phone=store.contact_phone,
+            address=store.address,
+            social_links=store.social_links,
+            created_at=str(store.created_at),
+            updated_at=str(store.updated_at),
         )
-        for store in result.stores
+        for store in result.items
     ]
     
     return SuccessResponse(
@@ -124,8 +123,8 @@ async def list_stores(
             items=stores,
             total=result.total,
             page=page,
-            limit=limit,
-            pages=(result.total + limit - 1) // limit,
+            page_size=limit,
+            total_pages=(result.total + limit - 1) // limit,
         ),
         message="Stores retrieved successfully",
     )
@@ -153,15 +152,15 @@ async def get_store(
             slug=result.slug,
             description=result.description,
             logo_url=result.logo_url,
-            website=result.website,
-            email=result.email,
-            phone=result.phone,
-            currency=result.currency,
-            country=result.country,
-            is_active=result.is_active,
-            is_verified=result.is_verified,
-            created_at=result.created_at,
-            updated_at=result.updated_at,
+            banner_url=result.banner_url,
+            status=result.status,
+            default_currency=result.default_currency,
+            contact_email=result.contact_email,
+            contact_phone=result.contact_phone,
+            address=result.address,
+            social_links=result.social_links,
+            created_at=str(result.created_at),
+            updated_at=str(result.updated_at),
         ),
         message="Store retrieved successfully",
     )
@@ -181,15 +180,22 @@ async def update_store(
     """Update store details."""
     use_case = UpdateStoreUseCase(store_repository=store_repo)
     
-    result = await use_case.execute(
-        store_id=store_id,
-        owner_id=user_id,
+    dto = UpdateStoreDTO(
         name=request.name,
         description=request.description,
         logo_url=request.logo_url,
-        website=request.website,
-        email=request.email,
-        phone=request.phone,
+        banner_url=request.banner_url,
+        contact_email=request.contact_email,
+        contact_phone=request.contact_phone,
+        address=request.address,
+        social_links=request.social_links,
+        settings=request.settings,
+    )
+    
+    result = await use_case.execute(
+        store_id=store_id,
+        dto=dto,
+        user_id=user_id,
     )
     
     return SuccessResponse(
@@ -200,15 +206,15 @@ async def update_store(
             slug=result.slug,
             description=result.description,
             logo_url=result.logo_url,
-            website=result.website,
-            email=result.email,
-            phone=result.phone,
-            currency=result.currency,
-            country=result.country,
-            is_active=result.is_active,
-            is_verified=result.is_verified,
-            created_at=result.created_at,
-            updated_at=result.updated_at,
+            banner_url=result.banner_url,
+            status=result.status,
+            default_currency=result.default_currency,
+            contact_email=result.contact_email,
+            contact_phone=result.contact_phone,
+            address=result.address,
+            social_links=result.social_links,
+            created_at=str(result.created_at),
+            updated_at=str(result.updated_at),
         ),
         message="Store updated successfully",
     )
@@ -227,7 +233,7 @@ async def delete_store(
     """Delete a store."""
     use_case = DeleteStoreUseCase(store_repository=store_repo)
     
-    await use_case.execute(store_id=store_id, owner_id=user_id)
+    await use_case.execute(store_id=store_id, user_id=user_id)
     
     return SuccessResponse(
         data=DeleteResponse(deleted=True, id=str(store_id)),
