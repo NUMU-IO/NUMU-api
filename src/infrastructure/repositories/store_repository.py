@@ -72,11 +72,18 @@ class StoreRepository(IStoreRepository):
         self,
         skip: int = 0,
         limit: int = 100,
+        is_active: bool | None = None,
     ) -> list[Store]:
-        """Get all stores with pagination."""
-        result = await self.session.execute(
-            select(StoreModel).offset(skip).limit(limit)
-        )
+        """Get all stores with pagination and optional filtering."""
+        query = select(StoreModel)
+        
+        # Apply is_active filter if provided
+        if is_active is not None:
+            target_status = StoreStatus.ACTIVE if is_active else StoreStatus.INACTIVE
+            query = query.where(StoreModel.status == target_status)
+        
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def create(self, entity: Store) -> Store:
@@ -123,11 +130,16 @@ class StoreRepository(IStoreRepository):
             return True
         return False
 
-    async def count(self) -> int:
-        """Get total count of stores."""
-        result = await self.session.execute(
-            select(func.count(StoreModel.id))
-        )
+    async def count(self, is_active: bool | None = None) -> int:
+        """Get total count of stores, optionally filtered by active status."""
+        query = select(func.count(StoreModel.id))
+        
+        # Apply is_active filter if provided
+        if is_active is not None:
+            target_status = StoreStatus.ACTIVE if is_active else StoreStatus.INACTIVE
+            query = query.where(StoreModel.status == target_status)
+        
+        result = await self.session.execute(query)
         return result.scalar() or 0
 
     async def get_by_slug(self, slug: str) -> Store | None:

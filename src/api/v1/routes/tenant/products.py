@@ -183,7 +183,7 @@ async def list_products(
             total=result.total,
             page=page,
             page_size=limit,
-            total_pages=(result.total + limit - 1) // limit,
+            total_pages=(result.total + limit - 1) // limit if limit > 0 else 0,
         ),
         message="Products retrieved successfully",
     )
