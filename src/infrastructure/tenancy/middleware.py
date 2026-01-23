@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Routes that don't require tenant context
 PUBLIC_PATHS = (
+    "/",
     "/health",
     "/docs",
     "/redoc",
@@ -84,6 +85,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
         - localhost -> None
         - octyrafiy.com -> None
         - www.octyrafiy.com -> www (might want to skip 'www')
+        - 0.0.0.0 -> None (IP address)
         - 127.0.0.1 -> None (IP address)
         """
         # Skip IP addresses (both IPv4 and localhost)
@@ -91,6 +93,14 @@ class TenantMiddleware(BaseHTTPMiddleware):
             return None
         
         parts = host.split(".")
+        
+        # Check if it's an IP address (all parts are numeric)
+        if all(part.isdigit() for part in parts):
+            return None
+        
+        # Handle localhost
+        if host == "localhost":
+            return None
         
         # Need at least 2 parts to have a subdomain
         if len(parts) < 2:

@@ -11,6 +11,21 @@ class IStoreRepository(BaseRepository[Store]):
     """Store repository interface."""
 
     @abstractmethod
+    async def get_all(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool | None = None,
+    ) -> list[Store]:
+        """Get all stores with optional filtering."""
+        ...
+
+    @abstractmethod
+    async def count(self, is_active: bool | None = None) -> int:
+        """Get total count of stores, optionally filtered."""
+        ...
+
+    @abstractmethod
     async def get_by_slug(self, slug: str) -> Store | None:
         """Get store by slug."""
         ...

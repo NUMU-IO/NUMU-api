@@ -262,3 +262,76 @@ class ProductRepository(IProductRepository):
                 .values(quantity=ProductModel.quantity + delta)
             )
         await self.session.flush()
+
+    async def list_with_filters(
+        self,
+        store_id: UUID | None = None,
+        category_id: UUID | None = None,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool | None = None,
+        search: str | None = None,
+    ) -> list[Product]:
+        """List products with multiple optional filters."""
+        query = select(ProductModel)
+        
+        # Apply filters
+        if store_id:
+            query = query.where(ProductModel.store_id == store_id)
+        
+        if category_id:
+            query = query.where(ProductModel.category_id == category_id)
+        
+        if is_active is not None:
+            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
+            query = query.where(ProductModel.status == target_status)
+        
+        if search:
+            search_term = f"%{search}%"
+            query = query.where(
+                or_(
+                    ProductModel.name.ilike(search_term),
+                    ProductModel.description.ilike(search_term),
+                    ProductModel.sku.ilike(search_term),
+                )
+            )
+        
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+        
+        result = await self.session.execute(query)
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def count_with_filters(
+        self,
+        store_id: UUID | None = None,
+        category_id: UUID | None = None,
+        is_active: bool | None = None,
+        search: str | None = None,
+    ) -> int:
+        """Count products matching the given filters."""
+        query = select(func.count(ProductModel.id))
+        
+        # Apply same filters as list_with_filters
+        if store_id:
+            query = query.where(ProductModel.store_id == store_id)
+        
+        if category_id:
+            query = query.where(ProductModel.category_id == category_id)
+        
+        if is_active is not None:
+            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
+            query = query.where(ProductModel.status == target_status)
+        
+        if search:
+            search_term = f"%{search}%"
+            query = query.where(
+                or_(
+                    ProductModel.name.ilike(search_term),
+                    ProductModel.description.ilike(search_term),
+                    ProductModel.sku.ilike(search_term),
+                )
+            )
+        
+        result = await self.session.execute(query)
+        return result.scalar() or 0

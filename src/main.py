@@ -30,14 +30,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-    logger.info("Starting numu API...")
+    logger.info("Starting NUMU API...")
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"API Version: {settings.app_version}")
     
     yield
     
     # Shutdown
-    logger.info("Shutting down numu API...")
+    logger.info("Shutting down NUMU API...")
     await engine.dispose()
     logger.info("Database connection closed")
 
@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title=settings.app_name,
-        description="E-commerce platform API for numu",
+        description="E-commerce platform API for NUMU",
         version=settings.app_version,
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
@@ -67,6 +67,18 @@ def create_app() -> FastAPI:
     # Add middleware (order matters: first added = outermost)
     app.add_middleware(TenantMiddleware)
     app.middleware("http")(logging_middleware)
+    
+    # Root endpoint
+    @app.get("/", tags=["Root"])
+    async def root():
+        """Root endpoint - API information."""
+        return {
+            "name": settings.app_name,
+            "version": settings.app_version,
+            "description": "E-commerce platform API for NUMU",
+            "docs": "/docs" if settings.debug else None,
+            "health": "/api/v1/public/health",
+        }
     
     # Include routers
     app.include_router(api_router)
