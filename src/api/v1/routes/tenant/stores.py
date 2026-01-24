@@ -93,8 +93,9 @@ async def list_stores(
     use_case = ListStoresUseCase(store_repository=store_repo)
     
     result = await use_case.execute(
-        page=page,
-        page_size=limit,
+        skip=(page - 1) * limit,
+        limit=limit,
+        is_active=is_active,
     )
     
     stores = [

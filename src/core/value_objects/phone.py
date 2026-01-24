@@ -14,18 +14,18 @@ class PhoneNumber:
     country_code: str = "EG"
 
     def __post_init__(self) -> None:
-        """Validate and normalize phone number."""
+        """Validate and normalize phone number if possible."""
         try:
             parsed = phonenumbers.parse(self.value, self.country_code)
-            if not phonenumbers.is_valid_number(parsed):
-                raise ValueError(f"Invalid phone number: {self.value}")
-            # Store in E.164 format
-            formatted = phonenumbers.format_number(
-                parsed, phonenumbers.PhoneNumberFormat.E164
-            )
-            object.__setattr__(self, "value", formatted)
-        except NumberParseException as e:
-            raise ValueError(f"Invalid phone number: {self.value}") from e
+            if phonenumbers.is_valid_number(parsed):
+                # Store in E.164 format if valid
+                formatted = phonenumbers.format_number(
+                    parsed, phonenumbers.PhoneNumberFormat.E164
+                )
+                object.__setattr__(self, "value", formatted)
+        except NumberParseException:
+            # Keep original value if parsing fails
+            pass
 
     def __str__(self) -> str:
         return self.value
