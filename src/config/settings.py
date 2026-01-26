@@ -1,10 +1,13 @@
 """Application configuration using Pydantic Settings."""
 
+import logging
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, computed_field
+from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -35,7 +38,6 @@ class Settings(BaseSettings):
     postgres_password: str = "postgres"
     postgres_db: str = "numu"
 
-    @computed_field
     @property
     def database_url(self) -> str:
         """Construct async PostgreSQL connection URL."""
@@ -50,7 +52,6 @@ class Settings(BaseSettings):
             )
         )
 
-    @computed_field
     @property
     def database_url_sync(self) -> str:
         """Construct sync PostgreSQL connection URL (for Alembic)."""
@@ -71,7 +72,6 @@ class Settings(BaseSettings):
     redis_password: str | None = None
     redis_db: int = 0
 
-    @computed_field
     @property
     def redis_url(self) -> str:
         """Construct Redis connection URL."""
@@ -79,10 +79,65 @@ class Settings(BaseSettings):
         return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     # JWT Authentication
-    jwt_secret_key: str = Field(default="change-me-in-production")
+    # Default is 32+ chars for development, MUST be changed in production
+    jwt_secret_key: str = Field(default="dev-only-jwt-secret-key-change-in-production-32chars")
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+
+    # Session (separate from JWT for admin panel cookies)
+    # Default is 32+ chars for development, MUST be changed in production
+    session_secret_key: str = Field(default="dev-only-session-secret-change-in-prod-32chars")
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """Validate JWT secret key."""
+        # Note: Environment check happens in model_validator since we need
+        # access to the environment field
+        if len(v) < 32:
+            raise ValueError(
+                "JWT_SECRET_KEY must be at least 32 characters for security. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        return v
+
+    @field_validator("session_secret_key")
+    @classmethod
+    def validate_session_secret(cls, v: str) -> str:
+        """Validate session secret key."""
+        if len(v) < 32:
+            raise ValueError(
+                "SESSION_SECRET_KEY must be at least 32 characters for security. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Validate that default secrets are not used in production."""
+        if self.environment == "production":
+            if self.jwt_secret_key == "change-me-in-production":
+                raise ValueError(
+                    "CRITICAL: JWT_SECRET_KEY must be changed from default in production! "
+                    "Set a secure value in your environment or .env file."
+                )
+            if self.session_secret_key == "change-me-session-secret":
+                raise ValueError(
+                    "CRITICAL: SESSION_SECRET_KEY must be changed from default in production! "
+                    "Set a secure value in your environment or .env file."
+                )
+            if self.debug:
+                logger.warning(
+                    "WARNING: Debug mode is enabled in production. "
+                    "This exposes sensitive information and should be disabled."
+                )
+        return self
+
+    # Rate limiting
+    rate_limit_enabled: bool = True
+    rate_limit_requests_per_minute: int = 60
+    rate_limit_auth_requests_per_minute: int = 5
 
     # Stripe
     stripe_secret_key: str | None = None

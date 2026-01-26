@@ -1,4 +1,7 @@
-"""Authentication routes."""
+"""User authentication routes.
+
+These routes handle platform user authentication (not store customers).
+"""
 
 from typing import Annotated
 
@@ -29,7 +32,7 @@ from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.external_services import PasswordService, TokenService
 from src.infrastructure.repositories import UserRepository
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter()
 
 
 @router.post(
@@ -44,13 +47,13 @@ async def register(
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
 ):
-    """Register a new user account."""
+    """Register a new platform user account."""
     use_case = RegisterUserUseCase(
         user_repository=user_repo,
         password_service=password_service,
         token_service=token_service,
     )
-    
+
     dto = RegisterDTO(
         email=request.email,
         password=request.password,
@@ -59,7 +62,7 @@ async def register(
         phone=request.phone,
     )
     result = await use_case.execute(dto)
-    
+
     return SuccessResponse(
         data=AuthResponse(
             user=UserResponse(
@@ -103,13 +106,13 @@ async def login(
         password_service=password_service,
         token_service=token_service,
     )
-    
+
     dto = LoginDTO(
         email=request.email,
         password=request.password,
     )
     result = await use_case.execute(dto)
-    
+
     return SuccessResponse(
         data=AuthResponse(
             user=UserResponse(
@@ -151,9 +154,9 @@ async def refresh_token(
         user_repository=user_repo,
         token_service=token_service,
     )
-    
+
     result = await use_case.execute(refresh_token=request.refresh_token)
-    
+
     return SuccessResponse(
         data=TokenResponse(
             access_token=result.access_token,
@@ -176,10 +179,10 @@ async def get_current_user(
 ):
     """Get current authenticated user's profile."""
     user = await user_repo.get_by_id(user_id)
-    
+
     if not user:
         raise EntityNotFoundError("User", str(user_id))
-    
+
     return SuccessResponse(
         data=UserResponse(
             id=str(user.id),

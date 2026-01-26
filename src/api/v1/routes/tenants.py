@@ -1,4 +1,7 @@
-"""Tenant management routes (admin/public endpoints)."""
+"""Tenant management routes.
+
+Public routes for tenant/store registration and admin routes for management.
+"""
 
 import logging
 from typing import Annotated
@@ -23,16 +26,16 @@ from src.infrastructure.tenancy.service import TenantService
 
 logger = logging.getLogger(__name__)
 
-# Public routes for tenant registration (no tenant context required)
-router = APIRouter(prefix="/public/tenants", tags=["tenants"])
+# Public routes for tenant registration (authenticated users)
+router = APIRouter()
 
 
 @router.post(
     "/",
     response_model=TenantCreatedResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new store",
-    description="Register a new store/tenant. This creates a new database schema for the store.",
+    summary="Create a new store/tenant",
+    description="Register a new store/tenant. Creates a new database schema for the store.",
 )
 async def create_tenant(
     request: CreateTenantRequest,
@@ -41,17 +44,17 @@ async def create_tenant(
 ) -> TenantCreatedResponse:
     """
     Create a new tenant/store.
-    
+
     This endpoint:
     1. Validates the subdomain is unique and properly formatted
     2. Creates a new tenant record in the public schema
     3. Provisions a new database schema for the tenant
     4. Creates all necessary tables in the new schema
-    
+
     The authenticated user becomes the owner of the new store.
     """
     tenant_service = TenantService(db)
-    
+
     try:
         tenant = await tenant_service.create_tenant(
             name=request.name,
@@ -59,19 +62,19 @@ async def create_tenant(
             owner_id=str(current_user_id),
             plan=request.plan,
         )
-        
+
         # Build store URL
-        base_domain = getattr(settings, "BASE_DOMAIN", "octyrafiy.com")
+        base_domain = getattr(settings, "BASE_DOMAIN", "numu.io")
         store_url = f"https://{tenant.subdomain}.{base_domain}"
-        
+
         logger.info(f"Created new tenant: {tenant.subdomain} for user {current_user_id}")
-        
+
         return TenantCreatedResponse(
             message="Store created successfully",
             tenant=TenantResponse.model_validate(tenant),
             store_url=store_url,
         )
-        
+
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -97,18 +100,18 @@ async def check_subdomain_availability(
     """Check if a subdomain is available."""
     # Ensure we're querying public schema
     await db.execute(text("SET search_path TO public"))
-    
+
     tenant_repo = TenantRepository(db)
     existing = await tenant_repo.get_by_subdomain(subdomain.lower())
-    
+
     return {
         "subdomain": subdomain.lower(),
         "available": existing is None,
     }
 
 
-# Admin routes (require admin role)
-admin_router = APIRouter(prefix="/admin/tenants", tags=["admin-tenants"])
+# Admin routes (require super admin role)
+admin_router = APIRouter()
 
 
 @admin_router.get(
@@ -125,10 +128,10 @@ async def list_tenants(
 ) -> list[TenantResponse]:
     """List all tenants (admin only)."""
     await db.execute(text("SET search_path TO public"))
-    
+
     tenant_repo = TenantRepository(db)
     tenants = await tenant_repo.list_active(skip=skip, limit=limit)
-    
+
     return [TenantResponse.model_validate(t) for t in tenants]
 
 
@@ -145,16 +148,16 @@ async def get_tenant(
 ) -> TenantResponse:
     """Get tenant by ID (admin only)."""
     await db.execute(text("SET search_path TO public"))
-    
+
     tenant_repo = TenantRepository(db)
     tenant = await tenant_repo.get_by_id(tenant_id)
-    
+
     if not tenant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tenant not found",
         )
-    
+
     return TenantResponse.model_validate(tenant)
 
 
@@ -172,16 +175,16 @@ async def update_tenant(
 ) -> TenantResponse:
     """Update tenant settings (admin only)."""
     await db.execute(text("SET search_path TO public"))
-    
+
     tenant_repo = TenantRepository(db)
     tenant = await tenant_repo.get_by_id(tenant_id)
-    
+
     if not tenant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tenant not found",
         )
-    
+
     # Update fields
     if request.name is not None:
         tenant.name = request.name
@@ -191,7 +194,7 @@ async def update_tenant(
         tenant.is_active = request.is_active
     if request.settings is not None:
         tenant.settings = str(request.settings)
-    
+
     updated = await tenant_repo.update(tenant)
     return TenantResponse.model_validate(updated)
 
@@ -209,10 +212,10 @@ async def deactivate_tenant(
 ) -> None:
     """Deactivate a tenant (admin only)."""
     await db.execute(text("SET search_path TO public"))
-    
+
     tenant_repo = TenantRepository(db)
     success = await tenant_repo.deactivate(tenant_id)
-    
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

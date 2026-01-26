@@ -8,6 +8,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from src.api.middleware import (
+    RateLimitMiddleware,
     TenantMiddleware,
     logging_middleware,
     setup_cors,
@@ -61,10 +62,13 @@ def create_app() -> FastAPI:
     setup_exception_handlers(app)
     
     # Add SessionMiddleware for admin panel cookie-based auth
+    # Uses separate session secret from JWT for security
     from starlette.middleware.sessions import SessionMiddleware
-    app.add_middleware(SessionMiddleware, secret_key=settings.jwt_secret_key)
+    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
     
     # Add middleware (order matters: first added = outermost)
+    # Rate limiting should be outermost to block requests early
+    app.add_middleware(RateLimitMiddleware)
     app.add_middleware(TenantMiddleware)
     app.middleware("http")(logging_middleware)
     

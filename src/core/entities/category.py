@@ -1,36 +1,75 @@
 """Category entity for product categorization."""
 
-from datetime import datetime
+from typing import Any
 from uuid import UUID
+
+from pydantic import Field
 
 from src.core.entities.base import BaseEntity
 
 
 class Category(BaseEntity):
-    """Category entity for product categorization."""
+    """Category entity for product categorization.
 
-    def __init__(
-        self,
-        store_id: UUID,
-        name: str,
-        slug: str,
-        description: str | None = None,
-        image_url: str | None = None,
-        parent_id: UUID | None = None,
-        position: int = 0,
-        is_active: bool = True,
-        metadata: dict | None = None,
-        id: UUID | None = None,
-        created_at: datetime | None = None,
-        updated_at: datetime | None = None,
-    ) -> None:
-        super().__init__(id=id, created_at=created_at, updated_at=updated_at)
-        self.store_id = store_id
-        self.name = name
-        self.slug = slug
-        self.description = description
-        self.image_url = image_url
+    Categories support hierarchical structures through parent_id,
+    allowing for nested category trees.
+    """
+
+    store_id: UUID
+    name: str
+    slug: str
+    description: str | None = None
+    image_url: str | None = None
+    parent_id: UUID | None = None
+    position: int = Field(default=0, ge=0)
+    is_active: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def is_root(self) -> bool:
+        """Check if this is a root category (no parent)."""
+        return self.parent_id is None
+
+    @property
+    def has_parent(self) -> bool:
+        """Check if this category has a parent."""
+        return self.parent_id is not None
+
+    def activate(self) -> None:
+        """Activate the category."""
+        self.is_active = True
+        self.touch()
+
+    def deactivate(self) -> None:
+        """Deactivate the category."""
+        self.is_active = False
+        self.touch()
+
+    def set_parent(self, parent_id: UUID | None) -> None:
+        """Set the parent category.
+
+        Args:
+            parent_id: The parent category ID, or None to make this a root category
+        """
         self.parent_id = parent_id
+        self.touch()
+
+    def update_position(self, position: int) -> None:
+        """Update the category position for ordering.
+
+        Args:
+            position: New position value (lower = earlier in order)
+        """
+        if position < 0:
+            raise ValueError("Position cannot be negative")
         self.position = position
-        self.is_active = is_active
-        self.metadata = metadata or {}
+        self.touch()
+
+    def update_metadata(self, **kwargs: Any) -> None:
+        """Update category metadata.
+
+        Args:
+            **kwargs: Key-value pairs to update in metadata
+        """
+        self.metadata.update(kwargs)
+        self.touch()

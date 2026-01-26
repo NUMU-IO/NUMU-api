@@ -1,4 +1,4 @@
-"""Store routes."""
+"""Store CRUD routes."""
 
 from typing import Annotated
 from uuid import UUID
@@ -10,7 +10,7 @@ from src.api.dependencies import (
     get_store_repository,
     require_store_owner,
 )
-from src.api.responses import PaginatedResponse, SuccessResponse
+from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateStoreRequest,
     DeleteResponse,
@@ -28,11 +28,11 @@ from src.application.use_cases.stores import (
 )
 from src.infrastructure.repositories import StoreRepository
 
-router = APIRouter(prefix="/stores", tags=["Stores"])
+router = APIRouter()
 
 
 @router.post(
-    "",
+    "/",
     response_model=SuccessResponse[StoreResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create new store",
@@ -44,7 +44,7 @@ async def create_store(
 ):
     """Create a new store."""
     use_case = CreateStoreUseCase(store_repository=store_repo)
-    
+
     dto = CreateStoreDTO(
         name=request.name,
         slug=request.slug,
@@ -53,9 +53,9 @@ async def create_store(
         contact_email=request.contact_email,
         contact_phone=request.contact_phone,
     )
-    
+
     result = await use_case.execute(dto, owner_id=user_id)
-    
+
     return SuccessResponse(
         data=StoreResponse(
             id=str(result.id),
@@ -79,7 +79,7 @@ async def create_store(
 
 
 @router.get(
-    "",
+    "/",
     response_model=SuccessResponse[PaginatedListResponse[StoreResponse]],
     summary="List stores",
 )
@@ -91,13 +91,13 @@ async def list_stores(
 ):
     """List all stores with pagination."""
     use_case = ListStoresUseCase(store_repository=store_repo)
-    
+
     result = await use_case.execute(
         skip=(page - 1) * limit,
         limit=limit,
         is_active=is_active,
     )
-    
+
     stores = [
         StoreResponse(
             id=str(store.id),
@@ -118,7 +118,7 @@ async def list_stores(
         )
         for store in result.items
     ]
-    
+
     return SuccessResponse(
         data=PaginatedListResponse(
             items=stores,
@@ -142,9 +142,9 @@ async def get_store(
 ):
     """Get store details by ID."""
     use_case = GetStoreUseCase(store_repository=store_repo)
-    
+
     result = await use_case.execute(store_id=store_id)
-    
+
     return SuccessResponse(
         data=StoreResponse(
             id=str(result.id),
@@ -180,7 +180,7 @@ async def update_store(
 ):
     """Update store details."""
     use_case = UpdateStoreUseCase(store_repository=store_repo)
-    
+
     dto = UpdateStoreDTO(
         name=request.name,
         description=request.description,
@@ -192,13 +192,13 @@ async def update_store(
         social_links=request.social_links,
         settings=request.settings,
     )
-    
+
     result = await use_case.execute(
         store_id=store_id,
         dto=dto,
         user_id=user_id,
     )
-    
+
     return SuccessResponse(
         data=StoreResponse(
             id=str(result.id),
@@ -233,9 +233,9 @@ async def delete_store(
 ):
     """Delete a store."""
     use_case = DeleteStoreUseCase(store_repository=store_repo)
-    
+
     await use_case.execute(store_id=store_id, user_id=user_id)
-    
+
     return SuccessResponse(
         data=DeleteResponse(deleted=True, id=str(store_id)),
         message="Store deleted successfully",

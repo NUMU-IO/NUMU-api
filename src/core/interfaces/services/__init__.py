@@ -6,6 +6,13 @@ from src.core.interfaces.services.ai_service import (
     IAIService,
     ProductDescription,
 )
+from src.core.interfaces.services.audit_service import (
+    AuditEvent,
+    AuditEventSeverity,
+    AuditEventType,
+    AuditLogEntry,
+    IAuditService,
+)
 from src.core.interfaces.services.cache_service import ICacheService
 from src.core.interfaces.services.email_service import EmailMessage, IEmailService
 from src.core.interfaces.services.password_service import IPasswordService
@@ -58,4 +65,9 @@ __all__ = [
     "ChatMessage",
     "ChatResponse",
     "ICacheService",
+    "IAuditService",
+    "AuditEvent",
+    "AuditEventType",
+    "AuditEventSeverity",
+    "AuditLogEntry",
 ]
