@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from src.api.responses import SuccessResponse
 
-router = APIRouter(tags=["Health"])
+router = APIRouter()
 
 
 @router.get("/health", summary="Health check")
@@ -21,9 +21,9 @@ async def root():
     """Root endpoint."""
     return SuccessResponse(
         data={
-            "name": "Octyrafiy API",
+            "name": "NUMU API",
             "version": "1.0.0",
-            "description": "E-commerce platform API",
+            "description": "Multi-tenant e-commerce platform API",
         },
-        message="Welcome to Octyrafiy API",
+        message="Welcome to NUMU API",
     )

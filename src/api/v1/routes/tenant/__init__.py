@@ -1,13 +1,12 @@
-"""Tenant-scoped API routes (require tenant context).
+"""Tenant-scoped API routes (legacy module).
 
-These routes require a valid tenant subdomain to be accessed.
-They operate within the tenant's database schema.
+NOTE: This module is deprecated. Routes have been reorganized:
+- Store routes -> /api/v1/routes/stores/
+- Product routes -> /api/v1/routes/stores/products.py
+- Customer routes -> /api/v1/routes/stores/customers.py
 """
 
-from src.api.v1.routes.tenant.products import router as products_router
-from src.api.v1.routes.tenant.stores import router as stores_router
+# This module is kept for backwards compatibility but routes have moved
+# to the new structure under stores/ module.
 
-__all__ = [
-    "products_router",
-    "stores_router",
-]
+__all__: list[str] = []

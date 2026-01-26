@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from enum import Enum
-from uuid import UUID
+
+from pydantic import Field
 
 from src.core.entities.base import BaseEntity
 from src.core.value_objects.email import Email
@@ -29,35 +30,26 @@ class UserStatus(str, Enum):
 
 
 class User(BaseEntity):
-    """User entity representing an authenticated user."""
+    """User entity representing an authenticated user.
 
-    def __init__(
-        self,
-        email: Email,
-        hashed_password: str,
-        first_name: str,
-        last_name: str,
-        role: UserRole = UserRole.CUSTOMER,
-        status: UserStatus = UserStatus.PENDING_VERIFICATION,
-        phone: PhoneNumber | None = None,
-        avatar_url: str | None = None,
-        email_verified_at: datetime | None = None,
-        last_login_at: datetime | None = None,
-        id: UUID | None = None,
-        created_at: datetime | None = None,
-        updated_at: datetime | None = None,
-    ) -> None:
-        super().__init__(id=id, created_at=created_at, updated_at=updated_at)
-        self.email = email
-        self.hashed_password = hashed_password
-        self.first_name = first_name
-        self.last_name = last_name
-        self.role = role
-        self.status = status
-        self.phone = phone
-        self.avatar_url = avatar_url
-        self.email_verified_at = email_verified_at
-        self.last_login_at = last_login_at
+    Users can have different roles:
+    - CUSTOMER: End customers who browse and purchase
+    - STORE_OWNER: Owners who manage stores and products
+    - STORE_ADMIN: Administrators with elevated store permissions
+    - STORE_STAFF: Staff members with limited permissions
+    - SUPER_ADMIN: Platform-wide administrators
+    """
+
+    email: Email
+    hashed_password: str
+    first_name: str
+    last_name: str
+    role: UserRole = UserRole.CUSTOMER
+    status: UserStatus = UserStatus.PENDING_VERIFICATION
+    phone: PhoneNumber | None = None
+    avatar_url: str | None = None
+    email_verified_at: datetime | None = None
+    last_login_at: datetime | None = None
 
     @property
     def full_name(self) -> str:
@@ -74,13 +66,66 @@ class User(BaseEntity):
         """Check if user is active."""
         return self.status == UserStatus.ACTIVE
 
+    @property
+    def is_store_owner(self) -> bool:
+        """Check if user is a store owner."""
+        return self.role == UserRole.STORE_OWNER
+
+    @property
+    def is_admin(self) -> bool:
+        """Check if user has admin privileges."""
+        return self.role in (UserRole.SUPER_ADMIN, UserRole.STORE_ADMIN)
+
+    @property
+    def is_super_admin(self) -> bool:
+        """Check if user is a super admin."""
+        return self.role == UserRole.SUPER_ADMIN
+
     def verify_email(self) -> None:
-        """Mark user email as verified."""
+        """Mark user email as verified and activate account."""
         self.email_verified_at = datetime.utcnow()
         self.status = UserStatus.ACTIVE
-        self.updated_at = datetime.utcnow()
+        self.touch()
 
     def update_last_login(self) -> None:
         """Update last login timestamp."""
         self.last_login_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.touch()
+
+    def suspend(self, reason: str | None = None) -> None:
+        """Suspend the user account."""
+        self.status = UserStatus.SUSPENDED
+        self.touch()
+
+    def activate(self) -> None:
+        """Activate the user account."""
+        self.status = UserStatus.ACTIVE
+        self.touch()
+
+    def deactivate(self) -> None:
+        """Deactivate the user account."""
+        self.status = UserStatus.INACTIVE
+        self.touch()
+
+    def can_manage_store(self) -> bool:
+        """Check if user can manage stores."""
+        return self.role in (
+            UserRole.STORE_OWNER,
+            UserRole.STORE_ADMIN,
+            UserRole.SUPER_ADMIN,
+        )
+
+    def has_permission(self, required_role: UserRole) -> bool:
+        """Check if user has at least the required role level.
+
+        Role hierarchy (lowest to highest):
+        CUSTOMER < STORE_STAFF < STORE_ADMIN < STORE_OWNER < SUPER_ADMIN
+        """
+        role_hierarchy = {
+            UserRole.CUSTOMER: 0,
+            UserRole.STORE_STAFF: 1,
+            UserRole.STORE_ADMIN: 2,
+            UserRole.STORE_OWNER: 3,
+            UserRole.SUPER_ADMIN: 4,
+        }
+        return role_hierarchy.get(self.role, 0) >= role_hierarchy.get(required_role, 0)

@@ -84,3 +84,44 @@ def require_roles(*allowed_roles: UserRole):
 # Common role dependencies
 require_store_owner = require_roles(UserRole.STORE_OWNER, UserRole.SUPER_ADMIN)
 require_admin = require_roles(UserRole.SUPER_ADMIN)
+
+from src.core.entities.customer import Customer
+from src.core.interfaces.services.token_service import CustomerTokenPayload
+from src.infrastructure.repositories.customer_repository import CustomerRepository
+from src.infrastructure.database.models import CustomerModel # implied need for repo access, but we usually use get_repository dependency. 
+# Better to use the dependency injection for repository efficiently or manually if needed in testing. 
+# However, usually dependencies can depend on other dependencies.
+# Let's import the dependency for repository.
+from src.api.dependencies.repositories import get_customer_repository
+
+# ... existing code ...
+
+async def get_current_customer_payload(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+) -> CustomerTokenPayload:
+    """Get current customer payload from JWT token."""
+    token = credentials.credentials
+    
+    try:
+        return token_service.verify_customer_token(token)
+    except (TokenExpiredError, InvalidTokenError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+async def get_current_customer(
+    payload: Annotated[CustomerTokenPayload, Depends(get_current_customer_payload)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+) -> Customer:
+    """Get current customer from JWT token."""
+    customer = await customer_repo.get_by_id(payload.customer_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Customer not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    return customer

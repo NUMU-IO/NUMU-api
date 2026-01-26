@@ -1,25 +1,13 @@
-"""Public API routes (no tenant context required).
+"""Public API routes (legacy module).
 
-These routes are accessible without a tenant subdomain:
-- Authentication (login, register, refresh)
-- Health checks
-- Tenant registration/management
-- Customer storefront (registration, login, profile, addresses)
+NOTE: This module is deprecated. Routes have been reorganized:
+- Auth routes -> /api/v1/routes/auth.py
+- Health routes -> /api/v1/routes/health.py
+- Tenant routes -> /api/v1/routes/tenants.py
+- Customer routes -> /api/v1/routes/storefront/
 """
 
-from src.api.v1.routes.public.auth import router as auth_router
-from src.api.v1.routes.public.customers import router as customers_router
-from src.api.v1.routes.public.health import router as health_router
-from src.api.v1.routes.public.tenants import (
-    admin_router as tenants_admin_router,
-    router as tenants_router,
-)
+# This module is kept for backwards compatibility but routes have moved
+# to the new structure in the parent routes module.
 
-__all__ = [
-    "auth_router",
-    "health_router",
-    "tenants_router",
-    "tenants_admin_router",
-    "customers_router",
-]
-
+__all__: list[str] = []

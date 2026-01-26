@@ -1,34 +1,85 @@
-"""API v1 routes module."""
+"""API v1 routes module.
+
+URL Hierarchy:
+/api/v1/
+├── health/                    # Health checks
+├── auth/                      # User authentication
+│   ├── POST /register
+│   ├── POST /login
+│   ├── POST /refresh
+│   └── GET /me
+├── admin/                     # Super admin only
+│   └── /tenants/...
+├── tenants/                   # Tenant registration (authenticated users)
+│   ├── POST /
+│   └── GET /check-subdomain/{subdomain}
+├── stores/                    # Store owner operations
+│   ├── GET/POST /
+│   ├── GET/PATCH/DELETE /{store_id}
+│   ├── /{store_id}/products/...
+│   └── /{store_id}/customers/...
+└── storefront/                # Customer-facing
+    ├── /store/{store_id}/     # Public catalog & auth
+    │   ├── GET /products
+    │   ├── GET /categories
+    │   └── /auth/...          # Customer auth
+    └── /me/                   # Authenticated customer
+        ├── GET/PUT /profile
+        ├── PUT /password
+        └── /addresses/...
+"""
 
 from fastapi import APIRouter
 
-# Public routes (no tenant context required)
-from src.api.v1.routes.public import (
-    auth_router,
-    customers_router,
-    health_router,
-    tenants_admin_router,
-    tenants_router,
+# Public routes
+from src.api.v1.routes.health import router as health_router
+from src.api.v1.routes.auth import router as auth_router
+
+# Tenant management routes
+from src.api.v1.routes.tenants import (
+    router as tenants_router,
+    admin_router as tenants_admin_router,
 )
 
-# Tenant-scoped routes (require tenant context)
-from src.api.v1.routes.tenant import products_router, stores_router
+# Store management routes (for store owners)
+from src.api.v1.routes.stores import router as stores_router
+
+# Storefront routes (customer-facing)
+from src.api.v1.routes.storefront import (
+    public_router as storefront_public_router,
+    customer_router as storefront_customer_router,
+)
 
 # Main v1 router
 api_router = APIRouter(prefix="/api/v1")
 
-# Public routes (accessible without tenant subdomain)
-api_router.include_router(health_router, prefix="/public", tags=["public"])
-api_router.include_router(auth_router, prefix="/public", tags=["public"])
-api_router.include_router(tenants_router, tags=["public"])
-api_router.include_router(tenants_admin_router, tags=["admin"])
+# Health check (root level for easy monitoring)
+api_router.include_router(health_router, tags=["Health"])
 
-# Storefront routes (customer-facing, tenant-scoped via store_id)
-api_router.include_router(customers_router, prefix="/storefront", tags=["storefront"])
+# User authentication (platform users, not customers)
+api_router.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 
-# Tenant routes (require subdomain)
-api_router.include_router(stores_router, tags=["tenant"])
-api_router.include_router(products_router, tags=["tenant"])
+# Tenant management
+api_router.include_router(tenants_router, prefix="/tenants", tags=["Tenants"])
+
+# Admin routes (super admin only)
+api_router.include_router(tenants_admin_router, prefix="/admin/tenants", tags=["Admin - Tenants"])
+
+# Store management (for authenticated store owners)
+api_router.include_router(stores_router, prefix="/stores", tags=["Stores"])
+
+# Storefront - public routes (catalog, customer auth)
+api_router.include_router(
+    storefront_public_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Public"],
+)
+
+# Storefront - authenticated customer routes
+api_router.include_router(
+    storefront_customer_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Customer"],
+)
 
 __all__ = ["api_router"]
-

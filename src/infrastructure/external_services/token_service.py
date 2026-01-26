@@ -125,7 +125,7 @@ class TokenService(ITokenService):
                 token, self.secret_key, algorithms=[self.algorithm]
             )
             if not payload.get("customer"):
-                raise InvalidTokenError("Not a customer token")
+                raise InvalidTokenError()
             return CustomerTokenPayload(
                 customer_id=UUID(payload["sub"]),
                 store_id=UUID(payload["store_id"]),

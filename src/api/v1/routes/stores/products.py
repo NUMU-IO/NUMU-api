@@ -1,9 +1,12 @@
-"""Product routes."""
+"""Product routes nested under stores.
+
+URL: /stores/{store_id}/products
+"""
 
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 
 from src.api.dependencies import (
     get_product_repository,
@@ -28,27 +31,28 @@ from src.application.use_cases.products import (
 )
 from src.infrastructure.repositories import ProductRepository, StoreRepository
 
-router = APIRouter(prefix="/products", tags=["Products"])
+router = APIRouter(prefix="/{store_id}/products")
 
 
 @router.post(
-    "",
+    "/",
     response_model=SuccessResponse[ProductResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create new product",
 )
 async def create_product(
+    store_id: Annotated[UUID, Path(description="Store ID")],
     request: CreateProductRequest,
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Create a new product."""
+    """Create a new product for the store."""
     use_case = CreateProductUseCase(
         product_repository=product_repo,
         store_repository=store_repo,
     )
-    
+
     dto = CreateProductDTO(
         name=request.name,
         slug=request.slug,
@@ -67,13 +71,13 @@ async def create_product(
         tags=request.tags,
         attributes=request.attributes,
     )
-    
+
     result = await use_case.execute(
         dto=dto,
-        store_id=request.store_id,
+        store_id=store_id,
         user_id=user_id,
     )
-    
+
     return SuccessResponse(
         data=ProductResponse(
             id=str(result.id),
@@ -105,23 +109,23 @@ async def create_product(
 
 
 @router.get(
-    "",
+    "/",
     response_model=SuccessResponse[PaginatedListResponse[ProductResponse]],
     summary="List products",
 )
 async def list_products(
+    store_id: Annotated[UUID, Path(description="Store ID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-    store_id: UUID | None = Query(None),
     category_id: UUID | None = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None),
+    product_status: str | None = Query(None, alias="status"),
     search: str | None = Query(None),
 ):
-    """List products with optional filtering and pagination."""
+    """List products for a store with optional filtering and pagination."""
     use_case = ListProductsUseCase(product_repository=product_repo)
-    
-    if search and store_id:
+
+    if search:
         result = await use_case.search(
             store_id=store_id,
             query=search,
@@ -134,20 +138,14 @@ async def list_products(
             page=page,
             page_size=limit,
         )
-    elif store_id:
+    else:
         result = await use_case.execute(
             store_id=store_id,
             page=page,
             page_size=limit,
-            status=status,
+            status=product_status,
         )
-    else:
-        # Fallback or error if store_id is mandatory for generic list
-        raise HTTPException(
-            status_code=400,
-            detail="store_id is required for listing products",
-        )
-    
+
     products = [
         ProductResponse(
             id=str(product.id),
@@ -176,7 +174,7 @@ async def list_products(
         )
         for product in result.items
     ]
-    
+
     return SuccessResponse(
         data=PaginatedListResponse(
             items=products,
@@ -195,14 +193,15 @@ async def list_products(
     summary="Get product by ID",
 )
 async def get_product(
-    product_id: UUID,
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_id: Annotated[UUID, Path(description="Product ID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Get product details by ID."""
     use_case = GetProductUseCase(product_repository=product_repo)
-    
+
     result = await use_case.execute(product_id=product_id)
-    
+
     return SuccessResponse(
         data=ProductResponse(
             id=str(result.id),
@@ -239,7 +238,8 @@ async def get_product(
     summary="Update product",
 )
 async def update_product(
-    product_id: UUID,
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_id: Annotated[UUID, Path(description="Product ID")],
     request: UpdateProductRequest,
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
@@ -250,7 +250,7 @@ async def update_product(
         product_repository=product_repo,
         store_repository=store_repo,
     )
-    
+
     dto = UpdateProductDTO(
         name=request.name,
         slug=request.slug,
@@ -268,13 +268,13 @@ async def update_product(
         attributes=request.attributes,
         status=request.status,
     )
-    
+
     result = await use_case.execute(
         product_id=product_id,
         dto=dto,
         user_id=user_id,
     )
-    
+
     return SuccessResponse(
         data=ProductResponse(
             id=str(result.id),
@@ -311,7 +311,8 @@ async def update_product(
     summary="Delete product",
 )
 async def delete_product(
-    product_id: UUID,
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_id: Annotated[UUID, Path(description="Product ID")],
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
@@ -321,9 +322,9 @@ async def delete_product(
         product_repository=product_repo,
         store_repository=store_repo,
     )
-    
+
     await use_case.execute(product_id=product_id, user_id=user_id)
-    
+
     return SuccessResponse(
         data=DeleteResponse(deleted=True, id=str(product_id)),
         message="Product deleted successfully",
