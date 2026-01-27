@@ -23,10 +23,10 @@ class CustomerRepository(ICustomerRepository):
         return Customer(
             id=model.id,
             store_id=model.store_id,
-            email=Email(model.email),
+            email=Email(value=model.email),
             first_name=model.first_name,
             last_name=model.last_name,
-            phone=PhoneNumber(model.phone) if model.phone else None,
+            phone=PhoneNumber(value=model.phone) if model.phone else None,
             password_hash=model.password_hash,
             user_id=model.user_id,
             accepts_marketing=model.accepts_marketing,
