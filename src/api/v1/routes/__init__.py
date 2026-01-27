@@ -18,15 +18,18 @@ URL Hierarchy:
 │   ├── GET/PATCH/DELETE /{store_id}
 │   ├── /{store_id}/products/...
 │   └── /{store_id}/customers/...
-└── storefront/                # Customer-facing
-    ├── /store/{store_id}/     # Public catalog & auth
-    │   ├── GET /products
-    │   ├── GET /categories
-    │   └── /auth/...          # Customer auth
-    └── /me/                   # Authenticated customer
-        ├── GET/PUT /profile
-        ├── PUT /password
-        └── /addresses/...
+├── storefront/                # Customer-facing
+│   ├── /store/{store_id}/     # Public catalog & auth
+│   │   ├── GET /products
+│   │   ├── GET /categories
+│   │   └── /auth/...          # Customer auth
+│   └── /me/                   # Authenticated customer
+│       ├── GET/PUT /profile
+│       ├── PUT /password
+│       └── /addresses/...
+└── webhooks/                  # External service callbacks
+    ├── /paymob/               # Paymob payment notifications
+    └── /fawry/                # Fawry payment notifications
 """
 
 from fastapi import APIRouter
@@ -49,6 +52,9 @@ from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
     customer_router as storefront_customer_router,
 )
+
+# Webhook routes (external service callbacks)
+from src.api.v1.routes.webhooks import router as webhooks_router
 
 # Main v1 router
 api_router = APIRouter(prefix="/api/v1")
@@ -81,5 +87,8 @@ api_router.include_router(
     prefix="/storefront/me",
     tags=["Storefront - Customer"],
 )
+
+# Webhooks - external service callbacks (no auth required)
+api_router.include_router(webhooks_router, prefix="/webhooks")
 
 __all__ = ["api_router"]

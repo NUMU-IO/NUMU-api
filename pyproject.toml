@@ -1,5 +1,5 @@
 [project]
-name = "octyrafiy-backend"
+name = "NUMU-backend"
 version = "0.1.0"
 description = "Clean Architecture e-commerce backend API"
 readme = "README.md"
@@ -39,6 +39,7 @@ dependencies = [
     "python-slugify>=8.0.1",
     "phonenumbers>=8.13.27",
     "Pillow>=10.2.0",
+    "qrcode[pil]>=7.4.0",
     
     # Admin Panel
     "sqladmin>=0.16.0",
