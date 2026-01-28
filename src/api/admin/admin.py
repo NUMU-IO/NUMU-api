@@ -1,7 +1,5 @@
 """SQLAdmin setup and configuration."""
 
-from pathlib import Path
-
 from fastapi import FastAPI
 from sqladmin import Admin
 
@@ -18,27 +16,23 @@ from src.api.admin.views import (
     OrderAdmin,
 )
 
-# Path to custom templates
-TEMPLATES_DIR = Path(__file__).parent / "templates"
-
 
 def setup_admin(app: FastAPI) -> Admin:
     """Setup SQLAdmin with the FastAPI application.
-    
+
     Args:
         app: The FastAPI application instance.
-        
+
     Returns:
         The configured Admin instance.
     """
-    # Create admin instance with authentication and custom templates
+    # Create admin instance with authentication
     admin = Admin(
         app=app,
         engine=engine,
-        authentication_backend=AdminAuth(secret_key=settings.jwt_secret_key),
+        authentication_backend=AdminAuth(secret_key=settings.session_secret_key),
         title="NUMU Admin",
         base_url="/admin",
-        templates_dir=str(TEMPLATES_DIR),
     )
     
     # Register model views

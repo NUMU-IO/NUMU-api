@@ -27,6 +27,10 @@ class AdminAuth(AuthenticationBackend):
         email = form.get("username")  # SQLAdmin uses 'username' field
         password = form.get("password")
 
+        # Strip whitespace from email
+        if email:
+            email = str(email).strip().lower()
+
         logger.info(f"Admin login attempt for: {email}")
 
         if not email or not password:
@@ -39,7 +43,7 @@ class AdminAuth(AuthenticationBackend):
                 await session.execute(text("SET search_path TO public"))
                 
                 result = await session.execute(
-                    select(UserModel).where(UserModel.email == email)
+                    select(UserModel).where(UserModel.email == email.lower())
                 )
                 user = result.scalar_one_or_none()
 
