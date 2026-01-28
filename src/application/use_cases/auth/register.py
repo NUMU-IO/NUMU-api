@@ -25,7 +25,7 @@ class RegisterUserUseCase:
 
     async def execute(self, dto: RegisterDTO) -> AuthResponseDTO:
         """Register a new user and return auth response."""
-        email = Email(dto.email)
+        email = Email(value=dto.email)
 
         # Check if email already exists
         if await self.user_repository.email_exists(email):
