@@ -1,6 +1,10 @@
 """Login user use case."""
 
+import logging
+
 from src.application.dto.auth import AuthResponseDTO, LoginDTO, TokenDTO
+
+logger = logging.getLogger(__name__)
 from src.application.dto.user import UserDTO
 from src.core.exceptions import InvalidCredentialsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
@@ -24,12 +28,17 @@ class LoginUserUseCase:
     async def execute(self, dto: LoginDTO) -> AuthResponseDTO:
         """Authenticate user and return auth response."""
         # Find user by email
+        logger.info(f"Login attempt for email: {dto.email}")
         user = await self.user_repository.get_by_email_str(dto.email)
         if not user:
+            logger.warning(f"Login failed: user not found for email {dto.email}")
             raise InvalidCredentialsError()
+
+        logger.info(f"User found: {user.email}, role: {user.role}")
 
         # Verify password
         if not self.password_service.verify_password(dto.password, user.hashed_password):
+            logger.warning(f"Login failed: invalid password for email {dto.email}")
             raise InvalidCredentialsError()
 
         # Update last login

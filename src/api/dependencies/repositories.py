@@ -9,6 +9,7 @@ from src.api.dependencies.database import get_db
 from src.infrastructure.repositories import (
     CustomerAddressRepository,
     CustomerRepository,
+    OrderRepository,
     ProductRepository,
     StoreRepository,
     UserRepository,
@@ -48,4 +49,11 @@ def get_customer_address_repository(
 ) -> CustomerAddressRepository:
     """Get customer address repository dependency."""
     return CustomerAddressRepository(session)
+
+
+def get_order_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> OrderRepository:
+    """Get order repository dependency."""
+    return OrderRepository(session)
 

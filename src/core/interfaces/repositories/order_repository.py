@@ -87,3 +87,14 @@ class IOrderRepository(BaseRepository[Order]):
         """Get total count of orders for a customer."""
         ...
 
+    @abstractmethod
+    async def search(
+        self,
+        store_id: UUID,
+        query: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Search orders by order number or customer notes."""
+        ...
+

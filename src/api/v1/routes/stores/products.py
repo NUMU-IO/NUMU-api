@@ -139,11 +139,11 @@ async def list_products(
             page_size=limit,
         )
     else:
+        skip = (page - 1) * limit
         result = await use_case.execute(
             store_id=store_id,
-            page=page,
-            page_size=limit,
-            status=product_status,
+            skip=skip,
+            limit=limit,
         )
 
     products = [

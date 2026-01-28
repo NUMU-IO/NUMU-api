@@ -42,10 +42,12 @@ class TokenService(ITokenService):
     ) -> str:
         """Create a JWT token."""
         expire = datetime.utcnow() + expires_delta
+        # Handle role as enum or string (for compatibility with DB enum names)
+        role_value = user.role.value if hasattr(user.role, 'value') else str(user.role)
         payload = {
             "sub": str(user.id),
             "email": str(user.email),
-            "role": user.role.value,
+            "role": role_value,
             "token_type": token_type,
             "exp": expire,
             "iat": datetime.utcnow(),

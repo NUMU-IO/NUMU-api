@@ -22,6 +22,8 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    subdomain: Mapped[str | None] = mapped_column(String(63), unique=True, index=True, nullable=True)
+    custom_domain: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
     owner_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
         nullable=False,
@@ -45,6 +47,7 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     address: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     social_links: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    theme_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Relationships (all within public schema now)
     tenant = relationship("TenantModel", back_populates="stores", lazy="selectin")

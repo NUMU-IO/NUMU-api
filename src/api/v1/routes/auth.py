@@ -16,17 +16,24 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     AuthResponse,
+    ChangePasswordRequest,
     LoginRequest,
+    MessageResponse,
     RefreshTokenRequest,
     RegisterRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UserResponse,
 )
 from src.application.dto.auth import LoginDTO, RefreshTokenDTO, RegisterDTO
 from src.application.use_cases.auth import (
+    ChangePasswordDTO,
+    ChangePasswordUseCase,
     LoginUserUseCase,
     RefreshTokenUseCase,
     RegisterUserUseCase,
+    UpdateProfileDTO,
+    UpdateProfileUseCase,
 )
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.external_services import PasswordService, TokenService
@@ -192,9 +199,92 @@ async def get_current_user(
             full_name=f"{user.first_name} {user.last_name}",
             phone=user.phone.value if user.phone else None,
             role=user.role.value,
-            is_active=user.is_active,
+            status=user.status.value,
+            avatar_url=user.avatar_url,
             is_verified=user.is_verified,
-            created_at=user.created_at,
+            created_at=str(user.created_at),
+            updated_at=str(user.updated_at),
         ),
         message="User retrieved successfully",
+    )
+
+
+@router.patch(
+    "/me",
+    response_model=SuccessResponse[UserResponse],
+    summary="Update profile",
+)
+async def update_profile(
+    request: UpdateProfileRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+):
+    """Update current user's profile."""
+    from uuid import UUID
+
+    use_case = UpdateProfileUseCase(user_repository=user_repo)
+
+    dto = UpdateProfileDTO(
+        first_name=request.first_name,
+        last_name=request.last_name,
+        phone=request.phone,
+        avatar_url=request.avatar_url,
+    )
+
+    result = await use_case.execute(
+        user_id=UUID(user_id),
+        dto=dto,
+    )
+
+    return SuccessResponse(
+        data=UserResponse(
+            id=str(result.id),
+            email=result.email,
+            first_name=result.first_name,
+            last_name=result.last_name,
+            full_name=result.full_name,
+            phone=result.phone,
+            role=result.role,
+            status=result.status,
+            avatar_url=result.avatar_url,
+            is_verified=result.is_verified,
+            created_at=str(result.created_at),
+            updated_at=str(result.updated_at),
+        ),
+        message="Profile updated successfully",
+    )
+
+
+@router.patch(
+    "/me/password",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Change password",
+)
+async def change_password(
+    request: ChangePasswordRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    password_service: Annotated[PasswordService, Depends(get_password_service)],
+):
+    """Change current user's password."""
+    from uuid import UUID
+
+    use_case = ChangePasswordUseCase(
+        user_repository=user_repo,
+        password_service=password_service,
+    )
+
+    dto = ChangePasswordDTO(
+        current_password=request.current_password,
+        new_password=request.new_password,
+    )
+
+    await use_case.execute(
+        user_id=UUID(user_id),
+        dto=dto,
+    )
+
+    return SuccessResponse(
+        data=MessageResponse(message="Password changed successfully"),
+        message="Password changed successfully",
     )
