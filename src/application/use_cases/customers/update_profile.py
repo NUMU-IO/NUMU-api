@@ -29,7 +29,7 @@ class UpdateCustomerProfileUseCase:
         if dto.last_name is not None:
             customer.last_name = dto.last_name
         if dto.phone is not None:
-            customer.phone = PhoneNumber(dto.phone) if dto.phone else None
+            customer.phone = PhoneNumber(value=dto.phone) if dto.phone else None
         if dto.accepts_marketing is not None:
             customer.accepts_marketing = dto.accepts_marketing
 

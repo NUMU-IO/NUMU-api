@@ -6,10 +6,22 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.entities.order import Order, OrderStatus, PaymentStatus
+from src.core.entities.order import Order, OrderStatus, PaymentStatus, OrderShippingAddress
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.entities.store import Store, StoreStatus
 from src.core.value_objects.money import Currency, Money
+
+
+# Helper to create a sample shipping address for tests
+def create_test_shipping_address() -> OrderShippingAddress:
+    """Create a test shipping address."""
+    return OrderShippingAddress(
+        first_name="Test",
+        last_name="Customer",
+        address_line1="123 Test St",
+        city="Cairo",
+        country="Egypt",
+    )
 
 
 class TestOrderCreationFlow:
@@ -51,6 +63,8 @@ class TestOrderCreationFlow:
             id=uuid4(),
             store_id=self.store_id,
             customer_id=self.customer_id,
+            order_number="ORD-TEST-001",
+            shipping_address=create_test_shipping_address(),
             status=OrderStatus.PENDING,
             payment_status=PaymentStatus.PENDING,
             payment_method="cod",
@@ -121,6 +135,8 @@ class TestPaymentFlow:
             id=uuid4(),
             store_id=uuid4(),
             customer_id=uuid4(),
+            order_number="ORD-TEST-002",
+            shipping_address=create_test_shipping_address(),
             status=OrderStatus.PENDING,
             payment_status=PaymentStatus.PENDING,
             payment_method="cod",
@@ -143,6 +159,8 @@ class TestPaymentFlow:
             id=order_id,
             store_id=uuid4(),
             customer_id=uuid4(),
+            order_number="ORD-TEST-003",
+            shipping_address=create_test_shipping_address(),
             status=OrderStatus.PENDING,
             payment_status=PaymentStatus.PENDING,
             payment_method="paymob",

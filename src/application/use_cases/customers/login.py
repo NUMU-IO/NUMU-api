@@ -26,7 +26,7 @@ class LoginCustomerUseCase:
     async def execute(self, dto: CustomerLoginDTO) -> CustomerAuthResponseDTO:
         """Authenticate customer and return auth response."""
         store_id = UUID(dto.store_id)
-        email = Email(dto.email)
+        email = Email(value=dto.email)
 
         # Get customer by email
         customer = await self.customer_repository.get_by_email(store_id, email)

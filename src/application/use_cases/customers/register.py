@@ -30,7 +30,7 @@ class RegisterCustomerUseCase:
     ) -> CustomerAuthResponseDTO:
         """Register a new customer and return auth response."""
         store_id = UUID(dto.store_id)
-        email = Email(dto.email)
+        email = Email(value=dto.email)
 
         # Check if email already exists for this store
         if await self.customer_repository.email_exists(store_id, email):
@@ -45,7 +45,7 @@ class RegisterCustomerUseCase:
             email=email,
             first_name=dto.first_name,
             last_name=dto.last_name,
-            phone=PhoneNumber(dto.phone) if dto.phone else None,
+            phone=PhoneNumber(value=dto.phone) if dto.phone else None,
             password_hash=hashed_password,
             accepts_marketing=dto.accepts_marketing,
         )

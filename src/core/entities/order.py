@@ -22,6 +22,7 @@ class OrderStatus(str, Enum):
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
+    PAYMENT_FAILED = "payment_failed"
 
 
 class PaymentStatus(str, Enum):
