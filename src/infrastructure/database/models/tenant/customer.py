@@ -49,6 +49,7 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Relationships
     store = relationship("StoreModel", back_populates="customers", lazy="selectin")
     orders = relationship("OrderModel", back_populates="customer", lazy="selectin")
+    invoices = relationship("InvoiceModel", back_populates="customer", lazy="selectin")
     addresses = relationship(
         "CustomerAddressModel",
         back_populates="customer",
