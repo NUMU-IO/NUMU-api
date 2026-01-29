@@ -7,9 +7,10 @@ class CreateStoreRequest(BaseModel):
     """Create store request schema."""
 
     name: str = Field(..., min_length=1, max_length=255)
+    subdomain: str = Field(..., min_length=3, max_length=63, description="Store subdomain (e.g., 'mystore' for mystore.numu.io)")
     slug: str | None = Field(None, max_length=255)
     description: str | None = None
-    default_currency: str = Field(default="USD", max_length=3)
+    default_currency: str = Field(default="EGP", max_length=3)
     contact_email: EmailStr | None = None
     contact_phone: str | None = Field(None, max_length=20)
 
@@ -26,6 +27,7 @@ class UpdateStoreRequest(BaseModel):
     address: dict | None = None
     social_links: dict | None = None
     settings: dict | None = None
+    theme_settings: dict | None = None
 
 
 class StoreResponse(BaseModel):
@@ -34,6 +36,9 @@ class StoreResponse(BaseModel):
     id: str
     name: str
     slug: str
+    subdomain: str | None
+    custom_domain: str | None
+    store_url: str
     owner_id: str
     description: str | None
     logo_url: str | None
@@ -44,8 +49,23 @@ class StoreResponse(BaseModel):
     contact_phone: str | None
     address: dict
     social_links: dict
+    theme_settings: dict
     created_at: str
     updated_at: str
 
     class Config:
         from_attributes = True
+
+
+class CheckSubdomainRequest(BaseModel):
+    """Check subdomain availability request."""
+
+    subdomain: str = Field(..., min_length=3, max_length=63)
+
+
+class CheckSubdomainResponse(BaseModel):
+    """Check subdomain availability response."""
+
+    subdomain: str
+    available: bool
+    message: str | None = None

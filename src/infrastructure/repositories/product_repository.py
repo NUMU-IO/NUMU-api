@@ -42,7 +42,7 @@ class ProductRepository(IProductRepository):
             category_id=model.category_id,
             tags=model.tags or [],
             attributes=model.attributes,
-            metadata=model.metadata,
+            metadata=model.extra_data or {},
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -71,7 +71,7 @@ class ProductRepository(IProductRepository):
             category_id=entity.category_id,
             tags=entity.tags,
             attributes=entity.attributes,
-            metadata=entity.metadata,
+            extra_data=entity.metadata,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -129,7 +129,7 @@ class ProductRepository(IProductRepository):
             model.category_id = entity.category_id
             model.tags = entity.tags
             model.attributes = entity.attributes
-            model.metadata = entity.metadata
+            model.extra_data = entity.metadata
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)
@@ -233,13 +233,29 @@ class ProductRepository(IProductRepository):
         self,
         store_id: UUID,
         threshold: int | None = None,
+        limit: int = 100,
     ) -> list[Product]:
         """Get products with low stock."""
         result = await self.session.execute(
             select(ProductModel).where(
                 ProductModel.store_id == store_id,
                 ProductModel.quantity <= (threshold or ProductModel.low_stock_threshold),
-            )
+                ProductModel.quantity > 0,
+            ).limit(limit)
+        )
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def get_out_of_stock(
+        self,
+        store_id: UUID,
+        limit: int = 100,
+    ) -> list[Product]:
+        """Get products that are out of stock."""
+        result = await self.session.execute(
+            select(ProductModel).where(
+                ProductModel.store_id == store_id,
+                ProductModel.quantity == 0,
+            ).limit(limit)
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 

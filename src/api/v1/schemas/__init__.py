@@ -17,16 +17,26 @@ from src.api.v1.schemas.public import (
     TenantCreatedResponse,
     TenantResponse,
     TokenResponse,
+    UpdateProfileRequest,
     UpdateTenantRequest,
     UserResponse,
 )
 
 # Import from tenant schemas
 from src.api.v1.schemas.tenant import (
+    CreateOrderRequest,
     CreateProductRequest,
     CreateStoreRequest,
+    OrderAddressRequest,
+    OrderAddressResponse,
+    OrderLineItemRequest,
+    OrderLineItemResponse,
+    OrderListItemResponse,
+    OrderResponse,
     ProductResponse,
     StoreResponse,
+    UpdateOrderRequest,
+    UpdateOrderStatusRequest,
     UpdateProductRequest,
     UpdateStoreRequest,
 )
@@ -42,6 +52,7 @@ __all__ = [
     "PasswordResetRequest",
     "PasswordResetConfirm",
     "ChangePasswordRequest",
+    "UpdateProfileRequest",
     # Tenant management (public)
     "CreateTenantRequest",
     "UpdateTenantRequest",
@@ -55,6 +66,16 @@ __all__ = [
     "CreateProductRequest",
     "UpdateProductRequest",
     "ProductResponse",
+    # Order (tenant)
+    "CreateOrderRequest",
+    "UpdateOrderRequest",
+    "UpdateOrderStatusRequest",
+    "OrderResponse",
+    "OrderListItemResponse",
+    "OrderLineItemRequest",
+    "OrderLineItemResponse",
+    "OrderAddressRequest",
+    "OrderAddressResponse",
     # Common
     "PaginationParams",
     "PaginatedListResponse",

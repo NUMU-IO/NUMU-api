@@ -30,6 +30,8 @@ class Store(BaseEntity):
     name: str
     slug: str
     owner_id: UUID
+    subdomain: str | None = None  # e.g., "mystore" for mystore.numu.io
+    custom_domain: str | None = None  # e.g., "shop.mybrand.com"
     description: str | None = None
     logo_url: str | None = None
     banner_url: str | None = None
@@ -40,12 +42,22 @@ class Store(BaseEntity):
     address: dict[str, Any] = Field(default_factory=dict)
     social_links: dict[str, str] = Field(default_factory=dict)
     settings: dict[str, Any] = Field(default_factory=dict)
+    theme_settings: dict[str, Any] = Field(default_factory=dict)  # NUMU-shop customization
     tenant_id: UUID | None = None
 
     @property
     def is_active(self) -> bool:
         """Check if store is active."""
         return self.status == StoreStatus.ACTIVE
+
+    @property
+    def store_url(self) -> str:
+        """Get the public URL for the store."""
+        if self.custom_domain:
+            return f"https://{self.custom_domain}"
+        if self.subdomain:
+            return f"https://{self.subdomain}.numu.io"
+        return f"https://{self.slug}.numu.io"
 
     @property
     def is_suspended(self) -> bool:

@@ -9,6 +9,7 @@ from src.api.v1.schemas.public.auth import (
     RefreshTokenRequest,
     RegisterRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UserResponse,
 )
 from src.api.v1.schemas.public.common import (
@@ -35,6 +36,7 @@ __all__ = [
     "PasswordResetRequest",
     "PasswordResetConfirm",
     "ChangePasswordRequest",
+    "UpdateProfileRequest",
     # Tenant
     "CreateTenantRequest",
     "UpdateTenantRequest",
