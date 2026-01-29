@@ -47,6 +47,45 @@ from src.infrastructure.repositories import (
 
 router = APIRouter()
 
+# Router for routes that don't require a store_id path param
+lookup_router = APIRouter()
+
+
+# ============================================================================
+# Store Lookup by Subdomain
+# ============================================================================
+
+
+@lookup_router.get(
+    "/store-by-subdomain/{subdomain}",
+    response_model=SuccessResponse,
+    summary="Get store info by subdomain",
+)
+async def get_store_by_subdomain(
+    subdomain: Annotated[str, Path(description="Store subdomain")],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Look up a store by its subdomain (public). Used by the storefront frontend."""
+    store = await store_repo.get_by_subdomain(subdomain.lower())
+    if not store:
+        raise EntityNotFoundError("Store", subdomain)
+
+    return SuccessResponse(
+        data={
+            "id": str(store.id),
+            "name": store.name,
+            "slug": store.slug,
+            "subdomain": store.subdomain,
+            "description": store.description,
+            "logo_url": store.logo_url,
+            "banner_url": store.banner_url,
+            "theme_settings": store.theme_settings,
+            "default_currency": store.default_currency.value if hasattr(store.default_currency, "value") else str(store.default_currency),
+            "social_links": store.social_links,
+        },
+        message="Store retrieved successfully",
+    )
+
 
 # ============================================================================
 # Public Catalog Routes

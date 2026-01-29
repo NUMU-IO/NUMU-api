@@ -88,29 +88,37 @@ class TenantMiddleware(BaseHTTPMiddleware):
         - 0.0.0.0 -> None (IP address)
         - 127.0.0.1 -> None (IP address)
         """
-        # Skip IP addresses (both IPv4 and localhost)
-        if host.replace(".", "").isdigit() or host == "localhost":
+        # Skip IP addresses
+        if host.replace(".", "").isdigit():
             return None
-        
+
+        # Plain localhost with no subdomain
+        if host == "localhost":
+            return None
+
         parts = host.split(".")
-        
+
         # Check if it's an IP address (all parts are numeric)
         if all(part.isdigit() for part in parts):
             return None
-        
-        # Handle localhost
-        if host == "localhost":
-            return None
-        
+
         # Need at least 2 parts to have a subdomain
         if len(parts) < 2:
             return None
-        
+
+        # Handle *.localhost (e.g., octyra.localhost)
+        if parts[-1] == "localhost" and len(parts) == 2:
+            subdomain = parts[0]
+            if subdomain in ("www", "api", "admin"):
+                return None
+            return subdomain
+
+        # Handle regular domains (e.g., store1.octyrafiy.com)
         subdomain = parts[0]
-        
+
         # Skip common non-tenant subdomains
         if subdomain in ("www", "api", "admin"):
             return None
-        
+
         return subdomain
 

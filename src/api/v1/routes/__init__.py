@@ -50,6 +50,7 @@ from src.api.v1.routes.stores import router as stores_router
 # Storefront routes (customer-facing)
 from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
+    storefront_lookup_router,
     customer_router as storefront_customer_router,
 )
 
@@ -73,6 +74,13 @@ api_router.include_router(tenants_admin_router, prefix="/admin/tenants", tags=["
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores", tags=["Stores"])
+
+# Storefront - store lookup by subdomain (no store_id needed)
+api_router.include_router(
+    storefront_lookup_router,
+    prefix="/storefront",
+    tags=["Storefront - Public"],
+)
 
 # Storefront - public routes (catalog, customer auth)
 api_router.include_router(

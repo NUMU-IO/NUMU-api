@@ -62,7 +62,7 @@ class UpdateProfileUseCase:
             user.last_name = dto.last_name
 
         if dto.phone is not None:
-            user.phone = PhoneNumber(dto.phone) if dto.phone else None
+            user.phone = PhoneNumber(value=dto.phone) if dto.phone else None
 
         if dto.avatar_url is not None:
             user.avatar_url = dto.avatar_url if dto.avatar_url else None

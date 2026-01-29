@@ -52,5 +52,13 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     owner = relationship("UserModel", back_populates="owned_tenants", lazy="selectin")
     stores = relationship("StoreModel", back_populates="tenant", lazy="selectin")
 
+    @property
+    def schema_name(self) -> str:
+        """Get the tenant's database schema name from settings."""
+        if self.settings and "schema_name" in self.settings:
+            return self.settings["schema_name"]
+        # Fallback: derive from subdomain
+        return f"tenant_{self.subdomain}"
+
     def __repr__(self) -> str:
         return f"<TenantModel(id={self.id}, subdomain={self.subdomain})>"

@@ -162,14 +162,14 @@ async def refresh_token(
         token_service=token_service,
     )
 
-    result = await use_case.execute(refresh_token=request.refresh_token)
+    dto = RefreshTokenDTO(refresh_token=request.refresh_token)
+    result = await use_case.execute(dto)
 
     return SuccessResponse(
         data=TokenResponse(
             access_token=result.access_token,
             refresh_token=result.refresh_token,
             token_type="bearer",
-            expires_in=result.expires_in,
         ),
         message="Token refreshed successfully",
     )
@@ -220,39 +220,46 @@ async def update_profile(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
 ):
     """Update current user's profile."""
+    import logging
     from uuid import UUID
 
-    use_case = UpdateProfileUseCase(user_repository=user_repo)
+    logger = logging.getLogger(__name__)
 
-    dto = UpdateProfileDTO(
-        first_name=request.first_name,
-        last_name=request.last_name,
-        phone=request.phone,
-        avatar_url=request.avatar_url,
-    )
+    try:
+        use_case = UpdateProfileUseCase(user_repository=user_repo)
 
-    result = await use_case.execute(
-        user_id=UUID(user_id),
-        dto=dto,
-    )
+        dto = UpdateProfileDTO(
+            first_name=request.first_name,
+            last_name=request.last_name,
+            phone=request.phone,
+            avatar_url=request.avatar_url,
+        )
 
-    return SuccessResponse(
-        data=UserResponse(
-            id=str(result.id),
-            email=result.email,
-            first_name=result.first_name,
-            last_name=result.last_name,
-            full_name=result.full_name,
-            phone=result.phone,
-            role=result.role,
-            status=result.status,
-            avatar_url=result.avatar_url,
-            is_verified=result.is_verified,
-            created_at=str(result.created_at),
-            updated_at=str(result.updated_at),
-        ),
-        message="Profile updated successfully",
-    )
+        result = await use_case.execute(
+            user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+            dto=dto,
+        )
+
+        return SuccessResponse(
+            data=UserResponse(
+                id=str(result.id),
+                email=result.email,
+                first_name=result.first_name,
+                last_name=result.last_name,
+                full_name=result.full_name,
+                phone=result.phone,
+                role=result.role,
+                status=result.status,
+                avatar_url=result.avatar_url,
+                is_verified=result.is_verified,
+                created_at=str(result.created_at),
+                updated_at=str(result.updated_at),
+            ),
+            message="Profile updated successfully",
+        )
+    except Exception as e:
+        logger.exception(f"PATCH /auth/me failed: {type(e).__name__}: {e}")
+        raise
 
 
 @router.patch(
@@ -280,7 +287,7 @@ async def change_password(
     )
 
     await use_case.execute(
-        user_id=UUID(user_id),
+        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
         dto=dto,
     )
 

@@ -62,6 +62,7 @@ class StoreRepository(IStoreRepository):
             social_links=entity.social_links,
             settings=entity.settings,
             theme_settings=entity.theme_settings,
+            tenant_id=entity.tenant_id,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
