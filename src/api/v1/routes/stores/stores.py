@@ -4,12 +4,14 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_current_user_id,
     get_store_repository,
     require_store_owner,
 )
+from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateStoreRequest,
@@ -29,6 +31,7 @@ from src.application.use_cases.stores import (
 )
 from src.application.use_cases.stores.create_store import validate_subdomain, RESERVED_SUBDOMAINS
 from src.infrastructure.repositories import StoreRepository
+from src.infrastructure.tenancy.service import TenantService
 
 router = APIRouter()
 
@@ -116,10 +119,12 @@ async def check_subdomain(
 async def create_store(
     request: CreateStoreRequest,
     user_id: Annotated[UUID, Depends(require_store_owner)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a new store with a subdomain."""
-    use_case = CreateStoreUseCase(store_repository=store_repo)
+    store_repo = StoreRepository(db)
+    tenant_service = TenantService(db)
+    use_case = CreateStoreUseCase(store_repository=store_repo, tenant_service=tenant_service)
 
     dto = CreateStoreDTO(
         name=request.name,

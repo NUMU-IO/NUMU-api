@@ -11,6 +11,7 @@ from src.core.entities.store import Store, StoreStatus
 from src.core.exceptions import EntityAlreadyExistsError, ValidationError
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency
+from src.infrastructure.tenancy.service import TenantService
 
 
 # Reserved subdomains that cannot be used
@@ -67,8 +68,13 @@ def validate_subdomain(subdomain: str) -> str:
 class CreateStoreUseCase:
     """Use case for creating a new store."""
 
-    def __init__(self, store_repository: IStoreRepository) -> None:
+    def __init__(
+        self,
+        store_repository: IStoreRepository,
+        tenant_service: TenantService,
+    ) -> None:
         self.store_repository = store_repository
+        self.tenant_service = tenant_service
 
     async def execute(self, dto: CreateStoreDTO, owner_id: UUID) -> StoreDTO:
         """Create a new store."""
@@ -106,7 +112,14 @@ class CreateStoreUseCase:
             "productCardStyle": "modern",
         }
 
-        # Create store entity
+        # Create tenant first to get tenant_id and provision schema
+        tenant = await self.tenant_service.create_tenant(
+            name=dto.name,
+            subdomain=subdomain,
+            owner_id=str(owner_id),
+        )
+
+        # Create store entity with tenant_id
         store = Store(
             name=dto.name,
             slug=slug,
@@ -118,6 +131,7 @@ class CreateStoreUseCase:
             contact_email=dto.contact_email,
             contact_phone=dto.contact_phone,
             theme_settings=default_theme_settings,
+            tenant_id=tenant.id,
         )
 
         # Save store
