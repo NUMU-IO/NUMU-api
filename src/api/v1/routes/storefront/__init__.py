@@ -9,10 +9,20 @@ Authenticated customer routes:
 - /storefront/me/profile - Customer profile management
 - /storefront/me/password - Password change
 - /storefront/me/addresses - Address management
+- /storefront/me/cart - Shopping cart management
+- /storefront/me/checkout - Checkout (cart to order)
 """
 
 from src.api.v1.routes.storefront.public import router as public_router
 from src.api.v1.routes.storefront.public import lookup_router as storefront_lookup_router
 from src.api.v1.routes.storefront.customer import router as customer_router
+from src.api.v1.routes.storefront.cart import router as cart_router
+from src.api.v1.routes.storefront.checkout import router as checkout_router
 
-__all__ = ["public_router", "storefront_lookup_router", "customer_router"]
+__all__ = [
+    "public_router",
+    "storefront_lookup_router",
+    "customer_router",
+    "cart_router",
+    "checkout_router",
+]

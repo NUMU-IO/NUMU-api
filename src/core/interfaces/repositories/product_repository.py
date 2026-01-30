@@ -67,6 +67,11 @@ class IProductRepository(BaseRepository[Product]):
         ...
 
     @abstractmethod
+    async def get_by_ids(self, product_ids: list[UUID]) -> dict[UUID, "Product"]:
+        """Get multiple products by their IDs. Returns a dict keyed by product ID."""
+        ...
+
+    @abstractmethod
     async def bulk_update_quantity(
         self,
         updates: list[tuple[UUID, int]],

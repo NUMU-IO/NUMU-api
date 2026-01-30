@@ -1,6 +1,7 @@
 """Repository implementations module."""
 
 from src.infrastructure.repositories.address_repository import CustomerAddressRepository
+from src.infrastructure.repositories.cart_repository import CartRepository
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
@@ -13,6 +14,7 @@ __all__ = [
     "ProductRepository",
     "CustomerRepository",
     "CustomerAddressRepository",
+    "CartRepository",
     "OrderRepository",
 ]
 

@@ -266,6 +266,15 @@ class ProductRepository(IProductRepository):
         )
         return result.scalar() or 0
 
+    async def get_by_ids(self, product_ids: list[UUID]) -> dict[UUID, Product]:
+        """Get multiple products by their IDs."""
+        if not product_ids:
+            return {}
+        result = await self.session.execute(
+            select(ProductModel).where(ProductModel.id.in_(product_ids))
+        )
+        return {model.id: self._to_entity(model) for model in result.scalars().all()}
+
     async def bulk_update_quantity(
         self,
         updates: list[tuple[UUID, int]],
