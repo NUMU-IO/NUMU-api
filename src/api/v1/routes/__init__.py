@@ -52,6 +52,8 @@ from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
     storefront_lookup_router,
     customer_router as storefront_customer_router,
+    cart_router as storefront_cart_router,
+    checkout_router as storefront_checkout_router,
 )
 
 # Webhook routes (external service callbacks)
@@ -94,6 +96,20 @@ api_router.include_router(
     storefront_customer_router,
     prefix="/storefront/me",
     tags=["Storefront - Customer"],
+)
+
+# Storefront - cart (authenticated customer)
+api_router.include_router(
+    storefront_cart_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Cart"],
+)
+
+# Storefront - checkout (authenticated customer, scoped to store)
+api_router.include_router(
+    storefront_checkout_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Checkout"],
 )
 
 # Webhooks - external service callbacks (no auth required)

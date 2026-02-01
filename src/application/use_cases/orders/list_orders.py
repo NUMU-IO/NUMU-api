@@ -1,10 +1,11 @@
 """List orders use case."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from src.application.dto.order import OrderListItemDTO
-from src.core.entities.order import OrderStatus
+from src.core.entities.order import FulfillmentStatus, OrderStatus, PaymentStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
@@ -42,9 +43,13 @@ class ListOrdersUseCase:
         page: int = 1,
         limit: int = 20,
         status: str | None = None,
+        payment_status: str | None = None,
+        fulfillment_status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
         search: str | None = None,
     ) -> ListOrdersResult:
-        """List orders for a store."""
+        """List orders for a store with optional filters."""
         # Verify store exists and user has permission
         store = await self.store_repository.get_by_id(store_id)
         if not store:
@@ -53,13 +58,27 @@ class ListOrdersUseCase:
         if store.owner_id != user_id:
             raise AuthorizationError("You don't have permission to view orders in this store")
 
-        # Parse status filter
+        # Parse enum filters (ignore invalid values silently)
         order_status = None
         if status:
             try:
                 order_status = OrderStatus(status)
             except ValueError:
-                pass  # Invalid status, ignore filter
+                pass
+
+        pay_status = None
+        if payment_status:
+            try:
+                pay_status = PaymentStatus(payment_status)
+            except ValueError:
+                pass
+
+        fulfill_status = None
+        if fulfillment_status:
+            try:
+                fulfill_status = FulfillmentStatus(fulfillment_status)
+            except ValueError:
+                pass
 
         # Calculate pagination
         skip = (page - 1) * limit
@@ -67,11 +86,24 @@ class ListOrdersUseCase:
         # Get orders
         if search:
             orders = await self.order_repository.search(store_id, search, skip, limit)
-            # For search, we don't have a count method, estimate from results
             total = len(orders) if len(orders) < limit else skip + limit + 1
         else:
-            orders = await self.order_repository.get_by_store(store_id, skip, limit, order_status)
-            total = await self.order_repository.count_by_store(store_id, order_status)
+            orders = await self.order_repository.get_by_store(
+                store_id, skip, limit,
+                status=order_status,
+                payment_status=pay_status,
+                fulfillment_status=fulfill_status,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            total = await self.order_repository.count_by_store(
+                store_id,
+                status=order_status,
+                payment_status=pay_status,
+                fulfillment_status=fulfill_status,
+                date_from=date_from,
+                date_to=date_to,
+            )
 
         # Get customer names for orders
         customer_names: dict[UUID, str] = {}

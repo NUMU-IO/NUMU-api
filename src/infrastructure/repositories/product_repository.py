@@ -279,29 +279,23 @@ class ProductRepository(IProductRepository):
             )
         await self.session.flush()
 
-    async def list_with_filters(
-        self,
-        store_id: UUID | None = None,
-        category_id: UUID | None = None,
-        skip: int = 0,
-        limit: int = 100,
-        is_active: bool | None = None,
-        search: str | None = None,
-    ) -> list[Product]:
-        """List products with multiple optional filters."""
-        query = select(ProductModel)
-        
-        # Apply filters
+    def _apply_product_filters(self, query, *, store_id=None, category_id=None,
+                               is_active=None, search=None, sku=None,
+                               price_min=None, price_max=None):
+        """Apply shared filter predicates to a product query."""
         if store_id:
             query = query.where(ProductModel.store_id == store_id)
-        
         if category_id:
             query = query.where(ProductModel.category_id == category_id)
-        
         if is_active is not None:
             target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
             query = query.where(ProductModel.status == target_status)
-        
+        if sku:
+            query = query.where(ProductModel.sku.ilike(f"%{sku}%"))
+        if price_min is not None:
+            query = query.where(ProductModel.price_amount >= price_min)
+        if price_max is not None:
+            query = query.where(ProductModel.price_amount <= price_max)
         if search:
             search_term = f"%{search}%"
             query = query.where(
@@ -311,10 +305,48 @@ class ProductRepository(IProductRepository):
                     ProductModel.sku.ilike(search_term),
                 )
             )
-        
-        # Apply pagination
+        return query
+
+    @staticmethod
+    def _apply_sort(query, sort_by: str | None, sort_order: str = "asc"):
+        """Apply sorting to a product query."""
+        sort_columns = {
+            "name": ProductModel.name,
+            "price": ProductModel.price_amount,
+            "created_at": ProductModel.created_at,
+            "updated_at": ProductModel.updated_at,
+            "quantity": ProductModel.quantity,
+        }
+        column = sort_columns.get(sort_by, ProductModel.created_at)
+        if sort_order == "desc":
+            column = column.desc()
+        else:
+            column = column.asc()
+        return query.order_by(column)
+
+    async def list_with_filters(
+        self,
+        store_id: UUID | None = None,
+        category_id: UUID | None = None,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool | None = None,
+        search: str | None = None,
+        sku: str | None = None,
+        price_min: int | None = None,
+        price_max: int | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "asc",
+    ) -> list[Product]:
+        """List products with multiple optional filters, price range, and sorting."""
+        query = select(ProductModel)
+        query = self._apply_product_filters(
+            query, store_id=store_id, category_id=category_id,
+            is_active=is_active, search=search, sku=sku,
+            price_min=price_min, price_max=price_max,
+        )
+        query = self._apply_sort(query, sort_by, sort_order)
         query = query.offset(skip).limit(limit)
-        
         result = await self.session.execute(query)
         return [self._to_entity(model) for model in result.scalars().all()]
 
@@ -324,30 +356,16 @@ class ProductRepository(IProductRepository):
         category_id: UUID | None = None,
         is_active: bool | None = None,
         search: str | None = None,
+        sku: str | None = None,
+        price_min: int | None = None,
+        price_max: int | None = None,
     ) -> int:
         """Count products matching the given filters."""
         query = select(func.count(ProductModel.id))
-        
-        # Apply same filters as list_with_filters
-        if store_id:
-            query = query.where(ProductModel.store_id == store_id)
-        
-        if category_id:
-            query = query.where(ProductModel.category_id == category_id)
-        
-        if is_active is not None:
-            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
-            query = query.where(ProductModel.status == target_status)
-        
-        if search:
-            search_term = f"%{search}%"
-            query = query.where(
-                or_(
-                    ProductModel.name.ilike(search_term),
-                    ProductModel.description.ilike(search_term),
-                    ProductModel.sku.ilike(search_term),
-                )
-            )
-        
+        query = self._apply_product_filters(
+            query, store_id=store_id, category_id=category_id,
+            is_active=is_active, search=search, sku=sku,
+            price_min=price_min, price_max=price_max,
+        )
         result = await self.session.execute(query)
         return result.scalar() or 0

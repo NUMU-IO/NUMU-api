@@ -238,11 +238,23 @@ class OrderRepository(IOrderRepository):
         skip: int = 0,
         limit: int = 100,
         status: OrderStatus | None = None,
+        payment_status: PaymentStatus | None = None,
+        fulfillment_status: FulfillmentStatus | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> list[Order]:
-        """Get all orders for a store."""
+        """Get all orders for a store with optional filters."""
         query = select(OrderModel).where(OrderModel.store_id == store_id)
         if status:
             query = query.where(OrderModel.status == status)
+        if payment_status:
+            query = query.where(OrderModel.payment_status == payment_status)
+        if fulfillment_status:
+            query = query.where(OrderModel.fulfillment_status == fulfillment_status)
+        if date_from:
+            query = query.where(OrderModel.created_at >= date_from)
+        if date_to:
+            query = query.where(OrderModel.created_at <= date_to)
         query = query.order_by(OrderModel.created_at.desc()).offset(skip).limit(limit)
         result = await self.session.execute(query)
         return [self._to_entity(model) for model in result.scalars().all()]
@@ -312,11 +324,23 @@ class OrderRepository(IOrderRepository):
         self,
         store_id: UUID,
         status: OrderStatus | None = None,
+        payment_status: PaymentStatus | None = None,
+        fulfillment_status: FulfillmentStatus | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> int:
-        """Get total count of orders for a store."""
+        """Get total count of orders for a store with optional filters."""
         query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
         if status:
             query = query.where(OrderModel.status == status)
+        if payment_status:
+            query = query.where(OrderModel.payment_status == payment_status)
+        if fulfillment_status:
+            query = query.where(OrderModel.fulfillment_status == fulfillment_status)
+        if date_from:
+            query = query.where(OrderModel.created_at >= date_from)
+        if date_to:
+            query = query.where(OrderModel.created_at <= date_to)
         result = await self.session.execute(query)
         return result.scalar() or 0
 

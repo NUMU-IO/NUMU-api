@@ -3,6 +3,7 @@
 URL: /stores/{store_id}/orders
 """
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -238,6 +239,10 @@ async def list_orders(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     order_status: str | None = Query(None, alias="status"),
+    payment_status: str | None = Query(None, description="Filter by payment status"),
+    fulfillment_status: str | None = Query(None, description="Filter by fulfillment status"),
+    date_from: datetime | None = Query(None, description="Filter orders from this date (ISO 8601)"),
+    date_to: datetime | None = Query(None, description="Filter orders until this date (ISO 8601)"),
     search: str | None = Query(None),
 ):
     """List orders for a store with optional filtering and pagination."""
@@ -253,6 +258,10 @@ async def list_orders(
         page=page,
         limit=limit,
         status=order_status,
+        payment_status=payment_status,
+        fulfillment_status=fulfillment_status,
+        date_from=date_from,
+        date_to=date_to,
         search=search,
     )
 
