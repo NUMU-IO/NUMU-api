@@ -8,10 +8,13 @@ Receives payment notifications from Paymob for:
 
 import logging
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies.database import get_db
 from src.config import settings
 from src.infrastructure.external_services.paymob import PaymobPaymentService
+from src.infrastructure.repositories.order_repository import OrderRepository
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,6 +26,7 @@ paymob_service = PaymobPaymentService()
 @router.post("/callback")
 async def paymob_callback(
     request: Request,
+    db: AsyncSession = Depends(get_db),
     hmac: str = Header(None, alias="hmac"),
 ):
     """Handle Paymob payment callback.
@@ -57,6 +61,7 @@ async def paymob_callback(
     obj = data.get("obj", {})
     transaction_id = obj.get("id")
     order_id = obj.get("order", {}).get("id")
+    merchant_order_id = obj.get("order", {}).get("merchant_order_id")
     success = obj.get("success", False)
     is_refunded = obj.get("is_refunded", False)
     is_voided = obj.get("is_voided", False)
@@ -69,31 +74,53 @@ async def paymob_callback(
         f"success={success}, refunded={is_refunded}, voided={is_voided}"
     )
 
+    order_repo = OrderRepository(db)
+
+    # Resolve the internal order via merchant_order_id (our payment_id)
+    # or fall back to the Paymob order_id.
+    order = None
+    lookup_id = merchant_order_id or str(order_id) if order_id else None
+    if lookup_id:
+        order = await order_repo.get_by_payment_id(lookup_id)
+
+    if not order:
+        logger.warning(f"Paymob webhook: could not find order for id={lookup_id}")
+        return {"status": "received", "transaction_id": transaction_id}
+
     # Process based on event type
     if is_refunded:
-        # Handle refund notification
-        logger.info(f"Paymob refund processed for order {order_id}")
-        # TODO: Update order status in database
-        # await order_service.mark_refunded(order_id, amount_cents)
+        logger.info(f"Paymob refund processed for order {order.order_number}")
+        order.refund(reason=f"Paymob refund - transaction {transaction_id}")
+        await order_repo.update(order)
 
     elif is_voided:
-        # Handle void notification
-        logger.info(f"Paymob payment voided for order {order_id}")
-        # TODO: Update order status in database
-        # await order_service.mark_cancelled(order_id)
+        logger.info(f"Paymob payment voided for order {order.order_number}")
+        if order.can_be_cancelled:
+            order.cancel(reason=f"Paymob void - transaction {transaction_id}")
+            await order_repo.update(order)
+        else:
+            logger.warning(
+                f"Cannot cancel order {order.order_number} in status {order.status}"
+            )
 
     elif success:
-        # Handle successful payment
-        logger.info(f"Paymob payment successful for order {order_id}: {amount_cents} {currency}")
-        # TODO: Update order status in database
-        # await order_service.mark_paid(order_id, transaction_id, amount_cents)
+        logger.info(
+            f"Paymob payment successful for order {order.order_number}: "
+            f"{amount_cents} {currency}"
+        )
+        order.mark_as_paid(
+            payment_id=str(transaction_id),
+            payment_method="paymob",
+        )
+        await order_repo.update(order)
 
     else:
-        # Handle failed payment
         error_msg = obj.get("data", {}).get("message", "Payment failed")
-        logger.warning(f"Paymob payment failed for order {order_id}: {error_msg}")
-        # TODO: Update order status in database
-        # await order_service.mark_payment_failed(order_id, error_msg)
+        logger.warning(
+            f"Paymob payment failed for order {order.order_number}: {error_msg}"
+        )
+        order.mark_payment_failed(reason=error_msg)
+        await order_repo.update(order)
 
     # Always return 200 to acknowledge receipt
     return {"status": "received", "transaction_id": transaction_id}
