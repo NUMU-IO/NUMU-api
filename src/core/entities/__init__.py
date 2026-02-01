@@ -2,6 +2,7 @@
 
 from src.core.entities.address import AddressLabel, CustomerAddress
 from src.core.entities.base import BaseEntity
+from src.core.entities.cart import Cart
 from src.core.entities.category import Category
 from src.core.entities.customer import Customer
 from src.core.entities.invoice import (
@@ -21,6 +22,7 @@ from src.core.entities.order import (
     OrderStatus,
     PaymentStatus,
     ShippingAddress,
+    VALID_STATUS_TRANSITIONS,
 )
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.entities.store import Store, StoreStatus
@@ -29,6 +31,8 @@ from src.core.entities.user import User, UserRole, UserStatus
 __all__ = [
     # Base
     "BaseEntity",
+    # Cart
+    "Cart",
     # User
     "User",
     "UserRole",
@@ -53,6 +57,7 @@ __all__ = [
     "OrderStatus",
     "PaymentStatus",
     "ShippingAddress",
+    "VALID_STATUS_TRANSITIONS",
     # Invoice
     "BuyerInfo",
     "Invoice",
