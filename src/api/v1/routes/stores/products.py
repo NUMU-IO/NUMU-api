@@ -6,29 +6,36 @@ URL: /stores/{store_id}/products
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
 
 from src.api.dependencies import (
     get_product_repository,
+    get_storage_service,
     get_store_repository,
     require_store_owner,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateProductRequest,
+    DeleteImageRequest,
     DeleteResponse,
     PaginatedListResponse,
     ProductResponse,
     UpdateProductRequest,
+    UploadedImageResponse,
 )
 from src.application.dto.product import CreateProductDTO, UpdateProductDTO
 from src.application.use_cases.products import (
     CreateProductUseCase,
+    DeleteProductImageUseCase,
     DeleteProductUseCase,
     GetProductUseCase,
     ListProductsUseCase,
     UpdateProductUseCase,
+    UploadProductImageUseCase,
 )
+from src.application.use_cases.products.upload_image import UploadProductImageDTO
+from src.infrastructure.external_services.cloudflare_r2 import CloudflareR2StorageService
 from src.infrastructure.repositories import ProductRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/products")
@@ -328,4 +335,100 @@ async def delete_product(
     return SuccessResponse(
         data=DeleteResponse(deleted=True, id=str(product_id)),
         message="Product deleted successfully",
+    )
+
+
+# =============================================================================
+# Image Upload/Delete Endpoints
+# =============================================================================
+
+
+@router.post(
+    "/{product_id}/images",
+    response_model=SuccessResponse[UploadedImageResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload product image",
+)
+async def upload_product_image(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_id: Annotated[UUID, Path(description="Product ID")],
+    file: Annotated[UploadFile, File(description="Image file to upload")],
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    storage_service: Annotated[CloudflareR2StorageService, Depends(get_storage_service)],
+):
+    """Upload an image for a product.
+
+    Accepts JPEG, PNG, WebP, and GIF images.
+    Maximum file size: 5 MB.
+    """
+    # Read file content
+    file_content = await file.read()
+
+    use_case = UploadProductImageUseCase(
+        storage_service=storage_service,
+        product_repository=product_repo,
+        store_repository=store_repo,
+    )
+
+    dto = UploadProductImageDTO(
+        product_id=product_id,
+        file_content=file_content,
+        filename=file.filename or "image",
+        content_type=file.content_type or "image/jpeg",
+    )
+
+    result = await use_case.execute(
+        dto=dto,
+        store_id=store_id,
+        user_id=user_id,
+    )
+
+    return SuccessResponse(
+        data=UploadedImageResponse(
+            url=result.url,
+            key=result.key,
+            size=result.size,
+            content_type=result.content_type,
+            product_id=str(result.product_id),
+        ),
+        message="Image uploaded successfully",
+    )
+
+
+@router.delete(
+    "/{product_id}/images",
+    response_model=SuccessResponse[DeleteResponse],
+    summary="Delete product image",
+)
+async def delete_product_image(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_id: Annotated[UUID, Path(description="Product ID")],
+    request: DeleteImageRequest,
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    storage_service: Annotated[CloudflareR2StorageService, Depends(get_storage_service)],
+):
+    """Delete a product image.
+
+    Removes the image from storage and from the product's image list.
+    """
+    use_case = DeleteProductImageUseCase(
+        storage_service=storage_service,
+        product_repository=product_repo,
+        store_repository=store_repo,
+    )
+
+    await use_case.execute(
+        product_id=product_id,
+        image_url=request.image_url,
+        store_id=store_id,
+        user_id=user_id,
+    )
+
+    return SuccessResponse(
+        data=DeleteResponse(deleted=True, id=str(product_id)),
+        message="Image deleted successfully",
     )

@@ -11,6 +11,14 @@ from src.application.dto.auth import (
     TokenDTO,
 )
 from src.application.dto.base import BaseDTO, PaginatedDTO
+from src.application.dto.cart import (
+    AddToCartDTO,
+    CartDTO,
+    CartItemDTO,
+    CartOperationResultDTO,
+    RemoveFromCartDTO,
+    UpdateCartItemDTO,
+)
 from src.application.dto.product import CreateProductDTO, ProductDTO, UpdateProductDTO
 from src.application.dto.store import CreateStoreDTO, StoreDTO, UpdateStoreDTO
 from src.application.dto.user import CreateUserDTO, UpdateUserDTO, UserDTO
@@ -39,4 +47,11 @@ __all__ = [
     "ProductDTO",
     "CreateProductDTO",
     "UpdateProductDTO",
+    # Cart
+    "CartDTO",
+    "CartItemDTO",
+    "AddToCartDTO",
+    "UpdateCartItemDTO",
+    "RemoveFromCartDTO",
+    "CartOperationResultDTO",
 ]

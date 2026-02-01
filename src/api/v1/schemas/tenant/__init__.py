@@ -15,8 +15,10 @@ from src.api.v1.schemas.tenant.invoice import (
 )
 from src.api.v1.schemas.tenant.product import (
     CreateProductRequest,
+    DeleteImageRequest,
     ProductResponse,
     UpdateProductRequest,
+    UploadedImageResponse,
 )
 from src.api.v1.schemas.tenant.store import (
     CheckSubdomainRequest,
@@ -51,8 +53,10 @@ __all__ = [
     "UpdateInvoiceRequest",
     # Product
     "CreateProductRequest",
+    "DeleteImageRequest",
     "ProductResponse",
     "UpdateProductRequest",
+    "UploadedImageResponse",
     # Store
     "CheckSubdomainRequest",
     "CheckSubdomainResponse",

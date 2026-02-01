@@ -27,6 +27,7 @@ from src.api.v1.schemas.tenant import (
     CreateOrderRequest,
     CreateProductRequest,
     CreateStoreRequest,
+    DeleteImageRequest,
     OrderAddressRequest,
     OrderAddressResponse,
     OrderLineItemRequest,
@@ -39,6 +40,7 @@ from src.api.v1.schemas.tenant import (
     UpdateOrderStatusRequest,
     UpdateProductRequest,
     UpdateStoreRequest,
+    UploadedImageResponse,
 )
 
 __all__ = [
@@ -64,8 +66,10 @@ __all__ = [
     "StoreResponse",
     # Product (tenant)
     "CreateProductRequest",
+    "DeleteImageRequest",
     "UpdateProductRequest",
     "ProductResponse",
+    "UploadedImageResponse",
     # Order (tenant)
     "CreateOrderRequest",
     "UpdateOrderRequest",

@@ -77,3 +77,19 @@ class ProductResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UploadedImageResponse(BaseModel):
+    """Uploaded image response schema."""
+
+    url: str
+    key: str
+    size: int
+    content_type: str
+    product_id: str
+
+
+class DeleteImageRequest(BaseModel):
+    """Delete image request schema."""
+
+    image_url: str
