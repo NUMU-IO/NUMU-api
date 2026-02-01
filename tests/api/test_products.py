@@ -24,7 +24,7 @@ class TestProductRoutes:
 
         # Create store
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
@@ -32,7 +32,7 @@ class TestProductRoutes:
 
         # Create product
         response = await client.post(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             json=sample_product_data,
             headers=headers,
         )
@@ -51,7 +51,7 @@ class TestProductRoutes:
         """Test product creation without authentication."""
         store_id = uuid4()
         response = await client.post(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             json=sample_product_data,
         )
 
@@ -95,7 +95,7 @@ class TestProductRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
@@ -107,13 +107,13 @@ class TestProductRoutes:
             product_data["name"] = f"Product {i}"
             product_data["sku"] = f"SKU-{i}"
             await client.post(
-                f"/api/v1/stores/{store_id}/products",
+                f"/api/v1/stores/{store_id}/products/",
                 json=product_data,
                 headers=headers,
             )
 
         # List products
-        response = await client.get(f"/api/v1/stores/{store_id}/products")
+        response = await client.get(f"/api/v1/stores/{store_id}/products/")
 
         assert response.status_code == 200
         data = response.json()
@@ -135,7 +135,7 @@ class TestProductRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
@@ -147,14 +147,14 @@ class TestProductRoutes:
             product_data["name"] = f"Product {i}"
             product_data["sku"] = f"SKU-{i}"
             await client.post(
-                f"/api/v1/stores/{store_id}/products",
+                f"/api/v1/stores/{store_id}/products/",
                 json=product_data,
                 headers=headers,
             )
 
         # Get first page with limit 2
         response = await client.get(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             params={"page": 1, "limit": 2},
         )
 
@@ -179,7 +179,7 @@ class TestProductRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
@@ -187,7 +187,7 @@ class TestProductRoutes:
 
         # Create product
         create_response = await client.post(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             json=sample_product_data,
             headers=headers,
         )
@@ -224,14 +224,14 @@ class TestProductRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
         store_id = store_response.json()["data"]["id"]
 
         create_response = await client.post(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             json=sample_product_data,
             headers=headers,
         )
@@ -264,14 +264,14 @@ class TestProductRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
         store_id = store_response.json()["data"]["id"]
 
         create_response = await client.post(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             json=sample_product_data,
             headers=headers,
         )
@@ -309,14 +309,14 @@ class TestProductRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
         store_id = store_response.json()["data"]["id"]
 
         create_response = await client.post(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             json=sample_product_data,
             headers=headers,
         )
@@ -351,7 +351,7 @@ class TestProductRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_response = await client.post(
-            "/api/v1/stores",
+            "/api/v1/stores/",
             json=sample_store_data,
             headers=headers,
         )
@@ -363,14 +363,14 @@ class TestProductRoutes:
             product_data["name"] = name
             product_data["sku"] = f"SKU-{name.replace(' ', '-')}"
             await client.post(
-                f"/api/v1/stores/{store_id}/products",
+                f"/api/v1/stores/{store_id}/products/",
                 json=product_data,
                 headers=headers,
             )
 
         # Search for "Samsung"
         response = await client.get(
-            f"/api/v1/stores/{store_id}/products",
+            f"/api/v1/stores/{store_id}/products/",
             params={"search": "Samsung"},
         )
 

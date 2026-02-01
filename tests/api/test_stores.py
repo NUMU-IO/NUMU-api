@@ -22,7 +22,7 @@ class TestStoreRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         # Create store
-        response = await client.post("/api/v1/stores", json=sample_store_data, headers=headers)
+        response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
 
         assert response.status_code == 201
         data = response.json()
@@ -37,7 +37,7 @@ class TestStoreRoutes:
         sample_store_data: dict,
     ):
         """Test store creation without authentication."""
-        response = await client.post("/api/v1/stores", json=sample_store_data)
+        response = await client.post("/api/v1/stores/", json=sample_store_data)
 
         assert response.status_code == 401
 
@@ -55,10 +55,10 @@ class TestStoreRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         # Create first store
-        await client.post("/api/v1/stores", json=sample_store_data, headers=headers)
+        await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
 
         # Try to create another store with same slug (should generate unique slug)
-        response = await client.post("/api/v1/stores", json=sample_store_data, headers=headers)
+        response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
 
         # Should still succeed with a modified slug
         assert response.status_code == 201
@@ -80,10 +80,10 @@ class TestStoreRoutes:
         for i in range(3):
             store_data = sample_store_data.copy()
             store_data["name"] = f"Store {i}"
-            await client.post("/api/v1/stores", json=store_data, headers=headers)
+            await client.post("/api/v1/stores/", json=store_data, headers=headers)
 
         # List stores
-        response = await client.get("/api/v1/stores", headers=headers)
+        response = await client.get("/api/v1/stores/", headers=headers)
 
         assert response.status_code == 200
         data = response.json()
@@ -102,7 +102,7 @@ class TestStoreRoutes:
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores", json=sample_store_data, headers=headers)
+        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
         store_id = create_response.json()["data"]["id"]
 
         # Get store
@@ -141,7 +141,7 @@ class TestStoreRoutes:
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores", json=sample_store_data, headers=headers)
+        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
         store_id = create_response.json()["data"]["id"]
 
         # Update store
@@ -166,7 +166,7 @@ class TestStoreRoutes:
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores", json=sample_store_data, headers=headers)
+        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
         store_id = create_response.json()["data"]["id"]
 
         # Create second user
@@ -195,7 +195,7 @@ class TestStoreRoutes:
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores", json=sample_store_data, headers=headers)
+        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
         store_id = create_response.json()["data"]["id"]
 
         # Delete store
@@ -219,6 +219,6 @@ class TestStoreRoutes:
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_data = {"name": ""}  # Empty name
-        response = await client.post("/api/v1/stores", json=store_data, headers=headers)
+        response = await client.post("/api/v1/stores/", json=store_data, headers=headers)
 
         assert response.status_code == 422

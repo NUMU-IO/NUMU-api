@@ -17,18 +17,21 @@ class TestCreateStoreRequest:
         """Test creating store with minimal required fields."""
         data = {
             "name": "My Store",
+            "subdomain": "mystore",
         }
         request = CreateStoreRequest(**data)
 
         assert request.name == "My Store"
+        assert request.subdomain == "mystore"
         assert request.slug is None
         assert request.description is None
-        assert request.default_currency == "USD"  # Default
+        assert request.default_currency == "EGP"  # Default
 
     def test_valid_full_store(self):
         """Test creating store with all fields."""
         data = {
             "name": "Full Store",
+            "subdomain": "fullstore",
             "slug": "full-store",
             "description": "A fully configured store",
             "default_currency": "EGP",
@@ -38,6 +41,7 @@ class TestCreateStoreRequest:
         request = CreateStoreRequest(**data)
 
         assert request.name == "Full Store"
+        assert request.subdomain == "fullstore"
         assert request.slug == "full-store"
         assert request.description == "A fully configured store"
         assert request.default_currency == "EGP"
@@ -199,6 +203,9 @@ class TestStoreResponse:
             "id": "123e4567-e89b-12d3-a456-426614174000",
             "name": "Test Store",
             "slug": "test-store",
+            "subdomain": "teststore",
+            "custom_domain": None,
+            "store_url": "https://teststore.numu.io",
             "owner_id": "123e4567-e89b-12d3-a456-426614174001",
             "description": "A test store",
             "logo_url": "https://example.com/logo.png",
@@ -209,6 +216,7 @@ class TestStoreResponse:
             "contact_phone": "+201234567890",
             "address": {"city": "Cairo", "country": "Egypt"},
             "social_links": {"facebook": "https://facebook.com/store"},
+            "theme_settings": {"primaryColor": "#0075FF"},
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
         }
@@ -225,6 +233,9 @@ class TestStoreResponse:
             "id": "123e4567-e89b-12d3-a456-426614174000",
             "name": "Test Store",
             "slug": "test-store",
+            "subdomain": None,
+            "custom_domain": None,
+            "store_url": "https://test-store.numu.io",
             "owner_id": "123e4567-e89b-12d3-a456-426614174001",
             "description": None,
             "logo_url": None,
@@ -235,6 +246,7 @@ class TestStoreResponse:
             "contact_phone": None,
             "address": {},
             "social_links": {},
+            "theme_settings": {},
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
         }
@@ -252,6 +264,9 @@ class TestStoreResponse:
             "id": "123e4567-e89b-12d3-a456-426614174000",
             "name": "Test Store",
             "slug": "test-store",
+            "subdomain": "teststore",
+            "custom_domain": None,
+            "store_url": "https://teststore.numu.io",
             "owner_id": "123e4567-e89b-12d3-a456-426614174001",
             "description": None,
             "logo_url": None,
@@ -261,6 +276,7 @@ class TestStoreResponse:
             "contact_phone": None,
             "address": {},
             "social_links": {},
+            "theme_settings": {},
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
         }
