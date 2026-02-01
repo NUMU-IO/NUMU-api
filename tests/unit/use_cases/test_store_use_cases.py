@@ -22,10 +22,15 @@ class TestCreateStoreUseCase:
         """Set up test fixtures."""
         self.mock_store_repo = MagicMock()
         self.mock_store_repo.slug_exists = AsyncMock(return_value=False)
+        self.mock_store_repo.subdomain_exists = AsyncMock(return_value=False)
         self.mock_store_repo.create = AsyncMock()
+
+        self.mock_tenant_service = MagicMock()
+        self.mock_tenant_service.create_tenant = AsyncMock()
 
         self.use_case = CreateStoreUseCase(
             store_repository=self.mock_store_repo,
+            tenant_service=self.mock_tenant_service,
         )
 
         self.user_id = uuid4()
@@ -33,19 +38,25 @@ class TestCreateStoreUseCase:
     @pytest.mark.asyncio
     async def test_create_store_success(self):
         """Test successful store creation."""
+        tenant_id = uuid4()
+        self.mock_tenant_service.create_tenant.return_value = MagicMock(id=tenant_id)
+
         created_store = Store(
             id=uuid4(),
             owner_id=self.user_id,
             name="My Store",
             slug="my-store",
-            status=StoreStatus.PENDING_APPROVAL,
+            subdomain="mystore",
+            status=StoreStatus.ACTIVE,
             default_currency=Currency.USD,
+            tenant_id=tenant_id,
         )
         self.mock_store_repo.create.return_value = created_store
 
         from src.application.dto.store import CreateStoreDTO
         dto = CreateStoreDTO(
             name="My Store",
+            subdomain="mystore",
             description="A great store",
         )
 
@@ -54,6 +65,7 @@ class TestCreateStoreUseCase:
         assert result is not None
         assert result.name == "My Store"
         self.mock_store_repo.create.assert_called_once()
+        self.mock_tenant_service.create_tenant.assert_called_once()
 
 
 class TestGetStoreUseCase:

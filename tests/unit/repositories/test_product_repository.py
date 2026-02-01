@@ -71,7 +71,7 @@ class TestProductRepository:
         mock_model.category_id = None
         mock_model.tags = []
         mock_model.attributes = {}
-        mock_model.metadata = {}
+        mock_model.extra_data = {}
         mock_model.created_at = datetime.utcnow()
         mock_model.updated_at = datetime.utcnow()
 
@@ -125,7 +125,7 @@ class TestProductRepository:
         mock_model.category_id = None
         mock_model.tags = product.tags
         mock_model.attributes = product.attributes
-        mock_model.metadata = {}
+        mock_model.extra_data = {}
         mock_model.created_at = product.created_at
         mock_model.updated_at = product.updated_at
 
@@ -198,7 +198,7 @@ class TestProductRepository:
             model.category_id = None
             model.tags = []
             model.attributes = {}
-            model.metadata = {}
+            model.extra_data = {}
             model.created_at = datetime.utcnow()
             model.updated_at = datetime.utcnow()
 
@@ -239,7 +239,7 @@ class TestProductRepository:
         mock_model.category_id = None
         mock_model.tags = []
         mock_model.attributes = {}
-        mock_model.metadata = {}
+        mock_model.extra_data = {}
         mock_model.created_at = datetime.utcnow()
         mock_model.updated_at = datetime.utcnow()
 
@@ -294,7 +294,7 @@ class TestProductRepository:
             model.category_id = None
             model.tags = []
             model.attributes = {}
-            model.metadata = {}
+            model.extra_data = {}
             model.created_at = datetime.utcnow()
             model.updated_at = datetime.utcnow()
 

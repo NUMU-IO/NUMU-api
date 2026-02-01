@@ -27,7 +27,7 @@ class TestPaymobWebhook:
         # Note: In real tests, you'd compute the signature correctly
         # This is a placeholder for the structure
         response = await client.post(
-            "/api/v1/webhooks/paymob",
+            "/api/v1/webhooks/paymob/callback",
             content=json.dumps(payload_data),
             headers={
                 "Content-Type": "application/json",
@@ -44,7 +44,7 @@ class TestPaymobWebhook:
         payload_data = {"obj": {"id": "123456"}}
 
         response = await client.post(
-            "/api/v1/webhooks/paymob",
+            "/api/v1/webhooks/paymob/callback",
             json=payload_data,
         )
 
@@ -65,7 +65,7 @@ class TestFawryWebhook:
         }
 
         response = await client.post(
-            "/api/v1/webhooks/fawry",
+            "/api/v1/webhooks/fawry/callback",
             json=payload_data,
             headers={"X-Fawry-Signature": "test_signature"},
         )
@@ -86,7 +86,7 @@ class TestBostaWebhook:
         }
 
         response = await client.post(
-            "/api/v1/webhooks/bosta",
+            "/api/v1/webhooks/bosta/callback",
             json=payload_data,
             headers={"X-Bosta-Signature": "test_signature"},
         )
@@ -102,7 +102,7 @@ class TestWhatsAppWebhook:
         """Test WhatsApp webhook verification (GET request)."""
         # WhatsApp sends a GET request for webhook verification
         response = await client.get(
-            "/api/v1/webhooks/whatsapp",
+            "/api/v1/webhooks/whatsapp/callback",
             params={
                 "hub.mode": "subscribe",
                 "hub.verify_token": "test_token",
@@ -140,7 +140,7 @@ class TestWhatsAppWebhook:
         }
 
         response = await client.post(
-            "/api/v1/webhooks/whatsapp",
+            "/api/v1/webhooks/whatsapp/callback",
             json=payload_data,
             headers={"X-Hub-Signature-256": "sha256=test_signature"},
         )

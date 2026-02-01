@@ -33,6 +33,8 @@ class TestStoreRepository:
         model.tenant_id = kwargs.get("tenant_id", uuid4())
         model.name = kwargs.get("name", "Test Store")
         model.slug = kwargs.get("slug", "test-store")
+        model.subdomain = kwargs.get("subdomain", "teststore")
+        model.custom_domain = kwargs.get("custom_domain", None)
         model.description = kwargs.get("description", "A test store")
         model.status = kwargs.get("status", StoreStatus.ACTIVE)
         model.default_currency = kwargs.get("default_currency", "USD")
@@ -43,7 +45,7 @@ class TestStoreRepository:
         model.address = kwargs.get("address", {})
         model.social_links = kwargs.get("social_links", {})
         model.settings = kwargs.get("settings", {})
-        model.metadata = kwargs.get("metadata", {})
+        model.theme_settings = kwargs.get("theme_settings", {})
         model.created_at = kwargs.get("created_at", datetime.utcnow())
         model.updated_at = kwargs.get("updated_at", datetime.utcnow())
         return model

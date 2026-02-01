@@ -54,6 +54,45 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop.close()
 
 
+_metadata_patched = False
+
+
+def _patch_metadata_for_sqlite(metadata):
+    """Patch metadata so PostgreSQL-specific features work with SQLite for testing."""
+    global _metadata_patched
+    if _metadata_patched:
+        return
+    _metadata_patched = True
+
+    from sqlalchemy import Enum as SAEnum, JSON, String
+    from sqlalchemy.dialects.postgresql import JSONB, ARRAY
+
+    for table in metadata.tables.values():
+        # Strip schema from tables (e.g. CREATE TABLE public.users → CREATE TABLE users)
+        if getattr(table, "schema", None):
+            table.schema = None
+
+        for column in table.columns:
+            # Strip schema from Enum column types
+            if isinstance(column.type, SAEnum) and getattr(column.type, "schema", None):
+                column.type.schema = None
+            # Replace JSONB with JSON (SQLite doesn't support JSONB)
+            if isinstance(column.type, JSONB):
+                column.type = JSON()
+            # Replace ARRAY with JSON (SQLite doesn't support ARRAY)
+            if isinstance(column.type, ARRAY):
+                column.type = JSON()
+
+    # Strip schema from ForeignKey references that use schema-qualified names
+    for table in metadata.tables.values():
+        for fk in table.foreign_keys:
+            if fk._colspec and isinstance(fk._colspec, str) and "." in fk._colspec:
+                parts = fk._colspec.split(".")
+                # If it's schema.table.column, strip the schema part
+                if len(parts) == 3:
+                    fk._colspec = f"{parts[1]}.{parts[2]}"
+
+
 @pytest_asyncio.fixture(scope="function")
 async def test_engine():
     """Create a test database engine."""
@@ -62,6 +101,9 @@ async def test_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+    # Patch PostgreSQL-specific features for SQLite compatibility
+    _patch_metadata_for_sqlite(Base.metadata)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -391,6 +433,7 @@ def sample_store_data() -> dict[str, Any]:
     """Return sample store creation data."""
     return {
         "name": f"Test Store {uuid4().hex[:8]}",
+        "subdomain": f"teststore{uuid4().hex[:8]}",
         "description": "A test store for testing purposes",
         "email": "store@example.com",
         "currency": "USD",
