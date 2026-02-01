@@ -42,7 +42,7 @@ class ProductRepository(IProductRepository):
             category_id=model.category_id,
             tags=model.tags or [],
             attributes=model.attributes,
-            metadata=model.metadata,
+            metadata=model.extra_data or {},
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -71,7 +71,7 @@ class ProductRepository(IProductRepository):
             category_id=entity.category_id,
             tags=entity.tags,
             attributes=entity.attributes,
-            metadata=entity.metadata,
+            extra_data=entity.metadata,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -129,7 +129,7 @@ class ProductRepository(IProductRepository):
             model.category_id = entity.category_id
             model.tags = entity.tags
             model.attributes = entity.attributes
-            model.metadata = entity.metadata
+            model.extra_data = entity.metadata
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)
@@ -233,13 +233,29 @@ class ProductRepository(IProductRepository):
         self,
         store_id: UUID,
         threshold: int | None = None,
+        limit: int = 100,
     ) -> list[Product]:
         """Get products with low stock."""
         result = await self.session.execute(
             select(ProductModel).where(
                 ProductModel.store_id == store_id,
                 ProductModel.quantity <= (threshold or ProductModel.low_stock_threshold),
-            )
+                ProductModel.quantity > 0,
+            ).limit(limit)
+        )
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def get_out_of_stock(
+        self,
+        store_id: UUID,
+        limit: int = 100,
+    ) -> list[Product]:
+        """Get products that are out of stock."""
+        result = await self.session.execute(
+            select(ProductModel).where(
+                ProductModel.store_id == store_id,
+                ProductModel.quantity == 0,
+            ).limit(limit)
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 
@@ -262,3 +278,94 @@ class ProductRepository(IProductRepository):
                 .values(quantity=ProductModel.quantity + delta)
             )
         await self.session.flush()
+
+    def _apply_product_filters(self, query, *, store_id=None, category_id=None,
+                               is_active=None, search=None, sku=None,
+                               price_min=None, price_max=None):
+        """Apply shared filter predicates to a product query."""
+        if store_id:
+            query = query.where(ProductModel.store_id == store_id)
+        if category_id:
+            query = query.where(ProductModel.category_id == category_id)
+        if is_active is not None:
+            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
+            query = query.where(ProductModel.status == target_status)
+        if sku:
+            query = query.where(ProductModel.sku.ilike(f"%{sku}%"))
+        if price_min is not None:
+            query = query.where(ProductModel.price_amount >= price_min)
+        if price_max is not None:
+            query = query.where(ProductModel.price_amount <= price_max)
+        if search:
+            search_term = f"%{search}%"
+            query = query.where(
+                or_(
+                    ProductModel.name.ilike(search_term),
+                    ProductModel.description.ilike(search_term),
+                    ProductModel.sku.ilike(search_term),
+                )
+            )
+        return query
+
+    @staticmethod
+    def _apply_sort(query, sort_by: str | None, sort_order: str = "asc"):
+        """Apply sorting to a product query."""
+        sort_columns = {
+            "name": ProductModel.name,
+            "price": ProductModel.price_amount,
+            "created_at": ProductModel.created_at,
+            "updated_at": ProductModel.updated_at,
+            "quantity": ProductModel.quantity,
+        }
+        column = sort_columns.get(sort_by, ProductModel.created_at)
+        if sort_order == "desc":
+            column = column.desc()
+        else:
+            column = column.asc()
+        return query.order_by(column)
+
+    async def list_with_filters(
+        self,
+        store_id: UUID | None = None,
+        category_id: UUID | None = None,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool | None = None,
+        search: str | None = None,
+        sku: str | None = None,
+        price_min: int | None = None,
+        price_max: int | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "asc",
+    ) -> list[Product]:
+        """List products with multiple optional filters, price range, and sorting."""
+        query = select(ProductModel)
+        query = self._apply_product_filters(
+            query, store_id=store_id, category_id=category_id,
+            is_active=is_active, search=search, sku=sku,
+            price_min=price_min, price_max=price_max,
+        )
+        query = self._apply_sort(query, sort_by, sort_order)
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def count_with_filters(
+        self,
+        store_id: UUID | None = None,
+        category_id: UUID | None = None,
+        is_active: bool | None = None,
+        search: str | None = None,
+        sku: str | None = None,
+        price_min: int | None = None,
+        price_max: int | None = None,
+    ) -> int:
+        """Count products matching the given filters."""
+        query = select(func.count(ProductModel.id))
+        query = self._apply_product_filters(
+            query, store_id=store_id, category_id=category_id,
+            is_active=is_active, search=search, sku=sku,
+            price_min=price_min, price_max=price_max,
+        )
+        result = await self.session.execute(query)
+        return result.scalar() or 0

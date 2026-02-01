@@ -1,4 +1,7 @@
-"""Authentication routes."""
+"""User authentication routes.
+
+These routes handle platform user authentication (not store customers).
+"""
 
 from typing import Annotated
 
@@ -13,23 +16,30 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     AuthResponse,
+    ChangePasswordRequest,
     LoginRequest,
+    MessageResponse,
     RefreshTokenRequest,
     RegisterRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UserResponse,
 )
 from src.application.dto.auth import LoginDTO, RefreshTokenDTO, RegisterDTO
 from src.application.use_cases.auth import (
+    ChangePasswordDTO,
+    ChangePasswordUseCase,
     LoginUserUseCase,
     RefreshTokenUseCase,
     RegisterUserUseCase,
+    UpdateProfileDTO,
+    UpdateProfileUseCase,
 )
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.external_services import PasswordService, TokenService
 from src.infrastructure.repositories import UserRepository
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter()
 
 
 @router.post(
@@ -44,13 +54,13 @@ async def register(
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
 ):
-    """Register a new user account."""
+    """Register a new platform user account."""
     use_case = RegisterUserUseCase(
         user_repository=user_repo,
         password_service=password_service,
         token_service=token_service,
     )
-    
+
     dto = RegisterDTO(
         email=request.email,
         password=request.password,
@@ -59,7 +69,7 @@ async def register(
         phone=request.phone,
     )
     result = await use_case.execute(dto)
-    
+
     return SuccessResponse(
         data=AuthResponse(
             user=UserResponse(
@@ -103,13 +113,13 @@ async def login(
         password_service=password_service,
         token_service=token_service,
     )
-    
+
     dto = LoginDTO(
         email=request.email,
         password=request.password,
     )
     result = await use_case.execute(dto)
-    
+
     return SuccessResponse(
         data=AuthResponse(
             user=UserResponse(
@@ -151,15 +161,15 @@ async def refresh_token(
         user_repository=user_repo,
         token_service=token_service,
     )
-    
-    result = await use_case.execute(refresh_token=request.refresh_token)
-    
+
+    dto = RefreshTokenDTO(refresh_token=request.refresh_token)
+    result = await use_case.execute(dto)
+
     return SuccessResponse(
         data=TokenResponse(
             access_token=result.access_token,
             refresh_token=result.refresh_token,
             token_type="bearer",
-            expires_in=result.expires_in,
         ),
         message="Token refreshed successfully",
     )
@@ -176,10 +186,10 @@ async def get_current_user(
 ):
     """Get current authenticated user's profile."""
     user = await user_repo.get_by_id(user_id)
-    
+
     if not user:
         raise EntityNotFoundError("User", str(user_id))
-    
+
     return SuccessResponse(
         data=UserResponse(
             id=str(user.id),
@@ -189,9 +199,99 @@ async def get_current_user(
             full_name=f"{user.first_name} {user.last_name}",
             phone=user.phone.value if user.phone else None,
             role=user.role.value,
-            is_active=user.is_active,
+            status=user.status.value,
+            avatar_url=user.avatar_url,
             is_verified=user.is_verified,
-            created_at=user.created_at,
+            created_at=str(user.created_at),
+            updated_at=str(user.updated_at),
         ),
         message="User retrieved successfully",
+    )
+
+
+@router.patch(
+    "/me",
+    response_model=SuccessResponse[UserResponse],
+    summary="Update profile",
+)
+async def update_profile(
+    request: UpdateProfileRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+):
+    """Update current user's profile."""
+    import logging
+    from uuid import UUID
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        use_case = UpdateProfileUseCase(user_repository=user_repo)
+
+        dto = UpdateProfileDTO(
+            first_name=request.first_name,
+            last_name=request.last_name,
+            phone=request.phone,
+            avatar_url=request.avatar_url,
+        )
+
+        result = await use_case.execute(
+            user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+            dto=dto,
+        )
+
+        return SuccessResponse(
+            data=UserResponse(
+                id=str(result.id),
+                email=result.email,
+                first_name=result.first_name,
+                last_name=result.last_name,
+                full_name=result.full_name,
+                phone=result.phone,
+                role=result.role,
+                status=result.status,
+                avatar_url=result.avatar_url,
+                is_verified=result.is_verified,
+                created_at=str(result.created_at),
+                updated_at=str(result.updated_at),
+            ),
+            message="Profile updated successfully",
+        )
+    except Exception as e:
+        logger.exception(f"PATCH /auth/me failed: {type(e).__name__}: {e}")
+        raise
+
+
+@router.patch(
+    "/me/password",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Change password",
+)
+async def change_password(
+    request: ChangePasswordRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    password_service: Annotated[PasswordService, Depends(get_password_service)],
+):
+    """Change current user's password."""
+    from uuid import UUID
+
+    use_case = ChangePasswordUseCase(
+        user_repository=user_repo,
+        password_service=password_service,
+    )
+
+    dto = ChangePasswordDTO(
+        current_password=request.current_password,
+        new_password=request.new_password,
+    )
+
+    await use_case.execute(
+        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+        dto=dto,
+    )
+
+    return SuccessResponse(
+        data=MessageResponse(message="Password changed successfully"),
+        message="Password changed successfully",
     )

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class CreateProductRequest(BaseModel):
     """Create product request schema."""
 
+    store_id: UUID
     name: str = Field(..., min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=255)
     sku: str | None = Field(None, max_length=100)
@@ -76,3 +77,19 @@ class ProductResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UploadedImageResponse(BaseModel):
+    """Uploaded image response schema."""
+
+    url: str
+    key: str
+    size: int
+    content_type: str
+    product_id: str
+
+
+class DeleteImageRequest(BaseModel):
+    """Delete image request schema."""
+
+    image_url: str

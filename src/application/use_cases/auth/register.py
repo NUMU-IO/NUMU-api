@@ -25,7 +25,7 @@ class RegisterUserUseCase:
 
     async def execute(self, dto: RegisterDTO) -> AuthResponseDTO:
         """Register a new user and return auth response."""
-        email = Email(dto.email)
+        email = Email(value=dto.email)
 
         # Check if email already exists
         if await self.user_repository.email_exists(email):
@@ -34,13 +34,13 @@ class RegisterUserUseCase:
         # Hash password
         hashed_password = self.password_service.hash_password(dto.password)
 
-        # Create user entity
+        # Create user entity (register as store owner for merchant dashboard)
         user = User(
             email=email,
             hashed_password=hashed_password,
             first_name=dto.first_name,
             last_name=dto.last_name,
-            role=UserRole.CUSTOMER,
+            role=UserRole.STORE_OWNER,
             status=UserStatus.PENDING_VERIFICATION,
         )
 

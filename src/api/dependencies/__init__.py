@@ -1,6 +1,7 @@
 """API dependencies module."""
 
 from src.api.dependencies.auth import (
+    get_current_store,
     get_current_user_id,
     get_current_user_role,
     require_admin,
@@ -9,6 +10,9 @@ from src.api.dependencies.auth import (
 )
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
+    get_customer_address_repository,
+    get_customer_repository,
+    get_order_repository,
     get_product_repository,
     get_store_repository,
     get_user_repository,
@@ -26,6 +30,7 @@ __all__ = [
     # Database
     "get_db",
     # Auth
+    "get_current_store",
     "get_current_user_id",
     "get_current_user_role",
     "require_roles",
@@ -35,6 +40,9 @@ __all__ = [
     "get_user_repository",
     "get_store_repository",
     "get_product_repository",
+    "get_customer_repository",
+    "get_customer_address_repository",
+    "get_order_repository",
     # Services
     "get_password_service",
     "get_token_service",
@@ -43,3 +51,4 @@ __all__ = [
     "get_storage_service",
     "get_ai_service",
 ]
+

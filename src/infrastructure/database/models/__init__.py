@@ -4,10 +4,12 @@ from src.infrastructure.database.models.base import TenantMixin, TimestampMixin,
 
 # Public schema models
 from src.infrastructure.database.models.public import TenantModel, UserModel
+from src.infrastructure.database.models.audit import AuditLogModel
 
 # Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
     CategoryModel,
+    CustomerAddressModel,
     CustomerModel,
     OrderModel,
     ProductModel,
@@ -21,10 +23,13 @@ __all__ = [
     # Public
     "TenantModel",
     "UserModel",
+    "AuditLogModel",
     # Tenant-scoped
     "StoreModel",
     "ProductModel",
     "CategoryModel",
     "CustomerModel",
+    "CustomerAddressModel",
     "OrderModel",
 ]
+

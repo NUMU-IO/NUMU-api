@@ -81,3 +81,20 @@ class IOrderRepository(BaseRepository[Order]):
     async def get_next_order_number(self, store_id: UUID) -> str:
         """Generate next order number for a store."""
         ...
+
+    @abstractmethod
+    async def count_by_customer(self, customer_id: UUID) -> int:
+        """Get total count of orders for a customer."""
+        ...
+
+    @abstractmethod
+    async def search(
+        self,
+        store_id: UUID,
+        query: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Search orders by order number or customer notes."""
+        ...
+

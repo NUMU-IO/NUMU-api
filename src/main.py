@@ -8,6 +8,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from src.api.middleware import (
+    RateLimitMiddleware,
     TenantMiddleware,
     logging_middleware,
     setup_cors,
@@ -30,22 +31,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-<<<<<<< Updated upstream
     logger.info("Starting NUMU API...")
-=======
-    logger.info("Starting numu API...")
->>>>>>> Stashed changes
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"API Version: {settings.app_version}")
     
     yield
     
     # Shutdown
-<<<<<<< Updated upstream
     logger.info("Shutting down NUMU API...")
-=======
-    logger.info("Shutting down numu API...")
->>>>>>> Stashed changes
     await engine.dispose()
     logger.info("Database connection closed")
 
@@ -54,11 +47,7 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title=settings.app_name,
-<<<<<<< Updated upstream
         description="E-commerce platform API for NUMU",
-=======
-        description="E-commerce platform API for numu",
->>>>>>> Stashed changes
         version=settings.app_version,
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
@@ -73,12 +62,27 @@ def create_app() -> FastAPI:
     setup_exception_handlers(app)
     
     # Add SessionMiddleware for admin panel cookie-based auth
+    # Uses separate session secret from JWT for security
     from starlette.middleware.sessions import SessionMiddleware
-    app.add_middleware(SessionMiddleware, secret_key=settings.jwt_secret_key)
+    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
     
     # Add middleware (order matters: first added = outermost)
+    # Rate limiting should be outermost to block requests early
+    app.add_middleware(RateLimitMiddleware)
     app.add_middleware(TenantMiddleware)
     app.middleware("http")(logging_middleware)
+    
+    # Root endpoint
+    @app.get("/", tags=["Root"])
+    async def root():
+        """Root endpoint - API information."""
+        return {
+            "name": settings.app_name,
+            "version": settings.app_version,
+            "description": "E-commerce platform API for NUMU",
+            "docs": "/docs" if settings.debug else None,
+            "health": "/api/v1/public/health",
+        }
     
     # Include routers
     app.include_router(api_router)
@@ -96,7 +100,7 @@ app = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         "src.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host="127.0.0.1",
+        port=8021,
         reload=settings.debug,
     )

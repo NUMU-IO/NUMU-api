@@ -22,13 +22,13 @@ class UserRepository(IUserRepository):
         """Convert database model to domain entity."""
         return User(
             id=model.id,
-            email=Email(model.email),
+            email=Email(value=model.email),
             hashed_password=model.hashed_password,
             first_name=model.first_name,
             last_name=model.last_name,
             role=model.role,
             status=model.status,
-            phone=PhoneNumber(model.phone) if model.phone else None,
+            phone=PhoneNumber(value=model.phone) if model.phone else None,
             avatar_url=model.avatar_url,
             email_verified_at=model.email_verified_at,
             last_login_at=model.last_login_at,

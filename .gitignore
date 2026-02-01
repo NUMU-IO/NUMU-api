@@ -92,4 +92,7 @@ temp/
 
 # Package manager
 poetry.lock
-Pipfile.lock
+Pipfile.lock.claude/
+
+# claude-specific
+.claude/

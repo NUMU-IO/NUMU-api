@@ -1,10 +1,13 @@
 """Application configuration using Pydantic Settings."""
 
+import logging
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, computed_field
+from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -35,7 +38,6 @@ class Settings(BaseSettings):
     postgres_password: str = "postgres"
     postgres_db: str = "numu"
 
-    @computed_field
     @property
     def database_url(self) -> str:
         """Construct async PostgreSQL connection URL."""
@@ -50,7 +52,6 @@ class Settings(BaseSettings):
             )
         )
 
-    @computed_field
     @property
     def database_url_sync(self) -> str:
         """Construct sync PostgreSQL connection URL (for Alembic)."""
@@ -71,7 +72,6 @@ class Settings(BaseSettings):
     redis_password: str | None = None
     redis_db: int = 0
 
-    @computed_field
     @property
     def redis_url(self) -> str:
         """Construct Redis connection URL."""
@@ -79,10 +79,65 @@ class Settings(BaseSettings):
         return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     # JWT Authentication
-    jwt_secret_key: str = Field(default="change-me-in-production")
+    # Default is 32+ chars for development, MUST be changed in production
+    jwt_secret_key: str = Field(default="dev-only-jwt-secret-key-change-in-production-32chars")
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+
+    # Session (separate from JWT for admin panel cookies)
+    # Default is 32+ chars for development, MUST be changed in production
+    session_secret_key: str = Field(default="dev-only-session-secret-change-in-prod-32chars")
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """Validate JWT secret key."""
+        # Note: Environment check happens in model_validator since we need
+        # access to the environment field
+        if len(v) < 32:
+            raise ValueError(
+                "JWT_SECRET_KEY must be at least 32 characters for security. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        return v
+
+    @field_validator("session_secret_key")
+    @classmethod
+    def validate_session_secret(cls, v: str) -> str:
+        """Validate session secret key."""
+        if len(v) < 32:
+            raise ValueError(
+                "SESSION_SECRET_KEY must be at least 32 characters for security. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Validate that default secrets are not used in production."""
+        if self.environment == "production":
+            if self.jwt_secret_key == "change-me-in-production":
+                raise ValueError(
+                    "CRITICAL: JWT_SECRET_KEY must be changed from default in production! "
+                    "Set a secure value in your environment or .env file."
+                )
+            if self.session_secret_key == "change-me-session-secret":
+                raise ValueError(
+                    "CRITICAL: SESSION_SECRET_KEY must be changed from default in production! "
+                    "Set a secure value in your environment or .env file."
+                )
+            if self.debug:
+                logger.warning(
+                    "WARNING: Debug mode is enabled in production. "
+                    "This exposes sensitive information and should be disabled."
+                )
+        return self
+
+    # Rate limiting
+    rate_limit_enabled: bool = True
+    rate_limit_requests_per_minute: int = 60
+    rate_limit_auth_requests_per_minute: int = 5
 
     # Stripe
     stripe_secret_key: str | None = None
@@ -111,6 +166,55 @@ class Settings(BaseSettings):
 
     # Shippo
     shippo_api_key: str | None = None
+
+    # =========================================================================
+    # Egyptian Market Integrations
+    # =========================================================================
+
+    # Paymob (Egyptian Payment Gateway)
+    paymob_api_key: str | None = None
+    paymob_integration_id: str | None = None  # Card payments integration
+    paymob_iframe_id: str | None = None
+    paymob_hmac_secret: str | None = None  # Webhook verification
+    paymob_wallet_integration_id: str | None = None  # Mobile wallets
+
+    # Fawry (Retail Pay Points)
+    fawry_merchant_code: str | None = None
+    fawry_security_key: str | None = None
+    fawry_base_url: str = "https://atfawry.fawrystaging.com"  # Use production URL in prod
+
+    # Cash on Delivery (COD)
+    cod_enabled: bool = True
+    cod_fee_percentage: float = 0.0  # Optional COD fee (0-100)
+    cod_fee_flat: int = 0  # Flat COD fee in cents
+    cod_max_amount: int = 1000000  # Max COD amount in cents (10,000 EGP)
+    cod_min_amount: int = 0  # Min COD amount in cents
+
+    # Bosta Shipping (Egyptian Courier)
+    bosta_api_key: str | None = None
+    bosta_business_id: str | None = None
+    bosta_base_url: str = "https://app.bosta.co/api/v2"
+    bosta_webhook_secret: str | None = None
+
+    # WhatsApp Business API
+    whatsapp_access_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_business_account_id: str | None = None
+    whatsapp_webhook_verify_token: str | None = None
+    whatsapp_app_secret: str | None = None  # For webhook signature verification
+    whatsapp_enabled: bool = False
+
+    # Egyptian Tax Authority (ETA) E-Invoicing
+    eta_client_id: str | None = None
+    eta_client_secret: str | None = None
+    eta_base_url: str = "https://api.invoicing.eta.gov.eg/api/v1"
+    eta_token_url: str = "https://id.eta.gov.eg/connect/token"
+    eta_activity_code: str = "4649"  # Wholesale of other household goods
+    eta_enabled: bool = False
+
+    # Localization
+    default_locale: str = "en"
+    supported_locales: list[str] = ["en", "ar"]
 
 
 @lru_cache

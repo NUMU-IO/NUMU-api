@@ -64,10 +64,10 @@ class TenantService:
             tenant = await self.tenant_repo.create(
                 name=name,
                 subdomain=subdomain,
-                schema_name=schema_name,
                 owner_id=owner_id,
                 plan=plan,
-                is_active=True
+                is_active=True,
+                settings={"schema_name": schema_name},
             )
             
             logger.info(f"Created tenant '{subdomain}' with schema '{schema_name}'")

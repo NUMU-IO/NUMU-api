@@ -87,6 +87,7 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Relationships
     store = relationship("StoreModel", back_populates="orders", lazy="selectin")
     customer = relationship("CustomerModel", back_populates="orders", lazy="selectin")
+    invoice = relationship("InvoiceModel", back_populates="order", uselist=False, lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<OrderModel(id={self.id}, order_number={self.order_number})>"

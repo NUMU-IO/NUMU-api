@@ -5,6 +5,10 @@ from src.application.use_cases.products.delete_product import DeleteProductUseCa
 from src.application.use_cases.products.get_product import GetProductUseCase
 from src.application.use_cases.products.list_products import ListProductsUseCase
 from src.application.use_cases.products.update_product import UpdateProductUseCase
+from src.application.use_cases.products.upload_image import (
+    DeleteProductImageUseCase,
+    UploadProductImageUseCase,
+)
 
 __all__ = [
     "CreateProductUseCase",
@@ -12,4 +16,6 @@ __all__ = [
     "ListProductsUseCase",
     "UpdateProductUseCase",
     "DeleteProductUseCase",
+    "UploadProductImageUseCase",
+    "DeleteProductImageUseCase",
 ]

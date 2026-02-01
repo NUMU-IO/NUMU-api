@@ -1,21 +1,31 @@
 """Email value object."""
 
 import re
-from dataclasses import dataclass
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
-@dataclass(frozen=True)
-class Email:
+class Email(BaseModel):
     """Email value object with validation."""
+
+    model_config = ConfigDict(frozen=True)
 
     value: str
 
-    def __post_init__(self) -> None:
-        """Validate email format."""
-        if not self._is_valid_email(self.value):
-            raise ValueError(f"Invalid email address: {self.value}")
-        # Normalize email to lowercase
-        object.__setattr__(self, "value", self.value.lower().strip())
+    @field_validator("value", mode="before")
+    @classmethod
+    def validate_and_normalize(cls, v: Any) -> str:
+        """Validate email format and normalize to lowercase."""
+        if not isinstance(v, str):
+            v = str(v)
+
+        v = v.lower().strip()
+
+        if not cls._is_valid_email(v):
+            raise ValueError(f"Invalid email address: {v}")
+
+        return v
 
     @staticmethod
     def _is_valid_email(email: str) -> bool:

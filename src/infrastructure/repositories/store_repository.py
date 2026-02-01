@@ -1,5 +1,6 @@
 """Store repository implementation."""
 
+import copy
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -23,6 +24,8 @@ class StoreRepository(IStoreRepository):
             id=model.id,
             name=model.name,
             slug=model.slug,
+            subdomain=model.subdomain,
+            custom_domain=model.custom_domain,
             owner_id=model.owner_id,
             description=model.description,
             logo_url=model.logo_url,
@@ -31,9 +34,11 @@ class StoreRepository(IStoreRepository):
             default_currency=model.default_currency,
             contact_email=model.contact_email,
             contact_phone=model.contact_phone,
-            address=model.address,
-            social_links=model.social_links,
-            settings=model.settings,
+            address=copy.deepcopy(model.address) if model.address else {},
+            social_links=copy.deepcopy(model.social_links) if model.social_links else {},
+            settings=copy.deepcopy(model.settings) if model.settings else {},
+            theme_settings=copy.deepcopy(model.theme_settings) if model.theme_settings else {},
+            tenant_id=model.tenant_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -44,6 +49,8 @@ class StoreRepository(IStoreRepository):
             id=entity.id,
             name=entity.name,
             slug=entity.slug,
+            subdomain=entity.subdomain,
+            custom_domain=entity.custom_domain,
             owner_id=entity.owner_id,
             description=entity.description,
             logo_url=entity.logo_url,
@@ -55,6 +62,8 @@ class StoreRepository(IStoreRepository):
             address=entity.address,
             social_links=entity.social_links,
             settings=entity.settings,
+            theme_settings=entity.theme_settings,
+            tenant_id=entity.tenant_id,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -71,11 +80,18 @@ class StoreRepository(IStoreRepository):
         self,
         skip: int = 0,
         limit: int = 100,
+        is_active: bool | None = None,
     ) -> list[Store]:
-        """Get all stores with pagination."""
-        result = await self.session.execute(
-            select(StoreModel).offset(skip).limit(limit)
-        )
+        """Get all stores with pagination and optional filtering."""
+        query = select(StoreModel)
+        
+        # Apply is_active filter if provided
+        if is_active is not None:
+            target_status = StoreStatus.ACTIVE if is_active else StoreStatus.INACTIVE
+            query = query.where(StoreModel.status == target_status)
+        
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def create(self, entity: Store) -> Store:
@@ -95,6 +111,8 @@ class StoreRepository(IStoreRepository):
         if model:
             model.name = entity.name
             model.slug = entity.slug
+            model.subdomain = entity.subdomain
+            model.custom_domain = entity.custom_domain
             model.description = entity.description
             model.logo_url = entity.logo_url
             model.banner_url = entity.banner_url
@@ -105,6 +123,7 @@ class StoreRepository(IStoreRepository):
             model.address = entity.address
             model.social_links = entity.social_links
             model.settings = entity.settings
+            model.theme_settings = entity.theme_settings
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)
@@ -122,11 +141,16 @@ class StoreRepository(IStoreRepository):
             return True
         return False
 
-    async def count(self) -> int:
-        """Get total count of stores."""
-        result = await self.session.execute(
-            select(func.count(StoreModel.id))
-        )
+    async def count(self, is_active: bool | None = None) -> int:
+        """Get total count of stores, optionally filtered by active status."""
+        query = select(func.count(StoreModel.id))
+        
+        # Apply is_active filter if provided
+        if is_active is not None:
+            target_status = StoreStatus.ACTIVE if is_active else StoreStatus.INACTIVE
+            query = query.where(StoreModel.status == target_status)
+        
+        result = await self.session.execute(query)
         return result.scalar() or 0
 
     async def get_by_slug(self, slug: str) -> Store | None:
@@ -143,6 +167,29 @@ class StoreRepository(IStoreRepository):
             select(StoreModel.id).where(StoreModel.slug == slug)
         )
         return result.scalar_one_or_none() is not None
+
+    async def subdomain_exists(self, subdomain: str) -> bool:
+        """Check if subdomain already exists."""
+        result = await self.session.execute(
+            select(StoreModel.id).where(StoreModel.subdomain == subdomain.lower())
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_by_subdomain(self, subdomain: str) -> Store | None:
+        """Get store by subdomain."""
+        result = await self.session.execute(
+            select(StoreModel).where(StoreModel.subdomain == subdomain.lower())
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_custom_domain(self, domain: str) -> Store | None:
+        """Get store by custom domain."""
+        result = await self.session.execute(
+            select(StoreModel).where(StoreModel.custom_domain == domain.lower())
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
 
     async def get_by_owner(
         self,

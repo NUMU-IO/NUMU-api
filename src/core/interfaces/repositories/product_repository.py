@@ -73,3 +73,27 @@ class IProductRepository(BaseRepository[Product]):
     ) -> None:
         """Bulk update product quantities. Each tuple is (product_id, quantity_delta)."""
         ...
+
+    @abstractmethod
+    async def list_with_filters(
+        self,
+        store_id: UUID | None = None,
+        category_id: UUID | None = None,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool | None = None,
+        search: str | None = None,
+    ) -> list[Product]:
+        """List products with multiple optional filters."""
+        ...
+
+    @abstractmethod
+    async def count_with_filters(
+        self,
+        store_id: UUID | None = None,
+        category_id: UUID | None = None,
+        is_active: bool | None = None,
+        search: str | None = None,
+    ) -> int:
+        """Count products matching the given filters."""
+        ...
