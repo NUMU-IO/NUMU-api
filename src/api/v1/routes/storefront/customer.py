@@ -6,6 +6,7 @@ These routes require customer authentication and provide:
 - Profile management
 - Password change
 - Address management
+- Order history
 """
 
 from typing import Annotated
@@ -17,6 +18,7 @@ from src.api.dependencies.auth import get_current_customer
 from src.api.dependencies.repositories import (
     get_customer_address_repository,
     get_customer_repository,
+    get_order_repository,
     get_store_repository,
 )
 from src.api.dependencies.services import get_password_service
@@ -53,6 +55,7 @@ from src.infrastructure.external_services import PasswordService
 from src.infrastructure.repositories import (
     CustomerAddressRepository,
     CustomerRepository,
+    OrderRepository,
     StoreRepository,
 )
 
@@ -444,4 +447,158 @@ async def set_default_address(
             updated_at=str(result.updated_at) if result.updated_at else None,
         ),
         message="Default address set successfully",
+    )
+
+
+# ============================================================================
+# Order History Routes
+# ============================================================================
+
+from src.api.v1.schemas.tenant.order import (
+    OrderLineItemResponse,
+    OrderAddressResponse,
+    OrderListItemResponse,
+    OrderResponse,
+)
+from src.api.v1.schemas.tenant.common import PaginatedListResponse
+from src.application.dto.order import OrderDTO
+
+
+def _order_address_to_response(address_dto) -> OrderAddressResponse:
+    return OrderAddressResponse(
+        first_name=address_dto.first_name,
+        last_name=address_dto.last_name,
+        full_name=address_dto.full_name,
+        address_line1=address_dto.address_line1,
+        address_line2=address_dto.address_line2,
+        city=address_dto.city,
+        state=address_dto.state,
+        postal_code=address_dto.postal_code,
+        country=address_dto.country,
+        phone=address_dto.phone,
+    )
+
+
+def _order_line_item_to_response(item_dto) -> OrderLineItemResponse:
+    return OrderLineItemResponse(
+        product_id=str(item_dto.product_id),
+        product_name=item_dto.product_name,
+        variant_id=str(item_dto.variant_id) if item_dto.variant_id else None,
+        variant_name=item_dto.variant_name,
+        sku=item_dto.sku,
+        quantity=item_dto.quantity,
+        unit_price=item_dto.unit_price,
+        total_price=item_dto.total_price,
+    )
+
+
+def _order_to_response(order_dto) -> OrderResponse:
+    return OrderResponse(
+        id=str(order_dto.id),
+        store_id=str(order_dto.store_id),
+        customer_id=str(order_dto.customer_id),
+        order_number=order_dto.order_number,
+        line_items=[_order_line_item_to_response(i) for i in order_dto.line_items],
+        shipping_address=_order_address_to_response(order_dto.shipping_address),
+        billing_address=_order_address_to_response(order_dto.billing_address) if order_dto.billing_address else None,
+        status=order_dto.status,
+        payment_status=order_dto.payment_status,
+        fulfillment_status=order_dto.fulfillment_status,
+        subtotal=order_dto.subtotal,
+        shipping_cost=order_dto.shipping_cost,
+        tax_amount=order_dto.tax_amount,
+        discount_amount=order_dto.discount_amount,
+        total=order_dto.total,
+        currency=order_dto.currency,
+        payment_method=order_dto.payment_method,
+        payment_id=order_dto.payment_id,
+        shipping_method=order_dto.shipping_method,
+        tracking_number=order_dto.tracking_number,
+        tracking_url=order_dto.tracking_url,
+        notes=order_dto.notes,
+        customer_notes=order_dto.customer_notes,
+        item_count=order_dto.item_count,
+        is_paid=order_dto.is_paid,
+        can_be_cancelled=order_dto.can_be_cancelled,
+        cancelled_at=str(order_dto.cancelled_at) if order_dto.cancelled_at else None,
+        paid_at=str(order_dto.paid_at) if order_dto.paid_at else None,
+        fulfilled_at=str(order_dto.fulfilled_at) if order_dto.fulfilled_at else None,
+        shipped_at=str(order_dto.shipped_at) if order_dto.shipped_at else None,
+        delivered_at=str(order_dto.delivered_at) if order_dto.delivered_at else None,
+        created_at=str(order_dto.created_at),
+        updated_at=str(order_dto.updated_at),
+    )
+
+
+@router.get(
+    "/orders",
+    response_model=SuccessResponse[PaginatedListResponse[OrderListItemResponse]],
+    summary="List customer orders",
+)
+async def list_customer_orders(
+    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """List all orders placed by the current customer."""
+    skip = (page - 1) * limit
+    orders = await order_repo.get_by_customer(
+        customer_id=current_customer.id,
+        skip=skip,
+        limit=limit,
+    )
+    total = await order_repo.count_by_customer(current_customer.id)
+
+    items = [
+        OrderListItemResponse(
+            id=str(o.id),
+            order_number=o.order_number,
+            customer_id=str(o.customer_id),
+            customer_name=f"{current_customer.first_name} {current_customer.last_name}",
+            status=o.status.value,
+            payment_status=o.payment_status.value,
+            fulfillment_status=o.fulfillment_status.value,
+            total=o.total,
+            currency=o.currency,
+            item_count=o.item_count,
+            payment_method=o.payment_method,
+            created_at=str(o.created_at),
+        )
+        for o in orders
+    ]
+
+    return SuccessResponse(
+        data=PaginatedListResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=limit,
+            total_pages=(total + limit - 1) // limit if limit > 0 else 0,
+        ),
+        message="Orders retrieved successfully",
+    )
+
+
+@router.get(
+    "/orders/{order_id}",
+    response_model=SuccessResponse[OrderResponse],
+    summary="Get customer order detail",
+)
+async def get_customer_order(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+):
+    """Get detailed view of a specific order belonging to the current customer."""
+    order = await order_repo.get_by_id(order_id)
+
+    if not order or order.customer_id != current_customer.id:
+        raise EntityNotFoundError("Order", str(order_id))
+
+    order_dto = OrderDTO.from_entity(order)
+
+    return SuccessResponse(
+        data=_order_to_response(order_dto),
+        message="Order retrieved successfully",
     )
