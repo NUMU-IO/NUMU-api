@@ -1,6 +1,6 @@
 """Order entity representing a customer order."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -23,6 +23,39 @@ class OrderStatus(str, Enum):
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
     PAYMENT_FAILED = "payment_failed"
+
+
+# Valid status transitions map
+# Key: current status, Value: list of valid next statuses
+VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
+    OrderStatus.PENDING: [
+        OrderStatus.CONFIRMED,
+        OrderStatus.PROCESSING,  # Direct to processing if auto-confirmed
+        OrderStatus.CANCELLED,
+        OrderStatus.PAYMENT_FAILED,
+    ],
+    OrderStatus.CONFIRMED: [
+        OrderStatus.PROCESSING,
+        OrderStatus.CANCELLED,
+    ],
+    OrderStatus.PROCESSING: [
+        OrderStatus.SHIPPED,
+        OrderStatus.CANCELLED,  # Can cancel before shipping
+    ],
+    OrderStatus.SHIPPED: [
+        OrderStatus.DELIVERED,
+        # Cannot cancel after shipping
+    ],
+    OrderStatus.DELIVERED: [
+        OrderStatus.REFUNDED,
+    ],
+    OrderStatus.CANCELLED: [],  # Terminal state
+    OrderStatus.REFUNDED: [],  # Terminal state
+    OrderStatus.PAYMENT_FAILED: [
+        OrderStatus.PENDING,  # Can retry payment
+        OrderStatus.CANCELLED,
+    ],
+}
 
 
 class PaymentStatus(str, Enum):
@@ -234,7 +267,7 @@ class Order(BaseEntity):
     @property
     def can_be_cancelled(self) -> bool:
         """Check if order can be cancelled."""
-        return self.status in (OrderStatus.PENDING, OrderStatus.CONFIRMED)
+        return self.status in (OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING)
 
     @property
     def can_be_refunded(self) -> bool:
@@ -246,7 +279,82 @@ class Order(BaseEntity):
         """Get total number of items in the order."""
         return sum(item.quantity for item in self.line_items)
 
-    # State transition methods
+    # Status transition validation methods
+    def can_transition_to(self, new_status: OrderStatus) -> bool:
+        """Check if order can transition to the given status.
+
+        Args:
+            new_status: The target status.
+
+        Returns:
+            True if transition is valid, False otherwise.
+        """
+        valid_transitions = VALID_STATUS_TRANSITIONS.get(self.status, [])
+        return new_status in valid_transitions
+
+    def get_valid_transitions(self) -> list[OrderStatus]:
+        """Get list of valid status transitions from current status.
+
+        Returns:
+            List of valid target statuses.
+        """
+        return VALID_STATUS_TRANSITIONS.get(self.status, [])
+
+    def validate_transition(self, new_status: OrderStatus) -> None:
+        """Validate that a status transition is allowed.
+
+        Args:
+            new_status: The target status.
+
+        Raises:
+            ValueError: If transition is not allowed.
+        """
+        if not self.can_transition_to(new_status):
+            valid = [s.value for s in self.get_valid_transitions()]
+            raise ValueError(
+                f"Invalid status transition: {self.status.value} -> {new_status.value}. "
+                f"Valid transitions from {self.status.value}: {valid or 'none (terminal state)'}"
+            )
+
+    def transition_to(self, new_status: OrderStatus, reason: str | None = None) -> None:
+        """Transition order to a new status with validation.
+
+        Args:
+            new_status: The target status.
+            reason: Optional reason for the transition.
+
+        Raises:
+            ValueError: If transition is not allowed.
+        """
+        self.validate_transition(new_status)
+
+        old_status = self.status
+        self.status = new_status
+
+        # Record transition in metadata
+        if "status_history" not in self.metadata:
+            self.metadata["status_history"] = []
+
+        self.metadata["status_history"].append({
+            "from": old_status.value,
+            "to": new_status.value,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "reason": reason,
+        })
+
+        # Update timestamps based on new status
+        if new_status == OrderStatus.CANCELLED:
+            self.cancelled_at = datetime.now(timezone.utc)
+        elif new_status == OrderStatus.SHIPPED:
+            self.shipped_at = datetime.now(timezone.utc)
+            self.fulfilled_at = datetime.now(timezone.utc)
+            self.fulfillment_status = FulfillmentStatus.FULFILLED
+        elif new_status == OrderStatus.DELIVERED:
+            self.delivered_at = datetime.now(timezone.utc)
+
+        self.touch()
+
+    # State transition methods (legacy - now use validate_transition internally)
     def confirm(self) -> None:
         """Confirm the order."""
         if self.status != OrderStatus.PENDING:
@@ -265,7 +373,7 @@ class Order(BaseEntity):
         self.payment_id = payment_id
         if payment_method:
             self.payment_method = payment_method
-        self.paid_at = datetime.utcnow()
+        self.paid_at = datetime.now(timezone.utc)
         self.status = OrderStatus.PROCESSING
         self.touch()
 
@@ -302,8 +410,8 @@ class Order(BaseEntity):
             self.tracking_number = tracking_number
         if tracking_url:
             self.tracking_url = tracking_url
-        self.shipped_at = datetime.utcnow()
-        self.fulfilled_at = datetime.utcnow()
+        self.shipped_at = datetime.now(timezone.utc)
+        self.fulfilled_at = datetime.now(timezone.utc)
         self.touch()
 
     def deliver(self) -> None:
@@ -311,7 +419,7 @@ class Order(BaseEntity):
         if self.status != OrderStatus.SHIPPED:
             raise ValueError(f"Cannot deliver order in {self.status} status")
         self.status = OrderStatus.DELIVERED
-        self.delivered_at = datetime.utcnow()
+        self.delivered_at = datetime.now(timezone.utc)
         self.touch()
 
     def cancel(self, reason: str | None = None) -> None:
@@ -323,7 +431,7 @@ class Order(BaseEntity):
         if not self.can_be_cancelled:
             raise ValueError(f"Cannot cancel order in {self.status} status")
         self.status = OrderStatus.CANCELLED
-        self.cancelled_at = datetime.utcnow()
+        self.cancelled_at = datetime.now(timezone.utc)
         if reason:
             self.metadata["cancellation_reason"] = reason
         self.touch()

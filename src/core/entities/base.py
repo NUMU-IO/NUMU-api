@@ -1,10 +1,15 @@
 """Base entity class for all domain entities."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 
 class BaseEntity(BaseModel):
@@ -33,8 +38,8 @@ class BaseEntity(BaseModel):
     )
 
     id: UUID = Field(default_factory=uuid4)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
 
     def __eq__(self, other: Any) -> bool:
         """Entities are equal if they have the same ID."""
@@ -52,7 +57,7 @@ class BaseEntity(BaseModel):
 
     def touch(self) -> None:
         """Update the updated_at timestamp to current time."""
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     def model_dump_for_db(self, **kwargs: Any) -> dict[str, Any]:
         """Dump model for database insertion.
