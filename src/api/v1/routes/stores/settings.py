@@ -1,21 +1,32 @@
 """Store settings routes."""
 
+import re
 import uuid
-from typing import Annotated
+from datetime import datetime, timezone
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
 from src.api.dependencies import get_current_store, get_store_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     CreateShippingZoneRequest,
+    CustomizationFooter,
+    CustomizationHeader,
+    CustomizationHero,
+    CustomizationIdentity,
+    CustomizationProducts,
+    CustomizationResponse,
+    CustomizationSocialLinks,
+    CustomizationTheme,
     PaymentSettingsResponse,
     PaymentMethodStatus,
     ShippingCarrierStatus,
     ShippingSettingsResponse,
     ShippingZone,
     StoreSettingsResponse,
+    UpdateCustomizationRequest,
     UpdatePaymentSettingsRequest,
     UpdateShippingSettingsRequest,
     UpdateShippingZoneRequest,
@@ -455,4 +466,262 @@ async def update_whatsapp_settings(
     return SuccessResponse(
         data=_build_whatsapp_response(whatsapp_settings),
         message="WhatsApp settings updated successfully",
+    )
+
+
+# ============ Storefront Customization ============
+
+def _get_default_customization() -> dict:
+    """Get default storefront customization settings."""
+    return {
+        "identity": {"logo_url": "", "store_name": "", "favicon_url": ""},
+        "theme": {
+            "base_theme": "modern",
+            "primary_color": "",
+            "secondary_color": "",
+            "background_color": "",
+            "text_color": "",
+            "button_style": "rounded",
+        },
+        "header": {
+            "nav_layout": "left-aligned",
+            "show_search_bar": True,
+            "show_cart_icon": True,
+            "announcement_text": "",
+            "announcement_color": "#4318FF",
+        },
+        "hero": {
+            "hero_image_url": "",
+            "headline": "",
+            "subtitle": "",
+            "cta_text": "",
+            "cta_link": "",
+        },
+        "products": {
+            "layout": "grid",
+            "products_per_row": 3,
+            "show_price": True,
+            "show_rating": True,
+        },
+        "footer": {
+            "footer_text": "",
+            "social_links": {"facebook": "", "instagram": "", "twitter": "", "whatsapp": ""},
+            "show_newsletter": True,
+        },
+        "is_published": False,
+        "last_published_at": None,
+    }
+
+
+def _to_snake_case(name: str) -> str:
+    """Convert camelCase to snake_case."""
+    return re.sub(r"([A-Z])", r"_\1", name).lower().lstrip("_")
+
+
+def _normalize_keys(obj: Any) -> Any:
+    """Recursively convert all dict keys to snake_case and deduplicate."""
+    if isinstance(obj, dict):
+        result: dict[str, Any] = {}
+        for key, value in obj.items():
+            snake_key = _to_snake_case(key)
+            # Later keys win, so snake_case originals override camelCase conversions
+            result[snake_key] = _normalize_keys(value)
+        return result
+    if isinstance(obj, list):
+        return [_normalize_keys(item) for item in obj]
+    return obj
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Deep merge override into base dict."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _build_customization_response(settings: dict) -> CustomizationResponse:
+    """Build customization response from stored settings."""
+    defaults = _get_default_customization()
+    merged = _deep_merge(defaults, settings)
+
+    footer_data = merged.get("footer", defaults["footer"])
+    social_links_data = footer_data.get("social_links", defaults["footer"]["social_links"])
+
+    return CustomizationResponse(
+        customization_mode=merged.get("customization_mode", "preset"),
+        identity=CustomizationIdentity(**merged.get("identity", defaults["identity"])),
+        theme=CustomizationTheme(**merged.get("theme", defaults["theme"])),
+        header=CustomizationHeader(**merged.get("header", defaults["header"])),
+        hero=CustomizationHero(**merged.get("hero", defaults["hero"])),
+        products=CustomizationProducts(**merged.get("products", defaults["products"])),
+        footer=CustomizationFooter(
+            footer_text=footer_data.get("footer_text", ""),
+            social_links=CustomizationSocialLinks(**social_links_data),
+            show_newsletter=footer_data.get("show_newsletter", True),
+        ),
+        is_published=merged.get("is_published", False),
+        last_published_at=merged.get("last_published_at"),
+    )
+
+
+@router.get(
+    "/customization",
+    response_model=SuccessResponse[CustomizationResponse],
+    summary="Get storefront customization settings",
+)
+async def get_customization(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get storefront customization settings for the store."""
+    settings = store.settings or {}
+    customization = settings.get("customization", {})
+
+    return SuccessResponse(
+        data=_build_customization_response(customization),
+        message="Customization settings retrieved successfully",
+    )
+
+
+@router.patch(
+    "/customization",
+    response_model=SuccessResponse[CustomizationResponse],
+    summary="Update storefront customization (save draft)",
+)
+async def update_customization(
+    request: UpdateCustomizationRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Save storefront customization as draft. Does not publish to live store."""
+    settings = store.settings or {}
+    customization = _normalize_keys(settings.get("customization", _get_default_customization()))
+
+    # Persist customization mode
+    if request.customization_mode is not None:
+        customization["customization_mode"] = request.customization_mode
+
+    # Deep merge each section if provided (normalize existing to strip camelCase dupes)
+    if request.identity is not None:
+        customization["identity"] = {**customization.get("identity", {}), **request.identity}
+    if request.theme is not None:
+        customization["theme"] = {**customization.get("theme", {}), **request.theme}
+    if request.header is not None:
+        customization["header"] = {**customization.get("header", {}), **request.header}
+    if request.hero is not None:
+        customization["hero"] = {**customization.get("hero", {}), **request.hero}
+    if request.products is not None:
+        customization["products"] = {**customization.get("products", {}), **request.products}
+    if request.footer is not None:
+        footer_update = request.footer
+        existing_footer = customization.get("footer", _get_default_customization()["footer"])
+        # Handle nested social_links merge
+        if "social_links" in footer_update and isinstance(footer_update["social_links"], dict):
+            existing_social = existing_footer.get("social_links", {})
+            footer_update["social_links"] = {**existing_social, **footer_update["social_links"]}
+        customization["footer"] = {**existing_footer, **footer_update}
+
+    # Save to store settings
+    settings["customization"] = customization
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=_build_customization_response(customization),
+        message="Customization saved as draft successfully",
+    )
+
+
+@router.post(
+    "/customization/publish",
+    response_model=SuccessResponse[CustomizationResponse],
+    summary="Publish storefront customization to live store",
+)
+async def publish_customization(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Publish the current customization draft to the live storefront."""
+    settings = store.settings or {}
+    customization = _normalize_keys(settings.get("customization", _get_default_customization()))
+
+    # Mark as published with timestamp
+    customization["is_published"] = True
+    customization["last_published_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Copy to theme_settings for the storefront to consume (normalized snake_case)
+    store.theme_settings = _normalize_keys({
+        "identity": customization.get("identity", {}),
+        "theme": customization.get("theme", {}),
+        "header": customization.get("header", {}),
+        "hero": customization.get("hero", {}),
+        "products": customization.get("products", {}),
+        "footer": customization.get("footer", {}),
+    })
+
+    settings["customization"] = customization
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=_build_customization_response(customization),
+        message="Storefront published successfully",
+    )
+
+
+@router.post(
+    "/customization/assets",
+    response_model=SuccessResponse[dict],
+    summary="Upload a customization asset (logo, favicon, hero image)",
+)
+async def upload_customization_asset(
+    store: Annotated[Store, Depends(get_current_store)],
+    file: UploadFile = File(...),
+    asset_type: str = Form(..., description="Asset type: logo, favicon, or hero_image"),
+):
+    """Upload an asset for storefront customization.
+
+    Accepts logo, favicon, or hero_image uploads.
+    Returns the URL of the uploaded asset.
+    """
+    # Validate asset type
+    allowed_types = {"logo", "favicon", "hero_image"}
+    if asset_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid asset_type. Must be one of: {', '.join(allowed_types)}",
+        )
+
+    # Validate file type
+    allowed_content = {"image/jpeg", "image/png", "image/svg+xml", "image/webp", "image/x-icon", "image/gif"}
+    if file.content_type not in allowed_content:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {file.content_type}. Allowed: JPEG, PNG, SVG, WebP, ICO, GIF",
+        )
+
+    # Validate file size (max 5MB)
+    max_size = 5 * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="File size exceeds 5MB limit")
+
+    # Generate a unique filename
+    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "png"
+    filename = f"customization/{store.id}/{asset_type}_{uuid.uuid4().hex[:8]}.{ext}"
+
+    # TODO: Upload to Cloudflare R2 or configured storage
+    # For now, return a placeholder URL pattern
+    # In production, use the CloudflareR2StorageService:
+    #   from src.infrastructure.external_services.storage import get_storage_service
+    #   storage = get_storage_service()
+    #   url = await storage.upload(filename, content, file.content_type)
+    url = f"/api/v1/assets/{filename}"
+
+    return SuccessResponse(
+        data={"url": url, "asset_type": asset_type, "filename": file.filename},
+        message=f"{asset_type.replace('_', ' ').title()} uploaded successfully",
     )

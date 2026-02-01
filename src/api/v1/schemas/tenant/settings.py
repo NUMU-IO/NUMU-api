@@ -118,6 +118,90 @@ class UpdateWhatsAppSettingsRequest(BaseModel):
     notifications: dict[str, Any] | None = None
 
 
+# ============ Customization Settings ============
+
+class CustomizationIdentity(BaseModel):
+    """Store identity customization."""
+    logo_url: str = ""
+    store_name: str = ""
+    favicon_url: str = ""
+
+
+class CustomizationTheme(BaseModel):
+    """Store theme customization."""
+    base_theme: str = "modern"  # modern | classic | minimal | bold
+    primary_color: str = ""
+    secondary_color: str = ""
+    background_color: str = ""
+    text_color: str = ""
+    button_style: str = "rounded"  # rounded | square | pill
+
+
+class CustomizationHeader(BaseModel):
+    """Store header customization."""
+    nav_layout: str = "left-aligned"  # left-aligned | centered
+    show_search_bar: bool = True
+    show_cart_icon: bool = True
+    announcement_text: str = ""
+    announcement_color: str = "#4318FF"
+
+
+class CustomizationHero(BaseModel):
+    """Store hero/banner customization."""
+    hero_image_url: str = ""
+    headline: str = ""
+    subtitle: str = ""
+    cta_text: str = ""
+    cta_link: str = ""
+
+
+class CustomizationProducts(BaseModel):
+    """Store products section customization."""
+    layout: str = "grid"  # grid | list
+    products_per_row: int = Field(default=3, ge=2, le=4)
+    show_price: bool = True
+    show_rating: bool = True
+
+
+class CustomizationSocialLinks(BaseModel):
+    """Social media links."""
+    facebook: str = ""
+    instagram: str = ""
+    twitter: str = ""
+    whatsapp: str = ""
+
+
+class CustomizationFooter(BaseModel):
+    """Store footer customization."""
+    footer_text: str = ""
+    social_links: CustomizationSocialLinks = Field(default_factory=CustomizationSocialLinks)
+    show_newsletter: bool = True
+
+
+class CustomizationResponse(BaseModel):
+    """Full customization settings response."""
+    customization_mode: str = "preset"  # preset | custom
+    identity: CustomizationIdentity = Field(default_factory=CustomizationIdentity)
+    theme: CustomizationTheme = Field(default_factory=CustomizationTheme)
+    header: CustomizationHeader = Field(default_factory=CustomizationHeader)
+    hero: CustomizationHero = Field(default_factory=CustomizationHero)
+    products: CustomizationProducts = Field(default_factory=CustomizationProducts)
+    footer: CustomizationFooter = Field(default_factory=CustomizationFooter)
+    is_published: bool = False
+    last_published_at: str | None = None
+
+
+class UpdateCustomizationRequest(BaseModel):
+    """Update customization settings request. All fields optional for partial updates."""
+    customization_mode: str | None = None  # preset | custom
+    identity: dict[str, Any] | None = None
+    theme: dict[str, Any] | None = None
+    header: dict[str, Any] | None = None
+    hero: dict[str, Any] | None = None
+    products: dict[str, Any] | None = None
+    footer: dict[str, Any] | None = None
+
+
 # Combined Store Settings
 class StoreSettingsResponse(BaseModel):
     """Combined store settings response."""
