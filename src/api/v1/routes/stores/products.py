@@ -128,17 +128,58 @@ async def list_products(
     limit: int = Query(20, ge=1, le=100),
     product_status: str | None = Query(None, alias="status"),
     search: str | None = Query(None),
+    sku: str | None = Query(None, description="Filter by SKU (partial match)"),
+    price_min: int | None = Query(None, ge=0, description="Minimum price in cents"),
+    price_max: int | None = Query(None, ge=0, description="Maximum price in cents"),
+    sort_by: str | None = Query(None, description="Sort field: name, price, created_at, updated_at, quantity"),
+    sort_order: str = Query("asc", description="Sort direction: asc or desc"),
 ):
-    """List products for a store with optional filtering and pagination."""
+    """List products for a store with optional filtering, search, and sorting."""
     use_case = ListProductsUseCase(product_repository=product_repo)
 
-    if search:
-        result = await use_case.search(
+    # Use the advanced filter path when any extended filter is present
+    has_advanced_filters = any([sku, price_min is not None, price_max is not None, sort_by])
+
+    if has_advanced_filters or search:
+        skip = (page - 1) * limit
+        is_active = None
+        if product_status == "active":
+            is_active = True
+        elif product_status == "draft":
+            is_active = False
+
+        items = await product_repo.list_with_filters(
             store_id=store_id,
-            query=search,
-            page=page,
-            page_size=limit,
+            category_id=category_id,
+            skip=skip,
+            limit=limit,
+            is_active=is_active,
+            search=search,
+            sku=sku,
+            price_min=price_min,
+            price_max=price_max,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
+        total = await product_repo.count_with_filters(
+            store_id=store_id,
+            category_id=category_id,
+            is_active=is_active,
+            search=search,
+            sku=sku,
+            price_min=price_min,
+            price_max=price_max,
+        )
+
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Result:
+            items: list
+            total: int
+
+        result = _Result(items=items, total=total)
+
     elif category_id:
         result = await use_case.by_category(
             category_id=category_id,
