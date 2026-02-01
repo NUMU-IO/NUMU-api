@@ -163,3 +163,60 @@ class OrderListItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================================
+# Enriched / Timeline / Bulk schemas
+# ============================================================================
+
+
+class OrderTimelineEvent(BaseModel):
+    """Single event in an order's timeline."""
+
+    timestamp: str
+    status: str
+    description: str
+    actor: str | None = None
+
+
+class OrderTimelineResponse(BaseModel):
+    """Order timeline response."""
+
+    order_id: str
+    order_number: str
+    events: list[OrderTimelineEvent]
+
+    class Config:
+        from_attributes = True
+
+
+class OrderDetailEnrichedResponse(OrderResponse):
+    """Enriched order response with customer info and timeline.
+
+    Extends the base OrderResponse with additional context useful
+    for the store-owner dashboard detail view.
+    """
+
+    customer_name: str | None = None
+    customer_email: str | None = None
+    customer_phone: str | None = None
+    timeline: list[OrderTimelineEvent] = []
+
+    class Config:
+        from_attributes = True
+
+
+class BulkUpdateOrderStatusRequest(BaseModel):
+    """Bulk update order status request."""
+
+    order_ids: list[UUID] = Field(..., min_length=1, max_length=100)
+    status: str = Field(..., description="New order status")
+    reason: str | None = Field(None, description="Reason for status change")
+
+
+class BulkUpdateOrderStatusResponse(BaseModel):
+    """Bulk update order status response."""
+
+    updated: int
+    failed: int = 0
+    errors: list[dict] = Field(default_factory=list)
