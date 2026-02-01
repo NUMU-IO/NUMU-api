@@ -129,11 +129,12 @@ async def browse_products(
         )
     else:
         # Only show active products in storefront
+        skip = 0 if page < 1 else (page - 1) * limit
         result = await use_case.execute(
             store_id=store_id,
-            page=page,
-            page_size=limit,
-            status="active",
+            skip=skip,
+            limit=limit,
+            is_active=True,
         )
 
     products = [
