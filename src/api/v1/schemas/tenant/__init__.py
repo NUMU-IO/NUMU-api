@@ -28,13 +28,18 @@ from src.api.v1.schemas.tenant.store import (
     UpdateStoreRequest,
 )
 from src.api.v1.schemas.tenant.order import (
+    BulkUpdateOrderStatusRequest,
+    BulkUpdateOrderStatusResponse,
     CreateOrderRequest,
     OrderAddressRequest,
     OrderAddressResponse,
+    OrderDetailEnrichedResponse,
     OrderLineItemRequest,
     OrderLineItemResponse,
     OrderListItemResponse,
     OrderResponse,
+    OrderTimelineEvent,
+    OrderTimelineResponse,
     UpdateOrderRequest,
     UpdateOrderStatusRequest,
 )
@@ -64,13 +69,18 @@ __all__ = [
     "StoreResponse",
     "UpdateStoreRequest",
     # Order
+    "BulkUpdateOrderStatusRequest",
+    "BulkUpdateOrderStatusResponse",
     "CreateOrderRequest",
     "OrderAddressRequest",
     "OrderAddressResponse",
+    "OrderDetailEnrichedResponse",
     "OrderLineItemRequest",
     "OrderLineItemResponse",
     "OrderListItemResponse",
     "OrderResponse",
+    "OrderTimelineEvent",
+    "OrderTimelineResponse",
     "UpdateOrderRequest",
     "UpdateOrderStatusRequest",
 ]

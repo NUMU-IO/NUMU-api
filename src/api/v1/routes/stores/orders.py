@@ -446,3 +446,166 @@ async def cancel_order(
         data=DeleteResponse(deleted=True, id=str(order_id)),
         message="Order cancelled successfully",
     )
+
+
+# ============================================================================
+# Timeline & Bulk endpoints
+# ============================================================================
+
+from src.api.v1.schemas.tenant.order import (
+    BulkUpdateOrderStatusRequest,
+    BulkUpdateOrderStatusResponse,
+    OrderTimelineEvent,
+    OrderTimelineResponse,
+)
+from src.application.dto.order import OrderDTO
+
+
+def _build_timeline(order_dto: OrderDTO) -> list[OrderTimelineEvent]:
+    """Construct a chronological timeline from order timestamps."""
+    events: list[OrderTimelineEvent] = []
+
+    events.append(OrderTimelineEvent(
+        timestamp=str(order_dto.created_at),
+        status="pending",
+        description="Order placed",
+    ))
+
+    if order_dto.paid_at:
+        events.append(OrderTimelineEvent(
+            timestamp=str(order_dto.paid_at),
+            status="paid",
+            description=f"Payment received via {order_dto.payment_method or 'unknown'}",
+        ))
+
+    if order_dto.status in ("processing", "shipped", "delivered", "fulfilled"):
+        events.append(OrderTimelineEvent(
+            timestamp=str(order_dto.updated_at),
+            status="processing",
+            description="Order is being processed",
+        ))
+
+    if order_dto.shipped_at:
+        desc = "Order shipped"
+        if order_dto.tracking_number:
+            desc += f" (tracking: {order_dto.tracking_number})"
+        events.append(OrderTimelineEvent(
+            timestamp=str(order_dto.shipped_at),
+            status="shipped",
+            description=desc,
+        ))
+
+    if order_dto.fulfilled_at:
+        events.append(OrderTimelineEvent(
+            timestamp=str(order_dto.fulfilled_at),
+            status="fulfilled",
+            description="Order fulfilled",
+        ))
+
+    if order_dto.delivered_at:
+        events.append(OrderTimelineEvent(
+            timestamp=str(order_dto.delivered_at),
+            status="delivered",
+            description="Order delivered",
+        ))
+
+    if order_dto.cancelled_at:
+        events.append(OrderTimelineEvent(
+            timestamp=str(order_dto.cancelled_at),
+            status="cancelled",
+            description="Order cancelled",
+        ))
+
+    if order_dto.status == "refunded":
+        events.append(OrderTimelineEvent(
+            timestamp=str(order_dto.updated_at),
+            status="refunded",
+            description="Order refunded",
+        ))
+
+    return events
+
+
+@router.get(
+    "/{order_id}/timeline",
+    response_model=SuccessResponse[OrderTimelineResponse],
+    summary="Get order timeline",
+)
+async def get_order_timeline(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Get the timeline of status changes for an order."""
+    use_case = GetOrderUseCase(
+        order_repository=order_repo,
+        store_repository=store_repo,
+    )
+
+    result = await use_case.execute(
+        order_id=order_id,
+        store_id=store_id,
+        user_id=user_id,
+    )
+
+    timeline = _build_timeline(result)
+
+    return SuccessResponse(
+        data=OrderTimelineResponse(
+            order_id=str(result.id),
+            order_number=result.order_number,
+            events=timeline,
+        ),
+        message="Order timeline retrieved successfully",
+    )
+
+
+@router.post(
+    "/bulk-status",
+    response_model=SuccessResponse[BulkUpdateOrderStatusResponse],
+    summary="Bulk update order statuses",
+)
+async def bulk_update_order_status(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    request: BulkUpdateOrderStatusRequest,
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Update the status of multiple orders at once."""
+    use_case = UpdateOrderStatusUseCase(
+        order_repository=order_repo,
+        store_repository=store_repo,
+    )
+
+    updated = 0
+    failed = 0
+    errors: list[dict] = []
+
+    for oid in request.order_ids:
+        try:
+            dto = UpdateOrderStatusDTO(
+                status=request.status,
+                reason=request.reason,
+            )
+            await use_case.execute(
+                order_id=oid,
+                dto=dto,
+                store_id=store_id,
+                user_id=user_id,
+            )
+            updated += 1
+        except Exception as exc:
+            failed += 1
+            errors.append({"order_id": str(oid), "error": str(exc)})
+
+    return SuccessResponse(
+        data=BulkUpdateOrderStatusResponse(
+            updated=updated,
+            failed=failed,
+            errors=errors,
+        ),
+        message=f"Bulk status update completed: {updated} updated, {failed} failed",
+    )
