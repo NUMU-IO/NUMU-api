@@ -11,6 +11,16 @@ from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.product import ProductModel
 from src.infrastructure.database.models.tenant.store import StoreModel
+from src.infrastructure.database.models.tenant.configuration import (
+    ConfigurationRequest,
+    ServiceCredential,
+    CredentialAuditLog,
+    ServiceType,
+    ServiceName,
+    RequestStatus,
+    RequestPriority,
+    AuditAction,
+)
 
 __all__ = [
     "CategoryModel",
@@ -18,6 +28,15 @@ __all__ = [
     "CustomerModel",
     "InvoiceModel",
     "OrderModel",
+    # Configuration models
+    "ConfigurationRequest",
+    "ServiceCredential",
+    "CredentialAuditLog",
+    "ServiceType",
+    "ServiceName",
+    "RequestStatus",
+    "RequestPriority",
+    "AuditAction",
     "ProductModel",
     "StoreModel",
 ]
