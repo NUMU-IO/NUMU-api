@@ -3,7 +3,9 @@
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from src.core.value_objects.money import Currency
 
 
 class CreateProductRequest(BaseModel):
@@ -17,7 +19,7 @@ class CreateProductRequest(BaseModel):
     short_description: str | None = Field(None, max_length=500)
     product_type: str = Field(default="physical")
     price: Decimal = Field(..., ge=0)
-    price_currency: str = Field(default="USD", max_length=3)
+    price_currency: str = Field(default="EGP", max_length=3)
     compare_at_price: Decimal | None = Field(None, ge=0)
     cost_price: Decimal | None = Field(None, ge=0)
     quantity: int = Field(default=0, ge=0)
@@ -26,6 +28,19 @@ class CreateProductRequest(BaseModel):
     category_id: UUID | None = None
     tags: list[str] = Field(default_factory=list)
     attributes: dict = Field(default_factory=dict)
+
+    @field_validator("price_currency")
+    @classmethod
+    def validate_currency(cls, v: str) -> str:
+        """Validate that currency is a supported currency code."""
+        try:
+            Currency(v)
+        except ValueError:
+            supported = [c.value for c in Currency]
+            raise ValueError(
+                f"Unsupported currency '{v}'. Supported currencies: {supported}"
+            )
+        return v
 
 
 class UpdateProductRequest(BaseModel):

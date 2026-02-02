@@ -36,7 +36,7 @@ class Store(BaseEntity):
     logo_url: str | None = None
     banner_url: str | None = None
     status: StoreStatus = StoreStatus.PENDING_APPROVAL
-    default_currency: Currency = Currency.USD
+    default_currency: Currency = Currency.EGP
     contact_email: str | None = None
     contact_phone: str | None = None
     address: dict[str, Any] = Field(default_factory=dict)
