@@ -162,7 +162,8 @@ Environment variables:
 | `DEBUG` | Enable debug mode | `false` |
 | `DATABASE_URL` | PostgreSQL connection string | Required |
 | `REDIS_URL` | Redis connection string | Required |
-| `JWT_SECRET_KEY` | JWT signing secret | Required |
+| `JWT_PRIVATE_KEY` | RSA private key (PEM) for JWT signing | Required |
+| `JWT_PUBLIC_KEY` | RSA public key (PEM) for JWT verification | Required |
 | `STRIPE_SECRET_KEY` | Stripe API key | Optional |
 | `RESEND_API_KEY` | Resend email API key | Optional |
 | `OPENAI_API_KEY` | OpenAI API key | Optional |
