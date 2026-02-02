@@ -21,6 +21,7 @@ from src.core.exceptions import (
 from src.core.interfaces.repositories.cart_repository import ICartRepository
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
+from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.services.payment_service import IPaymentService
 
@@ -49,8 +50,9 @@ class CheckoutDTO(BaseDTO):
     billing_address: CheckoutAddressDTO | None = None
     customer_notes: str | None = None
     shipping_method: str | None = None
-    shipping_cost: int = 0  
-    payment_method: str = "card"  
+    shipping_cost: int = 0
+    payment_method: str = "card"
+    coupon_code: str | None = None  
 
 
 @dataclass
@@ -83,6 +85,7 @@ class CheckoutUseCase:
         product_repository: IProductRepository,
         customer_repository: ICustomerRepository,
         payment_service: IPaymentService,
+        coupon_repository: ICouponRepository | None = None,
     ) -> None:
         """Initialize use case.
 
@@ -92,12 +95,14 @@ class CheckoutUseCase:
             product_repository: Product repository instance.
             customer_repository: Customer repository instance.
             payment_service: Payment service (Paymob) instance.
+            coupon_repository: Optional coupon repository instance.
         """
         self.cart_repository = cart_repository
         self.order_repository = order_repository
         self.product_repository = product_repository
         self.customer_repository = customer_repository
         self.payment_service = payment_service
+        self.coupon_repository = coupon_repository
 
     async def execute(
         self,
@@ -194,7 +199,27 @@ class CheckoutUseCase:
         subtotal = sum(item.total_price for item in line_items)
         shipping_cost = dto.shipping_cost
         tax_amount = 0  # TODO: Calculate tax based on address
-        total = subtotal + shipping_cost + tax_amount
+
+        # 4b. Apply coupon if provided
+        discount_amount = 0
+        coupon_code = None
+        coupon_id = None
+
+        if dto.coupon_code and self.coupon_repository:
+            from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
+
+            apply_coupon = ApplyCouponUseCase(coupon_repository=self.coupon_repository)
+            coupon_result = await apply_coupon.execute(
+                store_id=store_id,
+                coupon_code=dto.coupon_code,
+                subtotal=subtotal,
+                customer_id=customer_id,
+            )
+            discount_amount = coupon_result.calculated_discount
+            coupon_code = coupon_result.coupon_code
+            coupon_id = coupon_result.coupon_id
+
+        total = subtotal + shipping_cost + tax_amount - discount_amount
 
         # 5. Generate order number
         order_number = await self.order_repository.get_next_order_number(store_id)
@@ -241,7 +266,9 @@ class CheckoutUseCase:
             subtotal=subtotal,
             shipping_cost=shipping_cost,
             tax_amount=tax_amount,
-            discount_amount=0,
+            discount_amount=discount_amount,
+            coupon_code=coupon_code,
+            coupon_id=coupon_id,
             total=total,
             currency=cart.currency,
             payment_method=dto.payment_method,
@@ -251,6 +278,10 @@ class CheckoutUseCase:
 
         # Save order first to get ID
         order = await self.order_repository.create(order)
+
+        # 7b. Increment coupon usage after order creation
+        if coupon_id and self.coupon_repository:
+            await self.coupon_repository.increment_usage(coupon_id)
 
         # 8. Initiate Paymob payment
         try:

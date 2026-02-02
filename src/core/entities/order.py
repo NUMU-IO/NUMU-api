@@ -179,6 +179,8 @@ class Order(BaseEntity):
     tracking_number: str | None = None
     tracking_url: str | None = None
     notes: str | None = None
+    coupon_code: str | None = None
+    coupon_id: UUID | None = None
     customer_notes: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     cancelled_at: datetime | None = None

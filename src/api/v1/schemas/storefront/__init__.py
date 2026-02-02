@@ -10,6 +10,10 @@ from src.api.v1.schemas.storefront.checkout import (
     CheckoutRequest,
     CheckoutResponse,
 )
+from src.api.v1.schemas.storefront.coupon import (
+    ApplyCouponRequest,
+    ApplyCouponResponse,
+)
 
 __all__ = [
     # Cart
@@ -20,4 +24,7 @@ __all__ = [
     # Checkout
     "CheckoutRequest",
     "CheckoutResponse",
+    # Coupon
+    "ApplyCouponRequest",
+    "ApplyCouponResponse",
 ]

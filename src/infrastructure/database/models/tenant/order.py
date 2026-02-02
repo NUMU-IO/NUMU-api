@@ -64,6 +64,15 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     
+    # Coupon
+    coupon_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    coupon_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.coupons.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Payment
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
     payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
@@ -88,6 +97,7 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     store = relationship("StoreModel", back_populates="orders", lazy="selectin")
     customer = relationship("CustomerModel", back_populates="orders", lazy="selectin")
     invoice = relationship("InvoiceModel", back_populates="order", uselist=False, lazy="selectin")
+    coupon = relationship("CouponModel", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<OrderModel(id={self.id}, order_number={self.order_number})>"

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from src.api.dependencies.auth import get_current_customer
 from src.api.dependencies.repositories import (
+    get_coupon_repository,
     get_customer_repository,
     get_order_repository,
     get_product_repository,
@@ -31,6 +32,7 @@ from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.repositories import (
+    CouponRepository,
     CustomerRepository,
     OrderRepository,
     ProductRepository,
@@ -56,6 +58,7 @@ async def checkout(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
 ):
     """Process checkout for the authenticated customer.
 
@@ -212,7 +215,26 @@ async def checkout(
             phone=billing_address.phone,
         )
 
-    total = subtotal + dto.shipping_cost + dto.tax_amount - dto.discount_amount
+    # Apply coupon if provided
+    discount_amount = 0
+    coupon_code = None
+    coupon_id = None
+
+    if request.coupon_code:
+        from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
+
+        apply_coupon = ApplyCouponUseCase(coupon_repository=coupon_repo)
+        coupon_result = await apply_coupon.execute(
+            store_id=store_id,
+            coupon_code=request.coupon_code,
+            subtotal=subtotal,
+            customer_id=current_customer.id,
+        )
+        discount_amount = coupon_result.calculated_discount
+        coupon_code = coupon_result.coupon_code
+        coupon_id = coupon_result.coupon_id
+
+    total = subtotal + dto.shipping_cost + dto.tax_amount - discount_amount
 
     order = Order(
         store_id=store_id,
@@ -226,7 +248,9 @@ async def checkout(
         subtotal=subtotal,
         shipping_cost=dto.shipping_cost,
         tax_amount=dto.tax_amount,
-        discount_amount=dto.discount_amount,
+        discount_amount=discount_amount,
+        coupon_code=coupon_code,
+        coupon_id=coupon_id,
         total=total,
         currency=currency,
         payment_method=request.payment_method,
@@ -235,6 +259,10 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # Increment coupon usage
+    if coupon_id:
+        await coupon_repo.increment_usage(coupon_id)
 
     # Deduct stock for each product
     for li in line_items:

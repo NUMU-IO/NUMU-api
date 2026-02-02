@@ -21,6 +21,7 @@ from src.infrastructure.database.models import (  # noqa: F401
     ProductModel,
     CategoryModel,
     CustomerModel,
+    CouponModel,
     OrderModel,
 )
 

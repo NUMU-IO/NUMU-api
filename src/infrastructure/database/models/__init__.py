@@ -9,6 +9,7 @@ from src.infrastructure.database.models.audit import AuditLogModel
 # Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
     CategoryModel,
+    CouponModel,
     CustomerAddressModel,
     CustomerModel,
     OrderModel,
@@ -28,6 +29,7 @@ __all__ = [
     "StoreModel",
     "ProductModel",
     "CategoryModel",
+    "CouponModel",
     "CustomerModel",
     "CustomerAddressModel",
     "OrderModel",

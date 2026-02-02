@@ -24,6 +24,8 @@ from src.api.v1.schemas.public import (
 
 # Import from tenant schemas
 from src.api.v1.schemas.tenant import (
+    CouponResponse,
+    CreateCouponRequest,
     CreateOrderRequest,
     CreateProductRequest,
     CreateStoreRequest,
@@ -38,6 +40,7 @@ from src.api.v1.schemas.tenant import (
     StoreResponse,
     UpdateOrderRequest,
     UpdateOrderStatusRequest,
+    UpdateCouponRequest,
     UpdateProductRequest,
     UpdateStoreRequest,
     UploadedImageResponse,
@@ -60,6 +63,10 @@ __all__ = [
     "UpdateTenantRequest",
     "TenantResponse",
     "TenantCreatedResponse",
+    # Coupon (tenant)
+    "CouponResponse",
+    "CreateCouponRequest",
+    "UpdateCouponRequest",
     # Store (tenant)
     "CreateStoreRequest",
     "UpdateStoreRequest",

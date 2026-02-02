@@ -54,6 +54,7 @@ from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
     cart_router as storefront_cart_router,
     checkout_router as storefront_checkout_router,
+    coupon_router as storefront_coupon_router,
 )
 
 # Webhook routes (external service callbacks)
@@ -110,6 +111,13 @@ api_router.include_router(
     storefront_checkout_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Checkout"],
+)
+
+# Storefront - coupon validation (authenticated customer, scoped to store)
+api_router.include_router(
+    storefront_coupon_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Coupons"],
 )
 
 # Webhooks - external service callbacks (no auth required)

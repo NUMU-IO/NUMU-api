@@ -19,6 +19,7 @@ from src.api.v1.routes.storefront.public import lookup_router as storefront_look
 from src.api.v1.routes.storefront.customer import router as customer_router
 from src.api.v1.routes.storefront.cart import router as cart_router
 from src.api.v1.routes.storefront.checkout import router as checkout_router
+from src.api.v1.routes.storefront.coupon import router as coupon_router
 
 __all__ = [
     "public_router",
@@ -26,4 +27,5 @@ __all__ = [
     "customer_router",
     "cart_router",
     "checkout_router",
+    "coupon_router",
 ]
