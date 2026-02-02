@@ -3,7 +3,13 @@
 from uuid import UUID
 
 from src.application.dto.coupon import CouponDTO, UpdateCouponDTO
-from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
+from src.core.entities.coupon import CouponType
+from src.core.exceptions import (
+    AuthorizationError,
+    EntityAlreadyExistsError,
+    EntityNotFoundError,
+    ValidationError,
+)
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 
@@ -25,7 +31,7 @@ class UpdateCouponUseCase:
         dto: UpdateCouponDTO,
         user_id: UUID,
     ) -> CouponDTO:
-        """Update an existing coupon.
+        """Update a coupon.
 
         Args:
             coupon_id: The coupon UUID.
@@ -36,9 +42,10 @@ class UpdateCouponUseCase:
             CouponDTO with updated coupon data.
 
         Raises:
-            EntityNotFoundError: If coupon or store not found.
+            EntityNotFoundError: If coupon not found.
             AuthorizationError: If user doesn't own the store.
-            ValidationError: If data is invalid.
+            EntityAlreadyExistsError: If new code already exists.
+            ValidationError: If updated data is invalid.
         """
         coupon = await self.coupon_repository.get_by_id(coupon_id)
         if not coupon:
@@ -51,32 +58,41 @@ class UpdateCouponUseCase:
                 "You don't have permission to update this coupon"
             )
 
-        # Apply non-None fields
-        if dto.description is not None:
-            coupon.description = dto.description
-        if dto.discount_value is not None:
-            if coupon.discount_type.value == "percentage" and dto.discount_value > 100:
-                raise ValidationError("Percentage discount cannot exceed 100")
-            coupon.discount_value = dto.discount_value
+        # Update fields
+        if dto.code is not None:
+            new_code = dto.code.strip().upper()
+            if new_code != coupon.code:
+                existing = await self.coupon_repository.get_by_code(
+                    coupon.store_id, new_code
+                )
+                if existing:
+                    raise EntityAlreadyExistsError("Coupon", "code", new_code)
+                coupon.code = new_code
+
+        if dto.coupon_type is not None:
+            try:
+                coupon.coupon_type = CouponType(dto.coupon_type)
+            except ValueError:
+                valid = [t.value for t in CouponType]
+                raise ValidationError(
+                    f"Invalid coupon type. Valid types: {', '.join(valid)}"
+                )
+
+        if dto.value is not None:
+            coupon.value = dto.value
         if dto.min_order_amount is not None:
             coupon.min_order_amount = dto.min_order_amount
         if dto.max_discount_amount is not None:
             coupon.max_discount_amount = dto.max_discount_amount
-        if dto.max_uses is not None:
-            coupon.max_uses = dto.max_uses
-        if dto.max_uses_per_customer is not None:
-            coupon.max_uses_per_customer = dto.max_uses_per_customer
+        if dto.usage_limit is not None:
+            coupon.usage_limit = dto.usage_limit
         if dto.valid_from is not None:
             coupon.valid_from = dto.valid_from
-        if dto.valid_to is not None:
-            coupon.valid_to = dto.valid_to
+        if dto.valid_until is not None:
+            coupon.valid_until = dto.valid_until
         if dto.is_active is not None:
             coupon.is_active = dto.is_active
 
-        # Validate date range if both set
-        if coupon.valid_from and coupon.valid_to and coupon.valid_from >= coupon.valid_to:
-            raise ValidationError("valid_from must be before valid_to")
-
         coupon.touch()
-        updated_coupon = await self.coupon_repository.update(coupon)
-        return CouponDTO.from_entity(updated_coupon)
+        updated = await self.coupon_repository.update(coupon)
+        return CouponDTO.from_entity(updated)

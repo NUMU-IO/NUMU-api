@@ -1,13 +1,14 @@
 """Coupon repository implementation."""
 
+from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.coupon import Coupon, DiscountType
+from src.core.entities.coupon import Coupon, CouponType
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
-from src.infrastructure.database.models import CouponModel, OrderModel
+from src.infrastructure.database.models.tenant.coupon import CouponModel
 
 
 class CouponRepository(ICouponRepository):
@@ -22,18 +23,15 @@ class CouponRepository(ICouponRepository):
             id=model.id,
             store_id=model.store_id,
             code=model.code,
-            description=model.description,
-            discount_type=model.discount_type,
-            discount_value=model.discount_value,
+            coupon_type=model.coupon_type,
+            value=model.value,
             min_order_amount=model.min_order_amount,
             max_discount_amount=model.max_discount_amount,
-            max_uses=model.max_uses,
-            max_uses_per_customer=model.max_uses_per_customer,
-            current_usage_count=model.current_usage_count,
+            usage_limit=model.usage_limit,
+            usage_count=model.usage_count,
             valid_from=model.valid_from,
-            valid_to=model.valid_to,
+            valid_until=model.valid_until,
             is_active=model.is_active,
-            metadata=model.extra_data or {},
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -44,18 +42,15 @@ class CouponRepository(ICouponRepository):
             id=entity.id,
             store_id=entity.store_id,
             code=entity.code,
-            description=entity.description,
-            discount_type=entity.discount_type,
-            discount_value=entity.discount_value,
+            coupon_type=entity.coupon_type,
+            value=entity.value,
             min_order_amount=entity.min_order_amount,
             max_discount_amount=entity.max_discount_amount,
-            max_uses=entity.max_uses,
-            max_uses_per_customer=entity.max_uses_per_customer,
-            current_usage_count=entity.current_usage_count,
+            usage_limit=entity.usage_limit,
+            usage_count=entity.usage_count,
             valid_from=entity.valid_from,
-            valid_to=entity.valid_to,
+            valid_until=entity.valid_until,
             is_active=entity.is_active,
-            extra_data=entity.metadata,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -68,16 +63,12 @@ class CouponRepository(ICouponRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
-    async def get_all(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> list[Coupon]:
+    async def get_all(self, skip: int = 0, limit: int = 100) -> list[Coupon]:
         """Get all coupons with pagination."""
         result = await self.session.execute(
             select(CouponModel).offset(skip).limit(limit)
         )
-        return [self._to_entity(model) for model in result.scalars().all()]
+        return [self._to_entity(m) for m in result.scalars().all()]
 
     async def create(self, entity: Coupon) -> Coupon:
         """Create a new coupon."""
@@ -95,18 +86,15 @@ class CouponRepository(ICouponRepository):
         model = result.scalar_one_or_none()
         if model:
             model.code = entity.code
-            model.description = entity.description
-            model.discount_type = entity.discount_type
-            model.discount_value = entity.discount_value
+            model.coupon_type = entity.coupon_type
+            model.value = entity.value
             model.min_order_amount = entity.min_order_amount
             model.max_discount_amount = entity.max_discount_amount
-            model.max_uses = entity.max_uses
-            model.max_uses_per_customer = entity.max_uses_per_customer
-            model.current_usage_count = entity.current_usage_count
+            model.usage_limit = entity.usage_limit
+            model.usage_count = entity.usage_count
             model.valid_from = entity.valid_from
-            model.valid_to = entity.valid_to
+            model.valid_until = entity.valid_until
             model.is_active = entity.is_active
-            model.extra_data = entity.metadata
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)
@@ -131,6 +119,17 @@ class CouponRepository(ICouponRepository):
         )
         return result.scalar() or 0
 
+    async def get_by_code(self, store_id: UUID, code: str) -> Coupon | None:
+        """Get coupon by code within a store."""
+        result = await self.session.execute(
+            select(CouponModel).where(
+                CouponModel.store_id == store_id,
+                CouponModel.code == code.strip().upper(),
+            )
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def get_by_store(
         self,
         store_id: UUID,
@@ -144,41 +143,87 @@ class CouponRepository(ICouponRepository):
             query = query.where(CouponModel.is_active == is_active)
         query = query.order_by(CouponModel.created_at.desc()).offset(skip).limit(limit)
         result = await self.session.execute(query)
-        return [self._to_entity(model) for model in result.scalars().all()]
-
-    async def get_by_code(self, store_id: UUID, code: str) -> Coupon | None:
-        """Get coupon by code within a store."""
-        result = await self.session.execute(
-            select(CouponModel).where(
-                CouponModel.store_id == store_id,
-                CouponModel.code == code.upper(),
-            )
-        )
-        model = result.scalar_one_or_none()
-        return self._to_entity(model) if model else None
+        return [self._to_entity(m) for m in result.scalars().all()]
 
     async def count_by_store(self, store_id: UUID) -> int:
         """Get total count of coupons for a store."""
         result = await self.session.execute(
-            select(func.count(CouponModel.id)).where(CouponModel.store_id == store_id)
-        )
-        return result.scalar() or 0
-
-    async def increment_usage(self, coupon_id: UUID) -> None:
-        """Atomically increment the coupon usage count."""
-        await self.session.execute(
-            update(CouponModel)
-            .where(CouponModel.id == coupon_id)
-            .values(current_usage_count=CouponModel.current_usage_count + 1)
-        )
-        await self.session.flush()
-
-    async def get_customer_usage_count(self, coupon_id: UUID, customer_id: UUID) -> int:
-        """Get how many times a customer has used a specific coupon."""
-        result = await self.session.execute(
-            select(func.count(OrderModel.id)).where(
-                OrderModel.coupon_id == coupon_id,
-                OrderModel.customer_id == customer_id,
+            select(func.count(CouponModel.id)).where(
+                CouponModel.store_id == store_id
             )
         )
         return result.scalar() or 0
+
+    async def get_active_by_store(
+        self,
+        store_id: UUID,
+        now: datetime | None = None,
+    ) -> list[Coupon]:
+        """Get currently active and valid coupons for a store."""
+        now = now or datetime.now(timezone.utc)
+        query = (
+            select(CouponModel)
+            .where(
+                CouponModel.store_id == store_id,
+                CouponModel.is_active.is_(True),
+            )
+            .where(
+                or_(CouponModel.valid_from.is_(None), CouponModel.valid_from <= now)
+            )
+            .where(
+                or_(CouponModel.valid_until.is_(None), CouponModel.valid_until > now)
+            )
+        )
+        result = await self.session.execute(query)
+        return [self._to_entity(m) for m in result.scalars().all()]
+
+    def _apply_filters(self, query, *, store_id=None, is_active=None, search=None):
+        """Apply shared filter predicates to a coupon query."""
+        if store_id:
+            query = query.where(CouponModel.store_id == store_id)
+        if is_active is not None:
+            query = query.where(CouponModel.is_active == is_active)
+        if search:
+            search_term = f"%{search}%"
+            query = query.where(CouponModel.code.ilike(search_term))
+        return query
+
+    async def list_with_filters(
+        self,
+        store_id: UUID | None = None,
+        is_active: bool | None = None,
+        search: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Coupon]:
+        """List coupons with multiple optional filters."""
+        query = select(CouponModel)
+        query = self._apply_filters(
+            query, store_id=store_id, is_active=is_active, search=search
+        )
+        query = query.order_by(CouponModel.created_at.desc()).offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return [self._to_entity(m) for m in result.scalars().all()]
+
+    async def count_with_filters(
+        self,
+        store_id: UUID | None = None,
+        is_active: bool | None = None,
+        search: str | None = None,
+    ) -> int:
+        """Count coupons matching the given filters."""
+        query = select(func.count(CouponModel.id))
+        query = self._apply_filters(
+            query, store_id=store_id, is_active=is_active, search=search
+        )
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
+    async def increment_usage(self, coupon_id: UUID) -> None:
+        """Atomically increment the usage count of a coupon."""
+        await self.session.execute(
+            update(CouponModel)
+            .where(CouponModel.id == coupon_id)
+            .values(usage_count=CouponModel.usage_count + 1)
+        )
+        await self.session.flush()

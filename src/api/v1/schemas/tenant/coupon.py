@@ -1,6 +1,7 @@
 """Coupon Pydantic schemas for store management."""
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
@@ -9,29 +10,26 @@ class CreateCouponRequest(BaseModel):
     """Create coupon request schema."""
 
     code: str = Field(..., min_length=1, max_length=50)
-    description: str | None = Field(None, max_length=500)
-    discount_type: str = Field(..., description="percentage or fixed_amount")
-    discount_value: int = Field(..., gt=0, description="Percentage (1-100) or cents for fixed")
-    min_order_amount: int = Field(default=0, ge=0, description="Minimum order subtotal in cents")
-    max_discount_amount: int | None = Field(None, ge=0, description="Max discount cap in cents (for percentage)")
-    max_uses: int | None = Field(None, ge=1, description="Total usage limit")
-    max_uses_per_customer: int | None = Field(None, ge=1, description="Per-customer usage limit")
+    coupon_type: str = Field(..., description="percentage, fixed, or free_shipping")
+    value: Decimal = Field(default=Decimal("0"), ge=0, description="Percentage (0-100) or fixed amount")
+    min_order_amount: Decimal | None = Field(None, ge=0, description="Minimum order subtotal")
+    max_discount_amount: Decimal | None = Field(None, ge=0, description="Max discount cap (for percentage)")
+    usage_limit: int | None = Field(None, ge=1, description="Total usage limit")
     valid_from: datetime | None = None
-    valid_to: datetime | None = None
-    is_active: bool = True
+    valid_until: datetime | None = None
 
 
 class UpdateCouponRequest(BaseModel):
     """Update coupon request schema."""
 
-    description: str | None = Field(None, max_length=500)
-    discount_value: int | None = Field(None, gt=0)
-    min_order_amount: int | None = Field(None, ge=0)
-    max_discount_amount: int | None = Field(None, ge=0)
-    max_uses: int | None = Field(None, ge=1)
-    max_uses_per_customer: int | None = Field(None, ge=1)
+    code: str | None = Field(None, min_length=1, max_length=50)
+    coupon_type: str | None = None
+    value: Decimal | None = Field(None, ge=0)
+    min_order_amount: Decimal | None = Field(None, ge=0)
+    max_discount_amount: Decimal | None = Field(None, ge=0)
+    usage_limit: int | None = Field(None, ge=1)
     valid_from: datetime | None = None
-    valid_to: datetime | None = None
+    valid_until: datetime | None = None
     is_active: bool | None = None
 
 
@@ -41,17 +39,17 @@ class CouponResponse(BaseModel):
     id: str
     store_id: str
     code: str
-    description: str | None
-    discount_type: str
-    discount_value: int
-    min_order_amount: int
-    max_discount_amount: int | None
-    max_uses: int | None
-    max_uses_per_customer: int | None
-    current_usage_count: int
+    coupon_type: str
+    value: str
+    min_order_amount: str | None
+    max_discount_amount: str | None
+    usage_limit: int | None
+    usage_count: int
     valid_from: str | None
-    valid_to: str | None
+    valid_until: str | None
     is_active: bool
+    is_expired: bool
+    is_usable: bool
     created_at: str
     updated_at: str
 

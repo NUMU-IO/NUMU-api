@@ -15,33 +15,42 @@ class ListCouponsUseCase:
 
     async def execute(
         self,
-        store_id: UUID,
+        store_id: UUID | None = None,
+        is_active: bool | None = None,
+        search: str | None = None,
         skip: int = 0,
         limit: int = 20,
-        is_active: bool | None = None,
     ) -> PaginatedDTO:
-        """List coupons for a store with pagination.
+        """List coupons with filtering and pagination.
 
         Args:
-            store_id: The store UUID.
+            store_id: Optional filter by store.
+            is_active: Optional filter for active/inactive coupons.
+            search: Optional search query for coupon code.
             skip: Number of records to skip.
             limit: Maximum number of records to return.
-            is_active: Optional filter for active/inactive coupons.
 
         Returns:
             PaginatedDTO containing coupon data and pagination metadata.
         """
-        coupons = await self.coupon_repository.get_by_store(
+        coupons = await self.coupon_repository.list_with_filters(
             store_id=store_id,
+            is_active=is_active,
+            search=search,
             skip=skip,
             limit=limit,
-            is_active=is_active,
         )
-        total = await self.coupon_repository.count_by_store(store_id)
+
+        total = await self.coupon_repository.count_with_filters(
+            store_id=store_id,
+            is_active=is_active,
+            search=search,
+        )
+
         page = (skip // limit) + 1 if limit > 0 else 1
 
         return PaginatedDTO.create(
-            items=[CouponDTO.from_entity(coupon) for coupon in coupons],
+            items=[CouponDTO.from_entity(c) for c in coupons],
             total=total,
             page=page,
             page_size=limit,

@@ -40,17 +40,17 @@ def _coupon_response(result) -> CouponResponse:
         id=str(result.id),
         store_id=str(result.store_id),
         code=result.code,
-        description=result.description,
-        discount_type=result.discount_type,
-        discount_value=result.discount_value,
-        min_order_amount=result.min_order_amount,
-        max_discount_amount=result.max_discount_amount,
-        max_uses=result.max_uses,
-        max_uses_per_customer=result.max_uses_per_customer,
-        current_usage_count=result.current_usage_count,
+        coupon_type=result.coupon_type,
+        value=str(result.value),
+        min_order_amount=str(result.min_order_amount) if result.min_order_amount is not None else None,
+        max_discount_amount=str(result.max_discount_amount) if result.max_discount_amount is not None else None,
+        usage_limit=result.usage_limit,
+        usage_count=result.usage_count,
         valid_from=str(result.valid_from) if result.valid_from else None,
-        valid_to=str(result.valid_to) if result.valid_to else None,
+        valid_until=str(result.valid_until) if result.valid_until else None,
         is_active=result.is_active,
+        is_expired=result.is_expired,
+        is_usable=result.is_usable,
         created_at=str(result.created_at),
         updated_at=str(result.updated_at),
     )
@@ -77,16 +77,13 @@ async def create_coupon(
 
     dto = CreateCouponDTO(
         code=request.code,
-        description=request.description,
-        discount_type=request.discount_type,
-        discount_value=request.discount_value,
+        coupon_type=request.coupon_type,
+        value=request.value,
         min_order_amount=request.min_order_amount,
         max_discount_amount=request.max_discount_amount,
-        max_uses=request.max_uses,
-        max_uses_per_customer=request.max_uses_per_customer,
+        usage_limit=request.usage_limit,
         valid_from=request.valid_from,
-        valid_to=request.valid_to,
-        is_active=request.is_active,
+        valid_until=request.valid_until,
     )
 
     result = await use_case.execute(dto=dto, store_id=store_id, user_id=user_id)
@@ -175,14 +172,14 @@ async def update_coupon(
     )
 
     dto = UpdateCouponDTO(
-        description=request.description,
-        discount_value=request.discount_value,
+        code=request.code,
+        coupon_type=request.coupon_type,
+        value=request.value,
         min_order_amount=request.min_order_amount,
         max_discount_amount=request.max_discount_amount,
-        max_uses=request.max_uses,
-        max_uses_per_customer=request.max_uses_per_customer,
+        usage_limit=request.usage_limit,
         valid_from=request.valid_from,
-        valid_to=request.valid_to,
+        valid_until=request.valid_until,
         is_active=request.is_active,
     )
 

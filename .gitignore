@@ -72,6 +72,10 @@ dmypy.json
 # Docker
 docker-compose.override.yml
 
+# RSA / JWT key files
+*.pem
+*.key
+
 # Cloudflare R2 / AWS
 .aws/
 

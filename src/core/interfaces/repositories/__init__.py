@@ -15,6 +15,7 @@ from src.core.interfaces.repositories.user_repository import IUserRepository
 __all__ = [
     "BaseRepository",
     "ICartRepository",
+    "ICouponRepository",
     "IUserRepository",
     "IStoreRepository",
     "IProductRepository",

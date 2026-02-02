@@ -26,10 +26,10 @@ class DeleteCouponUseCase:
             user_id: The user UUID (for authorization).
 
         Returns:
-            True if deleted.
+            True if coupon was deleted.
 
         Raises:
-            EntityNotFoundError: If coupon or store not found.
+            EntityNotFoundError: If coupon not found.
             AuthorizationError: If user doesn't own the store.
         """
         coupon = await self.coupon_repository.get_by_id(coupon_id)

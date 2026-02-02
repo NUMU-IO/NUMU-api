@@ -1,102 +1,142 @@
-"""Coupon entity representing a discount coupon for a store."""
+"""Coupon entity for discount codes."""
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
-from typing import Any
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from src.core.entities.base import BaseEntity
 
 
-class DiscountType(str, Enum):
+class CouponType(str, Enum):
     """Coupon discount type enumeration."""
 
     PERCENTAGE = "percentage"
-    FIXED_AMOUNT = "fixed_amount"
+    FIXED = "fixed"
+    FREE_SHIPPING = "free_shipping"
 
 
 class Coupon(BaseEntity):
-    """Coupon entity representing a store discount coupon.
+    """Coupon entity representing a discount code for a store.
 
-    For PERCENTAGE type, discount_value is the integer percentage (e.g. 10 = 10%).
-    For FIXED_AMOUNT type, discount_value is in cents.
+    Coupons can offer percentage discounts, fixed-amount discounts,
+    or free shipping. They support usage limits and validity date ranges.
     """
 
     store_id: UUID
-    code: str
-    description: str | None = None
-    discount_type: DiscountType
-    discount_value: int = Field(ge=0)
-    min_order_amount: int = Field(default=0, ge=0)
-    max_discount_amount: int | None = None
-    max_uses: int | None = None
-    max_uses_per_customer: int | None = None
-    current_usage_count: int = Field(default=0, ge=0)
+    code: str = Field(..., min_length=1, max_length=50)
+    coupon_type: CouponType
+    value: Decimal = Field(default=Decimal("0"), ge=0)
+    min_order_amount: Decimal | None = Field(None, ge=0)
+    max_discount_amount: Decimal | None = Field(None, ge=0)
+    usage_limit: int | None = Field(None, ge=0)
+    usage_count: int = Field(default=0, ge=0)
     valid_from: datetime | None = None
-    valid_to: datetime | None = None
+    valid_until: datetime | None = None
     is_active: bool = True
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
-    def is_valid(
-        self,
-        subtotal: int,
-        now: datetime | None = None,
-        customer_usage_count: int = 0,
-    ) -> tuple[bool, str | None]:
-        """Check if the coupon is valid for the given order.
+    @field_validator("code", mode="before")
+    @classmethod
+    def normalize_code(cls, v: str) -> str:
+        """Normalize coupon code to uppercase and stripped."""
+        return v.strip().upper()
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, v: Decimal, info) -> Decimal:
+        """Validate value based on coupon type context."""
+        if v < 0:
+            raise ValueError("Coupon value cannot be negative")
+        return v
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if coupon has passed its validity end date."""
+        if self.valid_until is None:
+            return False
+        return datetime.now(timezone.utc) > self.valid_until
+
+    @property
+    def is_started(self) -> bool:
+        """Check if coupon validity period has started."""
+        if self.valid_from is None:
+            return True
+        return datetime.now(timezone.utc) >= self.valid_from
+
+    @property
+    def is_within_validity(self) -> bool:
+        """Check if coupon is within its validity date range."""
+        return self.is_started and not self.is_expired
+
+    @property
+    def has_remaining_uses(self) -> bool:
+        """Check if coupon has remaining uses."""
+        if self.usage_limit is None:
+            return True
+        return self.usage_count < self.usage_limit
+
+    @property
+    def is_usable(self) -> bool:
+        """Check if coupon can currently be used."""
+        return self.is_active and self.is_within_validity and self.has_remaining_uses
+
+    def meets_minimum_order(self, order_amount: Decimal) -> bool:
+        """Check if an order amount meets the minimum order requirement.
 
         Args:
-            subtotal: Order subtotal in cents.
-            now: Current time (defaults to UTC now).
-            customer_usage_count: How many times the customer has used this coupon.
+            order_amount: The order subtotal to check against.
 
         Returns:
-            Tuple of (is_valid, error_message).
+            True if the order meets the minimum, or no minimum is set.
         """
-        if now is None:
-            now = datetime.now(timezone.utc)
+        if self.min_order_amount is None:
+            return True
+        return order_amount >= self.min_order_amount
 
-        if not self.is_active:
-            return False, "Coupon is not active"
-
-        if self.valid_from and now < self.valid_from:
-            return False, "Coupon is not yet valid"
-
-        if self.valid_to and now > self.valid_to:
-            return False, "Coupon has expired"
-
-        if self.max_uses is not None and self.current_usage_count >= self.max_uses:
-            return False, "Coupon usage limit reached"
-
-        if self.max_uses_per_customer is not None and customer_usage_count >= self.max_uses_per_customer:
-            return False, "You have already used this coupon the maximum number of times"
-
-        if subtotal < self.min_order_amount:
-            return False, f"Minimum order amount not met (required: {self.min_order_amount} cents)"
-
-        return True, None
-
-    def calculate_discount(self, subtotal: int) -> int:
-        """Calculate the discount amount for a given subtotal.
+    def calculate_discount(self, order_amount: Decimal) -> Decimal:
+        """Calculate the discount amount for a given order total.
 
         Args:
-            subtotal: Order subtotal in cents.
+            order_amount: The order subtotal to calculate discount for.
 
         Returns:
-            Discount amount in cents.
+            The discount amount (capped by max_discount_amount if set).
         """
-        if self.discount_type == DiscountType.PERCENTAGE:
-            discount = subtotal * self.discount_value // 100
-            if self.max_discount_amount is not None:
-                discount = min(discount, self.max_discount_amount)
-            return discount
+        if self.coupon_type == CouponType.FREE_SHIPPING:
+            return Decimal("0")
+
+        if self.coupon_type == CouponType.PERCENTAGE:
+            discount = order_amount * self.value / Decimal("100")
         else:
-            # Fixed amount: discount cannot exceed subtotal
-            return min(self.discount_value, subtotal)
+            # Fixed discount — cannot exceed the order amount
+            discount = min(self.value, order_amount)
 
-    def increment_usage(self) -> None:
-        """Increment the usage count."""
-        self.current_usage_count += 1
+        if self.max_discount_amount is not None:
+            discount = min(discount, self.max_discount_amount)
+
+        return discount
+
+    def record_usage(self) -> None:
+        """Record a single usage of this coupon.
+
+        Raises:
+            ValueError: If the coupon has no remaining uses.
+        """
+        if not self.has_remaining_uses:
+            raise ValueError(
+                f"Coupon '{self.code}' has reached its usage limit of {self.usage_limit}"
+            )
+        self.usage_count += 1
+        self.touch()
+
+    def deactivate(self) -> None:
+        """Deactivate the coupon."""
+        self.is_active = False
+        self.touch()
+
+    def activate(self) -> None:
+        """Activate the coupon."""
+        self.is_active = True
         self.touch()

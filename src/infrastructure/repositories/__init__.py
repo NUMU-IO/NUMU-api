@@ -13,6 +13,7 @@ __all__ = [
     "UserRepository",
     "StoreRepository",
     "ProductRepository",
+    "CouponRepository",
     "CustomerRepository",
     "CustomerAddressRepository",
     "CouponRepository",

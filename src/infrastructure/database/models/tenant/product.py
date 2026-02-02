@@ -42,7 +42,7 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     
     # Pricing (stored in cents)
     price_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    price_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    price_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EGP")
     compare_at_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     

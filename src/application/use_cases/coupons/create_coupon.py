@@ -1,12 +1,21 @@
 """Create coupon use case."""
 
+from decimal import Decimal
 from uuid import UUID
 
 from src.application.dto.coupon import CouponDTO, CreateCouponDTO
-from src.core.entities.coupon import Coupon, DiscountType
-from src.core.exceptions import AuthorizationError, EntityAlreadyExistsError, EntityNotFoundError, ValidationError
+from src.core.entities.coupon import Coupon, CouponType
+from src.core.exceptions import (
+    AuthorizationError,
+    EntityAlreadyExistsError,
+    EntityNotFoundError,
+    ValidationError,
+)
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+
+
+VALID_COUPON_TYPES = {t.value for t in CouponType}
 
 
 class CreateCouponUseCase:
@@ -19,6 +28,39 @@ class CreateCouponUseCase:
     ) -> None:
         self.coupon_repository = coupon_repository
         self.store_repository = store_repository
+
+    def _validate(self, dto: CreateCouponDTO) -> list[str]:
+        """Validate coupon data and return list of errors."""
+        errors: list[str] = []
+
+        if not dto.code or not dto.code.strip():
+            errors.append("Coupon code is required")
+
+        if dto.coupon_type not in VALID_COUPON_TYPES:
+            errors.append(
+                f"Invalid coupon type. Valid types: {', '.join(VALID_COUPON_TYPES)}"
+            )
+
+        if dto.coupon_type == CouponType.PERCENTAGE.value:
+            if dto.value <= 0 or dto.value > 100:
+                errors.append("Percentage value must be between 0 and 100")
+        elif dto.coupon_type == CouponType.FIXED.value:
+            if dto.value <= 0:
+                errors.append("Fixed discount value must be greater than 0")
+
+        if dto.min_order_amount is not None and dto.min_order_amount < 0:
+            errors.append("Minimum order amount cannot be negative")
+
+        if dto.max_discount_amount is not None and dto.max_discount_amount <= 0:
+            errors.append("Maximum discount amount must be greater than 0")
+
+        if dto.usage_limit is not None and dto.usage_limit < 1:
+            errors.append("Usage limit must be at least 1")
+
+        if dto.valid_from and dto.valid_until and dto.valid_from >= dto.valid_until:
+            errors.append("valid_from must be before valid_until")
+
+        return errors
 
     async def execute(
         self,
@@ -39,7 +81,7 @@ class CreateCouponUseCase:
         Raises:
             EntityNotFoundError: If store not found.
             AuthorizationError: If user doesn't own the store.
-            EntityAlreadyExistsError: If coupon code already exists.
+            EntityAlreadyExistsError: If coupon code already exists in store.
             ValidationError: If coupon data is invalid.
         """
         # Verify store exists and user has permission
@@ -52,48 +94,34 @@ class CreateCouponUseCase:
                 "You don't have permission to create coupons for this store"
             )
 
-        # Validate discount type
-        try:
-            discount_type = DiscountType(dto.discount_type)
-        except ValueError:
+        # Validate coupon data
+        validation_errors = self._validate(dto)
+        if validation_errors:
             raise ValidationError(
-                f"Invalid discount type '{dto.discount_type}'. "
-                f"Valid types: {', '.join(t.value for t in DiscountType)}"
+                "Coupon validation failed:\n• " + "\n• ".join(validation_errors)
             )
 
-        # Validate percentage range
-        if discount_type == DiscountType.PERCENTAGE and dto.discount_value > 100:
-            raise ValidationError("Percentage discount cannot exceed 100")
-
-        # Validate date range
-        if dto.valid_from and dto.valid_to and dto.valid_from >= dto.valid_to:
-            raise ValidationError("valid_from must be before valid_to")
-
-        # Normalize code to uppercase
+        # Check code uniqueness within the store
         code = dto.code.strip().upper()
-        if not code:
-            raise ValidationError("Coupon code is required")
-
-        # Check uniqueness within store
         existing = await self.coupon_repository.get_by_code(store_id, code)
         if existing:
             raise EntityAlreadyExistsError("Coupon", "code", code)
 
-        # Create coupon entity
+        # Parse coupon type
+        coupon_type = CouponType(dto.coupon_type)
+
+        # Create entity
         coupon = Coupon(
             store_id=store_id,
             code=code,
-            description=dto.description,
-            discount_type=discount_type,
-            discount_value=dto.discount_value,
+            coupon_type=coupon_type,
+            value=dto.value,
             min_order_amount=dto.min_order_amount,
             max_discount_amount=dto.max_discount_amount,
-            max_uses=dto.max_uses,
-            max_uses_per_customer=dto.max_uses_per_customer,
+            usage_limit=dto.usage_limit,
             valid_from=dto.valid_from,
-            valid_to=dto.valid_to,
-            is_active=dto.is_active,
+            valid_until=dto.valid_until,
         )
 
-        created_coupon = await self.coupon_repository.create(coupon)
-        return CouponDTO.from_entity(created_coupon)
+        created = await self.coupon_repository.create(coupon)
+        return CouponDTO.from_entity(created)

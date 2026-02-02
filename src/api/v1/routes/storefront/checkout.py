@@ -7,6 +7,7 @@ using live product prices, and optionally initiates payment.
 """
 
 import logging
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -226,12 +227,11 @@ async def checkout(
         apply_coupon = ApplyCouponUseCase(coupon_repository=coupon_repo)
         coupon_result = await apply_coupon.execute(
             store_id=store_id,
-            coupon_code=request.coupon_code,
-            subtotal=subtotal,
-            customer_id=current_customer.id,
+            code=request.coupon_code,
+            order_amount=Decimal(str(subtotal)),
         )
-        discount_amount = coupon_result.calculated_discount
-        coupon_code = coupon_result.coupon_code
+        discount_amount = int(coupon_result.discount_amount)
+        coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
 
     total = subtotal + dto.shipping_cost + dto.tax_amount - discount_amount

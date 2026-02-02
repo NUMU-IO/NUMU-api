@@ -1,10 +1,12 @@
 """Checkout use case - validates cart, checks stock, creates order, initiates Paymob payment."""
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from uuid import UUID
 
 from src.application.dto.base import BaseDTO
 from src.application.dto.order import OrderDTO
+from src.core.entities.coupon import CouponType
 from src.core.entities.order import (
     Order,
     OrderLineItem,
@@ -19,9 +21,9 @@ from src.core.exceptions import (
     ValidationError,
 )
 from src.core.interfaces.repositories.cart_repository import ICartRepository
+from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
-from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.services.payment_service import IPaymentService
 
@@ -52,7 +54,7 @@ class CheckoutDTO(BaseDTO):
     shipping_method: str | None = None
     shipping_cost: int = 0
     payment_method: str = "card"
-    coupon_code: str | None = None  
+    coupon_code: str | None = None
 
 
 @dataclass
@@ -95,7 +97,7 @@ class CheckoutUseCase:
             product_repository: Product repository instance.
             customer_repository: Customer repository instance.
             payment_service: Payment service (Paymob) instance.
-            coupon_repository: Optional coupon repository instance.
+            coupon_repository: Coupon repository instance (optional).
         """
         self.cart_repository = cart_repository
         self.order_repository = order_repository
@@ -200,24 +202,43 @@ class CheckoutUseCase:
         shipping_cost = dto.shipping_cost
         tax_amount = 0  # TODO: Calculate tax based on address
 
-        # 4b. Apply coupon if provided
+        # 4a. Apply coupon discount if provided
         discount_amount = 0
-        coupon_code = None
-        coupon_id = None
+        applied_coupon_code: str | None = None
+        free_shipping = False
 
         if dto.coupon_code and self.coupon_repository:
-            from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
-
-            apply_coupon = ApplyCouponUseCase(coupon_repository=self.coupon_repository)
-            coupon_result = await apply_coupon.execute(
-                store_id=store_id,
-                coupon_code=dto.coupon_code,
-                subtotal=subtotal,
-                customer_id=customer_id,
+            coupon = await self.coupon_repository.get_by_code(
+                store_id, dto.coupon_code
             )
-            discount_amount = coupon_result.calculated_discount
-            coupon_code = coupon_result.coupon_code
-            coupon_id = coupon_result.coupon_id
+            if not coupon:
+                raise ValidationError(f"Coupon code '{dto.coupon_code}' not found")
+
+            if not coupon.is_usable:
+                if not coupon.is_active:
+                    raise ValidationError("This coupon is currently inactive")
+                if coupon.is_expired:
+                    raise ValidationError("This coupon has expired")
+                if not coupon.is_started:
+                    raise ValidationError("This coupon is not yet valid")
+                if not coupon.has_remaining_uses:
+                    raise ValidationError("This coupon has reached its usage limit")
+
+            subtotal_decimal = Decimal(subtotal)
+            if not coupon.meets_minimum_order(subtotal_decimal):
+                raise ValidationError(
+                    f"Order subtotal must be at least {coupon.min_order_amount} "
+                    f"to use this coupon"
+                )
+
+            if coupon.coupon_type == CouponType.FREE_SHIPPING:
+                free_shipping = True
+                shipping_cost = 0
+            else:
+                discount_amount = int(coupon.calculate_discount(subtotal_decimal))
+
+            applied_coupon_code = coupon.code
+            await self.coupon_repository.increment_usage(coupon.id)
 
         total = subtotal + shipping_cost + tax_amount - discount_amount
 
@@ -253,6 +274,12 @@ class CheckoutUseCase:
             )
 
         # 7. Create order
+        order_metadata: dict = {}
+        if applied_coupon_code:
+            order_metadata["coupon_code"] = applied_coupon_code
+            if free_shipping:
+                order_metadata["free_shipping_coupon"] = True
+
         order = Order(
             store_id=store_id,
             customer_id=customer_id,
@@ -267,21 +294,16 @@ class CheckoutUseCase:
             shipping_cost=shipping_cost,
             tax_amount=tax_amount,
             discount_amount=discount_amount,
-            coupon_code=coupon_code,
-            coupon_id=coupon_id,
             total=total,
             currency=cart.currency,
             payment_method=dto.payment_method,
             shipping_method=dto.shipping_method,
             customer_notes=dto.customer_notes,
+            metadata=order_metadata,
         )
 
         # Save order first to get ID
         order = await self.order_repository.create(order)
-
-        # 7b. Increment coupon usage after order creation
-        if coupon_id and self.coupon_repository:
-            await self.coupon_repository.increment_usage(coupon_id)
 
         # 8. Initiate Paymob payment
         try:

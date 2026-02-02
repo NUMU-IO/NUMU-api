@@ -4,6 +4,7 @@ from src.core.entities.address import AddressLabel, CustomerAddress
 from src.core.entities.base import BaseEntity
 from src.core.entities.cart import Cart
 from src.core.entities.category import Category
+from src.core.entities.coupon import Coupon, CouponType
 from src.core.entities.customer import Customer
 from src.core.entities.invoice import (
     BuyerInfo,
@@ -46,6 +47,9 @@ __all__ = [
     "ProductType",
     # Category
     "Category",
+    # Coupon
+    "Coupon",
+    "CouponType",
     # Customer
     "Customer",
     "CustomerAddress",

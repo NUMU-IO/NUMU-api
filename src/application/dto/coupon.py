@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from src.application.dto.base import BaseDTO
@@ -15,38 +16,38 @@ class CouponDTO(BaseDTO):
     id: UUID
     store_id: UUID
     code: str
-    description: str | None
-    discount_type: str
-    discount_value: int
-    min_order_amount: int
-    max_discount_amount: int | None
-    max_uses: int | None
-    max_uses_per_customer: int | None
-    current_usage_count: int
+    coupon_type: str
+    value: Decimal
+    min_order_amount: Decimal | None
+    max_discount_amount: Decimal | None
+    usage_limit: int | None
+    usage_count: int
     valid_from: datetime | None
-    valid_to: datetime | None
+    valid_until: datetime | None
     is_active: bool
+    is_expired: bool
+    is_usable: bool
     created_at: datetime
     updated_at: datetime
 
     @classmethod
     def from_entity(cls, entity: Coupon) -> "CouponDTO":
-        """Create DTO from domain entity."""
+        """Create DTO from Coupon entity."""
         return cls(
             id=entity.id,
             store_id=entity.store_id,
             code=entity.code,
-            description=entity.description,
-            discount_type=entity.discount_type.value,
-            discount_value=entity.discount_value,
+            coupon_type=entity.coupon_type.value,
+            value=entity.value,
             min_order_amount=entity.min_order_amount,
             max_discount_amount=entity.max_discount_amount,
-            max_uses=entity.max_uses,
-            max_uses_per_customer=entity.max_uses_per_customer,
-            current_usage_count=entity.current_usage_count,
+            usage_limit=entity.usage_limit,
+            usage_count=entity.usage_count,
             valid_from=entity.valid_from,
-            valid_to=entity.valid_to,
+            valid_until=entity.valid_until,
             is_active=entity.is_active,
+            is_expired=entity.is_expired,
+            is_usable=entity.is_usable,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -54,43 +55,39 @@ class CouponDTO(BaseDTO):
 
 @dataclass
 class CreateCouponDTO(BaseDTO):
-    """DTO for creating a coupon."""
+    """Create coupon data transfer object."""
 
     code: str
-    discount_type: str
-    discount_value: int
-    description: str | None = None
-    min_order_amount: int = 0
-    max_discount_amount: int | None = None
-    max_uses: int | None = None
-    max_uses_per_customer: int | None = None
+    coupon_type: str
+    value: Decimal = Decimal("0")
+    min_order_amount: Decimal | None = None
+    max_discount_amount: Decimal | None = None
+    usage_limit: int | None = None
     valid_from: datetime | None = None
-    valid_to: datetime | None = None
-    is_active: bool = True
+    valid_until: datetime | None = None
 
 
 @dataclass
 class UpdateCouponDTO(BaseDTO):
-    """DTO for updating a coupon."""
+    """Update coupon data transfer object."""
 
-    description: str | None = None
-    discount_value: int | None = None
-    min_order_amount: int | None = None
-    max_discount_amount: int | None = None
-    max_uses: int | None = None
-    max_uses_per_customer: int | None = None
+    code: str | None = None
+    coupon_type: str | None = None
+    value: Decimal | None = None
+    min_order_amount: Decimal | None = None
+    max_discount_amount: Decimal | None = None
+    usage_limit: int | None = None
     valid_from: datetime | None = None
-    valid_to: datetime | None = None
+    valid_until: datetime | None = None
     is_active: bool | None = None
 
 
 @dataclass
-class ApplyCouponResultDTO(BaseDTO):
-    """Result of applying a coupon."""
+class ApplyCouponDTO(BaseDTO):
+    """Result of applying a coupon to an order."""
 
     coupon_id: UUID
-    coupon_code: str
-    discount_type: str
-    discount_value: int
-    calculated_discount: int
-    message: str
+    code: str
+    coupon_type: str
+    discount_amount: Decimal
+    free_shipping: bool

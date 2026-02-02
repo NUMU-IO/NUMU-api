@@ -42,6 +42,7 @@ __all__ = [
     "get_user_repository",
     "get_store_repository",
     "get_product_repository",
+    "get_coupon_repository",
     "get_customer_repository",
     "get_customer_address_repository",
     "get_order_repository",

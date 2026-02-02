@@ -39,7 +39,7 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     default_currency: Mapped[Currency] = mapped_column(
         Enum(Currency, name="currency", schema="public"),
-        default=Currency.USD,
+        default=Currency.EGP,
         nullable=False,
     )
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)

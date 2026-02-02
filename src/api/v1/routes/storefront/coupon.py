@@ -41,18 +41,17 @@ async def apply_coupon(
 
     result = await use_case.execute(
         store_id=store_id,
-        coupon_code=request.coupon_code,
-        subtotal=request.subtotal,
-        customer_id=current_customer.id,
+        code=request.coupon_code,
+        order_amount=request.order_amount,
     )
 
     return SuccessResponse(
         data=ApplyCouponResponse(
-            coupon_code=result.coupon_code,
-            discount_type=result.discount_type,
-            discount_value=result.discount_value,
-            calculated_discount=result.calculated_discount,
-            message=result.message,
+            coupon_id=str(result.coupon_id),
+            code=result.code,
+            coupon_type=result.coupon_type,
+            discount_amount=str(result.discount_amount),
+            free_shipping=result.free_shipping,
         ),
         message="Coupon applied successfully",
     )

@@ -1,15 +1,20 @@
-"""Apply coupon use case — validates and calculates discount."""
+"""Apply coupon use case."""
 
-from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID
 
-from src.application.dto.coupon import ApplyCouponResultDTO
+from src.application.dto.coupon import ApplyCouponDTO
+from src.core.entities.coupon import CouponType
 from src.core.exceptions import EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 
 
 class ApplyCouponUseCase:
-    """Use case for validating and applying a coupon code."""
+    """Use case for applying a coupon to an order.
+
+    Validates the coupon, calculates the discount, and atomically
+    increments the coupon usage count.
+    """
 
     def __init__(self, coupon_repository: ICouponRepository) -> None:
         self.coupon_repository = coupon_repository
@@ -17,54 +22,47 @@ class ApplyCouponUseCase:
     async def execute(
         self,
         store_id: UUID,
-        coupon_code: str,
-        subtotal: int,
-        customer_id: UUID | None = None,
-    ) -> ApplyCouponResultDTO:
-        """Validate a coupon and calculate the discount.
+        code: str,
+        order_amount: Decimal,
+    ) -> ApplyCouponDTO:
+        """Apply a coupon and record its usage.
 
         Args:
             store_id: The store UUID.
-            coupon_code: The coupon code to validate.
-            subtotal: Order subtotal in cents.
-            customer_id: Optional customer UUID for per-customer limit checks.
+            code: The coupon code.
+            order_amount: The order subtotal.
 
         Returns:
-            ApplyCouponResultDTO with discount details.
+            ApplyCouponDTO with the calculated discount details.
 
         Raises:
             EntityNotFoundError: If coupon code not found.
-            ValidationError: If coupon is invalid for this order.
+            ValidationError: If coupon cannot be applied.
         """
-        coupon = await self.coupon_repository.get_by_code(store_id, coupon_code)
+        coupon = await self.coupon_repository.get_by_code(store_id, code)
         if not coupon:
-            raise EntityNotFoundError("Coupon", coupon_code)
+            raise EntityNotFoundError("Coupon", code)
 
-        # Check per-customer usage
-        customer_usage = 0
-        if customer_id and coupon.max_uses_per_customer is not None:
-            customer_usage = await self.coupon_repository.get_customer_usage_count(
-                coupon.id, customer_id
+        if not coupon.is_usable:
+            raise ValidationError("This coupon cannot be applied")
+
+        if not coupon.meets_minimum_order(order_amount):
+            raise ValidationError(
+                f"Order total must be at least {coupon.min_order_amount} "
+                f"to use this coupon"
             )
 
-        # Validate coupon
-        now = datetime.now(timezone.utc)
-        is_valid, error_message = coupon.is_valid(
-            subtotal=subtotal,
-            now=now,
-            customer_usage_count=customer_usage,
-        )
-        if not is_valid:
-            raise ValidationError(error_message or "Coupon is not valid")
-
         # Calculate discount
-        calculated_discount = coupon.calculate_discount(subtotal)
+        discount_amount = coupon.calculate_discount(order_amount)
+        free_shipping = coupon.coupon_type == CouponType.FREE_SHIPPING
 
-        return ApplyCouponResultDTO(
+        # Record usage atomically
+        await self.coupon_repository.increment_usage(coupon.id)
+
+        return ApplyCouponDTO(
             coupon_id=coupon.id,
-            coupon_code=coupon.code,
-            discount_type=coupon.discount_type.value,
-            discount_value=coupon.discount_value,
-            calculated_discount=calculated_discount,
-            message=f"Coupon '{coupon.code}' applied successfully",
+            code=coupon.code,
+            coupon_type=coupon.coupon_type.value,
+            discount_amount=discount_amount,
+            free_shipping=free_shipping,
         )
