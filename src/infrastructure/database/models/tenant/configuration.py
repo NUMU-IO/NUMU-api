@@ -197,7 +197,9 @@ class ServiceCredential(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
     
     # Metadata (non-sensitive info like account name, masked values for display)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    extra_metadata: Mapped[Optional[dict]] = mapped_column(
+        "metadata", JSONB, nullable=True
+    )
     
     def __repr__(self) -> str:
         return f"<ServiceCredential(id={self.id}, service={self.service_name}, active={self.is_active})>"

@@ -104,7 +104,7 @@ class ConfigureCredentialsUseCase:
             existing.is_active = True
             existing.last_validated_at = now
             existing.configured_by = admin_id
-            existing.metadata = {
+            existing.extra_metadata = {
                 "display_info": display_info,
                 "validation_details": validation_result.details,
             }
@@ -120,7 +120,7 @@ class ConfigureCredentialsUseCase:
                 is_active=True,
                 last_validated_at=now,
                 configured_by=admin_id,
-                metadata={
+                extra_metadata={
                     "display_info": display_info,
                     "validation_details": validation_result.details,
                 }
@@ -202,8 +202,8 @@ class ConfigureCredentialsUseCase:
             return None
         
         display_info = None
-        if credential.metadata:
-            display_info = credential.metadata.get("display_info")
+        if credential.extra_metadata:
+            display_info = credential.extra_metadata.get("display_info")
         
         return CredentialStatusResponse(
             tenant_id=tenant_id,

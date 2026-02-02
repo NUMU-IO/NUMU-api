@@ -14,11 +14,15 @@ from src.api.dependencies import (
     get_store_repository,
     require_store_owner,
 )
+from fastapi.responses import StreamingResponse
+
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateProductRequest,
     DeleteImageRequest,
     DeleteResponse,
+    ImportResultResponse,
+    ImportRowErrorResponse,
     PaginatedListResponse,
     ProductResponse,
     UpdateProductRequest,
@@ -29,7 +33,9 @@ from src.application.use_cases.products import (
     CreateProductUseCase,
     DeleteProductImageUseCase,
     DeleteProductUseCase,
+    ExportProductsUseCase,
     GetProductUseCase,
+    ImportProductsUseCase,
     ListProductsUseCase,
     UpdateProductUseCase,
     UploadProductImageUseCase,
@@ -472,4 +478,109 @@ async def delete_product_image(
     return SuccessResponse(
         data=DeleteResponse(deleted=True, id=str(product_id)),
         message="Image deleted successfully",
+    )
+
+
+# =============================================================================
+# CSV Import/Export Endpoints
+# =============================================================================
+
+
+@router.get(
+    "/template",
+    summary="Download CSV import template",
+)
+async def download_csv_template() -> StreamingResponse:
+    """Download an empty CSV template with the correct column headers."""
+    import io
+
+    from src.application.use_cases.products.import_products import CSV_COLUMNS
+
+    output = io.StringIO()
+    import csv
+
+    writer = csv.writer(output)
+    writer.writerow(CSV_COLUMNS)
+
+    content = output.getvalue()
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=products_template.csv"},
+    )
+
+
+@router.post(
+    "/import",
+    response_model=SuccessResponse[ImportResultResponse],
+    summary="Import products from CSV",
+)
+async def import_products(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    file: Annotated[UploadFile, File(description="CSV file to import")],
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Import products from a CSV file.
+
+    - Creates new products for rows without a matching SKU in the store.
+    - Updates existing products when a matching SKU is found.
+    - Returns row-level errors without aborting the entire import.
+    - Maximum file size: 5 MB.
+    """
+    csv_content = await file.read()
+
+    use_case = ImportProductsUseCase(
+        product_repository=product_repo,
+        store_repository=store_repo,
+    )
+
+    result = await use_case.execute(
+        csv_content=csv_content,
+        store_id=store_id,
+        user_id=user_id,
+    )
+
+    return SuccessResponse(
+        data=ImportResultResponse(
+            total_rows=result.total_rows,
+            created=result.created,
+            updated=result.updated,
+            errors=[
+                ImportRowErrorResponse(row=e.row, field=e.field, message=e.message)
+                for e in result.errors
+            ],
+        ),
+        message=f"Import complete: {result.created} created, {result.updated} updated, {len(result.errors)} errors",
+    )
+
+
+@router.get(
+    "/export",
+    summary="Export products as CSV",
+)
+async def export_products(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+) -> StreamingResponse:
+    """Export all store products as a downloadable CSV file."""
+    use_case = ExportProductsUseCase(
+        product_repository=product_repo,
+        store_repository=store_repo,
+    )
+
+    csv_content = await use_case.execute(
+        store_id=store_id,
+        user_id=user_id,
+    )
+
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="products_{store_id}.csv"',
+        },
     )

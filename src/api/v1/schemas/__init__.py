@@ -40,6 +40,8 @@ from src.api.v1.schemas.tenant import (
     StoreResponse,
     UpdateOrderRequest,
     UpdateOrderStatusRequest,
+    ImportResultResponse,
+    ImportRowErrorResponse,
     UpdateCouponRequest,
     UpdateProductRequest,
     UpdateStoreRequest,
@@ -77,6 +79,8 @@ __all__ = [
     "UpdateProductRequest",
     "ProductResponse",
     "UploadedImageResponse",
+    "ImportResultResponse",
+    "ImportRowErrorResponse",
     # Order (tenant)
     "CreateOrderRequest",
     "UpdateOrderRequest",

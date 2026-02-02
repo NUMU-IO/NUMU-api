@@ -25,6 +25,10 @@ from src.api.v1.schemas.tenant.product import (
     UpdateProductRequest,
     UploadedImageResponse,
 )
+from src.api.v1.schemas.tenant.product_import import (
+    ImportResultResponse,
+    ImportRowErrorResponse,
+)
 from src.api.v1.schemas.tenant.store import (
     CheckSubdomainRequest,
     CheckSubdomainResponse,
@@ -71,6 +75,9 @@ __all__ = [
     "ProductResponse",
     "UpdateProductRequest",
     "UploadedImageResponse",
+    # Product Import/Export
+    "ImportResultResponse",
+    "ImportRowErrorResponse",
     # Store
     "CheckSubdomainRequest",
     "CheckSubdomainResponse",
