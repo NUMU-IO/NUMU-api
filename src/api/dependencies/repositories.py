@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.infrastructure.repositories import (
+    CouponRepository,
     CustomerAddressRepository,
     CustomerRepository,
     OrderRepository,
@@ -49,6 +50,13 @@ def get_customer_address_repository(
 ) -> CustomerAddressRepository:
     """Get customer address repository dependency."""
     return CustomerAddressRepository(session)
+
+
+def get_coupon_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> CouponRepository:
+    """Get coupon repository dependency."""
+    return CouponRepository(session)
 
 
 def get_order_repository(
