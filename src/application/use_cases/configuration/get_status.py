@@ -74,8 +74,8 @@ class GetConfigurationStatusUseCase:
         
         # Build display info from metadata if available
         display_info = None
-        if credentials and credentials.metadata:
-            display_info = credentials.metadata.get("display_info")
+        if credentials and credentials.extra_metadata:
+            display_info = credentials.extra_metadata.get("display_info")
         
         return ConfigurationStatusResponse(
             service_type=service_type,

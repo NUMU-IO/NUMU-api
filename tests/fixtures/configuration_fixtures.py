@@ -190,7 +190,7 @@ def mock_service_credential(tenant_id: UUID, admin_id: UUID):
     credential.configured_by = admin_id
     credential.created_at = datetime.utcnow()
     credential.updated_at = datetime.utcnow()
-    credential.metadata = {"display_info": {"merchant_code": "FWY***789"}}
+    credential.extra_metadata = {"display_info": {"merchant_code": "FWY***789"}}
     return credential
 
 
