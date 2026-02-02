@@ -13,6 +13,8 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -167,12 +169,32 @@ def sync_client() -> Generator[TestClient, None, None]:
 # =============================================================================
 
 
+def _generate_test_rsa_keypair() -> tuple[str, str]:
+    """Generate an RSA key pair for test token signing."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+    public_pem = key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+    return private_pem, public_pem
+
+
+# Generated once per test session to avoid repeated key generation overhead.
+_TEST_PRIVATE_KEY, _TEST_PUBLIC_KEY = _generate_test_rsa_keypair()
+
+
 @pytest.fixture
 def token_service() -> TokenService:
-    """Create a token service instance for testing."""
+    """Create a token service instance for testing (RS256)."""
     return TokenService(
-        secret_key="test-secret-key-for-testing-minimum-32-chars",
-        algorithm="HS256",
+        private_key=_TEST_PRIVATE_KEY,
+        public_key=_TEST_PUBLIC_KEY,
+        algorithm="RS256",
         access_token_expire_minutes=30,
         refresh_token_expire_days=7,
     )

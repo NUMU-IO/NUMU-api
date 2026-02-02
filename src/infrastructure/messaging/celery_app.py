@@ -1,6 +1,7 @@
 """Celery application configuration."""
 
 from celery import Celery
+from celery.schedules import crontab
 
 from src.config import settings
 
@@ -37,11 +38,10 @@ celery_app.conf.update(
     ],
 )
 
-# Optional: Beat schedule for periodic tasks
+# Beat schedule for periodic tasks
 celery_app.conf.beat_schedule = {
-    # Example periodic task (uncomment and customize as needed):
-    # "cleanup-expired-sessions": {
-    #     "task": "src.infrastructure.messaging.tasks.cleanup_sessions",
-    #     "schedule": 3600.0,  # Every hour
-    # },
+    "daily-database-backup": {
+        "task": "tasks.backup_database",
+        "schedule": crontab(hour=3, minute=0),  # Every day at 03:00 UTC
+    },
 }

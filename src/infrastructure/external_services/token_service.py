@@ -1,4 +1,4 @@
-"""JWT token service implementation."""
+"""JWT token service implementation using RS256 asymmetric signing."""
 
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -16,23 +16,38 @@ from src.core.interfaces.services.token_service import (
 
 
 class TokenService(ITokenService):
-    """JWT token service implementation."""
+    """JWT token service using RS256 asymmetric key pair.
+
+    Tokens are signed with the private key and verified with the public key.
+    This allows external services to verify tokens using only the public key,
+    without needing access to the signing secret.
+    """
 
     def __init__(
         self,
-        secret_key: str | None = None,
+        private_key: str | None = None,
+        public_key: str | None = None,
         algorithm: str | None = None,
         access_token_expire_minutes: int | None = None,
         refresh_token_expire_days: int | None = None,
     ) -> None:
-        self.secret_key = secret_key or settings.jwt_secret_key
         self.algorithm = algorithm or settings.jwt_algorithm
+        self.private_key = private_key or settings.jwt_private_key
+        self.public_key = public_key or settings.jwt_public_key
         self.access_token_expire_minutes = (
             access_token_expire_minutes or settings.access_token_expire_minutes
         )
         self.refresh_token_expire_days = (
             refresh_token_expire_days or settings.refresh_token_expire_days
         )
+
+    def _get_signing_key(self) -> str:
+        """Get the key used for signing tokens."""
+        return self.private_key
+
+    def _get_verification_key(self) -> str:
+        """Get the key used for verifying tokens."""
+        return self.public_key
 
     def _create_token(
         self,
@@ -52,7 +67,7 @@ class TokenService(ITokenService):
             "exp": expire,
             "iat": datetime.utcnow(),
         }
-        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_access_token(self, user: User) -> str:
         """Create an access token for a user."""
@@ -68,7 +83,7 @@ class TokenService(ITokenService):
         """Verify and decode a token. Raises exception if invalid."""
         try:
             payload = jwt.decode(
-                token, self.secret_key, algorithms=[self.algorithm]
+                token, self._get_verification_key(), algorithms=[self.algorithm]
             )
             return TokenPayload(
                 user_id=UUID(payload["sub"]),
@@ -108,7 +123,7 @@ class TokenService(ITokenService):
             "exp": expire,
             "iat": datetime.utcnow(),
         }
-        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_customer_access_token(self, customer) -> str:
         """Create an access token for a customer."""
@@ -124,7 +139,7 @@ class TokenService(ITokenService):
         """Verify and decode a customer token. Raises exception if invalid."""
         try:
             payload = jwt.decode(
-                token, self.secret_key, algorithms=[self.algorithm]
+                token, self._get_verification_key(), algorithms=[self.algorithm]
             )
             if not payload.get("customer"):
                 raise InvalidTokenError()
@@ -150,4 +165,3 @@ class TokenService(ITokenService):
 
 # Singleton instance
 token_service = TokenService()
-

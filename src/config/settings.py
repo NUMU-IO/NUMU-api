@@ -78,29 +78,35 @@ class Settings(BaseSettings):
         password_part = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
-    # JWT Authentication
-    # Default is 32+ chars for development, MUST be changed in production
-    jwt_secret_key: str = Field(default="dev-only-jwt-secret-key-change-in-production-32chars")
-    jwt_algorithm: str = "HS256"
+    # JWT Authentication (RS256 asymmetric signing)
+    jwt_private_key: str = Field(default="")
+    jwt_public_key: str = Field(default="")
+    jwt_algorithm: str = "RS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+
+    # Legacy HS256 secret (kept for backwards-compatible token verification during migration)
+    jwt_secret_key: str = Field(default="")
 
     # Session (separate from JWT for admin panel cookies)
     # Default is 32+ chars for development, MUST be changed in production
     session_secret_key: str = Field(default="dev-only-session-secret-change-in-prod-32chars")
 
-    @field_validator("jwt_secret_key")
-    @classmethod
-    def validate_jwt_secret(cls, v: str) -> str:
-        """Validate JWT secret key."""
-        # Note: Environment check happens in model_validator since we need
-        # access to the environment field
-        if len(v) < 32:
-            raise ValueError(
-                "JWT_SECRET_KEY must be at least 32 characters for security. "
-                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
-            )
-        return v
+    @model_validator(mode="after")
+    def validate_jwt_keys(self) -> "Settings":
+        """Validate that RSA keys are provided when using RS256."""
+        if self.jwt_algorithm == "RS256":
+            if not self.jwt_private_key:
+                raise ValueError(
+                    "JWT_PRIVATE_KEY is required for RS256 algorithm. "
+                    "Generate keys with: python scripts/generate_jwt_keys.py"
+                )
+            if not self.jwt_public_key:
+                raise ValueError(
+                    "JWT_PUBLIC_KEY is required for RS256 algorithm. "
+                    "Generate keys with: python scripts/generate_jwt_keys.py"
+                )
+        return self
 
     @field_validator("session_secret_key")
     @classmethod
@@ -117,11 +123,6 @@ class Settings(BaseSettings):
     def validate_production_secrets(self) -> "Settings":
         """Validate that default secrets are not used in production."""
         if self.environment == "production":
-            if self.jwt_secret_key == "change-me-in-production":
-                raise ValueError(
-                    "CRITICAL: JWT_SECRET_KEY must be changed from default in production! "
-                    "Set a secure value in your environment or .env file."
-                )
             if self.session_secret_key == "change-me-session-secret":
                 raise ValueError(
                     "CRITICAL: SESSION_SECRET_KEY must be changed from default in production! "
@@ -163,6 +164,10 @@ class Settings(BaseSettings):
     r2_secret_access_key: str | None = None
     r2_bucket_name: str = "numu"
     r2_public_url: str | None = None
+
+    # Database Backups (uses R2 credentials for storage)
+    r2_backup_bucket_name: str = "numu-db-backups"
+    backup_retention_days: int = 30
 
     # Shippo
     shippo_api_key: str | None = None
