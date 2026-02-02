@@ -38,6 +38,7 @@ __all__ = [
     "require_store_owner",
     "require_admin",
     # Repositories
+    "get_coupon_repository",
     "get_user_repository",
     "get_store_repository",
     "get_product_repository",

@@ -16,6 +16,7 @@ __all__ = [
     "CouponRepository",
     "CustomerRepository",
     "CustomerAddressRepository",
+    "CouponRepository",
     "OrderRepository",
     "RedisCartRepository",
 ]

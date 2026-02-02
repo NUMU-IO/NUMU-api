@@ -23,6 +23,7 @@ from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import inventory as inventory_module
 from src.api.v1.routes.stores import analytics as analytics_module
+from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import settings as settings_module
 
 # Create main stores router - this will be mounted at /stores in the main router
@@ -40,6 +41,7 @@ router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(inventory_module.router, tags=["Store Inventory"])
 router.include_router(analytics_module.router, tags=["Store Analytics"])
+router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(settings_module.router, tags=["Store Settings"])
 
 __all__ = ["router"]

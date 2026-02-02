@@ -6,6 +6,11 @@ from src.api.v1.schemas.tenant.common import (
     PaginatedListResponse,
     PaginationParams,
 )
+from src.api.v1.schemas.tenant.coupon import (
+    CouponResponse,
+    CreateCouponRequest,
+    UpdateCouponRequest,
+)
 from src.api.v1.schemas.tenant.invoice import (
     CreateInvoiceRequest,
     InvoiceListResponse,
@@ -50,6 +55,10 @@ __all__ = [
     "MessageResponse",
     "PaginatedListResponse",
     "PaginationParams",
+    # Coupon
+    "CouponResponse",
+    "CreateCouponRequest",
+    "UpdateCouponRequest",
     # Invoice
     "CreateInvoiceRequest",
     "InvoiceListResponse",

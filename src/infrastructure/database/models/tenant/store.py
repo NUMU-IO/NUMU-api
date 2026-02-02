@@ -56,6 +56,7 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     customers = relationship("CustomerModel", back_populates="store", lazy="selectin")
     orders = relationship("OrderModel", back_populates="store", lazy="selectin")
     invoices = relationship("InvoiceModel", back_populates="store", lazy="selectin")
+    coupons = relationship("CouponModel", back_populates="store", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<StoreModel(id={self.id}, name={self.name})>"

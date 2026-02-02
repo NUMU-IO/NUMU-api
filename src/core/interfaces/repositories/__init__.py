@@ -23,6 +23,7 @@ __all__ = [
     "ICustomerAddressRepository",
     "IOrderRepository",
     "ICategoryRepository",
+    "ICouponRepository",
     "ITenantRepository",
 ]
 
