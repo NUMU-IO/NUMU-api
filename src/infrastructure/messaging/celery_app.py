@@ -44,4 +44,9 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.backup_database",
         "schedule": crontab(hour=3, minute=0),  # Every day at 03:00 UTC
     },
+    "process-slack-alert-queue": {
+        "task": "tasks.process_slack_alert_queue",
+        "schedule": 5.0,  # Every 5 seconds
+        "kwargs": {"max_alerts": 5},
+    },
 }
