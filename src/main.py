@@ -1,11 +1,13 @@
 """Main FastAPI application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
 import uvicorn
 from fastapi import FastAPI
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 from src.api.admin import setup_admin
@@ -33,6 +35,12 @@ def init_sentry() -> None:
         logger.warning("sentry_dsn_not_configured", msg="Sentry DSN not set, error tracking disabled")
         return
 
+    # Configure logging integration to capture WARNING+ as breadcrumbs, ERROR+ as events
+    sentry_logging = LoggingIntegration(
+        level=logging.INFO,          # Capture INFO+ as breadcrumbs
+        event_level=logging.ERROR,   # Send ERROR+ as Sentry events
+    )
+
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         environment=settings.environment,
@@ -41,6 +49,7 @@ def init_sentry() -> None:
         profiles_sample_rate=settings.sentry_profiles_sample_rate,
         send_default_pii=settings.sentry_send_default_pii,
         integrations=[
+            sentry_logging,
             AsyncioIntegration(),
             SqlalchemyIntegration(),
         ],
