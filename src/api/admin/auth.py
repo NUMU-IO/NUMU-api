@@ -3,21 +3,21 @@
 import logging
 
 from sqladmin.authentication import AuthenticationBackend
+from sqlalchemy import select, text
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
-from sqlalchemy import select, text
 
+from src.core.entities.user import UserRole
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models import UserModel
 from src.infrastructure.external_services.password_service import password_service
-from src.core.entities.user import UserRole
 
 logger = logging.getLogger(__name__)
 
 
 class AdminAuth(AuthenticationBackend):
     """Authentication backend for admin panel.
-    
+
     Only users with SUPER_ADMIN role can access the admin panel.
     """
 
@@ -41,7 +41,7 @@ class AdminAuth(AuthenticationBackend):
             async with AsyncSessionLocal() as session:
                 # Explicitly set public schema for user lookup
                 await session.execute(text("SET search_path TO public"))
-                
+
                 result = await session.execute(
                     select(UserModel).where(UserModel.email == email.lower())
                 )

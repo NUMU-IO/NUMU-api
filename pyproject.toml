@@ -73,6 +73,8 @@ packages = ["src"]
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -82,9 +84,18 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
 ]
-ignore = ["E501", "B008", "B905"]
+ignore = [
+    "E501",  # line too long
+    "B008",  # function call in default argument
+    "B905",  # zip without strict
+    "B904",  # raise without from (intentional in some cases)
+    "E402",  # module import not at top (needed for settings-dependent imports)
+    "B017",  # pytest.raises(Exception) - sometimes intentional
+    "B015",  # useless comparison in tests
+    "F403",  # star imports - used for fixture re-exports
+]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["src"]
 
 [tool.mypy]

@@ -6,10 +6,10 @@ from uuid import uuid4
 import pytest
 
 from src.application.use_cases.stores.create_store import CreateStoreUseCase
+from src.application.use_cases.stores.delete_store import DeleteStoreUseCase
 from src.application.use_cases.stores.get_store import GetStoreUseCase
 from src.application.use_cases.stores.list_stores import ListStoresUseCase
 from src.application.use_cases.stores.update_store import UpdateStoreUseCase
-from src.application.use_cases.stores.delete_store import DeleteStoreUseCase
 from src.core.entities.store import Store, StoreStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.value_objects.money import Currency

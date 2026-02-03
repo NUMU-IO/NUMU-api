@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.core.entities.user import User, UserRole
+from src.core.entities.user import UserRole
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
 from src.infrastructure.external_services.token_service import token_service
 
@@ -18,7 +18,7 @@ async def get_current_user_id(
 ) -> UUID:
     """Get current user ID from JWT token."""
     token = credentials.credentials
-    
+
     try:
         payload = token_service.verify_token(token)
         return payload.user_id
@@ -41,7 +41,7 @@ async def get_current_user_role(
 ) -> tuple[UUID, str]:
     """Get current user ID and role from JWT token."""
     token = credentials.credentials
-    
+
     try:
         payload = token_service.verify_token(token)
         return payload.user_id, payload.role
@@ -90,12 +90,15 @@ def require_roles(*allowed_roles: UserRole):
 require_store_owner = require_roles(UserRole.STORE_OWNER, UserRole.SUPER_ADMIN)
 require_admin = require_roles(UserRole.SUPER_ADMIN)
 
+from src.api.dependencies.repositories import (
+    get_customer_repository,
+    get_store_repository,
+)
 from src.core.entities.customer import Customer
 from src.core.entities.store import Store
 from src.core.interfaces.services.token_service import CustomerTokenPayload
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
-from src.api.dependencies.repositories import get_customer_repository, get_store_repository
 
 # ... existing code ...
 
@@ -104,7 +107,7 @@ async def get_current_customer_payload(
 ) -> CustomerTokenPayload:
     """Get current customer payload from JWT token."""
     token = credentials.credentials
-    
+
     try:
         return token_service.verify_customer_token(token)
     except (TokenExpiredError, InvalidTokenError) as e:

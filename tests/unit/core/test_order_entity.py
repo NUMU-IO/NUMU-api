@@ -5,12 +5,12 @@ from uuid import uuid4
 import pytest
 
 from src.core.entities.order import (
-    Order,
-    OrderStatus,
-    PaymentStatus,
     FulfillmentStatus,
+    Order,
     OrderLineItem,
     OrderShippingAddress,
+    OrderStatus,
+    PaymentStatus,
 )
 
 

@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.user import User, UserRole, UserStatus
+from src.core.entities.user import User
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber

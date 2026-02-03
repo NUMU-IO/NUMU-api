@@ -1,7 +1,7 @@
 """Health check routes with comprehensive system status."""
 
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -50,18 +50,18 @@ class DetailedHealthResponse(BaseModel):
 
 async def check_database(db: AsyncSession) -> ComponentHealth:
     """Check database connectivity."""
-    start = datetime.now(timezone.utc)
+    start = datetime.now(UTC)
     try:
         result = await db.execute(text("SELECT 1"))
         result.scalar()
-        latency = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+        latency = (datetime.now(UTC) - start).total_seconds() * 1000
         return ComponentHealth(
             status=HealthStatus.HEALTHY,
             latency_ms=round(latency, 2),
             message="Database connection successful",
         )
     except Exception as e:
-        latency = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+        latency = (datetime.now(UTC) - start).total_seconds() * 1000
         logger.error("health_check_db_failed", error=str(e))
         return ComponentHealth(
             status=HealthStatus.UNHEALTHY,
@@ -72,7 +72,7 @@ async def check_database(db: AsyncSession) -> ComponentHealth:
 
 async def check_redis() -> ComponentHealth:
     """Check Redis connectivity."""
-    start = datetime.now(timezone.utc)
+    start = datetime.now(UTC)
     try:
         client = redis.from_url(
             settings.redis_url,
@@ -82,7 +82,7 @@ async def check_redis() -> ComponentHealth:
         await client.ping()
         info = await client.info("server")
         await client.close()
-        latency = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+        latency = (datetime.now(UTC) - start).total_seconds() * 1000
         return ComponentHealth(
             status=HealthStatus.HEALTHY,
             latency_ms=round(latency, 2),
@@ -93,7 +93,7 @@ async def check_redis() -> ComponentHealth:
             },
         )
     except Exception as e:
-        latency = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+        latency = (datetime.now(UTC) - start).total_seconds() * 1000
         logger.error("health_check_redis_failed", error=str(e))
         return ComponentHealth(
             status=HealthStatus.UNHEALTHY,
@@ -218,7 +218,7 @@ async def detailed_health_check(
 
     return DetailedHealthResponse(
         status=overall_status,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         version=settings.app_version,
         environment=settings.environment,
         components=components,

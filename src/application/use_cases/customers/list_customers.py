@@ -21,13 +21,13 @@ class ListCustomersUseCase:
         query: str | None = None,
     ) -> PaginatedDTO:
         """List customers for a store with pagination and optional search.
-        
+
         Args:
             store_id: ID of the store
             skip: Number of records to skip
             limit: Maximum number of records to return
             query: Optional search query (name or email)
-            
+
         Returns:
             PaginatedDTO containing customer data
         """
@@ -55,7 +55,7 @@ class ListCustomersUseCase:
                 limit=limit,
             )
             total = await self.customer_repository.count_by_store(store_id)
-        
+
         page = (skip // limit) + 1 if limit > 0 else 1
 
         return PaginatedDTO.create(

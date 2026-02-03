@@ -102,25 +102,25 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.debug else None,
         lifespan=lifespan,
     )
-    
+
     # Setup CORS
     setup_cors(app)
-    
+
     # Setup exception handlers
     setup_exception_handlers(app)
-    
+
     # Add SessionMiddleware for admin panel cookie-based auth
     # Uses separate session secret from JWT for security
     from starlette.middleware.sessions import SessionMiddleware
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
-    
+
     # Add middleware (order matters: first added = outermost)
     # Rate limiting should be outermost to block requests early
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(TenantMiddleware)
     app.add_middleware(SentryMiddleware)  # Captures request context for Sentry
     app.add_middleware(LoggingMiddleware)  # Structured logging with request context
-    
+
     # Root endpoint
     @app.get("/", tags=["Root"])
     async def root():
@@ -132,13 +132,13 @@ def create_app() -> FastAPI:
             "docs": "/docs" if settings.debug else None,
             "health": "/api/v1/public/health",
         }
-    
+
     # Include routers
     app.include_router(api_router)
-    
+
     # Setup admin panel (public schema only)
     setup_admin(app)
-    
+
     return app
 
 

@@ -20,18 +20,18 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    
+
     # Task execution
     task_acks_late=True,
     task_reject_on_worker_lost=True,
-    
+
     # Results
     result_expires=3600,  # 1 hour
-    
+
     # Worker settings
     worker_prefetch_multiplier=1,
     worker_concurrency=4,
-    
+
     # Task autodiscovery - adjust paths as needed
     imports=[
         "src.infrastructure.messaging.tasks",

@@ -1,6 +1,6 @@
 """Sentry middleware for request context and performance tracking."""
 
-from typing import Callable
+from collections.abc import Callable
 
 import sentry_sdk
 from fastapi import Request, Response

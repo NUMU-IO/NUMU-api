@@ -1,6 +1,6 @@
 """Unit tests for coupon entity, CRUD, and apply logic."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -8,7 +8,6 @@ from uuid import uuid4
 import pytest
 
 from src.core.entities.coupon import Coupon, CouponType
-
 
 # =============================================================================
 # Coupon Entity Tests
@@ -75,14 +74,14 @@ class TestCouponEntity:
 
     def test_is_expired_coupon(self):
         coupon = self._create_coupon(
-            valid_until=datetime.now(timezone.utc) - timedelta(days=1),
+            valid_until=datetime.now(UTC) - timedelta(days=1),
         )
         assert coupon.is_expired is True
         assert coupon.is_usable is False
 
     def test_not_yet_started_coupon(self):
         coupon = self._create_coupon(
-            valid_from=datetime.now(timezone.utc) + timedelta(days=1),
+            valid_from=datetime.now(UTC) + timedelta(days=1),
         )
         assert coupon.is_started is False
         assert coupon.is_usable is False
@@ -188,7 +187,7 @@ class TestApplyCoupon:
     @pytest.mark.asyncio
     async def test_apply_expired_coupon(self):
         coupon = self._create_coupon_entity(
-            valid_until=datetime.now(timezone.utc) - timedelta(days=1),
+            valid_until=datetime.now(UTC) - timedelta(days=1),
         )
         use_case = self._make_use_case(coupon=coupon)
 

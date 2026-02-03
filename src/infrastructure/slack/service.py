@@ -12,18 +12,16 @@ import sentry_sdk
 from src.config import settings
 from src.config.logging_config import get_logger
 from src.infrastructure.slack.alerts import (
-    AlertSeverity,
     AlertService,
+    AlertSeverity,
     SlackAlert,
     create_critical_alert,
     create_fraud_alert,
     create_infrastructure_alert,
     create_payment_alert,
     create_shipping_alert,
-    create_warn_alert,
 )
 from src.infrastructure.slack.channels import (
-    AlertChannel,
     get_all_channels_for_alert,
     get_channel_for_alert,
 )

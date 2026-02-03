@@ -7,7 +7,6 @@ This module provides structured email templates for:
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -20,18 +19,18 @@ class EmailTemplate:
 
 class ConfigurationRequestEmailTemplate:
     """Email templates for configuration request notifications."""
-    
+
     @staticmethod
     def new_request_admin(
         merchant_name: str,
         service_name: str,
         service_type: str,
         priority: str,
-        notes: Optional[str],
+        notes: str | None,
         action_url: str,
     ) -> EmailTemplate:
         """Generate email for new configuration request (to admin).
-        
+
         Args:
             merchant_name: The merchant's business name
             service_name: The service being requested
@@ -39,14 +38,14 @@ class ConfigurationRequestEmailTemplate:
             priority: Request priority
             notes: Optional merchant notes
             action_url: URL to view the request
-        
+
         Returns:
             EmailTemplate with subject and body
         """
         subject = f"[NUMU] New Configuration Request: {service_name} - {priority.upper()}"
-        
+
         notes_section = f"<p><strong>Merchant Notes:</strong> {notes}</p>" if notes else ""
-        
+
         html_body = f"""
         <!DOCTYPE html>
         <html>
@@ -71,7 +70,7 @@ class ConfigurationRequestEmailTemplate:
                 </div>
                 <div class="content">
                     <p>A merchant has requested service configuration:</p>
-                    
+
                     <div class="details">
                         <p><strong>Merchant:</strong> {merchant_name}</p>
                         <p><strong>Service:</strong> {service_name}</p>
@@ -79,7 +78,7 @@ class ConfigurationRequestEmailTemplate:
                         <p><strong>Priority:</strong> <span class="priority-{priority.lower()}">{priority.upper()}</span></p>
                         {notes_section}
                     </div>
-                    
+
                     <p>Please review and configure the credentials:</p>
                     <a href="{action_url}" class="button">Configure Credentials</a>
                 </div>
@@ -87,7 +86,7 @@ class ConfigurationRequestEmailTemplate:
         </body>
         </html>
         """
-        
+
         text_body = f"""
 NUMU Admin - New Configuration Request
 
@@ -102,9 +101,9 @@ Priority: {priority.upper()}
 Please review and configure the credentials at:
 {action_url}
         """
-        
+
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)
-    
+
     @staticmethod
     def request_received_merchant(
         merchant_name: str,
@@ -112,17 +111,17 @@ Please review and configure the credentials at:
         request_id: str,
     ) -> EmailTemplate:
         """Generate confirmation email for merchant.
-        
+
         Args:
             merchant_name: The merchant's business name
             service_name: The service being requested
             request_id: The request ID for reference
-        
+
         Returns:
             EmailTemplate with subject and body
         """
         subject = f"[NUMU] Configuration Request Received: {service_name}"
-        
+
         html_body = f"""
         <!DOCTYPE html>
         <html>
@@ -142,23 +141,23 @@ Please review and configure the credentials at:
                 </div>
                 <div class="content">
                     <p>Hello {merchant_name},</p>
-                    
+
                     <p>We've received your configuration request for <strong>{service_name}</strong>.</p>
-                    
+
                     <p>Our team will review your request and configure the service for your store. This typically takes 1-2 business days.</p>
-                    
+
                     <p>Reference ID:</p>
                     <div class="reference">{request_id}</div>
-                    
+
                     <p>You'll receive an email notification once the configuration is complete.</p>
-                    
+
                     <p>Thank you for choosing NUMU!</p>
                 </div>
             </div>
         </body>
         </html>
         """
-        
+
         text_body = f"""
 Hello {merchant_name},
 
@@ -172,13 +171,13 @@ You'll receive an email notification once the configuration is complete.
 
 Thank you for choosing NUMU!
         """
-        
+
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)
 
 
 class CredentialsConfiguredEmailTemplate:
     """Email templates for credential configuration notifications."""
-    
+
     @staticmethod
     def credentials_ready(
         merchant_name: str,
@@ -188,21 +187,21 @@ class CredentialsConfiguredEmailTemplate:
         action_url: str,
     ) -> EmailTemplate:
         """Generate email when credentials are configured.
-        
+
         Args:
             merchant_name: The merchant's business name
             service_name: The service configured
             service_type: Type of service
             features: List of enabled features
             action_url: URL to access the service
-        
+
         Returns:
             EmailTemplate with subject and body
         """
         subject = f"[NUMU] {service_name} is Now Active! 🎉"
-        
+
         features_html = "".join([f"<li>{f}</li>" for f in features])
-        
+
         html_body = f"""
         <!DOCTYPE html>
         <html>
@@ -226,30 +225,30 @@ class CredentialsConfiguredEmailTemplate:
                 </div>
                 <div class="content">
                     <p>Hello {merchant_name},</p>
-                    
+
                     <p><span class="success-badge">✓ ACTIVE</span></p>
-                    
+
                     <p>Your <strong>{service_name}</strong> integration has been configured and is ready to use!</p>
-                    
+
                     <div class="features">
                         <h3>What's Enabled:</h3>
                         <ul>
                             {features_html}
                         </ul>
                     </div>
-                    
+
                     <p>Start using {service_name} in your store:</p>
                     <a href="{action_url}" class="button">Go to Settings</a>
-                    
+
                     <p style="margin-top: 30px;">Need help? Our support team is here for you.</p>
                 </div>
             </div>
         </body>
         </html>
         """
-        
+
         features_text = "\n".join([f"  - {f}" for f in features])
-        
+
         text_body = f"""
 Great News! {service_name} is Ready
 
@@ -265,9 +264,9 @@ Start using {service_name} in your store:
 
 Need help? Our support team is here for you.
         """
-        
+
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)
-    
+
     @staticmethod
     def credentials_revoked(
         merchant_name: str,
@@ -275,17 +274,17 @@ Need help? Our support team is here for you.
         reason: str,
     ) -> EmailTemplate:
         """Generate email when credentials are revoked.
-        
+
         Args:
             merchant_name: The merchant's business name
             service_name: The service revoked
             reason: Reason for revocation
-        
+
         Returns:
             EmailTemplate with subject and body
         """
         subject = f"[NUMU] Important: {service_name} Configuration Update"
-        
+
         html_body = f"""
         <!DOCTYPE html>
         <html>
@@ -305,21 +304,21 @@ Need help? Our support team is here for you.
                 </div>
                 <div class="content">
                     <p>Hello {merchant_name},</p>
-                    
+
                     <div class="alert">
                         <p><strong>Important:</strong> Your {service_name} configuration has been deactivated.</p>
                         <p><strong>Reason:</strong> {reason}</p>
                     </div>
-                    
+
                     <p>If you need to re-enable this service, please submit a new configuration request through your dashboard.</p>
-                    
+
                     <p>If you have questions, please contact our support team.</p>
                 </div>
             </div>
         </body>
         </html>
         """
-        
+
         text_body = f"""
 Configuration Update
 
@@ -333,5 +332,5 @@ If you need to re-enable this service, please submit a new configuration request
 
 If you have questions, please contact our support team.
         """
-        
+
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)

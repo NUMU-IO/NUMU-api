@@ -12,33 +12,33 @@ from src.infrastructure.database.models.public import TenantModel
 async def get_current_tenant(request: Request) -> TenantModel:
     """
     Get the current tenant from the request state.
-    
+
     This dependency extracts the tenant that was set by TenantMiddleware.
     Use this in routes that require tenant context.
-    
+
     Raises:
         HTTPException: If no tenant context is available.
-    
+
     Returns:
         TenantModel: The current tenant object.
     """
     tenant = getattr(request.state, "tenant", None)
-    
+
     if not tenant:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tenant context not available. Ensure you're accessing via a valid subdomain.",
         )
-    
+
     return tenant
 
 
 async def get_optional_tenant(request: Request) -> TenantModel | None:
     """
     Get the current tenant from request state, or None if not available.
-    
+
     Use this in routes that can work both with and without tenant context.
-    
+
     Returns:
         TenantModel | None: The current tenant or None.
     """
@@ -48,7 +48,7 @@ async def get_optional_tenant(request: Request) -> TenantModel | None:
 def require_tenant_owner():
     """
     Dependency factory that requires the current user to be the tenant owner.
-    
+
     Usage:
         @router.put("/settings")
         async def update_settings(
@@ -67,7 +67,7 @@ def require_tenant_owner():
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to perform this action on this store.",
             )
-    
+
     return check_ownership
 
 

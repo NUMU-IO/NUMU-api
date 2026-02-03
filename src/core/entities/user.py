@@ -3,8 +3,6 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import Field
-
 from src.core.entities.base import BaseEntity
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber

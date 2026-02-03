@@ -3,13 +3,13 @@
 Defines the standard alert format for NUMU's Slack notifications.
 """
 
+import hashlib
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
-import hashlib
-import uuid
 
 
 class AlertSeverity(str, Enum):

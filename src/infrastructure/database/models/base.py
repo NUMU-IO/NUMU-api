@@ -1,7 +1,8 @@
 """Base model mixins for SQLAlchemy models."""
 
 from datetime import datetime
-from uuid import UUID as PyUUID, uuid4
+from uuid import UUID as PyUUID
+from uuid import uuid4
 
 from sqlalchemy import DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -36,7 +37,7 @@ class UUIDMixin:
 
 class TenantMixin:
     """Mixin for multi-tenancy with tenant_id discriminator.
-    
+
     All tenant-scoped models should inherit from this mixin.
     The tenant_id references the public.tenants table.
     """

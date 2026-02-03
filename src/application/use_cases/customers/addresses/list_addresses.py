@@ -3,7 +3,9 @@
 from uuid import UUID
 
 from src.application.dto.customer import CustomerAddressDTO
-from src.core.interfaces.repositories.address_repository import ICustomerAddressRepository
+from src.core.interfaces.repositories.address_repository import (
+    ICustomerAddressRepository,
+)
 
 
 class ListAddressesUseCase:

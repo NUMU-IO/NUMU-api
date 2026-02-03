@@ -8,8 +8,8 @@ from pydantic import ValidationError
 
 from src.api.v1.schemas.tenant.product import (
     CreateProductRequest,
-    UpdateProductRequest,
     ProductResponse,
+    UpdateProductRequest,
 )
 
 

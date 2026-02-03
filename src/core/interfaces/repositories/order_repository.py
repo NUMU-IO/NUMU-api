@@ -4,7 +4,7 @@ from abc import abstractmethod
 from datetime import datetime
 from uuid import UUID
 
-from src.core.entities.order import Order, OrderStatus, PaymentStatus
+from src.core.entities.order import Order, OrderStatus
 from src.core.interfaces.repositories.base import BaseRepository
 
 

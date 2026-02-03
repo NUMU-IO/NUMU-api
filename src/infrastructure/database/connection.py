@@ -1,7 +1,6 @@
 """Database connection and session management."""
 
 import re
-
 from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 
@@ -68,7 +67,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         schema = get_tenant_schema()
         safe_schema = _validate_schema_name(schema)
         await session.execute(text(f"SET search_path TO {safe_schema}"))
-        
+
         try:
             yield session
             await session.commit()

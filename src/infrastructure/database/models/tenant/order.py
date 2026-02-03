@@ -8,7 +8,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.order import FulfillmentStatus, OrderStatus, PaymentStatus
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import (
+    TenantMixin,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 
 class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
@@ -30,7 +34,7 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         index=True,
     )
     order_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    
+
     # Status
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="orderstatus", schema="public"),
@@ -48,14 +52,14 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         default=FulfillmentStatus.UNFULFILLED,
         nullable=False,
     )
-    
+
     # Line items (stored as JSON)
     line_items: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
-    
+
     # Addresses (stored as JSON)
     shipping_address: Mapped[dict] = mapped_column(JSONB, nullable=False)
     billing_address: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Pricing (stored in cents)
     subtotal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     shipping_cost: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -63,7 +67,7 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     discount_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
-    
+
     # Coupon
     coupon_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     coupon_id: Mapped[str | None] = mapped_column(
@@ -76,18 +80,18 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Payment
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
     payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    
+
     # Shipping
     shipping_method: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    
+
     # Notes
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    
+
     # Extra Data
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
-    
+
     # Timestamps
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

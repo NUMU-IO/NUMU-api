@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
-    get_current_user_id,
     get_store_repository,
     require_store_owner,
 )
@@ -20,7 +19,10 @@ from src.api.v1.schemas import (
     StoreResponse,
     UpdateStoreRequest,
 )
-from src.api.v1.schemas.tenant.store import CheckSubdomainRequest, CheckSubdomainResponse
+from src.api.v1.schemas.tenant.store import (
+    CheckSubdomainRequest,
+    CheckSubdomainResponse,
+)
 from src.application.dto.store import CreateStoreDTO, UpdateStoreDTO
 from src.application.use_cases.stores import (
     CreateStoreUseCase,
@@ -29,7 +31,10 @@ from src.application.use_cases.stores import (
     ListStoresUseCase,
     UpdateStoreUseCase,
 )
-from src.application.use_cases.stores.create_store import validate_subdomain, RESERVED_SUBDOMAINS
+from src.application.use_cases.stores.create_store import (
+    RESERVED_SUBDOMAINS,
+    validate_subdomain,
+)
 from src.infrastructure.repositories import StoreRepository
 from src.infrastructure.tenancy.service import TenantService
 

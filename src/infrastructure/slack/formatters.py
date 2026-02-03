@@ -11,7 +11,7 @@ Supports:
 from typing import Any
 
 from src.config import settings
-from src.infrastructure.slack.alerts import AlertSeverity, AlertService, SlackAlert
+from src.infrastructure.slack.alerts import AlertService, AlertSeverity, SlackAlert
 
 
 def format_amount(amount: Any, currency: str = "EGP") -> str:

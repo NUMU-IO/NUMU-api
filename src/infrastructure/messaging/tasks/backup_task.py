@@ -24,7 +24,7 @@ def backup_database(self) -> dict:
     """
     # Import inside the task to avoid circular imports at worker boot and to
     # ensure settings are read fresh each time (no stale lru_cache).
-    from scripts.backup_db import create_backup  # noqa: WPS433
+    from scripts.backup_db import create_backup
 
     try:
         logger.info("Starting scheduled database backup …")

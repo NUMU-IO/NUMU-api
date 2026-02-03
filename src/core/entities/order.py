@@ -1,6 +1,6 @@
 """Order entity representing a customer order."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -340,19 +340,19 @@ class Order(BaseEntity):
         self.metadata["status_history"].append({
             "from": old_status.value,
             "to": new_status.value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "reason": reason,
         })
 
         # Update timestamps based on new status
         if new_status == OrderStatus.CANCELLED:
-            self.cancelled_at = datetime.now(timezone.utc)
+            self.cancelled_at = datetime.now(UTC)
         elif new_status == OrderStatus.SHIPPED:
-            self.shipped_at = datetime.now(timezone.utc)
-            self.fulfilled_at = datetime.now(timezone.utc)
+            self.shipped_at = datetime.now(UTC)
+            self.fulfilled_at = datetime.now(UTC)
             self.fulfillment_status = FulfillmentStatus.FULFILLED
         elif new_status == OrderStatus.DELIVERED:
-            self.delivered_at = datetime.now(timezone.utc)
+            self.delivered_at = datetime.now(UTC)
 
         self.touch()
 
@@ -375,7 +375,7 @@ class Order(BaseEntity):
         self.payment_id = payment_id
         if payment_method:
             self.payment_method = payment_method
-        self.paid_at = datetime.now(timezone.utc)
+        self.paid_at = datetime.now(UTC)
         self.status = OrderStatus.PROCESSING
         self.touch()
 
@@ -412,8 +412,8 @@ class Order(BaseEntity):
             self.tracking_number = tracking_number
         if tracking_url:
             self.tracking_url = tracking_url
-        self.shipped_at = datetime.now(timezone.utc)
-        self.fulfilled_at = datetime.now(timezone.utc)
+        self.shipped_at = datetime.now(UTC)
+        self.fulfilled_at = datetime.now(UTC)
         self.touch()
 
     def deliver(self) -> None:
@@ -421,7 +421,7 @@ class Order(BaseEntity):
         if self.status != OrderStatus.SHIPPED:
             raise ValueError(f"Cannot deliver order in {self.status} status")
         self.status = OrderStatus.DELIVERED
-        self.delivered_at = datetime.now(timezone.utc)
+        self.delivered_at = datetime.now(UTC)
         self.touch()
 
     def cancel(self, reason: str | None = None) -> None:
@@ -433,7 +433,7 @@ class Order(BaseEntity):
         if not self.can_be_cancelled:
             raise ValueError(f"Cannot cancel order in {self.status} status")
         self.status = OrderStatus.CANCELLED
-        self.cancelled_at = datetime.now(timezone.utc)
+        self.cancelled_at = datetime.now(UTC)
         if reason:
             self.metadata["cancellation_reason"] = reason
         self.touch()
