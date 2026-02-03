@@ -13,6 +13,7 @@ from src.api.dependencies import (
     get_token_service,
     get_user_repository,
 )
+from src.api.dependencies.services import get_totp_service
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     AuthResponse,
@@ -25,6 +26,15 @@ from src.api.v1.schemas import (
     UpdateProfileRequest,
     UserResponse,
 )
+from src.api.v1.schemas.public.two_factor import (
+    Disable2FARequest,
+    Enable2FAResponse,
+    RegenerateBackupCodesRequest,
+    RegenerateBackupCodesResponse,
+    TwoFactorStatusResponse,
+    Verify2FARequest,
+    Verify2FAResponse,
+)
 from src.application.dto.auth import LoginDTO, RefreshTokenDTO, RegisterDTO
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
@@ -35,9 +45,20 @@ from src.application.use_cases.auth import (
     UpdateProfileDTO,
     UpdateProfileUseCase,
 )
+from src.application.use_cases.auth.two_factor import (
+    Disable2FAUseCase,
+    Enable2FAUseCase,
+    RegenerateBackupCodesUseCase,
+    Verify2FAUseCase,
+)
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.external_services import PasswordService, TokenService
+from src.infrastructure.external_services.totp_service import TOTPService
 from src.infrastructure.repositories import UserRepository
+from src.infrastructure.repositories.two_factor_repository import (
+    InMemoryTwoFactorRepository,
+    get_two_factor_repository,
+)
 
 router = APIRouter()
 
@@ -294,4 +315,235 @@ async def change_password(
     return SuccessResponse(
         data=MessageResponse(message="Password changed successfully"),
         message="Password changed successfully",
+    )
+
+
+# =============================================================================
+# Two-Factor Authentication (2FA) Routes
+# =============================================================================
+
+
+@router.post(
+    "/2fa/enable",
+    response_model=SuccessResponse[Enable2FAResponse],
+    summary="Enable 2FA",
+    description="Generate TOTP secret, QR code URI, and 10 backup codes to enable 2FA.",
+)
+async def enable_2fa(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
+):
+    """Enable Two-Factor Authentication for the current user.
+    
+    This generates:
+    - A TOTP secret for authenticator apps
+    - A provisioning URI (for QR code generation)
+    - 10 backup codes for recovery
+    
+    The user must verify with a TOTP code to complete setup.
+    Backup codes should be saved securely - they are only shown once!
+    """
+    from uuid import UUID
+
+    use_case = Enable2FAUseCase(
+        user_repository=user_repo,
+        two_factor_repository=two_factor_repo,
+        totp_service=totp_svc,
+    )
+
+    result = await use_case.execute(
+        user_id=UUID(user_id) if isinstance(user_id, str) else user_id
+    )
+
+    return SuccessResponse(
+        data=Enable2FAResponse(
+            secret=result.secret,
+            provisioning_uri=result.provisioning_uri,
+            qr_code_uri=result.qr_code_uri,
+            backup_codes=result.backup_codes,
+            method=result.method,
+        ),
+        message="2FA setup initiated. Verify with a TOTP code to complete.",
+    )
+
+
+@router.post(
+    "/2fa/verify",
+    response_model=SuccessResponse[Verify2FAResponse],
+    summary="Verify 2FA code",
+    description="Verify a TOTP code or backup code. Completes 2FA setup if pending.",
+)
+async def verify_2fa(
+    request: Verify2FARequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
+):
+    """Verify a 2FA code (TOTP or backup code).
+    
+    This endpoint serves two purposes:
+    1. Complete 2FA setup after calling /2fa/enable (first verification)
+    2. Verify 2FA during sensitive operations
+    
+    Accepts both 6-digit TOTP codes and backup codes (XXXX-XXXX format).
+    """
+    from uuid import UUID
+
+    # Check if this is initial setup verification
+    two_factor = await two_factor_repo.get_by_user_id(
+        UUID(user_id) if isinstance(user_id, str) else user_id
+    )
+    is_initial_setup = two_factor and two_factor.is_pending
+
+    use_case = Verify2FAUseCase(
+        two_factor_repository=two_factor_repo,
+        totp_service=totp_svc,
+    )
+
+    result = await use_case.execute(
+        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+        code=request.code,
+        is_initial_setup=is_initial_setup,
+    )
+
+    message = "2FA verified successfully"
+    if is_initial_setup:
+        message = "2FA enabled successfully! Your account is now protected."
+
+    return SuccessResponse(
+        data=Verify2FAResponse(
+            verified=result.verified,
+            method_used=result.method_used,
+            backup_codes_remaining=result.backup_codes_remaining,
+        ),
+        message=message,
+    )
+
+
+@router.delete(
+    "/2fa/disable",
+    response_model=SuccessResponse[TwoFactorStatusResponse],
+    summary="Disable 2FA",
+    description="Disable Two-Factor Authentication. Requires password confirmation.",
+)
+async def disable_2fa(
+    request: Disable2FARequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    password_svc: Annotated[PasswordService, Depends(get_password_service)],
+    totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
+):
+    """Disable Two-Factor Authentication for the current user.
+    
+    Requires password confirmation for security. Optionally accepts
+    a TOTP code for additional verification.
+    
+    WARNING: This removes all 2FA protection from the account.
+    """
+    from uuid import UUID
+
+    use_case = Disable2FAUseCase(
+        user_repository=user_repo,
+        two_factor_repository=two_factor_repo,
+        password_service=password_svc,
+        totp_service=totp_svc,
+    )
+
+    result = await use_case.execute(
+        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+        password=request.password,
+        totp_code=request.code,
+    )
+
+    return SuccessResponse(
+        data=TwoFactorStatusResponse(
+            is_enabled=result.is_enabled,
+            method=result.method,
+            backup_codes_remaining=result.backup_codes_remaining,
+            enabled_at=str(result.enabled_at) if result.enabled_at else None,
+            last_used_at=str(result.last_used_at) if result.last_used_at else None,
+        ),
+        message="2FA disabled successfully",
+    )
+
+
+@router.get(
+    "/2fa/status",
+    response_model=SuccessResponse[TwoFactorStatusResponse],
+    summary="Get 2FA status",
+    description="Get the current 2FA status for the authenticated user.",
+)
+async def get_2fa_status(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+):
+    """Get the current 2FA status for the authenticated user.
+    
+    Returns whether 2FA is enabled, the method used, and
+    the number of remaining backup codes.
+    """
+    from uuid import UUID
+    from src.application.dto.two_factor import TwoFactorStatusDTO
+
+    two_factor = await two_factor_repo.get_by_user_id(
+        UUID(user_id) if isinstance(user_id, str) else user_id
+    )
+
+    status = TwoFactorStatusDTO.from_entity(two_factor)
+
+    return SuccessResponse(
+        data=TwoFactorStatusResponse(
+            is_enabled=status.is_enabled,
+            method=status.method,
+            backup_codes_remaining=status.backup_codes_remaining,
+            enabled_at=str(status.enabled_at) if status.enabled_at else None,
+            last_used_at=str(status.last_used_at) if status.last_used_at else None,
+        ),
+        message="2FA status retrieved successfully",
+    )
+
+
+@router.post(
+    "/2fa/backup-codes/regenerate",
+    response_model=SuccessResponse[RegenerateBackupCodesResponse],
+    summary="Regenerate backup codes",
+    description="Generate new backup codes. Requires current TOTP code.",
+)
+async def regenerate_backup_codes(
+    request: RegenerateBackupCodesRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
+):
+    """Regenerate backup codes for 2FA recovery.
+    
+    Requires a valid TOTP code to prevent abuse. All existing
+    backup codes are invalidated and replaced with new ones.
+    
+    Save the new backup codes securely - they are only shown once!
+    """
+    from uuid import UUID
+
+    use_case = RegenerateBackupCodesUseCase(
+        user_repository=user_repo,
+        two_factor_repository=two_factor_repo,
+        totp_service=totp_svc,
+    )
+
+    result = await use_case.execute(
+        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
+        totp_code=request.code,
+    )
+
+    return SuccessResponse(
+        data=RegenerateBackupCodesResponse(
+            backup_codes=result.backup_codes,
+            previous_count=result.previous_count,
+            new_count=result.new_count,
+        ),
+        message="Backup codes regenerated successfully. Save them securely!",
     )

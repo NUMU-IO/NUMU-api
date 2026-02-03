@@ -24,6 +24,17 @@ from src.api.v1.schemas.public.tenant import (
     TenantResponse,
     UpdateTenantRequest,
 )
+from src.api.v1.schemas.public.two_factor import (
+    Complete2FALoginRequest,
+    Disable2FARequest,
+    Enable2FAResponse,
+    RegenerateBackupCodesRequest,
+    RegenerateBackupCodesResponse,
+    TwoFactorChallengeResponse,
+    TwoFactorStatusResponse,
+    Verify2FARequest,
+    Verify2FAResponse,
+)
 
 __all__ = [
     # Auth
@@ -37,6 +48,16 @@ __all__ = [
     "PasswordResetConfirm",
     "ChangePasswordRequest",
     "UpdateProfileRequest",
+    # 2FA
+    "Enable2FAResponse",
+    "Verify2FARequest",
+    "Verify2FAResponse",
+    "Disable2FARequest",
+    "TwoFactorStatusResponse",
+    "RegenerateBackupCodesRequest",
+    "RegenerateBackupCodesResponse",
+    "TwoFactorChallengeResponse",
+    "Complete2FALoginRequest",
     # Tenant
     "CreateTenantRequest",
     "UpdateTenantRequest",

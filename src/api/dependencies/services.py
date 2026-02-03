@@ -8,6 +8,7 @@ from src.infrastructure.external_services.openai import OpenAIService
 from src.infrastructure.external_services.resend import ResendEmailService
 from src.infrastructure.external_services.stripe import StripePaymentService
 from src.infrastructure.external_services.cloudflare_r2 import CloudflareR2StorageService
+from src.infrastructure.external_services.totp_service import totp_service
 
 
 def get_password_service():
@@ -18,6 +19,11 @@ def get_password_service():
 def get_token_service():
     """Get token service dependency."""
     return token_service
+
+
+def get_totp_service():
+    """Get TOTP service dependency for 2FA."""
+    return totp_service
 
 
 def get_email_service():
