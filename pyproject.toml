@@ -34,6 +34,10 @@ dependencies = [
     # Caching & Messaging
     "redis>=5.0.1",
     "celery>=5.3.6",
+
+    # Observability
+    "sentry-sdk[fastapi]>=1.40.0",
+    "structlog>=24.1.0",
     
     # Utilities
     "python-slugify>=8.0.1",

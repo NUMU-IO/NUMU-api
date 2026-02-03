@@ -221,6 +221,20 @@ class Settings(BaseSettings):
     default_locale: str = "en"
     supported_locales: list[str] = ["en", "ar"]
 
+    # =========================================================================
+    # Observability (Sentry, Structured Logging)
+    # =========================================================================
+
+    # Sentry
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 0.1  # 10% of transactions
+    sentry_profiles_sample_rate: float = 0.1  # 10% of profiled transactions
+    sentry_send_default_pii: bool = False  # Set True to capture user emails, IPs
+
+    # Structured Logging
+    log_level: str = "INFO"
+    log_format: str = "json"  # "json" for production, "console" for development
+
 
 @lru_cache
 def get_settings() -> Settings:
