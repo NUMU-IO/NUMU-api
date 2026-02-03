@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from src.api.middleware import (
     RateLimitMiddleware,
+    SecurityHeadersMiddleware,
     TenantMiddleware,
     logging_middleware,
     setup_cors,
@@ -67,7 +68,9 @@ def create_app() -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
     
     # Add middleware (order matters: first added = outermost)
-    # Rate limiting should be outermost to block requests early
+    # Security headers should be outermost to ensure all responses have them
+    app.add_middleware(SecurityHeadersMiddleware)
+    # Rate limiting should be next to block requests early
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(TenantMiddleware)
     app.middleware("http")(logging_middleware)
