@@ -1,0 +1,259 @@
+version: '3.8'
+
+# =============================================================================
+# NUMU API - Staging Environment
+# =============================================================================
+# Features:
+# - Nginx reverse proxy with SSL termination
+# - PostgreSQL with WAL archiving for point-in-time recovery
+# - Redis Sentinel for high availability
+# - API service with staging environment variables
+
+services:
+  # ===========================================================================
+  # Nginx Reverse Proxy
+  # ===========================================================================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: numu-nginx-staging
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - api
+    networks:
+      - numu-staging
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # NUMU API
+  # ===========================================================================
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: numu-api-staging
+    restart: unless-stopped
+    env_file:
+      - ../.env.staging
+    environment:
+      - ENVIRONMENT=staging
+      - DEBUG=false
+      - LOG_FORMAT=json
+    expose:
+      - "8000"
+    volumes:
+      - api_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    networks:
+      - numu-staging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/public/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ===========================================================================
+  # PostgreSQL with WAL Archiving
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: numu-postgres-staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-numu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-numu_staging}
+      # WAL archiving settings
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_wal_archive:/var/lib/postgresql/wal_archive
+      - ./postgres/init-wal-archiving.sh:/docker-entrypoint-initdb.d/init-wal-archiving.sh:ro
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - numu-staging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-numu} -d ${POSTGRES_DB:-numu_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # ===========================================================================
+  # Redis Master
+  # ===========================================================================
+  redis-master:
+    image: redis:7-alpine
+    container_name: numu-redis-master-staging
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_master_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - numu-staging
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # Redis Sentinel 1
+  # ===========================================================================
+  redis-sentinel-1:
+    image: redis:7-alpine
+    container_name: numu-redis-sentinel-1-staging
+    restart: unless-stopped
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis-master
+    networks:
+      - numu-staging
+    ports:
+      - "26379:26379"
+
+  # ===========================================================================
+  # Redis Sentinel 2
+  # ===========================================================================
+  redis-sentinel-2:
+    image: redis:7-alpine
+    container_name: numu-redis-sentinel-2-staging
+    restart: unless-stopped
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis-master
+    networks:
+      - numu-staging
+    ports:
+      - "26380:26379"
+
+  # ===========================================================================
+  # Redis Sentinel 3
+  # ===========================================================================
+  redis-sentinel-3:
+    image: redis:7-alpine
+    container_name: numu-redis-sentinel-3-staging
+    restart: unless-stopped
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis-master
+    networks:
+      - numu-staging
+    ports:
+      - "26381:26379"
+
+  # ===========================================================================
+  # Celery Worker
+  # ===========================================================================
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: numu-celery-worker-staging
+    restart: unless-stopped
+    command: celery -A src.infrastructure.messaging.celery_app worker --loglevel=info
+    env_file:
+      - ../.env.staging
+    environment:
+      - ENVIRONMENT=staging
+      - LOG_FORMAT=json
+    depends_on:
+      - redis-master
+      - postgres
+    networks:
+      - numu-staging
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ===========================================================================
+  # Celery Beat (Scheduler)
+  # ===========================================================================
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: numu-celery-beat-staging
+    restart: unless-stopped
+    command: celery -A src.infrastructure.messaging.celery_app beat --loglevel=info
+    env_file:
+      - ../.env.staging
+    environment:
+      - ENVIRONMENT=staging
+      - LOG_FORMAT=json
+    depends_on:
+      - redis-master
+      - postgres
+    networks:
+      - numu-staging
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  numu-staging:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  postgres_wal_archive:
+    driver: local
+  redis_master_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  api_logs:
+    driver: local
