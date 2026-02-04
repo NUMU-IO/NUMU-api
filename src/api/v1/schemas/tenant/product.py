@@ -15,7 +15,7 @@ class CreateProductRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=255)
     sku: str | None = Field(None, max_length=100)
-    description: str | None = None
+    description: str | None = Field(None, max_length=10000)
     short_description: str | None = Field(None, max_length=500)
     product_type: str = Field(default="physical")
     price: Decimal = Field(..., ge=0)
@@ -24,9 +24,9 @@ class CreateProductRequest(BaseModel):
     cost_price: Decimal | None = Field(None, ge=0)
     quantity: int = Field(default=0, ge=0)
     low_stock_threshold: int = Field(default=5, ge=0)
-    images: list[str] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list, max_length=50)
     category_id: UUID | None = None
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list, max_length=50)
     attributes: dict = Field(default_factory=dict)
 
     @field_validator("price_currency")
@@ -49,16 +49,16 @@ class UpdateProductRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=255)
     sku: str | None = Field(None, max_length=100)
-    description: str | None = None
+    description: str | None = Field(None, max_length=10000)
     short_description: str | None = Field(None, max_length=500)
     price: Decimal | None = Field(None, ge=0)
     compare_at_price: Decimal | None = Field(None, ge=0)
     cost_price: Decimal | None = Field(None, ge=0)
     quantity: int | None = Field(None, ge=0)
     low_stock_threshold: int | None = Field(None, ge=0)
-    images: list[str] | None = None
+    images: list[str] | None = Field(None, max_length=50)
     category_id: UUID | None = None
-    tags: list[str] | None = None
+    tags: list[str] | None = Field(None, max_length=50)
     attributes: dict | None = None
     status: str | None = None
 

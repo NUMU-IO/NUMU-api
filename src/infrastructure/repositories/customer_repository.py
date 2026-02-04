@@ -20,6 +20,10 @@ class CustomerRepository(ICustomerRepository):
 
     def _to_entity(self, model: CustomerModel) -> Customer:
         """Convert database model to domain entity."""
+        extra = model.extra_data or {}
+        # Merge notification_prefs column into metadata
+        if model.notification_prefs:
+            extra["notification_preferences"] = model.notification_prefs
         return Customer(
             id=model.id,
             store_id=model.store_id,
@@ -36,13 +40,15 @@ class CustomerRepository(ICustomerRepository):
             default_address_id=model.default_address_id,
             total_orders=model.total_orders,
             total_spent=model.total_spent,
-            metadata=model.extra_data or {},
+            metadata=extra,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
 
     def _to_model(self, entity: Customer, tenant_id: UUID) -> CustomerModel:
         """Convert domain entity to database model."""
+        meta = dict(entity.metadata)
+        notif_prefs = meta.pop("notification_preferences", None)
         return CustomerModel(
             id=entity.id,
             tenant_id=tenant_id,
@@ -60,7 +66,8 @@ class CustomerRepository(ICustomerRepository):
             default_address_id=entity.default_address_id,
             total_orders=entity.total_orders,
             total_spent=entity.total_spent,
-            extra_data=entity.metadata,
+            extra_data=meta,
+            notification_prefs=notif_prefs or Customer.default_notification_preferences(),
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -109,7 +116,11 @@ class CustomerRepository(ICustomerRepository):
             model.default_address_id = entity.default_address_id
             model.total_orders = entity.total_orders
             model.total_spent = entity.total_spent
-            model.extra_data = entity.metadata
+            meta = dict(entity.metadata)
+            notif_prefs = meta.pop("notification_preferences", None)
+            model.extra_data = meta
+            if notif_prefs is not None:
+                model.notification_prefs = notif_prefs
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)

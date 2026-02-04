@@ -57,6 +57,19 @@ class RegisterUserUseCase:
         log = log.bind(user_id=str(created_user.id), role=created_user.role.value)
         log.info("auth_register_success")
 
+        # Send welcome onboarding email (non-blocking via Celery)
+        try:
+            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                send_welcome_email_task,
+            )
+
+            send_welcome_email_task.delay(
+                email=dto.email,
+                merchant_name=dto.first_name,
+            )
+        except Exception:
+            log.warning("welcome_email_dispatch_failed")
+
         # Generate tokens
         access_token = self.token_service.create_access_token(created_user)
         refresh_token = self.token_service.create_refresh_token(created_user)

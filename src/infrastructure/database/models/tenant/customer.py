@@ -30,6 +30,7 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     user_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -55,6 +56,9 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         Integer, nullable=False, default=0
     )  # In cents
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    notification_prefs: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=False, server_default='{"email":{"order_confirmation":true,"shipping_update":true,"delivery_confirmation":true},"whatsapp":{"order_confirmation":true,"shipping_update":true,"delivery_confirmation":true}}',
+    )
 
     # Relationships
     store = relationship("StoreModel", back_populates="customers", lazy="selectin")

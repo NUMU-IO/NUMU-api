@@ -405,11 +405,13 @@ async def update_order_status(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
 ):
     """Update order status."""
     use_case = UpdateOrderStatusUseCase(
         order_repository=order_repo,
         store_repository=store_repo,
+        customer_repository=customer_repo,
     )
 
     dto = UpdateOrderStatusDTO(
@@ -441,12 +443,14 @@ async def cancel_order(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     reason: str | None = Query(None, description="Cancellation reason"),
 ):
     """Cancel an order."""
     use_case = UpdateOrderStatusUseCase(
         order_repository=order_repo,
         store_repository=store_repo,
+        customer_repository=customer_repo,
     )
 
     dto = UpdateOrderStatusDTO(
@@ -608,11 +612,13 @@ async def bulk_update_order_status(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
 ):
     """Update the status of multiple orders at once."""
     use_case = UpdateOrderStatusUseCase(
         order_repository=order_repo,
         store_repository=store_repo,
+        customer_repository=customer_repo,
     )
 
     updated = 0

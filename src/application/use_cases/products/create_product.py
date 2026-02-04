@@ -252,4 +252,23 @@ class CreateProductUseCase:
         # Save product
         created_product = await self.product_repository.create(product)
 
+        # Check if this is the merchant's first product -> send onboarding email
+        try:
+            total_products = await self.product_repository.count_by_store(store_id)
+            if total_products == 1:
+                from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                    send_first_product_email_task,
+                )
+
+                merchant_email = store.contact_email or None
+                if merchant_email:
+                    send_first_product_email_task.delay(
+                        email=merchant_email,
+                        merchant_name=store.name,
+                        product_name=dto.name,
+                        language=store.default_language,
+                    )
+        except Exception:
+            pass  # Never block product creation for onboarding emails
+
         return ProductDTO.from_entity(created_product)

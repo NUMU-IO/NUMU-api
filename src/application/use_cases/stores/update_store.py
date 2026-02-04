@@ -46,6 +46,8 @@ class UpdateStoreUseCase:
             store.address = dto.address
         if dto.social_links is not None:
             store.social_links = dto.social_links
+        if dto.default_language is not None:
+            store.default_language = dto.default_language
         if dto.settings is not None:
             store.settings = dto.settings
 

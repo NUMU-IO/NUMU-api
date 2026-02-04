@@ -61,6 +61,11 @@ htmlcov/
 .tox/
 .hypothesis/
 
+# Load test results (keep .gitkeep)
+tests/load/results/*.csv
+tests/load/results/*.html
+tests/load/results/*.log
+
 # MyPy
 .mypy_cache/
 .dmypy.json

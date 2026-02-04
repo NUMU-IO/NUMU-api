@@ -7,7 +7,7 @@ import re
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.infrastructure.database.connection import Base, engine
+from src.infrastructure.database.connection import engine
 from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = logging.getLogger(__name__)
@@ -92,30 +92,20 @@ class TenantService:
         return f"tenant_{safe_subdomain}_{schema_hash}"
 
     async def _provision_schema(self, schema_name: str):
-        """Create and initialize a tenant schema with all required tables.
+        """Reserve a tenant schema namespace.
 
-        Uses the engine directly for DDL operations to avoid transaction issues.
+        Creates the schema for future use. All tenant data tables live in the
+        public schema with a tenant_id discriminator, so no tables are created
+        inside the tenant schema itself — they are managed by Alembic migrations.
         """
         # Validate schema name to prevent SQL injection
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", schema_name):
             raise ValueError(f"Invalid schema name: {schema_name}")
 
         async with engine.begin() as conn:
-            # Create schema
             await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
 
-            # Set search_path and create tables
-            await conn.execute(text(f"SET search_path TO {schema_name}"))
-
-            # Create all tables defined in Base.metadata
-            # Note: This creates tables for ALL models. In production, you may want
-            # to filter to only tenant-specific models.
-            await conn.run_sync(Base.metadata.create_all)
-
-            # Reset search_path
-            await conn.execute(text("SET search_path TO public"))
-
-        logger.info(f"Provisioned schema '{schema_name}' with tables")
+        logger.info(f"Provisioned schema '{schema_name}'")
 
     async def _drop_schema(self, schema_name: str):
         """Drop a schema (used for rollback on failure)."""
