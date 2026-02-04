@@ -8,22 +8,22 @@ These tests verify the complete 2FA lifecycle:
 - Login flow with 2FA
 """
 
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 
-from src.core.entities.two_factor import TwoFactorAuth, TwoFactorMethod, TwoFactorStatus
+from src.application.use_cases.auth.two_factor import (
+    Disable2FAUseCase,
+    Enable2FAUseCase,
+    Verify2FAUseCase,
+)
+from src.core.entities.two_factor import TwoFactorAuth, TwoFactorStatus
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.value_objects.email import Email
 from src.infrastructure.external_services.totp_service import TOTPService
-from src.infrastructure.repositories.two_factor_repository import InMemoryTwoFactorRepository
-from src.application.use_cases.auth.two_factor import (
-    Enable2FAUseCase,
-    Verify2FAUseCase,
-    Disable2FAUseCase,
+from src.infrastructure.repositories.two_factor_repository import (
+    InMemoryTwoFactorRepository,
 )
 
 
@@ -157,7 +157,9 @@ class TestEnable2FA:
             totp_service=totp_service,
         )
 
-        from src.application.use_cases.auth.two_factor.enable_2fa import TwoFactorAlreadyEnabledError
+        from src.application.use_cases.auth.two_factor.enable_2fa import (
+            TwoFactorAlreadyEnabledError,
+        )
         with pytest.raises(TwoFactorAlreadyEnabledError):
             await use_case.execute(test_user.id)
 
@@ -179,7 +181,7 @@ class TestVerify2FA:
             totp_service.hash_backup_code(code)
             for code in totp_service.generate_backup_codes(10)
         ]
-        
+
         two_factor = TwoFactorAuth(
             user_id=test_user.id,
             status=TwoFactorStatus.PENDING,
@@ -215,7 +217,7 @@ class TestVerify2FA:
     ):
         """Test that verification enables 2FA during initial setup."""
         secret = totp_service.generate_secret()
-        
+
         two_factor = TwoFactorAuth(
             user_id=test_user.id,
             status=TwoFactorStatus.PENDING,
@@ -251,7 +253,7 @@ class TestVerify2FA:
     ):
         """Test that an invalid code is rejected."""
         secret = totp_service.generate_secret()
-        
+
         two_factor = TwoFactorAuth(
             user_id=test_user.id,
             status=TwoFactorStatus.ENABLED,
@@ -266,7 +268,9 @@ class TestVerify2FA:
             totp_service=totp_service,
         )
 
-        from src.application.use_cases.auth.two_factor.verify_2fa import InvalidTwoFactorCodeError
+        from src.application.use_cases.auth.two_factor.verify_2fa import (
+            InvalidTwoFactorCodeError,
+        )
         with pytest.raises(InvalidTwoFactorCodeError):
             await use_case.execute(
                 user_id=test_user.id,
@@ -285,7 +289,7 @@ class TestVerify2FA:
         secret = totp_service.generate_secret()
         backup_codes = totp_service.generate_backup_codes(10)
         backup_hashes = [totp_service.hash_backup_code(c) for c in backup_codes]
-        
+
         two_factor = TwoFactorAuth(
             user_id=test_user.id,
             status=TwoFactorStatus.ENABLED,
@@ -322,7 +326,7 @@ class TestVerify2FA:
         secret = totp_service.generate_secret()
         backup_codes = totp_service.generate_backup_codes(10)
         backup_hashes = [totp_service.hash_backup_code(c) for c in backup_codes]
-        
+
         two_factor = TwoFactorAuth(
             user_id=test_user.id,
             status=TwoFactorStatus.ENABLED,
@@ -345,7 +349,9 @@ class TestVerify2FA:
         )
 
         # Use same backup code again - should fail
-        from src.application.use_cases.auth.two_factor.verify_2fa import InvalidTwoFactorCodeError
+        from src.application.use_cases.auth.two_factor.verify_2fa import (
+            InvalidTwoFactorCodeError,
+        )
         with pytest.raises(InvalidTwoFactorCodeError):
             await use_case.execute(
                 user_id=test_user.id,

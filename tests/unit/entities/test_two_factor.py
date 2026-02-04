@@ -3,8 +3,6 @@
 from datetime import datetime
 from uuid import uuid4
 
-import pytest
-
 from src.core.entities.two_factor import (
     TwoFactorAuth,
     TwoFactorMethod,
