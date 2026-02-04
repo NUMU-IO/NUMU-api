@@ -221,6 +221,63 @@ class Settings(BaseSettings):
     default_locale: str = "en"
     supported_locales: list[str] = ["en", "ar"]
 
+    # =========================================================================
+    # Observability (Sentry, Structured Logging)
+    # =========================================================================
+
+    # Sentry
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 0.1  # 10% of transactions
+    sentry_profiles_sample_rate: float = 0.1  # 10% of profiled transactions
+    sentry_send_default_pii: bool = False  # Set True to capture user emails, IPs
+
+    # Structured Logging
+    log_level: str = "INFO"
+    log_format: str = "json"  # "json" for production, "console" for development
+
+    # =========================================================================
+    # Slack Alerting
+    # =========================================================================
+
+    slack_enabled: bool = False
+    slack_environment: str = "development"  # Used in alert messages
+
+    # Webhooks (one per channel)
+    slack_webhook_critical: str | None = None
+    slack_webhook_payments: str | None = None
+    slack_webhook_fraud: str | None = None
+    slack_webhook_shipping: str | None = None
+    slack_webhook_infra: str | None = None
+    slack_webhook_business: str | None = None
+    slack_webhook_dev: str | None = None  # For non-prod alerts
+
+    # Bot token (for mentions and interactive alerts)
+    slack_bot_token: str | None = None
+
+    # User IDs for escalation mentions
+    slack_user_oncall: str | None = None
+    slack_user_fraud_lead: str | None = None
+    slack_user_infra_lead: str | None = None
+    slack_user_payments_lead: str | None = None
+
+    # Channel IDs (for bot API calls if needed)
+    slack_channel_critical: str | None = None
+    slack_channel_fraud: str | None = None
+
+    # Behavior settings
+    slack_force_dev_channel: bool = False  # Force all alerts to dev channel (non-prod)
+
+    # Rate limiting
+    slack_cooldown_critical_seconds: int = 300  # 5 minutes
+    slack_cooldown_warn_seconds: int = 1800  # 30 minutes
+    slack_cooldown_info_seconds: int = 14400  # 4 hours
+
+    def get_slack_webhook(self, channel: str) -> str | None:
+        """Get webhook URL for a channel, respecting force_dev_channel setting."""
+        if self.slack_force_dev_channel or self.environment != "production":
+            return self.slack_webhook_dev
+        return getattr(self, f"slack_webhook_{channel}", None)
+
 
 @lru_cache
 def get_settings() -> Settings:

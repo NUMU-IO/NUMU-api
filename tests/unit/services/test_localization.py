@@ -1,10 +1,8 @@
 """Unit tests for LocalizationService."""
 
-import pytest
 
 from src.core.services.localization import (
     Locale,
-    LocaleInfo,
     LocalizationService,
     get_current_locale,
     set_current_locale,

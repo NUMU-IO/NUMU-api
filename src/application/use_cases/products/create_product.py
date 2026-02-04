@@ -14,7 +14,6 @@ from src.core.interfaces.repositories.product_repository import IProductReposito
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency, Money
 
-
 # Validation constants
 MIN_PRODUCT_NAME_LENGTH = 1
 MAX_PRODUCT_NAME_LENGTH = 255

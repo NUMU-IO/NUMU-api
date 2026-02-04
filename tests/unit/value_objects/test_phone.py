@@ -100,9 +100,11 @@ class TestPhoneNumber:
 
     def test_phone_immutability(self):
         """Test phone is immutable (frozen)."""
+        from pydantic import ValidationError
+
         phone = PhoneNumber(value="+201234567890")
 
-        with pytest.raises(Exception):  # ValidationError for frozen model
+        with pytest.raises(ValidationError):
             phone.value = "+201111111111"
 
     def test_phone_with_spaces_and_dashes(self):
@@ -116,11 +118,9 @@ class TestPhoneNumber:
         """Test different formats of same number are normalized."""
         phone1 = PhoneNumber(value="01234567890", country_code="EG")
         phone2 = PhoneNumber(value="+201234567890")
-        phone3 = PhoneNumber(value="00201234567890", country_code="EG")
 
         # All should normalize to same E.164 format
         assert phone1.value == phone2.value
-        # phone3 might or might not normalize depending on parsing
 
 
 class TestPhoneNumberEdgeCases:

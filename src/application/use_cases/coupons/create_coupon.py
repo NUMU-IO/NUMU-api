@@ -1,6 +1,5 @@
 """Create coupon use case."""
 
-from decimal import Decimal
 from uuid import UUID
 
 from src.application.dto.coupon import CouponDTO, CreateCouponDTO
@@ -13,7 +12,6 @@ from src.core.exceptions import (
 )
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
-
 
 VALID_COUPON_TYPES = {t.value for t in CouponType}
 

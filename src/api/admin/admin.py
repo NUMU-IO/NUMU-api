@@ -3,18 +3,18 @@
 from fastapi import FastAPI
 from sqladmin import Admin
 
-from src.config import settings
-from src.infrastructure.database.connection import engine
 from src.api.admin.auth import AdminAuth
 from src.api.admin.views import (
-    TenantAdmin,
-    UserAdmin,
-    StoreAdmin,
     CategoryAdmin,
-    ProductAdmin,
     CustomerAdmin,
     OrderAdmin,
+    ProductAdmin,
+    StoreAdmin,
+    TenantAdmin,
+    UserAdmin,
 )
+from src.config import settings
+from src.infrastructure.database.connection import engine
 
 
 def setup_admin(app: FastAPI) -> Admin:
@@ -34,7 +34,7 @@ def setup_admin(app: FastAPI) -> Admin:
         title="NUMU Admin",
         base_url="/admin",
     )
-    
+
     # Register model views
     admin.add_view(TenantAdmin)
     admin.add_view(UserAdmin)
@@ -43,5 +43,5 @@ def setup_admin(app: FastAPI) -> Admin:
     admin.add_view(ProductAdmin)
     admin.add_view(CustomerAdmin)
     admin.add_view(OrderAdmin)
-    
+
     return admin

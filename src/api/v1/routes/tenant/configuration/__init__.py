@@ -7,7 +7,7 @@ This module provides endpoints for:
 - Admins to validate credentials
 """
 
-from .merchant_routes import router as merchant_router
 from .admin_routes import router as admin_router
+from .merchant_routes import router as merchant_router
 
 __all__ = ["merchant_router", "admin_router"]

@@ -1,6 +1,5 @@
 """Cloudflare R2 storage service implementation."""
 
-import hashlib
 from io import BytesIO
 from uuid import uuid4
 
@@ -67,7 +66,7 @@ class CloudflareR2StorageService(IStorageService):
 
         try:
             key = self._generate_key(filename, bucket)
-            
+
             self.client.upload_fileobj(
                 BytesIO(file_content),
                 self.bucket_name,

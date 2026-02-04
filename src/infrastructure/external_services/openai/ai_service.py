@@ -59,9 +59,9 @@ Format your response as JSON with keys: short_description, long_description, seo
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
             )
-            
+
             data = json.loads(response.choices[0].message.content)
-            
+
             return ProductDescription(
                 short_description=data.get("short_description", ""),
                 long_description=data.get("long_description", ""),
@@ -85,7 +85,7 @@ Format your response as JSON with keys: short_description, long_description, seo
         chat_messages = []
         if system_prompt:
             chat_messages.append({"role": "system", "content": system_prompt})
-        
+
         for msg in messages:
             chat_messages.append({"role": msg.role, "content": msg.content})
 
@@ -95,7 +95,7 @@ Format your response as JSON with keys: short_description, long_description, seo
                 messages=chat_messages,
                 max_tokens=max_tokens,
             )
-            
+
             return ChatResponse(
                 message=response.choices[0].message.content,
                 tokens_used=response.usage.total_tokens,
@@ -154,7 +154,7 @@ Provide 10-15 relevant SEO keywords as a JSON array of strings."""
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
             )
-            
+
             data = json.loads(response.choices[0].message.content)
             return data.get("keywords", [])
         except Exception as e:

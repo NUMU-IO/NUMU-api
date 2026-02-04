@@ -5,7 +5,9 @@ from uuid import UUID
 from src.application.dto.customer import CreateAddressDTO, CustomerAddressDTO
 from src.core.entities.address import AddressLabel, CustomerAddress
 from src.core.exceptions import EntityNotFoundError
-from src.core.interfaces.repositories.address_repository import ICustomerAddressRepository
+from src.core.interfaces.repositories.address_repository import (
+    ICustomerAddressRepository,
+)
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 
 

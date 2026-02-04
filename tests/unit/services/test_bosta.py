@@ -8,7 +8,9 @@ import pytest
 
 from src.core.interfaces.services.shipping_service import Parcel, ShippingAddress
 from src.infrastructure.external_services.bosta.governorates import ShippingZone
-from src.infrastructure.external_services.bosta.shipping_service import BostaShippingService
+from src.infrastructure.external_services.bosta.shipping_service import (
+    BostaShippingService,
+)
 
 
 class TestBostaShippingService:

@@ -17,7 +17,6 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
-from uuid import UUID
 
 import httpx
 

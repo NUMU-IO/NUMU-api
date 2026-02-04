@@ -6,17 +6,18 @@ Receives payment notifications from Paymob for:
 - Refunds
 """
 
-import logging
+import json
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.config import settings
+from src.config.logging_config import get_logger
 from src.infrastructure.external_services.paymob import PaymobPaymentService
 from src.infrastructure.repositories.order_repository import OrderRepository
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 # Initialize service
@@ -40,12 +41,13 @@ async def paymob_callback(
     - Refund processed (is_refunded=true)
     """
     payload = await request.body()
+    log = logger.bind(webhook="paymob")
 
     # Verify signature
     if settings.paymob_hmac_secret:
         verified_data = paymob_service.verify_webhook_signature(payload, hmac or "")
         if not verified_data:
-            logger.warning("Paymob webhook signature verification failed")
+            log.warning("webhook_signature_invalid")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid webhook signature",
@@ -53,9 +55,8 @@ async def paymob_callback(
         data = verified_data
     else:
         # In development, accept without verification
-        import json
         data = json.loads(payload)
-        logger.warning("Paymob webhook received without signature verification (dev mode)")
+        log.warning("webhook_no_signature_verification", mode="development")
 
     # Extract transaction details
     obj = data.get("obj", {})
@@ -68,11 +69,17 @@ async def paymob_callback(
     amount_cents = obj.get("amount_cents", 0)
     currency = obj.get("currency", "EGP")
 
-    # Log the event
-    logger.info(
-        f"Paymob webhook: transaction={transaction_id}, order={order_id}, "
-        f"success={success}, refunded={is_refunded}, voided={is_voided}"
+    log = log.bind(
+        transaction_id=transaction_id,
+        paymob_order_id=order_id,
+        merchant_order_id=merchant_order_id,
+        success=success,
+        is_refunded=is_refunded,
+        is_voided=is_voided,
+        amount_cents=amount_cents,
+        currency=currency,
     )
+    log.info("webhook_received")
 
     order_repo = OrderRepository(db)
 
@@ -84,30 +91,27 @@ async def paymob_callback(
         order = await order_repo.get_by_payment_id(lookup_id)
 
     if not order:
-        logger.warning(f"Paymob webhook: could not find order for id={lookup_id}")
+        log.warning("webhook_order_not_found", lookup_id=lookup_id)
         return {"status": "received", "transaction_id": transaction_id}
+
+    log = log.bind(order_id=str(order.id), order_number=order.order_number)
 
     # Process based on event type
     if is_refunded:
-        logger.info(f"Paymob refund processed for order {order.order_number}")
+        log.info("payment_refund_processed")
         order.refund(reason=f"Paymob refund - transaction {transaction_id}")
         await order_repo.update(order)
 
     elif is_voided:
-        logger.info(f"Paymob payment voided for order {order.order_number}")
+        log.info("payment_voided")
         if order.can_be_cancelled:
             order.cancel(reason=f"Paymob void - transaction {transaction_id}")
             await order_repo.update(order)
         else:
-            logger.warning(
-                f"Cannot cancel order {order.order_number} in status {order.status}"
-            )
+            log.warning("payment_void_cannot_cancel", current_status=order.status.value)
 
     elif success:
-        logger.info(
-            f"Paymob payment successful for order {order.order_number}: "
-            f"{amount_cents} {currency}"
-        )
+        log.info("payment_success")
         order.mark_as_paid(
             payment_id=str(transaction_id),
             payment_method="paymob",
@@ -116,9 +120,7 @@ async def paymob_callback(
 
     else:
         error_msg = obj.get("data", {}).get("message", "Payment failed")
-        logger.warning(
-            f"Paymob payment failed for order {order.order_number}: {error_msg}"
-        )
+        log.warning("payment_failed", error_message=error_msg)
         order.mark_payment_failed(reason=error_msg)
         await order_repo.update(order)
 
@@ -144,10 +146,14 @@ async def paymob_callback_redirect(
     - order: Paymob order ID
     - merchant_order_id: Your order ID
     """
-    logger.info(
-        f"Paymob redirect: success={success}, order={order}, "
-        f"merchant_order={merchant_order_id}, response_code={txn_response_code}"
+    log = logger.bind(
+        webhook="paymob_redirect",
+        success=success,
+        paymob_order_id=order,
+        merchant_order_id=merchant_order_id,
+        response_code=txn_response_code,
     )
+    log.info("payment_redirect_received")
 
     # In production, redirect to frontend with status
     # For now, return status info

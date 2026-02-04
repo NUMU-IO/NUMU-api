@@ -11,7 +11,6 @@ Provides endpoints for:
 """
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -31,11 +30,8 @@ from src.config import settings
 from src.core.entities.invoice import (
     BuyerInfo,
     Invoice,
-    InvoiceLineItem,
     InvoiceStatus,
     SellerInfo,
-    TaxLine,
-    TaxType,
 )
 from src.infrastructure.external_services.eta import ETAInvoiceService
 

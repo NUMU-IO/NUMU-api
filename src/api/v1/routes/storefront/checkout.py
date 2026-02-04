@@ -28,7 +28,6 @@ from src.application.dto.order import (
     CreateOrderDTO,
     CreateOrderLineItemDTO,
 )
-from src.application.use_cases.orders import CreateOrderUseCase
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
