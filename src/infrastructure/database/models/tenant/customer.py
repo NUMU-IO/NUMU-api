@@ -5,12 +5,16 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import (
+    TenantMixin,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 
 class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     """Customer database model with tenant_id discriminator.
-    
+
     Note: user_id references a user in the public.users table for linking
     customer profiles to user accounts.
     """

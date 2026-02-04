@@ -1,6 +1,8 @@
 """Script to update user role."""
 import asyncio
+
 from sqlalchemy import text
+
 from src.infrastructure.database.connection import AsyncSessionLocal
 
 

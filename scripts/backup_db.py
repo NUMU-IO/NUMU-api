@@ -18,7 +18,7 @@ import logging
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import boto3
@@ -116,7 +116,7 @@ def prune_old_backups(settings: Settings) -> int:
     client = _build_r2_client(settings)
     bucket = settings.r2_backup_bucket_name
     retention_days = settings.backup_retention_days
-    cutoff = datetime.now(timezone.utc).timestamp() - (retention_days * 86400)
+    cutoff = datetime.now(UTC).timestamp() - (retention_days * 86400)
 
     paginator = client.get_paginator("list_objects_v2")
     deleted = 0
@@ -139,7 +139,7 @@ def create_backup(prune: bool = False) -> str:
     This is the main entry point used by both the CLI and the Celery task.
     """
     settings = _get_settings()
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     filename = f"{settings.postgres_db}_{timestamp}.sql.gz"
     object_key = f"backups/{filename}"
 

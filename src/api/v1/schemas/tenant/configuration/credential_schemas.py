@@ -1,24 +1,24 @@
 """Pydantic schemas for credential configuration endpoints (admin only)."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from src.infrastructure.database.models.tenant.configuration import (
-    ServiceType,
     ServiceName,
+    ServiceType,
 )
 
 
 class CredentialConfigureRequest(BaseModel):
     """Schema for configuring credentials (admin only).
-    
+
     This is used by administrators to set up service credentials
     for a merchant's store.
     """
-    
+
     tenant_id: UUID = Field(
         ...,
         description="Tenant/merchant ID to configure credentials for"
@@ -35,16 +35,16 @@ class CredentialConfigureRequest(BaseModel):
         ...,
         description="Service credentials (will be encrypted)"
     )
-    request_id: Optional[UUID] = Field(
+    request_id: UUID | None = Field(
         None,
         description="Configuration request ID if responding to a request"
     )
-    admin_notes: Optional[str] = Field(
+    admin_notes: str | None = Field(
         None,
         max_length=2000,
         description="Notes about the configuration"
     )
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -64,7 +64,7 @@ class CredentialConfigureRequest(BaseModel):
 
 class CredentialValidateRequest(BaseModel):
     """Schema for validating credentials without storing them."""
-    
+
     service_type: ServiceType = Field(
         ...,
         description="Type of service"
@@ -77,7 +77,7 @@ class CredentialValidateRequest(BaseModel):
         ...,
         description="Credentials to validate"
     )
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -93,13 +93,13 @@ class CredentialValidateRequest(BaseModel):
 
 class CredentialValidationResponse(BaseModel):
     """Schema for credential validation response."""
-    
+
     is_valid: bool
     status: str
     message: str
-    details: Optional[dict[str, Any]] = None
-    error_code: Optional[str] = None
-    
+    details: dict[str, Any] | None = None
+    error_code: str | None = None
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -117,37 +117,37 @@ class CredentialValidationResponse(BaseModel):
 
 class CredentialStatusResponse(BaseModel):
     """Schema for credential status response."""
-    
+
     tenant_id: UUID
     service_type: ServiceType
     service_name: ServiceName
-    
+
     is_configured: bool
     is_active: bool
     is_validated: bool
-    
-    configured_at: Optional[datetime]
-    configured_by: Optional[UUID]
-    last_validated_at: Optional[datetime]
-    
+
+    configured_at: datetime | None
+    configured_by: UUID | None
+    last_validated_at: datetime | None
+
     # Masked display info
-    display_info: Optional[dict[str, str]] = None
-    
+    display_info: dict[str, str] | None = None
+
     class Config:
         from_attributes = True
 
 
 class ServiceInfoResponse(BaseModel):
     """Schema for service information."""
-    
+
     service_type: ServiceType
     service_name: ServiceName
     display_name: str
     description: str
     required_fields: list[str]
     optional_fields: list[str]
-    documentation_url: Optional[str] = None
-    
+    documentation_url: str | None = None
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -164,11 +164,11 @@ class ServiceInfoResponse(BaseModel):
 
 class SupportedServicesResponse(BaseModel):
     """Schema for list of supported services."""
-    
+
     payment_gateways: list[ServiceInfoResponse]
     shipping_carriers: list[ServiceInfoResponse]
     communication: list[ServiceInfoResponse]
-    
+
     class Config:
         json_schema_extra = {
             "example": {

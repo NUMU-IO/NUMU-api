@@ -5,6 +5,7 @@ This module contains implementations of external concerns:
 - External Services: Payment, Email, Storage, AI, Shipping
 - Cache: Redis implementation
 - Messaging: Background tasks (Celery)
+- Slack: Alerting and notifications
 """
 
 from src.infrastructure.cache import RedisCacheService
@@ -31,6 +32,13 @@ from src.infrastructure.repositories import (
     StoreRepository,
     UserRepository,
 )
+from src.infrastructure.slack import (
+    AlertChannel,
+    AlertSeverity,
+    SlackAlert,
+    SlackAlertService,
+    slack_alert_service,
+)
 
 __all__ = [
     # Database
@@ -54,4 +62,10 @@ __all__ = [
     "OpenAIService",
     "CloudflareR2StorageService",
     "RedisCacheService",
+    # Slack Alerting
+    "AlertSeverity",
+    "AlertChannel",
+    "SlackAlert",
+    "SlackAlertService",
+    "slack_alert_service",
 ]

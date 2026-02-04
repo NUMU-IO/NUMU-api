@@ -154,7 +154,7 @@ class GetOrderTimelineUseCase:
         # Build standard flow timeline
         # Calculate current_index once before the loop
         current_index = STANDARD_FLOW.index(current_status) if current_status in STANDARD_FLOW else -1
-        
+
         for i, status in enumerate(STANDARD_FLOW):
             config = STATUS_CONFIG[status]
 
@@ -245,8 +245,8 @@ class GetOrderTimelineUseCase:
         """
         timestamp_map = {
             OrderStatus.PENDING: order.created_at,
-            OrderStatus.CONFIRMED: order.paid_at,  
-            OrderStatus.PROCESSING: order.paid_at,  
+            OrderStatus.CONFIRMED: order.paid_at,
+            OrderStatus.PROCESSING: order.paid_at,
             OrderStatus.SHIPPED: order.shipped_at,
             OrderStatus.DELIVERED: order.delivered_at,
         }

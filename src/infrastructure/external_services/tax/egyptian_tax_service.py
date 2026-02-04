@@ -20,7 +20,6 @@ from src.core.interfaces.services.tax_service import (
     TaxRateType,
 )
 
-
 # Egyptian VAT rates
 EGYPT_STANDARD_RATE = TaxRate(
     type=TaxRateType.STANDARD,

@@ -5,8 +5,10 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.address import AddressLabel, CustomerAddress
-from src.core.interfaces.repositories.address_repository import ICustomerAddressRepository
+from src.core.entities.address import CustomerAddress
+from src.core.interfaces.repositories.address_repository import (
+    ICustomerAddressRepository,
+)
 from src.infrastructure.database.models import CustomerAddressModel
 
 

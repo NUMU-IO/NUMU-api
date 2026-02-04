@@ -8,7 +8,6 @@ import pytest
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.value_objects.money import Currency, Money
 
-
 # ---------------------------------------------------------------------------
 # Entity construction
 # ---------------------------------------------------------------------------
@@ -17,17 +16,17 @@ class TestProductCreation:
     """Tests for creating Product entities."""
 
     def _make(self, **overrides):
-        defaults = dict(
-            id=uuid4(),
-            store_id=uuid4(),
-            name="Test Product",
-            slug="test-product",
-            sku="SKU-001",
-            product_type=ProductType.PHYSICAL,
-            status=ProductStatus.ACTIVE,
-            price=Money(amount=Decimal("49.99"), currency=Currency.EGP),
-            quantity=100,
-        )
+        defaults = {
+            "id": uuid4(),
+            "store_id": uuid4(),
+            "name": "Test Product",
+            "slug": "test-product",
+            "sku": "SKU-001",
+            "product_type": ProductType.PHYSICAL,
+            "status": ProductStatus.ACTIVE,
+            "price": Money(amount=Decimal("49.99"), currency=Currency.EGP),
+            "quantity": 100,
+        }
         defaults.update(overrides)
         return Product(**defaults)
 
@@ -183,8 +182,9 @@ class TestProductSchemas:
         assert data.quantity == 0  # default
 
     def test_create_product_request_requires_name(self):
-        from src.api.v1.schemas.tenant.product import CreateProductRequest
         from pydantic import ValidationError
+
+        from src.api.v1.schemas.tenant.product import CreateProductRequest
 
         with pytest.raises(ValidationError):
             CreateProductRequest(store_id=uuid4(), name="", price=Decimal("10"))

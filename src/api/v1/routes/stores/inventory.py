@@ -15,7 +15,6 @@ from src.api.dependencies import (
     require_store_owner,
 )
 from src.api.responses import SuccessResponse
-from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.infrastructure.repositories import ProductRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/inventory")

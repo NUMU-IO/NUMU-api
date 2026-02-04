@@ -10,7 +10,7 @@ API Documentation: https://developers.bosta.co/
 import hashlib
 import hmac
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import httpx

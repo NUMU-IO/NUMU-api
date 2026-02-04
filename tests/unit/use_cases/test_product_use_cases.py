@@ -7,10 +7,10 @@ from uuid import uuid4
 import pytest
 
 from src.application.dto.product import UpdateProductDTO
+from src.application.use_cases.products.delete_product import DeleteProductUseCase
 from src.application.use_cases.products.get_product import GetProductUseCase
 from src.application.use_cases.products.list_products import ListProductsUseCase
 from src.application.use_cases.products.update_product import UpdateProductUseCase
-from src.application.use_cases.products.delete_product import DeleteProductUseCase
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.entities.store import Store, StoreStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError

@@ -34,27 +34,40 @@ URL Hierarchy:
 
 from fastapi import APIRouter
 
-# Public routes
-from src.api.v1.routes.health import router as health_router
 from src.api.v1.routes.auth import router as auth_router
 
-# Tenant management routes
-from src.api.v1.routes.tenants import (
-    router as tenants_router,
-    admin_router as tenants_admin_router,
+# Public routes
+from src.api.v1.routes.health import router as health_router
+from src.api.v1.routes.storefront import (
+    cart_router as storefront_cart_router,
 )
-
-# Store management routes (for store owners)
-from src.api.v1.routes.stores import router as stores_router
+from src.api.v1.routes.storefront import (
+    checkout_router as storefront_checkout_router,
+)
+from src.api.v1.routes.storefront import (
+    coupon_router as storefront_coupon_router,
+)
+from src.api.v1.routes.storefront import (
+    customer_router as storefront_customer_router,
+)
 
 # Storefront routes (customer-facing)
 from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
+)
+from src.api.v1.routes.storefront import (
     storefront_lookup_router,
-    customer_router as storefront_customer_router,
-    cart_router as storefront_cart_router,
-    checkout_router as storefront_checkout_router,
-    coupon_router as storefront_coupon_router,
+)
+
+# Store management routes (for store owners)
+from src.api.v1.routes.stores import router as stores_router
+from src.api.v1.routes.tenants import (
+    admin_router as tenants_admin_router,
+)
+
+# Tenant management routes
+from src.api.v1.routes.tenants import (
+    router as tenants_router,
 )
 
 # Webhook routes (external service callbacks)

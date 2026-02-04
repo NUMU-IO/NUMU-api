@@ -14,17 +14,18 @@ Provides REST endpoints for store CRUD operations and nested resources:
 
 from fastapi import APIRouter
 
-# Import all routers
-from src.api.v1.routes.stores import stores as stores_module
-from src.api.v1.routes.stores import products as products_module
-from src.api.v1.routes.stores import orders as orders_module
-from src.api.v1.routes.stores import dashboard as dashboard_module
-from src.api.v1.routes.stores import customers as customers_module
-from src.api.v1.routes.stores import invoices as invoices_module
-from src.api.v1.routes.stores import inventory as inventory_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import coupons as coupons_module
+from src.api.v1.routes.stores import customers as customers_module
+from src.api.v1.routes.stores import dashboard as dashboard_module
+from src.api.v1.routes.stores import inventory as inventory_module
+from src.api.v1.routes.stores import invoices as invoices_module
+from src.api.v1.routes.stores import orders as orders_module
+from src.api.v1.routes.stores import products as products_module
 from src.api.v1.routes.stores import settings as settings_module
+
+# Import all routers
+from src.api.v1.routes.stores import stores as stores_module
 
 # Create main stores router - this will be mounted at /stores in the main router
 router = APIRouter()

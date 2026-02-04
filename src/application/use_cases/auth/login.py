@@ -1,15 +1,14 @@
 """Login user use case."""
 
-import logging
-
 from src.application.dto.auth import AuthResponseDTO, LoginDTO, TokenDTO
-
-logger = logging.getLogger(__name__)
 from src.application.dto.user import UserDTO
+from src.config.logging_config import get_logger
 from src.core.exceptions import InvalidCredentialsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
+
+logger = get_logger(__name__)
 
 
 class LoginUserUseCase:
@@ -27,18 +26,21 @@ class LoginUserUseCase:
 
     async def execute(self, dto: LoginDTO) -> AuthResponseDTO:
         """Authenticate user and return auth response."""
+        log = logger.bind(email=dto.email)
+
         # Find user by email
-        logger.info(f"Login attempt for email: {dto.email}")
+        log.info("auth_login_attempt")
         user = await self.user_repository.get_by_email_str(dto.email)
         if not user:
-            logger.warning(f"Login failed: user not found for email {dto.email}")
+            log.warning("auth_login_failed", reason="user_not_found")
             raise InvalidCredentialsError()
 
-        logger.info(f"User found: {user.email}, role: {user.role}")
+        log = log.bind(user_id=str(user.id), role=user.role.value)
+        log.debug("auth_user_found")
 
         # Verify password
         if not self.password_service.verify_password(dto.password, user.hashed_password):
-            logger.warning(f"Login failed: invalid password for email {dto.email}")
+            log.warning("auth_login_failed", reason="invalid_password")
             raise InvalidCredentialsError()
 
         # Update last login
@@ -48,6 +50,8 @@ class LoginUserUseCase:
         # Generate tokens
         access_token = self.token_service.create_access_token(user)
         refresh_token = self.token_service.create_refresh_token(user)
+
+        log.info("auth_login_success")
 
         return AuthResponseDTO(
             user=UserDTO.from_entity(user),

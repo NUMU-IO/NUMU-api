@@ -1,6 +1,6 @@
 """Common Pydantic schemas."""
 
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 

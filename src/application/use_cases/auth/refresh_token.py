@@ -1,6 +1,5 @@
 """Refresh token use case."""
 
-from uuid import UUID
 
 from src.application.dto.auth import RefreshTokenDTO, TokenDTO
 from src.core.exceptions import EntityNotFoundError, InvalidTokenError
@@ -23,7 +22,7 @@ class RefreshTokenUseCase:
         """Refresh access token using refresh token."""
         # Verify refresh token
         payload = self.token_service.verify_token(dto.refresh_token)
-        
+
         if payload.token_type != "refresh":
             raise InvalidTokenError()
 

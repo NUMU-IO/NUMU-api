@@ -4,11 +4,9 @@ Provides locale detection from HTTP headers and locale context
 for request processing. Supports Arabic (RTL) and English.
 """
 
-import re
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 from src.config import settings
 
@@ -226,7 +224,7 @@ class LocalizationService:
         Returns:
             Formatted number string
         """
-        info = self.get_locale_info(locale)
+        self.get_locale_info(locale)
 
         # Arabic numerals conversion (optional, can be enabled)
         # For now, use Western Arabic numerals which are common in Egypt

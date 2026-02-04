@@ -6,9 +6,13 @@ from uuid import uuid4
 import pytest
 
 from src.core.entities.customer import Customer
-from src.core.entities.product import Product, ProductStatus
-from src.core.entities.store import Store, StoreStatus
-from src.core.entities.order import Order, OrderStatus, OrderLineItem, OrderShippingAddress
+from src.core.entities.order import (
+    Order,
+    OrderLineItem,
+    OrderShippingAddress,
+)
+from src.core.entities.product import Product
+from src.core.entities.store import Store
 from src.core.value_objects.email import Email
 from src.core.value_objects.money import Currency, Money
 
