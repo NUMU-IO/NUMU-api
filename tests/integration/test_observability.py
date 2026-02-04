@@ -6,7 +6,8 @@ Tests:
 - Health check endpoints
 """
 
-from unittest.mock import patch
+import json
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient

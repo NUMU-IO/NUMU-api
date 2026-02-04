@@ -1,9 +1,9 @@
-.PHONY: help install dev lint format type-check test test-cov run migrate seed docker-up docker-down clean
+.PHONY: help install dev lint format type-check test test-cov run migrate seed docker-up docker-down clean staging-deploy staging-stop staging-logs staging-status
 
 # Default target
 help:
-	@echo "Octyrafiy Backend - Available Commands"
-	@echo "======================================="
+	@echo "NUMU Backend - Available Commands"
+	@echo "=================================="
 	@echo ""
 	@echo "Development:"
 	@echo "  install      Install production dependencies"
@@ -18,16 +18,27 @@ help:
 	@echo "Testing:"
 	@echo "  test         Run all tests"
 	@echo "  test-cov     Run tests with coverage"
+	@echo "  test-obs     Run observability tests"
 	@echo ""
 	@echo "Database:"
 	@echo "  migrate      Run database migrations"
 	@echo "  migrate-new  Create new migration (use MSG=description)"
 	@echo "  seed         Seed database with sample data"
 	@echo ""
-	@echo "Docker:"
+	@echo "Docker (Development):"
 	@echo "  docker-up    Start all services with Docker"
 	@echo "  docker-down  Stop all Docker services"
 	@echo "  docker-build Build Docker image"
+	@echo "  docker-logs  Follow Docker logs"
+	@echo ""
+	@echo "Staging Environment:"
+	@echo "  staging-deploy   Deploy to staging"
+	@echo "  staging-stop     Stop staging services"
+	@echo "  staging-restart  Restart staging services"
+	@echo "  staging-logs     Follow staging logs"
+	@echo "  staging-status   Show staging service status"
+	@echo "  staging-backup   Backup staging database"
+	@echo "  staging-cleanup  Clean up staging resources"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  clean        Remove cache and build artifacts"
@@ -61,6 +72,9 @@ test:
 test-cov:
 	pytest tests/ -v --cov=src --cov-report=html --cov-report=term
 
+test-obs:
+	pytest tests/integration/test_observability.py -v
+
 # Database
 migrate:
 	alembic upgrade head
@@ -74,7 +88,7 @@ migrate-down:
 seed:
 	python scripts/seed_data.py
 
-# Docker
+# Docker (Development)
 docker-up:
 	docker-compose -f docker/docker-compose.yml up -d
 
@@ -87,7 +101,45 @@ docker-build:
 docker-logs:
 	docker-compose -f docker/docker-compose.yml logs -f
 
+# =============================================================================
+# Staging Environment
+# =============================================================================
+
+staging-deploy:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh deploy
+
+staging-stop:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh stop
+
+staging-restart:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh restart
+
+staging-logs:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh logs $(SVC)
+
+staging-status:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh status
+
+staging-backup:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh backup-db
+
+staging-cleanup:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh cleanup
+
+staging-rollback:
+	@chmod +x scripts/deploy_staging.sh
+	@./scripts/deploy_staging.sh rollback
+
+# =============================================================================
 # Cleanup
+# =============================================================================
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type d -name ".pytest_cache" -exec rm -rf {} +
@@ -98,6 +150,10 @@ clean:
 	find . -type f -name ".coverage" -delete
 	find . -type f -name "*.pyc" -delete
 
-# create Superuser
+# Create Superuser
 createsuperuser:
 	python scripts/create_superuser.py
+
+# Test Sentry integration
+test-sentry:
+	python -c "import sentry_sdk; from src.config import settings; sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.environment); sentry_sdk.capture_message('Test from NUMU API'); print('Test message sent to Sentry!')"
