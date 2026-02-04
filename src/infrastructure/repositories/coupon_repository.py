@@ -128,6 +128,23 @@ class CouponRepository(ICouponRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_by_code_for_update(self, store_id: UUID, code: str) -> Coupon | None:
+        """Get coupon by code with row-level lock (SELECT ... FOR UPDATE).
+
+        Prevents concurrent transactions from reading/modifying this coupon
+        until the current transaction commits or rolls back.
+        """
+        result = await self.session.execute(
+            select(CouponModel)
+            .where(
+                CouponModel.store_id == store_id,
+                CouponModel.code == code.strip().upper(),
+            )
+            .with_for_update()
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def get_by_store(
         self,
         store_id: UUID,

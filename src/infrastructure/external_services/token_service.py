@@ -3,7 +3,8 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import ExpiredSignatureError, PyJWTError
 
 from src.config import settings
 from src.core.entities.user import User
@@ -92,9 +93,9 @@ class TokenService(ITokenService):
                 exp=payload["exp"],
                 token_type=payload.get("token_type", "access"),
             )
-        except JWTError as e:
-            if "expired" in str(e).lower():
-                raise TokenExpiredError()
+        except ExpiredSignatureError:
+            raise TokenExpiredError()
+        except PyJWTError:
             raise InvalidTokenError()
 
     def decode_token(self, token: str) -> TokenPayload | None:
@@ -150,9 +151,9 @@ class TokenService(ITokenService):
                 exp=payload["exp"],
                 token_type=payload.get("token_type", "access"),
             )
-        except JWTError as e:
-            if "expired" in str(e).lower():
-                raise TokenExpiredError()
+        except ExpiredSignatureError:
+            raise TokenExpiredError()
+        except PyJWTError:
             raise InvalidTokenError()
 
     def decode_customer_token(self, token: str) -> CustomerTokenPayload | None:
