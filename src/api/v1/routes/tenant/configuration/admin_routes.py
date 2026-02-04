@@ -64,8 +64,8 @@ async def list_pending_requests(
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    admin = Depends(require_admin),
-    db = Depends(get_db),
+    admin=Depends(require_admin),
+    db=Depends(get_db),
 ):
     """List all pending configuration requests."""
     use_case = ListAllConfigurationRequestsUseCase(db)
@@ -87,8 +87,8 @@ async def list_pending_requests(
 )
 async def get_request_details(
     request_id: UUID,
-    admin = Depends(require_admin),
-    db = Depends(get_db),
+    admin=Depends(require_admin),
+    db=Depends(get_db),
 ):
     """Get configuration request details."""
     use_case = ListAllConfigurationRequestsUseCase(db)
@@ -113,8 +113,8 @@ async def get_request_details(
 async def update_request(
     request_id: UUID,
     update: ConfigurationRequestUpdate,
-    admin = Depends(require_admin),
-    db = Depends(get_db),
+    admin=Depends(require_admin),
+    db=Depends(get_db),
 ):
     """Update a configuration request."""
     use_case = UpdateConfigurationRequestUseCase(db)
@@ -158,8 +158,8 @@ async def update_request(
 )
 async def configure_credentials(
     config: CredentialConfigureRequest,
-    admin = Depends(require_admin),
-    db = Depends(get_db),
+    admin=Depends(require_admin),
+    db=Depends(get_db),
 ):
     """Configure credentials for a merchant."""
     use_case = ConfigureCredentialsUseCase(db)
@@ -194,8 +194,8 @@ async def configure_credentials(
 )
 async def validate_credentials(
     request: CredentialValidateRequest,
-    admin = Depends(require_admin),
-    db = Depends(get_db),
+    admin=Depends(require_admin),
+    db=Depends(get_db),
 ):
     """Validate credentials without storing."""
     use_case = ValidateCredentialsUseCase(db)
@@ -225,8 +225,8 @@ async def get_credential_status(
     tenant_id: UUID,
     service_type: ServiceType,
     service_name: ServiceName,
-    admin = Depends(require_admin),
-    db = Depends(get_db),
+    admin=Depends(require_admin),
+    db=Depends(get_db),
 ):
     """Get credential status for a merchant's service."""
     use_case = ConfigureCredentialsUseCase(db)
@@ -263,8 +263,8 @@ async def revoke_credentials(
     tenant_id: UUID,
     service_type: ServiceType,
     service_name: ServiceName,
-    admin = Depends(require_super_admin),
-    db = Depends(get_db),
+    admin=Depends(require_super_admin),
+    db=Depends(get_db),
 ):
     """Revoke credentials for a merchant's service."""
     use_case = RevokeCredentialsUseCase(db)
@@ -290,7 +290,7 @@ async def revoke_credentials(
     description="Get list of all supported services and their required credentials.",
 )
 async def get_supported_services(
-    admin = Depends(require_admin),
+    admin=Depends(require_admin),
 ):
     """Get list of supported services."""
     use_case = GetSupportedServicesUseCase()
@@ -306,7 +306,7 @@ async def get_supported_services(
 async def get_service_info(
     service_type: ServiceType,
     service_name: ServiceName,
-    admin = Depends(require_admin),
+    admin=Depends(require_admin),
 ):
     """Get information about a specific service."""
     use_case = GetSupportedServicesUseCase()

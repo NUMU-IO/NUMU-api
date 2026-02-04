@@ -3,10 +3,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class PaymentProvider(str, Enum):
+class PaymentProvider(StrEnum):
     """Payment provider enumeration."""
 
     STRIPE = "stripe"
@@ -17,7 +17,7 @@ class PaymentProvider(str, Enum):
     FAWRY = "fawry"  # Fawry retail pay points
 
 
-class PaymentMethod(str, Enum):
+class PaymentMethod(StrEnum):
     """Payment method types."""
 
     CARD = "card"
@@ -27,7 +27,7 @@ class PaymentMethod(str, Enum):
     FAWRY_REFERENCE = "fawry_reference"  # Pay at Fawry outlet
 
 
-class CODCollectionStatus(str, Enum):
+class CODCollectionStatus(StrEnum):
     """COD collection status."""
 
     PENDING = "pending"  # Awaiting delivery

@@ -102,6 +102,7 @@ from src.infrastructure.repositories.store_repository import StoreRepository
 
 # ... existing code ...
 
+
 async def get_current_customer_payload(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ) -> CustomerTokenPayload:
@@ -116,6 +117,7 @@ async def get_current_customer_payload(
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         )
+
 
 async def get_current_customer(
     payload: Annotated[CustomerTokenPayload, Depends(get_current_customer_payload)],

@@ -32,6 +32,7 @@ from src.infrastructure.external_services.gateway_validators.base import (
 # Test Fixtures Specific to Configure Credentials
 # =============================================================================
 
+
 @pytest.fixture
 def use_case(mock_db_session: AsyncMock) -> ConfigureCredentialsUseCase:
     """Create a ConfigureCredentialsUseCase instance with mocked dependencies."""

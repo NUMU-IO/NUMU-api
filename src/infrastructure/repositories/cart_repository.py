@@ -21,7 +21,6 @@ class RedisCartRepository(ICartRepository):
     # Default TTL: 7 days in seconds
     DEFAULT_TTL_SECONDS: int = 7 * 24 * 60 * 60
 
-
     SESSION_KEY_PREFIX: str = "cart:session"
     CUSTOMER_KEY_PREFIX: str = "cart:customer"
 
@@ -120,16 +119,12 @@ class RedisCartRepository(ICartRepository):
         """Save cart to Redis with TTL."""
         client = await self._get_client()
 
-
         cart.expires_at = self._calculate_expires_at()
-
 
         cart_data = json.dumps(cart.to_dict())
 
-
         session_key = self._session_key(cart.session_id, cart.store_id)
         await client.setex(session_key, self.ttl_seconds, cart_data)
-
 
         if cart.customer_id:
             customer_key = self._customer_key(cart.customer_id, cart.store_id)
@@ -141,15 +136,12 @@ class RedisCartRepository(ICartRepository):
         """Delete cart by session ID and store ID."""
         client = await self._get_client()
 
-
         cart = await self.get_by_session_id(session_id, store_id)
         if not cart:
             return False
 
-
         session_key = self._session_key(session_id, store_id)
         await client.delete(session_key)
-
 
         if cart.customer_id:
             customer_key = self._customer_key(cart.customer_id, cart.store_id)
@@ -165,15 +157,12 @@ class RedisCartRepository(ICartRepository):
         """Delete cart by customer ID and store ID."""
         client = await self._get_client()
 
-
         cart = await self.get_by_customer_id(customer_id, store_id)
         if not cart:
             return False
 
-
         customer_key = self._customer_key(customer_id, store_id)
         await client.delete(customer_key)
-
 
         session_key = self._session_key(cart.session_id, cart.store_id)
         await client.delete(session_key)
@@ -192,7 +181,6 @@ class RedisCartRepository(ICartRepository):
         if not guest_cart:
             return None
 
-
         existing_cart = await self.get_by_customer_id(customer_id, store_id)
 
         if existing_cart:
@@ -200,17 +188,14 @@ class RedisCartRepository(ICartRepository):
             existing_cart.merge_cart(guest_cart)
             existing_cart.customer_id = customer_id
 
-
             old_session_key = self._session_key(session_id, store_id)
             client = await self._get_client()
             await client.delete(old_session_key)
-
 
             return await self.save(existing_cart)
         else:
 
             guest_cart.customer_id = customer_id
-
 
             return await self.save(guest_cart)
 
@@ -219,13 +204,10 @@ class RedisCartRepository(ICartRepository):
         client = await self._get_client()
         key = self._session_key(session_id, store_id)
 
-
         if not await client.exists(key):
             return False
 
-
         await client.expire(key, self.ttl_seconds)
-
 
         cart = await self.get_by_session_id(session_id, store_id)
         if cart and cart.customer_id:

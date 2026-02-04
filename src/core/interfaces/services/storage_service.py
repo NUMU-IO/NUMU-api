@@ -2,10 +2,10 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class StorageBucket(str, Enum):
+class StorageBucket(StrEnum):
     """Storage bucket types."""
 
     PRODUCTS = "products"

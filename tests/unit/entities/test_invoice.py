@@ -360,4 +360,3 @@ class TestInvoiceEntity:
         assert invoice.subtotal == 25000  # 250 * 100 cents
         assert invoice.total_taxes == 3500  # 35 * 100 cents
         assert invoice.total == 28500  # 285 * 100 cents
-

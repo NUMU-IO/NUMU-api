@@ -10,7 +10,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -21,7 +21,7 @@ from src.config.settings import settings
 logger = logging.getLogger(__name__)
 
 
-class NotificationType(str, Enum):
+class NotificationType(StrEnum):
     """Types of notifications."""
     # Configuration request notifications
     CONFIG_REQUEST_CREATED = "config_request_created"
@@ -36,7 +36,7 @@ class NotificationType(str, Enum):
     CREDENTIALS_REVOKED = "credentials_revoked"
 
 
-class NotificationPriority(str, Enum):
+class NotificationPriority(StrEnum):
     """Priority levels for notifications."""
     LOW = "low"
     NORMAL = "normal"
@@ -90,8 +90,8 @@ class NotificationService:
 
     def __init__(
         self,
-        redis_client = None,
-        db_session = None,
+        redis_client=None,
+        db_session=None,
     ):
         self.redis_client = redis_client
         self.db_session = db_session
@@ -401,8 +401,8 @@ _notification_service: NotificationService | None = None
 
 
 def get_notification_service(
-    redis_client = None,
-    db_session = None,
+    redis_client=None,
+    db_session=None,
 ) -> NotificationService:
     """Get or create the notification service instance.
 

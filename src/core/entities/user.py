@@ -1,14 +1,14 @@
 """User entity representing an authenticated user in the system."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from src.core.entities.base import BaseEntity
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber
 
 
-class UserRole(str, Enum):
+class UserRole(StrEnum):
     """User role enumeration."""
 
     CUSTOMER = "customer"
@@ -18,7 +18,7 @@ class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
 
 
-class UserStatus(str, Enum):
+class UserStatus(StrEnum):
     """User status enumeration."""
 
     ACTIVE = "active"

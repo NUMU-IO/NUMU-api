@@ -3,10 +3,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 
-class TaxRateType(str, Enum):
+class TaxRateType(StrEnum):
     """Types of tax rates."""
 
     STANDARD = "standard"  # Standard VAT rate

@@ -6,12 +6,12 @@ for request processing. Supports Arabic (RTL) and English.
 
 from contextvars import ContextVar
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from src.config import settings
 
 
-class Locale(str, Enum):
+class Locale(StrEnum):
     """Supported locales."""
 
     EN = "en"

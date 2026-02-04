@@ -35,6 +35,7 @@ from src.infrastructure.external_services.gateway_validators.payment_validators 
 # FawryValidator Tests
 # =============================================================================
 
+
 class TestFawryValidator:
     """Test suite for FawryValidator."""
 

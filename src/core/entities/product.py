@@ -1,7 +1,7 @@
 """Product entity representing a product in a store."""
 
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -11,7 +11,7 @@ from src.core.entities.base import BaseEntity
 from src.core.value_objects.money import Money
 
 
-class ProductStatus(str, Enum):
+class ProductStatus(StrEnum):
     """Product status enumeration."""
 
     DRAFT = "draft"
@@ -20,7 +20,7 @@ class ProductStatus(str, Enum):
     OUT_OF_STOCK = "out_of_stock"
 
 
-class ProductType(str, Enum):
+class ProductType(StrEnum):
     """Product type enumeration."""
 
     PHYSICAL = "physical"

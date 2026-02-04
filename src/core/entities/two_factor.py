@@ -5,7 +5,7 @@ for users, including TOTP secrets and backup codes.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import Field
@@ -13,7 +13,7 @@ from pydantic import Field
 from src.core.entities.base import BaseEntity
 
 
-class TwoFactorMethod(str, Enum):
+class TwoFactorMethod(StrEnum):
     """Supported 2FA methods."""
 
     TOTP = "totp"  # Time-based One-Time Password (Google Authenticator, etc.)
@@ -23,7 +23,7 @@ class TwoFactorMethod(str, Enum):
     # WEBAUTHN = "webauthn"
 
 
-class TwoFactorStatus(str, Enum):
+class TwoFactorStatus(StrEnum):
     """Status of 2FA setup."""
 
     DISABLED = "disabled"  # 2FA not enabled

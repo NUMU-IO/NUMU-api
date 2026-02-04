@@ -28,6 +28,7 @@ from src.core.value_objects.phone import PhoneNumber
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_store(owner_id=None):
     return Store(
         id=uuid4(),

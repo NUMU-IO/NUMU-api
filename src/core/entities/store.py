@@ -1,7 +1,7 @@
 """Store entity representing a merchant store."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -11,7 +11,7 @@ from src.core.entities.base import BaseEntity
 from src.core.value_objects.money import Currency
 
 
-class StoreStatus(str, Enum):
+class StoreStatus(StrEnum):
     """Store status enumeration."""
 
     ACTIVE = "active"

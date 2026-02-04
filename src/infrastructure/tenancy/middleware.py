@@ -121,4 +121,3 @@ class TenantMiddleware(BaseHTTPMiddleware):
             return None
 
         return subdomain
-

@@ -40,6 +40,7 @@ def create_async_session_mock(existing_user=None):
 
     # Track commit calls
     commit_called = []
+
     async def mock_commit():
         commit_called.append(True)
     mock_session.commit = mock_commit
@@ -168,6 +169,7 @@ class TestCreateSuperuser:
 
         # Track the user model that was added
         added_user = None
+
         def capture_add(user):
             nonlocal added_user
             added_user = user
@@ -200,6 +202,7 @@ class TestCreateSuperuser:
 
         # Track the user model that was added
         added_user = None
+
         def capture_add(user):
             nonlocal added_user
             added_user = user
@@ -233,6 +236,7 @@ class TestCreateSuperuser:
 
         # Track the user model that was added
         added_user = None
+
         def capture_add(user):
             nonlocal added_user
             added_user = user
@@ -265,6 +269,7 @@ class TestCreateSuperuser:
 
         # Track the user model that was added
         added_user = None
+
         def capture_add(user):
             nonlocal added_user
             added_user = user
@@ -293,6 +298,7 @@ class TestCreateSuperuser:
 
         # Track the user model that was added
         added_user = None
+
         def capture_add(user):
             nonlocal added_user
             added_user = user
@@ -327,6 +333,7 @@ class TestCreateSuperuser:
 
         # Track the user model that was added
         added_user = None
+
         def capture_add(user):
             nonlocal added_user
             added_user = user
@@ -356,6 +363,7 @@ class TestCreateSuperuser:
 
         # Track the user model that was added
         added_user = None
+
         def capture_add(user):
             nonlocal added_user
             added_user = user

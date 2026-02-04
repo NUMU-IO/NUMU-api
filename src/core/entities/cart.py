@@ -158,7 +158,6 @@ class Cart(BaseEntity):
 
             return self.remove_item(product_id, variant_id)
 
-
         existing_item = self.items[index]
         updated_item = existing_item.with_quantity(quantity)
         self.items = [
