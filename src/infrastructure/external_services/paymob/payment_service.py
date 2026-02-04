@@ -19,7 +19,6 @@ from src.core.exceptions import PaymentError
 from src.core.interfaces.services.payment_service import (
     IPaymentService,
     PaymentIntent,
-    PaymentMethod,
     PaymentProvider,
     PaymentResult,
     PaymobPaymentKey,

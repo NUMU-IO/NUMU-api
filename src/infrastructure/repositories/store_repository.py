@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.store import Store, StoreStatus
 from src.core.interfaces.repositories.store_repository import IStoreRepository
-from src.core.value_objects.money import Currency
 from src.infrastructure.database.models import StoreModel
 
 
@@ -84,12 +83,12 @@ class StoreRepository(IStoreRepository):
     ) -> list[Store]:
         """Get all stores with pagination and optional filtering."""
         query = select(StoreModel)
-        
+
         # Apply is_active filter if provided
         if is_active is not None:
             target_status = StoreStatus.ACTIVE if is_active else StoreStatus.INACTIVE
             query = query.where(StoreModel.status == target_status)
-        
+
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return [self._to_entity(model) for model in result.scalars().all()]
@@ -144,12 +143,12 @@ class StoreRepository(IStoreRepository):
     async def count(self, is_active: bool | None = None) -> int:
         """Get total count of stores, optionally filtered by active status."""
         query = select(func.count(StoreModel.id))
-        
+
         # Apply is_active filter if provided
         if is_active is not None:
             target_status = StoreStatus.ACTIVE if is_active else StoreStatus.INACTIVE
             query = query.where(StoreModel.status == target_status)
-        
+
         result = await self.session.execute(query)
         return result.scalar() or 0
 

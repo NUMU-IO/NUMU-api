@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from src.core.entities.base import BaseEntity
-from src.core.value_objects.money import Currency, Money
+from src.core.value_objects.money import Money
 
 
 class ProductStatus(str, Enum):

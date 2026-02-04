@@ -7,7 +7,6 @@ These endpoints allow administrators to:
 - Manage credential lifecycle
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,12 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from src.api.dependencies.auth import require_admin, require_super_admin
 from src.api.dependencies.database import get_db
 from src.api.v1.schemas.tenant.configuration import (
-    ConfigurationRequestResponse,
     ConfigurationRequestListResponse,
+    ConfigurationRequestResponse,
     ConfigurationRequestUpdate,
     CredentialConfigureRequest,
-    CredentialValidateRequest,
     CredentialStatusResponse,
+    CredentialValidateRequest,
     ServiceInfoResponse,
     SupportedServicesResponse,
 )
@@ -28,17 +27,17 @@ from src.api.v1.schemas.tenant.configuration.credential_schemas import (
     CredentialValidationResponse,
 )
 from src.application.use_cases.configuration import (
-    ListAllConfigurationRequestsUseCase,
-    UpdateConfigurationRequestUseCase,
     ConfigureCredentialsUseCase,
-    ValidateCredentialsUseCase,
-    RevokeCredentialsUseCase,
     GetSupportedServicesUseCase,
+    ListAllConfigurationRequestsUseCase,
+    RevokeCredentialsUseCase,
+    UpdateConfigurationRequestUseCase,
+    ValidateCredentialsUseCase,
 )
 from src.infrastructure.database.models.tenant.configuration import (
-    ServiceType,
-    ServiceName,
     RequestStatus,
+    ServiceName,
+    ServiceType,
 )
 
 router = APIRouter(
@@ -54,12 +53,12 @@ router = APIRouter(
     description="Get all pending configuration requests across all merchants.",
 )
 async def list_pending_requests(
-    status_filter: Optional[RequestStatus] = Query(
+    status_filter: RequestStatus | None = Query(
         RequestStatus.PENDING,
         alias="status",
         description="Filter by request status"
     ),
-    service_type: Optional[ServiceType] = Query(
+    service_type: ServiceType | None = Query(
         None,
         description="Filter by service type"
     ),
@@ -70,7 +69,7 @@ async def list_pending_requests(
 ):
     """List all pending configuration requests."""
     use_case = ListAllConfigurationRequestsUseCase(db)
-    
+
     result = await use_case.execute(
         status_filter=status_filter,
         service_type=service_type,
@@ -93,15 +92,15 @@ async def get_request_details(
 ):
     """Get configuration request details."""
     use_case = ListAllConfigurationRequestsUseCase(db)
-    
+
     result = await use_case.get_by_id(request_id=request_id)
-    
+
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Configuration request not found"
         )
-    
+
     return result
 
 
@@ -119,7 +118,7 @@ async def update_request(
 ):
     """Update a configuration request."""
     use_case = UpdateConfigurationRequestUseCase(db)
-    
+
     try:
         result = await use_case.execute(
             request_id=request_id,
@@ -149,11 +148,11 @@ async def update_request(
     summary="Configure credentials",
     description="""
     Configure credentials for a merchant's service.
-    
+
     This is the secure endpoint where actual API keys are entered.
     Credentials are validated with the provider before being encrypted
     and stored.
-    
+
     **Security**: Credentials are encrypted using AES-256 before storage.
     """,
 )
@@ -164,7 +163,7 @@ async def configure_credentials(
 ):
     """Configure credentials for a merchant."""
     use_case = ConfigureCredentialsUseCase(db)
-    
+
     try:
         result = await use_case.execute(
             tenant_id=config.tenant_id,
@@ -189,7 +188,7 @@ async def configure_credentials(
     summary="Validate credentials",
     description="""
     Validate credentials without storing them.
-    
+
     Use this to test credentials before configuring them for a merchant.
     """,
 )
@@ -200,13 +199,13 @@ async def validate_credentials(
 ):
     """Validate credentials without storing."""
     use_case = ValidateCredentialsUseCase(db)
-    
+
     result = await use_case.execute(
         service_type=request.service_type,
         service_name=request.service_name,
         credentials=request.credentials,
     )
-    
+
     return CredentialValidationResponse(
         is_valid=result.is_valid,
         status=result.status.value,
@@ -231,19 +230,19 @@ async def get_credential_status(
 ):
     """Get credential status for a merchant's service."""
     use_case = ConfigureCredentialsUseCase(db)
-    
+
     result = await use_case.get_status(
         tenant_id=tenant_id,
         service_type=service_type,
         service_name=service_name,
     )
-    
+
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credentials not configured for this service"
         )
-    
+
     return result
 
 
@@ -253,10 +252,10 @@ async def get_credential_status(
     summary="Revoke credentials",
     description="""
     Revoke/delete credentials for a merchant's service.
-    
+
     **Warning**: This action cannot be undone. The merchant will need
     to request new credentials to be configured.
-    
+
     **Requires**: Super admin privileges.
     """,
 )
@@ -269,7 +268,7 @@ async def revoke_credentials(
 ):
     """Revoke credentials for a merchant's service."""
     use_case = RevokeCredentialsUseCase(db)
-    
+
     try:
         await use_case.execute(
             tenant_id=tenant_id,
@@ -311,16 +310,16 @@ async def get_service_info(
 ):
     """Get information about a specific service."""
     use_case = GetSupportedServicesUseCase()
-    
+
     result = await use_case.get_service_info(
         service_type=service_type,
         service_name=service_name,
     )
-    
+
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Service not found"
         )
-    
+
     return result

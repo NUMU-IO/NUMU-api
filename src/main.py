@@ -3,44 +3,92 @@
 import logging
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 import uvicorn
-
 from fastapi import FastAPI
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
+from src.api.admin import setup_admin
 from src.api.middleware import (
+    LoggingMiddleware,
     RateLimitMiddleware,
+    SentryMiddleware,
     TenantMiddleware,
-    logging_middleware,
     setup_cors,
     setup_exception_handlers,
 )
-from src.api.admin import setup_admin
 from src.api.v1.routes import api_router
 from src.config import settings
+from src.config.logging_config import configure_logging, get_logger
 from src.infrastructure.database import engine
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG if settings.debug else logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+configure_logging()
+logger = get_logger(__name__)
+
+
+def init_sentry() -> None:
+    """Initialize Sentry SDK for error tracking and performance monitoring."""
+    if not settings.sentry_dsn:
+        logger.warning("sentry_dsn_not_configured", msg="Sentry DSN not set, error tracking disabled")
+        return
+
+    # Configure logging integration to capture WARNING+ as breadcrumbs, ERROR+ as events
+    sentry_logging = LoggingIntegration(
+        level=logging.INFO,          # Capture INFO+ as breadcrumbs
+        event_level=logging.ERROR,   # Send ERROR+ as Sentry events
+    )
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        release=f"numu-api@{settings.app_version}",
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        profiles_sample_rate=settings.sentry_profiles_sample_rate,
+        send_default_pii=settings.sentry_send_default_pii,
+        integrations=[
+            sentry_logging,
+            AsyncioIntegration(),
+            SqlalchemyIntegration(),
+        ],
+        before_send=_filter_sentry_events,
+    )
+    logger.info(
+        "sentry_initialized",
+        environment=settings.environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+    )
+
+
+def _filter_sentry_events(event: dict, _hint: dict) -> dict | None:
+    """Filter Sentry events before sending (PII scrubbing, ignoring certain errors)."""
+    # Ignore health check errors
+    if "request" in event and event["request"].get("url", "").endswith("/health"):
+        return None
+    return event
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-    logger.info("Starting NUMU API...")
-    logger.info(f"Debug mode: {settings.debug}")
-    logger.info(f"API Version: {settings.app_version}")
-    
+    init_sentry()
+    logger.info(
+        "app_startup",
+        app_name=settings.app_name,
+        version=settings.app_version,
+        environment=settings.environment,
+        debug=settings.debug,
+    )
+
     yield
-    
+
     # Shutdown
-    logger.info("Shutting down NUMU API...")
+    logger.info("app_shutdown", msg="Shutting down NUMU API")
     await engine.dispose()
-    logger.info("Database connection closed")
+    logger.info("database_closed", msg="Database connection closed")
 
 
 def create_app() -> FastAPI:
@@ -54,24 +102,25 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.debug else None,
         lifespan=lifespan,
     )
-    
+
     # Setup CORS
     setup_cors(app)
-    
+
     # Setup exception handlers
     setup_exception_handlers(app)
-    
+
     # Add SessionMiddleware for admin panel cookie-based auth
     # Uses separate session secret from JWT for security
     from starlette.middleware.sessions import SessionMiddleware
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
-    
+
     # Add middleware (order matters: first added = outermost)
     # Rate limiting should be outermost to block requests early
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(TenantMiddleware)
-    app.middleware("http")(logging_middleware)
-    
+    app.add_middleware(SentryMiddleware)  # Captures request context for Sentry
+    app.add_middleware(LoggingMiddleware)  # Structured logging with request context
+
     # Root endpoint
     @app.get("/", tags=["Root"])
     async def root():
@@ -83,13 +132,13 @@ def create_app() -> FastAPI:
             "docs": "/docs" if settings.debug else None,
             "health": "/api/v1/public/health",
         }
-    
+
     # Include routers
     app.include_router(api_router)
-    
+
     # Setup admin panel (public schema only)
     setup_admin(app)
-    
+
     return app
 
 

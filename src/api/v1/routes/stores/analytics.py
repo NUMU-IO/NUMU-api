@@ -13,16 +13,14 @@ from pydantic import BaseModel
 from src.api.dependencies import (
     get_customer_repository,
     get_order_repository,
-    get_product_repository,
     get_store_repository,
     require_store_owner,
 )
 from src.api.responses import SuccessResponse
-from src.core.entities.order import OrderStatus, PaymentStatus
+from src.core.entities.order import PaymentStatus
 from src.infrastructure.repositories import (
     CustomerRepository,
     OrderRepository,
-    ProductRepository,
     StoreRepository,
 )
 
@@ -317,7 +315,7 @@ async def get_sales_by_location(
 
     # Sort by sales and format
     sorted_locations = sorted(
-        [(k, v) for k, v in location_sales.items()],
+        location_sales.items(),
         key=lambda x: x[1]["sales"],
         reverse=True,
     )

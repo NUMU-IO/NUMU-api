@@ -8,8 +8,8 @@ import pytest
 
 from src.application.dto.product import CreateProductDTO
 from src.application.use_cases.products.create_product import CreateProductUseCase
-from src.core.entities.store import Store, StoreStatus
 from src.core.entities.product import Product, ProductStatus, ProductType
+from src.core.entities.store import Store, StoreStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.value_objects.money import Currency, Money
 

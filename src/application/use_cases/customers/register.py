@@ -2,7 +2,12 @@
 
 from uuid import UUID
 
-from src.application.dto.customer import CustomerAuthResponseDTO, CustomerDTO, CustomerRegisterDTO, CustomerTokenDTO
+from src.application.dto.customer import (
+    CustomerAuthResponseDTO,
+    CustomerDTO,
+    CustomerRegisterDTO,
+    CustomerTokenDTO,
+)
 from src.core.entities.customer import Customer
 from src.core.exceptions import EntityAlreadyExistsError
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository

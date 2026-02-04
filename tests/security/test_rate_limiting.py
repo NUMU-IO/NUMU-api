@@ -1,10 +1,11 @@
 """Tests for rate limiting middleware."""
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
 from fastapi import Request
 
-from src.api.middleware.rate_limit import RateLimiter, RateLimitMiddleware
+from src.api.middleware.rate_limit import RateLimiter
 
 
 class TestRateLimiter:
@@ -181,7 +182,7 @@ class TestRateLimitMiddlewareIntegration:
 
     async def test_rate_limit_headers_added(self, client):
         """Test that rate limit headers are added to response."""
-        response = await client.get("/api/v1/public/health")
+        await client.get("/api/v1/public/health")
 
         # Health is skipped, so check a regular endpoint
         # Just verify the app doesn't crash with rate limiting enabled

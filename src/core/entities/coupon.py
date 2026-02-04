@@ -1,6 +1,6 @@
 """Coupon entity for discount codes."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID
@@ -56,14 +56,14 @@ class Coupon(BaseEntity):
         """Check if coupon has passed its validity end date."""
         if self.valid_until is None:
             return False
-        return datetime.now(timezone.utc) > self.valid_until
+        return datetime.now(UTC) > self.valid_until
 
     @property
     def is_started(self) -> bool:
         """Check if coupon validity period has started."""
         if self.valid_from is None:
             return True
-        return datetime.now(timezone.utc) >= self.valid_from
+        return datetime.now(UTC) >= self.valid_from
 
     @property
     def is_within_validity(self) -> bool:

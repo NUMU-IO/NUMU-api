@@ -1,6 +1,5 @@
 """Unit tests for order status transitions and entity behaviour."""
 
-from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -13,7 +12,6 @@ from src.core.entities.order import (
     OrderStatus,
     PaymentStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,18 +28,18 @@ def _addr():
 
 
 def _order(status=OrderStatus.PENDING, payment_status=PaymentStatus.PENDING, **kw):
-    defaults = dict(
-        id=uuid4(),
-        store_id=uuid4(),
-        customer_id=uuid4(),
-        order_number=f"ORD-{uuid4().hex[:6].upper()}",
-        shipping_address=_addr(),
-        status=status,
-        payment_status=payment_status,
-        subtotal=10000,
-        total=10000,
-        currency="EGP",
-    )
+    defaults = {
+        "id": uuid4(),
+        "store_id": uuid4(),
+        "customer_id": uuid4(),
+        "order_number": f"ORD-{uuid4().hex[:6].upper()}",
+        "shipping_address": _addr(),
+        "status": status,
+        "payment_status": payment_status,
+        "subtotal": 10000,
+        "total": 10000,
+        "currency": "EGP",
+    }
     defaults.update(kw)
     return Order(**defaults)
 
@@ -249,6 +247,7 @@ class TestOrderSchemas:
 
     def test_create_order_request_requires_line_items(self):
         from pydantic import ValidationError
+
         from src.api.v1.schemas.tenant.order import CreateOrderRequest
 
         with pytest.raises(ValidationError):
@@ -266,6 +265,7 @@ class TestOrderSchemas:
 
     def test_update_order_status_request_requires_status(self):
         from pydantic import ValidationError
+
         from src.api.v1.schemas.tenant.order import UpdateOrderStatusRequest
 
         with pytest.raises(ValidationError):
@@ -273,6 +273,7 @@ class TestOrderSchemas:
 
     def test_bulk_update_request_max_100(self):
         from pydantic import ValidationError
+
         from src.api.v1.schemas.tenant.order import BulkUpdateOrderStatusRequest
 
         with pytest.raises(ValidationError):

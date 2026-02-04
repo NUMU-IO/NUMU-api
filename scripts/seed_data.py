@@ -8,17 +8,16 @@ from uuid import uuid4
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import settings
-from src.core.entities.user import UserRole, UserStatus
-from src.core.entities.store import StoreStatus
 from src.core.entities.product import ProductStatus, ProductType
+from src.core.entities.store import StoreStatus
+from src.core.entities.user import UserRole, UserStatus
 from src.core.value_objects.money import Currency
 from src.infrastructure.database import AsyncSessionLocal
 from src.infrastructure.database.models import (
-    TenantModel,
     CategoryModel,
     ProductModel,
     StoreModel,
+    TenantModel,
     UserModel,
 )
 from src.infrastructure.external_services import password_service
@@ -27,7 +26,7 @@ from src.infrastructure.external_services import password_service
 async def seed_database():
     """Seed the database with initial data."""
     print("Starting database seeding...")
-    
+
     async with AsyncSessionLocal() as session:
         # Check if data already exists
         existing_users = await session.execute(
@@ -36,7 +35,7 @@ async def seed_database():
         if existing_users.scalar():
             print("Database already seeded. Skipping...")
             return
-        
+
         # Create super admin user
         admin_id = uuid4()
         admin_password = password_service.hash_password("admin123456")
@@ -51,7 +50,7 @@ async def seed_database():
         )
         session.add(admin)
         print("Created admin user: admin@octyrafiy.com")
-        
+
         # Create store owner user
         owner_id = uuid4()
         owner_password = password_service.hash_password("owner123456")
@@ -66,7 +65,7 @@ async def seed_database():
         )
         session.add(owner)
         print("Created store owner: owner@example.com")
-        
+
         # Create customer user
         customer_id = uuid4()
         customer_password = password_service.hash_password("customer123456")
@@ -81,10 +80,10 @@ async def seed_database():
         )
         session.add(customer)
         print("Created customer: customer@example.com")
-        
+
         # Flush to ensure users are created before tenant references them
         await session.flush()
-        
+
         # Create a tenant for the store owner
         tenant_id = uuid4()
         tenant = TenantModel(
@@ -97,7 +96,7 @@ async def seed_database():
         )
         session.add(tenant)
         print("Created tenant: Demo Company (subdomain: demo)")
-        
+
         # Create sample store (with tenant_id)
         store_id = uuid4()
         store = StoreModel(
@@ -113,7 +112,7 @@ async def seed_database():
         )
         session.add(store)
         print("Created store: Demo Store")
-        
+
         # Create categories (with tenant_id)
         electronics_id = uuid4()
         electronics = CategoryModel(
@@ -126,7 +125,7 @@ async def seed_database():
             is_active=True,
         )
         session.add(electronics)
-        
+
         clothing_id = uuid4()
         clothing = CategoryModel(
             id=clothing_id,
@@ -139,7 +138,7 @@ async def seed_database():
         )
         session.add(clothing)
         print("Created categories: Electronics, Clothing")
-        
+
         # Create sample products (with tenant_id)
         products = [
             ProductModel(
@@ -191,15 +190,15 @@ async def seed_database():
                 status=ProductStatus.ACTIVE,
             ),
         ]
-        
+
         for product in products:
             session.add(product)
         print(f"Created {len(products)} sample products")
-        
+
         # Commit all changes
         await session.commit()
         print("Database seeding completed successfully!")
-        
+
         # Print login credentials
         print("\n" + "=" * 50)
         print("TEST ACCOUNTS:")

@@ -7,13 +7,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.entities.store import StoreStatus
 from src.core.value_objects.money import Currency
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import (
+    TenantMixin,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 
 class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     """Store database model with tenant_id discriminator.
-    
-    Stores are scoped to a tenant. The owner_id references a user 
+
+    Stores are scoped to a tenant. The owner_id references a user
     in the public.users table.
     """
 

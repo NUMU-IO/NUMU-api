@@ -2,8 +2,6 @@
 
 from uuid import uuid4
 
-import pytest
-
 from src.core.entities.store import Store, StoreStatus
 from src.core.value_objects.money import Currency
 

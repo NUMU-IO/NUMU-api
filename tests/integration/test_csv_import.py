@@ -8,11 +8,11 @@ from uuid import uuid4
 
 import pytest
 
+from src.application.use_cases.products.export_products import ExportProductsUseCase
 from src.application.use_cases.products.import_products import (
     CSV_COLUMNS,
     ImportProductsUseCase,
 )
-from src.application.use_cases.products.export_products import ExportProductsUseCase
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.entities.store import Store, StoreStatus
 from src.core.value_objects.money import Currency, Money

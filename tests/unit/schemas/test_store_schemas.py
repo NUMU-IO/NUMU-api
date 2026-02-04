@@ -5,8 +5,8 @@ from pydantic import ValidationError
 
 from src.api.v1.schemas.tenant.store import (
     CreateStoreRequest,
-    UpdateStoreRequest,
     StoreResponse,
+    UpdateStoreRequest,
 )
 
 

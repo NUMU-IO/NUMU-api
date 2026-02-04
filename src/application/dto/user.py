@@ -5,7 +5,7 @@ from datetime import datetime
 from uuid import UUID
 
 from src.application.dto.base import BaseDTO
-from src.core.entities.user import User, UserRole, UserStatus
+from src.core.entities.user import User, UserRole
 
 
 @dataclass

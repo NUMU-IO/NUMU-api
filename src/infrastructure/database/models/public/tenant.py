@@ -10,7 +10,7 @@ from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 class TenantStatus(str, Enum):
     """Tenant status enumeration."""
-    
+
     ACTIVE = "active"
     INACTIVE = "inactive"
     SUSPENDED = "suspended"
@@ -19,7 +19,7 @@ class TenantStatus(str, Enum):
 
 class TenantPlan(str, Enum):
     """Tenant subscription plan."""
-    
+
     FREE = "free"
     STARTER = "starter"
     PRO = "pro"
@@ -28,7 +28,7 @@ class TenantPlan(str, Enum):
 
 class TenantModel(Base, UUIDMixin, TimestampMixin):
     """Tenant model representing an organization/store owner in the platform.
-    
+
     This model lives in the 'public' PostgreSQL schema and is used
     to track all tenants. The tenant_id is used as a discriminator
     in all tenant-scoped tables.

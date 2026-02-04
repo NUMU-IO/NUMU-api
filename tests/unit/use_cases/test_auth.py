@@ -1,16 +1,16 @@
 """Unit tests for authentication use cases."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from src.application.dto.auth import LoginDTO, RegisterDTO, RefreshTokenDTO
+from src.application.dto.auth import LoginDTO, RefreshTokenDTO, RegisterDTO
 from src.application.use_cases.auth.login import LoginUserUseCase
-from src.application.use_cases.auth.register import RegisterUserUseCase
 from src.application.use_cases.auth.refresh_token import RefreshTokenUseCase
+from src.application.use_cases.auth.register import RegisterUserUseCase
 from src.core.entities.user import User, UserRole, UserStatus
-from src.core.exceptions import AuthenticationError, InvalidCredentialsError, EntityNotFoundError
+from src.core.exceptions import EntityNotFoundError, InvalidCredentialsError
 from src.core.value_objects.email import Email
 
 

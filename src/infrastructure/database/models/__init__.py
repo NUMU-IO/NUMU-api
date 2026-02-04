@@ -1,10 +1,14 @@
 """Database models module."""
 
-from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.audit import AuditLogModel
+from src.infrastructure.database.models.base import (
+    TenantMixin,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 # Public schema models
 from src.infrastructure.database.models.public import TenantModel, UserModel
-from src.infrastructure.database.models.audit import AuditLogModel
 
 # Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
