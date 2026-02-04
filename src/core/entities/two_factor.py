@@ -6,7 +6,6 @@ for users, including TOTP secrets and backup codes.
 
 from datetime import datetime
 from enum import Enum
-from typing import List
 from uuid import UUID
 
 from pydantic import Field
@@ -54,7 +53,7 @@ class TwoFactorAuth(BaseEntity):
     method: TwoFactorMethod = TwoFactorMethod.TOTP
     status: TwoFactorStatus = TwoFactorStatus.DISABLED
     secret: str | None = None  # Base32-encoded TOTP secret
-    backup_codes: List[str] = Field(default_factory=list)  # Hashed backup codes
+    backup_codes: list[str] = Field(default_factory=list)  # Hashed backup codes
     backup_codes_remaining: int = 0
     verified_at: datetime | None = None
     last_used_at: datetime | None = None
@@ -89,7 +88,7 @@ class TwoFactorAuth(BaseEntity):
         self.verified_at = None
         self.touch()
 
-    def set_pending(self, secret: str, hashed_backup_codes: List[str]) -> None:
+    def set_pending(self, secret: str, hashed_backup_codes: list[str]) -> None:
         """Set 2FA to pending status with new secret and backup codes.
 
         Args:
@@ -123,7 +122,7 @@ class TwoFactorAuth(BaseEntity):
         self.last_used_at = datetime.utcnow()
         self.touch()
 
-    def regenerate_backup_codes(self, hashed_backup_codes: List[str]) -> None:
+    def regenerate_backup_codes(self, hashed_backup_codes: list[str]) -> None:
         """Replace backup codes with new ones.
 
         Args:

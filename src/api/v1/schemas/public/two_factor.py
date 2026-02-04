@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class Enable2FAResponse(BaseModel):
     """Response when 2FA is enabled.
-    
+
     Contains the provisioning URI for QR code generation and backup codes.
     The backup codes should be saved by the user as they are only shown once.
     """
@@ -34,7 +34,7 @@ class Enable2FAResponse(BaseModel):
 
 class Verify2FARequest(BaseModel):
     """Request to verify a 2FA code.
-    
+
     Can be either a 6-digit TOTP code or a backup code (XXXX-XXXX format).
     """
 
@@ -65,7 +65,7 @@ class Verify2FAResponse(BaseModel):
 
 class Disable2FARequest(BaseModel):
     """Request to disable 2FA.
-    
+
     Requires password confirmation for security.
     """
 
@@ -134,7 +134,7 @@ class RegenerateBackupCodesResponse(BaseModel):
 
 class TwoFactorChallengeResponse(BaseModel):
     """Response when login requires 2FA verification.
-    
+
     Returned instead of tokens when user has 2FA enabled.
     """
 

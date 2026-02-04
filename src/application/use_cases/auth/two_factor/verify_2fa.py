@@ -11,7 +11,6 @@ from src.application.dto.two_factor import Verify2FAResponseDTO
 from src.core.entities.two_factor import TwoFactorStatus
 from src.core.exceptions import (
     BusinessRuleViolationError,
-    EntityNotFoundError,
 )
 from src.core.interfaces.repositories.two_factor_repository import ITwoFactorRepository
 from src.core.interfaces.services.totp_service import ITOTPService
@@ -109,7 +108,7 @@ class Verify2FAUseCase:
             # Looks like a TOTP code (6 digits)
             if self.totp_service.verify_code(two_factor.secret, normalized_code):
                 logger.info(f"TOTP code verified for user: {user_id}")
-                
+
                 # If initial setup, enable 2FA
                 if is_initial_setup:
                     two_factor.enable()
@@ -130,7 +129,7 @@ class Verify2FAUseCase:
         backup_result = await self._verify_backup_code(user_id, two_factor, code)
         if backup_result:
             logger.info(f"Backup code verified for user: {user_id}")
-            
+
             # If initial setup, enable 2FA
             if is_initial_setup:
                 two_factor.enable()

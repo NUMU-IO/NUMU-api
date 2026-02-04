@@ -336,12 +336,12 @@ async def enable_2fa(
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Enable Two-Factor Authentication for the current user.
-    
+
     This generates:
     - A TOTP secret for authenticator apps
     - A provisioning URI (for QR code generation)
     - 10 backup codes for recovery
-    
+
     The user must verify with a TOTP code to complete setup.
     Backup codes should be saved securely - they are only shown once!
     """
@@ -382,11 +382,11 @@ async def verify_2fa(
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Verify a 2FA code (TOTP or backup code).
-    
+
     This endpoint serves two purposes:
     1. Complete 2FA setup after calling /2fa/enable (first verification)
     2. Verify 2FA during sensitive operations
-    
+
     Accepts both 6-digit TOTP codes and backup codes (XXXX-XXXX format).
     """
     from uuid import UUID
@@ -437,10 +437,10 @@ async def disable_2fa(
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Disable Two-Factor Authentication for the current user.
-    
+
     Requires password confirmation for security. Optionally accepts
     a TOTP code for additional verification.
-    
+
     WARNING: This removes all 2FA protection from the account.
     """
     from uuid import UUID
@@ -481,11 +481,12 @@ async def get_2fa_status(
     two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
 ):
     """Get the current 2FA status for the authenticated user.
-    
+
     Returns whether 2FA is enabled, the method used, and
     the number of remaining backup codes.
     """
     from uuid import UUID
+
     from src.application.dto.two_factor import TwoFactorStatusDTO
 
     two_factor = await two_factor_repo.get_by_user_id(
@@ -520,10 +521,10 @@ async def regenerate_backup_codes(
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Regenerate backup codes for 2FA recovery.
-    
+
     Requires a valid TOTP code to prevent abuse. All existing
     backup codes are invalidated and replaced with new ones.
-    
+
     Save the new backup codes securely - they are only shown once!
     """
     from uuid import UUID
