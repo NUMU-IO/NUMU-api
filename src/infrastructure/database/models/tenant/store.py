@@ -66,14 +66,15 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         JSONB, nullable=True, default=dict
     )
 
-    # Relationships (all within public schema now)
-    tenant = relationship("TenantModel", back_populates="stores", lazy="selectin")
-    products = relationship("ProductModel", back_populates="store", lazy="selectin")
-    categories = relationship("CategoryModel", back_populates="store", lazy="selectin")
-    customers = relationship("CustomerModel", back_populates="store", lazy="selectin")
-    orders = relationship("OrderModel", back_populates="store", lazy="selectin")
-    invoices = relationship("InvoiceModel", back_populates="store", lazy="selectin")
-    coupons = relationship("CouponModel", back_populates="store", lazy="selectin")
+    # Relationships — use lazy="raise" to prevent accidental implicit loading
+    # in async context. Load explicitly with selectinload() where needed.
+    tenant = relationship("TenantModel", back_populates="stores", lazy="raise")
+    products = relationship("ProductModel", back_populates="store", lazy="raise")
+    categories = relationship("CategoryModel", back_populates="store", lazy="raise")
+    customers = relationship("CustomerModel", back_populates="store", lazy="raise")
+    orders = relationship("OrderModel", back_populates="store", lazy="raise")
+    invoices = relationship("InvoiceModel", back_populates="store", lazy="raise")
+    coupons = relationship("CouponModel", back_populates="store", lazy="raise")
 
     def __repr__(self) -> str:
         return f"<StoreModel(id={self.id}, name={self.name})>"
