@@ -1,12 +1,12 @@
 """Unit tests for create_superuser script."""
 
+import importlib.util
 import sys
 from pathlib import Path
-import importlib.util
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from uuid import UUID
 
 import pytest
-from uuid import UUID
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from src.core.entities.user import UserRole, UserStatus
 

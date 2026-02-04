@@ -22,19 +22,19 @@ class ResendEmailService(IEmailService):
         try:
             to_list = message.to if isinstance(message.to, list) else [message.to]
             from_address = f"{message.from_name or self.from_name} <{message.from_email or self.from_email}>"
-            
+
             params = {
                 "from": from_address,
                 "to": to_list,
                 "subject": message.subject,
                 "html": message.html_content,
             }
-            
+
             if message.text_content:
                 params["text"] = message.text_content
             if message.reply_to:
                 params["reply_to"] = message.reply_to
-                
+
             resend.Emails.send(params)
             return True
         except Exception as e:
@@ -87,12 +87,12 @@ class ResendEmailService(IEmailService):
                 <td>${item['price']:.2f}</td>
             </tr>
             """
-        
+
         html_content = f"""
         <h1>Order Confirmation</h1>
         <p>Thank you for your order!</p>
         <p><strong>Order Number:</strong> {order_number}</p>
-        
+
         <h2>Order Details</h2>
         <table>
             <thead>
@@ -106,7 +106,7 @@ class ResendEmailService(IEmailService):
                 {items_html}
             </tbody>
         </table>
-        
+
         <p><strong>Total:</strong> ${order_details.get('total', 0):.2f}</p>
         """
         message = EmailMessage(
@@ -130,7 +130,7 @@ class ResendEmailService(IEmailService):
             <p><strong>Tracking Number:</strong> {tracking_number}</p>
             <p><strong>Carrier:</strong> {carrier or 'N/A'}</p>
             """
-        
+
         html_content = f"""
         <h1>Your Order Has Shipped!</h1>
         <p>Great news! Your order #{order_number} is on its way.</p>

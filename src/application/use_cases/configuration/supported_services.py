@@ -1,19 +1,17 @@
 """Use case for getting supported services information."""
 
-from typing import Optional
 
 from src.api.v1.schemas.tenant.configuration import (
     ServiceInfoResponse,
     SupportedServicesResponse,
 )
 from src.infrastructure.database.models.tenant.configuration import (
-    ServiceType,
     ServiceName,
+    ServiceType,
 )
 from src.infrastructure.external_services.gateway_validators import (
     get_validator_factory,
 )
-
 
 # Service display information
 SERVICE_INFO = {
@@ -75,81 +73,81 @@ SERVICE_INFO = {
 
 class GetSupportedServicesUseCase:
     """Use case for getting information about supported services."""
-    
+
     def __init__(self):
         self.validator_factory = get_validator_factory()
-    
+
     async def execute(self) -> SupportedServicesResponse:
         """Get all supported services grouped by type.
-        
+
         Returns:
             SupportedServicesResponse with all services
         """
         supported = self.validator_factory.get_supported_services()
-        
+
         payment_gateways = []
         shipping_carriers = []
         communication = []
-        
+
         for service_type, service_names in supported.items():
             for service_name in service_names:
                 info = await self._build_service_info(service_type, service_name)
-                
+
                 if service_type == ServiceType.PAYMENT_GATEWAY:
                     payment_gateways.append(info)
                 elif service_type == ServiceType.SHIPPING_CARRIER:
                     shipping_carriers.append(info)
                 elif service_type in [ServiceType.WHATSAPP, ServiceType.SMS]:
                     communication.append(info)
-        
+
         return SupportedServicesResponse(
             payment_gateways=payment_gateways,
             shipping_carriers=shipping_carriers,
             communication=communication,
         )
-    
+
     async def get_service_info(
         self,
         service_type: ServiceType,
         service_name: ServiceName,
-    ) -> Optional[ServiceInfoResponse]:
+    ) -> ServiceInfoResponse | None:
         """Get information about a specific service.
-        
+
         Args:
             service_type: Type of service
             service_name: Specific service provider
-        
+
         Returns:
             ServiceInfoResponse if service exists, None otherwise
         """
         if not self.validator_factory.is_supported(service_type, service_name):
             return None
-        
+
         return await self._build_service_info(service_type, service_name)
-    
+
     async def _build_service_info(
         self,
         service_type: ServiceType,
         service_name: ServiceName,
     ) -> ServiceInfoResponse:
         """Build service info response.
-        
+
         Args:
             service_type: Type of service
             service_name: Specific service provider
-        
+
         Returns:
             ServiceInfoResponse with service details
         """
         info = SERVICE_INFO.get(service_name, {})
-        
+
         required_fields = self.validator_factory.get_required_fields(
             service_type, service_name
         )
         optional_fields = self.validator_factory.get_optional_fields(
             service_type, service_name
         )
-        
+
         return ServiceInfoResponse(
             service_type=service_type,
             service_name=service_name,

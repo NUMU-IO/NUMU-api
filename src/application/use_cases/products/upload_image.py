@@ -17,7 +17,6 @@ from src.core.interfaces.services.storage_service import (
     StorageBucket,
 )
 
-
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
@@ -27,7 +26,7 @@ ALLOWED_IMAGE_TYPES = {
 }
 
 # Maximum file size (5 MB)
-MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
 
 
 @dataclass
@@ -118,7 +117,7 @@ class UploadProductImageUseCase:
         if file_size == 0:
             raise ValidationError("File is empty")
 
-        
+
         store = await self.store_repository.get_by_id(store_id)
         if not store:
             raise EntityNotFoundError("Store", str(store_id))
@@ -128,7 +127,7 @@ class UploadProductImageUseCase:
                 "You don't have permission to upload images to this store"
             )
 
-        
+
         product = await self.product_repository.get_by_id(dto.product_id)
         if not product:
             raise EntityNotFoundError("Product", str(dto.product_id))
@@ -136,13 +135,13 @@ class UploadProductImageUseCase:
         if product.store_id != store_id:
             raise EntityNotFoundError("Product", str(dto.product_id))
 
-        
+
         ext = ALLOWED_IMAGE_TYPES.get(content_type, ".jpg")
         safe_filename = f"{dto.product_id}_{dto.filename}"
         if not safe_filename.lower().endswith(ext):
             safe_filename = f"{safe_filename}{ext}"
 
-        
+
         uploaded_file = await self.storage_service.upload_file(
             file_content=dto.file_content,
             filename=safe_filename,
@@ -150,7 +149,7 @@ class UploadProductImageUseCase:
             bucket=StorageBucket.PRODUCTS,
         )
 
-        
+
         if uploaded_file.url not in product.images:
             product.images = [*product.images, uploaded_file.url]
             await self.product_repository.update(product)
@@ -207,7 +206,7 @@ class DeleteProductImageUseCase:
             AuthorizationError: If user doesn't own the store.
             ValidationError: If image not found on product.
         """
-        
+
         store = await self.store_repository.get_by_id(store_id)
         if not store:
             raise EntityNotFoundError("Store", str(store_id))
@@ -217,7 +216,7 @@ class DeleteProductImageUseCase:
                 "You don't have permission to delete images from this store"
             )
 
-        
+
         product = await self.product_repository.get_by_id(product_id)
         if not product:
             raise EntityNotFoundError("Product", str(product_id))
@@ -225,7 +224,7 @@ class DeleteProductImageUseCase:
         if product.store_id != store_id:
             raise EntityNotFoundError("Product", str(product_id))
 
-        
+
         if image_url not in product.images:
             raise ValidationError(
                 f"Image not found on product. URL: {image_url}"
@@ -248,7 +247,7 @@ class DeleteProductImageUseCase:
         if key:
             await self.storage_service.delete_file(key)
 
-        
+
         product.images = [img for img in product.images if img != image_url]
         await self.product_repository.update(product)
 

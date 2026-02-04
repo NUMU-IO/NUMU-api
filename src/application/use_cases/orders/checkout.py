@@ -1,6 +1,6 @@
 """Checkout use case - validates cart, checks stock, creates order, initiates Paymob payment."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
@@ -8,12 +8,12 @@ from src.application.dto.base import BaseDTO
 from src.application.dto.order import OrderDTO
 from src.core.entities.coupon import CouponType
 from src.core.entities.order import (
+    FulfillmentStatus,
     Order,
     OrderLineItem,
     OrderShippingAddress,
     OrderStatus,
     PaymentStatus,
-    FulfillmentStatus,
 )
 from src.core.exceptions import (
     EntityNotFoundError,
@@ -129,7 +129,7 @@ class CheckoutUseCase:
             ValidationError: If cart is empty or stock is insufficient.
             PaymentError: If payment initiation fails.
         """
-        
+
         cart = await self.cart_repository.get_by_customer_id(customer_id, store_id)
         if not cart:
             cart = await self.cart_repository.get_by_session_id(session_id, store_id)

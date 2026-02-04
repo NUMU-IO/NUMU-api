@@ -1,6 +1,6 @@
 """Cart entity representing a shopping cart."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -98,7 +98,7 @@ class Cart(BaseEntity):
         index = self._find_item_index(item.product_id, item.variant_id)
 
         if index >= 0:
-            
+
             existing_item = self.items[index]
             new_quantity = existing_item.quantity + item.quantity
             updated_item = existing_item.with_quantity(new_quantity)
@@ -106,10 +106,10 @@ class Cart(BaseEntity):
                 updated_item if i == index else it for i, it in enumerate(self.items)
             ]
         else:
-            
+
             self.items = [*self.items, item]
 
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
         return self
 
     def remove_item(self, product_id: UUID, variant_id: UUID | None = None) -> "Cart":
@@ -125,7 +125,7 @@ class Cart(BaseEntity):
         index = self._find_item_index(product_id, variant_id)
         if index >= 0:
             self.items = [item for i, item in enumerate(self.items) if i != index]
-            self.updated_at = datetime.now(timezone.utc)
+            self.updated_at = datetime.now(UTC)
         return self
 
     def update_item_quantity(
@@ -155,16 +155,16 @@ class Cart(BaseEntity):
             raise ValueError(f"Item with product_id {product_id} not found in cart")
 
         if quantity <= 0:
-            
+
             return self.remove_item(product_id, variant_id)
 
-            
+
         existing_item = self.items[index]
         updated_item = existing_item.with_quantity(quantity)
         self.items = [
             updated_item if i == index else it for i, it in enumerate(self.items)
         ]
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
         return self
 
     def clear(self) -> "Cart":
@@ -174,7 +174,7 @@ class Cart(BaseEntity):
             Self for method chaining.
         """
         self.items = []
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
         return self
 
     def merge_cart(self, other: "Cart") -> "Cart":
@@ -221,7 +221,7 @@ class Cart(BaseEntity):
             currency=data.get("currency", "USD"),
             notes=data.get("notes"),
             metadata=data.get("metadata", {}),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(timezone.utc),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.now(timezone.utc),
+            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(UTC),
+            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.now(UTC),
             expires_at=datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None,
         )

@@ -32,7 +32,7 @@ class GetCustomerOrdersUseCase:
             skip=skip,
             limit=limit,
         )
-        
+
         total = await self.order_repository.count_by_customer(customer_id)
 
         return {

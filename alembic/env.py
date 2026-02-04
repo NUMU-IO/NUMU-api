@@ -15,14 +15,14 @@ from src.infrastructure.database.connection import Base
 
 # Import all models for migration autogenerate support
 from src.infrastructure.database.models import (  # noqa: F401
+    CategoryModel,
+    CouponModel,
+    CustomerModel,
+    OrderModel,
+    ProductModel,
+    StoreModel,
     TenantModel,
     UserModel,
-    StoreModel,
-    ProductModel,
-    CategoryModel,
-    CustomerModel,
-    CouponModel,
-    OrderModel,
 )
 
 # this is the Alembic Config object

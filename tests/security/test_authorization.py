@@ -2,8 +2,6 @@
 
 from uuid import uuid4
 
-import pytest
-
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.value_objects.email import Email
 

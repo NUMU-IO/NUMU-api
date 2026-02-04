@@ -20,12 +20,12 @@ class ListStoresUseCase:
         is_active: bool | None = None,
     ) -> PaginatedDTO:
         """List all stores with pagination and filtering.
-        
+
         Args:
             skip: Number of records to skip (for pagination)
             limit: Maximum number of records to return
             is_active: Optional filter for active/inactive stores
-        
+
         Returns:
             PaginatedDTO containing store data and pagination metadata
         """
@@ -35,10 +35,10 @@ class ListStoresUseCase:
             limit=limit,
             is_active=is_active,
         )
-        
+
         # Get total count (potentially filtered)
         total = await self.store_repository.count(is_active=is_active)
-        
+
         # Calculate page number from skip/limit for response metadata
         page = (skip // limit) + 1 if limit > 0 else 1
 

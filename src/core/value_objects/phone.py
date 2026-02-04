@@ -1,6 +1,6 @@
 """Phone number value object."""
 
-from typing import Any, Self
+from typing import Self
 
 import phonenumbers
 from phonenumbers import NumberParseException

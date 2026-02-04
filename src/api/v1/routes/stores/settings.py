@@ -2,11 +2,10 @@
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.api.dependencies import get_current_store, get_store_repository
 from src.api.responses import SuccessResponse
@@ -20,8 +19,9 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationResponse,
     CustomizationSocialLinks,
     CustomizationTheme,
-    PaymentSettingsResponse,
+    NotificationTemplate,
     PaymentMethodStatus,
+    PaymentSettingsResponse,
     ShippingCarrierStatus,
     ShippingSettingsResponse,
     ShippingZone,
@@ -33,7 +33,6 @@ from src.api.v1.schemas.tenant.settings import (
     UpdateWhatsAppSettingsRequest,
     WhatsAppNotifications,
     WhatsAppSettingsResponse,
-    NotificationTemplate,
 )
 from src.core.entities.store import Store
 from src.infrastructure.repositories import StoreRepository
@@ -650,7 +649,7 @@ async def publish_customization(
 
     # Mark as published with timestamp
     customization["is_published"] = True
-    customization["last_published_at"] = datetime.now(timezone.utc).isoformat()
+    customization["last_published_at"] = datetime.now(UTC).isoformat()
 
     # Copy to theme_settings for the storefront to consume (normalized snake_case)
     store.theme_settings = _normalize_keys({

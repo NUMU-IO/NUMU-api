@@ -1,12 +1,12 @@
 """Coupon repository implementation."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.coupon import Coupon, CouponType
+from src.core.entities.coupon import Coupon
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.infrastructure.database.models.tenant.coupon import CouponModel
 
@@ -160,7 +160,7 @@ class CouponRepository(ICouponRepository):
         now: datetime | None = None,
     ) -> list[Coupon]:
         """Get currently active and valid coupons for a store."""
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         query = (
             select(CouponModel)
             .where(

@@ -22,7 +22,7 @@ class CartItem(BaseModel):
     variant_name: str | None = None
     sku: str | None = None
     quantity: int = Field(default=1, ge=1)
-    unit_price: int = Field(default=0, ge=0) 
+    unit_price: int = Field(default=0, ge=0)
     image_url: str | None = None
     weight: Decimal | None = None
     properties: dict[str, Any] = Field(default_factory=dict)

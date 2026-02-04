@@ -76,11 +76,11 @@ async def create_superuser(
         session.add(user)
         await session.commit()
 
-        print(f"\n✅ Superuser created successfully!")
+        print("\n✅ Superuser created successfully!")
         print(f"   Email: {email}")
         print(f"   Name: {first_name} {last_name}")
-        print(f"   Role: SUPER_ADMIN")
-        print(f"\n   You can now login at: /admin")
+        print("   Role: SUPER_ADMIN")
+        print("\n   You can now login at: /admin")
         return True
 
 
@@ -107,10 +107,10 @@ async def promote_to_superuser(email: str) -> bool:
         user.status = UserStatus.ACTIVE
         await session.commit()
 
-        print(f"\n✅ User promoted to superadmin!")
+        print("\n✅ User promoted to superadmin!")
         print(f"   Email: {email}")
         print(f"   Previous Role: {old_role}")
-        print(f"   New Role: SUPER_ADMIN")
+        print("   New Role: SUPER_ADMIN")
         return True
 
 

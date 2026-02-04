@@ -4,7 +4,6 @@ from uuid import UUID
 
 from src.application.dto.base import PaginatedDTO
 from src.application.dto.product import ProductDTO
-from src.core.entities.product import ProductStatus
 from src.core.interfaces.repositories.product_repository import IProductRepository
 
 
@@ -24,7 +23,7 @@ class ListProductsUseCase:
         search: str | None = None,
     ) -> PaginatedDTO:
         """List products with filtering and pagination.
-        
+
         Args:
             store_id: Optional filter by store
             category_id: Optional filter by category
@@ -32,7 +31,7 @@ class ListProductsUseCase:
             limit: Maximum number of records to return
             is_active: Optional filter for active/inactive products
             search: Optional search query for product name/description
-        
+
         Returns:
             PaginatedDTO containing product data and pagination metadata
         """
@@ -45,7 +44,7 @@ class ListProductsUseCase:
             is_active=is_active,
             search=search,
         )
-        
+
         # Get total count with same filters
         total = await self.product_repository.count_with_filters(
             store_id=store_id,
@@ -53,7 +52,7 @@ class ListProductsUseCase:
             is_active=is_active,
             search=search,
         )
-        
+
         # Calculate page number from skip/limit for response metadata
         page = (skip // limit) + 1 if limit > 0 else 1
 

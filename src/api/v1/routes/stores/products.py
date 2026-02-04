@@ -7,6 +7,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from src.api.dependencies import (
     get_product_repository,
@@ -14,8 +15,6 @@ from src.api.dependencies import (
     get_store_repository,
     require_store_owner,
 )
-from fastapi.responses import StreamingResponse
-
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateProductRequest,
@@ -41,7 +40,9 @@ from src.application.use_cases.products import (
     UploadProductImageUseCase,
 )
 from src.application.use_cases.products.upload_image import UploadProductImageDTO
-from src.infrastructure.external_services.cloudflare_r2 import CloudflareR2StorageService
+from src.infrastructure.external_services.cloudflare_r2 import (
+    CloudflareR2StorageService,
+)
 from src.infrastructure.repositories import ProductRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/products")

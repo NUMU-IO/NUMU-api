@@ -1,6 +1,5 @@
 """Unit tests for Egyptian governorates data."""
 
-import pytest
 
 from src.infrastructure.external_services.bosta.governorates import (
     EGYPTIAN_GOVERNORATES,
@@ -23,7 +22,7 @@ class TestEgyptianGovernorates:
         """Test all governorates have required fields."""
         for gov in EGYPTIAN_GOVERNORATES:
             assert gov.code, f"Missing code for {gov.name_en}"
-            assert gov.name_en, f"Missing English name"
+            assert gov.name_en, "Missing English name"
             assert gov.name_ar, f"Missing Arabic name for {gov.name_en}"
             assert gov.zone, f"Missing zone for {gov.name_en}"
             assert gov.capital_en, f"Missing capital for {gov.name_en}"

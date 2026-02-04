@@ -1,11 +1,9 @@
 """Customer DTOs for application layer."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from src.application.dto.base import BaseDTO
-from src.core.entities.address import AddressLabel
 
 
 @dataclass

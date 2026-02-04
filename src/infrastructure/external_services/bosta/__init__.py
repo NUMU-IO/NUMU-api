@@ -7,7 +7,9 @@ from src.infrastructure.external_services.bosta.governorates import (
     get_governorate_by_code,
     get_governorate_by_name,
 )
-from src.infrastructure.external_services.bosta.shipping_service import BostaShippingService
+from src.infrastructure.external_services.bosta.shipping_service import (
+    BostaShippingService,
+)
 
 __all__ = [
     "BostaShippingService",

@@ -17,13 +17,13 @@ from src.core.entities.invoice import (
     TaxType,
 )
 from src.core.entities.order import (
+    VALID_STATUS_TRANSITIONS,
     FulfillmentStatus,
     Order,
     OrderLineItem,
     OrderStatus,
     PaymentStatus,
     ShippingAddress,
-    VALID_STATUS_TRANSITIONS,
 )
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.entities.store import Store, StoreStatus

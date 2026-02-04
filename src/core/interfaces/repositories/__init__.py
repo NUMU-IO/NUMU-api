@@ -1,6 +1,8 @@
 """Repository interfaces."""
 
-from src.core.interfaces.repositories.address_repository import ICustomerAddressRepository
+from src.core.interfaces.repositories.address_repository import (
+    ICustomerAddressRepository,
+)
 from src.core.interfaces.repositories.base import BaseRepository
 from src.core.interfaces.repositories.cart_repository import ICartRepository
 from src.core.interfaces.repositories.category_repository import ICategoryRepository

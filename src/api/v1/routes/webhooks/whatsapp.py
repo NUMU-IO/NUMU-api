@@ -142,8 +142,8 @@ async def _process_message_event(account_id: str, value: dict):
         value: Event value containing messages or statuses
     """
     metadata = value.get("metadata", {})
-    phone_number_id = metadata.get("phone_number_id")
-    display_phone = metadata.get("display_phone_number")
+    metadata.get("phone_number_id")
+    metadata.get("display_phone_number")
 
     # Process message status updates
     statuses = value.get("statuses", [])
@@ -165,7 +165,7 @@ async def _process_message_event(account_id: str, value: dict):
             "read": "read",
             "failed": "failed",
         }
-        mapped_status = status_map.get(status_value, "unknown")
+        status_map.get(status_value, "unknown")
 
         # TODO: Update message status in database
         # await message_repository.update_status(

@@ -6,24 +6,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.models.tenant.configuration import (
-    ServiceCredential,
-    CredentialAuditLog,
-    ServiceType,
-    ServiceName,
     AuditAction,
+    CredentialAuditLog,
+    ServiceCredential,
+    ServiceName,
+    ServiceType,
 )
 
 
 class RevokeCredentialsUseCase:
     """Use case for revoking/deleting credentials (super admin only).
-    
+
     This permanently removes credentials for a service. The merchant
     will need to request new credentials to be configured.
     """
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
+
     async def execute(
         self,
         tenant_id: UUID,
@@ -32,13 +32,13 @@ class RevokeCredentialsUseCase:
         service_name: ServiceName,
     ) -> None:
         """Revoke credentials for a merchant's service.
-        
+
         Args:
             tenant_id: The tenant/merchant ID
             admin_id: The admin revoking credentials
             service_type: Type of service
             service_name: Specific service provider
-        
+
         Raises:
             LookupError: If credentials not found
         """
@@ -50,10 +50,10 @@ class RevokeCredentialsUseCase:
             .where(ServiceCredential.service_name == service_name)
         )
         credential = result.scalar_one_or_none()
-        
+
         if not credential:
             raise LookupError("Credentials not found")
-        
+
         # Create audit log before deletion
         audit_log = CredentialAuditLog(
             tenant_id=tenant_id,
@@ -67,10 +67,10 @@ class RevokeCredentialsUseCase:
             }
         )
         self.db.add(audit_log)
-        
+
         # Delete credentials
         await self.db.delete(credential)
         await self.db.commit()
-        
+
         # TODO: Emit event for notification service
         # await self.event_bus.publish(CredentialsRevoked(tenant_id, service_type, service_name))

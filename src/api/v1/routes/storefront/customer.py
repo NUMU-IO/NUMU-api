@@ -454,13 +454,13 @@ async def set_default_address(
 # Order History Routes
 # ============================================================================
 
+from src.api.v1.schemas.tenant.common import PaginatedListResponse
 from src.api.v1.schemas.tenant.order import (
-    OrderLineItemResponse,
     OrderAddressResponse,
+    OrderLineItemResponse,
     OrderListItemResponse,
     OrderResponse,
 )
-from src.api.v1.schemas.tenant.common import PaginatedListResponse
 from src.application.dto.order import OrderDTO
 
 

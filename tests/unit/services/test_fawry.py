@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.interfaces.services.payment_service import PaymentProvider
-from src.infrastructure.external_services.fawry.payment_service import FawryPaymentService
+from src.infrastructure.external_services.fawry.payment_service import (
+    FawryPaymentService,
+)
 
 
 class TestFawryPaymentService:
@@ -28,15 +30,18 @@ class TestFawryPaymentService:
         """Test signature generation."""
         # Test internal signature generation
         sig = self.service._generate_signature("val1", "val2", "val3")
-        expected = hashlib.sha256("val1val2val3".encode()).hexdigest()
+        expected = hashlib.sha256(b"val1val2val3").hexdigest()
         assert sig == expected
 
     @pytest.mark.asyncio
     async def test_create_payment_intent(self):
         """Test creating a Fawry payment intent."""
         with patch.object(self.service, "create_reference_number", new_callable=AsyncMock) as mock_create:
-            from src.core.interfaces.services.payment_service import FawryReferenceNumber
             from datetime import datetime, timedelta
+
+            from src.core.interfaces.services.payment_service import (
+                FawryReferenceNumber,
+            )
 
             mock_create.return_value = FawryReferenceNumber(
                 reference_number="123456789",

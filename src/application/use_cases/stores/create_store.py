@@ -13,7 +13,6 @@ from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency
 from src.infrastructure.tenancy.service import TenantService
 
-
 # Reserved subdomains that cannot be used
 RESERVED_SUBDOMAINS = {
     "www", "api", "admin", "dashboard", "app", "mail", "email",

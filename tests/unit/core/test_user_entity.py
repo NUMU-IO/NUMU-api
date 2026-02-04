@@ -3,8 +3,6 @@
 from datetime import datetime
 from uuid import uuid4
 
-import pytest
-
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber
