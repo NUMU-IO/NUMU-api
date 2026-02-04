@@ -8,32 +8,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.v1.schemas.tenant.configuration import ConfigurationStatusResponse
 from src.infrastructure.database.models.tenant.configuration import (
     ConfigurationRequest,
-    ServiceCredential,
-    ServiceType,
-    ServiceName,
     RequestStatus,
+    ServiceCredential,
+    ServiceName,
+    ServiceType,
 )
 from src.infrastructure.external_services.gateway_validators import (
-    GatewayValidatorFactory,
     get_validator_factory,
 )
-from src.infrastructure.external_services.secrets import SecretsManager, get_secrets_manager
 
 
 class GetConfigurationStatusUseCase:
     """Use case for getting configuration status of a service.
-    
+
     Returns comprehensive status including:
     - Whether credentials are configured
     - Whether they're validated
     - Any pending requests
     - Safe display information
     """
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.validator_factory = get_validator_factory()
-    
+
     async def execute(
         self,
         tenant_id: UUID,
@@ -41,12 +39,12 @@ class GetConfigurationStatusUseCase:
         service_name: ServiceName,
     ) -> ConfigurationStatusResponse:
         """Get configuration status for a service.
-        
+
         Args:
             tenant_id: The tenant/merchant ID
             service_type: Type of service
             service_name: Specific service provider
-        
+
         Returns:
             ConfigurationStatusResponse with complete status
         """
@@ -58,7 +56,7 @@ class GetConfigurationStatusUseCase:
             .where(ServiceCredential.service_name == service_name)
         )
         credentials = creds_result.scalar_one_or_none()
-        
+
         # Get pending request if any
         request_result = await self.db.execute(
             select(ConfigurationRequest)
@@ -71,12 +69,12 @@ class GetConfigurationStatusUseCase:
             ]))
         )
         pending_request = request_result.scalar_one_or_none()
-        
+
         # Build display info from metadata if available
         display_info = None
         if credentials and credentials.extra_metadata:
             display_info = credentials.extra_metadata.get("display_info")
-        
+
         return ConfigurationStatusResponse(
             service_type=service_type,
             service_name=service_name,

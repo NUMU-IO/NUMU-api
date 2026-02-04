@@ -1,12 +1,16 @@
 """Integration tests for order flow."""
 
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from src.core.entities.order import Order, OrderStatus, PaymentStatus, OrderShippingAddress
+from src.core.entities.order import (
+    Order,
+    OrderShippingAddress,
+    OrderStatus,
+    PaymentStatus,
+)
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.entities.store import Store, StoreStatus
 from src.core.value_objects.money import Currency, Money
@@ -155,7 +159,7 @@ class TestPaymentFlow:
         order_id = uuid4()
 
         # Simulate initial order
-        order = Order(
+        Order(
             id=order_id,
             store_id=uuid4(),
             customer_id=uuid4(),
@@ -195,7 +199,6 @@ class TestShippingFlow:
     async def test_order_shipped_updates_status(self):
         """Test shipping creation updates order status."""
         # Initial confirmed order
-        initial_status = OrderStatus.CONFIRMED
 
         # After shipping created
         updated_status = OrderStatus.SHIPPED
@@ -206,8 +209,6 @@ class TestShippingFlow:
     async def test_order_delivered_updates_cod_payment(self):
         """Test delivery confirmation updates COD payment status."""
         # COD order delivered
-        payment_method = "cod"
-        initial_payment_status = PaymentStatus.PENDING
 
         # After delivery confirmation
         final_payment_status = PaymentStatus.PAID
@@ -303,7 +304,6 @@ class TestNotificationFlow:
     @pytest.mark.asyncio
     async def test_arabic_notifications_use_arabic_template(self):
         """Test Arabic locale uses Arabic message templates."""
-        locale = "ar"
 
         # Sample Arabic confirmation message
         arabic_template = "تم استلام طلبك رقم {order_number}"

@@ -1,6 +1,8 @@
 """External services module."""
 
-from src.infrastructure.external_services.cloudflare_r2 import CloudflareR2StorageService
+from src.infrastructure.external_services.cloudflare_r2 import (
+    CloudflareR2StorageService,
+)
 from src.infrastructure.external_services.openai import OpenAIService
 from src.infrastructure.external_services.password_service import (
     PasswordService,

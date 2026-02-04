@@ -16,7 +16,7 @@ from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 class UserModel(Base, UUIDMixin, TimestampMixin):
     """User database model (public schema).
-    
+
     Users are stored globally in the public schema to enable:
     - Single Sign-On across tenants
     - Users owning multiple stores

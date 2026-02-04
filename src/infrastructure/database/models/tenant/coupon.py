@@ -9,7 +9,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.coupon import CouponType
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import (
+    TenantMixin,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 
 class CouponModel(Base, UUIDMixin, TimestampMixin, TenantMixin):

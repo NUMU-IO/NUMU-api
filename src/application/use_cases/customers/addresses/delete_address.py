@@ -3,7 +3,9 @@
 from uuid import UUID
 
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
-from src.core.interfaces.repositories.address_repository import ICustomerAddressRepository
+from src.core.interfaces.repositories.address_repository import (
+    ICustomerAddressRepository,
+)
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 
 

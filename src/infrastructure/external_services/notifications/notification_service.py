@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import httpx
@@ -28,7 +28,7 @@ class NotificationType(str, Enum):
     CONFIG_REQUEST_UPDATED = "config_request_updated"
     CONFIG_REQUEST_COMPLETED = "config_request_completed"
     CONFIG_REQUEST_REJECTED = "config_request_rejected"
-    
+
     # Credential notifications
     CREDENTIALS_CONFIGURED = "credentials_configured"
     CREDENTIALS_VALIDATED = "credentials_validated"
@@ -50,16 +50,16 @@ class NotificationPayload:
     type: NotificationType
     priority: NotificationPriority
     recipient_id: UUID
-    recipient_email: Optional[str]
+    recipient_email: str | None
     title: str
     message: str
     data: dict[str, Any]
     created_at: datetime = None
-    
+
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = datetime.utcnow()
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
@@ -76,18 +76,18 @@ class NotificationPayload:
 
 class NotificationService:
     """Service for sending notifications via multiple channels.
-    
+
     This service supports:
     - Email notifications (SMTP, SendGrid, Mailgun)
     - Real-time WebSocket notifications (via Redis pub/sub)
     - In-app notifications (stored in database)
-    
+
     Usage:
         service = NotificationService()
         await service.notify_admin_new_request(request)
         await service.notify_merchant_credentials_configured(credential)
     """
-    
+
     def __init__(
         self,
         redis_client = None,
@@ -96,27 +96,27 @@ class NotificationService:
         self.redis_client = redis_client
         self.db_session = db_session
         self._email_provider = settings.EMAIL_PROVIDER if hasattr(settings, 'EMAIL_PROVIDER') else "smtp"
-    
+
     async def send_notification(
         self,
         payload: NotificationPayload,
         channels: list[str] = None,
     ) -> bool:
         """Send a notification via specified channels.
-        
+
         Args:
             payload: The notification payload
             channels: List of channels ("email", "websocket", "in_app")
                      Defaults to all channels if not specified
-        
+
         Returns:
             True if notification was sent successfully
         """
         if channels is None:
             channels = ["email", "websocket", "in_app"]
-        
+
         success = True
-        
+
         for channel in channels:
             try:
                 if channel == "email" and payload.recipient_email:
@@ -128,9 +128,9 @@ class NotificationService:
             except Exception as e:
                 logger.error(f"Failed to send notification via {channel}: {e}")
                 success = False
-        
+
         return success
-    
+
     async def notify_admin_new_request(
         self,
         request_id: UUID,
@@ -142,7 +142,7 @@ class NotificationService:
         admin_emails: list[str],
     ) -> None:
         """Notify admins about a new configuration request.
-        
+
         Args:
             request_id: The configuration request ID
             tenant_id: The tenant/merchant ID
@@ -171,7 +171,7 @@ class NotificationService:
                 }
             )
             await self.send_notification(payload)
-    
+
     async def notify_merchant_credentials_configured(
         self,
         tenant_id: UUID,
@@ -181,7 +181,7 @@ class NotificationService:
         service_name: str,
     ) -> None:
         """Notify merchant that credentials have been configured.
-        
+
         Args:
             tenant_id: The tenant/merchant ID
             merchant_email: Merchant's email address
@@ -204,7 +204,7 @@ class NotificationService:
             }
         )
         await self.send_notification(payload)
-    
+
     async def notify_merchant_request_rejected(
         self,
         tenant_id: UUID,
@@ -213,7 +213,7 @@ class NotificationService:
         reason: str,
     ) -> None:
         """Notify merchant that their request was rejected.
-        
+
         Args:
             tenant_id: The tenant/merchant ID
             merchant_email: Merchant's email address
@@ -235,10 +235,10 @@ class NotificationService:
             }
         )
         await self.send_notification(payload)
-    
+
     async def _send_email(self, payload: NotificationPayload) -> None:
         """Send email notification.
-        
+
         Args:
             payload: The notification payload
         """
@@ -248,20 +248,20 @@ class NotificationService:
             await self._send_via_mailgun(payload)
         else:
             await self._send_via_smtp(payload)
-    
+
     async def _send_via_smtp(self, payload: NotificationPayload) -> None:
         """Send email via SMTP.
-        
+
         Args:
             payload: The notification payload
         """
         # Implementation would use aiosmtplib
         logger.info(f"[SMTP] Sending email to {payload.recipient_email}: {payload.title}")
         # TODO: Implement actual SMTP sending
-    
+
     async def _send_via_sendgrid(self, payload: NotificationPayload) -> None:
         """Send email via SendGrid.
-        
+
         Args:
             payload: The notification payload
         """
@@ -269,7 +269,7 @@ class NotificationService:
         if not api_key:
             logger.warning("SendGrid API key not configured")
             return
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://api.sendgrid.com/v3/mail/send",
@@ -289,23 +289,23 @@ class NotificationService:
                     }],
                 }
             )
-            
+
             if response.status_code not in [200, 202]:
                 logger.error(f"SendGrid error: {response.text}")
-    
+
     async def _send_via_mailgun(self, payload: NotificationPayload) -> None:
         """Send email via Mailgun.
-        
+
         Args:
             payload: The notification payload
         """
         api_key = getattr(settings, 'MAILGUN_API_KEY', None)
         domain = getattr(settings, 'MAILGUN_DOMAIN', None)
-        
+
         if not api_key or not domain:
             logger.warning("Mailgun not configured")
             return
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"https://api.mailgun.net/v3/{domain}/messages",
@@ -317,50 +317,50 @@ class NotificationService:
                     "html": self._build_email_html(payload),
                 }
             )
-            
+
             if response.status_code != 200:
                 logger.error(f"Mailgun error: {response.text}")
-    
+
     async def _send_websocket(self, payload: NotificationPayload) -> None:
         """Send real-time notification via WebSocket (Redis pub/sub).
-        
+
         Args:
             payload: The notification payload
         """
         if not self.redis_client:
             logger.debug("Redis client not available for WebSocket notification")
             return
-        
+
         channel = f"notifications:{payload.recipient_id}"
         await self.redis_client.publish(channel, json.dumps(payload.to_dict()))
         logger.debug(f"Published notification to channel: {channel}")
-    
+
     async def _store_in_app(self, payload: NotificationPayload) -> None:
         """Store notification in database for in-app display.
-        
+
         Args:
             payload: The notification payload
         """
         if not self.db_session:
             logger.debug("Database session not available for in-app notification")
             return
-        
+
         # TODO: Create InAppNotification model and store
         logger.debug(f"Stored in-app notification for user: {payload.recipient_id}")
-    
+
     def _build_email_html(self, payload: NotificationPayload) -> str:
         """Build HTML email content.
-        
+
         Args:
             payload: The notification payload
-        
+
         Returns:
             HTML string for email body
         """
         action_url = payload.data.get("action_url", "")
         base_url = getattr(settings, 'FRONTEND_URL', 'https://dashboard.numu.io')
         full_action_url = f"{base_url}{action_url}"
-        
+
         return f"""
         <!DOCTYPE html>
         <html>
@@ -397,7 +397,7 @@ class NotificationService:
 
 
 # Singleton instance
-_notification_service: Optional[NotificationService] = None
+_notification_service: NotificationService | None = None
 
 
 def get_notification_service(
@@ -405,11 +405,11 @@ def get_notification_service(
     db_session = None,
 ) -> NotificationService:
     """Get or create the notification service instance.
-    
+
     Args:
         redis_client: Optional Redis client for WebSocket notifications
         db_session: Optional database session for in-app notifications
-    
+
     Returns:
         NotificationService instance
     """

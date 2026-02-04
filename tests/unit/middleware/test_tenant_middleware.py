@@ -47,7 +47,7 @@ class TestTenantMiddleware:
 
         mock_call_next = AsyncMock(return_value=MagicMock())
 
-        response = await self.middleware.dispatch(mock_request, mock_call_next)
+        await self.middleware.dispatch(mock_request, mock_call_next)
 
         assert mock_request.state.tenant is None
         mock_call_next.assert_called_once_with(mock_request)
@@ -61,7 +61,7 @@ class TestTenantMiddleware:
 
         mock_call_next = AsyncMock(return_value=MagicMock())
 
-        response = await self.middleware.dispatch(mock_request, mock_call_next)
+        await self.middleware.dispatch(mock_request, mock_call_next)
 
         assert mock_request.state.tenant is None
         mock_call_next.assert_called_once_with(mock_request)
@@ -75,7 +75,7 @@ class TestTenantMiddleware:
 
         mock_call_next = AsyncMock(return_value=MagicMock())
 
-        response = await self.middleware.dispatch(mock_request, mock_call_next)
+        await self.middleware.dispatch(mock_request, mock_call_next)
 
         assert mock_request.state.tenant is None
         mock_call_next.assert_called_once_with(mock_request)
@@ -90,7 +90,7 @@ class TestTenantMiddleware:
 
         mock_call_next = AsyncMock(return_value=MagicMock())
 
-        response = await self.middleware.dispatch(mock_request, mock_call_next)
+        await self.middleware.dispatch(mock_request, mock_call_next)
 
         assert mock_request.state.tenant is None
         mock_call_next.assert_called_once_with(mock_request)
@@ -103,7 +103,6 @@ class TestTenantMiddleware:
         self, mock_session_local, mock_set_schema, mock_reset_schema
     ):
         """Test dispatch with valid tenant subdomain."""
-        from uuid import uuid4
 
         # Setup mock tenant
         mock_tenant = MagicMock()
@@ -133,7 +132,7 @@ class TestTenantMiddleware:
             mock_response = MagicMock()
             mock_call_next = AsyncMock(return_value=mock_response)
 
-            response = await self.middleware.dispatch(mock_request, mock_call_next)
+            await self.middleware.dispatch(mock_request, mock_call_next)
 
             assert mock_request.state.tenant == mock_tenant
             mock_set_schema.assert_called_once_with("tenant_store1")

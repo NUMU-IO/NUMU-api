@@ -22,27 +22,26 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.api.dependencies import get_db
-from src.config import settings
-from src.infrastructure.database.connection import Base
-from src.infrastructure.external_services.token_service import TokenService
-from src.main import app
+from src.core.entities.category import Category
+from src.core.entities.customer import Customer
+from src.core.entities.order import (
+    Order,
+    OrderLineItem,
+    OrderShippingAddress,
+    OrderStatus,
+)
+from src.core.entities.product import Product, ProductStatus
+from src.core.entities.store import Store, StoreStatus
 
 # Import entities and value objects for fixtures
 from src.core.entities.user import User, UserRole, UserStatus
-from src.core.entities.store import Store, StoreStatus
-from src.core.entities.customer import Customer
-from src.core.entities.product import Product, ProductStatus
-from src.core.entities.category import Category
-from src.core.entities.order import (
-    Order,
-    OrderStatus,
-    OrderLineItem,
-    OrderShippingAddress,
-)
-from src.core.value_objects.email import Email
-from src.core.value_objects.phone import PhoneNumber
-from src.core.value_objects.money import Money, Currency
 from src.core.value_objects.address import Address
+from src.core.value_objects.email import Email
+from src.core.value_objects.money import Currency, Money
+from src.core.value_objects.phone import PhoneNumber
+from src.infrastructure.database.connection import Base
+from src.infrastructure.external_services.token_service import TokenService
+from src.main import app
 
 # Test database URL (use SQLite for tests)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -71,8 +70,9 @@ def _patch_metadata_for_sqlite(metadata):
         return
     _metadata_patched = True
 
-    from sqlalchemy import Enum as SAEnum, JSON, String
-    from sqlalchemy.dialects.postgresql import JSONB, ARRAY
+    from sqlalchemy import JSON
+    from sqlalchemy import Enum as SAEnum
+    from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
     for table in metadata.tables.values():
         # Strip schema from tables (e.g. CREATE TABLE public.users → CREATE TABLE users)

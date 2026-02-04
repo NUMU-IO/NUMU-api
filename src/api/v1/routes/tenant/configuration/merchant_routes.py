@@ -7,7 +7,6 @@ These endpoints allow merchants to:
 - Cancel pending requests
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,20 +16,20 @@ from src.api.dependencies.database import get_db
 from src.api.dependencies.tenant import get_current_tenant
 from src.api.v1.schemas.tenant.configuration import (
     ConfigurationRequestCreate,
-    ConfigurationRequestResponse,
     ConfigurationRequestListResponse,
+    ConfigurationRequestResponse,
     ConfigurationStatusResponse,
 )
 from src.application.use_cases.configuration import (
+    CancelConfigurationRequestUseCase,
     CreateConfigurationRequestUseCase,
     GetConfigurationStatusUseCase,
     ListConfigurationRequestsUseCase,
-    CancelConfigurationRequestUseCase,
 )
 from src.infrastructure.database.models.tenant.configuration import (
-    ServiceType,
-    ServiceName,
     RequestStatus,
+    ServiceName,
+    ServiceType,
 )
 
 router = APIRouter(
@@ -46,10 +45,10 @@ router = APIRouter(
     summary="Create configuration request",
     description="""
     Create a new configuration request for a service.
-    
+
     This notifies administrators that the merchant needs credentials configured
     for a specific service (payment gateway, shipping carrier, etc.).
-    
+
     **Note**: Only one pending request per service is allowed.
     """,
 )
@@ -61,7 +60,7 @@ async def create_configuration_request(
 ):
     """Create a new configuration request."""
     use_case = CreateConfigurationRequestUseCase(db)
-    
+
     try:
         result = await use_case.execute(
             tenant_id=tenant.id,
@@ -85,7 +84,7 @@ async def create_configuration_request(
     summary="Get configuration status",
     description="""
     Get the configuration status for a specific service.
-    
+
     Returns whether credentials are configured, validated, and if there
     are any pending configuration requests.
     """,
@@ -98,7 +97,7 @@ async def get_configuration_status(
 ):
     """Get configuration status for a service."""
     use_case = GetConfigurationStatusUseCase(db)
-    
+
     result = await use_case.execute(
         tenant_id=tenant.id,
         service_type=service_type,
@@ -114,12 +113,12 @@ async def get_configuration_status(
     description="Get all configuration requests for the current merchant.",
 )
 async def list_configuration_requests(
-    status_filter: Optional[RequestStatus] = Query(
+    status_filter: RequestStatus | None = Query(
         None,
         alias="status",
         description="Filter by request status"
     ),
-    service_type: Optional[ServiceType] = Query(
+    service_type: ServiceType | None = Query(
         None,
         description="Filter by service type"
     ),
@@ -130,7 +129,7 @@ async def list_configuration_requests(
 ):
     """List all configuration requests for the merchant."""
     use_case = ListConfigurationRequestsUseCase(db)
-    
+
     result = await use_case.execute(
         tenant_id=tenant.id,
         status_filter=status_filter,
@@ -154,18 +153,18 @@ async def get_configuration_request(
 ):
     """Get a specific configuration request."""
     use_case = ListConfigurationRequestsUseCase(db)
-    
+
     result = await use_case.get_by_id(
         tenant_id=tenant.id,
         request_id=request_id,
     )
-    
+
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Configuration request not found"
         )
-    
+
     return result
 
 
@@ -175,7 +174,7 @@ async def get_configuration_request(
     summary="Cancel configuration request",
     description="""
     Cancel a pending configuration request.
-    
+
     Only pending requests can be cancelled. Requests that are already
     in progress or completed cannot be cancelled.
     """,
@@ -188,7 +187,7 @@ async def cancel_configuration_request(
 ):
     """Cancel a pending configuration request."""
     use_case = CancelConfigurationRequestUseCase(db)
-    
+
     try:
         await use_case.execute(
             tenant_id=tenant.id,

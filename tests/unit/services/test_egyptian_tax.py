@@ -2,8 +2,6 @@
 
 from decimal import Decimal
 
-import pytest
-
 from src.core.interfaces.services.tax_service import TaxRateType
 from src.infrastructure.external_services.tax.egyptian_tax_service import (
     EGYPT_EXEMPT_RATE,

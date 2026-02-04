@@ -10,22 +10,22 @@ Supported Services:
 - Communication: WhatsApp Business API, Twilio
 """
 
-from .base import GatewayValidator, ValidationResult, GatewayValidatorError
+from .base import GatewayValidator, GatewayValidatorError, ValidationResult
+from .communication_validators import (
+    TwilioValidator,
+    WhatsAppValidator,
+)
 from .payment_validators import (
     FawryValidator,
     PaymobValidator,
-    VodafoneCashValidator,
     StripeValidator,
     TapValidator,
+    VodafoneCashValidator,
 )
 from .shipping_validators import (
     AramexValidator,
     BostaValidator,
     MylerzValidator,
-)
-from .communication_validators import (
-    WhatsAppValidator,
-    TwilioValidator,
 )
 from .validator_factory import GatewayValidatorFactory
 

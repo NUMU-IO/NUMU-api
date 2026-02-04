@@ -64,7 +64,7 @@ class PlanPDF(FPDF):
             self.task_table_header()
 
         y_start = self.get_y()
-        x_start = self.get_x()
+        self.get_x()
 
         # Number cell
         self.cell(8, row_h, str(num), border=1, align="C", fill=shade)

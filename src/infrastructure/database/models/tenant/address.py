@@ -6,7 +6,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.address import AddressLabel
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TenantMixin, TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import (
+    TenantMixin,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 
 class CustomerAddressModel(Base, UUIDMixin, TimestampMixin, TenantMixin):

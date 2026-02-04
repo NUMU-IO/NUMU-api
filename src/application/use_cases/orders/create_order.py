@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from src.application.dto.order import CreateOrderDTO, OrderDTO
+from src.config.logging_config import get_logger
 from src.core.entities.order import (
     Order,
     OrderLineItem,
@@ -11,9 +12,11 @@ from src.core.entities.order import (
     PaymentStatus,
 )
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
+from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
-from src.core.interfaces.repositories.customer_repository import ICustomerRepository
+
+logger = get_logger(__name__)
 
 
 class CreateOrderUseCase:
@@ -36,21 +39,32 @@ class CreateOrderUseCase:
         user_id: UUID,
     ) -> OrderDTO:
         """Create a new order."""
+        log = logger.bind(
+            store_id=str(store_id),
+            user_id=str(user_id),
+            customer_id=str(dto.customer_id),
+        )
+        log.info("order_create_attempt", item_count=len(dto.line_items))
+
         # Verify store exists and user has permission
         store = await self.store_repository.get_by_id(store_id)
         if not store:
+            log.warning("order_create_failed", reason="store_not_found")
             raise EntityNotFoundError("Store", str(store_id))
 
         if store.owner_id != user_id:
+            log.warning("order_create_failed", reason="unauthorized")
             raise AuthorizationError("You don't have permission to create orders in this store")
 
         # Verify customer exists
         customer = await self.customer_repository.get_by_id(dto.customer_id)
         if not customer:
+            log.warning("order_create_failed", reason="customer_not_found")
             raise EntityNotFoundError("Customer", str(dto.customer_id))
 
         # Generate order number
         order_number = await self.order_repository.get_next_order_number(store_id)
+        log = log.bind(order_number=order_number)
 
         # Convert line items
         line_items = []
@@ -125,5 +139,13 @@ class CreateOrderUseCase:
 
         # Save order
         created_order = await self.order_repository.create(order)
+
+        log.info(
+            "order_created",
+            order_id=str(created_order.id),
+            total=total,
+            currency=dto.currency,
+            payment_method=dto.payment_method,
+        )
 
         return OrderDTO.from_entity(created_order)

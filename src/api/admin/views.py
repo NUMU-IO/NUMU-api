@@ -6,13 +6,13 @@ from sqladmin import ModelView
 from wtforms import PasswordField, validators
 
 from src.infrastructure.database.models import (
-    TenantModel,
-    UserModel,
-    StoreModel,
     CategoryModel,
-    ProductModel,
     CustomerModel,
     OrderModel,
+    ProductModel,
+    StoreModel,
+    TenantModel,
+    UserModel,
 )
 from src.infrastructure.external_services.password_service import password_service
 

@@ -6,15 +6,15 @@ This module provides notification capabilities for:
 - In-app notifications
 """
 
-from .notification_service import (
-    NotificationService,
-    NotificationType,
-    NotificationPriority,
-    get_notification_service,
-)
 from .email_templates import (
     ConfigurationRequestEmailTemplate,
     CredentialsConfiguredEmailTemplate,
+)
+from .notification_service import (
+    NotificationPriority,
+    NotificationService,
+    NotificationType,
+    get_notification_service,
 )
 
 __all__ = [

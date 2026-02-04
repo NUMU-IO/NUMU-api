@@ -7,14 +7,13 @@ This module provides reusable fixtures for testing:
 - Configure credentials use case
 """
 
-import pytest
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-
 
 # =============================================================================
 # UUID Fixtures
@@ -149,12 +148,12 @@ def mock_configuration_request(tenant_id: UUID, request_id: UUID):
     """Create a mock ConfigurationRequest object."""
     from src.infrastructure.database.models.tenant.configuration import (
         ConfigurationRequest,
-        ServiceType,
-        ServiceName,
-        RequestStatus,
         RequestPriority,
+        RequestStatus,
+        ServiceName,
+        ServiceType,
     )
-    
+
     request = MagicMock(spec=ConfigurationRequest)
     request.id = request_id
     request.tenant_id = tenant_id
@@ -174,10 +173,10 @@ def mock_service_credential(tenant_id: UUID, admin_id: UUID):
     """Create a mock ServiceCredential object."""
     from src.infrastructure.database.models.tenant.configuration import (
         ServiceCredential,
-        ServiceType,
         ServiceName,
+        ServiceType,
     )
-    
+
     credential = MagicMock(spec=ServiceCredential)
     credential.id = uuid4()
     credential.tenant_id = tenant_id
@@ -205,7 +204,7 @@ def mock_validation_result_success():
         ValidationResult,
         ValidationStatus,
     )
-    
+
     return ValidationResult(
         is_valid=True,
         status=ValidationStatus.VALID,
@@ -221,7 +220,7 @@ def mock_validation_result_failure():
         ValidationResult,
         ValidationStatus,
     )
-    
+
     return ValidationResult(
         is_valid=False,
         status=ValidationStatus.INVALID,
@@ -236,16 +235,16 @@ def mock_validator_factory(mock_validation_result_success):
     from src.infrastructure.external_services.gateway_validators import (
         GatewayValidatorFactory,
     )
-    
+
     factory = MagicMock(spec=GatewayValidatorFactory)
-    
+
     mock_validator = AsyncMock()
     mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
     mock_validator.get_display_info = MagicMock(return_value={"merchant_code": "FWY***789"})
-    
+
     factory.get_validator = MagicMock(return_value=mock_validator)
     factory.is_supported = MagicMock(return_value=True)
-    
+
     return factory
 
 
@@ -257,11 +256,11 @@ def mock_validator_factory(mock_validation_result_success):
 def mock_secrets_manager():
     """Create a mock secrets manager."""
     from src.infrastructure.external_services.secrets import SecretsManager
-    
+
     manager = MagicMock(spec=SecretsManager)
     manager.encrypt_credentials = MagicMock(return_value=b"encrypted_credentials_data")
     manager.decrypt_credentials = MagicMock(return_value={"merchant_code": "FWY123456789"})
-    
+
     return manager
 
 

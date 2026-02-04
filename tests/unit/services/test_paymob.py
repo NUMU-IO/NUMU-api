@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.interfaces.services.payment_service import PaymentProvider
-from src.infrastructure.external_services.paymob.payment_service import PaymobPaymentService
+from src.infrastructure.external_services.paymob.payment_service import (
+    PaymobPaymentService,
+)
 
 
 class TestPaymobPaymentService:

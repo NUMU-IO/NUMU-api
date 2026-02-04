@@ -7,9 +7,9 @@ from uuid import UUID
 from src.application.dto.order import OrderListItemDTO
 from src.core.entities.order import FulfillmentStatus, OrderStatus, PaymentStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
+from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
-from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 
 
 @dataclass

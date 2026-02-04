@@ -2,7 +2,12 @@
 
 from uuid import UUID
 
-from src.application.dto.customer import CustomerAuthResponseDTO, CustomerDTO, CustomerLoginDTO, CustomerTokenDTO
+from src.application.dto.customer import (
+    CustomerAuthResponseDTO,
+    CustomerDTO,
+    CustomerLoginDTO,
+    CustomerTokenDTO,
+)
 from src.core.exceptions import AuthenticationError
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.services.password_service import IPasswordService

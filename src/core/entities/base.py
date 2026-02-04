@@ -1,6 +1,6 @@
 """Base entity class for all domain entities."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 def _utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class BaseEntity(BaseModel):
@@ -57,7 +57,7 @@ class BaseEntity(BaseModel):
 
     def touch(self) -> None:
         """Update the updated_at timestamp to current time."""
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def model_dump_for_db(self, **kwargs: Any) -> dict[str, Any]:
         """Dump model for database insertion.

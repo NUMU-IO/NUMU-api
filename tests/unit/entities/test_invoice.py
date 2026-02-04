@@ -1,10 +1,7 @@
 """Unit tests for Invoice entity."""
 
-from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
-
-import pytest
 
 from src.core.entities.invoice import (
     BuyerInfo,

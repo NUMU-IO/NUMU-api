@@ -14,12 +14,14 @@ Authenticated customer routes:
 - /storefront/me/orders - Order history
 """
 
-from src.api.v1.routes.storefront.public import router as public_router
-from src.api.v1.routes.storefront.public import lookup_router as storefront_lookup_router
-from src.api.v1.routes.storefront.customer import router as customer_router
 from src.api.v1.routes.storefront.cart import router as cart_router
 from src.api.v1.routes.storefront.checkout import router as checkout_router
 from src.api.v1.routes.storefront.coupon import router as coupon_router
+from src.api.v1.routes.storefront.customer import router as customer_router
+from src.api.v1.routes.storefront.public import (
+    lookup_router as storefront_lookup_router,
+)
+from src.api.v1.routes.storefront.public import router as public_router
 
 __all__ = [
     "public_router",
