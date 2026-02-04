@@ -3,6 +3,7 @@
 from src.core.exceptions.base import (
     AuthenticationError,
     AuthorizationError,
+    BusinessRuleViolationError,
     DomainException,
     EntityAlreadyExistsError,
     EntityNotFoundError,
@@ -22,6 +23,7 @@ __all__ = [
     "ValidationError",
     "AuthenticationError",
     "AuthorizationError",
+    "BusinessRuleViolationError",
     "InvalidCredentialsError",
     "TokenExpiredError",
     "InvalidTokenError",
