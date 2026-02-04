@@ -7,7 +7,6 @@ in HTTP responses and have correct values.
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.responses import JSONResponse
 
 from src.api.middleware.security_headers import (
     SecurityHeadersMiddleware,
@@ -139,7 +138,7 @@ class TestSecurityHeadersValues:
         response = client.get("/test")
 
         csp = response.headers["Content-Security-Policy"]
-        
+
         # Check for important directives
         assert "default-src" in csp
         assert "frame-ancestors" in csp
