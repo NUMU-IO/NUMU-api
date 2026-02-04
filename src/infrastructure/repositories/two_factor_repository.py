@@ -12,7 +12,7 @@ from src.core.interfaces.repositories.two_factor_repository import ITwoFactorRep
 
 class InMemoryTwoFactorRepository(ITwoFactorRepository):
     """In-memory implementation of ITwoFactorRepository.
-    
+
     WARNING: This is for development/testing only.
     Data is lost when the application restarts.
     """

@@ -73,6 +73,7 @@ packages = ["src"]
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+preview = true
 
 [tool.ruff.lint]
 select = [
@@ -93,6 +94,7 @@ ignore = [
     "B017",  # pytest.raises(Exception) - sometimes intentional
     "B015",  # useless comparison in tests
     "F403",  # star imports - used for fixture re-exports
+    "B903",  # suggest dataclass - intentional class design
 ]
 
 [tool.ruff.lint.isort]

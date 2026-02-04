@@ -2,7 +2,7 @@
 
 import shutil
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import redis.asyncio as redis
@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-class HealthStatus(str, Enum):
+class HealthStatus(StrEnum):
     """Health status values."""
 
     HEALTHY = "healthy"

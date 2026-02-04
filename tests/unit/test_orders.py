@@ -17,6 +17,7 @@ from src.core.entities.order import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _addr():
     return OrderShippingAddress(
         first_name="Test",

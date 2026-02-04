@@ -12,6 +12,7 @@ from src.core.value_objects.money import Currency, Money
 # Entity construction
 # ---------------------------------------------------------------------------
 
+
 class TestProductCreation:
     """Tests for creating Product entities."""
 

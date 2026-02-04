@@ -8,11 +8,11 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class AlertSeverity(str, Enum):
+class AlertSeverity(StrEnum):
     """Alert severity levels with response time expectations.
 
     CRITICAL: < 15 min response, auto-escalate to on-call
@@ -24,7 +24,7 @@ class AlertSeverity(str, Enum):
     INFO = "INFO"
 
 
-class AlertService(str, Enum):
+class AlertService(StrEnum):
     """Service categories for alerts."""
     PAYMENTS = "payments"
     FRAUD = "fraud"

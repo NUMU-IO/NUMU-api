@@ -97,4 +97,3 @@ class IOrderRepository(BaseRepository[Order]):
     ) -> list[Order]:
         """Search orders by order number or customer notes."""
         ...
-

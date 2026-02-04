@@ -1,13 +1,13 @@
 """Money value object for handling monetary values."""
 
 from decimal import ROUND_HALF_UP, Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
-class Currency(str, Enum):
+class Currency(StrEnum):
     """Supported currencies."""
 
     USD = "USD"

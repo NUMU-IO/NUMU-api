@@ -64,4 +64,3 @@ def get_order_repository(
 ) -> OrderRepository:
     """Get order repository dependency."""
     return OrderRepository(session)
-

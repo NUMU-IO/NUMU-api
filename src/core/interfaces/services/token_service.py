@@ -84,4 +84,3 @@ class ITokenService(ABC):
     def decode_customer_token(self, token: str) -> CustomerTokenPayload | None:
         """Decode a customer token without raising exceptions."""
         ...
-

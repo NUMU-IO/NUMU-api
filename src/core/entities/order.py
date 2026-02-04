@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -12,7 +12,7 @@ from src.core.entities.base import BaseEntity
 from src.core.value_objects.money import Currency, Money
 
 
-class OrderStatus(str, Enum):
+class OrderStatus(StrEnum):
     """Order status enumeration."""
 
     PENDING = "pending"
@@ -58,7 +58,7 @@ VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
 }
 
 
-class PaymentStatus(str, Enum):
+class PaymentStatus(StrEnum):
     """Payment status enumeration."""
 
     PENDING = "pending"
@@ -69,7 +69,7 @@ class PaymentStatus(str, Enum):
     FAILED = "failed"
 
 
-class FulfillmentStatus(str, Enum):
+class FulfillmentStatus(StrEnum):
     """Fulfillment status enumeration."""
 
     UNFULFILLED = "unfulfilled"

@@ -10,10 +10,10 @@ calculated based on zones:
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class ShippingZone(str, Enum):
+class ShippingZone(StrEnum):
     """Shipping zones for rate calculation."""
 
     GREATER_CAIRO = "zone_1"

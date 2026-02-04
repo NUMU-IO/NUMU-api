@@ -6,11 +6,11 @@ all gateway validators.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ValidationStatus(str, Enum):
+class ValidationStatus(StrEnum):
     """Status of credential validation."""
     VALID = "valid"
     INVALID = "invalid"

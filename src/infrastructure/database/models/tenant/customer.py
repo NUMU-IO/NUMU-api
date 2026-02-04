@@ -63,4 +63,3 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
 
     def __repr__(self) -> str:
         return f"<CustomerModel(id={self.id}, email={self.email})>"
-

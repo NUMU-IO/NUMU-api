@@ -77,4 +77,3 @@ class ICustomerRepository(BaseRepository[Customer]):
     async def verify_customer(self, customer_id: UUID) -> Customer | None:
         """Mark customer as verified."""
         ...
-

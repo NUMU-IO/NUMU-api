@@ -1,12 +1,12 @@
 """Customer address entity for address book management."""
 
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from src.core.entities.base import BaseEntity
 
 
-class AddressLabel(str, Enum):
+class AddressLabel(StrEnum):
     """Address label enumeration."""
 
     HOME = "home"

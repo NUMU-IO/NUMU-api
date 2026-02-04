@@ -54,9 +54,9 @@ router = APIRouter(
 )
 async def create_configuration_request(
     request: ConfigurationRequestCreate,
-    current_user = Depends(get_current_user),
-    tenant = Depends(get_current_tenant),
-    db = Depends(get_db),
+    current_user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db=Depends(get_db),
 ):
     """Create a new configuration request."""
     use_case = CreateConfigurationRequestUseCase(db)
@@ -92,8 +92,8 @@ async def create_configuration_request(
 async def get_configuration_status(
     service_type: ServiceType,
     service_name: ServiceName,
-    tenant = Depends(get_current_tenant),
-    db = Depends(get_db),
+    tenant=Depends(get_current_tenant),
+    db=Depends(get_db),
 ):
     """Get configuration status for a service."""
     use_case = GetConfigurationStatusUseCase(db)
@@ -124,8 +124,8 @@ async def list_configuration_requests(
     ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    tenant = Depends(get_current_tenant),
-    db = Depends(get_db),
+    tenant=Depends(get_current_tenant),
+    db=Depends(get_db),
 ):
     """List all configuration requests for the merchant."""
     use_case = ListConfigurationRequestsUseCase(db)
@@ -148,8 +148,8 @@ async def list_configuration_requests(
 )
 async def get_configuration_request(
     request_id: UUID,
-    tenant = Depends(get_current_tenant),
-    db = Depends(get_db),
+    tenant=Depends(get_current_tenant),
+    db=Depends(get_db),
 ):
     """Get a specific configuration request."""
     use_case = ListConfigurationRequestsUseCase(db)
@@ -181,9 +181,9 @@ async def get_configuration_request(
 )
 async def cancel_configuration_request(
     request_id: UUID,
-    current_user = Depends(get_current_user),
-    tenant = Depends(get_current_tenant),
-    db = Depends(get_db),
+    current_user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db=Depends(get_db),
 ):
     """Cancel a pending configuration request."""
     use_case = CancelConfigurationRequestUseCase(db)

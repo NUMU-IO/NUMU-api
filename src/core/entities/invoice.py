@@ -15,7 +15,7 @@ ETA Requirements:
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.core.entities.base import BaseEntity
 
 
-class InvoiceStatus(str, Enum):
+class InvoiceStatus(StrEnum):
     """Invoice status for ETA submission workflow."""
 
     DRAFT = "draft"  # Not yet submitted
@@ -35,7 +35,7 @@ class InvoiceStatus(str, Enum):
     CANCELLED = "cancelled"  # Cancelled invoice
 
 
-class InvoiceType(str, Enum):
+class InvoiceType(StrEnum):
     """Invoice types per ETA classification."""
 
     INVOICE = "I"  # Regular invoice (فاتورة)
@@ -43,7 +43,7 @@ class InvoiceType(str, Enum):
     DEBIT_NOTE = "D"  # Debit note (إشعار مدين)
 
 
-class TaxType(str, Enum):
+class TaxType(StrEnum):
     """Egyptian tax types."""
 
     VAT = "T1"  # Value Added Tax (14%)

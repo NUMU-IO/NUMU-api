@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # UUID Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def tenant_id() -> UUID:
     """Generate a consistent tenant ID for tests."""

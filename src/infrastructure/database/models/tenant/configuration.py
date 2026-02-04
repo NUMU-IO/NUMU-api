@@ -12,7 +12,7 @@ SECURITY NOTE:
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID as PyUUID
 
 from sqlalchemy import (
@@ -39,7 +39,7 @@ from src.infrastructure.database.models.base import (
 )
 
 
-class ServiceType(str, Enum):
+class ServiceType(StrEnum):
     """Types of external services that require credentials."""
     PAYMENT_GATEWAY = "payment_gateway"
     SHIPPING_CARRIER = "shipping_carrier"
@@ -48,7 +48,7 @@ class ServiceType(str, Enum):
     EMAIL = "email"
 
 
-class ServiceName(str, Enum):
+class ServiceName(StrEnum):
     """Specific service providers."""
     # Payment Gateways
     FAWRY = "fawry"
@@ -68,7 +68,7 @@ class ServiceName(str, Enum):
     TWILIO = "twilio"
 
 
-class RequestStatus(str, Enum):
+class RequestStatus(StrEnum):
     """Status of a configuration request."""
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -77,7 +77,7 @@ class RequestStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class RequestPriority(str, Enum):
+class RequestPriority(StrEnum):
     """Priority level for configuration requests."""
     LOW = "low"
     NORMAL = "normal"

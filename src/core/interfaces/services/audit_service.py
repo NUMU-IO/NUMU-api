@@ -2,14 +2,14 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
-class AuditEventType(str, Enum):
+class AuditEventType(StrEnum):
     """Types of audit events."""
 
     # Authentication events
@@ -57,7 +57,7 @@ class AuditEventType(str, Enum):
     SUSPICIOUS_ACTIVITY = "suspicious_activity"
 
 
-class AuditEventSeverity(str, Enum):
+class AuditEventSeverity(StrEnum):
     """Severity levels for audit events."""
 
     INFO = "info"

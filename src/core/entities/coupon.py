@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import Field, field_validator
@@ -10,7 +10,7 @@ from pydantic import Field, field_validator
 from src.core.entities.base import BaseEntity
 
 
-class CouponType(str, Enum):
+class CouponType(StrEnum):
     """Coupon discount type enumeration."""
 
     PERCENTAGE = "percentage"

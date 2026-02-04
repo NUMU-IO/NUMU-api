@@ -2,11 +2,11 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class MessageChannel(str, Enum):
+class MessageChannel(StrEnum):
     """Message delivery channels."""
 
     WHATSAPP = "whatsapp"
@@ -14,7 +14,7 @@ class MessageChannel(str, Enum):
     EMAIL = "email"
 
 
-class MessageType(str, Enum):
+class MessageType(StrEnum):
     """Predefined message types."""
 
     ORDER_CONFIRMATION = "order_confirmation"
@@ -31,7 +31,7 @@ class MessageType(str, Enum):
     CUSTOM = "custom"
 
 
-class MessageStatus(str, Enum):
+class MessageStatus(StrEnum):
     """Message delivery status."""
 
     PENDING = "pending"

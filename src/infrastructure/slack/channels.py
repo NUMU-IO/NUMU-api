@@ -6,12 +6,12 @@ Routes alerts to appropriate Slack channels based on:
 - Environment (prod vs non-prod)
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from src.infrastructure.slack.alerts import AlertService, AlertSeverity, SlackAlert
 
 
-class AlertChannel(str, Enum):
+class AlertChannel(StrEnum):
     """Slack channel identifiers.
 
     Maps to settings.slack_webhook_<channel> environment variables.
