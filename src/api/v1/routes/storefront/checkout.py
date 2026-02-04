@@ -285,6 +285,75 @@ async def checkout(
         f"customer={current_customer.id}, total={created_order.total} {currency}"
     )
 
+    # Dispatch async order-confirmation notifications (non-blocking)
+    try:
+        from src.infrastructure.messaging.tasks.notification_tasks import (
+            send_order_confirmation_email_task,
+            send_whatsapp_order_confirmation_task,
+        )
+
+        prefs = current_customer.metadata.get("notification_preferences", {})
+        email_prefs = prefs.get("email", {})
+        whatsapp_prefs = prefs.get("whatsapp", {})
+
+        customer_email = str(current_customer.email) if current_customer.email else None
+        customer_phone = str(current_customer.phone) if current_customer.phone else None
+
+        total_display = f"{currency} {created_order.total / 100:.2f}"
+
+        # Email: order confirmation
+        if customer_email and email_prefs.get("order_confirmation", True):
+            order_details = {
+                "items": [
+                    {
+                        "name": li.product_name,
+                        "quantity": li.quantity,
+                        "price": li.unit_price / 100,
+                    }
+                    for li in order_line_items
+                ],
+                "total": created_order.total / 100,
+            }
+            send_order_confirmation_email_task.delay(
+                email=customer_email,
+                order_number=created_order.order_number,
+                order_details=order_details,
+                language=store.default_language,
+            )
+
+        # WhatsApp: order confirmation
+        if customer_phone and whatsapp_prefs.get("order_confirmation", True):
+            send_whatsapp_order_confirmation_task.delay(
+                phone=customer_phone,
+                customer_name=current_customer.full_name,
+                order_number=created_order.order_number,
+                total=total_display,
+                store_name=store.name,
+                language=store.default_language,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch checkout notifications: {e}")
+
+    # Merchant onboarding: send first-order email if this is order #1
+    try:
+        total_orders = await order_repo.count_by_store(store_id)
+        if total_orders == 1:
+            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                send_first_order_email_task,
+            )
+
+            merchant_email = store.contact_email
+            if merchant_email:
+                send_first_order_email_task.delay(
+                    email=merchant_email,
+                    merchant_name=store.name,
+                    order_number=created_order.order_number,
+                    total=f"{currency} {created_order.total / 100:.2f}",
+                    language=store.default_language,
+                )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch first-order onboarding email: {e}")
+
     return SuccessResponse(
         data=CheckoutResponse(
             order_id=str(created_order.id),

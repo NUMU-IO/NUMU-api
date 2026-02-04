@@ -100,7 +100,7 @@ class ConfigurationRequest(Base, UUIDMixin, TenantMixin, TimestampMixin):
     __table_args__ = (
         Index("idx_config_requests_tenant_status", "tenant_id", "status"),
         Index("idx_config_requests_assigned", "assigned_to"),
-        {"schema": "tenant"},
+        {"schema": "public"},
     )
 
     # Who requested
@@ -138,7 +138,7 @@ class ConfigurationRequest(Base, UUIDMixin, TenantMixin, TimestampMixin):
     # Admin handling
     assigned_to: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("public.admins.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
     admin_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -171,7 +171,7 @@ class ServiceCredential(Base, UUIDMixin, TenantMixin, TimestampMixin):
             "service_name",
             unique=True,
         ),
-        {"schema": "tenant"},
+        {"schema": "public"},
     )
 
     # Service identification
@@ -207,7 +207,7 @@ class ServiceCredential(Base, UUIDMixin, TenantMixin, TimestampMixin):
     # Who configured this
     configured_by: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("public.admins.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -230,13 +230,13 @@ class CredentialAuditLog(Base, UUIDMixin, TenantMixin):
     __table_args__ = (
         Index("idx_audit_logs_tenant_created", "tenant_id", "created_at"),
         Index("idx_audit_logs_action", "action"),
-        {"schema": "tenant"},
+        {"schema": "public"},
     )
 
     # Who performed the action
     admin_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("public.admins.id", ondelete="SET NULL"),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
     user_id: Mapped[PyUUID | None] = mapped_column(

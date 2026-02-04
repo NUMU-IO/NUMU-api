@@ -463,6 +463,84 @@ async def set_default_address(
 
 
 # ============================================================================
+# Notification Preference Routes
+# ============================================================================
+
+from pydantic import BaseModel as _BaseModel
+
+
+class _NotificationChannelPrefs(_BaseModel):
+    order_confirmation: bool | None = None
+    shipping_update: bool | None = None
+    delivery_confirmation: bool | None = None
+
+
+class UpdateNotificationPrefsRequest(_BaseModel):
+    email: _NotificationChannelPrefs | None = None
+    whatsapp: _NotificationChannelPrefs | None = None
+
+
+class NotificationPrefsResponse(_BaseModel):
+    email: dict
+    whatsapp: dict
+
+
+@router.get(
+    "/notification-preferences",
+    response_model=SuccessResponse[NotificationPrefsResponse],
+    summary="Get notification preferences",
+)
+async def get_notification_preferences(
+    current_customer: Annotated[Customer, Depends(get_current_customer)],
+):
+    """Get current customer notification preferences."""
+    prefs = current_customer.notification_preferences
+    return SuccessResponse(
+        data=NotificationPrefsResponse(
+            email=prefs.get("email", {}),
+            whatsapp=prefs.get("whatsapp", {}),
+        ),
+        message="Notification preferences retrieved successfully",
+    )
+
+
+@router.put(
+    "/notification-preferences",
+    response_model=SuccessResponse[NotificationPrefsResponse],
+    summary="Update notification preferences",
+)
+async def update_notification_preferences(
+    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    request: UpdateNotificationPrefsRequest,
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+):
+    """Update customer notification preferences (opt-in / opt-out)."""
+    update_dict: dict = {}
+    if request.email:
+        update_dict["email"] = {
+            k: v
+            for k, v in request.email.model_dump(exclude_none=True).items()
+        }
+    if request.whatsapp:
+        update_dict["whatsapp"] = {
+            k: v
+            for k, v in request.whatsapp.model_dump(exclude_none=True).items()
+        }
+
+    current_customer.update_notification_preferences(update_dict)
+    await customer_repo.update(current_customer)
+
+    prefs = current_customer.notification_preferences
+    return SuccessResponse(
+        data=NotificationPrefsResponse(
+            email=prefs.get("email", {}),
+            whatsapp=prefs.get("whatsapp", {}),
+        ),
+        message="Notification preferences updated successfully",
+    )
+
+
+# ============================================================================
 # Order History Routes
 # ============================================================================
 

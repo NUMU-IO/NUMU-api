@@ -56,6 +56,7 @@ def _build_store_response(store) -> StoreResponse:
         banner_url=store.banner_url,
         status=store.status,
         default_currency=store.default_currency,
+        default_language=store.default_language,
         contact_email=store.contact_email,
         contact_phone=store.contact_phone,
         address=store.address,
@@ -141,6 +142,7 @@ async def create_store(
         slug=request.slug,
         description=request.description,
         default_currency=request.default_currency,
+        default_language=request.default_language,
         contact_email=request.contact_email,
         contact_phone=request.contact_phone,
     )
@@ -238,6 +240,7 @@ async def update_store(
         contact_phone=request.contact_phone,
         address=request.address,
         social_links=request.social_links,
+        default_language=request.default_language,
         settings=request.settings,
         theme_settings=request.theme_settings,
     )

@@ -165,6 +165,7 @@ class CreateStoreUseCase:
             description=dto.description,
             status=StoreStatus.ACTIVE,  # Auto-activate for now
             default_currency=currency,
+            default_language=dto.default_language,
             contact_email=dto.contact_email,
             contact_phone=dto.contact_phone,
             theme_settings=default_theme_settings,

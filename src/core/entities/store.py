@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -37,6 +37,7 @@ class Store(BaseEntity):
     banner_url: str | None = None
     status: StoreStatus = StoreStatus.PENDING_APPROVAL
     default_currency: Currency = Currency.EGP
+    default_language: Literal["en", "ar"] = "en"
     contact_email: str | None = None
     contact_phone: str | None = None
     address: dict[str, Any] = Field(default_factory=dict)

@@ -83,6 +83,7 @@ async def get_store_by_subdomain(
             "default_currency": store.default_currency.value
             if hasattr(store.default_currency, "value")
             else str(store.default_currency),
+            "default_language": store.default_language,
             "social_links": store.social_links,
         },
         message="Store retrieved successfully",

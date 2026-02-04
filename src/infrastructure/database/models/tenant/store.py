@@ -52,6 +52,9 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         default=Currency.EGP,
         nullable=False,
     )
+    default_language: Mapped[str] = mapped_column(
+        String(5), nullable=False, server_default="en"
+    )
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     address: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
