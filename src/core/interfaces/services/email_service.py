@@ -42,6 +42,7 @@ class IEmailService(ABC):
         email: str,
         order_number: str,
         order_details: dict,
+        language: str = "en",
     ) -> bool:
         """Send order confirmation email."""
         ...
@@ -53,6 +54,7 @@ class IEmailService(ABC):
         order_number: str,
         tracking_number: str | None,
         carrier: str | None,
+        language: str = "en",
     ) -> bool:
         """Send shipping notification email."""
         ...

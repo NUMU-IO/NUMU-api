@@ -24,6 +24,7 @@ class ApplyCouponUseCase:
         store_id: UUID,
         code: str,
         order_amount: Decimal,
+        for_update: bool = False,
     ) -> ApplyCouponDTO:
         """Apply a coupon and record its usage.
 
@@ -31,6 +32,7 @@ class ApplyCouponUseCase:
             store_id: The store UUID.
             code: The coupon code.
             order_amount: The order subtotal.
+            for_update: If True, lock the coupon row to prevent concurrent usage.
 
         Returns:
             ApplyCouponDTO with the calculated discount details.
@@ -39,7 +41,10 @@ class ApplyCouponUseCase:
             EntityNotFoundError: If coupon code not found.
             ValidationError: If coupon cannot be applied.
         """
-        coupon = await self.coupon_repository.get_by_code(store_id, code)
+        if for_update and hasattr(self.coupon_repository, "get_by_code_for_update"):
+            coupon = await self.coupon_repository.get_by_code_for_update(store_id, code)
+        else:
+            coupon = await self.coupon_repository.get_by_code(store_id, code)
         if not coupon:
             raise EntityNotFoundError("Coupon", code)
 

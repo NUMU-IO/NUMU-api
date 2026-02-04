@@ -215,7 +215,7 @@ async def checkout(
             phone=billing_address.phone,
         )
 
-    # Apply coupon if provided
+    # Apply coupon if provided (with row-level lock to prevent concurrent bypass)
     discount_amount = 0
     coupon_code = None
     coupon_id = None
@@ -228,10 +228,23 @@ async def checkout(
             store_id=store_id,
             code=request.coupon_code,
             order_amount=Decimal(str(subtotal)),
+            for_update=True,
         )
         discount_amount = int(coupon_result.discount_amount)
         coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
+
+    # Atomically deduct stock BEFORE creating the order.
+    # Uses conditional UPDATE (WHERE quantity >= needed) so concurrent
+    # checkouts cannot oversell. If the transaction rolls back, stock
+    # is automatically restored.
+    for li in line_items:
+        success = await product_repo.deduct_stock(li.product_id, li.quantity)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
+            )
 
     total = subtotal + dto.shipping_cost + dto.tax_amount - discount_amount
 
@@ -259,22 +272,6 @@ async def checkout(
 
     created_order = await order_repo.create(order)
 
-    # Increment coupon usage
-    if coupon_id:
-        await coupon_repo.increment_usage(coupon_id)
-
-    # Deduct stock for each product
-    for li in line_items:
-        product = await product_repo.get_by_id(li.product_id)
-        if product and product.quantity >= li.quantity:
-            product.quantity -= li.quantity
-            await product_repo.update(product)
-
-    # Clear the customer's cart after successful checkout
-    from src.api.v1.routes.storefront.cart import _carts
-
-    _carts.pop(current_customer.id, None)
-
     # Build payment URL if applicable
     payment_url: str | None = None
     # Payment initiation would go here based on request.payment_method.
@@ -284,6 +281,80 @@ async def checkout(
         f"Checkout completed: order={created_order.order_number}, "
         f"customer={current_customer.id}, total={created_order.total} {currency}"
     )
+
+    # Dispatch async order-confirmation notifications (non-blocking)
+    try:
+        from src.infrastructure.messaging.tasks.notification_tasks import (
+            send_order_confirmation_email_task,
+            send_whatsapp_order_confirmation_task,
+        )
+
+        prefs = current_customer.metadata.get("notification_preferences", {})
+        email_prefs = prefs.get("email", {})
+        whatsapp_prefs = prefs.get("whatsapp", {})
+
+        customer_email = str(current_customer.email) if current_customer.email else None
+        customer_phone = str(current_customer.phone) if current_customer.phone else None
+
+        total_display = f"{currency} {created_order.total / 100:.2f}"
+
+        # Email: order confirmation
+        if customer_email and email_prefs.get("order_confirmation", True):
+            order_details = {
+                "items": [
+                    {
+                        "name": li.product_name,
+                        "quantity": li.quantity,
+                        "price": li.unit_price / 100,
+                    }
+                    for li in order_line_items
+                ],
+                "total": created_order.total / 100,
+            }
+            send_order_confirmation_email_task.delay(
+                email=customer_email,
+                order_number=created_order.order_number,
+                order_details=order_details,
+                language=store.default_language,
+            )
+
+        # WhatsApp: order confirmation
+        if customer_phone and whatsapp_prefs.get("order_confirmation", True):
+            send_whatsapp_order_confirmation_task.delay(
+                phone=customer_phone,
+                customer_name=current_customer.full_name,
+                order_number=created_order.order_number,
+                total=total_display,
+                store_name=store.name,
+                language=store.default_language,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch checkout notifications: {e}")
+
+    # Merchant onboarding: send first-order email if this is order #1
+    try:
+        total_orders = await order_repo.count_by_store(store_id)
+        if total_orders == 1:
+            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                send_first_order_email_task,
+            )
+
+            merchant_email = store.contact_email
+            if merchant_email:
+                send_first_order_email_task.delay(
+                    email=merchant_email,
+                    merchant_name=store.name,
+                    order_number=created_order.order_number,
+                    total=f"{currency} {created_order.total / 100:.2f}",
+                    language=store.default_language,
+                )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch first-order onboarding email: {e}")
+
+    # Clear the customer's cart only after the entire checkout succeeds
+    from src.api.v1.routes.storefront.cart import _carts
+
+    _carts.pop(current_customer.id, None)
 
     return SuccessResponse(
         data=CheckoutResponse(

@@ -278,6 +278,32 @@ class ProductRepository(IProductRepository):
         )
         return result.scalar() or 0
 
+    async def deduct_stock(self, product_id: UUID, quantity: int) -> bool:
+        """Atomically deduct stock if sufficient quantity exists.
+
+        Uses a conditional UPDATE that only succeeds when current stock >= requested.
+        Returns True if deduction succeeded, False if insufficient stock.
+        """
+        result = await self.session.execute(
+            update(ProductModel)
+            .where(
+                ProductModel.id == product_id,
+                ProductModel.quantity >= quantity,
+            )
+            .values(quantity=ProductModel.quantity - quantity)
+        )
+        await self.session.flush()
+        return result.rowcount > 0
+
+    async def restore_stock(self, product_id: UUID, quantity: int) -> None:
+        """Atomically restore stock (e.g. on order cancellation)."""
+        await self.session.execute(
+            update(ProductModel)
+            .where(ProductModel.id == product_id)
+            .values(quantity=ProductModel.quantity + quantity)
+        )
+        await self.session.flush()
+
     async def bulk_update_quantity(
         self,
         updates: list[tuple[UUID, int]],

@@ -6,6 +6,7 @@ from src.application.dto.order import OrderDTO, UpdateOrderStatusDTO
 from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
+from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 
@@ -19,9 +20,11 @@ class UpdateOrderStatusUseCase:
         self,
         order_repository: IOrderRepository,
         store_repository: IStoreRepository,
+        customer_repository: ICustomerRepository | None = None,
     ) -> None:
         self.order_repository = order_repository
         self.store_repository = store_repository
+        self.customer_repository = customer_repository
 
     async def execute(
         self,
@@ -108,4 +111,90 @@ class UpdateOrderStatusUseCase:
             reason=dto.reason,
         )
 
+        # Dispatch async notifications for shipped / delivered
+        if new_status in (OrderStatus.SHIPPED, OrderStatus.DELIVERED):
+            await self._dispatch_notifications(
+                updated_order, new_status, store, log
+            )
+
         return OrderDTO.from_entity(updated_order)
+
+    async def _dispatch_notifications(self, order, new_status, store, log):
+        """Fire Celery tasks for WhatsApp + email notifications.
+
+        Runs inside a try/except so notification failures never block
+        the order flow.
+        """
+        try:
+            customer = None
+            if self.customer_repository:
+                customer = await self.customer_repository.get_by_id(order.customer_id)
+
+            if not customer:
+                log.warning("notification_skipped", reason="customer_not_found")
+                return
+
+            customer_email = str(customer.email) if customer.email else None
+            customer_phone = str(customer.phone) if customer.phone else None
+            customer_name = customer.full_name
+            store_name = store.name
+
+            # Check notification preferences (stored in customer.metadata)
+            prefs = customer.metadata.get("notification_preferences", {})
+            email_prefs = prefs.get("email", {})
+            whatsapp_prefs = prefs.get("whatsapp", {})
+
+            from src.infrastructure.messaging.tasks.notification_tasks import (
+                send_delivery_confirmation_email_task,
+                send_shipping_notification_email_task,
+                send_whatsapp_delivery_confirmation_task,
+                send_whatsapp_shipping_update_task,
+            )
+
+            if new_status == OrderStatus.SHIPPED:
+                # Email notification
+                if customer_email and email_prefs.get("shipping_update", True):
+                    send_shipping_notification_email_task.delay(
+                        email=customer_email,
+                        order_number=order.order_number,
+                        tracking_number=order.tracking_number,
+                        carrier=order.shipping_method or "Bosta",
+                    )
+
+                # WhatsApp notification
+                if customer_phone and whatsapp_prefs.get("shipping_update", True):
+                    send_whatsapp_shipping_update_task.delay(
+                        phone=customer_phone,
+                        customer_name=customer_name,
+                        order_number=order.order_number,
+                        tracking_number=order.tracking_number or "N/A",
+                        carrier=order.shipping_method or "Bosta",
+                    )
+
+            elif new_status == OrderStatus.DELIVERED:
+                # Email notification
+                if customer_email and email_prefs.get("delivery_confirmation", True):
+                    send_delivery_confirmation_email_task.delay(
+                        email=customer_email,
+                        order_number=order.order_number,
+                        store_name=store_name,
+                    )
+
+                # WhatsApp notification
+                if customer_phone and whatsapp_prefs.get("delivery_confirmation", True):
+                    send_whatsapp_delivery_confirmation_task.delay(
+                        phone=customer_phone,
+                        customer_name=customer_name,
+                        order_number=order.order_number,
+                        store_name=store_name,
+                    )
+
+            log.info(
+                "order_notifications_dispatched",
+                status=new_status.value,
+                has_email=bool(customer_email),
+                has_phone=bool(customer_phone),
+            )
+        except Exception as e:
+            # Never let notification failures break the order flow
+            log.error("order_notification_dispatch_failed", error=str(e))

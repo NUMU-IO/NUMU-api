@@ -8,7 +8,6 @@ Create Date: 2026-02-02 12:00:00.000000
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -20,92 +19,92 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # 1. Create discounttype enum
-    discounttype_enum = sa.Enum(
-        'percentage', 'fixed_amount',
-        name='discounttype',
-        schema='public',
-    )
-    discounttype_enum.create(op.get_bind(), checkfirst=True)
+    conn = op.get_bind()
 
-    # 2. Create coupons table
-    op.create_table(
-        'coupons',
-        sa.Column('store_id', sa.UUID(), nullable=False),
-        sa.Column('code', sa.String(length=50), nullable=False),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column(
-            'discount_type',
-            discounttype_enum,
-            nullable=False,
-        ),
-        sa.Column('discount_value', sa.Integer(), nullable=False),
-        sa.Column('min_order_amount', sa.Integer(), nullable=False, server_default='0'),
-        sa.Column('max_discount_amount', sa.Integer(), nullable=True),
-        sa.Column('max_uses', sa.Integer(), nullable=True),
-        sa.Column('max_uses_per_customer', sa.Integer(), nullable=True),
-        sa.Column('current_usage_count', sa.Integer(), nullable=False, server_default='0'),
-        sa.Column('valid_from', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('valid_to', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
-        sa.Column('extra_data', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        # Base mixin columns
-        sa.Column('id', sa.UUID(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('tenant_id', sa.UUID(), nullable=False),
-        # Constraints
-        sa.ForeignKeyConstraint(['store_id'], ['public.stores.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['tenant_id'], ['public.tenants.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('store_id', 'code', name='uq_coupons_store_code'),
-        schema='public',
-    )
+    # 1. Create discounttype enum (idempotent)
+    conn.exec_driver_sql("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'discounttype') THEN
+                CREATE TYPE public.discounttype AS ENUM ('percentage', 'fixed_amount');
+            END IF;
+        END $$;
+    """)
 
-    # 3. Create indexes for coupons
-    op.create_index(
-        op.f('ix_public_coupons_store_id'),
-        'coupons', ['store_id'],
-        unique=False, schema='public',
+    # 2. Create coupons table via raw SQL (avoids SQLAlchemy enum auto-creation bug)
+    table_exists = conn.exec_driver_sql(
+        "SELECT to_regclass('public.coupons')"
+    ).scalar()
+
+    if table_exists is None:
+        conn.exec_driver_sql("""
+            CREATE TABLE public.coupons (
+                id UUID NOT NULL PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+                store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+                code VARCHAR(50) NOT NULL,
+                description TEXT,
+                discount_type public.discounttype NOT NULL,
+                discount_value INTEGER NOT NULL,
+                min_order_amount INTEGER NOT NULL DEFAULT 0,
+                max_discount_amount INTEGER,
+                max_uses INTEGER,
+                max_uses_per_customer INTEGER,
+                current_usage_count INTEGER NOT NULL DEFAULT 0,
+                valid_from TIMESTAMPTZ,
+                valid_to TIMESTAMPTZ,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                extra_data JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_coupons_store_code UNIQUE (store_id, code)
+            )
+        """)
+
+    # 3. Create indexes (IF NOT EXISTS for idempotency)
+    conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_public_coupons_store_id ON public.coupons (store_id)"
     )
-    op.create_index(
-        op.f('ix_public_coupons_code'),
-        'coupons', ['code'],
-        unique=False, schema='public',
+    conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_public_coupons_code ON public.coupons (code)"
     )
-    op.create_index(
-        op.f('ix_public_coupons_tenant_id'),
-        'coupons', ['tenant_id'],
-        unique=False, schema='public',
+    conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_public_coupons_tenant_id ON public.coupons (tenant_id)"
     )
 
-    # 4. Add coupon columns to orders table
-    op.add_column(
-        'orders',
-        sa.Column('coupon_code', sa.String(length=50), nullable=True),
-        schema='public',
-    )
-    op.add_column(
-        'orders',
-        sa.Column('coupon_id', sa.UUID(), nullable=True),
-        schema='public',
-    )
-    op.create_foreign_key(
-        'fk_orders_coupon_id_coupons',
-        'orders', 'coupons',
-        ['coupon_id'], ['id'],
-        source_schema='public',
-        referent_schema='public',
-        ondelete='SET NULL',
-    )
-    op.create_index(
-        op.f('ix_public_orders_coupon_id'),
-        'orders', ['coupon_id'],
-        unique=False, schema='public',
-    )
+    # 4. Add coupon columns to orders table (skip if already exist)
+    col_exists = conn.exec_driver_sql("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'coupon_code'
+    """).scalar()
+
+    if not col_exists:
+        op.add_column(
+            'orders',
+            sa.Column('coupon_code', sa.String(length=50), nullable=True),
+            schema='public',
+        )
+        op.add_column(
+            'orders',
+            sa.Column('coupon_id', sa.UUID(), nullable=True),
+            schema='public',
+        )
+        op.create_foreign_key(
+            'fk_orders_coupon_id_coupons',
+            'orders', 'coupons',
+            ['coupon_id'], ['id'],
+            source_schema='public',
+            referent_schema='public',
+            ondelete='SET NULL',
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_public_orders_coupon_id ON public.orders (coupon_id)"
+        )
 
 
 def downgrade() -> None:
+    conn = op.get_bind()
+
     # 1. Remove coupon columns from orders
     op.drop_index(op.f('ix_public_orders_coupon_id'), table_name='orders', schema='public')
     op.drop_constraint('fk_orders_coupon_id_coupons', 'orders', schema='public', type_='foreignkey')
@@ -119,4 +118,4 @@ def downgrade() -> None:
     op.drop_table('coupons', schema='public')
 
     # 3. Drop discounttype enum
-    sa.Enum(name='discounttype', schema='public').drop(op.get_bind(), checkfirst=True)
+    conn.exec_driver_sql("DROP TYPE IF EXISTS public.discounttype")

@@ -76,42 +76,33 @@ class ResendEmailService(IEmailService):
         email: str,
         order_number: str,
         order_details: dict,
+        language: str = "en",
     ) -> bool:
         """Send order confirmation email."""
-        items_html = ""
-        for item in order_details.get("items", []):
-            items_html += f"""
-            <tr>
-                <td>{item["name"]}</td>
-                <td>{item["quantity"]}</td>
-                <td>${item["price"]:.2f}</td>
-            </tr>
-            """
+        from src.infrastructure.external_services.resend.email_templates.notifications import (
+            ORDER_CONFIRMATION_TEMPLATE,
+        )
 
-        html_content = f"""
-        <h1>Order Confirmation</h1>
-        <p>Thank you for your order!</p>
-        <p><strong>Order Number:</strong> {order_number}</p>
+        items = order_details.get("items", [])
+        total = order_details.get("total", 0)
+        currency = order_details.get("currency", "EGP")
+        store_name = order_details.get("store_name", "NUMU")
+        customer_name = order_details.get("customer_name")
 
-        <h2>Order Details</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Item</th>
-                    <th>Quantity</th>
-                    <th>Price</th>
-                </tr>
-            </thead>
-            <tbody>
-                {items_html}
-            </tbody>
-        </table>
+        html_content = ORDER_CONFIRMATION_TEMPLATE["html_fn"](
+            order_number=order_number,
+            items=items,
+            total=total,
+            currency=currency,
+            store_name=store_name,
+            customer_name=customer_name,
+            language=language,
+        )
+        subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](order_number, store_name, language)
 
-        <p><strong>Total:</strong> ${order_details.get("total", 0):.2f}</p>
-        """
         message = EmailMessage(
             to=email,
-            subject=f"Order Confirmation #{order_number} - Octyrafiy",
+            subject=subject,
             html_content=html_content,
         )
         return await self.send_email(message)
@@ -122,24 +113,24 @@ class ResendEmailService(IEmailService):
         order_number: str,
         tracking_number: str | None,
         carrier: str | None,
+        language: str = "en",
     ) -> bool:
         """Send shipping notification email."""
-        tracking_info = ""
-        if tracking_number:
-            tracking_info = f"""
-            <p><strong>Tracking Number:</strong> {tracking_number}</p>
-            <p><strong>Carrier:</strong> {carrier or "N/A"}</p>
-            """
+        from src.infrastructure.external_services.resend.email_templates.notifications import (
+            SHIPPING_NOTIFICATION_TEMPLATE,
+        )
 
-        html_content = f"""
-        <h1>Your Order Has Shipped!</h1>
-        <p>Great news! Your order #{order_number} is on its way.</p>
-        {tracking_info}
-        <p>You can track your package using the tracking number above.</p>
-        """
+        html_content = SHIPPING_NOTIFICATION_TEMPLATE["html_fn"](
+            order_number=order_number,
+            tracking_number=tracking_number,
+            carrier=carrier,
+            language=language,
+        )
+        subject = SHIPPING_NOTIFICATION_TEMPLATE["subject_fn"](order_number, language=language)
+
         message = EmailMessage(
             to=email,
-            subject=f"Your Order #{order_number} Has Shipped! - Octyrafiy",
+            subject=subject,
             html_content=html_content,
         )
         return await self.send_email(message)

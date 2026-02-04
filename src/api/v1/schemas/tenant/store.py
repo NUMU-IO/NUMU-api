@@ -16,6 +16,7 @@ class CreateStoreRequest(BaseModel):
     slug: str | None = Field(None, max_length=255)
     description: str | None = None
     default_currency: str = Field(default="EGP", max_length=3)
+    default_language: str = Field(default="en", pattern="^(en|ar)$")
     contact_email: EmailStr | None = None
     contact_phone: str | None = Field(None, max_length=20)
 
@@ -31,6 +32,7 @@ class UpdateStoreRequest(BaseModel):
     contact_phone: str | None = Field(None, max_length=20)
     address: dict | None = None
     social_links: dict | None = None
+    default_language: str | None = Field(None, pattern="^(en|ar)$")
     settings: dict | None = None
     theme_settings: dict | None = None
 
@@ -50,6 +52,7 @@ class StoreResponse(BaseModel):
     banner_url: str | None
     status: str
     default_currency: str
+    default_language: str
     contact_email: str | None
     contact_phone: str | None
     address: dict

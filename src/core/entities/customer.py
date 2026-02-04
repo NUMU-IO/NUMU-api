@@ -147,3 +147,46 @@ class Customer(BaseEntity):
         """
         self.notes = notes
         self.touch()
+
+    # ------------------------------------------------------------------
+    # Notification preference helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def default_notification_preferences() -> dict:
+        """Return default notification preferences structure."""
+        return {
+            "email": {
+                "order_confirmation": True,
+                "shipping_update": True,
+                "delivery_confirmation": True,
+            },
+            "whatsapp": {
+                "order_confirmation": True,
+                "shipping_update": True,
+                "delivery_confirmation": True,
+            },
+        }
+
+    @property
+    def notification_preferences(self) -> dict:
+        """Get notification preferences from metadata."""
+        return self.metadata.get(
+            "notification_preferences",
+            self.default_notification_preferences(),
+        )
+
+    def update_notification_preferences(self, prefs: dict) -> None:
+        """Update notification preferences.
+
+        Args:
+            prefs: Dict with 'email' and/or 'whatsapp' keys, each
+                   containing event-type booleans.
+        """
+        current = self.notification_preferences
+        for channel in ("email", "whatsapp"):
+            if channel in prefs:
+                current.setdefault(channel, {})
+                current[channel].update(prefs[channel])
+        self.metadata["notification_preferences"] = current
+        self.touch()
