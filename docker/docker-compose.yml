@@ -7,7 +7,7 @@ services:
       - "8000:8000"
     environment:
       - DEBUG=true
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/octyrafiy
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/numu
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
       - JWT_ALGORITHM=HS256
@@ -20,14 +20,14 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - octyrafiy-network
+      - numu-network
 
   db:
     image: postgres:15-alpine
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=octyrafiy
+      - POSTGRES_DB=numu
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -39,7 +39,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - octyrafiy-network
+      - numu-network
 
   redis:
     image: redis:7-alpine
@@ -55,7 +55,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - octyrafiy-network
+      - numu-network
 
 volumes:
   postgres_data:
@@ -63,5 +63,5 @@ volumes:
 
 
 networks:
-  octyrafiy-network:
+  numu-network:
     driver: bridge

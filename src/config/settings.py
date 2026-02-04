@@ -153,7 +153,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4-turbo-preview"
+    openai_model: str = "gpt-4o"
 
     # Resend (Email)
     resend_api_key: str | None = None

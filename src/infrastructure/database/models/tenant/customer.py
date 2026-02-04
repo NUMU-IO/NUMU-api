@@ -30,6 +30,7 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     user_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
