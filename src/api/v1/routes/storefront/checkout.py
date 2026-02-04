@@ -215,7 +215,7 @@ async def checkout(
             phone=billing_address.phone,
         )
 
-    # Apply coupon if provided
+    # Apply coupon if provided (with row-level lock to prevent concurrent bypass)
     discount_amount = 0
     coupon_code = None
     coupon_id = None
@@ -228,10 +228,23 @@ async def checkout(
             store_id=store_id,
             code=request.coupon_code,
             order_amount=Decimal(str(subtotal)),
+            for_update=True,
         )
         discount_amount = int(coupon_result.discount_amount)
         coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
+
+    # Atomically deduct stock BEFORE creating the order.
+    # Uses conditional UPDATE (WHERE quantity >= needed) so concurrent
+    # checkouts cannot oversell. If the transaction rolls back, stock
+    # is automatically restored.
+    for li in line_items:
+        success = await product_repo.deduct_stock(li.product_id, li.quantity)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
+            )
 
     total = subtotal + dto.shipping_cost + dto.tax_amount - discount_amount
 
@@ -258,22 +271,6 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
-
-    # Increment coupon usage
-    if coupon_id:
-        await coupon_repo.increment_usage(coupon_id)
-
-    # Deduct stock for each product
-    for li in line_items:
-        product = await product_repo.get_by_id(li.product_id)
-        if product and product.quantity >= li.quantity:
-            product.quantity -= li.quantity
-            await product_repo.update(product)
-
-    # Clear the customer's cart after successful checkout
-    from src.api.v1.routes.storefront.cart import _carts
-
-    _carts.pop(current_customer.id, None)
 
     # Build payment URL if applicable
     payment_url: str | None = None
@@ -353,6 +350,11 @@ async def checkout(
                 )
     except Exception as e:
         logger.warning(f"Failed to dispatch first-order onboarding email: {e}")
+
+    # Clear the customer's cart only after the entire checkout succeeds
+    from src.api.v1.routes.storefront.cart import _carts
+
+    _carts.pop(current_customer.id, None)
 
     return SuccessResponse(
         data=CheckoutResponse(
