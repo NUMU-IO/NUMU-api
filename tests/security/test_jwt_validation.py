@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jose import jwt
+import jwt
 
 from src.core.entities.customer import Customer
 from src.core.entities.user import User, UserRole, UserStatus
