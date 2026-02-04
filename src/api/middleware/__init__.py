@@ -11,6 +11,10 @@ from src.api.middleware.rate_limit import (
     RateLimitMiddleware,
     rate_limit_exceeded_handler,
 )
+from src.api.middleware.security_headers import (
+    SecurityHeadersMiddleware,
+    get_security_headers_middleware,
+)
 from src.api.middleware.sentry_middleware import SentryMiddleware
 from src.infrastructure.tenancy.middleware import TenantMiddleware
 
@@ -24,5 +28,7 @@ __all__ = [
     "RateLimitMiddleware",
     "rate_limit_exceeded_handler",
     "RateLimitExceeded",
+    "SecurityHeadersMiddleware",
+    "get_security_headers_middleware",
     "SentryMiddleware",
 ]
