@@ -153,7 +153,11 @@ class GetOrderTimelineUseCase:
 
         # Build standard flow timeline
         # Calculate current_index once before the loop
-        current_index = STANDARD_FLOW.index(current_status) if current_status in STANDARD_FLOW else -1
+        current_index = (
+            STANDARD_FLOW.index(current_status)
+            if current_status in STANDARD_FLOW
+            else -1
+        )
 
         for i, status in enumerate(STANDARD_FLOW):
             config = STATUS_CONFIG[status]
@@ -252,9 +256,7 @@ class GetOrderTimelineUseCase:
         }
         return timestamp_map.get(status)
 
-    def _get_status_metadata(
-        self, order: Order, status: OrderStatus
-    ) -> dict:
+    def _get_status_metadata(self, order: Order, status: OrderStatus) -> dict:
         """Get metadata for a status.
 
         Args:

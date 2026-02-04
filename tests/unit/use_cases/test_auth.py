@@ -25,11 +25,17 @@ class TestRegisterUserUseCase:
         self.mock_user_repo.create = AsyncMock()
 
         self.mock_password_service = MagicMock()
-        self.mock_password_service.hash_password = MagicMock(return_value="hashed_password")
+        self.mock_password_service.hash_password = MagicMock(
+            return_value="hashed_password"
+        )
 
         self.mock_token_service = MagicMock()
-        self.mock_token_service.create_access_token = MagicMock(return_value="access_token")
-        self.mock_token_service.create_refresh_token = MagicMock(return_value="refresh_token")
+        self.mock_token_service.create_access_token = MagicMock(
+            return_value="access_token"
+        )
+        self.mock_token_service.create_refresh_token = MagicMock(
+            return_value="refresh_token"
+        )
 
         self.use_case = RegisterUserUseCase(
             user_repository=self.mock_user_repo,
@@ -65,7 +71,9 @@ class TestRegisterUserUseCase:
         assert result.user.email == "newuser@example.com"
         assert result.tokens.access_token == "access_token"
         assert result.tokens.refresh_token == "refresh_token"
-        self.mock_password_service.hash_password.assert_called_once_with("SecurePassword123!")
+        self.mock_password_service.hash_password.assert_called_once_with(
+            "SecurePassword123!"
+        )
 
     @pytest.mark.asyncio
     async def test_register_duplicate_email(self):
@@ -108,8 +116,12 @@ class TestLoginUserUseCase:
         self.mock_password_service.verify_password = MagicMock(return_value=True)
 
         self.mock_token_service = MagicMock()
-        self.mock_token_service.create_access_token = MagicMock(return_value="access_token")
-        self.mock_token_service.create_refresh_token = MagicMock(return_value="refresh_token")
+        self.mock_token_service.create_access_token = MagicMock(
+            return_value="access_token"
+        )
+        self.mock_token_service.create_refresh_token = MagicMock(
+            return_value="refresh_token"
+        )
 
         self.use_case = LoginUserUseCase(
             user_repository=self.mock_user_repo,
@@ -185,8 +197,12 @@ class TestRefreshTokenUseCase:
 
         self.mock_token_service = MagicMock()
         self.mock_token_service.verify_token = MagicMock(return_value=self.mock_payload)
-        self.mock_token_service.create_access_token = MagicMock(return_value="new_access_token")
-        self.mock_token_service.create_refresh_token = MagicMock(return_value="new_refresh_token")
+        self.mock_token_service.create_access_token = MagicMock(
+            return_value="new_access_token"
+        )
+        self.mock_token_service.create_refresh_token = MagicMock(
+            return_value="new_refresh_token"
+        )
 
         self.use_case = RefreshTokenUseCase(
             user_repository=self.mock_user_repo,
@@ -203,7 +219,9 @@ class TestRefreshTokenUseCase:
         assert result is not None
         assert result.access_token == "new_access_token"
         assert result.refresh_token == "new_refresh_token"
-        self.mock_token_service.verify_token.assert_called_once_with("valid_refresh_token")
+        self.mock_token_service.verify_token.assert_called_once_with(
+            "valid_refresh_token"
+        )
 
     @pytest.mark.asyncio
     async def test_refresh_token_user_not_found(self):

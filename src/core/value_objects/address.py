@@ -30,16 +30,14 @@ class Address(BaseModel):
         return ", ".join(parts)
 
     def __hash__(self) -> int:
-        return hash(
-            (
-                self.address_line1,
-                self.address_line2,
-                self.city,
-                self.state,
-                self.postal_code,
-                self.country,
-            )
-        )
+        return hash((
+            self.address_line1,
+            self.address_line2,
+            self.city,
+            self.state,
+            self.postal_code,
+            self.country,
+        ))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert address to dictionary.

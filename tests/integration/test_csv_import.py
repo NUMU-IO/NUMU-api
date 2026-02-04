@@ -91,7 +91,9 @@ class TestCSVImport:
         ]
         csv_bytes = _build_csv(rows)
 
-        result = await self._make_use_case().execute(csv_bytes, self.store_id, self.user_id)
+        result = await self._make_use_case().execute(
+            csv_bytes, self.store_id, self.user_id
+        )
 
         assert result.total_rows == 3
         assert result.created == 3
@@ -102,11 +104,13 @@ class TestCSVImport:
     async def test_import_csv_missing_required_fields(self):
         rows = [
             {"name": "", "price": "10.50"},  # missing name
-            {"name": "Valid", "price": ""},   # missing price
+            {"name": "Valid", "price": ""},  # missing price
         ]
         csv_bytes = _build_csv(rows)
 
-        result = await self._make_use_case().execute(csv_bytes, self.store_id, self.user_id)
+        result = await self._make_use_case().execute(
+            csv_bytes, self.store_id, self.user_id
+        )
 
         assert result.total_rows == 2
         assert result.created == 0
@@ -119,7 +123,9 @@ class TestCSVImport:
         rows = [{"name": "Bad Price", "price": "not_a_number"}]
         csv_bytes = _build_csv(rows)
 
-        result = await self._make_use_case().execute(csv_bytes, self.store_id, self.user_id)
+        result = await self._make_use_case().execute(
+            csv_bytes, self.store_id, self.user_id
+        )
 
         assert result.created == 0
         assert len(result.errors) == 1
@@ -141,10 +147,19 @@ class TestCSVImport:
         )
         self.product_repo.get_by_sku = AsyncMock(return_value=existing)
 
-        rows = [{"name": "Updated Name", "price": "15.00", "sku": "SKU-EXISTING", "quantity": "10"}]
+        rows = [
+            {
+                "name": "Updated Name",
+                "price": "15.00",
+                "sku": "SKU-EXISTING",
+                "quantity": "10",
+            }
+        ]
         csv_bytes = _build_csv(rows)
 
-        result = await self._make_use_case().execute(csv_bytes, self.store_id, self.user_id)
+        result = await self._make_use_case().execute(
+            csv_bytes, self.store_id, self.user_id
+        )
 
         assert result.created == 0
         assert result.updated == 1
@@ -155,7 +170,9 @@ class TestCSVImport:
     async def test_import_empty_csv(self):
         csv_bytes = _build_csv([])
 
-        result = await self._make_use_case().execute(csv_bytes, self.store_id, self.user_id)
+        result = await self._make_use_case().execute(
+            csv_bytes, self.store_id, self.user_id
+        )
 
         assert result.total_rows == 0
         assert result.created == 0
@@ -170,7 +187,9 @@ class TestCSVImport:
         ]
         csv_bytes = _build_csv(rows)
 
-        result = await self._make_use_case().execute(csv_bytes, self.store_id, self.user_id)
+        result = await self._make_use_case().execute(
+            csv_bytes, self.store_id, self.user_id
+        )
 
         assert result.total_rows == 3
         assert result.created == 2

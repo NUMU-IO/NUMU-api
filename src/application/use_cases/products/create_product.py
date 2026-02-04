@@ -36,7 +36,9 @@ class CreateProductUseCase:
         self.store_repository = store_repository
         self.category_repository = category_repository
 
-    def _validate_product_data(self, dto: CreateProductDTO, store_id: UUID) -> list[str]:
+    def _validate_product_data(
+        self, dto: CreateProductDTO, store_id: UUID
+    ) -> list[str]:
         """Validate product data and return list of errors.
 
         Args:
@@ -52,9 +54,13 @@ class CreateProductUseCase:
         if not dto.name:
             errors.append("Product name is required")
         elif len(dto.name.strip()) < MIN_PRODUCT_NAME_LENGTH:
-            errors.append(f"Product name must be at least {MIN_PRODUCT_NAME_LENGTH} character(s)")
+            errors.append(
+                f"Product name must be at least {MIN_PRODUCT_NAME_LENGTH} character(s)"
+            )
         elif len(dto.name) > MAX_PRODUCT_NAME_LENGTH:
-            errors.append(f"Product name must not exceed {MAX_PRODUCT_NAME_LENGTH} characters")
+            errors.append(
+                f"Product name must not exceed {MAX_PRODUCT_NAME_LENGTH} characters"
+            )
 
         # Required field: price (must be > 0)
         if dto.price is None:
@@ -86,16 +92,25 @@ class CreateProductUseCase:
             errors.append(f"SKU must not exceed {MAX_SKU_LENGTH} characters")
 
         # Validate short_description length if provided
-        if dto.short_description and len(dto.short_description) > MAX_SHORT_DESCRIPTION_LENGTH:
-            errors.append(f"Short description must not exceed {MAX_SHORT_DESCRIPTION_LENGTH} characters")
+        if (
+            dto.short_description
+            and len(dto.short_description) > MAX_SHORT_DESCRIPTION_LENGTH
+        ):
+            errors.append(
+                f"Short description must not exceed {MAX_SHORT_DESCRIPTION_LENGTH} characters"
+            )
 
         # Validate product_type
         if dto.product_type and dto.product_type.lower() not in VALID_PRODUCT_TYPES:
-            errors.append(f"Invalid product type. Valid types: {', '.join(VALID_PRODUCT_TYPES)}")
+            errors.append(
+                f"Invalid product type. Valid types: {', '.join(VALID_PRODUCT_TYPES)}"
+            )
 
         # Validate currency
         if dto.price_currency and dto.price_currency.upper() not in VALID_CURRENCIES:
-            errors.append(f"Invalid currency. Valid currencies: {', '.join(VALID_CURRENCIES)}")
+            errors.append(
+                f"Invalid currency. Valid currencies: {', '.join(VALID_CURRENCIES)}"
+            )
 
         # Validate images are URLs (basic check)
         if dto.images:
@@ -103,7 +118,9 @@ class CreateProductUseCase:
                 if not isinstance(image, str):
                     errors.append(f"Image at index {i} must be a string URL")
                 elif not image.startswith(("http://", "https://")):
-                    errors.append(f"Image at index {i} must be a valid URL starting with http:// or https://")
+                    errors.append(
+                        f"Image at index {i} must be a valid URL starting with http:// or https://"
+                    )
 
         return errors
 
@@ -169,7 +186,9 @@ class CreateProductUseCase:
 
         # Validate category exists if provided
         if dto.category_id:
-            category_error = await self._validate_category_exists(dto.category_id, store_id)
+            category_error = await self._validate_category_exists(
+                dto.category_id, store_id
+            )
             if category_error:
                 validation_errors.append(category_error)
 

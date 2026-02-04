@@ -177,10 +177,15 @@ def _generate_test_rsa_keypair() -> tuple[str, str]:
         format=serialization.PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm=serialization.NoEncryption(),
     ).decode()
-    public_pem = key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode()
+    public_pem = (
+        key
+        .public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode()
+    )
     return private_pem, public_pem
 
 
@@ -341,7 +346,9 @@ def sample_product(sample_store: Store, sample_category: Category) -> Product:
 
 
 @pytest.fixture
-def sample_order(sample_store: Store, sample_customer: Customer, sample_product: Product) -> Order:
+def sample_order(
+    sample_store: Store, sample_customer: Customer, sample_product: Product
+) -> Order:
     """Create a sample Order entity."""
     shipping_address = OrderShippingAddress(
         first_name="Alice",
@@ -378,14 +385,18 @@ def sample_order(sample_store: Store, sample_customer: Customer, sample_product:
 
 
 @pytest.fixture
-def authenticated_user_headers(sample_user: User, token_service: TokenService) -> dict[str, str]:
+def authenticated_user_headers(
+    sample_user: User, token_service: TokenService
+) -> dict[str, str]:
     """Create authentication headers for a regular user."""
     token = token_service.create_access_token(sample_user)
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
-def authenticated_admin_headers(sample_admin_user: User, token_service: TokenService) -> dict[str, str]:
+def authenticated_admin_headers(
+    sample_admin_user: User, token_service: TokenService
+) -> dict[str, str]:
     """Create authentication headers for a super admin."""
     token = token_service.create_access_token(sample_admin_user)
     return {"Authorization": f"Bearer {token}"}

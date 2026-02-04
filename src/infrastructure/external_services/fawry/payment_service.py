@@ -111,7 +111,9 @@ class FawryPaymentService(IPaymentService):
 
         expiry_hours = expiry_hours or self.default_expiry_hours
         expiry_date = datetime.utcnow() + timedelta(hours=expiry_hours)
-        expiry_timestamp = int(expiry_date.timestamp() * 1000)  # Fawry uses milliseconds
+        expiry_timestamp = int(
+            expiry_date.timestamp() * 1000
+        )  # Fawry uses milliseconds
 
         # Build charge items
         charge_items = []
@@ -215,9 +217,12 @@ class FawryPaymentService(IPaymentService):
             PaymentIntent with reference number as ID
         """
         metadata = metadata or {}
-        merchant_ref_number = metadata.get("order_id", metadata.get("merchant_ref_number"))
+        merchant_ref_number = metadata.get(
+            "order_id", metadata.get("merchant_ref_number")
+        )
         if not merchant_ref_number:
             import uuid
+
             merchant_ref_number = f"fawry_{uuid.uuid4().hex[:12]}"
 
         reference = await self.create_reference_number(
@@ -478,6 +483,7 @@ class FawryPaymentService(IPaymentService):
 
         try:
             import json
+
             data = json.loads(payload)
 
             # Build signature string
@@ -496,9 +502,7 @@ class FawryPaymentService(IPaymentService):
                 self.security_key,
             ]
 
-            expected_signature = hashlib.sha256(
-                "".join(sig_parts).encode()
-            ).hexdigest()
+            expected_signature = hashlib.sha256("".join(sig_parts).encode()).hexdigest()
 
             if expected_signature.lower() == signature.lower():
                 return data
@@ -520,5 +524,9 @@ class FawryPaymentService(IPaymentService):
             URL for online payment
         """
         # Use production URL in production environment
-        base = self.base_url.replace("fawrystaging", "fawry") if settings.environment == "production" else self.base_url
+        base = (
+            self.base_url.replace("fawrystaging", "fawry")
+            if settings.environment == "production"
+            else self.base_url
+        )
         return f"{base.replace('/api', '')}/atfawry/plugin/invoice?referenceNumber={reference_number}"

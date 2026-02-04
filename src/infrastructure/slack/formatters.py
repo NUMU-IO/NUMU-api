@@ -100,7 +100,13 @@ def build_fields_block(alert: SlackAlert) -> dict[str, Any] | None:
     # Fraud score (from details)
     if "fraud_score" in alert.details:
         score = alert.details["fraud_score"]
-        score_emoji = "\U0001F534" if float(score) > 0.9 else "\U0001F7E0" if float(score) > 0.7 else "\U0001F7E1"
+        score_emoji = (
+            "\U0001f534"
+            if float(score) > 0.9
+            else "\U0001f7e0"
+            if float(score) > 0.7
+            else "\U0001f7e1"
+        )
         fields.append({
             "type": "mrkdwn",
             "text": f"*Fraud Score:*\n`{score}` {score_emoji}",
@@ -168,7 +174,11 @@ def build_customer_details_block(alert: SlackAlert) -> dict[str, Any] | None:
 
     if alert.customer_phone:
         # Partially mask phone for security
-        masked = alert.customer_phone[:7] + "xxx" + alert.customer_phone[-4:] if len(alert.customer_phone) > 11 else alert.customer_phone
+        masked = (
+            alert.customer_phone[:7] + "xxx" + alert.customer_phone[-4:]
+            if len(alert.customer_phone) > 11
+            else alert.customer_phone
+        )
         fields.append({
             "type": "mrkdwn",
             "text": f"*Phone:*\n`{masked}`",
@@ -204,7 +214,9 @@ def build_customer_details_block(alert: SlackAlert) -> dict[str, Any] | None:
 
 def build_context_block(alert: SlackAlert) -> dict[str, Any]:
     """Build context footer with timestamp and correlation ID."""
-    context_text = f"\U0001F550 {format_timestamp(alert)} | `corr:{alert.correlation_id}`"
+    context_text = (
+        f"\U0001f550 {format_timestamp(alert)} | `corr:{alert.correlation_id}`"
+    )
 
     return {
         "type": "context",
@@ -325,7 +337,9 @@ def format_alert_to_blocks(alert: SlackAlert) -> dict[str, Any]:
         blocks.append(fields_block)
 
     # Divider before details (for fraud alerts)
-    if alert.risk_signals or (alert.service == AlertService.FRAUD and alert.customer_phone):
+    if alert.risk_signals or (
+        alert.service == AlertService.FRAUD and alert.customer_phone
+    ):
         blocks.append(build_divider())
 
     # Risk signals (fraud alerts)
@@ -362,12 +376,14 @@ def format_alert_to_blocks(alert: SlackAlert) -> dict[str, Any]:
     return payload
 
 
-def format_simple_message(text: str, severity: AlertSeverity = AlertSeverity.INFO) -> dict[str, Any]:
+def format_simple_message(
+    text: str, severity: AlertSeverity = AlertSeverity.INFO
+) -> dict[str, Any]:
     """Format a simple text message (no blocks)."""
     emoji = {
-        AlertSeverity.CRITICAL: "\U0001F534",
-        AlertSeverity.WARN: "\U0001F7E1",
-        AlertSeverity.INFO: "\U0001F535",
+        AlertSeverity.CRITICAL: "\U0001f534",
+        AlertSeverity.WARN: "\U0001f7e1",
+        AlertSeverity.INFO: "\U0001f535",
     }[severity]
 
     return {

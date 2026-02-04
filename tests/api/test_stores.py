@@ -18,12 +18,16 @@ class TestStoreRoutes:
     ):
         """Test successful store creation."""
         # Register user
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         # Create store
-        response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
+        response = await client.post(
+            "/api/v1/stores/", json=sample_store_data, headers=headers
+        )
 
         assert response.status_code == 201
         data = response.json()
@@ -51,7 +55,9 @@ class TestStoreRoutes:
     ):
         """Test store creation with duplicate slug."""
         # Register user
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -59,7 +65,9 @@ class TestStoreRoutes:
         await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
 
         # Try to create another store with same slug (should generate unique slug)
-        response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
+        response = await client.post(
+            "/api/v1/stores/", json=sample_store_data, headers=headers
+        )
 
         # Should still succeed with a modified slug
         assert response.status_code == 201
@@ -73,7 +81,9 @@ class TestStoreRoutes:
     ):
         """Test listing user's stores."""
         # Register user
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -99,11 +109,15 @@ class TestStoreRoutes:
     ):
         """Test getting a store by ID."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
+        create_response = await client.post(
+            "/api/v1/stores/", json=sample_store_data, headers=headers
+        )
         store_id = create_response.json()["data"]["id"]
 
         # Get store
@@ -120,7 +134,9 @@ class TestStoreRoutes:
         sample_user_data: dict,
     ):
         """Test getting non-existent store."""
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -138,16 +154,25 @@ class TestStoreRoutes:
     ):
         """Test updating a store."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
+        create_response = await client.post(
+            "/api/v1/stores/", json=sample_store_data, headers=headers
+        )
         store_id = create_response.json()["data"]["id"]
 
         # Update store
-        update_data = {"name": "Updated Store Name", "description": "Updated description"}
-        response = await client.patch(f"/api/v1/stores/{store_id}", json=update_data, headers=headers)
+        update_data = {
+            "name": "Updated Store Name",
+            "description": "Updated description",
+        }
+        response = await client.patch(
+            f"/api/v1/stores/{store_id}", json=update_data, headers=headers
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -163,11 +188,15 @@ class TestStoreRoutes:
     ):
         """Test updating store by non-owner."""
         # Create first user and store
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
+        create_response = await client.post(
+            "/api/v1/stores/", json=sample_store_data, headers=headers
+        )
         store_id = create_response.json()["data"]["id"]
 
         # Create second user
@@ -179,7 +208,9 @@ class TestStoreRoutes:
 
         # Try to update store with different user
         update_data = {"name": "Hacked Name"}
-        response = await client.patch(f"/api/v1/stores/{store_id}", json=update_data, headers=headers2)
+        response = await client.patch(
+            f"/api/v1/stores/{store_id}", json=update_data, headers=headers2
+        )
 
         assert response.status_code == 403
 
@@ -192,11 +223,15 @@ class TestStoreRoutes:
     ):
         """Test deleting a store."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
-        create_response = await client.post("/api/v1/stores/", json=sample_store_data, headers=headers)
+        create_response = await client.post(
+            "/api/v1/stores/", json=sample_store_data, headers=headers
+        )
         store_id = create_response.json()["data"]["id"]
 
         # Delete store
@@ -215,11 +250,15 @@ class TestStoreRoutes:
         sample_user_data: dict,
     ):
         """Test store creation with invalid name."""
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         store_data = {"name": ""}  # Empty name
-        response = await client.post("/api/v1/stores/", json=store_data, headers=headers)
+        response = await client.post(
+            "/api/v1/stores/", json=store_data, headers=headers
+        )
 
         assert response.status_code == 422

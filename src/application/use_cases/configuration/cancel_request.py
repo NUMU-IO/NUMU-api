@@ -67,7 +67,7 @@ class CancelConfigurationRequestUseCase:
             details={
                 "request_id": str(request_id),
                 "cancelled_by": "merchant",
-            }
+            },
         )
         self.db.add(audit_log)
 

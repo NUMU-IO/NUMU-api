@@ -17,7 +17,15 @@ from src.infrastructure.tenancy.repository import TenantRepository
 logger = logging.getLogger(__name__)
 
 # Routes that don't require tenant context
-PUBLIC_PATHS = ("/health", "/docs", "/redoc", "/openapi.json", "/api/v1/public", "/api/v1/auth", "/admin")
+PUBLIC_PATHS = (
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/api/v1/public",
+    "/api/v1/auth",
+    "/admin",
+)
 
 
 class TenantMiddleware(BaseHTTPMiddleware):
@@ -49,7 +57,10 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 tenant = await tenant_repo.get_by_subdomain(subdomain)
 
             if not tenant or not tenant.is_active:
-                raise HTTPException(status_code=404, detail=f"Store '{subdomain}' not found or inactive.")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Store '{subdomain}' not found or inactive.",
+                )
 
             # Set tenant context (both schema and ID for RLS)
             request.state.tenant = tenant

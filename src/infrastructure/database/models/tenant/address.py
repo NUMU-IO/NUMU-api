@@ -42,7 +42,9 @@ class CustomerAddressModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
 
     # Relationships
-    customer = relationship("CustomerModel", back_populates="addresses", lazy="selectin")
+    customer = relationship(
+        "CustomerModel", back_populates="addresses", lazy="selectin"
+    )
 
     def __repr__(self) -> str:
         return f"<CustomerAddressModel(id={self.id}, customer_id={self.customer_id})>"

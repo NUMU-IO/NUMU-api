@@ -39,7 +39,9 @@ class LoginUserUseCase:
         log.debug("auth_user_found")
 
         # Verify password
-        if not self.password_service.verify_password(dto.password, user.hashed_password):
+        if not self.password_service.verify_password(
+            dto.password, user.hashed_password
+        ):
             log.warning("auth_login_failed", reason="invalid_password")
             raise InvalidCredentialsError()
 

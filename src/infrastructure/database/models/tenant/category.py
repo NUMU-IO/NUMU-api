@@ -41,7 +41,9 @@ class CategoryModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Relationships
     store = relationship("StoreModel", back_populates="categories", lazy="selectin")
     products = relationship("ProductModel", back_populates="category", lazy="selectin")
-    parent = relationship("CategoryModel", remote_side="CategoryModel.id", lazy="selectin")
+    parent = relationship(
+        "CategoryModel", remote_side="CategoryModel.id", lazy="selectin"
+    )
 
     def __repr__(self) -> str:
         return f"<CategoryModel(id={self.id}, name={self.name})>"

@@ -49,8 +49,7 @@ class UpdateConfigurationRequestUseCase:
         """
         # Get the request
         result = await self.db.execute(
-            select(ConfigurationRequest)
-            .where(ConfigurationRequest.id == request_id)
+            select(ConfigurationRequest).where(ConfigurationRequest.id == request_id)
         )
         request = result.scalar_one_or_none()
 
@@ -80,7 +79,10 @@ class UpdateConfigurationRequestUseCase:
             request.admin_notes = admin_notes
 
         if assigned_to is not None:
-            changes["assigned_to"] = {"from": str(request.assigned_to), "to": str(assigned_to)}
+            changes["assigned_to"] = {
+                "from": str(request.assigned_to),
+                "to": str(assigned_to),
+            }
             request.assigned_to = assigned_to
 
         # Create audit log
@@ -93,7 +95,7 @@ class UpdateConfigurationRequestUseCase:
             details={
                 "request_id": str(request_id),
                 "changes": changes,
-            }
+            },
         )
         self.db.add(audit_log)
 
@@ -103,9 +105,7 @@ class UpdateConfigurationRequestUseCase:
         return request
 
     def _validate_status_transition(
-        self,
-        current: RequestStatus,
-        new: RequestStatus
+        self, current: RequestStatus, new: RequestStatus
     ) -> None:
         """Validate that a status transition is allowed.
 

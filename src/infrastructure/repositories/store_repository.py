@@ -34,9 +34,13 @@ class StoreRepository(IStoreRepository):
             contact_email=model.contact_email,
             contact_phone=model.contact_phone,
             address=copy.deepcopy(model.address) if model.address else {},
-            social_links=copy.deepcopy(model.social_links) if model.social_links else {},
+            social_links=copy.deepcopy(model.social_links)
+            if model.social_links
+            else {},
             settings=copy.deepcopy(model.settings) if model.settings else {},
-            theme_settings=copy.deepcopy(model.theme_settings) if model.theme_settings else {},
+            theme_settings=copy.deepcopy(model.theme_settings)
+            if model.theme_settings
+            else {},
             tenant_id=model.tenant_id,
             created_at=model.created_at,
             updated_at=model.updated_at,

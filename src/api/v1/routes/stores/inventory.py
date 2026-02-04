@@ -108,7 +108,9 @@ async def get_inventory(
                 is_out_of_stock=product.quantity == 0,
                 price=price_cents,
                 inventory_value=price_cents * product.quantity,
-                status=product.status.value if hasattr(product.status, 'value') else str(product.status),
+                status=product.status.value
+                if hasattr(product.status, "value")
+                else str(product.status),
             )
         )
 
@@ -186,7 +188,9 @@ async def adjust_stock(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     if product.store_id != store_id:
-        raise HTTPException(status_code=403, detail="Product does not belong to this store")
+        raise HTTPException(
+            status_code=403, detail="Product does not belong to this store"
+        )
 
     # Calculate new quantity
     previous_quantity = product.quantity

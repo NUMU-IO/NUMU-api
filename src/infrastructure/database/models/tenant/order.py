@@ -79,7 +79,9 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
 
     # Payment
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    payment_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
 
     # Shipping
     shipping_method: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -93,14 +95,22 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Timestamps
-    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    fulfilled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     store = relationship("StoreModel", back_populates="orders", lazy="selectin")
     customer = relationship("CustomerModel", back_populates="orders", lazy="selectin")
-    invoice = relationship("InvoiceModel", back_populates="order", uselist=False, lazy="selectin")
+    invoice = relationship(
+        "InvoiceModel", back_populates="order", uselist=False, lazy="selectin"
+    )
     coupon = relationship("CouponModel", lazy="selectin")
 
     def __repr__(self) -> str:

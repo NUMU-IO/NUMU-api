@@ -76,10 +76,12 @@ class CreateConfigurationRequestUseCase:
             .where(ConfigurationRequest.tenant_id == tenant_id)
             .where(ConfigurationRequest.service_type == service_type)
             .where(ConfigurationRequest.service_name == service_name)
-            .where(ConfigurationRequest.status.in_([
-                RequestStatus.PENDING,
-                RequestStatus.IN_PROGRESS
-            ]))
+            .where(
+                ConfigurationRequest.status.in_([
+                    RequestStatus.PENDING,
+                    RequestStatus.IN_PROGRESS,
+                ])
+            )
         )
         if existing_request.scalar_one_or_none():
             raise ValueError(
@@ -111,7 +113,7 @@ class CreateConfigurationRequestUseCase:
                 "request_id": str(request.id),
                 "priority": priority.value,
                 "has_notes": bool(notes),
-            }
+            },
         )
         self.db.add(audit_log)
 

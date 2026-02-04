@@ -32,7 +32,9 @@ class GetOrderUseCase:
             raise EntityNotFoundError("Store", str(store_id))
 
         if store.owner_id != user_id:
-            raise AuthorizationError("You don't have permission to view orders in this store")
+            raise AuthorizationError(
+                "You don't have permission to view orders in this store"
+            )
 
         # Get order
         order = await self.order_repository.get_by_id(order_id)

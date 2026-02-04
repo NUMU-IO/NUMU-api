@@ -147,7 +147,9 @@ async def track_bosta_delivery(tracking_number: str):
         return {
             "tracking_number": tracking.tracking_number,
             "status": tracking.status,
-            "estimated_delivery": tracking.estimated_delivery.isoformat() if tracking.estimated_delivery else None,
+            "estimated_delivery": tracking.estimated_delivery.isoformat()
+            if tracking.estimated_delivery
+            else None,
             "events": [
                 {
                     "status": event.status,

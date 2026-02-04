@@ -63,9 +63,10 @@ class TestAdminAuthLogin:
         """Test successful login with SUPER_ADMIN role."""
         # Setup form data
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "admin@example.com"), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", "admin@example.com"),
+                ("password", "password123"),
+            ])
         )
 
         # Mock database session and query
@@ -127,9 +128,10 @@ class TestAdminAuthLogin:
     ):
         """Test login fails with incorrect password."""
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "admin@example.com"), ("password", "wrongpassword")]
-            )
+            return_value=FormData([
+                ("username", "admin@example.com"),
+                ("password", "wrongpassword"),
+            ])
         )
 
         with (
@@ -163,9 +165,10 @@ class TestAdminAuthLogin:
     async def test_login_fails_with_non_existent_user(self, admin_auth, mock_request):
         """Test login fails when user doesn't exist."""
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "nonexistent@example.com"), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", "nonexistent@example.com"),
+                ("password", "password123"),
+            ])
         )
 
         with patch("src.api.admin.auth.AsyncSessionLocal") as mock_session_local:
@@ -192,9 +195,10 @@ class TestAdminAuthLogin:
     ):
         """Test login fails with non-SUPER_ADMIN roles."""
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "user@example.com"), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", "user@example.com"),
+                ("password", "password123"),
+            ])
         )
 
         with (
@@ -228,9 +232,10 @@ class TestAdminAuthLogin:
         """Test login explicitly fails with CUSTOMER role."""
         mock_regular_user.role = UserRole.CUSTOMER
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "user@example.com"), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", "user@example.com"),
+                ("password", "password123"),
+            ])
         )
 
         with (
@@ -264,9 +269,10 @@ class TestAdminAuthLogin:
         """Test login explicitly fails with STORE_OWNER role."""
         mock_regular_user.role = UserRole.STORE_OWNER
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "owner@example.com"), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", "owner@example.com"),
+                ("password", "password123"),
+            ])
         )
 
         with (
@@ -297,9 +303,10 @@ class TestAdminAuthLogin:
     async def test_login_handles_database_exception(self, admin_auth, mock_request):
         """Test login handles database exceptions gracefully."""
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "admin@example.com"), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", "admin@example.com"),
+                ("password", "password123"),
+            ])
         )
 
         with patch("src.api.admin.auth.AsyncSessionLocal") as mock_session_local:
@@ -429,9 +436,10 @@ class TestAdminAuthSessionPersistence:
     ):
         """Test that session data persists after successful login."""
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", "admin@example.com"), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", "admin@example.com"),
+                ("password", "password123"),
+            ])
         )
 
         with (
@@ -512,9 +520,10 @@ class TestAdminAuthSessionPersistence:
         expected_email = mock_super_admin_user.email
 
         mock_request.form = AsyncMock(
-            return_value=FormData(
-                [("username", expected_email), ("password", "password123")]
-            )
+            return_value=FormData([
+                ("username", expected_email),
+                ("password", "password123"),
+            ])
         )
 
         with (

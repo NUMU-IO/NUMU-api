@@ -89,7 +89,9 @@ class GetDashboardStatsUseCase:
             raise EntityNotFoundError("Store", str(store_id))
 
         if store.owner_id != user_id:
-            raise AuthorizationError("You don't have permission to view this store's dashboard")
+            raise AuthorizationError(
+                "You don't have permission to view this store's dashboard"
+            )
 
         now = datetime.utcnow()
         period_start = now - timedelta(days=days)
@@ -107,7 +109,9 @@ class GetDashboardStatsUseCase:
 
         # Calculate revenue change percentage
         if previous_revenue > 0:
-            revenue_change_percent = ((current_revenue - previous_revenue) / previous_revenue) * 100
+            revenue_change_percent = (
+                (current_revenue - previous_revenue) / previous_revenue
+            ) * 100
         elif current_revenue > 0:
             revenue_change_percent = 100.0
         else:
@@ -115,10 +119,18 @@ class GetDashboardStatsUseCase:
 
         # Get order counts by status
         total_orders = await self.order_repository.count_by_store(store_id)
-        pending_orders = await self.order_repository.count_by_store(store_id, OrderStatus.PENDING)
-        processing_orders = await self.order_repository.count_by_store(store_id, OrderStatus.PROCESSING)
-        completed_orders = await self.order_repository.count_by_store(store_id, OrderStatus.DELIVERED)
-        cancelled_orders = await self.order_repository.count_by_store(store_id, OrderStatus.CANCELLED)
+        pending_orders = await self.order_repository.count_by_store(
+            store_id, OrderStatus.PENDING
+        )
+        processing_orders = await self.order_repository.count_by_store(
+            store_id, OrderStatus.PROCESSING
+        )
+        completed_orders = await self.order_repository.count_by_store(
+            store_id, OrderStatus.DELIVERED
+        )
+        cancelled_orders = await self.order_repository.count_by_store(
+            store_id, OrderStatus.CANCELLED
+        )
 
         # Get customer counts
         total_customers = await self.customer_repository.count_by_store(store_id)
@@ -161,7 +173,9 @@ class GetDashboardStatsUseCase:
             raise EntityNotFoundError("Store", str(store_id))
 
         if store.owner_id != user_id:
-            raise AuthorizationError("You don't have permission to view this store's dashboard")
+            raise AuthorizationError(
+                "You don't have permission to view this store's dashboard"
+            )
 
         now = datetime.utcnow()
         data_points = []
@@ -203,7 +217,9 @@ class GetDashboardStatsUseCase:
             raise EntityNotFoundError("Store", str(store_id))
 
         if store.owner_id != user_id:
-            raise AuthorizationError("You don't have permission to view this store's dashboard")
+            raise AuthorizationError(
+                "You don't have permission to view this store's dashboard"
+            )
 
         # Get recent orders to aggregate product sales
         now = datetime.utcnow()
@@ -217,7 +233,10 @@ class GetDashboardStatsUseCase:
         product_sales: dict[UUID, dict] = {}
         for order in orders:
             # Only count completed/paid orders
-            if order.payment_status not in [PaymentStatus.PAID, PaymentStatus.PARTIALLY_REFUNDED]:
+            if order.payment_status not in [
+                PaymentStatus.PAID,
+                PaymentStatus.PARTIALLY_REFUNDED,
+            ]:
                 continue
 
             for item in order.line_items:

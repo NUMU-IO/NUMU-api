@@ -104,7 +104,9 @@ async def create_product(
             status=result.status,
             price=str(result.price),
             price_currency=result.price_currency,
-            compare_at_price=str(result.compare_at_price) if result.compare_at_price else None,
+            compare_at_price=str(result.compare_at_price)
+            if result.compare_at_price
+            else None,
             cost_price=str(result.cost_price) if result.cost_price else None,
             sku=result.sku,
             quantity=result.quantity,
@@ -138,14 +140,21 @@ async def list_products(
     sku: str | None = Query(None, description="Filter by SKU (partial match)"),
     price_min: int | None = Query(None, ge=0, description="Minimum price in cents"),
     price_max: int | None = Query(None, ge=0, description="Maximum price in cents"),
-    sort_by: str | None = Query(None, description="Sort field: name, price, created_at, updated_at, quantity"),
+    sort_by: str | None = Query(
+        None, description="Sort field: name, price, created_at, updated_at, quantity"
+    ),
     sort_order: str = Query("asc", description="Sort direction: asc or desc"),
 ):
     """List products for a store with optional filtering, search, and sorting."""
     use_case = ListProductsUseCase(product_repository=product_repo)
 
     # Use the advanced filter path when any extended filter is present
-    has_advanced_filters = any([sku, price_min is not None, price_max is not None, sort_by])
+    has_advanced_filters = any([
+        sku,
+        price_min is not None,
+        price_max is not None,
+        sort_by,
+    ])
 
     if has_advanced_filters or search:
         skip = (page - 1) * limit
@@ -213,7 +222,9 @@ async def list_products(
             status=product.status,
             price=str(product.price),
             price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price) if product.compare_at_price else None,
+            compare_at_price=str(product.compare_at_price)
+            if product.compare_at_price
+            else None,
             cost_price=str(product.cost_price) if product.cost_price else None,
             sku=product.sku,
             quantity=product.quantity,
@@ -269,7 +280,9 @@ async def get_product(
             status=result.status,
             price=str(result.price),
             price_currency=result.price_currency,
-            compare_at_price=str(result.compare_at_price) if result.compare_at_price else None,
+            compare_at_price=str(result.compare_at_price)
+            if result.compare_at_price
+            else None,
             cost_price=str(result.cost_price) if result.cost_price else None,
             sku=result.sku,
             quantity=result.quantity,
@@ -342,7 +355,9 @@ async def update_product(
             status=result.status,
             price=str(result.price),
             price_currency=result.price_currency,
-            compare_at_price=str(result.compare_at_price) if result.compare_at_price else None,
+            compare_at_price=str(result.compare_at_price)
+            if result.compare_at_price
+            else None,
             cost_price=str(result.cost_price) if result.cost_price else None,
             sku=result.sku,
             quantity=result.quantity,
@@ -404,7 +419,9 @@ async def upload_product_image(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    storage_service: Annotated[CloudflareR2StorageService, Depends(get_storage_service)],
+    storage_service: Annotated[
+        CloudflareR2StorageService, Depends(get_storage_service)
+    ],
 ):
     """Upload an image for a product.
 
@@ -457,7 +474,9 @@ async def delete_product_image(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    storage_service: Annotated[CloudflareR2StorageService, Depends(get_storage_service)],
+    storage_service: Annotated[
+        CloudflareR2StorageService, Depends(get_storage_service)
+    ],
 ):
     """Delete a product image.
 

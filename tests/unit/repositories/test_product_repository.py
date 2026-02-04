@@ -132,8 +132,8 @@ class TestProductRepository:
         # Mock the refresh to update the model
         self.mock_session.refresh = AsyncMock(return_value=None)
 
-        with patch.object(self.repository, '_to_model', return_value=mock_model):
-            with patch.object(self.repository, '_to_entity', return_value=product):
+        with patch.object(self.repository, "_to_model", return_value=mock_model):
+            with patch.object(self.repository, "_to_entity", return_value=product):
                 result = await self.repository.create(product)
 
         assert result is not None

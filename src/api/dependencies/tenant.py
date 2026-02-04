@@ -58,6 +58,7 @@ def require_tenant_owner():
         ):
             ...
     """
+
     async def check_ownership(
         tenant: Annotated[TenantModel, Depends(get_current_tenant)],
         user_id: Annotated[UUID, Depends(get_current_user_id)],

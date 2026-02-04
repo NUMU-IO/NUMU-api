@@ -19,6 +19,7 @@ class AlertSeverity(StrEnum):
     WARN: < 2 hours response, requires attention
     INFO: Next business day, informational only
     """
+
     CRITICAL = "CRITICAL"
     WARN = "WARN"
     INFO = "INFO"
@@ -26,6 +27,7 @@ class AlertSeverity(StrEnum):
 
 class AlertService(StrEnum):
     """Service categories for alerts."""
+
     PAYMENTS = "payments"
     FRAUD = "fraud"
     SHIPPING = "shipping"
@@ -37,6 +39,7 @@ class AlertService(StrEnum):
 @dataclass
 class AlertAction:
     """Interactive button for Slack alert."""
+
     text: str
     url: str | None = None
     action_id: str | None = None  # For interactive callbacks
@@ -60,6 +63,7 @@ class SlackAlert:
     - amount: Financial amount (for payment alerts)
     - correlation_id: Links to logs/traces
     """
+
     # Required fields
     severity: AlertSeverity
     title: str
@@ -124,9 +128,9 @@ class SlackAlert:
     def severity_emoji(self) -> str:
         """Get emoji for severity level."""
         return {
-            AlertSeverity.CRITICAL: "\U0001F534",  # Red circle
-            AlertSeverity.WARN: "\U0001F7E1",      # Yellow circle
-            AlertSeverity.INFO: "\U0001F535",      # Blue circle
+            AlertSeverity.CRITICAL: "\U0001f534",  # Red circle
+            AlertSeverity.WARN: "\U0001f7e1",  # Yellow circle
+            AlertSeverity.INFO: "\U0001f535",  # Blue circle
         }[self.severity]
 
     def with_suppressed_count(self, count: int) -> "SlackAlert":
@@ -159,6 +163,7 @@ class SlackAlert:
 # ============================================================================
 # Alert Builder Functions
 # ============================================================================
+
 
 def create_critical_alert(
     title: str,

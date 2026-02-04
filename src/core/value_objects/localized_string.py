@@ -32,7 +32,9 @@ class LocalizedString(BaseModel):
                 v for k, v in data.items() if isinstance(v, str) and v.strip()
             )
             if not has_value:
-                raise ValueError("LocalizedString must have at least one non-empty value")
+                raise ValueError(
+                    "LocalizedString must have at least one non-empty value"
+                )
         return data
 
     def get(self, locale: str = "en", fallback_locale: str = "en") -> str | None:

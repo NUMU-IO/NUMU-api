@@ -95,7 +95,9 @@ class TestCustomerRepository:
         store_id = uuid4()
 
         mock_models = [
-            self._create_mock_customer_model(store_id=store_id, email=f"customer{i}@example.com")
+            self._create_mock_customer_model(
+                store_id=store_id, email=f"customer{i}@example.com"
+            )
             for i in range(5)
         ]
 

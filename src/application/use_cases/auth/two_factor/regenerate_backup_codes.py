@@ -108,8 +108,7 @@ class RegenerateBackupCodesUseCase:
 
         # Hash backup codes for storage
         hashed_backup_codes = [
-            self.totp_service.hash_backup_code(code)
-            for code in plaintext_backup_codes
+            self.totp_service.hash_backup_code(code) for code in plaintext_backup_codes
         ]
 
         # 5. Update entity with new backup codes

@@ -42,6 +42,7 @@ class OrderRepository(IOrderRepository):
     def _dict_to_line_item(self, data: dict) -> OrderLineItem:
         """Convert dict to OrderLineItem."""
         from decimal import Decimal
+
         return OrderLineItem(
             product_id=UUID(data["product_id"]),
             product_name=data["product_name"],
@@ -90,9 +91,13 @@ class OrderRepository(IOrderRepository):
             store_id=model.store_id,
             customer_id=model.customer_id,
             order_number=model.order_number,
-            line_items=[self._dict_to_line_item(item) for item in (model.line_items or [])],
+            line_items=[
+                self._dict_to_line_item(item) for item in (model.line_items or [])
+            ],
             shipping_address=self._dict_to_address(model.shipping_address),
-            billing_address=self._dict_to_address(model.billing_address) if model.billing_address else None,
+            billing_address=self._dict_to_address(model.billing_address)
+            if model.billing_address
+            else None,
             status=model.status,
             payment_status=model.payment_status,
             fulfillment_status=model.fulfillment_status,
@@ -125,7 +130,9 @@ class OrderRepository(IOrderRepository):
             order_number=entity.order_number,
             line_items=[self._line_item_to_dict(item) for item in entity.line_items],
             shipping_address=self._address_to_dict(entity.shipping_address),
-            billing_address=self._address_to_dict(entity.billing_address) if entity.billing_address else None,
+            billing_address=self._address_to_dict(entity.billing_address)
+            if entity.billing_address
+            else None,
             status=entity.status,
             payment_status=entity.payment_status,
             fulfillment_status=entity.fulfillment_status,
@@ -189,9 +196,15 @@ class OrderRepository(IOrderRepository):
             model.status = entity.status
             model.payment_status = entity.payment_status
             model.fulfillment_status = entity.fulfillment_status
-            model.line_items = [self._line_item_to_dict(item) for item in entity.line_items]
+            model.line_items = [
+                self._line_item_to_dict(item) for item in entity.line_items
+            ]
             model.shipping_address = self._address_to_dict(entity.shipping_address)
-            model.billing_address = self._address_to_dict(entity.billing_address) if entity.billing_address else None
+            model.billing_address = (
+                self._address_to_dict(entity.billing_address)
+                if entity.billing_address
+                else None
+            )
             model.subtotal = entity.subtotal
             model.shipping_cost = entity.shipping_cost
             model.tax_amount = entity.tax_amount
@@ -227,9 +240,7 @@ class OrderRepository(IOrderRepository):
 
     async def count(self) -> int:
         """Get total count of orders."""
-        result = await self.session.execute(
-            select(func.count(OrderModel.id))
-        )
+        result = await self.session.execute(select(func.count(OrderModel.id)))
         return result.scalar() or 0
 
     async def get_by_store(
@@ -347,7 +358,9 @@ class OrderRepository(IOrderRepository):
     async def count_by_customer(self, customer_id: UUID) -> int:
         """Get total count of orders for a customer."""
         result = await self.session.execute(
-            select(func.count(OrderModel.id)).where(OrderModel.customer_id == customer_id)
+            select(func.count(OrderModel.id)).where(
+                OrderModel.customer_id == customer_id
+            )
         )
         return result.scalar() or 0
 
@@ -359,8 +372,7 @@ class OrderRepository(IOrderRepository):
     ) -> int:
         """Get total revenue for a date range (in cents)."""
         result = await self.session.execute(
-            select(func.coalesce(func.sum(OrderModel.total), 0))
-            .where(
+            select(func.coalesce(func.sum(OrderModel.total), 0)).where(
                 OrderModel.store_id == store_id,
                 OrderModel.created_at >= start_date,
                 OrderModel.created_at <= end_date,
@@ -386,6 +398,7 @@ class OrderRepository(IOrderRepository):
     ) -> list[Order]:
         """Search orders by order number or customer notes."""
         from sqlalchemy import or_
+
         search_term = f"%{query}%"
         result = await self.session.execute(
             select(OrderModel)

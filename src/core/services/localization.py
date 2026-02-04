@@ -249,7 +249,9 @@ class LocalizationService:
         """
         formatted = self.format_number(amount, locale)
 
-        if locale == Locale.AR or (locale is None and get_current_locale() == Locale.AR):
+        if locale == Locale.AR or (
+            locale is None and get_current_locale() == Locale.AR
+        ):
             # Arabic: number followed by currency
             return f"{formatted} {currency}"
         else:

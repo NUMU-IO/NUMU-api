@@ -109,7 +109,9 @@ async def get_sales_overview(
     previous_period_start = period_start - timedelta(days=days)
 
     # Current period
-    current_revenue = await order_repo.get_revenue_by_date_range(store_id, period_start, now)
+    current_revenue = await order_repo.get_revenue_by_date_range(
+        store_id, period_start, now
+    )
     current_orders = await order_repo.count_by_store(store_id)
 
     # Previous period for comparison
@@ -175,7 +177,9 @@ async def get_sales_chart(
         day_end = now - timedelta(days=i)
         day_start = day_end - timedelta(days=1)
 
-        revenue = await order_repo.get_revenue_by_date_range(store_id, day_start, day_end)
+        revenue = await order_repo.get_revenue_by_date_range(
+            store_id, day_start, day_end
+        )
         orders = await order_repo.get_by_date_range(store_id, day_start, day_end)
 
         data_points.append(
@@ -223,7 +227,10 @@ async def get_top_products(
     total_revenue = 0
 
     for order in orders:
-        if order.payment_status not in [PaymentStatus.PAID, PaymentStatus.PARTIALLY_REFUNDED]:
+        if order.payment_status not in [
+            PaymentStatus.PAID,
+            PaymentStatus.PARTIALLY_REFUNDED,
+        ]:
             continue
 
         for item in order.line_items:
@@ -296,15 +303,21 @@ async def get_sales_by_location(
     total_sales = 0
 
     for order in orders:
-        if order.payment_status not in [PaymentStatus.PAID, PaymentStatus.PARTIALLY_REFUNDED]:
+        if order.payment_status not in [
+            PaymentStatus.PAID,
+            PaymentStatus.PARTIALLY_REFUNDED,
+        ]:
             continue
 
         # Get location from shipping address
         location = "Unknown"
         if order.shipping_address:
-            location = order.shipping_address.get("governorate") or \
-                       order.shipping_address.get("city") or \
-                       order.shipping_address.get("state") or "Unknown"
+            location = (
+                order.shipping_address.get("governorate")
+                or order.shipping_address.get("city")
+                or order.shipping_address.get("state")
+                or "Unknown"
+            )
 
         if location not in location_sales:
             location_sales[location] = {"sales": 0, "orders": 0}
@@ -373,7 +386,9 @@ async def get_customer_analytics(
 
     for order in orders:
         if order.customer_id:
-            customer_orders[order.customer_id] = customer_orders.get(order.customer_id, 0) + 1
+            customer_orders[order.customer_id] = (
+                customer_orders.get(order.customer_id, 0) + 1
+            )
         total_revenue += order.total_amount
 
     new_customers = sum(1 for count in customer_orders.values() if count == 1)
@@ -421,7 +436,9 @@ async def get_conversion_stats(
     # These would typically come from analytics/tracking integration
     # For now, we estimate based on orders
     estimated_visitors = total_orders * 30  # Rough estimate: 3.3% conversion
-    conversion_rate = (total_orders / estimated_visitors * 100) if estimated_visitors > 0 else 0
+    conversion_rate = (
+        (total_orders / estimated_visitors * 100) if estimated_visitors > 0 else 0
+    )
 
     # Cart abandonment - would need cart tracking
     # Estimate: industry average is ~70%

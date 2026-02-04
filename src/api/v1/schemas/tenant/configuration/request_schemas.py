@@ -18,20 +18,18 @@ class ConfigurationRequestCreate(BaseModel):
 
     service_type: ServiceType = Field(
         ...,
-        description="Type of service to configure (payment_gateway, shipping_carrier, etc.)"
+        description="Type of service to configure (payment_gateway, shipping_carrier, etc.)",
     )
     service_name: ServiceName = Field(
-        ...,
-        description="Specific service provider name (fawry, paymob, aramex, etc.)"
+        ..., description="Specific service provider name (fawry, paymob, aramex, etc.)"
     )
     notes: str | None = Field(
         None,
         max_length=1000,
-        description="Optional notes or requirements from the merchant"
+        description="Optional notes or requirements from the merchant",
     )
     priority: RequestPriority = Field(
-        RequestPriority.NORMAL,
-        description="Priority level for the request"
+        RequestPriority.NORMAL, description="Priority level for the request"
     )
 
     class Config:
@@ -40,7 +38,7 @@ class ConfigurationRequestCreate(BaseModel):
                 "service_type": "payment_gateway",
                 "service_name": "fawry",
                 "notes": "Please configure Fawry for our store. We need both card and reference payments.",
-                "priority": "normal"
+                "priority": "normal",
             }
         }
 
@@ -48,22 +46,13 @@ class ConfigurationRequestCreate(BaseModel):
 class ConfigurationRequestUpdate(BaseModel):
     """Schema for updating a configuration request (admin only)."""
 
-    status: RequestStatus | None = Field(
-        None,
-        description="New status for the request"
-    )
-    priority: RequestPriority | None = Field(
-        None,
-        description="New priority level"
-    )
+    status: RequestStatus | None = Field(None, description="New status for the request")
+    priority: RequestPriority | None = Field(None, description="New priority level")
     admin_notes: str | None = Field(
-        None,
-        max_length=2000,
-        description="Notes from the administrator"
+        None, max_length=2000, description="Notes from the administrator"
     )
     assigned_to: UUID | None = Field(
-        None,
-        description="Admin ID to assign the request to"
+        None, description="Admin ID to assign the request to"
     )
 
 
@@ -104,7 +93,7 @@ class ConfigurationRequestResponse(BaseModel):
                 "assigned_to": None,
                 "created_at": "2026-01-20T10:00:00Z",
                 "updated_at": "2026-01-20T10:00:00Z",
-                "completed_at": None
+                "completed_at": None,
             }
         }
 
@@ -119,12 +108,7 @@ class ConfigurationRequestListResponse(BaseModel):
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "items": [],
-                "total": 0,
-                "page": 1,
-                "page_size": 20
-            }
+            "example": {"items": [], "total": 0, "page": 1, "page_size": 20}
         }
 
 
@@ -135,44 +119,33 @@ class ConfigurationStatusResponse(BaseModel):
     service_name: ServiceName
 
     is_configured: bool = Field(
-        ...,
-        description="Whether credentials are configured for this service"
+        ..., description="Whether credentials are configured for this service"
     )
-    is_active: bool = Field(
-        ...,
-        description="Whether the service is currently enabled"
-    )
+    is_active: bool = Field(..., description="Whether the service is currently enabled")
     is_validated: bool = Field(
-        ...,
-        description="Whether the credentials have been validated with the provider"
+        ..., description="Whether the credentials have been validated with the provider"
     )
 
     last_configured_at: datetime | None = Field(
-        None,
-        description="When the credentials were last configured"
+        None, description="When the credentials were last configured"
     )
     last_validated_at: datetime | None = Field(
-        None,
-        description="When the credentials were last validated"
+        None, description="When the credentials were last validated"
     )
 
     has_pending_request: bool = Field(
-        ...,
-        description="Whether there's a pending configuration request"
+        ..., description="Whether there's a pending configuration request"
     )
     pending_request_id: UUID | None = Field(
-        None,
-        description="ID of the pending request if any"
+        None, description="ID of the pending request if any"
     )
     pending_request_status: RequestStatus | None = Field(
-        None,
-        description="Status of the pending request"
+        None, description="Status of the pending request"
     )
 
     # Display info (masked credentials)
     display_info: dict | None = Field(
-        None,
-        description="Safe display information (masked values)"
+        None, description="Safe display information (masked values)"
     )
 
     class Config:
@@ -188,8 +161,6 @@ class ConfigurationStatusResponse(BaseModel):
                 "has_pending_request": False,
                 "pending_request_id": None,
                 "pending_request_status": None,
-                "display_info": {
-                    "merchant_code": "M***5678"
-                }
+                "display_info": {"merchant_code": "M***5678"},
             }
         }

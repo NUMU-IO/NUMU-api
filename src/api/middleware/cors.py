@@ -77,7 +77,9 @@ def _validate_origins(origins: list[str], environment: str) -> list[str]:
         elif origin == "*":
             validated.append(origin)
         else:
-            logger.warning(f"CORS: Invalid origin format '{origin}' - must include protocol")
+            logger.warning(
+                f"CORS: Invalid origin format '{origin}' - must include protocol"
+            )
 
     return validated
 
@@ -136,7 +138,9 @@ def setup_cors(app: FastAPI) -> None:
     if origins:
         logger.info(f"CORS: Configured allowed origins: {origins}")
     else:
-        logger.warning("CORS: No valid origins configured - cross-origin requests will fail")
+        logger.warning(
+            "CORS: No valid origins configured - cross-origin requests will fail"
+        )
 
     # Check for credentials + wildcard conflict
     allow_credentials = True
@@ -173,7 +177,9 @@ def setup_cors(app: FastAPI) -> None:
         allow_methods=allowed_methods,
         allow_headers=allowed_headers,
         expose_headers=DEFAULT_EXPOSED_HEADERS,
-        max_age=600 if environment == "production" else 0,  # Cache preflight for 10 min in prod
+        max_age=600
+        if environment == "production"
+        else 0,  # Cache preflight for 10 min in prod
     )
 
     if settings.debug:

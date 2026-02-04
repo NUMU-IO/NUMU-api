@@ -92,7 +92,15 @@ EGYPTIAN_TEMPLATES = {
             name="order_confirmation_en",
             language="en",
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number", "total", "store_name"]},
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "total",
+                        "store_name",
+                    ],
+                },
             ],
         ),
         "ar": MessageTemplate(
@@ -100,7 +108,15 @@ EGYPTIAN_TEMPLATES = {
             name="order_confirmation_ar",
             language="ar",
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number", "total", "store_name"]},
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "total",
+                        "store_name",
+                    ],
+                },
             ],
         ),
     },
@@ -110,7 +126,15 @@ EGYPTIAN_TEMPLATES = {
             name="order_shipped_en",
             language="en",
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number", "tracking_number", "carrier"]},
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "tracking_number",
+                        "carrier",
+                    ],
+                },
             ],
         ),
         "ar": MessageTemplate(
@@ -118,7 +142,15 @@ EGYPTIAN_TEMPLATES = {
             name="order_shipped_ar",
             language="ar",
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number", "tracking_number", "carrier"]},
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "tracking_number",
+                        "carrier",
+                    ],
+                },
             ],
         ),
     },
@@ -146,7 +178,10 @@ EGYPTIAN_TEMPLATES = {
             name="order_delivered_en",
             language="en",
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number", "store_name"]},
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "order_number", "store_name"],
+                },
             ],
         ),
         "ar": MessageTemplate(
@@ -154,7 +189,10 @@ EGYPTIAN_TEMPLATES = {
             name="order_delivered_ar",
             language="ar",
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number", "store_name"]},
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "order_number", "store_name"],
+                },
             ],
         ),
     },
@@ -164,7 +202,10 @@ EGYPTIAN_TEMPLATES = {
             name="payment_received_en",
             language="en",
             components=[
-                {"type": "body", "parameters": ["customer_name", "amount", "order_number"]},
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "amount", "order_number"],
+                },
             ],
         ),
         "ar": MessageTemplate(
@@ -172,7 +213,10 @@ EGYPTIAN_TEMPLATES = {
             name="payment_received_ar",
             language="ar",
             components=[
-                {"type": "body", "parameters": ["customer_name", "amount", "order_number"]},
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "amount", "order_number"],
+                },
             ],
         ),
     },

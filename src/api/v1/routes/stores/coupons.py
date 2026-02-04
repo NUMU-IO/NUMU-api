@@ -42,8 +42,12 @@ def _coupon_response(result) -> CouponResponse:
         code=result.code,
         coupon_type=result.coupon_type,
         value=str(result.value),
-        min_order_amount=str(result.min_order_amount) if result.min_order_amount is not None else None,
-        max_discount_amount=str(result.max_discount_amount) if result.max_discount_amount is not None else None,
+        min_order_amount=str(result.min_order_amount)
+        if result.min_order_amount is not None
+        else None,
+        max_discount_amount=str(result.max_discount_amount)
+        if result.max_discount_amount is not None
+        else None,
         usage_limit=result.usage_limit,
         usage_count=result.usage_count,
         valid_from=str(result.valid_from) if result.valid_from else None,

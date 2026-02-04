@@ -109,7 +109,9 @@ async def check_subdomain(
         data=CheckSubdomainResponse(
             subdomain=subdomain,
             available=not exists,
-            message="Subdomain is already taken" if exists else "Subdomain is available",
+            message="Subdomain is already taken"
+            if exists
+            else "Subdomain is available",
         ),
         message="Subdomain check completed",
     )
@@ -129,7 +131,9 @@ async def create_store(
     """Create a new store with a subdomain."""
     store_repo = StoreRepository(db)
     tenant_service = TenantService(db)
-    use_case = CreateStoreUseCase(store_repository=store_repo, tenant_service=tenant_service)
+    use_case = CreateStoreUseCase(
+        store_repository=store_repo, tenant_service=tenant_service
+    )
 
     dto = CreateStoreDTO(
         name=request.name,

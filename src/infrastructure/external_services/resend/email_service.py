@@ -82,9 +82,9 @@ class ResendEmailService(IEmailService):
         for item in order_details.get("items", []):
             items_html += f"""
             <tr>
-                <td>{item['name']}</td>
-                <td>{item['quantity']}</td>
-                <td>${item['price']:.2f}</td>
+                <td>{item["name"]}</td>
+                <td>{item["quantity"]}</td>
+                <td>${item["price"]:.2f}</td>
             </tr>
             """
 
@@ -107,7 +107,7 @@ class ResendEmailService(IEmailService):
             </tbody>
         </table>
 
-        <p><strong>Total:</strong> ${order_details.get('total', 0):.2f}</p>
+        <p><strong>Total:</strong> ${order_details.get("total", 0):.2f}</p>
         """
         message = EmailMessage(
             to=email,
@@ -128,7 +128,7 @@ class ResendEmailService(IEmailService):
         if tracking_number:
             tracking_info = f"""
             <p><strong>Tracking Number:</strong> {tracking_number}</p>
-            <p><strong>Carrier:</strong> {carrier or 'N/A'}</p>
+            <p><strong>Carrier:</strong> {carrier or "N/A"}</p>
             """
 
         html_content = f"""

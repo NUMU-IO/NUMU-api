@@ -38,7 +38,9 @@ class CustomerAddressRepository(ICustomerAddressRepository):
             updated_at=model.updated_at,
         )
 
-    def _to_model(self, entity: CustomerAddress, tenant_id: UUID) -> CustomerAddressModel:
+    def _to_model(
+        self, entity: CustomerAddress, tenant_id: UUID
+    ) -> CustomerAddressModel:
         """Convert domain entity to database model."""
         return CustomerAddressModel(
             id=entity.id,
@@ -123,9 +125,7 @@ class CustomerAddressRepository(ICustomerAddressRepository):
 
     async def count(self) -> int:
         """Get total count of addresses."""
-        result = await self.session.execute(
-            select(func.count(CustomerAddressModel.id))
-        )
+        result = await self.session.execute(select(func.count(CustomerAddressModel.id)))
         return result.scalar() or 0
 
     async def get_by_customer(

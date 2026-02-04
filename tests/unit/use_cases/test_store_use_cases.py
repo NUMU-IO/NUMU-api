@@ -54,6 +54,7 @@ class TestCreateStoreUseCase:
         self.mock_store_repo.create.return_value = created_store
 
         from src.application.dto.store import CreateStoreDTO
+
         dto = CreateStoreDTO(
             name="My Store",
             subdomain="mystore",
@@ -214,6 +215,7 @@ class TestUpdateStoreUseCase:
         self.mock_store_repo.update.return_value = updated_store
 
         from src.application.dto.store import UpdateStoreDTO
+
         dto = UpdateStoreDTO(name="Updated Store")
 
         result = await self.use_case.execute(
@@ -230,6 +232,7 @@ class TestUpdateStoreUseCase:
         self.mock_store_repo.get_by_id.return_value = self.sample_store
 
         from src.application.dto.store import UpdateStoreDTO
+
         dto = UpdateStoreDTO(name="Hacked Store")
 
         with pytest.raises(AuthorizationError):

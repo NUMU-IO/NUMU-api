@@ -87,9 +87,13 @@ def _order_to_response(order_dto) -> OrderResponse:
         store_id=str(order_dto.store_id),
         customer_id=str(order_dto.customer_id),
         order_number=order_dto.order_number,
-        line_items=[_order_line_item_to_response(item) for item in order_dto.line_items],
+        line_items=[
+            _order_line_item_to_response(item) for item in order_dto.line_items
+        ],
         shipping_address=_order_address_to_response(order_dto.shipping_address),
-        billing_address=_order_address_to_response(order_dto.billing_address) if order_dto.billing_address else None,
+        billing_address=_order_address_to_response(order_dto.billing_address)
+        if order_dto.billing_address
+        else None,
         status=order_dto.status,
         payment_status=order_dto.payment_status,
         fulfillment_status=order_dto.fulfillment_status,
@@ -240,9 +244,15 @@ async def list_orders(
     limit: int = Query(20, ge=1, le=100),
     order_status: str | None = Query(None, alias="status"),
     payment_status: str | None = Query(None, description="Filter by payment status"),
-    fulfillment_status: str | None = Query(None, description="Filter by fulfillment status"),
-    date_from: datetime | None = Query(None, description="Filter orders from this date (ISO 8601)"),
-    date_to: datetime | None = Query(None, description="Filter orders until this date (ISO 8601)"),
+    fulfillment_status: str | None = Query(
+        None, description="Filter by fulfillment status"
+    ),
+    date_from: datetime | None = Query(
+        None, description="Filter orders from this date (ISO 8601)"
+    ),
+    date_to: datetime | None = Query(
+        None, description="Filter orders until this date (ISO 8601)"
+    ),
     search: str | None = Query(None),
 ):
     """List orders for a store with optional filtering and pagination."""
@@ -474,63 +484,79 @@ def _build_timeline(order_dto: OrderDTO) -> list[OrderTimelineEvent]:
     """Construct a chronological timeline from order timestamps."""
     events: list[OrderTimelineEvent] = []
 
-    events.append(OrderTimelineEvent(
-        timestamp=str(order_dto.created_at),
-        status="pending",
-        description="Order placed",
-    ))
+    events.append(
+        OrderTimelineEvent(
+            timestamp=str(order_dto.created_at),
+            status="pending",
+            description="Order placed",
+        )
+    )
 
     if order_dto.paid_at:
-        events.append(OrderTimelineEvent(
-            timestamp=str(order_dto.paid_at),
-            status="paid",
-            description=f"Payment received via {order_dto.payment_method or 'unknown'}",
-        ))
+        events.append(
+            OrderTimelineEvent(
+                timestamp=str(order_dto.paid_at),
+                status="paid",
+                description=f"Payment received via {order_dto.payment_method or 'unknown'}",
+            )
+        )
 
     if order_dto.status in ("processing", "shipped", "delivered", "fulfilled"):
-        events.append(OrderTimelineEvent(
-            timestamp=str(order_dto.updated_at),
-            status="processing",
-            description="Order is being processed",
-        ))
+        events.append(
+            OrderTimelineEvent(
+                timestamp=str(order_dto.updated_at),
+                status="processing",
+                description="Order is being processed",
+            )
+        )
 
     if order_dto.shipped_at:
         desc = "Order shipped"
         if order_dto.tracking_number:
             desc += f" (tracking: {order_dto.tracking_number})"
-        events.append(OrderTimelineEvent(
-            timestamp=str(order_dto.shipped_at),
-            status="shipped",
-            description=desc,
-        ))
+        events.append(
+            OrderTimelineEvent(
+                timestamp=str(order_dto.shipped_at),
+                status="shipped",
+                description=desc,
+            )
+        )
 
     if order_dto.fulfilled_at:
-        events.append(OrderTimelineEvent(
-            timestamp=str(order_dto.fulfilled_at),
-            status="fulfilled",
-            description="Order fulfilled",
-        ))
+        events.append(
+            OrderTimelineEvent(
+                timestamp=str(order_dto.fulfilled_at),
+                status="fulfilled",
+                description="Order fulfilled",
+            )
+        )
 
     if order_dto.delivered_at:
-        events.append(OrderTimelineEvent(
-            timestamp=str(order_dto.delivered_at),
-            status="delivered",
-            description="Order delivered",
-        ))
+        events.append(
+            OrderTimelineEvent(
+                timestamp=str(order_dto.delivered_at),
+                status="delivered",
+                description="Order delivered",
+            )
+        )
 
     if order_dto.cancelled_at:
-        events.append(OrderTimelineEvent(
-            timestamp=str(order_dto.cancelled_at),
-            status="cancelled",
-            description="Order cancelled",
-        ))
+        events.append(
+            OrderTimelineEvent(
+                timestamp=str(order_dto.cancelled_at),
+                status="cancelled",
+                description="Order cancelled",
+            )
+        )
 
     if order_dto.status == "refunded":
-        events.append(OrderTimelineEvent(
-            timestamp=str(order_dto.updated_at),
-            status="refunded",
-            description="Order refunded",
-        ))
+        events.append(
+            OrderTimelineEvent(
+                timestamp=str(order_dto.updated_at),
+                status="refunded",
+                description="Order refunded",
+            )
+        )
 
     return events
 

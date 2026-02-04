@@ -56,7 +56,9 @@ class ListOrdersUseCase:
             raise EntityNotFoundError("Store", str(store_id))
 
         if store.owner_id != user_id:
-            raise AuthorizationError("You don't have permission to view orders in this store")
+            raise AuthorizationError(
+                "You don't have permission to view orders in this store"
+            )
 
         # Parse enum filters (ignore invalid values silently)
         order_status = None
@@ -89,7 +91,9 @@ class ListOrdersUseCase:
             total = len(orders) if len(orders) < limit else skip + limit + 1
         else:
             orders = await self.order_repository.get_by_store(
-                store_id, skip, limit,
+                store_id,
+                skip,
+                limit,
                 status=order_status,
                 payment_status=pay_status,
                 fulfillment_status=fulfill_status,
@@ -111,7 +115,9 @@ class ListOrdersUseCase:
         for customer_id in customer_ids:
             customer = await self.customer_repository.get_by_id(customer_id)
             if customer:
-                customer_names[customer_id] = f"{customer.first_name} {customer.last_name}"
+                customer_names[customer_id] = (
+                    f"{customer.first_name} {customer.last_name}"
+                )
 
         # Convert to DTOs
         order_dtos = [

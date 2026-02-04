@@ -219,9 +219,7 @@ class DeleteProductImageUseCase:
             raise EntityNotFoundError("Product", str(product_id))
 
         if image_url not in product.images:
-            raise ValidationError(
-                f"Image not found on product. URL: {image_url}"
-            )
+            raise ValidationError(f"Image not found on product. URL: {image_url}")
 
         # Extract key from URL using proper URL parsing
         # URL format: https://pub-xxx.r2.dev/products/abc123.jpg

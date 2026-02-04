@@ -1,6 +1,5 @@
 """Tests for authentication routes."""
 
-
 import pytest
 from httpx import AsyncClient
 
@@ -24,7 +23,9 @@ class TestAuthRoutes:
         assert data["data"]["tokens"]["token_type"] == "bearer"
 
     @pytest.mark.asyncio
-    async def test_register_duplicate_email(self, client: AsyncClient, sample_user_data: dict):
+    async def test_register_duplicate_email(
+        self, client: AsyncClient, sample_user_data: dict
+    ):
         """Test registration with duplicate email."""
         # Register first user
         await client.post("/api/v1/auth/register", json=sample_user_data)
@@ -34,10 +35,15 @@ class TestAuthRoutes:
 
         assert response.status_code == 400
         data = response.json()
-        assert "already exists" in data["message"].lower() or "duplicate" in data["message"].lower()
+        assert (
+            "already exists" in data["message"].lower()
+            or "duplicate" in data["message"].lower()
+        )
 
     @pytest.mark.asyncio
-    async def test_register_invalid_email(self, client: AsyncClient, sample_user_data: dict):
+    async def test_register_invalid_email(
+        self, client: AsyncClient, sample_user_data: dict
+    ):
         """Test registration with invalid email."""
         sample_user_data["email"] = "invalid-email"
 
@@ -46,7 +52,9 @@ class TestAuthRoutes:
         assert response.status_code == 422  # Validation error
 
     @pytest.mark.asyncio
-    async def test_register_weak_password(self, client: AsyncClient, sample_user_data: dict):
+    async def test_register_weak_password(
+        self, client: AsyncClient, sample_user_data: dict
+    ):
         """Test registration with weak password."""
         sample_user_data["password"] = "123"
 
@@ -74,7 +82,9 @@ class TestAuthRoutes:
         assert data["data"]["tokens"]["access_token"] is not None
 
     @pytest.mark.asyncio
-    async def test_login_invalid_credentials(self, client: AsyncClient, sample_user_data: dict):
+    async def test_login_invalid_credentials(
+        self, client: AsyncClient, sample_user_data: dict
+    ):
         """Test login with invalid credentials."""
         # Register first
         await client.post("/api/v1/auth/register", json=sample_user_data)
@@ -100,10 +110,14 @@ class TestAuthRoutes:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_refresh_token_success(self, client: AsyncClient, sample_user_data: dict):
+    async def test_refresh_token_success(
+        self, client: AsyncClient, sample_user_data: dict
+    ):
         """Test successful token refresh."""
         # Register and get tokens
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
 
         # Refresh token
@@ -127,7 +141,9 @@ class TestAuthRoutes:
     async def test_get_current_user(self, client: AsyncClient, sample_user_data: dict):
         """Test getting current user profile."""
         # Register and get tokens
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
 
         # Get current user

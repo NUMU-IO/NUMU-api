@@ -75,7 +75,9 @@ class TestFawryValidator:
         """Test Fawry validation with invalid credentials."""
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = AsyncMock()
-            mock_instance.post = AsyncMock(return_value=mock_httpx_response_unauthorized)
+            mock_instance.post = AsyncMock(
+                return_value=mock_httpx_response_unauthorized
+            )
             mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
             mock_instance.__aexit__ = AsyncMock(return_value=None)
             mock_client.return_value = mock_instance
@@ -96,7 +98,10 @@ class TestFawryValidator:
 
         assert result.is_valid is False
         assert result.status == ValidationStatus.INVALID
-        assert "security_key" in result.message.lower() or "required" in result.message.lower()
+        assert (
+            "security_key" in result.message.lower()
+            or "required" in result.message.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_validate_network_error(
@@ -107,7 +112,9 @@ class TestFawryValidator:
         """Test Fawry validation when network error occurs."""
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = AsyncMock()
-            mock_instance.post = AsyncMock(side_effect=httpx.ConnectError("Connection failed"))
+            mock_instance.post = AsyncMock(
+                side_effect=httpx.ConnectError("Connection failed")
+            )
             mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
             mock_instance.__aexit__ = AsyncMock(return_value=None)
             mock_client.return_value = mock_instance
@@ -127,7 +134,9 @@ class TestFawryValidator:
 
         assert "merchant_code" in display_info
         # Merchant code should be partially masked
-        assert "***" in display_info["merchant_code"] or len(display_info["merchant_code"]) < len(valid_fawry_credentials["merchant_code"])
+        assert "***" in display_info["merchant_code"] or len(
+            display_info["merchant_code"]
+        ) < len(valid_fawry_credentials["merchant_code"])
 
     def test_get_required_fields(self, validator: FawryValidator):
         """Test that required fields are correctly defined."""
@@ -146,6 +155,7 @@ class TestFawryValidator:
 # =============================================================================
 # PaymobValidator Tests
 # =============================================================================
+
 
 class TestPaymobValidator:
     """Test suite for PaymobValidator."""
@@ -216,7 +226,9 @@ class TestPaymobValidator:
         display_info = validator.get_display_info(valid_paymob_credentials)
 
         assert "integration_id" in display_info
-        assert display_info["integration_id"] == valid_paymob_credentials["integration_id"]
+        assert (
+            display_info["integration_id"] == valid_paymob_credentials["integration_id"]
+        )
 
     def test_get_required_fields(self, validator: PaymobValidator):
         """Test that required fields are correctly defined."""
@@ -229,6 +241,7 @@ class TestPaymobValidator:
 # =============================================================================
 # VodafoneCashValidator Tests
 # =============================================================================
+
 
 class TestVodafoneCashValidator:
     """Test suite for VodafoneCashValidator."""
@@ -288,6 +301,7 @@ class TestVodafoneCashValidator:
 # =============================================================================
 # StripeValidator Tests
 # =============================================================================
+
 
 class TestStripeValidator:
     """Test suite for StripeValidator."""
@@ -381,6 +395,7 @@ class TestStripeValidator:
 # TapValidator Tests
 # =============================================================================
 
+
 class TestTapValidator:
     """Test suite for TapValidator."""
 
@@ -441,6 +456,7 @@ class TestTapValidator:
 # Validator Factory Tests
 # =============================================================================
 
+
 class TestValidatorFactory:
     """Test suite for GatewayValidatorFactory."""
 
@@ -455,7 +471,9 @@ class TestValidatorFactory:
         )
 
         factory = get_validator_factory()
-        validator = factory.get_validator(ServiceType.PAYMENT_GATEWAY, ServiceName.FAWRY)
+        validator = factory.get_validator(
+            ServiceType.PAYMENT_GATEWAY, ServiceName.FAWRY
+        )
 
         assert validator is not None
         assert isinstance(validator, FawryValidator)
@@ -471,7 +489,9 @@ class TestValidatorFactory:
         )
 
         factory = get_validator_factory()
-        validator = factory.get_validator(ServiceType.PAYMENT_GATEWAY, ServiceName.PAYMOB)
+        validator = factory.get_validator(
+            ServiceType.PAYMENT_GATEWAY, ServiceName.PAYMOB
+        )
 
         assert validator is not None
         assert isinstance(validator, PaymobValidator)
@@ -487,7 +507,9 @@ class TestValidatorFactory:
         )
 
         factory = get_validator_factory()
-        validator = factory.get_validator(ServiceType.PAYMENT_GATEWAY, ServiceName.STRIPE)
+        validator = factory.get_validator(
+            ServiceType.PAYMENT_GATEWAY, ServiceName.STRIPE
+        )
 
         assert validator is not None
         assert isinstance(validator, StripeValidator)
@@ -506,7 +528,9 @@ class TestValidatorFactory:
 
         # This should raise an error or return None for unsupported combinations
         with pytest.raises((ValueError, KeyError)):
-            factory.get_validator(ServiceType.PAYMENT_GATEWAY, ServiceName.WHATSAPP_BUSINESS)
+            factory.get_validator(
+                ServiceType.PAYMENT_GATEWAY, ServiceName.WHATSAPP_BUSINESS
+            )
 
     def test_is_supported(self):
         """Test checking if a service is supported."""
@@ -520,9 +544,17 @@ class TestValidatorFactory:
 
         factory = get_validator_factory()
 
-        assert factory.is_supported(ServiceType.PAYMENT_GATEWAY, ServiceName.FAWRY) is True
-        assert factory.is_supported(ServiceType.PAYMENT_GATEWAY, ServiceName.PAYMOB) is True
-        assert factory.is_supported(ServiceType.PAYMENT_GATEWAY, ServiceName.STRIPE) is True
+        assert (
+            factory.is_supported(ServiceType.PAYMENT_GATEWAY, ServiceName.FAWRY) is True
+        )
+        assert (
+            factory.is_supported(ServiceType.PAYMENT_GATEWAY, ServiceName.PAYMOB)
+            is True
+        )
+        assert (
+            factory.is_supported(ServiceType.PAYMENT_GATEWAY, ServiceName.STRIPE)
+            is True
+        )
 
     def test_get_supported_services(self):
         """Test getting list of supported services."""

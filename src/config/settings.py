@@ -90,7 +90,9 @@ class Settings(BaseSettings):
 
     # Session (separate from JWT for admin panel cookies)
     # Default is 32+ chars for development, MUST be changed in production
-    session_secret_key: str = Field(default="dev-only-session-secret-change-in-prod-32chars")
+    session_secret_key: str = Field(
+        default="dev-only-session-secret-change-in-prod-32chars"
+    )
 
     @model_validator(mode="after")
     def validate_jwt_keys(self) -> "Settings":
@@ -115,7 +117,7 @@ class Settings(BaseSettings):
         if len(v) < 32:
             raise ValueError(
                 "SESSION_SECRET_KEY must be at least 32 characters for security. "
-                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         return v
 
@@ -186,7 +188,9 @@ class Settings(BaseSettings):
     # Fawry (Retail Pay Points)
     fawry_merchant_code: str | None = None
     fawry_security_key: str | None = None
-    fawry_base_url: str = "https://atfawry.fawrystaging.com"  # Use production URL in prod
+    fawry_base_url: str = (
+        "https://atfawry.fawrystaging.com"  # Use production URL in prod
+    )
 
     # Cash on Delivery (COD)
     cod_enabled: bool = True

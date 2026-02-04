@@ -247,7 +247,9 @@ class CODPaymentService(IPaymentService):
             payment_id=payment_intent_id,
         )
 
-    async def mark_collection_failed(self, payment_intent_id: str, reason: str = "") -> PaymentResult:
+    async def mark_collection_failed(
+        self, payment_intent_id: str, reason: str = ""
+    ) -> PaymentResult:
         """Mark COD collection as failed.
 
         Called when delivery fails or customer refuses to pay.

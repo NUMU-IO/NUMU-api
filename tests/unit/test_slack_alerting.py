@@ -122,9 +122,9 @@ class TestSlackAlert:
             service=AlertService.PAYMENTS,
         )
 
-        assert critical.severity_emoji == "\U0001F534"  # Red
-        assert warn.severity_emoji == "\U0001F7E1"      # Yellow
-        assert info.severity_emoji == "\U0001F535"      # Blue
+        assert critical.severity_emoji == "\U0001f534"  # Red
+        assert warn.severity_emoji == "\U0001f7e1"  # Yellow
+        assert info.severity_emoji == "\U0001f535"  # Blue
 
     def test_with_suppressed_count(self):
         """Test adding suppressed count to alert."""

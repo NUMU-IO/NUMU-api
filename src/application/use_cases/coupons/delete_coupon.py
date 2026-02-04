@@ -39,8 +39,6 @@ class DeleteCouponUseCase:
         # Verify store ownership
         store = await self.store_repository.get_by_id(coupon.store_id)
         if not store or store.owner_id != user_id:
-            raise AuthorizationError(
-                "You don't have permission to delete this coupon"
-            )
+            raise AuthorizationError("You don't have permission to delete this coupon")
 
         return await self.coupon_repository.delete(coupon_id)

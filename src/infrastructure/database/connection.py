@@ -109,7 +109,7 @@ def reset_tenant_context() -> None:
 
 def _validate_schema_name(schema: str) -> str:
     """Validate schema name to prevent SQL injection."""
-    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema):
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", schema):
         raise ValueError(f"Invalid schema name: {schema}")
     return schema
 
@@ -139,11 +139,13 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
                 UUID(tenant_id)
                 await session.execute(
                     text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
-                    {"tenant_id": tenant_id}
+                    {"tenant_id": tenant_id},
                 )
                 logger.debug(f"Set RLS context for tenant: {tenant_id}")
             except ValueError:
-                logger.warning(f"Invalid tenant_id format: {tenant_id}, skipping RLS context")
+                logger.warning(
+                    f"Invalid tenant_id format: {tenant_id}, skipping RLS context"
+                )
         else:
             # Clear any existing tenant context when no tenant is set
             await session.execute(
@@ -177,9 +179,7 @@ async def get_admin_db_session() -> AsyncGenerator[AsyncSession, None]:
         await session.execute(text("SET search_path TO public"))
 
         # Enable RLS bypass
-        await session.execute(
-            text("SELECT set_config('app.rls_bypass', 'true', true)")
-        )
+        await session.execute(text("SELECT set_config('app.rls_bypass', 'true', true)"))
         logger.warning("Admin session created with RLS bypass enabled")
 
         try:

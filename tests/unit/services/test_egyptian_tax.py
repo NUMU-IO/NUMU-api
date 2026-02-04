@@ -42,7 +42,9 @@ class TestEgyptianTaxService:
 
     def test_get_rate_for_exempt_services(self):
         """Test getting exempt rate for financial services."""
-        rate = self.service.get_rate_for_product("SVC-001", category="financial_services")
+        rate = self.service.get_rate_for_product(
+            "SVC-001", category="financial_services"
+        )
         assert rate == EGYPT_EXEMPT_RATE
 
     def test_get_rate_for_healthcare(self):

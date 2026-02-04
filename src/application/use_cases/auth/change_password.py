@@ -44,7 +44,9 @@ class ChangePasswordUseCase:
             raise AuthenticationError("Current password is incorrect")
 
         # Hash new password
-        new_hashed_password = await self.password_service.hash_password(dto.new_password)
+        new_hashed_password = await self.password_service.hash_password(
+            dto.new_password
+        )
 
         # Update password
         user.hashed_password = new_hashed_password

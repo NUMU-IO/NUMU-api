@@ -66,7 +66,9 @@ class TestGetProductUseCase:
         """Test successful product retrieval by slug."""
         self.mock_product_repo.get_by_slug.return_value = self.sample_product
 
-        result = await self.use_case.by_slug(store_id=self.store_id, slug="test-product")
+        result = await self.use_case.by_slug(
+            store_id=self.store_id, slug="test-product"
+        )
 
         assert result is not None
         assert result.slug == "test-product"

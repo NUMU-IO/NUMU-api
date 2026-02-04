@@ -101,7 +101,9 @@ class ETAInvoiceService:
             data = response.json()
             self._access_token = data.get("access_token")
             expires_in = data.get("expires_in", 3600)
-            self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in - 60)
+            self._token_expires_at = datetime.utcnow() + timedelta(
+                seconds=expires_in - 60
+            )
 
             return self._access_token
 

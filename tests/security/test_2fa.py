@@ -160,6 +160,7 @@ class TestEnable2FA:
         from src.application.use_cases.auth.two_factor.enable_2fa import (
             TwoFactorAlreadyEnabledError,
         )
+
         with pytest.raises(TwoFactorAlreadyEnabledError):
             await use_case.execute(test_user.id)
 
@@ -271,6 +272,7 @@ class TestVerify2FA:
         from src.application.use_cases.auth.two_factor.verify_2fa import (
             InvalidTwoFactorCodeError,
         )
+
         with pytest.raises(InvalidTwoFactorCodeError):
             await use_case.execute(
                 user_id=test_user.id,
@@ -352,6 +354,7 @@ class TestVerify2FA:
         from src.application.use_cases.auth.two_factor.verify_2fa import (
             InvalidTwoFactorCodeError,
         )
+
         with pytest.raises(InvalidTwoFactorCodeError):
             await use_case.execute(
                 user_id=test_user.id,
@@ -466,6 +469,7 @@ class TestDisable2FA:
         )
 
         from src.core.exceptions import InvalidCredentialsError
+
         with pytest.raises(InvalidCredentialsError):
             await use_case.execute(
                 user_id=test_user.id,
@@ -546,7 +550,9 @@ class TestBackupCodeGeneration:
             assert code[:4].isalnum()
             assert code[5:].isalnum()
 
-    def test_backup_code_verification_is_case_insensitive(self, totp_service: TOTPService):
+    def test_backup_code_verification_is_case_insensitive(
+        self, totp_service: TOTPService
+    ):
         """Test that backup code verification ignores case."""
         code = "ABCD-EFGH"
         hashed = totp_service.hash_backup_code(code)

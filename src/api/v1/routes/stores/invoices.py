@@ -162,17 +162,11 @@ async def list_invoices(
 ):
     """List all invoices for the store with optional filtering."""
     # Filter invoices for this store
-    store_invoices = [
-        inv for inv in _invoices.values()
-        if inv.store_id == store_id
-    ]
+    store_invoices = [inv for inv in _invoices.values() if inv.store_id == store_id]
 
     # Apply status filter
     if status_filter:
-        store_invoices = [
-            inv for inv in store_invoices
-            if inv.status == status_filter
-        ]
+        store_invoices = [inv for inv in store_invoices if inv.status == status_filter]
 
     # Sort by date descending
     store_invoices.sort(key=lambda x: x.created_at, reverse=True)

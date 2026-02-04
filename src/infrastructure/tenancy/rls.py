@@ -55,7 +55,7 @@ async def set_tenant_context(session: AsyncSession, tenant_id: UUID | str) -> No
     # The third parameter 'true' makes it local to the current transaction
     await session.execute(
         text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
-        {"tenant_id": tenant_id_str}
+        {"tenant_id": tenant_id_str},
     )
     logger.debug(f"Set tenant context to: {tenant_id_str}")
 
@@ -70,9 +70,7 @@ async def clear_tenant_context(session: AsyncSession) -> None:
     Args:
         session: The SQLAlchemy async session
     """
-    await session.execute(
-        text("SELECT set_config('app.current_tenant', '', true)")
-    )
+    await session.execute(text("SELECT set_config('app.current_tenant', '', true)"))
     logger.debug("Cleared tenant context")
 
 
@@ -124,9 +122,7 @@ async def enable_rls_bypass(session: AsyncSession) -> None:
             finally:
                 await disable_rls_bypass(session)
     """
-    await session.execute(
-        text("SELECT set_config('app.rls_bypass', 'true', true)")
-    )
+    await session.execute(text("SELECT set_config('app.rls_bypass', 'true', true)"))
     logger.warning("RLS bypass ENABLED - all tenant data accessible")
 
 
@@ -138,9 +134,7 @@ async def disable_rls_bypass(session: AsyncSession) -> None:
     Args:
         session: The SQLAlchemy async session
     """
-    await session.execute(
-        text("SELECT set_config('app.rls_bypass', 'false', true)")
-    )
+    await session.execute(text("SELECT set_config('app.rls_bypass', 'false', true)"))
     logger.debug("RLS bypass disabled")
 
 
@@ -157,7 +151,7 @@ async def is_rls_bypassed(session: AsyncSession) -> bool:
         text("SELECT current_setting('app.rls_bypass', true)")
     )
     value = result.scalar()
-    return value == 'true'
+    return value == "true"
 
 
 class RLSContext:

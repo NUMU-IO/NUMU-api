@@ -41,7 +41,7 @@ class CreateTenantRequest(BaseModel):
             raise ValueError("Subdomain must be between 3 and 63 characters")
 
         # Must be lowercase alphanumeric with hyphens, no start/end with hyphen
-        pattern = r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+        pattern = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
         if not re.match(pattern, v):
             raise ValueError(
                 "Subdomain must contain only lowercase letters, numbers, and hyphens. "
@@ -49,7 +49,16 @@ class CreateTenantRequest(BaseModel):
             )
 
         # Reserved subdomains
-        reserved = {"www", "api", "admin", "app", "dashboard", "mail", "ftp", "localhost"}
+        reserved = {
+            "www",
+            "api",
+            "admin",
+            "app",
+            "dashboard",
+            "mail",
+            "ftp",
+            "localhost",
+        }
         if v in reserved:
             raise ValueError(f"Subdomain '{v}' is reserved and cannot be used")
 

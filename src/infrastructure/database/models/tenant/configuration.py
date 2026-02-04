@@ -41,6 +41,7 @@ from src.infrastructure.database.models.base import (
 
 class ServiceType(StrEnum):
     """Types of external services that require credentials."""
+
     PAYMENT_GATEWAY = "payment_gateway"
     SHIPPING_CARRIER = "shipping_carrier"
     WHATSAPP = "whatsapp"
@@ -50,6 +51,7 @@ class ServiceType(StrEnum):
 
 class ServiceName(StrEnum):
     """Specific service providers."""
+
     # Payment Gateways
     FAWRY = "fawry"
     PAYMOB = "paymob"
@@ -70,6 +72,7 @@ class ServiceName(StrEnum):
 
 class RequestStatus(StrEnum):
     """Status of a configuration request."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -79,6 +82,7 @@ class RequestStatus(StrEnum):
 
 class RequestPriority(StrEnum):
     """Priority level for configuration requests."""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -160,7 +164,13 @@ class ServiceCredential(Base, UUIDMixin, TenantMixin, TimestampMixin):
 
     __tablename__ = "service_credentials"
     __table_args__ = (
-        Index("idx_service_credentials_tenant_service", "tenant_id", "service_type", "service_name", unique=True),
+        Index(
+            "idx_service_credentials_tenant_service",
+            "tenant_id",
+            "service_type",
+            "service_name",
+            unique=True,
+        ),
         {"schema": "tenant"},
     )
 
@@ -249,7 +259,9 @@ class CredentialAuditLog(Base, UUIDMixin, TenantMixin):
     )
 
     # Context
-    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv6 compatible
+    ip_address: Mapped[str | None] = mapped_column(
+        String(45), nullable=True
+    )  # IPv6 compatible
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
@@ -267,6 +279,7 @@ class CredentialAuditLog(Base, UUIDMixin, TenantMixin):
 # Audit action constants
 class AuditAction:
     """Constants for audit log actions."""
+
     REQUEST_CREATED = "request_created"
     REQUEST_ASSIGNED = "request_assigned"
     REQUEST_COMPLETED = "request_completed"

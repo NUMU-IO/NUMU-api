@@ -54,10 +54,23 @@ class UserAdmin(ModelView, model=UserModel):
         UserModel.status,
         UserModel.created_at,
     ]
-    column_searchable_list = [UserModel.email, UserModel.first_name, UserModel.last_name]
-    column_sortable_list = [UserModel.email, UserModel.created_at, UserModel.role, UserModel.status]
+    column_searchable_list = [
+        UserModel.email,
+        UserModel.first_name,
+        UserModel.last_name,
+    ]
+    column_sortable_list = [
+        UserModel.email,
+        UserModel.created_at,
+        UserModel.role,
+        UserModel.status,
+    ]
     column_default_sort = ("created_at", True)
-    form_excluded_columns = [UserModel.hashed_password, UserModel.created_at, UserModel.updated_at]
+    form_excluded_columns = [
+        UserModel.hashed_password,
+        UserModel.created_at,
+        UserModel.updated_at,
+    ]
     name = "User"
     name_plural = "Users"
     icon = "fa-solid fa-user"
@@ -73,7 +86,9 @@ class UserAdmin(ModelView, model=UserModel):
             "Password",
             validators=[
                 validators.Optional(),
-                validators.Length(min=8, message="Password must be at least 8 characters"),
+                validators.Length(
+                    min=8, message="Password must be at least 8 characters"
+                ),
             ],
             description="Leave blank to keep existing password",
         ),
@@ -110,7 +125,11 @@ class StoreAdmin(ModelView, model=StoreModel):
         StoreModel.contact_email,
         StoreModel.created_at,
     ]
-    column_searchable_list = [StoreModel.name, StoreModel.slug, StoreModel.contact_email]
+    column_searchable_list = [
+        StoreModel.name,
+        StoreModel.slug,
+        StoreModel.contact_email,
+    ]
     column_sortable_list = [StoreModel.name, StoreModel.created_at, StoreModel.status]
     column_default_sort = ("created_at", True)
     form_excluded_columns = [StoreModel.created_at, StoreModel.updated_at]
@@ -131,7 +150,11 @@ class CategoryAdmin(ModelView, model=CategoryModel):
         CategoryModel.created_at,
     ]
     column_searchable_list = [CategoryModel.name, CategoryModel.slug]
-    column_sortable_list = [CategoryModel.name, CategoryModel.position, CategoryModel.created_at]
+    column_sortable_list = [
+        CategoryModel.name,
+        CategoryModel.position,
+        CategoryModel.created_at,
+    ]
     column_default_sort = ("position", False)
     form_excluded_columns = [CategoryModel.created_at, CategoryModel.updated_at]
     name = "Category"
@@ -153,7 +176,12 @@ class ProductAdmin(ModelView, model=ProductModel):
         ProductModel.created_at,
     ]
     column_searchable_list = [ProductModel.name, ProductModel.slug, ProductModel.sku]
-    column_sortable_list = [ProductModel.name, ProductModel.price_amount, ProductModel.quantity, ProductModel.created_at]
+    column_sortable_list = [
+        ProductModel.name,
+        ProductModel.price_amount,
+        ProductModel.quantity,
+        ProductModel.created_at,
+    ]
     column_default_sort = ("created_at", True)
     form_excluded_columns = [ProductModel.created_at, ProductModel.updated_at]
     name = "Product"
@@ -173,8 +201,17 @@ class CustomerAdmin(ModelView, model=CustomerModel):
         CustomerModel.total_spent,
         CustomerModel.created_at,
     ]
-    column_searchable_list = [CustomerModel.email, CustomerModel.first_name, CustomerModel.last_name]
-    column_sortable_list = [CustomerModel.email, CustomerModel.total_orders, CustomerModel.total_spent, CustomerModel.created_at]
+    column_searchable_list = [
+        CustomerModel.email,
+        CustomerModel.first_name,
+        CustomerModel.last_name,
+    ]
+    column_sortable_list = [
+        CustomerModel.email,
+        CustomerModel.total_orders,
+        CustomerModel.total_spent,
+        CustomerModel.created_at,
+    ]
     column_default_sort = ("created_at", True)
     form_excluded_columns = [CustomerModel.created_at, CustomerModel.updated_at]
     name = "Customer"
@@ -196,7 +233,12 @@ class OrderAdmin(ModelView, model=OrderModel):
         OrderModel.created_at,
     ]
     column_searchable_list = [OrderModel.order_number]
-    column_sortable_list = [OrderModel.order_number, OrderModel.total, OrderModel.status, OrderModel.created_at]
+    column_sortable_list = [
+        OrderModel.order_number,
+        OrderModel.total,
+        OrderModel.status,
+        OrderModel.created_at,
+    ]
     column_default_sort = ("created_at", True)
     form_excluded_columns = [OrderModel.created_at, OrderModel.updated_at]
     name = "Order"

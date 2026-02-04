@@ -189,15 +189,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-RateLimit-Limit"] = str(max_requests)
         response.headers["X-RateLimit-Remaining"] = str(
-            max(0, max_requests - len(rate_limiter._requests.get(
-                rate_limiter._get_key(request), []
-            )))
+            max(
+                0,
+                max_requests
+                - len(rate_limiter._requests.get(rate_limiter._get_key(request), [])),
+            )
         )
 
         return response
 
 
-def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+def rate_limit_exceeded_handler(
+    request: Request, exc: RateLimitExceeded
+) -> JSONResponse:
     """Handle rate limit exceeded exceptions."""
     return JSONResponse(
         status_code=429,

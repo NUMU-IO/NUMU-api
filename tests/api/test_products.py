@@ -19,7 +19,9 @@ class TestProductRoutes:
     ):
         """Test successful product creation."""
         # Register user
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -67,7 +69,9 @@ class TestProductRoutes:
     ):
         """Test product creation for non-existent store."""
         # Register user
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -91,7 +95,9 @@ class TestProductRoutes:
     ):
         """Test listing products."""
         # Setup: Register, create store, create products
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -131,7 +137,9 @@ class TestProductRoutes:
     ):
         """Test product listing pagination."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -175,7 +183,9 @@ class TestProductRoutes:
     ):
         """Test getting a product by ID."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -220,7 +230,9 @@ class TestProductRoutes:
     ):
         """Test updating a product."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -260,7 +272,9 @@ class TestProductRoutes:
     ):
         """Test updating product without proper authorization."""
         # Create first user and store/product
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -305,7 +319,9 @@ class TestProductRoutes:
     ):
         """Test deleting a product."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
@@ -334,7 +350,9 @@ class TestProductRoutes:
         assert data["data"]["deleted"] is True
 
         # Verify product is deleted
-        get_response = await client.get(f"/api/v1/stores/{store_id}/products/{product_id}")
+        get_response = await client.get(
+            f"/api/v1/stores/{store_id}/products/{product_id}"
+        )
         assert get_response.status_code == 404
 
     @pytest.mark.asyncio
@@ -347,7 +365,9 @@ class TestProductRoutes:
     ):
         """Test searching products."""
         # Setup
-        register_response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
         tokens = register_response.json()["data"]["tokens"]
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 

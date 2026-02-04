@@ -184,7 +184,9 @@ async def change_customer_password(
 )
 async def list_customer_addresses(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
-    address_repo: Annotated[CustomerAddressRepository, Depends(get_customer_address_repository)],
+    address_repo: Annotated[
+        CustomerAddressRepository, Depends(get_customer_address_repository)
+    ],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
 ):
@@ -232,7 +234,9 @@ async def create_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     request: CreateAddressRequest,
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
-    address_repo: Annotated[CustomerAddressRepository, Depends(get_customer_address_repository)],
+    address_repo: Annotated[
+        CustomerAddressRepository, Depends(get_customer_address_repository)
+    ],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Create a new address for the current customer."""
@@ -297,7 +301,9 @@ async def create_customer_address(
 async def get_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     address_id: Annotated[UUID, Path(description="Address ID")],
-    address_repo: Annotated[CustomerAddressRepository, Depends(get_customer_address_repository)],
+    address_repo: Annotated[
+        CustomerAddressRepository, Depends(get_customer_address_repository)
+    ],
 ):
     """Get a specific address for the current customer."""
     address = await address_repo.get_by_id(address_id)
@@ -338,7 +344,9 @@ async def update_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     address_id: Annotated[UUID, Path(description="Address ID")],
     request: UpdateAddressRequest,
-    address_repo: Annotated[CustomerAddressRepository, Depends(get_customer_address_repository)],
+    address_repo: Annotated[
+        CustomerAddressRepository, Depends(get_customer_address_repository)
+    ],
 ):
     """Update an existing address for the current customer."""
     use_case = UpdateAddressUseCase(address_repository=address_repo)
@@ -391,7 +399,9 @@ async def delete_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     address_id: Annotated[UUID, Path(description="Address ID")],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
-    address_repo: Annotated[CustomerAddressRepository, Depends(get_customer_address_repository)],
+    address_repo: Annotated[
+        CustomerAddressRepository, Depends(get_customer_address_repository)
+    ],
 ):
     """Delete an address for the current customer."""
     use_case = DeleteAddressUseCase(
@@ -416,7 +426,9 @@ async def set_default_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     address_id: Annotated[UUID, Path(description="Address ID")],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
-    address_repo: Annotated[CustomerAddressRepository, Depends(get_customer_address_repository)],
+    address_repo: Annotated[
+        CustomerAddressRepository, Depends(get_customer_address_repository)
+    ],
 ):
     """Set an address as the default for the current customer."""
     use_case = SetDefaultAddressUseCase(
@@ -500,7 +512,9 @@ def _order_to_response(order_dto) -> OrderResponse:
         order_number=order_dto.order_number,
         line_items=[_order_line_item_to_response(i) for i in order_dto.line_items],
         shipping_address=_order_address_to_response(order_dto.shipping_address),
-        billing_address=_order_address_to_response(order_dto.billing_address) if order_dto.billing_address else None,
+        billing_address=_order_address_to_response(order_dto.billing_address)
+        if order_dto.billing_address
+        else None,
         status=order_dto.status,
         payment_status=order_dto.payment_status,
         fulfillment_status=order_dto.fulfillment_status,

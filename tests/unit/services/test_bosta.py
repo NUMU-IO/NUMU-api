@@ -278,7 +278,7 @@ class TestBostaShippingService:
             api_key="test",
             webhook_secret=None,
         )
-        result = service.verify_webhook_signature(b'{}', "sig")
+        result = service.verify_webhook_signature(b"{}", "sig")
         assert result is None
 
     @pytest.mark.asyncio

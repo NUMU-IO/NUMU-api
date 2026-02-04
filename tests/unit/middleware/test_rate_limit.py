@@ -127,8 +127,8 @@ class TestRateLimiter:
     def test_get_client_ip_from_x_forwarded_for(self):
         """Test IP extraction from X-Forwarded-For header."""
         mock_request = MagicMock()
-        mock_request.headers.get.side_effect = (
-            lambda h: "10.0.0.1, 10.0.0.2" if h == "X-Forwarded-For" else None
+        mock_request.headers.get.side_effect = lambda h: (
+            "10.0.0.1, 10.0.0.2" if h == "X-Forwarded-For" else None
         )
 
         ip = self.limiter._get_client_ip(mock_request)
@@ -137,8 +137,8 @@ class TestRateLimiter:
     def test_get_client_ip_from_x_real_ip(self):
         """Test IP extraction from X-Real-IP header."""
         mock_request = MagicMock()
-        mock_request.headers.get.side_effect = (
-            lambda h: "10.0.0.3" if h == "X-Real-IP" else None
+        mock_request.headers.get.side_effect = lambda h: (
+            "10.0.0.3" if h == "X-Real-IP" else None
         )
 
         ip = self.limiter._get_client_ip(mock_request)

@@ -11,9 +11,15 @@ class CreateCouponRequest(BaseModel):
 
     code: str = Field(..., min_length=1, max_length=50)
     coupon_type: str = Field(..., description="percentage, fixed, or free_shipping")
-    value: Decimal = Field(default=Decimal("0"), ge=0, description="Percentage (0-100) or fixed amount")
-    min_order_amount: Decimal | None = Field(None, ge=0, description="Minimum order subtotal")
-    max_discount_amount: Decimal | None = Field(None, ge=0, description="Max discount cap (for percentage)")
+    value: Decimal = Field(
+        default=Decimal("0"), ge=0, description="Percentage (0-100) or fixed amount"
+    )
+    min_order_amount: Decimal | None = Field(
+        None, ge=0, description="Minimum order subtotal"
+    )
+    max_discount_amount: Decimal | None = Field(
+        None, ge=0, description="Max discount cap (for percentage)"
+    )
     usage_limit: int | None = Field(None, ge=1, description="Total usage limit")
     valid_from: datetime | None = None
     valid_until: datetime | None = None

@@ -109,11 +109,7 @@ class Product(BaseEntity):
             return None
         if self.cost_price.amount == 0:
             return 100.0
-        margin = (
-            (self.price.amount - self.cost_price.amount)
-            / self.price.amount
-            * 100
-        )
+        margin = (self.price.amount - self.cost_price.amount) / self.price.amount * 100
         return float(round(margin, 2))
 
     @property

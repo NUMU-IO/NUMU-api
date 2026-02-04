@@ -4,7 +4,6 @@ This module provides a factory class that creates the appropriate validator
 based on service type and name.
 """
 
-
 from src.infrastructure.database.models.tenant.configuration import (
     ServiceName,
     ServiceType,
@@ -31,6 +30,7 @@ from .shipping_validators import (
 
 class ValidatorNotFoundError(GatewayValidatorError):
     """Raised when no validator is found for the given service."""
+
     pass
 
 
@@ -72,9 +72,7 @@ class GatewayValidatorFactory:
     }
 
     def get_validator(
-        self,
-        service_type: ServiceType,
-        service_name: ServiceName
+        self, service_type: ServiceType, service_name: ServiceName
     ) -> GatewayValidator:
         """Get a validator instance for the given service.
 
@@ -103,9 +101,7 @@ class GatewayValidatorFactory:
         return validator_class()
 
     def is_supported(
-        self,
-        service_type: ServiceType,
-        service_name: ServiceName
+        self, service_type: ServiceType, service_name: ServiceName
     ) -> bool:
         """Check if a service is supported by the validator factory.
 
@@ -131,9 +127,7 @@ class GatewayValidatorFactory:
         }
 
     def get_required_fields(
-        self,
-        service_type: ServiceType,
-        service_name: ServiceName
+        self, service_type: ServiceType, service_name: ServiceName
     ) -> list[str]:
         """Get required credential fields for a service.
 
@@ -151,9 +145,7 @@ class GatewayValidatorFactory:
         return validator.required_fields
 
     def get_optional_fields(
-        self,
-        service_type: ServiceType,
-        service_name: ServiceName
+        self, service_type: ServiceType, service_name: ServiceName
     ) -> list[str]:
         """Get optional credential fields for a service.
 

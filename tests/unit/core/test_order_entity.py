@@ -287,7 +287,9 @@ class TestOrderEntity:
     def test_order_ship(self):
         """Test ship method."""
         order = self._create_order(status=OrderStatus.PROCESSING)
-        order.ship(tracking_number="TRK123", tracking_url="https://track.example.com/TRK123")
+        order.ship(
+            tracking_number="TRK123", tracking_url="https://track.example.com/TRK123"
+        )
 
         assert order.status == OrderStatus.SHIPPED
         assert order.fulfillment_status == FulfillmentStatus.FULFILLED

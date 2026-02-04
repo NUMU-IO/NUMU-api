@@ -27,7 +27,9 @@ class SellerInfoRequest(BaseModel):
 class BuyerInfoRequest(BaseModel):
     """Buyer information for invoice."""
 
-    buyer_type: str = Field(default="B", description="B=Business, P=Person, F=Foreigner")
+    buyer_type: str = Field(
+        default="B", description="B=Business, P=Person, F=Foreigner"
+    )
     tax_id: str | None = Field(None, description="Tax ID (required for business)")
     national_id: str | None = Field(None, description="National ID (for persons)")
     name: str
@@ -51,7 +53,9 @@ class InvoiceLineItemRequest(BaseModel):
     quantity: Decimal = Field(..., gt=0)
     unit_price: Decimal = Field(..., ge=0, description="Price per unit before tax")
     discount: Decimal = Field(default=Decimal("0"), ge=0)
-    vat_rate: Decimal = Field(default=Decimal("14.00"), description="VAT rate percentage")
+    vat_rate: Decimal = Field(
+        default=Decimal("14.00"), description="VAT rate percentage"
+    )
     internal_code: str | None = Field(None, description="Internal SKU")
 
 

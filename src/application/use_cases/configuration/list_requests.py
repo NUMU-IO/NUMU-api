@@ -135,8 +135,7 @@ class ListAllConfigurationRequestsUseCase:
 
         # Apply pagination and ordering (prioritize by priority then date)
         query = query.order_by(
-            ConfigurationRequest.priority.desc(),
-            ConfigurationRequest.created_at.asc()
+            ConfigurationRequest.priority.desc(), ConfigurationRequest.created_at.asc()
         )
         query = query.offset((page - 1) * page_size).limit(page_size)
 
@@ -164,7 +163,6 @@ class ListAllConfigurationRequestsUseCase:
             ConfigurationRequest if found, None otherwise
         """
         result = await self.db.execute(
-            select(ConfigurationRequest)
-            .where(ConfigurationRequest.id == request_id)
+            select(ConfigurationRequest).where(ConfigurationRequest.id == request_id)
         )
         return result.scalar_one_or_none()

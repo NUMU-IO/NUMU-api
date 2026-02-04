@@ -54,9 +54,7 @@ class UpdateCouponUseCase:
         # Verify store ownership
         store = await self.store_repository.get_by_id(coupon.store_id)
         if not store or store.owner_id != user_id:
-            raise AuthorizationError(
-                "You don't have permission to update this coupon"
-            )
+            raise AuthorizationError("You don't have permission to update this coupon")
 
         # Update fields
         if dto.code is not None:

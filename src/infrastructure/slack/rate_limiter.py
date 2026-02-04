@@ -164,6 +164,7 @@ class AlertQueue:
 
         try:
             import json
+
             priority = self._get_priority(alert.severity)
             alert_data = json.dumps({
                 "severity": alert.severity.value,
@@ -232,7 +233,9 @@ class AlertQueue:
                 correlation_id=alert_data["correlation_id"],
                 tenant_id=alert_data.get("tenant_id"),
                 order_id=alert_data.get("order_id"),
-                amount=Decimal(alert_data["amount"]) if alert_data.get("amount") else None,
+                amount=Decimal(alert_data["amount"])
+                if alert_data.get("amount")
+                else None,
                 currency=alert_data.get("currency", "EGP"),
                 mention_users=alert_data.get("mention_users", []),
                 notes=alert_data.get("notes"),

@@ -41,7 +41,9 @@ class DeleteAddressUseCase:
         # If there are remaining addresses and we deleted the default,
         # set a new default
         if address.is_default:
-            remaining = await self.address_repository.get_by_customer(customer_id, limit=1)
+            remaining = await self.address_repository.get_by_customer(
+                customer_id, limit=1
+            )
             if remaining:
                 await self.address_repository.set_default(customer_id, remaining[0].id)
                 await self.customer_repository.update_default_address(

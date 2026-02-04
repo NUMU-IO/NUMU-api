@@ -12,6 +12,7 @@ from typing import Any
 
 class ValidationStatus(StrEnum):
     """Status of credential validation."""
+
     VALID = "valid"
     INVALID = "invalid"
     ERROR = "error"
@@ -29,6 +30,7 @@ class ValidationResult:
         details: Additional details from the provider (e.g., account info).
         error_code: Provider-specific error code if validation failed.
     """
+
     is_valid: bool
     status: ValidationStatus
     message: str
@@ -36,7 +38,11 @@ class ValidationResult:
     error_code: str | None = None
 
     @classmethod
-    def success(cls, message: str = "Credentials validated successfully", details: dict | None = None) -> "ValidationResult":
+    def success(
+        cls,
+        message: str = "Credentials validated successfully",
+        details: dict | None = None,
+    ) -> "ValidationResult":
         """Create a successful validation result."""
         return cls(
             is_valid=True,
@@ -46,7 +52,9 @@ class ValidationResult:
         )
 
     @classmethod
-    def failure(cls, message: str, error_code: str | None = None, details: dict | None = None) -> "ValidationResult":
+    def failure(
+        cls, message: str, error_code: str | None = None, details: dict | None = None
+    ) -> "ValidationResult":
         """Create a failed validation result."""
         return cls(
             is_valid=False,
@@ -67,7 +75,9 @@ class ValidationResult:
         )
 
     @classmethod
-    def timeout(cls, message: str = "Validation request timed out") -> "ValidationResult":
+    def timeout(
+        cls, message: str = "Validation request timed out"
+    ) -> "ValidationResult":
         """Create a timeout validation result."""
         return cls(
             is_valid=False,
@@ -78,6 +88,7 @@ class ValidationResult:
 
 class GatewayValidatorError(Exception):
     """Base exception for gateway validator errors."""
+
     pass
 
 
@@ -190,7 +201,10 @@ class GatewayValidator(ABC):
             if field in credentials and credentials[field]:
                 value = str(credentials[field])
                 # Mask sensitive values
-                if any(sensitive in field.lower() for sensitive in ["key", "secret", "password", "token"]):
+                if any(
+                    sensitive in field.lower()
+                    for sensitive in ["key", "secret", "password", "token"]
+                ):
                     display_info[field] = self._mask_value(value)
                 else:
                     display_info[field] = value

@@ -269,7 +269,11 @@ class Order(BaseEntity):
     @property
     def can_be_cancelled(self) -> bool:
         """Check if order can be cancelled."""
-        return self.status in (OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING)
+        return self.status in (
+            OrderStatus.PENDING,
+            OrderStatus.CONFIRMED,
+            OrderStatus.PROCESSING,
+        )
 
     @property
     def can_be_refunded(self) -> bool:
@@ -397,7 +401,9 @@ class Order(BaseEntity):
         self.status = OrderStatus.PROCESSING
         self.touch()
 
-    def ship(self, tracking_number: str | None = None, tracking_url: str | None = None) -> None:
+    def ship(
+        self, tracking_number: str | None = None, tracking_url: str | None = None
+    ) -> None:
         """Ship the order.
 
         Args:
@@ -479,7 +485,9 @@ class Order(BaseEntity):
             self.notes = note
         self.touch()
 
-    def update_tracking(self, tracking_number: str, tracking_url: str | None = None) -> None:
+    def update_tracking(
+        self, tracking_number: str, tracking_url: str | None = None
+    ) -> None:
         """Update tracking information.
 
         Args:

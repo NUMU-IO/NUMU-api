@@ -39,8 +39,12 @@ class TestCouponEntity:
         assert coupon.usage_count == 0
 
     def test_calculate_discount_percentage(self):
-        coupon = self._create_coupon(coupon_type=CouponType.PERCENTAGE, value=Decimal("10"))
-        assert coupon.calculate_discount(Decimal("10000")) == Decimal("1000")  # 10% of 10000
+        coupon = self._create_coupon(
+            coupon_type=CouponType.PERCENTAGE, value=Decimal("10")
+        )
+        assert coupon.calculate_discount(Decimal("10000")) == Decimal(
+            "1000"
+        )  # 10% of 10000
 
     def test_calculate_discount_fixed_amount(self):
         coupon = self._create_coupon(coupon_type=CouponType.FIXED, value=Decimal("500"))
@@ -56,12 +60,16 @@ class TestCouponEntity:
         assert coupon.calculate_discount(Decimal("10000")) == Decimal("3000")
 
     def test_calculate_discount_fixed_exceeds_subtotal(self):
-        coupon = self._create_coupon(coupon_type=CouponType.FIXED, value=Decimal("15000"))
+        coupon = self._create_coupon(
+            coupon_type=CouponType.FIXED, value=Decimal("15000")
+        )
         # Fixed 15000, but subtotal is only 10000 — capped to subtotal
         assert coupon.calculate_discount(Decimal("10000")) == Decimal("10000")
 
     def test_calculate_discount_free_shipping(self):
-        coupon = self._create_coupon(coupon_type=CouponType.FREE_SHIPPING, value=Decimal("0"))
+        coupon = self._create_coupon(
+            coupon_type=CouponType.FREE_SHIPPING, value=Decimal("0")
+        )
         assert coupon.calculate_discount(Decimal("10000")) == Decimal("0")
 
     def test_is_usable_active_coupon(self):
@@ -149,12 +157,15 @@ class TestApplyCoupon:
     @pytest.mark.asyncio
     async def test_apply_valid_percentage_coupon(self):
         coupon = self._create_coupon_entity(
-            coupon_type=CouponType.PERCENTAGE, value=Decimal("20"),
+            coupon_type=CouponType.PERCENTAGE,
+            value=Decimal("20"),
         )
         use_case = self._make_use_case(coupon=coupon)
 
         result = await use_case.execute(
-            store_id=coupon.store_id, code="DISCOUNT20", order_amount=Decimal("10000"),
+            store_id=coupon.store_id,
+            code="DISCOUNT20",
+            order_amount=Decimal("10000"),
         )
         assert result.discount_amount == Decimal("2000")  # 20% of 10000
         assert result.code == coupon.code
@@ -162,24 +173,30 @@ class TestApplyCoupon:
     @pytest.mark.asyncio
     async def test_apply_valid_fixed_coupon(self):
         coupon = self._create_coupon_entity(
-            coupon_type=CouponType.FIXED, value=Decimal("1500"),
+            coupon_type=CouponType.FIXED,
+            value=Decimal("1500"),
         )
         use_case = self._make_use_case(coupon=coupon)
 
         result = await use_case.execute(
-            store_id=coupon.store_id, code="DISCOUNT20", order_amount=Decimal("10000"),
+            store_id=coupon.store_id,
+            code="DISCOUNT20",
+            order_amount=Decimal("10000"),
         )
         assert result.discount_amount == Decimal("1500")
 
     @pytest.mark.asyncio
     async def test_apply_free_shipping_coupon(self):
         coupon = self._create_coupon_entity(
-            coupon_type=CouponType.FREE_SHIPPING, value=Decimal("0"),
+            coupon_type=CouponType.FREE_SHIPPING,
+            value=Decimal("0"),
         )
         use_case = self._make_use_case(coupon=coupon)
 
         result = await use_case.execute(
-            store_id=coupon.store_id, code="DISCOUNT20", order_amount=Decimal("10000"),
+            store_id=coupon.store_id,
+            code="DISCOUNT20",
+            order_amount=Decimal("10000"),
         )
         assert result.free_shipping is True
         assert result.discount_amount == Decimal("0")
@@ -195,7 +212,9 @@ class TestApplyCoupon:
 
         with pytest.raises(ValidationError):
             await use_case.execute(
-                store_id=coupon.store_id, code="DISCOUNT20", order_amount=Decimal("10000"),
+                store_id=coupon.store_id,
+                code="DISCOUNT20",
+                order_amount=Decimal("10000"),
             )
 
     @pytest.mark.asyncio
@@ -207,7 +226,9 @@ class TestApplyCoupon:
 
         with pytest.raises(ValidationError):
             await use_case.execute(
-                store_id=coupon.store_id, code="DISCOUNT20", order_amount=Decimal("10000"),
+                store_id=coupon.store_id,
+                code="DISCOUNT20",
+                order_amount=Decimal("10000"),
             )
 
     @pytest.mark.asyncio
@@ -219,7 +240,9 @@ class TestApplyCoupon:
 
         with pytest.raises(ValidationError):
             await use_case.execute(
-                store_id=coupon.store_id, code="DISCOUNT20", order_amount=Decimal("10000"),
+                store_id=coupon.store_id,
+                code="DISCOUNT20",
+                order_amount=Decimal("10000"),
             )
 
     @pytest.mark.asyncio
@@ -230,5 +253,7 @@ class TestApplyCoupon:
 
         with pytest.raises(EntityNotFoundError):
             await use_case.execute(
-                store_id=uuid4(), code="DOESNOTEXIST", order_amount=Decimal("10000"),
+                store_id=uuid4(),
+                code="DOESNOTEXIST",
+                order_amount=Decimal("10000"),
             )

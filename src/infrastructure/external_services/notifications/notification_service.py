@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class NotificationType(StrEnum):
     """Types of notifications."""
+
     # Configuration request notifications
     CONFIG_REQUEST_CREATED = "config_request_created"
     CONFIG_REQUEST_UPDATED = "config_request_updated"
@@ -38,6 +39,7 @@ class NotificationType(StrEnum):
 
 class NotificationPriority(StrEnum):
     """Priority levels for notifications."""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -47,6 +49,7 @@ class NotificationPriority(StrEnum):
 @dataclass
 class NotificationPayload:
     """Payload for a notification."""
+
     type: NotificationType
     priority: NotificationPriority
     recipient_id: UUID
@@ -95,7 +98,9 @@ class NotificationService:
     ):
         self.redis_client = redis_client
         self.db_session = db_session
-        self._email_provider = settings.EMAIL_PROVIDER if hasattr(settings, 'EMAIL_PROVIDER') else "smtp"
+        self._email_provider = (
+            settings.EMAIL_PROVIDER if hasattr(settings, "EMAIL_PROVIDER") else "smtp"
+        )
 
     async def send_notification(
         self,
@@ -155,8 +160,12 @@ class NotificationService:
         for admin_email in admin_emails:
             payload = NotificationPayload(
                 type=NotificationType.CONFIG_REQUEST_CREATED,
-                priority=NotificationPriority.HIGH if priority == "urgent" else NotificationPriority.NORMAL,
-                recipient_id=UUID("00000000-0000-0000-0000-000000000000"),  # System admin
+                priority=NotificationPriority.HIGH
+                if priority == "urgent"
+                else NotificationPriority.NORMAL,
+                recipient_id=UUID(
+                    "00000000-0000-0000-0000-000000000000"
+                ),  # System admin
                 recipient_email=admin_email,
                 title=f"New Configuration Request: {service_name}",
                 message=f"Merchant '{tenant_name}' has requested configuration for {service_name} ({service_type}). Priority: {priority}",
@@ -168,7 +177,7 @@ class NotificationService:
                     "service_name": service_name,
                     "priority": priority,
                     "action_url": f"/admin/credentials/requests/{request_id}",
-                }
+                },
             )
             await self.send_notification(payload)
 
@@ -201,7 +210,7 @@ class NotificationService:
                 "service_type": service_type,
                 "service_name": service_name,
                 "action_url": f"/settings/{service_type}",
-            }
+            },
         )
         await self.send_notification(payload)
 
@@ -232,7 +241,7 @@ class NotificationService:
                 "service_name": service_name,
                 "reason": reason,
                 "action_url": "/settings/configuration-requests",
-            }
+            },
         )
         await self.send_notification(payload)
 
@@ -256,7 +265,9 @@ class NotificationService:
             payload: The notification payload
         """
         # Implementation would use aiosmtplib
-        logger.info(f"[SMTP] Sending email to {payload.recipient_email}: {payload.title}")
+        logger.info(
+            f"[SMTP] Sending email to {payload.recipient_email}: {payload.title}"
+        )
         # TODO: Implement actual SMTP sending
 
     async def _send_via_sendgrid(self, payload: NotificationPayload) -> None:
@@ -265,7 +276,7 @@ class NotificationService:
         Args:
             payload: The notification payload
         """
-        api_key = getattr(settings, 'SENDGRID_API_KEY', None)
+        api_key = getattr(settings, "SENDGRID_API_KEY", None)
         if not api_key:
             logger.warning("SendGrid API key not configured")
             return
@@ -278,16 +289,20 @@ class NotificationService:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "personalizations": [{
-                        "to": [{"email": payload.recipient_email}],
-                    }],
+                    "personalizations": [
+                        {
+                            "to": [{"email": payload.recipient_email}],
+                        }
+                    ],
                     "from": {"email": "noreply@numu.io", "name": "NUMU"},
                     "subject": payload.title,
-                    "content": [{
-                        "type": "text/html",
-                        "value": self._build_email_html(payload),
-                    }],
-                }
+                    "content": [
+                        {
+                            "type": "text/html",
+                            "value": self._build_email_html(payload),
+                        }
+                    ],
+                },
             )
 
             if response.status_code not in [200, 202]:
@@ -299,8 +314,8 @@ class NotificationService:
         Args:
             payload: The notification payload
         """
-        api_key = getattr(settings, 'MAILGUN_API_KEY', None)
-        domain = getattr(settings, 'MAILGUN_DOMAIN', None)
+        api_key = getattr(settings, "MAILGUN_API_KEY", None)
+        domain = getattr(settings, "MAILGUN_DOMAIN", None)
 
         if not api_key or not domain:
             logger.warning("Mailgun not configured")
@@ -315,7 +330,7 @@ class NotificationService:
                     "to": payload.recipient_email,
                     "subject": payload.title,
                     "html": self._build_email_html(payload),
-                }
+                },
             )
 
             if response.status_code != 200:
@@ -358,7 +373,7 @@ class NotificationService:
             HTML string for email body
         """
         action_url = payload.data.get("action_url", "")
-        base_url = getattr(settings, 'FRONTEND_URL', 'https://dashboard.numu.io')
+        base_url = getattr(settings, "FRONTEND_URL", "https://dashboard.numu.io")
         full_action_url = f"{base_url}{action_url}"
 
         return f"""
@@ -384,7 +399,7 @@ class NotificationService:
                 <div class="content">
                     <h2>{payload.title}</h2>
                     <p>{payload.message}</p>
-                    {f'<a href="{full_action_url}" class="button">View Details</a>' if action_url else ''}
+                    {f'<a href="{full_action_url}" class="button">View Details</a>' if action_url else ""}
                 </div>
                 <div class="footer">
                     <p>© 2026 NUMU. All rights reserved.</p>

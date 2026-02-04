@@ -63,7 +63,9 @@ class CreateStoreDTO(BaseDTO):
     """Create store data transfer object."""
 
     name: str
-    subdomain: str  # Required - the store's subdomain (e.g., "mystore" for mystore.numu.io)
+    subdomain: (
+        str  # Required - the store's subdomain (e.g., "mystore" for mystore.numu.io)
+    )
     slug: str | None = None
     description: str | None = None
     default_currency: str = "EGP"

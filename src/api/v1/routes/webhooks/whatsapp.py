@@ -98,8 +98,11 @@ async def whatsapp_callback(
     else:
         # In development, accept without verification
         import json
+
         data = json.loads(payload)
-        logger.warning("WhatsApp webhook received without signature verification (dev mode)")
+        logger.warning(
+            "WhatsApp webhook received without signature verification (dev mode)"
+        )
 
     # Process the webhook event
     try:
@@ -195,8 +198,7 @@ async def _process_message_event(account_id: str, value: dict):
         timestamp = message.get("timestamp")
 
         logger.info(
-            f"WhatsApp incoming message: {msg_id} from {from_number}, "
-            f"type={msg_type}"
+            f"WhatsApp incoming message: {msg_id} from {from_number}, type={msg_type}"
         )
 
         # Handle different message types

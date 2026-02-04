@@ -356,6 +356,7 @@ class TestUserEntity:
 
     def test_user_from_attributes(self):
         """Test user creation from ORM-like attributes."""
+
         # Simulate ORM object with __dict__
         class MockORM:
             def __init__(self):

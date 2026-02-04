@@ -27,21 +27,25 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 class SecretsManagerError(Exception):
     """Base exception for secrets manager errors."""
+
     pass
 
 
 class EncryptionError(SecretsManagerError):
     """Raised when encryption fails."""
+
     pass
 
 
 class DecryptionError(SecretsManagerError):
     """Raised when decryption fails."""
+
     pass
 
 
 class KeyNotFoundError(SecretsManagerError):
     """Raised when encryption key is not configured."""
+
     pass
 
 
@@ -187,10 +191,7 @@ class SecretsManager:
             raise DecryptionError(f"Failed to decrypt credentials: {str(e)}") from e
 
     async def rotate_credentials(
-        self,
-        encrypted_data: bytes,
-        old_key_id: str,
-        new_key_id: str
+        self, encrypted_data: bytes, old_key_id: str, new_key_id: str
     ) -> bytes:
         """Re-encrypt credentials with a new key.
 

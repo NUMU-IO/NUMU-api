@@ -80,6 +80,7 @@ def _make_address():
 # Checkout validation
 # ---------------------------------------------------------------------------
 
+
 class TestCheckoutValidation:
     """Verify that checkout enforces business rules."""
 
@@ -114,6 +115,7 @@ class TestCheckoutValidation:
 # ---------------------------------------------------------------------------
 # Order creation from checkout
 # ---------------------------------------------------------------------------
+
 
 class TestCheckoutOrderCreation:
     """Verify that checkout produces a correct Order entity."""
@@ -187,6 +189,7 @@ class TestCheckoutOrderCreation:
 # Payment webhook processing
 # ---------------------------------------------------------------------------
 
+
 class TestPaymobWebhookProcessing:
     """Verify that webhook callbacks transition order state correctly."""
 
@@ -245,6 +248,7 @@ class TestPaymobWebhookProcessing:
 # ---------------------------------------------------------------------------
 # Full lifecycle
 # ---------------------------------------------------------------------------
+
 
 class TestCheckoutLifecycle:
     """End-to-end lifecycle: checkout → pay → ship → deliver."""
