@@ -8,7 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.infrastructure.database.connection import (
     AsyncSessionLocal,
-    reset_tenant_schema,
+    reset_tenant_context,
+    set_tenant_id,
     set_tenant_schema,
 )
 from src.infrastructure.tenancy.repository import TenantRepository
@@ -49,18 +50,19 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
             if not tenant or not tenant.is_active:
                 raise HTTPException(status_code=404, detail=f"Store '{subdomain}' not found or inactive.")
-
-            # Set tenant context
+            
+            # Set tenant context (both schema and ID for RLS)
             request.state.tenant = tenant
             set_tenant_schema(tenant.schema_name)
+            set_tenant_id(tenant.id)
 
             response = await call_next(request)
             return response
 
         finally:
             # Always reset tenant context after request completes
-            reset_tenant_schema()
-
+            reset_tenant_context()
+    
     def _extract_subdomain(self, host: str) -> str | None:
         """
         Extract subdomain from host.
