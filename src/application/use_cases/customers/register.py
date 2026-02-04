@@ -60,7 +60,9 @@ class RegisterCustomerUseCase:
 
         # Generate tokens (using customer ID as subject)
         access_token = self.token_service.create_customer_access_token(created_customer)
-        refresh_token = self.token_service.create_customer_refresh_token(created_customer)
+        refresh_token = self.token_service.create_customer_refresh_token(
+            created_customer
+        )
 
         return CustomerAuthResponseDTO(
             customer=CustomerDTO.from_entity(created_customer),

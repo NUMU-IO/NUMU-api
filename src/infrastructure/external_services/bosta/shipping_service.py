@@ -183,7 +183,9 @@ class BostaShippingService(IShippingService):
                                 carrier="Bosta",
                                 service="Standard Delivery",
                                 rate_id=f"bosta_standard_{to_zone.value}",
-                                amount=int(data.get("price", 0) * 100),  # Convert to cents
+                                amount=int(
+                                    data.get("price", 0) * 100
+                                ),  # Convert to cents
                                 currency="EGP",
                                 estimated_days=data.get("estimatedDays", 3),
                             )
@@ -274,8 +276,12 @@ class BostaShippingService(IShippingService):
                 "apartment": "",
             },
             "receiver": {
-                "firstName": to_address.name.split()[0] if to_address.name else "Customer",
-                "lastName": " ".join(to_address.name.split()[1:]) if to_address.name and len(to_address.name.split()) > 1 else "",
+                "firstName": to_address.name.split()[0]
+                if to_address.name
+                else "Customer",
+                "lastName": " ".join(to_address.name.split()[1:])
+                if to_address.name and len(to_address.name.split()) > 1
+                else "",
                 "phone": to_address.phone or "",
             },
             "businessReference": order_reference or "",
@@ -351,7 +357,9 @@ class BostaShippingService(IShippingService):
                         description=log.get("description", ""),
                         location=log.get("location", None),
                         timestamp=datetime.fromisoformat(
-                            log.get("timestamp", datetime.utcnow().isoformat()).replace("Z", "+00:00")
+                            log.get("timestamp", datetime.utcnow().isoformat()).replace(
+                                "Z", "+00:00"
+                            )
                         ),
                     )
                 )
@@ -528,6 +536,7 @@ class BostaShippingService(IShippingService):
 
             if hmac.compare_digest(expected_signature, signature):
                 import json
+
                 return json.loads(payload)
             else:
                 logger.warning("Bosta webhook signature mismatch")

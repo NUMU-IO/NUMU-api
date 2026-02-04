@@ -27,11 +27,13 @@ SLACK_MAX_RETRIES = 3
 
 class SlackClientError(Exception):
     """Base exception for Slack client errors."""
+
     pass
 
 
 class SlackRateLimitError(SlackClientError):
     """Raised when Slack rate limit is hit."""
+
     def __init__(self, retry_after: int = 60):
         self.retry_after = retry_after
         super().__init__(f"Rate limited. Retry after {retry_after}s")
@@ -39,6 +41,7 @@ class SlackRateLimitError(SlackClientError):
 
 class SlackWebhookError(SlackClientError):
     """Raised when webhook request fails."""
+
     pass
 
 
@@ -190,7 +193,7 @@ class SlackClient:
 
             # Exponential backoff before retry
             if attempt < self.max_retries - 1:
-                backoff = SLACK_BACKOFF_BASE_SECONDS * (2 ** attempt)
+                backoff = SLACK_BACKOFF_BASE_SECONDS * (2**attempt)
                 await asyncio.sleep(backoff)
 
         # All retries failed

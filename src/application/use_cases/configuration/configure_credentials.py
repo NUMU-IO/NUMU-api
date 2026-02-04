@@ -123,15 +123,16 @@ class ConfigureCredentialsUseCase:
                 extra_metadata={
                     "display_info": display_info,
                     "validation_details": validation_result.details,
-                }
+                },
             )
             self.db.add(credential)
 
         # Step 5: Update configuration request if provided
         if request_id:
             request_result = await self.db.execute(
-                select(ConfigurationRequest)
-                .where(ConfigurationRequest.id == request_id)
+                select(ConfigurationRequest).where(
+                    ConfigurationRequest.id == request_id
+                )
             )
             request = request_result.scalar_one_or_none()
 
@@ -151,7 +152,7 @@ class ConfigureCredentialsUseCase:
                 "request_id": str(request_id) if request_id else None,
                 "validation_status": validation_result.status.value,
                 "is_update": existing is not None,
-            }
+            },
         )
         self.db.add(audit_log)
 

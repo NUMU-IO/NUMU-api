@@ -34,7 +34,9 @@ class UpdateOrderUseCase:
             raise EntityNotFoundError("Store", str(store_id))
 
         if store.owner_id != user_id:
-            raise AuthorizationError("You don't have permission to update orders in this store")
+            raise AuthorizationError(
+                "You don't have permission to update orders in this store"
+            )
 
         # Get order
         order = await self.order_repository.get_by_id(order_id)
@@ -77,15 +79,30 @@ class UpdateOrderUseCase:
         if dto.shipping_cost is not None:
             order.shipping_cost = dto.shipping_cost
             # Recalculate total
-            order.total = order.subtotal + order.shipping_cost + order.tax_amount - order.discount_amount
+            order.total = (
+                order.subtotal
+                + order.shipping_cost
+                + order.tax_amount
+                - order.discount_amount
+            )
 
         if dto.tax_amount is not None:
             order.tax_amount = dto.tax_amount
-            order.total = order.subtotal + order.shipping_cost + order.tax_amount - order.discount_amount
+            order.total = (
+                order.subtotal
+                + order.shipping_cost
+                + order.tax_amount
+                - order.discount_amount
+            )
 
         if dto.discount_amount is not None:
             order.discount_amount = dto.discount_amount
-            order.total = order.subtotal + order.shipping_cost + order.tax_amount - order.discount_amount
+            order.total = (
+                order.subtotal
+                + order.shipping_cost
+                + order.tax_amount
+                - order.discount_amount
+            )
 
         if dto.payment_method is not None:
             order.payment_method = dto.payment_method

@@ -64,7 +64,7 @@ class RevokeCredentialsUseCase:
             details={
                 "credential_id": str(credential.id),
                 "was_active": credential.is_active,
-            }
+            },
         )
         self.db.add(audit_log)
 

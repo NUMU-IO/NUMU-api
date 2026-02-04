@@ -33,11 +33,14 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     to track all tenants. The tenant_id is used as a discriminator
     in all tenant-scoped tables.
     """
+
     __tablename__ = "tenants"
     __table_args__ = {"schema": "public"}
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    subdomain: Mapped[str] = mapped_column(String(63), unique=True, index=True, nullable=False)
+    subdomain: Mapped[str] = mapped_column(
+        String(63), unique=True, index=True, nullable=False
+    )
     owner_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.users.id", ondelete="SET NULL"),

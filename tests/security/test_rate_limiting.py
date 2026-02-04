@@ -16,7 +16,9 @@ class TestRateLimiter:
         """Create a fresh rate limiter."""
         return RateLimiter()
 
-    def _create_mock_request(self, path: str = "/api/v1/test", client_ip: str = "127.0.0.1"):
+    def _create_mock_request(
+        self, path: str = "/api/v1/test", client_ip: str = "127.0.0.1"
+    ):
         """Create a mock request."""
         request = MagicMock(spec=Request)
         request.url.path = path
@@ -122,13 +124,16 @@ class TestRateLimiter:
         # Manually age the entries
         key = rate_limiter._get_key(request)
         import time
+
         rate_limiter._requests[key] = [time.time() - 200]  # 200 seconds ago
 
         # Cleanup
         rate_limiter.cleanup()
 
         # Old entries should be removed
-        assert key not in rate_limiter._requests or len(rate_limiter._requests[key]) == 0
+        assert (
+            key not in rate_limiter._requests or len(rate_limiter._requests[key]) == 0
+        )
 
     def test_retry_after_calculation(self, rate_limiter):
         """Test retry_after is calculated correctly."""
@@ -139,7 +144,9 @@ class TestRateLimiter:
             rate_limiter.is_allowed(request, max_requests=5, window_seconds=60)
 
         # Get retry_after
-        is_allowed, retry_after = rate_limiter.is_allowed(request, max_requests=5, window_seconds=60)
+        is_allowed, retry_after = rate_limiter.is_allowed(
+            request, max_requests=5, window_seconds=60
+        )
 
         assert is_allowed is False
         # retry_after should be between 1 and 60 seconds

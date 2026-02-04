@@ -72,10 +72,7 @@ async def create_configuration_request(
         )
         return result
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get(
@@ -114,13 +111,10 @@ async def get_configuration_status(
 )
 async def list_configuration_requests(
     status_filter: RequestStatus | None = Query(
-        None,
-        alias="status",
-        description="Filter by request status"
+        None, alias="status", description="Filter by request status"
     ),
     service_type: ServiceType | None = Query(
-        None,
-        description="Filter by service type"
+        None, description="Filter by service type"
     ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -162,7 +156,7 @@ async def get_configuration_request(
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Configuration request not found"
+            detail="Configuration request not found",
         )
 
     return result
@@ -195,12 +189,9 @@ async def cancel_configuration_request(
             request_id=request_id,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except LookupError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Configuration request not found"
+            detail="Configuration request not found",
         )

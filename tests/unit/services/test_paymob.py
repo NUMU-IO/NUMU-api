@@ -47,9 +47,15 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_create_payment_intent(self):
         """Test creating a Paymob payment intent."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
-            with patch.object(self.service, "_create_paymob_order", new_callable=AsyncMock) as mock_order:
-                with patch.object(self.service, "_create_payment_key", new_callable=AsyncMock) as mock_key:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
+            with patch.object(
+                self.service, "_create_paymob_order", new_callable=AsyncMock
+            ) as mock_order:
+                with patch.object(
+                    self.service, "_create_payment_key", new_callable=AsyncMock
+                ) as mock_key:
                     mock_auth.return_value = "auth_token_123"
                     mock_order.return_value = "order_123"
                     mock_key.return_value = "payment_key_456"
@@ -71,9 +77,15 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_create_card_payment(self):
         """Test creating a card payment with PaymobPaymentKey."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
-            with patch.object(self.service, "_create_paymob_order", new_callable=AsyncMock) as mock_order:
-                with patch.object(self.service, "_create_payment_key", new_callable=AsyncMock) as mock_key:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
+            with patch.object(
+                self.service, "_create_paymob_order", new_callable=AsyncMock
+            ) as mock_order:
+                with patch.object(
+                    self.service, "_create_payment_key", new_callable=AsyncMock
+                ) as mock_key:
                     mock_auth.return_value = "auth_token_123"
                     mock_order.return_value = "order_456"
                     mock_key.return_value = "payment_key_789"
@@ -93,7 +105,9 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_confirm_payment_success(self):
         """Test confirming a paid Paymob payment."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "auth_token"
 
             with patch("httpx.AsyncClient") as mock_client:
@@ -103,7 +117,9 @@ class TestPaymobPaymentService:
                     "paid_amount_cents": 10000,
                     "amount_cents": 10000,
                 }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
 
                 result = await self.service.confirm_payment("order_123")
 
@@ -113,7 +129,9 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_confirm_payment_not_paid(self):
         """Test confirming an unpaid payment."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "auth_token"
 
             with patch("httpx.AsyncClient") as mock_client:
@@ -123,7 +141,9 @@ class TestPaymobPaymentService:
                     "paid_amount_cents": 0,
                     "amount_cents": 10000,
                 }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
 
                 result = await self.service.confirm_payment("order_123")
 
@@ -213,20 +233,24 @@ class TestPaymobPaymentService:
             iframe_id="456",
             hmac_secret=None,
         )
-        result = service.verify_webhook_signature(b'{}', "sig")
+        result = service.verify_webhook_signature(b"{}", "sig")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_refund_payment(self):
         """Test refunding a Paymob payment."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "auth_token"
 
             with patch("httpx.AsyncClient") as mock_client:
                 mock_response = MagicMock()
                 mock_response.status_code = 200
                 mock_response.json.return_value = {"id": "refund_123"}
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+                mock_client.return_value.__aenter__.return_value.post = AsyncMock(
+                    return_value=mock_response
+                )
 
                 result = await self.service.refund_payment("txn_123", amount=5000)
 
@@ -236,13 +260,17 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_cancel_payment(self):
         """Test cancelling/voiding a Paymob payment."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "auth_token"
 
             with patch("httpx.AsyncClient") as mock_client:
                 mock_response = MagicMock()
                 mock_response.status_code = 200
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+                mock_client.return_value.__aenter__.return_value.post = AsyncMock(
+                    return_value=mock_response
+                )
 
                 result = await self.service.cancel_payment("order_123")
 
@@ -251,7 +279,9 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_get_payment_status_paid(self):
         """Test getting payment status - paid."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "auth_token"
 
             with patch("httpx.AsyncClient") as mock_client:
@@ -262,7 +292,9 @@ class TestPaymobPaymentService:
                     "amount_cents": 10000,
                     "is_cancel": False,
                 }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
 
                 status = await self.service.get_payment_status("order_123")
                 assert status == "paid"
@@ -270,7 +302,9 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_get_payment_status_pending(self):
         """Test getting payment status - pending."""
-        with patch.object(self.service, "_get_auth_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_auth_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "auth_token"
 
             with patch("httpx.AsyncClient") as mock_client:
@@ -281,7 +315,9 @@ class TestPaymobPaymentService:
                     "amount_cents": 10000,
                     "is_cancel": False,
                 }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
 
                 status = await self.service.get_payment_status("order_123")
                 assert status == "pending"

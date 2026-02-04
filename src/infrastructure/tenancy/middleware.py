@@ -62,7 +62,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             if not tenant or not tenant.is_active:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Store '{subdomain}' not found or inactive."
+                    detail=f"Store '{subdomain}' not found or inactive.",
                 )
 
             # Set tenant context

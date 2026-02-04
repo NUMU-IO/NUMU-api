@@ -114,7 +114,9 @@ class Disable2FAUseCase:
 
                 if not backup_valid:
                     logger.warning(f"Invalid TOTP code for 2FA disable: {user_id}")
-                    raise BusinessRuleViolationError("Invalid two-factor authentication code")
+                    raise BusinessRuleViolationError(
+                        "Invalid two-factor authentication code"
+                    )
 
         # 5. Disable 2FA
         two_factor.disable()

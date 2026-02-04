@@ -63,10 +63,12 @@ class GetConfigurationStatusUseCase:
             .where(ConfigurationRequest.tenant_id == tenant_id)
             .where(ConfigurationRequest.service_type == service_type)
             .where(ConfigurationRequest.service_name == service_name)
-            .where(ConfigurationRequest.status.in_([
-                RequestStatus.PENDING,
-                RequestStatus.IN_PROGRESS
-            ]))
+            .where(
+                ConfigurationRequest.status.in_([
+                    RequestStatus.PENDING,
+                    RequestStatus.IN_PROGRESS,
+                ])
+            )
         )
         pending_request = request_result.scalar_one_or_none()
 

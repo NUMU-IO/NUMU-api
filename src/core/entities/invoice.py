@@ -367,5 +367,7 @@ class Invoice(BaseEntity):
     def eta_portal_url(self) -> str | None:
         """Get URL to view invoice on ETA portal."""
         if self.eta_uuid and self.eta_long_id:
-            return f"https://invoicing.eta.gov.eg/print/{self.eta_uuid}/{self.eta_long_id}"
+            return (
+                f"https://invoicing.eta.gov.eg/print/{self.eta_uuid}/{self.eta_long_id}"
+            )
         return None

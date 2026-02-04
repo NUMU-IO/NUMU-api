@@ -40,8 +40,8 @@ class OpenAIService(IAIService):
         prompt = f"""Generate a product description for an e-commerce product.
 
 Product Name: {product_name}
-Category: {category or 'General'}
-Attributes: {attrs_text or 'None'}
+Category: {category or "General"}
+Attributes: {attrs_text or "None"}
 Tone: {tone}
 
 Please provide:
@@ -143,7 +143,7 @@ Format your response as JSON with keys: short_description, long_description, seo
         prompt = f"""Generate SEO keywords for this product:
 
 Name: {product_name}
-Category: {category or 'General'}
+Category: {category or "General"}
 Description: {description}
 
 Provide 10-15 relevant SEO keywords as a JSON array of strings."""

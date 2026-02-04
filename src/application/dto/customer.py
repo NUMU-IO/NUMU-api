@@ -40,7 +40,9 @@ class CustomerDTO(BaseDTO):
             is_verified=entity.is_verified,
             total_orders=entity.total_orders,
             total_spent=entity.total_spent,
-            default_address_id=str(entity.default_address_id) if entity.default_address_id else None,
+            default_address_id=str(entity.default_address_id)
+            if entity.default_address_id
+            else None,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )

@@ -1,6 +1,5 @@
 """Use case for getting supported services information."""
 
-
 from src.api.v1.schemas.tenant.configuration import (
     ServiceInfoResponse,
     SupportedServicesResponse,

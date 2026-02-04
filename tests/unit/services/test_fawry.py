@@ -36,7 +36,9 @@ class TestFawryPaymentService:
     @pytest.mark.asyncio
     async def test_create_payment_intent(self):
         """Test creating a Fawry payment intent."""
-        with patch.object(self.service, "create_reference_number", new_callable=AsyncMock) as mock_create:
+        with patch.object(
+            self.service, "create_reference_number", new_callable=AsyncMock
+        ) as mock_create:
             from datetime import datetime, timedelta
 
             from src.core.interfaces.services.payment_service import (
@@ -77,7 +79,9 @@ class TestFawryPaymentService:
                 "statusCode": 200,
                 "referenceNumber": "987654321",
             }
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock(
+                return_value=mock_response
+            )
 
             reference = await self.service.create_reference_number(
                 amount=50000,
@@ -111,7 +115,9 @@ class TestFawryPaymentService:
     @pytest.mark.asyncio
     async def test_confirm_payment_paid(self):
         """Test confirming a paid Fawry payment."""
-        with patch.object(self.service, "get_payment_status_details", new_callable=AsyncMock) as mock_status:
+        with patch.object(
+            self.service, "get_payment_status_details", new_callable=AsyncMock
+        ) as mock_status:
             mock_status.return_value = {
                 "paymentStatus": "PAID",
                 "referenceNumber": "123456789",
@@ -125,7 +131,9 @@ class TestFawryPaymentService:
     @pytest.mark.asyncio
     async def test_confirm_payment_not_paid(self):
         """Test confirming unpaid Fawry payment."""
-        with patch.object(self.service, "get_payment_status_details", new_callable=AsyncMock) as mock_status:
+        with patch.object(
+            self.service, "get_payment_status_details", new_callable=AsyncMock
+        ) as mock_status:
             mock_status.return_value = {
                 "paymentStatus": "NEW",
                 "referenceNumber": "123456789",
@@ -187,7 +195,7 @@ class TestFawryPaymentService:
             merchant_code="test",
             security_key=None,
         )
-        result = service.verify_webhook_signature(b'{}', "sig")
+        result = service.verify_webhook_signature(b"{}", "sig")
         assert result is None
 
     @pytest.mark.asyncio
@@ -196,7 +204,9 @@ class TestFawryPaymentService:
         with patch("httpx.AsyncClient") as mock_client:
             mock_response = MagicMock()
             mock_response.status_code = 200
-            mock_client.return_value.__aenter__.return_value.delete = AsyncMock(return_value=mock_response)
+            mock_client.return_value.__aenter__.return_value.delete = AsyncMock(
+                return_value=mock_response
+            )
 
             result = await self.service.cancel_payment("order-123")
 
@@ -205,7 +215,9 @@ class TestFawryPaymentService:
     @pytest.mark.asyncio
     async def test_refund_payment(self):
         """Test refunding a Fawry payment."""
-        with patch.object(self.service, "get_payment_status_details", new_callable=AsyncMock) as mock_status:
+        with patch.object(
+            self.service, "get_payment_status_details", new_callable=AsyncMock
+        ) as mock_status:
             mock_status.return_value = {
                 "paymentStatus": "PAID",
                 "paymentAmount": "100.00",
@@ -218,7 +230,9 @@ class TestFawryPaymentService:
                     "statusCode": 200,
                     "referenceNumber": "refund_123",
                 }
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+                mock_client.return_value.__aenter__.return_value.post = AsyncMock(
+                    return_value=mock_response
+                )
 
                 result = await self.service.refund_payment("123456789")
 
@@ -227,7 +241,9 @@ class TestFawryPaymentService:
     @pytest.mark.asyncio
     async def test_get_payment_status(self):
         """Test getting payment status."""
-        with patch.object(self.service, "get_payment_status_details", new_callable=AsyncMock) as mock_details:
+        with patch.object(
+            self.service, "get_payment_status_details", new_callable=AsyncMock
+        ) as mock_details:
             mock_details.return_value = {"paymentStatus": "PAID"}
 
             status = await self.service.get_payment_status("order-123")

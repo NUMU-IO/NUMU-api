@@ -128,6 +128,7 @@ class TestSecurityHeadersValues:
         hsts = response.headers["Strict-Transport-Security"]
         # Extract max-age value
         import re
+
         match = re.search(r"max-age=(\d+)", hsts)
         assert match is not None
         max_age = int(match.group(1))

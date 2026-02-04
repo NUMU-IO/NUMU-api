@@ -54,13 +54,10 @@ router = APIRouter(
 )
 async def list_pending_requests(
     status_filter: RequestStatus | None = Query(
-        RequestStatus.PENDING,
-        alias="status",
-        description="Filter by request status"
+        RequestStatus.PENDING, alias="status", description="Filter by request status"
     ),
     service_type: ServiceType | None = Query(
-        None,
-        description="Filter by service type"
+        None, description="Filter by service type"
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -98,7 +95,7 @@ async def get_request_details(
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Configuration request not found"
+            detail="Configuration request not found",
         )
 
     return result
@@ -132,13 +129,10 @@ async def update_request(
     except LookupError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Configuration request not found"
+            detail="Configuration request not found",
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post(
@@ -176,10 +170,7 @@ async def configure_credentials(
         )
         return result
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post(
@@ -240,7 +231,7 @@ async def get_credential_status(
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Credentials not configured for this service"
+            detail="Credentials not configured for this service",
         )
 
     return result
@@ -278,8 +269,7 @@ async def revoke_credentials(
         )
     except LookupError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Credentials not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Credentials not found"
         )
 
 
@@ -318,8 +308,7 @@ async def get_service_info(
 
     if not result:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Service not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Service not found"
         )
 
     return result

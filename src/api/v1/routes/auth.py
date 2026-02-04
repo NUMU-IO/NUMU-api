@@ -332,7 +332,9 @@ async def change_password(
 async def enable_2fa(
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
-    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    two_factor_repo: Annotated[
+        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
+    ],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Enable Two-Factor Authentication for the current user.
@@ -378,7 +380,9 @@ async def enable_2fa(
 async def verify_2fa(
     request: Verify2FARequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    two_factor_repo: Annotated[
+        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
+    ],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Verify a 2FA code (TOTP or backup code).
@@ -432,7 +436,9 @@ async def disable_2fa(
     request: Disable2FARequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
-    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    two_factor_repo: Annotated[
+        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
+    ],
     password_svc: Annotated[PasswordService, Depends(get_password_service)],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
@@ -478,7 +484,9 @@ async def disable_2fa(
 )
 async def get_2fa_status(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    two_factor_repo: Annotated[
+        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
+    ],
 ):
     """Get the current 2FA status for the authenticated user.
 
@@ -517,7 +525,9 @@ async def regenerate_backup_codes(
     request: RegenerateBackupCodesRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
-    two_factor_repo: Annotated[InMemoryTwoFactorRepository, Depends(get_two_factor_repository)],
+    two_factor_repo: Annotated[
+        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
+    ],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Regenerate backup codes for 2FA recovery.

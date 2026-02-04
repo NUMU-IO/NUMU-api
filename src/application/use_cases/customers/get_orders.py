@@ -18,9 +18,7 @@ class GetCustomerOrdersUseCase:
         self.customer_repository = customer_repository
         self.order_repository = order_repository
 
-    async def execute(
-        self, customer_id: UUID, skip: int = 0, limit: int = 20
-    ) -> dict:
+    async def execute(self, customer_id: UUID, skip: int = 0, limit: int = 20) -> dict:
         """Get customer orders with pagination."""
         customer = await self.customer_repository.get_by_id(customer_id)
 

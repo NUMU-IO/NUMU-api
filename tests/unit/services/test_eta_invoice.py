@@ -117,7 +117,9 @@ class TestETAInvoiceService:
     @pytest.mark.asyncio
     async def test_submit_invoice_success(self):
         """Test successful invoice submission."""
-        with patch.object(self.service, "_get_access_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_access_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "access_token_123"
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -150,7 +152,9 @@ class TestETAInvoiceService:
     @pytest.mark.asyncio
     async def test_submit_invoice_rejected(self):
         """Test rejected invoice submission."""
-        with patch.object(self.service, "_get_access_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_access_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "access_token_123"
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -183,7 +187,9 @@ class TestETAInvoiceService:
     @pytest.mark.asyncio
     async def test_get_submission_status(self):
         """Test getting submission status."""
-        with patch.object(self.service, "_get_access_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_access_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "access_token"
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -205,7 +211,9 @@ class TestETAInvoiceService:
     @pytest.mark.asyncio
     async def test_get_document(self):
         """Test getting document by UUID."""
-        with patch.object(self.service, "_get_access_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_access_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "access_token"
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -227,7 +235,9 @@ class TestETAInvoiceService:
     @pytest.mark.asyncio
     async def test_cancel_document(self):
         """Test cancelling a document."""
-        with patch.object(self.service, "_get_access_token", new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            self.service, "_get_access_token", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = "access_token"
 
             with patch("httpx.AsyncClient") as mock_client_class:
@@ -302,6 +312,7 @@ class TestETAQRCodeGeneration:
 
         # Should be base64 encoded
         import base64
+
         decoded = base64.b64decode(qr_data)
         assert len(decoded) > 0
 
@@ -320,9 +331,10 @@ class TestETAQRCodeGeneration:
         # Image may be None if qrcode library not installed
         if qr_image:
             import base64
+
             decoded = base64.b64decode(qr_image)
             # Should be PNG image (starts with PNG header)
-            assert decoded[:4] == b'\x89PNG'
+            assert decoded[:4] == b"\x89PNG"
 
     def test_decode_qr_data(self):
         """Test decoding QR code data."""

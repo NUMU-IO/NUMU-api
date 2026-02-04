@@ -86,7 +86,9 @@ api_router.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(tenants_router, prefix="/tenants", tags=["Tenants"])
 
 # Admin routes (super admin only)
-api_router.include_router(tenants_admin_router, prefix="/admin/tenants", tags=["Admin - Tenants"])
+api_router.include_router(
+    tenants_admin_router, prefix="/admin/tenants", tags=["Admin - Tenants"]
+)
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores", tags=["Stores"])

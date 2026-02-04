@@ -46,7 +46,9 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
 
     # Pricing (stored in cents)
     price_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    price_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EGP")
+    price_currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="EGP"
+    )
     compare_at_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -59,14 +61,18 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     dimensions: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Media and categorization
-    images: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
+    images: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True, default=list
+    )
     category_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.categories.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True, default=list
+    )
 
     # Additional data
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)

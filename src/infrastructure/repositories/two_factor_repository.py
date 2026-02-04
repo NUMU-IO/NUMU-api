@@ -34,7 +34,7 @@ class InMemoryTwoFactorRepository(ITwoFactorRepository):
     async def get_all(self, skip: int = 0, limit: int = 100) -> list[TwoFactorAuth]:
         """Get all 2FA entities with pagination."""
         items = list(self._storage.values())
-        return items[skip:skip + limit]
+        return items[skip : skip + limit]
 
     async def create(self, entity: TwoFactorAuth) -> TwoFactorAuth:
         """Create a new 2FA entity."""

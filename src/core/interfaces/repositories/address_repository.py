@@ -26,7 +26,9 @@ class ICustomerAddressRepository(BaseRepository[CustomerAddress]):
         ...
 
     @abstractmethod
-    async def set_default(self, customer_id: UUID, address_id: UUID) -> CustomerAddress | None:
+    async def set_default(
+        self, customer_id: UUID, address_id: UUID
+    ) -> CustomerAddress | None:
         """Set an address as default, unsetting any previous default."""
         ...
 

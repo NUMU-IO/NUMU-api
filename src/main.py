@@ -33,13 +33,16 @@ logger = get_logger(__name__)
 def init_sentry() -> None:
     """Initialize Sentry SDK for error tracking and performance monitoring."""
     if not settings.sentry_dsn:
-        logger.warning("sentry_dsn_not_configured", msg="Sentry DSN not set, error tracking disabled")
+        logger.warning(
+            "sentry_dsn_not_configured",
+            msg="Sentry DSN not set, error tracking disabled",
+        )
         return
 
     # Configure logging integration to capture WARNING+ as breadcrumbs, ERROR+ as events
     sentry_logging = LoggingIntegration(
-        level=logging.INFO,          # Capture INFO+ as breadcrumbs
-        event_level=logging.ERROR,   # Send ERROR+ as Sentry events
+        level=logging.INFO,  # Capture INFO+ as breadcrumbs
+        event_level=logging.ERROR,  # Send ERROR+ as Sentry events
     )
 
     sentry_sdk.init(
@@ -113,6 +116,7 @@ def create_app() -> FastAPI:
     # Add SessionMiddleware for admin panel cookie-based auth
     # Uses separate session secret from JWT for security
     from starlette.middleware.sessions import SessionMiddleware
+
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
 
     # Add middleware (order matters: first added = outermost)

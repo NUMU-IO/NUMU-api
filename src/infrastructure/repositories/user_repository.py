@@ -68,9 +68,7 @@ class UserRepository(IUserRepository):
         limit: int = 100,
     ) -> list[User]:
         """Get all users with pagination."""
-        result = await self.session.execute(
-            select(UserModel).offset(skip).limit(limit)
-        )
+        result = await self.session.execute(select(UserModel).offset(skip).limit(limit))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def create(self, entity: User) -> User:
@@ -117,9 +115,7 @@ class UserRepository(IUserRepository):
 
     async def count(self) -> int:
         """Get total count of users."""
-        result = await self.session.execute(
-            select(UserModel)
-        )
+        result = await self.session.execute(select(UserModel))
         return len(result.scalars().all())
 
     async def get_by_email(self, email: Email) -> User | None:

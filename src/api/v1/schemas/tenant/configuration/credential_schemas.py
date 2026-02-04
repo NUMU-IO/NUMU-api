@@ -20,29 +20,18 @@ class CredentialConfigureRequest(BaseModel):
     """
 
     tenant_id: UUID = Field(
-        ...,
-        description="Tenant/merchant ID to configure credentials for"
+        ..., description="Tenant/merchant ID to configure credentials for"
     )
-    service_type: ServiceType = Field(
-        ...,
-        description="Type of service"
-    )
-    service_name: ServiceName = Field(
-        ...,
-        description="Specific service provider"
-    )
+    service_type: ServiceType = Field(..., description="Type of service")
+    service_name: ServiceName = Field(..., description="Specific service provider")
     credentials: dict[str, Any] = Field(
-        ...,
-        description="Service credentials (will be encrypted)"
+        ..., description="Service credentials (will be encrypted)"
     )
     request_id: UUID | None = Field(
-        None,
-        description="Configuration request ID if responding to a request"
+        None, description="Configuration request ID if responding to a request"
     )
     admin_notes: str | None = Field(
-        None,
-        max_length=2000,
-        description="Notes about the configuration"
+        None, max_length=2000, description="Notes about the configuration"
     )
 
     class Config:
@@ -54,10 +43,10 @@ class CredentialConfigureRequest(BaseModel):
                 "credentials": {
                     "merchant_code": "M12345678",
                     "security_key": "your-security-key-here",
-                    "environment": "production"
+                    "environment": "production",
                 },
                 "request_id": "550e8400-e29b-41d4-a716-446655440003",
-                "admin_notes": "Configured with production credentials"
+                "admin_notes": "Configured with production credentials",
             }
         }
 
@@ -65,28 +54,16 @@ class CredentialConfigureRequest(BaseModel):
 class CredentialValidateRequest(BaseModel):
     """Schema for validating credentials without storing them."""
 
-    service_type: ServiceType = Field(
-        ...,
-        description="Type of service"
-    )
-    service_name: ServiceName = Field(
-        ...,
-        description="Specific service provider"
-    )
-    credentials: dict[str, Any] = Field(
-        ...,
-        description="Credentials to validate"
-    )
+    service_type: ServiceType = Field(..., description="Type of service")
+    service_name: ServiceName = Field(..., description="Specific service provider")
+    credentials: dict[str, Any] = Field(..., description="Credentials to validate")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "service_type": "payment_gateway",
                 "service_name": "paymob",
-                "credentials": {
-                    "api_key": "your-api-key",
-                    "integration_id": "12345"
-                }
+                "credentials": {"api_key": "your-api-key", "integration_id": "12345"},
             }
         }
 
@@ -106,11 +83,8 @@ class CredentialValidationResponse(BaseModel):
                 "is_valid": True,
                 "status": "valid",
                 "message": "Credentials validated successfully",
-                "details": {
-                    "merchant_code": "M12345678",
-                    "environment": "production"
-                },
-                "error_code": None
+                "details": {"merchant_code": "M12345678", "environment": "production"},
+                "error_code": None,
             }
         }
 
@@ -157,7 +131,7 @@ class ServiceInfoResponse(BaseModel):
                 "description": "Egypt's leading payment network",
                 "required_fields": ["merchant_code", "security_key"],
                 "optional_fields": ["return_url", "environment"],
-                "documentation_url": "https://developer.fawry.io"
+                "documentation_url": "https://developer.fawry.io",
             }
         }
 
@@ -174,6 +148,6 @@ class SupportedServicesResponse(BaseModel):
             "example": {
                 "payment_gateways": [],
                 "shipping_carriers": [],
-                "communication": []
+                "communication": [],
             }
         }

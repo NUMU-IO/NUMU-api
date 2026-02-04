@@ -16,13 +16,14 @@ class AlertChannel(StrEnum):
 
     Maps to settings.slack_webhook_<channel> environment variables.
     """
-    CRITICAL = "critical"   # P0 alerts - page on-call
-    PAYMENTS = "payments"   # Payment failures, gateway issues
-    FRAUD = "fraud"         # COD fraud detection (restricted)
-    SHIPPING = "shipping"   # Bosta failures, SLA breaches
-    INFRA = "infra"         # DB, Redis, disk, latency
-    BUSINESS = "business"   # GMV anomalies, conversion drops
-    DEV = "dev"             # All non-prod alerts
+
+    CRITICAL = "critical"  # P0 alerts - page on-call
+    PAYMENTS = "payments"  # Payment failures, gateway issues
+    FRAUD = "fraud"  # COD fraud detection (restricted)
+    SHIPPING = "shipping"  # Bosta failures, SLA breaches
+    INFRA = "infra"  # DB, Redis, disk, latency
+    BUSINESS = "business"  # GMV anomalies, conversion drops
+    DEV = "dev"  # All non-prod alerts
 
 
 # Channel routing by service type
@@ -54,7 +55,10 @@ def get_channel_for_alert(alert: SlackAlert) -> AlertChannel:
     3. Fallback to #infra for unknown services
     """
     # Security CRITICAL always goes to critical channel
-    if alert.service == AlertService.SECURITY and alert.severity == AlertSeverity.CRITICAL:
+    if (
+        alert.service == AlertService.SECURITY
+        and alert.severity == AlertSeverity.CRITICAL
+    ):
         return AlertChannel.CRITICAL
 
     # Normal service routing
@@ -103,8 +107,7 @@ CHANNEL_DESCRIPTIONS: dict[AlertChannel, str] = {
         "Restricted access - fraud signals should not leak to merchants."
     ),
     AlertChannel.SHIPPING: (
-        "#numu-alerts-shipping - Bosta API failures, AWB issues, "
-        "delivery SLA breaches."
+        "#numu-alerts-shipping - Bosta API failures, AWB issues, delivery SLA breaches."
     ),
     AlertChannel.INFRA: (
         "#numu-alerts-infra - Database latency, Redis unavailable, "

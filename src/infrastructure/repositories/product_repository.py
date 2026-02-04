@@ -19,7 +19,9 @@ class ProductRepository(IProductRepository):
 
     def _to_entity(self, model: ProductModel) -> Product:
         """Convert database model to domain entity."""
-        currency = Currency(model.price_currency) if model.price_currency else Currency.USD
+        currency = (
+            Currency(model.price_currency) if model.price_currency else Currency.USD
+        )
         return Product(
             id=model.id,
             store_id=model.store_id,
@@ -31,8 +33,12 @@ class ProductRepository(IProductRepository):
             product_type=model.product_type,
             status=model.status,
             price=Money.from_cents(model.price_amount, currency),
-            compare_at_price=Money.from_cents(model.compare_at_price, currency) if model.compare_at_price else None,
-            cost_price=Money.from_cents(model.cost_price, currency) if model.cost_price else None,
+            compare_at_price=Money.from_cents(model.compare_at_price, currency)
+            if model.compare_at_price
+            else None,
+            cost_price=Money.from_cents(model.cost_price, currency)
+            if model.cost_price
+            else None,
             quantity=model.quantity,
             low_stock_threshold=model.low_stock_threshold,
             weight=model.weight,
@@ -60,7 +66,9 @@ class ProductRepository(IProductRepository):
             status=entity.status,
             price_amount=entity.price.cents,
             price_currency=entity.price.currency.value,
-            compare_at_price=entity.compare_at_price.cents if entity.compare_at_price else None,
+            compare_at_price=entity.compare_at_price.cents
+            if entity.compare_at_price
+            else None,
             cost_price=entity.cost_price.cents if entity.cost_price else None,
             quantity=entity.quantity,
             low_stock_threshold=entity.low_stock_threshold,
@@ -118,7 +126,9 @@ class ProductRepository(IProductRepository):
             model.status = entity.status
             model.price_amount = entity.price.cents
             model.price_currency = entity.price.currency.value
-            model.compare_at_price = entity.compare_at_price.cents if entity.compare_at_price else None
+            model.compare_at_price = (
+                entity.compare_at_price.cents if entity.compare_at_price else None
+            )
             model.cost_price = entity.cost_price.cents if entity.cost_price else None
             model.quantity = entity.quantity
             model.low_stock_threshold = entity.low_stock_threshold
@@ -148,9 +158,7 @@ class ProductRepository(IProductRepository):
 
     async def count(self) -> int:
         """Get total count of products."""
-        result = await self.session.execute(
-            select(func.count(ProductModel.id))
-        )
+        result = await self.session.execute(select(func.count(ProductModel.id)))
         return result.scalar() or 0
 
     async def get_by_store(
@@ -236,11 +244,14 @@ class ProductRepository(IProductRepository):
     ) -> list[Product]:
         """Get products with low stock."""
         result = await self.session.execute(
-            select(ProductModel).where(
+            select(ProductModel)
+            .where(
                 ProductModel.store_id == store_id,
-                ProductModel.quantity <= (threshold or ProductModel.low_stock_threshold),
+                ProductModel.quantity
+                <= (threshold or ProductModel.low_stock_threshold),
                 ProductModel.quantity > 0,
-            ).limit(limit)
+            )
+            .limit(limit)
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 
@@ -251,10 +262,12 @@ class ProductRepository(IProductRepository):
     ) -> list[Product]:
         """Get products that are out of stock."""
         result = await self.session.execute(
-            select(ProductModel).where(
+            select(ProductModel)
+            .where(
                 ProductModel.store_id == store_id,
                 ProductModel.quantity == 0,
-            ).limit(limit)
+            )
+            .limit(limit)
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 
@@ -278,9 +291,18 @@ class ProductRepository(IProductRepository):
             )
         await self.session.flush()
 
-    def _apply_product_filters(self, query, *, store_id=None, category_id=None,
-                               is_active=None, search=None, sku=None,
-                               price_min=None, price_max=None):
+    def _apply_product_filters(
+        self,
+        query,
+        *,
+        store_id=None,
+        category_id=None,
+        is_active=None,
+        search=None,
+        sku=None,
+        price_min=None,
+        price_max=None,
+    ):
         """Apply shared filter predicates to a product query."""
         if store_id:
             query = query.where(ProductModel.store_id == store_id)
@@ -340,9 +362,14 @@ class ProductRepository(IProductRepository):
         """List products with multiple optional filters, price range, and sorting."""
         query = select(ProductModel)
         query = self._apply_product_filters(
-            query, store_id=store_id, category_id=category_id,
-            is_active=is_active, search=search, sku=sku,
-            price_min=price_min, price_max=price_max,
+            query,
+            store_id=store_id,
+            category_id=category_id,
+            is_active=is_active,
+            search=search,
+            sku=sku,
+            price_min=price_min,
+            price_max=price_max,
         )
         query = self._apply_sort(query, sort_by, sort_order)
         query = query.offset(skip).limit(limit)
@@ -362,9 +389,14 @@ class ProductRepository(IProductRepository):
         """Count products matching the given filters."""
         query = select(func.count(ProductModel.id))
         query = self._apply_product_filters(
-            query, store_id=store_id, category_id=category_id,
-            is_active=is_active, search=search, sku=sku,
-            price_min=price_min, price_max=price_max,
+            query,
+            store_id=store_id,
+            category_id=category_id,
+            is_active=is_active,
+            search=search,
+            sku=sku,
+            price_min=price_min,
+            price_max=price_max,
         )
         result = await self.session.execute(query)
         return result.scalar() or 0

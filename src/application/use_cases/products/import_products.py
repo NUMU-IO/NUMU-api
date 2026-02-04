@@ -119,46 +119,96 @@ class ImportProductsUseCase:
             # Validate required: name
             name = (row.get("name") or "").strip()
             if not name:
-                row_errors.append(ImportRowError(row=row_num, field="name", message="Name is required"))
+                row_errors.append(
+                    ImportRowError(
+                        row=row_num, field="name", message="Name is required"
+                    )
+                )
 
             # Validate required: price
             price_str = (row.get("price") or "").strip()
             price_decimal: Decimal | None = None
             if not price_str:
-                row_errors.append(ImportRowError(row=row_num, field="price", message="Price is required"))
+                row_errors.append(
+                    ImportRowError(
+                        row=row_num, field="price", message="Price is required"
+                    )
+                )
             else:
                 try:
                     price_decimal = Decimal(price_str)
                     if price_decimal <= 0:
-                        row_errors.append(ImportRowError(row=row_num, field="price", message="Price must be greater than 0"))
+                        row_errors.append(
+                            ImportRowError(
+                                row=row_num,
+                                field="price",
+                                message="Price must be greater than 0",
+                            )
+                        )
                 except InvalidOperation:
-                    row_errors.append(ImportRowError(row=row_num, field="price", message=f"Invalid price value: {price_str}"))
+                    row_errors.append(
+                        ImportRowError(
+                            row=row_num,
+                            field="price",
+                            message=f"Invalid price value: {price_str}",
+                        )
+                    )
 
             # Validate product_type
             product_type_str = (row.get("product_type") or "physical").strip().lower()
             if product_type_str not in VALID_PRODUCT_TYPES:
-                row_errors.append(ImportRowError(row=row_num, field="product_type", message=f"Invalid product type: {product_type_str}"))
+                row_errors.append(
+                    ImportRowError(
+                        row=row_num,
+                        field="product_type",
+                        message=f"Invalid product type: {product_type_str}",
+                    )
+                )
                 product_type_str = "physical"
 
             # Validate status
             status_str = (row.get("status") or "draft").strip().lower()
             if status_str not in VALID_STATUSES:
-                row_errors.append(ImportRowError(row=row_num, field="status", message=f"Invalid status: {status_str}"))
+                row_errors.append(
+                    ImportRowError(
+                        row=row_num,
+                        field="status",
+                        message=f"Invalid status: {status_str}",
+                    )
+                )
                 status_str = "draft"
 
             # Validate currency
             currency_str = (row.get("price_currency") or "USD").strip().upper()
             if currency_str not in VALID_CURRENCIES:
-                row_errors.append(ImportRowError(row=row_num, field="price_currency", message=f"Invalid currency: {currency_str}"))
+                row_errors.append(
+                    ImportRowError(
+                        row=row_num,
+                        field="price_currency",
+                        message=f"Invalid currency: {currency_str}",
+                    )
+                )
                 currency_str = "USD"
 
             # Parse optional decimal fields
-            compare_at_price = self._parse_optional_decimal(row.get("compare_at_price"), row_num, "compare_at_price", row_errors)
-            cost_price = self._parse_optional_decimal(row.get("cost_price"), row_num, "cost_price", row_errors)
+            compare_at_price = self._parse_optional_decimal(
+                row.get("compare_at_price"), row_num, "compare_at_price", row_errors
+            )
+            cost_price = self._parse_optional_decimal(
+                row.get("cost_price"), row_num, "cost_price", row_errors
+            )
 
             # Parse optional integer fields
-            quantity = self._parse_optional_int(row.get("quantity"), row_num, "quantity", row_errors, default=0)
-            low_stock_threshold = self._parse_optional_int(row.get("low_stock_threshold"), row_num, "low_stock_threshold", row_errors, default=5)
+            quantity = self._parse_optional_int(
+                row.get("quantity"), row_num, "quantity", row_errors, default=0
+            )
+            low_stock_threshold = self._parse_optional_int(
+                row.get("low_stock_threshold"),
+                row_num,
+                "low_stock_threshold",
+                row_errors,
+                default=5,
+            )
 
             if row_errors:
                 result.errors.extend(row_errors)
@@ -177,19 +227,35 @@ class ImportProductsUseCase:
                 try:
                     category_id = UUID(category_id_str)
                 except ValueError:
-                    result.errors.append(ImportRowError(row=row_num, field="category_id", message=f"Invalid UUID: {category_id_str}"))
+                    result.errors.append(
+                        ImportRowError(
+                            row=row_num,
+                            field="category_id",
+                            message=f"Invalid UUID: {category_id_str}",
+                        )
+                    )
                     continue
 
             tags_str = (row.get("tags") or "").strip()
-            tags = [t.strip() for t in tags_str.split("|") if t.strip()] if tags_str else []
+            tags = (
+                [t.strip() for t in tags_str.split("|") if t.strip()]
+                if tags_str
+                else []
+            )
 
             images_str = (row.get("images") or "").strip()
-            images = [u.strip() for u in images_str.split("|") if u.strip()] if images_str else []
+            images = (
+                [u.strip() for u in images_str.split("|") if u.strip()]
+                if images_str
+                else []
+            )
 
             # Check if product with this SKU already exists in store (update path)
             existing_product = None
             if sku:
-                existing_product = await self.product_repository.get_by_sku(store_id, sku)
+                existing_product = await self.product_repository.get_by_sku(
+                    store_id, sku
+                )
 
             if existing_product:
                 # Update existing product
@@ -204,9 +270,13 @@ class ImportProductsUseCase:
                 existing_product.quantity = quantity
                 existing_product.low_stock_threshold = low_stock_threshold
                 if compare_at_price is not None:
-                    existing_product.compare_at_price = Money(amount=compare_at_price, currency=currency)
+                    existing_product.compare_at_price = Money(
+                        amount=compare_at_price, currency=currency
+                    )
                 if cost_price is not None:
-                    existing_product.cost_price = Money(amount=cost_price, currency=currency)
+                    existing_product.cost_price = Money(
+                        amount=cost_price, currency=currency
+                    )
                 if category_id:
                     existing_product.category_id = category_id
                 if tags:
@@ -219,14 +289,23 @@ class ImportProductsUseCase:
             else:
                 # Create new product
                 slug = slugify(name)
-                existing_slug = await self.product_repository.get_by_slug(store_id, slug)
+                existing_slug = await self.product_repository.get_by_slug(
+                    store_id, slug
+                )
                 if existing_slug:
                     import uuid as uuid_mod
+
                     slug = f"{slug}-{str(uuid_mod.uuid4())[:8]}"
 
                 price = Money(amount=price_decimal, currency=currency)
-                compare_money = Money(amount=compare_at_price, currency=currency) if compare_at_price else None
-                cost_money = Money(amount=cost_price, currency=currency) if cost_price else None
+                compare_money = (
+                    Money(amount=compare_at_price, currency=currency)
+                    if compare_at_price
+                    else None
+                )
+                cost_money = (
+                    Money(amount=cost_price, currency=currency) if cost_price else None
+                )
 
                 product = Product(
                     store_id=store_id,
@@ -265,11 +344,23 @@ class ImportProductsUseCase:
         try:
             d = Decimal(val)
             if d < 0:
-                errors.append(ImportRowError(row=row_num, field=field_name, message=f"{field_name} cannot be negative"))
+                errors.append(
+                    ImportRowError(
+                        row=row_num,
+                        field=field_name,
+                        message=f"{field_name} cannot be negative",
+                    )
+                )
                 return None
             return d
         except InvalidOperation:
-            errors.append(ImportRowError(row=row_num, field=field_name, message=f"Invalid decimal value: {val}"))
+            errors.append(
+                ImportRowError(
+                    row=row_num,
+                    field=field_name,
+                    message=f"Invalid decimal value: {val}",
+                )
+            )
             return None
 
     @staticmethod
@@ -286,9 +377,21 @@ class ImportProductsUseCase:
         try:
             i = int(val)
             if i < 0:
-                errors.append(ImportRowError(row=row_num, field=field_name, message=f"{field_name} cannot be negative"))
+                errors.append(
+                    ImportRowError(
+                        row=row_num,
+                        field=field_name,
+                        message=f"{field_name} cannot be negative",
+                    )
+                )
                 return default
             return i
         except ValueError:
-            errors.append(ImportRowError(row=row_num, field=field_name, message=f"Invalid integer value: {val}"))
+            errors.append(
+                ImportRowError(
+                    row=row_num,
+                    field=field_name,
+                    message=f"Invalid integer value: {val}",
+                )
+            )
             return default

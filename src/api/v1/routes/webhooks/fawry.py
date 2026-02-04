@@ -56,8 +56,11 @@ async def fawry_callback(
     else:
         # In development, accept without verification
         import json
+
         data = json.loads(payload)
-        logger.warning("Fawry webhook received without signature verification (dev mode)")
+        logger.warning(
+            "Fawry webhook received without signature verification (dev mode)"
+        )
 
     # Extract notification details
     reference_number = data.get("referenceNumber")
@@ -132,7 +135,9 @@ async def fawry_verify_payment(
         Payment status details
     """
     try:
-        status_data = await fawry_service.get_payment_status_details(merchant_ref_number)
+        status_data = await fawry_service.get_payment_status_details(
+            merchant_ref_number
+        )
         return {
             "success": status_data.get("paymentStatus") == "PAID",
             "status": status_data.get("paymentStatus"),

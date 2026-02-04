@@ -257,11 +257,14 @@ class TestWhatsAppMessagingService:
     def test_verify_webhook_signature_valid(self):
         """Test verifying valid WhatsApp webhook signature."""
         payload = b'{"object": "whatsapp_business_account"}'
-        signature = "sha256=" + hmac.new(
-            b"test_app_secret",
-            payload,
-            hashlib.sha256,
-        ).hexdigest()
+        signature = (
+            "sha256="
+            + hmac.new(
+                b"test_app_secret",
+                payload,
+                hashlib.sha256,
+            ).hexdigest()
+        )
 
         result = self.service.verify_webhook_signature(payload, signature)
         assert result is not None
@@ -280,7 +283,7 @@ class TestWhatsAppMessagingService:
             phone_number_id="123",
             app_secret=None,
         )
-        result = service.verify_webhook_signature(b'{}', "sha256=sig")
+        result = service.verify_webhook_signature(b"{}", "sha256=sig")
         assert result is None
 
     def test_build_template_message(self):

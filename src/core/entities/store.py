@@ -42,7 +42,9 @@ class Store(BaseEntity):
     address: dict[str, Any] = Field(default_factory=dict)
     social_links: dict[str, str] = Field(default_factory=dict)
     settings: dict[str, Any] = Field(default_factory=dict)
-    theme_settings: dict[str, Any] = Field(default_factory=dict)  # NUMU-shop customization
+    theme_settings: dict[str, Any] = Field(
+        default_factory=dict
+    )  # NUMU-shop customization
     tenant_id: UUID | None = None
 
     @property

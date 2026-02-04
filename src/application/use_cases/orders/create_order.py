@@ -54,7 +54,9 @@ class CreateOrderUseCase:
 
         if store.owner_id != user_id:
             log.warning("order_create_failed", reason="unauthorized")
-            raise AuthorizationError("You don't have permission to create orders in this store")
+            raise AuthorizationError(
+                "You don't have permission to create orders in this store"
+            )
 
         # Verify customer exists
         customer = await self.customer_repository.get_by_id(dto.customer_id)

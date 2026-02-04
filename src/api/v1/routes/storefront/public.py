@@ -80,7 +80,9 @@ async def get_store_by_subdomain(
             "logo_url": store.logo_url,
             "banner_url": store.banner_url,
             "theme_settings": store.theme_settings,
-            "default_currency": store.default_currency.value if hasattr(store.default_currency, "value") else str(store.default_currency),
+            "default_currency": store.default_currency.value
+            if hasattr(store.default_currency, "value")
+            else str(store.default_currency),
             "social_links": store.social_links,
         },
         message="Store retrieved successfully",
@@ -149,7 +151,9 @@ async def browse_products(
             status=product.status,
             price=str(product.price),
             price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price) if product.compare_at_price else None,
+            compare_at_price=str(product.compare_at_price)
+            if product.compare_at_price
+            else None,
             cost_price=None,  # Don't expose cost price in storefront
             sku=product.sku,
             quantity=product.quantity,
@@ -212,7 +216,9 @@ async def get_product_by_slug(
             status=product.status,
             price=str(product.price),
             price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price) if product.compare_at_price else None,
+            compare_at_price=str(product.compare_at_price)
+            if product.compare_at_price
+            else None,
             cost_price=None,  # Don't expose cost price in storefront
             sku=product.sku,
             quantity=product.quantity,
@@ -290,8 +296,12 @@ async def register_customer(
                 total_orders=result.customer.total_orders,
                 total_spent=result.customer.total_spent,
                 default_address_id=result.customer.default_address_id,
-                created_at=str(result.customer.created_at) if result.customer.created_at else None,
-                updated_at=str(result.customer.updated_at) if result.customer.updated_at else None,
+                created_at=str(result.customer.created_at)
+                if result.customer.created_at
+                else None,
+                updated_at=str(result.customer.updated_at)
+                if result.customer.updated_at
+                else None,
             ),
             tokens={
                 "access_token": result.tokens.access_token,
@@ -345,8 +355,12 @@ async def login_customer(
                 total_orders=result.customer.total_orders,
                 total_spent=result.customer.total_spent,
                 default_address_id=result.customer.default_address_id,
-                created_at=str(result.customer.created_at) if result.customer.created_at else None,
-                updated_at=str(result.customer.updated_at) if result.customer.updated_at else None,
+                created_at=str(result.customer.created_at)
+                if result.customer.created_at
+                else None,
+                updated_at=str(result.customer.updated_at)
+                if result.customer.updated_at
+                else None,
             ),
             tokens={
                 "access_token": result.tokens.access_token,

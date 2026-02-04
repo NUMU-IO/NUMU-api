@@ -55,7 +55,9 @@ class PaymobPaymentService(IPaymentService):
         self.integration_id = integration_id or settings.paymob_integration_id
         self.iframe_id = iframe_id or settings.paymob_iframe_id
         self.hmac_secret = hmac_secret or settings.paymob_hmac_secret
-        self.wallet_integration_id = wallet_integration_id or settings.paymob_wallet_integration_id
+        self.wallet_integration_id = (
+            wallet_integration_id or settings.paymob_wallet_integration_id
+        )
         self._auth_token: str | None = None
 
     @property
@@ -575,6 +577,7 @@ class PaymobPaymentService(IPaymentService):
 
         try:
             import json
+
             data = json.loads(payload)
 
             # Paymob HMAC is calculated from specific fields in this order

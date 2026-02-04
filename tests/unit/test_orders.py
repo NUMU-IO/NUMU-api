@@ -49,6 +49,7 @@ def _order(status=OrderStatus.PENDING, payment_status=PaymentStatus.PENDING, **k
 # Status transition: happy paths
 # ---------------------------------------------------------------------------
 
+
 class TestOrderStatusTransitions:
     """Verify valid status transitions on the Order entity."""
 
@@ -120,6 +121,7 @@ class TestOrderStatusTransitions:
 # Status transition: invalid / guard rails
 # ---------------------------------------------------------------------------
 
+
 class TestOrderInvalidTransitions:
     """Verify that invalid transitions raise errors."""
 
@@ -159,6 +161,7 @@ class TestOrderInvalidTransitions:
 # ---------------------------------------------------------------------------
 # Properties
 # ---------------------------------------------------------------------------
+
 
 class TestOrderProperties:
     """Verify computed properties on the Order entity."""
@@ -218,6 +221,7 @@ class TestOrderProperties:
 # Utility methods
 # ---------------------------------------------------------------------------
 
+
 class TestOrderUtilities:
     """Tests for add_note, update_tracking, etc."""
 
@@ -242,6 +246,7 @@ class TestOrderUtilities:
 # ---------------------------------------------------------------------------
 # Schema validation
 # ---------------------------------------------------------------------------
+
 
 class TestOrderSchemas:
     """Tests for order Pydantic request/response schemas."""

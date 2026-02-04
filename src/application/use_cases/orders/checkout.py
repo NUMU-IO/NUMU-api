@@ -184,13 +184,11 @@ class CheckoutUseCase:
                 )
             )
 
-            items_for_paymob.append(
-                {
-                    "name": cart_item.product_name,
-                    "amount_cents": current_price_cents,
-                    "quantity": cart_item.quantity,
-                }
-            )
+            items_for_paymob.append({
+                "name": cart_item.product_name,
+                "amount_cents": current_price_cents,
+                "quantity": cart_item.quantity,
+            })
 
         if stock_errors:
             raise ValidationError(
@@ -208,9 +206,7 @@ class CheckoutUseCase:
         free_shipping = False
 
         if dto.coupon_code and self.coupon_repository:
-            coupon = await self.coupon_repository.get_by_code(
-                store_id, dto.coupon_code
-            )
+            coupon = await self.coupon_repository.get_by_code(store_id, dto.coupon_code)
             if not coupon:
                 raise ValidationError(f"Coupon code '{dto.coupon_code}' not found")
 
@@ -311,7 +307,9 @@ class CheckoutUseCase:
             billing_data = {
                 "first_name": dto.shipping_address.first_name,
                 "last_name": dto.shipping_address.last_name,
-                "email": dto.shipping_address.email or customer.email or "customer@example.com",
+                "email": dto.shipping_address.email
+                or customer.email
+                or "customer@example.com",
                 "phone_number": dto.shipping_address.phone or "+201000000000",
                 "street": dto.shipping_address.address_line1,
                 "building": dto.shipping_address.address_line2 or "NA",
@@ -347,7 +345,10 @@ class CheckoutUseCase:
 
             # 10. Generate iframe URL
             iframe_url = None
-            if hasattr(self.payment_service, "iframe_id") and self.payment_service.iframe_id:
+            if (
+                hasattr(self.payment_service, "iframe_id")
+                and self.payment_service.iframe_id
+            ):
                 iframe_url = (
                     f"https://accept.paymob.com/api/acceptance/iframes/"
                     f"{self.payment_service.iframe_id}?payment_token={payment_intent.client_secret}"

@@ -42,6 +42,7 @@ def request_id() -> UUID:
 # Payment Gateway Credential Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def valid_fawry_credentials() -> dict[str, Any]:
     """Valid Fawry payment gateway credentials."""
@@ -132,6 +133,7 @@ def valid_tap_credentials() -> dict[str, Any]:
 # Database Mock Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def mock_db_session() -> AsyncMock:
     """Create a mock async database session."""
@@ -198,6 +200,7 @@ def mock_service_credential(tenant_id: UUID, admin_id: UUID):
 # Validator Mock Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def mock_validation_result_success():
     """Create a successful validation result."""
@@ -241,7 +244,9 @@ def mock_validator_factory(mock_validation_result_success):
 
     mock_validator = AsyncMock()
     mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
-    mock_validator.get_display_info = MagicMock(return_value={"merchant_code": "FWY***789"})
+    mock_validator.get_display_info = MagicMock(
+        return_value={"merchant_code": "FWY***789"}
+    )
 
     factory.get_validator = MagicMock(return_value=mock_validator)
     factory.is_supported = MagicMock(return_value=True)
@@ -253,6 +258,7 @@ def mock_validator_factory(mock_validation_result_success):
 # Secrets Manager Mock Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def mock_secrets_manager():
     """Create a mock secrets manager."""
@@ -260,7 +266,9 @@ def mock_secrets_manager():
 
     manager = MagicMock(spec=SecretsManager)
     manager.encrypt_credentials = MagicMock(return_value=b"encrypted_credentials_data")
-    manager.decrypt_credentials = MagicMock(return_value={"merchant_code": "FWY123456789"})
+    manager.decrypt_credentials = MagicMock(
+        return_value={"merchant_code": "FWY123456789"}
+    )
 
     return manager
 
@@ -268,6 +276,7 @@ def mock_secrets_manager():
 # =============================================================================
 # HTTP Response Mock Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def mock_httpx_response_success():

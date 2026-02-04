@@ -66,7 +66,7 @@ class AramexValidator(GatewayValidator):
                             "AccountCountryCode": credentials["account_country_code"],
                         },
                         "CountryCode": credentials["account_country_code"],
-                    }
+                    },
                 )
 
                 if response.status_code == 200:
@@ -75,7 +75,11 @@ class AramexValidator(GatewayValidator):
                     # Check for authentication errors
                     if data.get("HasErrors"):
                         notifications = data.get("Notifications", [])
-                        error_msg = notifications[0].get("Message") if notifications else "Authentication failed"
+                        error_msg = (
+                            notifications[0].get("Message")
+                            if notifications
+                            else "Authentication failed"
+                        )
                         return ValidationResult.failure(
                             message=f"Aramex authentication failed: {error_msg}",
                             error_code="AUTH_FAILED",
@@ -86,7 +90,7 @@ class AramexValidator(GatewayValidator):
                         details={
                             "account_number": credentials["account_number"],
                             "country_code": credentials["account_country_code"],
-                        }
+                        },
                     )
                 else:
                     return ValidationResult.error(
@@ -148,7 +152,7 @@ class BostaValidator(GatewayValidator):
                     headers={
                         "Authorization": api_key,
                         "X-Business-Id": business_id,
-                    }
+                    },
                 )
 
                 if response.status_code == 200:
@@ -157,7 +161,7 @@ class BostaValidator(GatewayValidator):
                         details={
                             "business_id": business_id,
                             "environment": environment,
-                        }
+                        },
                     )
                 elif response.status_code == 401:
                     return ValidationResult.failure(
@@ -221,7 +225,7 @@ class MylerzValidator(GatewayValidator):
                     headers={
                         "Authorization": f"Bearer {api_key}",
                         "X-Account-Id": account_id,
-                    }
+                    },
                 )
 
                 if response.status_code == 200:
@@ -231,7 +235,7 @@ class MylerzValidator(GatewayValidator):
                         details={
                             "account_id": account_id,
                             "account_name": account.get("name"),
-                        }
+                        },
                     )
                 elif response.status_code == 401:
                     return ValidationResult.failure(

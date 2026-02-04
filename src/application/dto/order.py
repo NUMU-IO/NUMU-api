@@ -117,9 +117,13 @@ class OrderDTO(BaseDTO):
             store_id=entity.store_id,
             customer_id=entity.customer_id,
             order_number=entity.order_number,
-            line_items=[OrderLineItemDTO.from_entity(item) for item in entity.line_items],
+            line_items=[
+                OrderLineItemDTO.from_entity(item) for item in entity.line_items
+            ],
             shipping_address=OrderAddressDTO.from_entity(entity.shipping_address),
-            billing_address=OrderAddressDTO.from_entity(entity.billing_address) if entity.billing_address else None,
+            billing_address=OrderAddressDTO.from_entity(entity.billing_address)
+            if entity.billing_address
+            else None,
             status=entity.status.value,
             payment_status=entity.payment_status.value,
             fulfillment_status=entity.fulfillment_status.value,
@@ -167,7 +171,9 @@ class OrderListItemDTO(BaseDTO):
     created_at: datetime
 
     @classmethod
-    def from_entity(cls, entity: Order, customer_name: str | None = None) -> "OrderListItemDTO":
+    def from_entity(
+        cls, entity: Order, customer_name: str | None = None
+    ) -> "OrderListItemDTO":
         """Create DTO from Order entity."""
         return cls(
             id=entity.id,

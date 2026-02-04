@@ -13,11 +13,11 @@ from src.core.entities.user import UserRole, UserStatus
 # Load the create_superuser module directly
 spec = importlib.util.spec_from_file_location(
     "create_superuser",
-    Path(__file__).parent.parent.parent.parent / "scripts" / "create_superuser.py"
+    Path(__file__).parent.parent.parent.parent / "scripts" / "create_superuser.py",
 )
 create_superuser_module = importlib.util.module_from_spec(spec)
 # Register the module in sys.modules so that patching works
-sys.modules['create_superuser'] = create_superuser_module
+sys.modules["create_superuser"] = create_superuser_module
 spec.loader.exec_module(create_superuser_module)
 create_superuser = create_superuser_module.create_superuser
 promote_to_superuser = create_superuser_module.promote_to_superuser
@@ -36,6 +36,7 @@ def create_async_session_mock(existing_user=None):
     # Make execute async
     async def mock_execute(*args, **kwargs):
         return mock_execute_result
+
     mock_session.execute = mock_execute
 
     # Track commit calls
@@ -43,6 +44,7 @@ def create_async_session_mock(existing_user=None):
 
     async def mock_commit():
         commit_called.append(True)
+
     mock_session.commit = mock_commit
     mock_session.commit_called = commit_called
 
@@ -114,13 +116,15 @@ class TestCreateSuperuser:
         mock_session, mock_cm = create_async_session_mock(existing_user=None)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = "$2b$12$hashedpassword"
 
             # Mock AsyncSessionLocal context manager
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print') as mock_print:
-                    result = await create_superuser(email, password, first_name, last_name)
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print") as mock_print:
+                    result = await create_superuser(
+                        email, password, first_name, last_name
+                    )
 
                     # Verify success
                     assert result is True
@@ -144,14 +148,16 @@ class TestCreateSuperuser:
         # Create mocked session with existing user
         mock_session, mock_cm = create_async_session_mock(existing_user=existing_user)
 
-        with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-            with patch('builtins.print') as mock_print:
+        with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+            with patch("builtins.print") as mock_print:
                 result = await create_superuser(email, password)
 
                 # Verify failure
                 assert result is False
                 # Verify error message was printed
-                mock_print.assert_any_call(f"\n❌ User with email '{email}' already exists!")
+                mock_print.assert_any_call(
+                    f"\n❌ User with email '{email}' already exists!"
+                )
 
         # Verify no user was added
         assert not mock_session.add.called
@@ -173,14 +179,15 @@ class TestCreateSuperuser:
         def capture_add(user):
             nonlocal added_user
             added_user = user
+
         mock_session.add = Mock(side_effect=capture_add)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = hashed_password
 
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print'):
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print"):
                     await create_superuser(email, password)
 
         # Verify password was hashed
@@ -206,14 +213,15 @@ class TestCreateSuperuser:
         def capture_add(user):
             nonlocal added_user
             added_user = user
+
         mock_session.add = Mock(side_effect=capture_add)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = "$2b$12$hashedpassword"
 
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print'):
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print"):
                     await create_superuser(email, password)
 
         # Verify role is SUPER_ADMIN
@@ -240,14 +248,15 @@ class TestCreateSuperuser:
         def capture_add(user):
             nonlocal added_user
             added_user = user
+
         mock_session.add = Mock(side_effect=capture_add)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = "$2b$12$hashedpassword"
 
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print'):
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print"):
                     await create_superuser(email, password)
 
         # Verify status is ACTIVE
@@ -273,14 +282,15 @@ class TestCreateSuperuser:
         def capture_add(user):
             nonlocal added_user
             added_user = user
+
         mock_session.add = Mock(side_effect=capture_add)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = "$2b$12$hashedpassword"
 
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print'):
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print"):
                     await create_superuser(email, password)
 
         # Verify email is lowercase
@@ -302,14 +312,15 @@ class TestCreateSuperuser:
         def capture_add(user):
             nonlocal added_user
             added_user = user
+
         mock_session.add = Mock(side_effect=capture_add)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = "$2b$12$hashedpassword"
 
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print'):
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print"):
                     await create_superuser(email, password)
 
         # Verify user has a valid UUID
@@ -318,7 +329,7 @@ class TestCreateSuperuser:
         assert isinstance(added_user.id, UUID)
         # Verify it's a valid UUID by checking its string representation
         assert len(str(added_user.id)) == 36  # Standard UUID string length
-        assert str(added_user.id).count('-') == 4  # UUIDs have 4 hyphens
+        assert str(added_user.id).count("-") == 4  # UUIDs have 4 hyphens
 
     @pytest.mark.asyncio
     async def test_superuser_name_fields(self):
@@ -337,14 +348,15 @@ class TestCreateSuperuser:
         def capture_add(user):
             nonlocal added_user
             added_user = user
+
         mock_session.add = Mock(side_effect=capture_add)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = "$2b$12$hashedpassword"
 
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print'):
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print"):
                     await create_superuser(email, password, first_name, last_name)
 
         # Verify name fields
@@ -367,14 +379,15 @@ class TestCreateSuperuser:
         def capture_add(user):
             nonlocal added_user
             added_user = user
+
         mock_session.add = Mock(side_effect=capture_add)
 
         # Mock password service
-        with patch('create_superuser.password_service.hash_password') as mock_hash:
+        with patch("create_superuser.password_service.hash_password") as mock_hash:
             mock_hash.return_value = "$2b$12$hashedpassword"
 
-            with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-                with patch('builtins.print'):
+            with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+                with patch("builtins.print"):
                     await create_superuser(email, password)
 
         # Verify default name fields
@@ -399,8 +412,8 @@ class TestPromoteToSuperuser:
         # Create mocked session with existing user
         mock_session, mock_cm = create_async_session_mock(existing_user=existing_user)
 
-        with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-            with patch('builtins.print') as mock_print:
+        with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+            with patch("builtins.print") as mock_print:
                 result = await promote_to_superuser(email)
 
                 # Verify success
@@ -419,8 +432,8 @@ class TestPromoteToSuperuser:
         # Create mocked session with no user
         mock_session, mock_cm = create_async_session_mock(existing_user=None)
 
-        with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-            with patch('builtins.print') as mock_print:
+        with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+            with patch("builtins.print") as mock_print:
                 result = await promote_to_superuser(email)
 
                 # Verify failure
@@ -440,10 +453,12 @@ class TestPromoteToSuperuser:
         # Create mocked session with existing user
         mock_session, mock_cm = create_async_session_mock(existing_user=existing_user)
 
-        with patch('create_superuser.AsyncSessionLocal', return_value=mock_cm):
-            with patch('builtins.print') as mock_print:
+        with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
+            with patch("builtins.print") as mock_print:
                 result = await promote_to_superuser(email)
 
                 # Should still return True (idempotent)
                 assert result is True
-                mock_print.assert_any_call(f"\n⚠️  User '{email}' is already a superadmin!")
+                mock_print.assert_any_call(
+                    f"\n⚠️  User '{email}' is already a superadmin!"
+                )

@@ -1,6 +1,5 @@
 """Unit tests for Egyptian governorates data."""
 
-
 from src.infrastructure.external_services.bosta.governorates import (
     EGYPTIAN_GOVERNORATES,
     ShippingZone,

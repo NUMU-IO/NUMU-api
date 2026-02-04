@@ -67,6 +67,7 @@ def mock_execute_result_with_request(mock_configuration_request):
 # Successful Configuration Tests
 # =============================================================================
 
+
 class TestConfigureCredentialsSuccess:
     """Test successful credential configuration scenarios."""
 
@@ -85,15 +86,18 @@ class TestConfigureCredentialsSuccess:
         # Setup mocks
         mock_db_session.execute.return_value = mock_execute_result_no_credential
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             # Setup validator mock
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
-            mock_validator.get_display_info = MagicMock(return_value={"merchant_code": "FWY***789"})
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
+            mock_validator.get_display_info = MagicMock(
+                return_value={"merchant_code": "FWY***789"}
+            )
             mock_factory.get_validator.return_value = mock_validator
 
             # Setup secrets manager mock
@@ -120,7 +124,9 @@ class TestConfigureCredentialsSuccess:
             mock_validator.validate.assert_called_once_with(valid_fawry_credentials)
 
             # Verify encryption was called
-            mock_secrets.encrypt_credentials.assert_called_once_with(valid_fawry_credentials)
+            mock_secrets.encrypt_credentials.assert_called_once_with(
+                valid_fawry_credentials
+            )
 
             # Verify database operations
             mock_db_session.add.assert_called()
@@ -141,18 +147,25 @@ class TestConfigureCredentialsSuccess:
         """Test configuring credentials and updating associated request."""
         # Setup mocks - first call returns no credential, second returns request
         mock_db_session.execute.side_effect = [
-            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # No existing credential
-            MagicMock(scalar_one_or_none=MagicMock(return_value=mock_configuration_request)),  # Request found
+            MagicMock(
+                scalar_one_or_none=MagicMock(return_value=None)
+            ),  # No existing credential
+            MagicMock(
+                scalar_one_or_none=MagicMock(return_value=mock_configuration_request)
+            ),  # Request found
         ]
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
-            mock_validator.get_display_info = MagicMock(return_value={"merchant_code": "FWY***789"})
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
+            mock_validator.get_display_info = MagicMock(
+                return_value={"merchant_code": "FWY***789"}
+            )
             mock_factory.get_validator.return_value = mock_validator
             mock_secrets.encrypt_credentials.return_value = b"encrypted_data"
 
@@ -192,14 +205,17 @@ class TestConfigureCredentialsSuccess:
             scalar_one_or_none=MagicMock(return_value=mock_service_credential)
         )
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
-            mock_validator.get_display_info = MagicMock(return_value={"merchant_code": "FWY***NEW"})
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
+            mock_validator.get_display_info = MagicMock(
+                return_value={"merchant_code": "FWY***NEW"}
+            )
             mock_factory.get_validator.return_value = mock_validator
             mock_secrets.encrypt_credentials.return_value = b"new_encrypted_data"
 
@@ -216,7 +232,9 @@ class TestConfigureCredentialsSuccess:
             assert result.is_configured is True
 
             # Verify existing credential was updated
-            assert mock_service_credential.encrypted_credentials == b"new_encrypted_data"
+            assert (
+                mock_service_credential.encrypted_credentials == b"new_encrypted_data"
+            )
             assert mock_service_credential.is_validated is True
             assert mock_service_credential.is_active is True
 
@@ -224,6 +242,7 @@ class TestConfigureCredentialsSuccess:
 # =============================================================================
 # Validation Failure Tests
 # =============================================================================
+
 
 class TestConfigureCredentialsValidationFailure:
     """Test credential validation failure scenarios."""
@@ -239,9 +258,11 @@ class TestConfigureCredentialsValidationFailure:
         mock_validation_result_failure: ValidationResult,
     ):
         """Test that configuration fails when validation fails."""
-        with patch.object(use_case, 'validator_factory') as mock_factory:
+        with patch.object(use_case, "validator_factory") as mock_factory:
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_failure)
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_failure
+            )
             mock_factory.get_validator.return_value = mock_validator
 
             # Execute and expect ValueError
@@ -271,7 +292,7 @@ class TestConfigureCredentialsValidationFailure:
         valid_fawry_credentials: dict,
     ):
         """Test configuration with mismatched service type and name."""
-        with patch.object(use_case, 'validator_factory') as mock_factory:
+        with patch.object(use_case, "validator_factory") as mock_factory:
             # Factory raises error for invalid combination
             mock_factory.get_validator.side_effect = ValueError("Unsupported service")
 
@@ -288,6 +309,7 @@ class TestConfigureCredentialsValidationFailure:
 # =============================================================================
 # Audit Log Tests
 # =============================================================================
+
 
 class TestConfigureCredentialsAuditLog:
     """Test audit log creation during credential configuration."""
@@ -307,13 +329,14 @@ class TestConfigureCredentialsAuditLog:
             scalar_one_or_none=MagicMock(return_value=None)
         )
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
             mock_secrets.encrypt_credentials.return_value = b"encrypted"
@@ -361,13 +384,14 @@ class TestConfigureCredentialsAuditLog:
             scalar_one_or_none=MagicMock(return_value=mock_service_credential)
         )
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
             mock_secrets.encrypt_credentials.return_value = b"encrypted"
@@ -391,6 +415,7 @@ class TestConfigureCredentialsAuditLog:
 # =============================================================================
 # Get Status Tests
 # =============================================================================
+
 
 class TestGetCredentialStatus:
     """Test getting credential status."""
@@ -444,6 +469,7 @@ class TestGetCredentialStatus:
 # Edge Cases and Error Handling
 # =============================================================================
 
+
 class TestConfigureCredentialsEdgeCases:
     """Test edge cases and error handling."""
 
@@ -463,13 +489,14 @@ class TestConfigureCredentialsEdgeCases:
         )
         mock_db_session.commit.side_effect = Exception("Database connection lost")
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
             mock_secrets.encrypt_credentials.return_value = b"encrypted"
@@ -500,16 +527,19 @@ class TestConfigureCredentialsEdgeCases:
             scalar_one_or_none=MagicMock(return_value=None)
         )
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.side_effect = Exception("Encryption failed")
+            mock_secrets.encrypt_credentials.side_effect = Exception(
+                "Encryption failed"
+            )
 
             with pytest.raises(Exception) as exc_info:
                 await use_case.execute(
@@ -532,9 +562,11 @@ class TestConfigureCredentialsEdgeCases:
         mock_validation_result_failure: ValidationResult,
     ):
         """Test configuration with empty credentials."""
-        with patch.object(use_case, 'validator_factory') as mock_factory:
+        with patch.object(use_case, "validator_factory") as mock_factory:
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_failure)
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_failure
+            )
             mock_factory.get_validator.return_value = mock_validator
 
             with pytest.raises(ValueError):
@@ -564,13 +596,14 @@ class TestConfigureCredentialsEdgeCases:
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
         ]
 
-        with patch.object(
-            use_case, 'validator_factory'
-        ) as mock_factory, patch.object(
-            use_case, 'secrets_manager'
-        ) as mock_secrets:
+        with (
+            patch.object(use_case, "validator_factory") as mock_factory,
+            patch.object(use_case, "secrets_manager") as mock_secrets,
+        ):
             mock_validator = AsyncMock()
-            mock_validator.validate = AsyncMock(return_value=mock_validation_result_success)
+            mock_validator.validate = AsyncMock(
+                return_value=mock_validation_result_success
+            )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
             mock_secrets.encrypt_credentials.return_value = b"encrypted"

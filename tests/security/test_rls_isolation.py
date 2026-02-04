@@ -58,12 +58,14 @@ class TestRLSIsolation:
         async with async_session_factory() as session:
             yield session
 
-    async def _set_tenant_context(self, session: AsyncSession, tenant_id: UUID | str | None) -> None:
+    async def _set_tenant_context(
+        self, session: AsyncSession, tenant_id: UUID | str | None
+    ) -> None:
         """Set the RLS tenant context for the session."""
         if tenant_id:
             await session.execute(
                 text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
-                {"tenant_id": str(tenant_id)}
+                {"tenant_id": str(tenant_id)},
             )
         else:
             await session.execute(
@@ -72,15 +74,13 @@ class TestRLSIsolation:
 
     async def _clear_tenant_context(self, session: AsyncSession) -> None:
         """Clear the RLS tenant context."""
-        await session.execute(
-            text("SELECT set_config('app.current_tenant', '', true)")
-        )
+        await session.execute(text("SELECT set_config('app.current_tenant', '', true)"))
 
     async def _bypass_rls(self, session: AsyncSession, bypass: bool = True) -> None:
         """Enable or disable RLS bypass for admin operations."""
         await session.execute(
             text("SELECT set_config('app.rls_bypass', :bypass, true)"),
-            {"bypass": str(bypass).lower()}
+            {"bypass": str(bypass).lower()},
         )
 
     async def _get_existing_tenants(self, session: AsyncSession) -> list[dict]:
@@ -91,7 +91,9 @@ class TestRLSIsolation:
                 text("SELECT id, name, schema_name FROM public.tenants LIMIT 2")
             )
             rows = result.fetchall()
-            return [{"id": row[0], "name": row[1], "schema_name": row[2]} for row in rows]
+            return [
+                {"id": row[0], "name": row[1], "schema_name": row[2]} for row in rows
+            ]
         finally:
             await self._bypass_rls(session, False)
 
@@ -103,7 +105,7 @@ class TestRLSIsolation:
                 FROM pg_class
                 WHERE relname = :table_name AND relnamespace = 'public'::regnamespace
             """),
-            {"table_name": table_name}
+            {"table_name": table_name},
         )
         row = result.fetchone()
         return row[0] if row else False
@@ -128,7 +130,7 @@ class TestRLSIsolation:
                         WHERE table_schema = 'public' AND table_name = :table_name
                     )
                 """),
-                {"table_name": table_name}
+                {"table_name": table_name},
             )
             table_exists = result.scalar()
 
@@ -139,7 +141,7 @@ class TestRLSIsolation:
                         SELECT COUNT(*) FROM pg_policies
                         WHERE schemaname = 'public' AND tablename = :table_name
                     """),
-                    {"table_name": table_name}
+                    {"table_name": table_name},
                 )
                 policy_count = result.scalar()
                 # Should have at least the tenant isolation policies
@@ -152,9 +154,7 @@ class TestRLSIsolation:
         await self._clear_tenant_context(db_session)
 
         # Try to query stores without tenant context
-        result = await db_session.execute(
-            text("SELECT COUNT(*) FROM public.stores")
-        )
+        result = await db_session.execute(text("SELECT COUNT(*) FROM public.stores"))
         count = result.scalar()
 
         # With RLS and no tenant context, should see no rows (or all rows if RLS bypass)
@@ -174,17 +174,23 @@ class TestRLSIsolation:
 
         # Query stores with tenant context set
         result = await db_session.execute(
-            text("SELECT id, tenant_id FROM public.stores WHERE tenant_id = :tenant_id"),
-            {"tenant_id": tenant["id"]}
+            text(
+                "SELECT id, tenant_id FROM public.stores WHERE tenant_id = :tenant_id"
+            ),
+            {"tenant_id": tenant["id"]},
         )
         rows = result.fetchall()
 
         # All returned rows should belong to the current tenant
         for row in rows:
-            assert row[1] == tenant["id"], "RLS should only return current tenant's data"
+            assert row[1] == tenant["id"], (
+                "RLS should only return current tenant's data"
+            )
 
     @pytest.mark.asyncio
-    async def test_wrong_tenant_context_blocks_cross_tenant_access(self, db_session: AsyncSession):
+    async def test_wrong_tenant_context_blocks_cross_tenant_access(
+        self, db_session: AsyncSession
+    ):
         """Test that tenant A cannot access tenant B's data."""
         tenants = await self._get_existing_tenants(db_session)
 
@@ -200,7 +206,7 @@ class TestRLSIsolation:
         # Try to query tenant B's stores directly (bypassing application filter)
         result = await db_session.execute(
             text("SELECT COUNT(*) FROM public.stores WHERE tenant_id = :tenant_b_id"),
-            {"tenant_b_id": tenant_b["id"]}
+            {"tenant_b_id": tenant_b["id"]},
         )
         count = result.scalar()
 
@@ -258,15 +264,14 @@ class TestRLSIsolation:
                     "name": "RLS Test Store",
                     "subdomain": f"rls-test-{uuid4().hex[:8]}",
                     "status": "active",
-                }
+                },
             )
             await db_session.commit()
 
             # If we get here, RLS didn't block - clean up and note the behavior
             await self._bypass_rls(db_session, True)
             await db_session.execute(
-                text("DELETE FROM public.stores WHERE id = :id"),
-                {"id": test_store_id}
+                text("DELETE FROM public.stores WHERE id = :id"), {"id": test_store_id}
             )
             await db_session.commit()
             await self._bypass_rls(db_session, False)
@@ -275,7 +280,11 @@ class TestRLSIsolation:
         except Exception as e:
             # RLS correctly blocked the insert
             await db_session.rollback()
-            assert "policy" in str(e).lower() or "permission" in str(e).lower() or "violates" in str(e).lower()
+            assert (
+                "policy" in str(e).lower()
+                or "permission" in str(e).lower()
+                or "violates" in str(e).lower()
+            )
 
     @pytest.mark.asyncio
     async def test_tenant_isolation_on_update(self, db_session: AsyncSession):
@@ -292,7 +301,7 @@ class TestRLSIsolation:
         await self._bypass_rls(db_session, True)
         result = await db_session.execute(
             text("SELECT id FROM public.stores WHERE tenant_id = :tenant_id LIMIT 1"),
-            {"tenant_id": tenant_b["id"]}
+            {"tenant_id": tenant_b["id"]},
         )
         row = result.fetchone()
         await self._bypass_rls(db_session, False)
@@ -308,7 +317,7 @@ class TestRLSIsolation:
         # Try to update tenant B's store
         result = await db_session.execute(
             text("UPDATE public.stores SET name = 'Hacked!' WHERE id = :store_id"),
-            {"store_id": store_id}
+            {"store_id": store_id},
         )
 
         # RLS should prevent the update (0 rows affected)
@@ -330,7 +339,7 @@ class TestRLSIsolation:
         await self._bypass_rls(db_session, True)
         result = await db_session.execute(
             text("SELECT id FROM public.stores WHERE tenant_id = :tenant_id LIMIT 1"),
-            {"tenant_id": tenant_b["id"]}
+            {"tenant_id": tenant_b["id"]},
         )
         row = result.fetchone()
         await self._bypass_rls(db_session, False)
@@ -346,7 +355,7 @@ class TestRLSIsolation:
         # Try to delete tenant B's store
         result = await db_session.execute(
             text("DELETE FROM public.stores WHERE id = :store_id"),
-            {"store_id": store_id}
+            {"store_id": store_id},
         )
 
         # RLS should prevent the delete (0 rows affected)
@@ -375,7 +384,7 @@ class TestRLSIsolation:
         await self._set_tenant_context(db_session, tenant_b["id"])
         result_b = await db_session.execute(
             text("SELECT COUNT(*) FROM public.products WHERE tenant_id = :tenant_a_id"),
-            {"tenant_a_id": tenant_a["id"]}
+            {"tenant_a_id": tenant_a["id"]},
         )
         count_a_from_b = result_b.scalar()
 
@@ -404,7 +413,9 @@ class TestRLSIsolation:
 
         # All visible orders should belong to tenant A
         for row in rows:
-            assert row[0] == tenant_a["id"], "RLS should only show current tenant's orders"
+            assert row[0] == tenant_a["id"], (
+                "RLS should only show current tenant's orders"
+            )
 
     @pytest.mark.asyncio
     async def test_customers_rls_isolation(self, db_session: AsyncSession):
@@ -421,12 +432,16 @@ class TestRLSIsolation:
         await self._set_tenant_context(db_session, tenant_a["id"])
 
         result = await db_session.execute(
-            text("SELECT COUNT(*) FROM public.customers WHERE tenant_id = :tenant_b_id"),
-            {"tenant_b_id": tenant_b["id"]}
+            text(
+                "SELECT COUNT(*) FROM public.customers WHERE tenant_id = :tenant_b_id"
+            ),
+            {"tenant_b_id": tenant_b["id"]},
         )
         count = result.scalar()
 
-        assert count == 0, "RLS should prevent tenant A from seeing tenant B's customers"
+        assert count == 0, (
+            "RLS should prevent tenant A from seeing tenant B's customers"
+        )
 
     @pytest.mark.asyncio
     async def test_get_current_tenant_function(self, db_session: AsyncSession):
@@ -437,47 +452,41 @@ class TestRLSIsolation:
         await self._set_tenant_context(db_session, test_tenant_id)
 
         # Call the helper function
-        result = await db_session.execute(
-            text("SELECT public.get_current_tenant_id()")
-        )
+        result = await db_session.execute(text("SELECT public.get_current_tenant_id()"))
         returned_id = result.scalar()
 
-        assert returned_id == test_tenant_id, "get_current_tenant_id() should return current tenant"
+        assert returned_id == test_tenant_id, (
+            "get_current_tenant_id() should return current tenant"
+        )
 
         # Clear context
         await self._clear_tenant_context(db_session)
 
-        result = await db_session.execute(
-            text("SELECT public.get_current_tenant_id()")
-        )
+        result = await db_session.execute(text("SELECT public.get_current_tenant_id()"))
         returned_id = result.scalar()
 
-        assert returned_id is None, "get_current_tenant_id() should return NULL when no context"
+        assert returned_id is None, (
+            "get_current_tenant_id() should return NULL when no context"
+        )
 
     @pytest.mark.asyncio
     async def test_is_rls_bypassed_function(self, db_session: AsyncSession):
         """Test that is_rls_bypassed() function works correctly."""
         # Check default (should be false)
-        result = await db_session.execute(
-            text("SELECT public.is_rls_bypassed()")
-        )
+        result = await db_session.execute(text("SELECT public.is_rls_bypassed()"))
         is_bypassed = result.scalar()
         assert is_bypassed is False, "RLS bypass should be disabled by default"
 
         # Enable bypass
         await self._bypass_rls(db_session, True)
 
-        result = await db_session.execute(
-            text("SELECT public.is_rls_bypassed()")
-        )
+        result = await db_session.execute(text("SELECT public.is_rls_bypassed()"))
         is_bypassed = result.scalar()
         assert is_bypassed is True, "RLS bypass should be enabled after setting"
 
         # Disable bypass
         await self._bypass_rls(db_session, False)
 
-        result = await db_session.execute(
-            text("SELECT public.is_rls_bypassed()")
-        )
+        result = await db_session.execute(text("SELECT public.is_rls_bypassed()"))
         is_bypassed = result.scalar()
         assert is_bypassed is False, "RLS bypass should be disabled after clearing"

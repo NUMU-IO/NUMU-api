@@ -46,8 +46,16 @@ def _get_default_payment_settings() -> dict:
         "cod": {"enabled": True, "is_configured": True, "last_configured": None},
         "fawry": {"enabled": False, "is_configured": False, "last_configured": None},
         "paymob": {"enabled": False, "is_configured": False, "last_configured": None},
-        "vodafone_cash": {"enabled": False, "is_configured": False, "last_configured": None},
-        "bank_transfer": {"enabled": False, "is_configured": False, "last_configured": None},
+        "vodafone_cash": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
+        "bank_transfer": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
         "bank_accounts_count": 0,
     }
 
@@ -60,11 +68,41 @@ def _get_default_shipping_settings() -> dict:
         "mylerz": {"enabled": False, "is_configured": False, "last_configured": None},
         "manual": {"enabled": True, "is_configured": True, "last_configured": None},
         "zones": [
-            {"id": str(uuid.uuid4()), "zone": "Cairo & Giza", "governorates": "Cairo, Giza", "rate": 50, "estimated_days": "1-2 days"},
-            {"id": str(uuid.uuid4()), "zone": "Alexandria", "governorates": "Alexandria", "rate": 60, "estimated_days": "2-3 days"},
-            {"id": str(uuid.uuid4()), "zone": "Delta Region", "governorates": "Dakahlia, Gharbia, Monufia, Qalyubia", "rate": 70, "estimated_days": "3-4 days"},
-            {"id": str(uuid.uuid4()), "zone": "Canal Cities", "governorates": "Port Said, Ismailia, Suez", "rate": 80, "estimated_days": "3-4 days"},
-            {"id": str(uuid.uuid4()), "zone": "Upper Egypt", "governorates": "Assiut, Sohag, Qena, Luxor, Aswan", "rate": 100, "estimated_days": "4-6 days"},
+            {
+                "id": str(uuid.uuid4()),
+                "zone": "Cairo & Giza",
+                "governorates": "Cairo, Giza",
+                "rate": 50,
+                "estimated_days": "1-2 days",
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "zone": "Alexandria",
+                "governorates": "Alexandria",
+                "rate": 60,
+                "estimated_days": "2-3 days",
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "zone": "Delta Region",
+                "governorates": "Dakahlia, Gharbia, Monufia, Qalyubia",
+                "rate": 70,
+                "estimated_days": "3-4 days",
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "zone": "Canal Cities",
+                "governorates": "Port Said, Ismailia, Suez",
+                "rate": 80,
+                "estimated_days": "3-4 days",
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "zone": "Upper Egypt",
+                "governorates": "Assiut, Sohag, Qena, Luxor, Aswan",
+                "rate": 100,
+                "estimated_days": "4-6 days",
+            },
         ],
         "free_shipping_threshold": 500,
     }
@@ -78,11 +116,31 @@ def _get_default_whatsapp_settings() -> dict:
         "last_configured": None,
         "phone_number": None,
         "notifications": {
-            "order_confirmation": {"enabled": True, "template": "مرحباً {{customerName}}، تم تأكيد طلبك رقم {{orderNumber}} بنجاح.", "delay": None},
-            "order_shipped": {"enabled": True, "template": "تم شحن طلبك رقم {{orderNumber}}. رقم التتبع: {{trackingNumber}}", "delay": None},
-            "order_delivered": {"enabled": True, "template": "تم توصيل طلبك رقم {{orderNumber}} بنجاح. شكراً لتسوقك معنا!", "delay": None},
-            "abandoned_cart": {"enabled": True, "template": "لاحظنا أنك تركت منتجات في سلة التسوق. أكمل طلبك الآن!", "delay": 60},
-            "low_stock": {"enabled": False, "template": "تنبيه: المنتج {{productName}} أوشك على النفاد. الكمية المتبقية: {{quantity}}", "delay": None},
+            "order_confirmation": {
+                "enabled": True,
+                "template": "مرحباً {{customerName}}، تم تأكيد طلبك رقم {{orderNumber}} بنجاح.",
+                "delay": None,
+            },
+            "order_shipped": {
+                "enabled": True,
+                "template": "تم شحن طلبك رقم {{orderNumber}}. رقم التتبع: {{trackingNumber}}",
+                "delay": None,
+            },
+            "order_delivered": {
+                "enabled": True,
+                "template": "تم توصيل طلبك رقم {{orderNumber}} بنجاح. شكراً لتسوقك معنا!",
+                "delay": None,
+            },
+            "abandoned_cart": {
+                "enabled": True,
+                "template": "لاحظنا أنك تركت منتجات في سلة التسوق. أكمل طلبك الآن!",
+                "delay": 60,
+            },
+            "low_stock": {
+                "enabled": False,
+                "template": "تنبيه: المنتج {{productName}} أوشك على النفاد. الكمية المتبقية: {{quantity}}",
+                "delay": None,
+            },
         },
         "messages_today": 0,
         "delivery_rate": 0,
@@ -99,8 +157,12 @@ def _build_payment_response(settings: dict) -> PaymentSettingsResponse:
         cod=PaymentMethodStatus(**merged.get("cod", defaults["cod"])),
         fawry=PaymentMethodStatus(**merged.get("fawry", defaults["fawry"])),
         paymob=PaymentMethodStatus(**merged.get("paymob", defaults["paymob"])),
-        vodafone_cash=PaymentMethodStatus(**merged.get("vodafone_cash", defaults["vodafone_cash"])),
-        bank_transfer=PaymentMethodStatus(**merged.get("bank_transfer", defaults["bank_transfer"])),
+        vodafone_cash=PaymentMethodStatus(
+            **merged.get("vodafone_cash", defaults["vodafone_cash"])
+        ),
+        bank_transfer=PaymentMethodStatus(
+            **merged.get("bank_transfer", defaults["bank_transfer"])
+        ),
         bank_accounts_count=merged.get("bank_accounts_count", 0),
     )
 
@@ -129,11 +191,31 @@ def _build_whatsapp_response(settings: dict) -> WhatsAppSettingsResponse:
 
     notifications_data = merged.get("notifications", defaults["notifications"])
     notifications = WhatsAppNotifications(
-        order_confirmation=NotificationTemplate(**notifications_data.get("order_confirmation", defaults["notifications"]["order_confirmation"])),
-        order_shipped=NotificationTemplate(**notifications_data.get("order_shipped", defaults["notifications"]["order_shipped"])),
-        order_delivered=NotificationTemplate(**notifications_data.get("order_delivered", defaults["notifications"]["order_delivered"])),
-        abandoned_cart=NotificationTemplate(**notifications_data.get("abandoned_cart", defaults["notifications"]["abandoned_cart"])),
-        low_stock=NotificationTemplate(**notifications_data.get("low_stock", defaults["notifications"]["low_stock"])),
+        order_confirmation=NotificationTemplate(
+            **notifications_data.get(
+                "order_confirmation", defaults["notifications"]["order_confirmation"]
+            )
+        ),
+        order_shipped=NotificationTemplate(
+            **notifications_data.get(
+                "order_shipped", defaults["notifications"]["order_shipped"]
+            )
+        ),
+        order_delivered=NotificationTemplate(
+            **notifications_data.get(
+                "order_delivered", defaults["notifications"]["order_delivered"]
+            )
+        ),
+        abandoned_cart=NotificationTemplate(
+            **notifications_data.get(
+                "abandoned_cart", defaults["notifications"]["abandoned_cart"]
+            )
+        ),
+        low_stock=NotificationTemplate(
+            **notifications_data.get(
+                "low_stock", defaults["notifications"]["low_stock"]
+            )
+        ),
     )
 
     return WhatsAppSettingsResponse(
@@ -149,6 +231,7 @@ def _build_whatsapp_response(settings: dict) -> WhatsAppSettingsResponse:
 
 
 # ============ All Settings ============
+
 
 @router.get(
     "/",
@@ -172,6 +255,7 @@ async def get_all_settings(
 
 
 # ============ Payment Settings ============
+
 
 @router.get(
     "/payment",
@@ -210,19 +294,31 @@ async def update_payment_settings(
         payment_settings["cod"]["enabled"] = request.cod_enabled
     if request.fawry_enabled is not None:
         if not payment_settings["fawry"]["is_configured"]:
-            raise HTTPException(status_code=400, detail="Fawry is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="Fawry is not configured. Contact administrator.",
+            )
         payment_settings["fawry"]["enabled"] = request.fawry_enabled
     if request.paymob_enabled is not None:
         if not payment_settings["paymob"]["is_configured"]:
-            raise HTTPException(status_code=400, detail="Paymob is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="Paymob is not configured. Contact administrator.",
+            )
         payment_settings["paymob"]["enabled"] = request.paymob_enabled
     if request.vodafone_cash_enabled is not None:
         if not payment_settings["vodafone_cash"]["is_configured"]:
-            raise HTTPException(status_code=400, detail="Vodafone Cash is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="Vodafone Cash is not configured. Contact administrator.",
+            )
         payment_settings["vodafone_cash"]["enabled"] = request.vodafone_cash_enabled
     if request.bank_transfer_enabled is not None:
         if not payment_settings["bank_transfer"]["is_configured"]:
-            raise HTTPException(status_code=400, detail="Bank Transfer is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="Bank Transfer is not configured. Contact administrator.",
+            )
         payment_settings["bank_transfer"]["enabled"] = request.bank_transfer_enabled
 
     # Save settings
@@ -237,6 +333,7 @@ async def update_payment_settings(
 
 
 # ============ Shipping Settings ============
+
 
 @router.get(
     "/shipping",
@@ -273,15 +370,24 @@ async def update_shipping_settings(
     # Update only provided fields
     if request.aramex_enabled is not None:
         if not shipping_settings["aramex"]["is_configured"]:
-            raise HTTPException(status_code=400, detail="Aramex is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="Aramex is not configured. Contact administrator.",
+            )
         shipping_settings["aramex"]["enabled"] = request.aramex_enabled
     if request.bosta_enabled is not None:
         if not shipping_settings["bosta"]["is_configured"]:
-            raise HTTPException(status_code=400, detail="Bosta is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="Bosta is not configured. Contact administrator.",
+            )
         shipping_settings["bosta"]["enabled"] = request.bosta_enabled
     if request.mylerz_enabled is not None:
         if not shipping_settings["mylerz"]["is_configured"]:
-            raise HTTPException(status_code=400, detail="MylerZ is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="MylerZ is not configured. Contact administrator.",
+            )
         shipping_settings["mylerz"]["enabled"] = request.mylerz_enabled
     if request.manual_enabled is not None:
         shipping_settings["manual"]["enabled"] = request.manual_enabled
@@ -412,6 +518,7 @@ async def delete_shipping_zone(
 
 # ============ WhatsApp Settings ============
 
+
 @router.get(
     "/whatsapp",
     response_model=SuccessResponse[WhatsAppSettingsResponse],
@@ -447,7 +554,10 @@ async def update_whatsapp_settings(
     # Update enabled status
     if request.enabled is not None:
         if not whatsapp_settings["is_configured"] and request.enabled:
-            raise HTTPException(status_code=400, detail="WhatsApp is not configured. Contact administrator.")
+            raise HTTPException(
+                status_code=400,
+                detail="WhatsApp is not configured. Contact administrator.",
+            )
         whatsapp_settings["enabled"] = request.enabled
 
     # Update notification templates
@@ -469,6 +579,7 @@ async def update_whatsapp_settings(
 
 
 # ============ Storefront Customization ============
+
 
 def _get_default_customization() -> dict:
     """Get default storefront customization settings."""
@@ -504,7 +615,12 @@ def _get_default_customization() -> dict:
         },
         "footer": {
             "footer_text": "",
-            "social_links": {"facebook": "", "instagram": "", "twitter": "", "whatsapp": ""},
+            "social_links": {
+                "facebook": "",
+                "instagram": "",
+                "twitter": "",
+                "whatsapp": "",
+            },
             "show_newsletter": True,
         },
         "is_published": False,
@@ -548,7 +664,9 @@ def _build_customization_response(settings: dict) -> CustomizationResponse:
     merged = _deep_merge(defaults, settings)
 
     footer_data = merged.get("footer", defaults["footer"])
-    social_links_data = footer_data.get("social_links", defaults["footer"]["social_links"])
+    social_links_data = footer_data.get(
+        "social_links", defaults["footer"]["social_links"]
+    )
 
     return CustomizationResponse(
         customization_mode=merged.get("customization_mode", "preset"),
@@ -597,7 +715,9 @@ async def update_customization(
 ):
     """Save storefront customization as draft. Does not publish to live store."""
     settings = store.settings or {}
-    customization = _normalize_keys(settings.get("customization", _get_default_customization()))
+    customization = _normalize_keys(
+        settings.get("customization", _get_default_customization())
+    )
 
     # Persist customization mode
     if request.customization_mode is not None:
@@ -605,7 +725,10 @@ async def update_customization(
 
     # Deep merge each section if provided (normalize existing to strip camelCase dupes)
     if request.identity is not None:
-        customization["identity"] = {**customization.get("identity", {}), **request.identity}
+        customization["identity"] = {
+            **customization.get("identity", {}),
+            **request.identity,
+        }
     if request.theme is not None:
         customization["theme"] = {**customization.get("theme", {}), **request.theme}
     if request.header is not None:
@@ -613,14 +736,24 @@ async def update_customization(
     if request.hero is not None:
         customization["hero"] = {**customization.get("hero", {}), **request.hero}
     if request.products is not None:
-        customization["products"] = {**customization.get("products", {}), **request.products}
+        customization["products"] = {
+            **customization.get("products", {}),
+            **request.products,
+        }
     if request.footer is not None:
         footer_update = request.footer
-        existing_footer = customization.get("footer", _get_default_customization()["footer"])
+        existing_footer = customization.get(
+            "footer", _get_default_customization()["footer"]
+        )
         # Handle nested social_links merge
-        if "social_links" in footer_update and isinstance(footer_update["social_links"], dict):
+        if "social_links" in footer_update and isinstance(
+            footer_update["social_links"], dict
+        ):
             existing_social = existing_footer.get("social_links", {})
-            footer_update["social_links"] = {**existing_social, **footer_update["social_links"]}
+            footer_update["social_links"] = {
+                **existing_social,
+                **footer_update["social_links"],
+            }
         customization["footer"] = {**existing_footer, **footer_update}
 
     # Save to store settings
@@ -645,7 +778,9 @@ async def publish_customization(
 ):
     """Publish the current customization draft to the live storefront."""
     settings = store.settings or {}
-    customization = _normalize_keys(settings.get("customization", _get_default_customization()))
+    customization = _normalize_keys(
+        settings.get("customization", _get_default_customization())
+    )
 
     # Mark as published with timestamp
     customization["is_published"] = True
@@ -695,7 +830,14 @@ async def upload_customization_asset(
         )
 
     # Validate file type
-    allowed_content = {"image/jpeg", "image/png", "image/svg+xml", "image/webp", "image/x-icon", "image/gif"}
+    allowed_content = {
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/webp",
+        "image/x-icon",
+        "image/gif",
+    }
     if file.content_type not in allowed_content:
         raise HTTPException(
             status_code=400,
@@ -709,7 +851,11 @@ async def upload_customization_asset(
         raise HTTPException(status_code=400, detail="File size exceeds 5MB limit")
 
     # Generate a unique filename
-    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "png"
+    ext = (
+        file.filename.rsplit(".", 1)[-1]
+        if file.filename and "." in file.filename
+        else "png"
+    )
     filename = f"customization/{store.id}/{asset_type}_{uuid.uuid4().hex[:8]}.{ext}"
 
     # TODO: Upload to Cloudflare R2 or configured storage

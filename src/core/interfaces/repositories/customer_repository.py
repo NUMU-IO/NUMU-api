@@ -62,7 +62,9 @@ class ICustomerRepository(BaseRepository[Customer]):
         ...
 
     @abstractmethod
-    async def update_password(self, customer_id: UUID, password_hash: str) -> Customer | None:
+    async def update_password(
+        self, customer_id: UUID, password_hash: str
+    ) -> Customer | None:
         """Update customer password hash."""
         ...
 

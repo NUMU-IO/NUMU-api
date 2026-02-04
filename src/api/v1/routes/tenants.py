@@ -67,7 +67,9 @@ async def create_tenant(
         base_domain = getattr(settings, "BASE_DOMAIN", "numu.io")
         store_url = f"https://{tenant.subdomain}.{base_domain}"
 
-        logger.info(f"Created new tenant: {tenant.subdomain} for user {current_user_id}")
+        logger.info(
+            f"Created new tenant: {tenant.subdomain} for user {current_user_id}"
+        )
 
         return TenantCreatedResponse(
             message="Store created successfully",

@@ -52,9 +52,13 @@ class UpdateProductUseCase:
         if dto.price is not None:
             product.price = Money(amount=dto.price, currency=product.price.currency)
         if dto.compare_at_price is not None:
-            product.compare_at_price = Money(amount=dto.compare_at_price, currency=product.price.currency)
+            product.compare_at_price = Money(
+                amount=dto.compare_at_price, currency=product.price.currency
+            )
         if dto.cost_price is not None:
-            product.cost_price = Money(amount=dto.cost_price, currency=product.price.currency)
+            product.cost_price = Money(
+                amount=dto.cost_price, currency=product.price.currency
+            )
         if dto.quantity is not None:
             product.quantity = dto.quantity
         if dto.low_stock_threshold is not None:

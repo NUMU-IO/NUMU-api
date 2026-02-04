@@ -328,7 +328,9 @@ class SlackAlertService:
             service=AlertService.SECURITY,
             correlation_id=correlation_id,
             details=details,
-            mention_users=[settings.slack_user_oncall] if settings.slack_user_oncall else [],
+            mention_users=[settings.slack_user_oncall]
+            if settings.slack_user_oncall
+            else [],
         )
         return await self.send_alert(alert)
 

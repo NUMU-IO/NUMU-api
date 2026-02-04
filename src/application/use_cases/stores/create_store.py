@@ -15,12 +15,42 @@ from src.infrastructure.tenancy.service import TenantService
 
 # Reserved subdomains that cannot be used
 RESERVED_SUBDOMAINS = {
-    "www", "api", "admin", "dashboard", "app", "mail", "email",
-    "ftp", "ssh", "sftp", "cpanel", "webmail", "ns1", "ns2",
-    "shop", "store", "checkout", "pay", "payment", "billing",
-    "support", "help", "docs", "blog", "cdn", "static", "assets",
-    "test", "staging", "dev", "demo", "beta", "alpha",
-    "numu", "numo", "numa"
+    "www",
+    "api",
+    "admin",
+    "dashboard",
+    "app",
+    "mail",
+    "email",
+    "ftp",
+    "ssh",
+    "sftp",
+    "cpanel",
+    "webmail",
+    "ns1",
+    "ns2",
+    "shop",
+    "store",
+    "checkout",
+    "pay",
+    "payment",
+    "billing",
+    "support",
+    "help",
+    "docs",
+    "blog",
+    "cdn",
+    "static",
+    "assets",
+    "test",
+    "staging",
+    "dev",
+    "demo",
+    "beta",
+    "alpha",
+    "numu",
+    "numo",
+    "numa",
 }
 
 
@@ -41,25 +71,33 @@ def validate_subdomain(subdomain: str) -> str:
 
     # Check length (3-63 characters per DNS rules)
     if len(subdomain) < 3:
-        raise ValidationError("Subdomain must be at least 3 characters", field="subdomain")
+        raise ValidationError(
+            "Subdomain must be at least 3 characters", field="subdomain"
+        )
     if len(subdomain) > 63:
-        raise ValidationError("Subdomain must be at most 63 characters", field="subdomain")
+        raise ValidationError(
+            "Subdomain must be at most 63 characters", field="subdomain"
+        )
 
     # Check format (letters, numbers, hyphens only, can't start/end with hyphen)
-    if not re.match(r'^[a-z0-9][a-z0-9-]*[a-z0-9]$', subdomain) and len(subdomain) > 2:
+    if not re.match(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$", subdomain) and len(subdomain) > 2:
         raise ValidationError(
             "Subdomain can only contain letters, numbers, and hyphens, "
             "and cannot start or end with a hyphen",
-            field="subdomain"
+            field="subdomain",
         )
 
     # Check for consecutive hyphens
-    if '--' in subdomain:
-        raise ValidationError("Subdomain cannot contain consecutive hyphens", field="subdomain")
+    if "--" in subdomain:
+        raise ValidationError(
+            "Subdomain cannot contain consecutive hyphens", field="subdomain"
+        )
 
     # Check reserved subdomains
     if subdomain in RESERVED_SUBDOMAINS:
-        raise ValidationError(f"'{subdomain}' is a reserved subdomain", field="subdomain")
+        raise ValidationError(
+            f"'{subdomain}' is a reserved subdomain", field="subdomain"
+        )
 
     return subdomain
 

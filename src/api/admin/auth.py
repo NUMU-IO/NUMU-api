@@ -52,13 +52,17 @@ class AdminAuth(AuthenticationBackend):
                     return False
 
                 # Verify password
-                if not password_service.verify_password(str(password), user.hashed_password):
+                if not password_service.verify_password(
+                    str(password), user.hashed_password
+                ):
                     logger.warning(f"Invalid password for: {email}")
                     return False
 
                 # Check if user is a super admin
                 if user.role != UserRole.SUPER_ADMIN:
-                    logger.warning(f"User {email} is not a SUPER_ADMIN, role: {user.role}")
+                    logger.warning(
+                        f"User {email} is not a SUPER_ADMIN, role: {user.role}"
+                    )
                     return False
 
                 # Store user info in session

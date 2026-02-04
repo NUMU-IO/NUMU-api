@@ -31,8 +31,8 @@ class TenantRepository(ITenantRepository):
     async def create(self, **kwargs) -> TenantModel:
         """Create a new tenant."""
         # Ensure subdomain is lowercase
-        if 'subdomain' in kwargs:
-            kwargs['subdomain'] = kwargs['subdomain'].lower()
+        if "subdomain" in kwargs:
+            kwargs["subdomain"] = kwargs["subdomain"].lower()
 
         tenant = TenantModel(**kwargs)
         self.session.add(tenant)

@@ -148,18 +148,19 @@ async def add_cart_item(
 
     # Check for existing entry with same product + variant
     for entry in cart:
-        if entry["product_id"] == str(request.product_id) and entry.get("variant_id") == variant_str:
+        if (
+            entry["product_id"] == str(request.product_id)
+            and entry.get("variant_id") == variant_str
+        ):
             entry["quantity"] += request.quantity
             break
     else:
-        cart.append(
-            {
-                "id": str(uuid4()),
-                "product_id": str(request.product_id),
-                "variant_id": variant_str,
-                "quantity": request.quantity,
-            }
-        )
+        cart.append({
+            "id": str(uuid4()),
+            "product_id": str(request.product_id),
+            "variant_id": variant_str,
+            "quantity": request.quantity,
+        })
 
     # Return refreshed cart
     return await get_cart(current_customer, product_repo)

@@ -7,7 +7,12 @@ class CreateStoreRequest(BaseModel):
     """Create store request schema."""
 
     name: str = Field(..., min_length=1, max_length=255)
-    subdomain: str = Field(..., min_length=3, max_length=63, description="Store subdomain (e.g., 'mystore' for mystore.numu.io)")
+    subdomain: str = Field(
+        ...,
+        min_length=3,
+        max_length=63,
+        description="Store subdomain (e.g., 'mystore' for mystore.numu.io)",
+    )
     slug: str | None = Field(None, max_length=255)
     description: str | None = None
     default_currency: str = Field(default="EGP", max_length=3)

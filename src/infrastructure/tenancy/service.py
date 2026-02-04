@@ -21,11 +21,7 @@ class TenantService:
         self.tenant_repo = TenantRepository(db)
 
     async def create_tenant(
-        self,
-        name: str,
-        subdomain: str,
-        owner_id: str = None,
-        plan: str = "free"
+        self, name: str, subdomain: str, owner_id: str = None, plan: str = "free"
     ):
         """Create a new tenant with its own database schema.
 
@@ -84,7 +80,7 @@ class TenantService:
         if not subdomain or len(subdomain) < 3 or len(subdomain) > 63:
             return False
         # Must be lowercase alphanumeric with hyphens, no start/end with hyphen
-        pattern = r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+        pattern = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
         return bool(re.match(pattern, subdomain.lower()))
 
     def _generate_schema_name(self, subdomain: str) -> str:
@@ -101,7 +97,7 @@ class TenantService:
         Uses the engine directly for DDL operations to avoid transaction issues.
         """
         # Validate schema name to prevent SQL injection
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema_name):
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", schema_name):
             raise ValueError(f"Invalid schema name: {schema_name}")
 
         async with engine.begin() as conn:
@@ -123,7 +119,7 @@ class TenantService:
 
     async def _drop_schema(self, schema_name: str):
         """Drop a schema (used for rollback on failure)."""
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema_name):
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", schema_name):
             return  # Don't attempt to drop invalid schema names
 
         try:

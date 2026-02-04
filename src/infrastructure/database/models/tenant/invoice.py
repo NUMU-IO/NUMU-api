@@ -113,7 +113,9 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         ForeignKey("public.invoices.id", ondelete="SET NULL"),
         nullable=True,
     )
-    original_invoice_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    original_invoice_number: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
 
     # Notes
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -69,7 +69,9 @@ class Cart(BaseEntity):
                 return i
         return -1
 
-    def get_item(self, product_id: UUID, variant_id: UUID | None = None) -> CartItem | None:
+    def get_item(
+        self, product_id: UUID, variant_id: UUID | None = None
+    ) -> CartItem | None:
         """Get an item from the cart.
 
         Args:
@@ -98,7 +100,6 @@ class Cart(BaseEntity):
         index = self._find_item_index(item.product_id, item.variant_id)
 
         if index >= 0:
-
             existing_item = self.items[index]
             new_quantity = existing_item.quantity + item.quantity
             updated_item = existing_item.with_quantity(new_quantity)
@@ -106,7 +107,6 @@ class Cart(BaseEntity):
                 updated_item if i == index else it for i, it in enumerate(self.items)
             ]
         else:
-
             self.items = [*self.items, item]
 
         self.updated_at = datetime.now(UTC)
@@ -155,7 +155,6 @@ class Cart(BaseEntity):
             raise ValueError(f"Item with product_id {product_id} not found in cart")
 
         if quantity <= 0:
-
             return self.remove_item(product_id, variant_id)
 
         existing_item = self.items[index]
@@ -220,7 +219,13 @@ class Cart(BaseEntity):
             currency=data.get("currency", "USD"),
             notes=data.get("notes"),
             metadata=data.get("metadata", {}),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(UTC),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.now(UTC),
-            expires_at=datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None,
+            created_at=datetime.fromisoformat(data["created_at"])
+            if data.get("created_at")
+            else datetime.now(UTC),
+            updated_at=datetime.fromisoformat(data["updated_at"])
+            if data.get("updated_at")
+            else datetime.now(UTC),
+            expires_at=datetime.fromisoformat(data["expires_at"])
+            if data.get("expires_at")
+            else None,
         )

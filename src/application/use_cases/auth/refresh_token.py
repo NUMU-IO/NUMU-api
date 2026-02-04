@@ -1,6 +1,5 @@
 """Refresh token use case."""
 
-
 from src.application.dto.auth import RefreshTokenDTO, TokenDTO
 from src.core.exceptions import EntityNotFoundError, InvalidTokenError
 from src.core.interfaces.repositories.user_repository import IUserRepository

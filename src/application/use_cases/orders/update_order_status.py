@@ -47,7 +47,9 @@ class UpdateOrderStatusUseCase:
 
         if store.owner_id != user_id:
             log.warning("order_status_update_failed", reason="unauthorized")
-            raise AuthorizationError("You don't have permission to update orders in this store")
+            raise AuthorizationError(
+                "You don't have permission to update orders in this store"
+            )
 
         # Get order
         order = await self.order_repository.get_by_id(order_id)
@@ -91,7 +93,9 @@ class UpdateOrderStatusUseCase:
                 order.status = new_status
                 order.touch()
         except ValueError as e:
-            log.warning("order_status_update_failed", reason="invalid_transition", error=str(e))
+            log.warning(
+                "order_status_update_failed", reason="invalid_transition", error=str(e)
+            )
             raise ValidationError(str(e))
 
         # Save order

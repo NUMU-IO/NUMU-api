@@ -52,7 +52,9 @@ class ProductDTO(BaseDTO):
             status=entity.status.value,
             price=entity.price.amount,
             price_currency=entity.price.currency.value,
-            compare_at_price=entity.compare_at_price.amount if entity.compare_at_price else None,
+            compare_at_price=entity.compare_at_price.amount
+            if entity.compare_at_price
+            else None,
             cost_price=entity.cost_price.amount if entity.cost_price else None,
             quantity=entity.quantity,
             is_in_stock=entity.is_in_stock,

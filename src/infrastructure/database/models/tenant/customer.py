@@ -38,16 +38,22 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    accepts_marketing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    accepts_marketing: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True, default=list
+    )
     default_address_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
         nullable=True,
     )
     total_orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_spent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # In cents
+    total_spent: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # In cents
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Relationships

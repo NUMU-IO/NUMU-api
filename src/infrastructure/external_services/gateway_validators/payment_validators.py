@@ -69,9 +69,7 @@ class FawryValidator(GatewayValidator):
         try:
             # Generate test signature to validate security key format
             test_data = f"{merchant_code}test123"
-            signature = hashlib.sha256(
-                (test_data + security_key).encode()
-            ).hexdigest()
+            signature = hashlib.sha256((test_data + security_key).encode()).hexdigest()
 
             # Make a test API call to validate merchant code
             async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
@@ -82,7 +80,7 @@ class FawryValidator(GatewayValidator):
                         "merchantCode": merchant_code,
                         "merchantRefNumber": "VALIDATION_TEST",
                         "signature": signature,
-                    }
+                    },
                 )
 
                 # Fawry returns specific error codes
@@ -111,7 +109,7 @@ class FawryValidator(GatewayValidator):
                             details={
                                 "merchant_code": merchant_code,
                                 "environment": environment,
-                            }
+                            },
                         )
                 else:
                     return ValidationResult.error(
@@ -179,8 +177,7 @@ class PaymobValidator(GatewayValidator):
             async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
                 # Step 1: Authenticate to get auth token
                 auth_response = await client.post(
-                    f"{self.API_URL}/auth/tokens",
-                    json={"api_key": api_key}
+                    f"{self.API_URL}/auth/tokens", json={"api_key": api_key}
                 )
 
                 if auth_response.status_code != 201:
@@ -202,7 +199,7 @@ class PaymobValidator(GatewayValidator):
                 # Get merchant profile to validate
                 profile_response = await client.get(
                     f"{self.API_URL}/acceptance/payment_integrations",
-                    headers={"Authorization": f"Bearer {auth_token}"}
+                    headers={"Authorization": f"Bearer {auth_token}"},
                 )
 
                 if profile_response.status_code == 200:
@@ -213,7 +210,7 @@ class PaymobValidator(GatewayValidator):
                         return ValidationResult.failure(
                             message="Integration ID not found in your Paymob account",
                             error_code="INVALID_INTEGRATION_ID",
-                            details={"available_integrations": len(integrations)}
+                            details={"available_integrations": len(integrations)},
                         )
 
                     return ValidationResult.success(
@@ -221,7 +218,7 @@ class PaymobValidator(GatewayValidator):
                         details={
                             "integration_id": integration_id,
                             "total_integrations": len(integrations),
-                        }
+                        },
                     )
                 else:
                     return ValidationResult.error(
@@ -282,8 +279,8 @@ class VodafoneCashValidator(GatewayValidator):
             message="Vodafone Cash credentials structure validated",
             details={
                 "merchant_id": merchant_id,
-                "note": "Full validation requires API partnership"
-            }
+                "note": "Full validation requires API partnership",
+            },
         )
 
 
@@ -348,8 +345,7 @@ class StripeValidator(GatewayValidator):
             async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
                 # Test the secret key by fetching account info
                 response = await client.get(
-                    f"{self.API_URL}/account",
-                    auth=(secret_key, "")
+                    f"{self.API_URL}/account", auth=(secret_key, "")
                 )
 
                 if response.status_code == 200:
@@ -358,9 +354,11 @@ class StripeValidator(GatewayValidator):
                         message="Stripe credentials validated successfully",
                         details={
                             "account_id": account.get("id"),
-                            "business_name": account.get("business_profile", {}).get("name"),
+                            "business_name": account.get("business_profile", {}).get(
+                                "name"
+                            ),
                             "environment": secret_env,
-                        }
+                        },
                     )
                 elif response.status_code == 401:
                     return ValidationResult.failure(
@@ -415,7 +413,7 @@ class TapValidator(GatewayValidator):
                 # Test by fetching business info
                 response = await client.get(
                     f"{self.API_URL}/business",
-                    headers={"Authorization": f"Bearer {secret_key}"}
+                    headers={"Authorization": f"Bearer {secret_key}"},
                 )
 
                 if response.status_code == 200:
@@ -425,7 +423,7 @@ class TapValidator(GatewayValidator):
                         details={
                             "business_id": business.get("id"),
                             "business_name": business.get("name"),
-                        }
+                        },
                     )
                 elif response.status_code == 401:
                     return ValidationResult.failure(

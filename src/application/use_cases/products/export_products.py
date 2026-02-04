@@ -57,24 +57,26 @@ class ExportProductsUseCase:
         writer.writeheader()
 
         for product in products:
-            writer.writerow(
-                {
-                    "name": product.name,
-                    "sku": product.sku or "",
-                    "description": product.description or "",
-                    "short_description": product.short_description or "",
-                    "product_type": product.product_type.value,
-                    "status": product.status.value,
-                    "price": str(product.price.amount),
-                    "price_currency": product.price.currency.value,
-                    "compare_at_price": str(product.compare_at_price.amount) if product.compare_at_price else "",
-                    "cost_price": str(product.cost_price.amount) if product.cost_price else "",
-                    "quantity": product.quantity,
-                    "low_stock_threshold": product.low_stock_threshold,
-                    "category_id": str(product.category_id) if product.category_id else "",
-                    "tags": "|".join(product.tags) if product.tags else "",
-                    "images": "|".join(product.images) if product.images else "",
-                }
-            )
+            writer.writerow({
+                "name": product.name,
+                "sku": product.sku or "",
+                "description": product.description or "",
+                "short_description": product.short_description or "",
+                "product_type": product.product_type.value,
+                "status": product.status.value,
+                "price": str(product.price.amount),
+                "price_currency": product.price.currency.value,
+                "compare_at_price": str(product.compare_at_price.amount)
+                if product.compare_at_price
+                else "",
+                "cost_price": str(product.cost_price.amount)
+                if product.cost_price
+                else "",
+                "quantity": product.quantity,
+                "low_stock_threshold": product.low_stock_threshold,
+                "category_id": str(product.category_id) if product.category_id else "",
+                "tags": "|".join(product.tags) if product.tags else "",
+                "images": "|".join(product.images) if product.images else "",
+            })
 
         return output.getvalue()

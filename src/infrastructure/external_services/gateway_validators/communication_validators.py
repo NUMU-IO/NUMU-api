@@ -58,7 +58,7 @@ class WhatsAppValidator(GatewayValidator):
                     params={
                         "access_token": access_token,
                         "fields": "display_phone_number,verified_name,quality_rating",
-                    }
+                    },
                 )
 
                 if phone_response.status_code == 401:
@@ -93,7 +93,7 @@ class WhatsAppValidator(GatewayValidator):
                     params={
                         "access_token": access_token,
                         "fields": "name,id",
-                    }
+                    },
                 )
 
                 if business_response.status_code != 200:
@@ -111,7 +111,7 @@ class WhatsAppValidator(GatewayValidator):
                         "verified_name": phone_data.get("verified_name"),
                         "quality_rating": phone_data.get("quality_rating"),
                         "business_name": business_data.get("name"),
-                    }
+                    },
                 )
 
         except httpx.TimeoutException:
@@ -172,7 +172,7 @@ class TwilioValidator(GatewayValidator):
                 # Validate by fetching account info
                 response = await client.get(
                     f"{self.API_URL}/Accounts/{account_sid}.json",
-                    auth=(account_sid, auth_token)
+                    auth=(account_sid, auth_token),
                 )
 
                 if response.status_code == 200:
@@ -184,7 +184,7 @@ class TwilioValidator(GatewayValidator):
                             "friendly_name": account.get("friendly_name"),
                             "status": account.get("status"),
                             "type": account.get("type"),
-                        }
+                        },
                     )
                 elif response.status_code == 401:
                     return ValidationResult.failure(

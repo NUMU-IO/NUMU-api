@@ -69,6 +69,7 @@ class TestProductCreation:
 # Status transitions
 # ---------------------------------------------------------------------------
 
+
 class TestProductStatusTransitions:
     """Tests for product status changes."""
 
@@ -102,6 +103,7 @@ class TestProductStatusTransitions:
 # Price / money handling
 # ---------------------------------------------------------------------------
 
+
 class TestProductPricing:
     """Tests for price calculations on products."""
 
@@ -131,6 +133,7 @@ class TestProductPricing:
 # ---------------------------------------------------------------------------
 # Quantity management
 # ---------------------------------------------------------------------------
+
 
 class TestProductQuantity:
     """Tests for inventory quantity operations."""
@@ -166,6 +169,7 @@ class TestProductQuantity:
 # ---------------------------------------------------------------------------
 # Schema validation (Pydantic request schemas)
 # ---------------------------------------------------------------------------
+
 
 class TestProductSchemas:
     """Tests for product Pydantic schemas."""

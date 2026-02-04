@@ -42,7 +42,9 @@ class LoginCustomerUseCase:
         if not customer.password_hash:
             raise AuthenticationError("Invalid email or password")
 
-        if not self.password_service.verify_password(dto.password, customer.password_hash):
+        if not self.password_service.verify_password(
+            dto.password, customer.password_hash
+        ):
             raise AuthenticationError("Invalid email or password")
 
         # Generate tokens

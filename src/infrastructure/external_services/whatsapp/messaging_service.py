@@ -57,7 +57,9 @@ class WhatsAppMessagingService(IMessagingService):
     ) -> None:
         self.access_token = access_token or settings.whatsapp_access_token
         self.phone_number_id = phone_number_id or settings.whatsapp_phone_number_id
-        self.business_account_id = business_account_id or settings.whatsapp_business_account_id
+        self.business_account_id = (
+            business_account_id or settings.whatsapp_business_account_id
+        )
         self.app_secret = app_secret or settings.whatsapp_app_secret
         self.enabled = settings.whatsapp_enabled
 
@@ -87,7 +89,14 @@ class WhatsAppMessagingService(IMessagingService):
             Formatted phone number (e.g., "201234567890")
         """
         # Remove common separators and prefixes
-        cleaned = phone.replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        cleaned = (
+            phone
+            .replace("+", "")
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("(", "")
+            .replace(")", "")
+        )
 
         # Handle Egyptian numbers without country code
         if cleaned.startswith("0") and len(cleaned) == 11:
@@ -113,8 +122,7 @@ class WhatsAppMessagingService(IMessagingService):
         """
         # Convert parameters dict to ordered list for body component
         body_params = [
-            {"type": "text", "text": str(value)}
-            for value in parameters.values()
+            {"type": "text", "text": str(value)} for value in parameters.values()
         ]
 
         return {
@@ -207,7 +215,9 @@ class WhatsAppMessagingService(IMessagingService):
                     )
                 else:
                     error_data = response.json()
-                    error_msg = error_data.get("error", {}).get("message", "Unknown error")
+                    error_msg = error_data.get("error", {}).get(
+                        "message", "Unknown error"
+                    )
                     error_code = error_data.get("error", {}).get("code")
 
                     logger.error(f"WhatsApp send failed: {error_msg}")
@@ -393,7 +403,9 @@ class WhatsAppMessagingService(IMessagingService):
         # WhatsApp doesn't have a direct status check API
         # Status is delivered via webhooks
         # This is a placeholder that returns SENT
-        logger.info(f"Status check for message {message_id} - use webhooks for real status")
+        logger.info(
+            f"Status check for message {message_id} - use webhooks for real status"
+        )
         return MessageStatus.SENT
 
     def verify_webhook_signature(
@@ -429,6 +441,7 @@ class WhatsAppMessagingService(IMessagingService):
 
             if hmac.compare_digest(expected_signature, signature):
                 import json
+
                 return json.loads(payload)
             else:
                 logger.warning("WhatsApp webhook signature mismatch")

@@ -184,7 +184,6 @@ class RedisCartRepository(ICartRepository):
         existing_cart = await self.get_by_customer_id(customer_id, store_id)
 
         if existing_cart:
-
             existing_cart.merge_cart(guest_cart)
             existing_cart.customer_id = customer_id
 
@@ -194,7 +193,6 @@ class RedisCartRepository(ICartRepository):
 
             return await self.save(existing_cart)
         else:
-
             guest_cart.customer_id = customer_id
 
             return await self.save(guest_cart)

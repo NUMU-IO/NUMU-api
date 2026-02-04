@@ -114,9 +114,7 @@ class CouponRepository(ICouponRepository):
 
     async def count(self) -> int:
         """Get total count of coupons."""
-        result = await self.session.execute(
-            select(func.count(CouponModel.id))
-        )
+        result = await self.session.execute(select(func.count(CouponModel.id)))
         return result.scalar() or 0
 
     async def get_by_code(self, store_id: UUID, code: str) -> Coupon | None:
@@ -148,9 +146,7 @@ class CouponRepository(ICouponRepository):
     async def count_by_store(self, store_id: UUID) -> int:
         """Get total count of coupons for a store."""
         result = await self.session.execute(
-            select(func.count(CouponModel.id)).where(
-                CouponModel.store_id == store_id
-            )
+            select(func.count(CouponModel.id)).where(CouponModel.store_id == store_id)
         )
         return result.scalar() or 0
 
@@ -167,9 +163,7 @@ class CouponRepository(ICouponRepository):
                 CouponModel.store_id == store_id,
                 CouponModel.is_active.is_(True),
             )
-            .where(
-                or_(CouponModel.valid_from.is_(None), CouponModel.valid_from <= now)
-            )
+            .where(or_(CouponModel.valid_from.is_(None), CouponModel.valid_from <= now))
             .where(
                 or_(CouponModel.valid_until.is_(None), CouponModel.valid_until > now)
             )

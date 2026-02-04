@@ -1,6 +1,5 @@
 """Unit tests for LocalizationService."""
 
-
 from src.core.services.localization import (
     Locale,
     LocalizationService,

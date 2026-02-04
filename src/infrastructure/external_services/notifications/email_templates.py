@@ -12,6 +12,7 @@ from dataclasses import dataclass
 @dataclass
 class EmailTemplate:
     """Base email template."""
+
     subject: str
     html_body: str
     text_body: str
@@ -42,9 +43,13 @@ class ConfigurationRequestEmailTemplate:
         Returns:
             EmailTemplate with subject and body
         """
-        subject = f"[NUMU] New Configuration Request: {service_name} - {priority.upper()}"
+        subject = (
+            f"[NUMU] New Configuration Request: {service_name} - {priority.upper()}"
+        )
 
-        notes_section = f"<p><strong>Merchant Notes:</strong> {notes}</p>" if notes else ""
+        notes_section = (
+            f"<p><strong>Merchant Notes:</strong> {notes}</p>" if notes else ""
+        )
 
         html_body = f"""
         <!DOCTYPE html>

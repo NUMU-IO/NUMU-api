@@ -25,7 +25,9 @@ class TwoFactorAlreadyEnabledError(BusinessRuleViolationError):
     """Raised when trying to enable 2FA that is already enabled."""
 
     def __init__(self) -> None:
-        super().__init__("Two-factor authentication is already enabled for this account")
+        super().__init__(
+            "Two-factor authentication is already enabled for this account"
+        )
 
 
 class Enable2FAUseCase:
@@ -107,8 +109,7 @@ class Enable2FAUseCase:
 
         # Hash backup codes for storage
         hashed_backup_codes = [
-            self.totp_service.hash_backup_code(code)
-            for code in plaintext_backup_codes
+            self.totp_service.hash_backup_code(code) for code in plaintext_backup_codes
         ]
 
         # 6. Create or update TwoFactorAuth entity

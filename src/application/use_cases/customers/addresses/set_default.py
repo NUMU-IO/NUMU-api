@@ -21,9 +21,7 @@ class SetDefaultAddressUseCase:
         self.customer_repository = customer_repository
         self.address_repository = address_repository
 
-    async def execute(
-        self, customer_id: UUID, address_id: UUID
-    ) -> CustomerAddressDTO:
+    async def execute(self, customer_id: UUID, address_id: UUID) -> CustomerAddressDTO:
         """Set an address as default."""
         address = await self.address_repository.get_by_id(address_id)
 
