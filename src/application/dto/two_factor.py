@@ -1,11 +1,11 @@
 """Two-Factor Authentication DTOs."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
 from src.application.dto.base import BaseDTO
-from src.core.entities.two_factor import TwoFactorAuth, TwoFactorMethod, TwoFactorStatus
+from src.core.entities.two_factor import TwoFactorAuth, TwoFactorStatus
 
 
 @dataclass
