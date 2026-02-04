@@ -86,6 +86,13 @@ class PaymentError(DomainException):
         super().__init__(message, code="PAYMENT_ERROR")
 
 
+class BusinessRuleViolationError(DomainException):
+    """Raised when a business rule is violated."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="BUSINESS_RULE_VIOLATION")
+
+
 class ExternalServiceError(DomainException):
     """Raised when an external service fails."""
 
