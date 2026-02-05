@@ -1,4 +1,8 @@
 from src.infrastructure.messaging.tasks.backup_task import backup_database  # noqa: F401
+from src.infrastructure.messaging.tasks.image_tasks import (  # noqa: F401
+    process_bulk_product_images_task,
+    process_product_image_task,
+)
 from src.infrastructure.messaging.tasks.onboarding_email_tasks import (  # noqa: F401
     send_first_order_email_task,
     send_first_product_email_task,

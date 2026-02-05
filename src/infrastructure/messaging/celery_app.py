@@ -2,6 +2,7 @@
 
 from celery import Celery
 from celery.schedules import crontab
+from kombu import Queue
 
 from src.config import settings
 
@@ -32,6 +33,22 @@ celery_app.conf.update(
     imports=[
         "src.infrastructure.messaging.tasks",
     ],
+    # Queue definitions
+    task_queues=(
+        Queue("default"),
+        Queue("images"),
+    ),
+    task_default_queue="default",
+    # Route image tasks to dedicated queue
+    task_routes={
+        "tasks.process_product_image": {"queue": "images"},
+        "tasks.process_bulk_product_images": {"queue": "images"},
+    },
+    # Redis broker stability
+    broker_transport_options={
+        "visibility_timeout": 3600,
+    },
+    broker_connection_retry_on_startup=True,
 )
 
 # Beat schedule for periodic tasks
