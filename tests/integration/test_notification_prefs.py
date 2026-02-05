@@ -6,12 +6,24 @@ Verifies:
 - Customer.update_notification_preferences() merges correctly
 - Onboarding email tasks call ResendEmailService with correct templates
 - Celery task retry on failure
+
+Note: Celery task tests require Redis and are skipped in CI.
+Run with NUMU_RUN_CELERY_TESTS=1 to execute those tests.
 """
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import pytest
+
 from src.core.entities.customer import Customer
+
+# Skip marker for tests requiring Celery/Redis
+requires_celery = pytest.mark.skipif(
+    os.environ.get("NUMU_RUN_CELERY_TESTS", "0") != "1",
+    reason="Celery/Redis tests require infrastructure. Set NUMU_RUN_CELERY_TESTS=1 to run.",
+)
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber
 
@@ -165,6 +177,7 @@ class TestUpdateNotificationPreferences:
 # ---------------------------------------------------------------------------
 
 
+@requires_celery
 class TestOnboardingEmailTasks:
     """Verify onboarding Celery tasks invoke email service correctly."""
 
@@ -241,6 +254,7 @@ class TestOnboardingEmailTasks:
 # ---------------------------------------------------------------------------
 
 
+@requires_celery
 class TestNotificationCeleryTasks:
     """Verify core notification Celery tasks invoke services correctly."""
 
