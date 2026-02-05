@@ -6,10 +6,12 @@ They include:
 - UserModel: User accounts (global SSO)
 """
 
+from src.infrastructure.database.models.public.onboarding import StoreOnboardingModel
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
 
 __all__ = [
+    "StoreOnboardingModel",
     "TenantModel",
     "UserModel",
 ]
