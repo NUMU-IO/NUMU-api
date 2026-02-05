@@ -102,6 +102,7 @@ class UploadedImageResponse(BaseModel):
     size: int
     content_type: str
     product_id: str
+    variant_urls: dict[str, str] = Field(default_factory=dict)
 
 
 class DeleteImageRequest(BaseModel):

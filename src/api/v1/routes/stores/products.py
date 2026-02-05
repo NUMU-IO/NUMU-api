@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from src.api.dependencies import (
+    get_image_pipeline,
     get_product_repository,
     get_storage_service,
     get_store_repository,
@@ -43,6 +44,7 @@ from src.application.use_cases.products.upload_image import UploadProductImageDT
 from src.infrastructure.external_services.cloudflare_r2 import (
     CloudflareR2StorageService,
 )
+from src.infrastructure.external_services.image import ImagePipeline
 from src.infrastructure.repositories import ProductRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/products")
@@ -419,20 +421,24 @@ async def upload_product_image(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    storage_service: Annotated[
-        CloudflareR2StorageService, Depends(get_storage_service)
-    ],
+    image_pipeline: Annotated[ImagePipeline, Depends(get_image_pipeline)],
 ):
     """Upload an image for a product.
 
     Accepts JPEG, PNG, WebP, and GIF images.
     Maximum file size: 5 MB.
+
+    Images are automatically:
+    - Validated and stripped of EXIF metadata
+    - Converted to WebP format with 85% quality
+    - Resized to 3 variants: thumbnail (150px), medium (600px), large (1200px)
+    - Uploaded to Cloudflare R2 storage
     """
     # Read file content
     file_content = await file.read()
 
     use_case = UploadProductImageUseCase(
-        storage_service=storage_service,
+        image_pipeline=image_pipeline,
         product_repository=product_repo,
         store_repository=store_repo,
     )
@@ -457,6 +463,7 @@ async def upload_product_image(
             size=result.size,
             content_type=result.content_type,
             product_id=str(result.product_id),
+            variant_urls=result.variant_urls,
         ),
         message="Image uploaded successfully",
     )
