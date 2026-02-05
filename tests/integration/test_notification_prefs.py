@@ -169,7 +169,7 @@ class TestOnboardingEmailTasks:
     """Verify onboarding Celery tasks invoke email service correctly."""
 
     @patch(
-        "src.infrastructure.messaging.tasks.onboarding_email_tasks.ResendEmailService"
+        "src.infrastructure.external_services.resend.email_service.ResendEmailService"
     )
     def test_welcome_email_task_sends(self, MockEmailService):
         mock_service = MagicMock()
@@ -193,7 +193,7 @@ class TestOnboardingEmailTasks:
         assert result["sent"] is True
 
     @patch(
-        "src.infrastructure.messaging.tasks.onboarding_email_tasks.ResendEmailService"
+        "src.infrastructure.external_services.resend.email_service.ResendEmailService"
     )
     def test_first_product_email_task_sends(self, MockEmailService):
         mock_service = MagicMock()
@@ -214,7 +214,7 @@ class TestOnboardingEmailTasks:
         assert result["sent"] is True
 
     @patch(
-        "src.infrastructure.messaging.tasks.onboarding_email_tasks.ResendEmailService"
+        "src.infrastructure.external_services.resend.email_service.ResendEmailService"
     )
     def test_first_order_email_task_sends(self, MockEmailService):
         mock_service = MagicMock()
@@ -244,7 +244,9 @@ class TestOnboardingEmailTasks:
 class TestNotificationCeleryTasks:
     """Verify core notification Celery tasks invoke services correctly."""
 
-    @patch("src.infrastructure.messaging.tasks.notification_tasks.ResendEmailService")
+    @patch(
+        "src.infrastructure.external_services.resend.email_service.ResendEmailService"
+    )
     def test_order_confirmation_email_task(self, MockEmailService):
         mock_service = MagicMock()
         mock_service.send_order_confirmation = AsyncMock(return_value=True)
@@ -268,7 +270,7 @@ class TestNotificationCeleryTasks:
         assert result["order_number"] == "ORD-002"
 
     @patch(
-        "src.infrastructure.messaging.tasks.notification_tasks.WhatsAppMessagingService"
+        "src.infrastructure.external_services.whatsapp.messaging_service.WhatsAppMessagingService"
     )
     def test_whatsapp_order_confirmation_task(self, MockWA):
         mock_service = MagicMock()
@@ -294,7 +296,9 @@ class TestNotificationCeleryTasks:
         assert result["sent"] is True
         assert result["message_id"] == "wamid_123"
 
-    @patch("src.infrastructure.messaging.tasks.notification_tasks.ResendEmailService")
+    @patch(
+        "src.infrastructure.external_services.resend.email_service.ResendEmailService"
+    )
     def test_shipping_notification_email_task(self, MockEmailService):
         mock_service = MagicMock()
         mock_service.send_shipping_notification = AsyncMock(return_value=True)
@@ -315,7 +319,7 @@ class TestNotificationCeleryTasks:
         assert result["sent"] is True
 
     @patch(
-        "src.infrastructure.messaging.tasks.notification_tasks.WhatsAppMessagingService"
+        "src.infrastructure.external_services.whatsapp.messaging_service.WhatsAppMessagingService"
     )
     def test_whatsapp_shipping_update_task(self, MockWA):
         mock_service = MagicMock()

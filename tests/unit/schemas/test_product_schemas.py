@@ -19,7 +19,6 @@ class TestCreateProductRequest:
     def test_valid_minimal_product(self):
         """Test creating product with minimal required fields."""
         data = {
-            "store_id": str(uuid4()),
             "name": "Test Product",
             "price": "19.99",
         }
@@ -27,14 +26,13 @@ class TestCreateProductRequest:
 
         assert request.name == "Test Product"
         assert request.price == Decimal("19.99")
-        assert request.price_currency == "USD"  # Default
+        assert request.price_currency == "EGP"  # Default
         assert request.quantity == 0  # Default
 
     def test_valid_full_product(self):
         """Test creating product with all fields."""
         category_id = uuid4()
         data = {
-            "store_id": str(uuid4()),
             "name": "Full Product",
             "slug": "full-product",
             "sku": "FULL-001",
@@ -64,7 +62,6 @@ class TestCreateProductRequest:
     def test_invalid_empty_name(self):
         """Test validation fails for empty name."""
         data = {
-            "store_id": str(uuid4()),
             "name": "",
             "price": "19.99",
         }
@@ -76,7 +73,6 @@ class TestCreateProductRequest:
     def test_invalid_negative_price(self):
         """Test validation fails for negative price."""
         data = {
-            "store_id": str(uuid4()),
             "name": "Test Product",
             "price": "-10.00",
         }
@@ -88,7 +84,6 @@ class TestCreateProductRequest:
     def test_invalid_negative_quantity(self):
         """Test validation fails for negative quantity."""
         data = {
-            "store_id": str(uuid4()),
             "name": "Test Product",
             "price": "19.99",
             "quantity": -5,
@@ -101,7 +96,6 @@ class TestCreateProductRequest:
     def test_name_too_long(self):
         """Test validation fails for name exceeding max length."""
         data = {
-            "store_id": str(uuid4()),
             "name": "A" * 300,  # Exceeds 255 char limit
             "price": "19.99",
         }

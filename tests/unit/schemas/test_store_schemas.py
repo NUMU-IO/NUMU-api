@@ -52,6 +52,7 @@ class TestCreateStoreRequest:
         """Test validation fails for empty name."""
         data = {
             "name": "",
+            "subdomain": "teststore",
         }
         with pytest.raises(ValidationError) as exc_info:
             CreateStoreRequest(**data)
@@ -62,6 +63,7 @@ class TestCreateStoreRequest:
         """Test validation fails for name exceeding max length."""
         data = {
             "name": "A" * 256,  # Exceeds 255 char limit
+            "subdomain": "teststore",
         }
         with pytest.raises(ValidationError) as exc_info:
             CreateStoreRequest(**data)
@@ -72,6 +74,7 @@ class TestCreateStoreRequest:
         """Test validation fails for invalid contact email."""
         data = {
             "name": "My Store",
+            "subdomain": "mystore",
             "contact_email": "not-an-email",
         }
         with pytest.raises(ValidationError) as exc_info:
@@ -83,6 +86,7 @@ class TestCreateStoreRequest:
         """Test validation for currency max length."""
         data = {
             "name": "My Store",
+            "subdomain": "mystore",
             "default_currency": "USDT",  # Exceeds 3 char limit
         }
         with pytest.raises(ValidationError) as exc_info:
@@ -94,6 +98,7 @@ class TestCreateStoreRequest:
         """Test validation for phone max length."""
         data = {
             "name": "My Store",
+            "subdomain": "mystore",
             "contact_phone": "1" * 21,  # Exceeds 20 char limit
         }
         with pytest.raises(ValidationError) as exc_info:
@@ -105,6 +110,7 @@ class TestCreateStoreRequest:
         """Test validation for slug max length."""
         data = {
             "name": "My Store",
+            "subdomain": "mystore",
             "slug": "a" * 256,  # Exceeds 255 char limit
         }
         with pytest.raises(ValidationError) as exc_info:
@@ -212,6 +218,7 @@ class TestStoreResponse:
             "banner_url": "https://example.com/banner.png",
             "status": "active",
             "default_currency": "EGP",
+            "default_language": "en",
             "contact_email": "store@example.com",
             "contact_phone": "+201234567890",
             "address": {"city": "Cairo", "country": "Egypt"},
@@ -242,6 +249,7 @@ class TestStoreResponse:
             "banner_url": None,
             "status": "active",
             "default_currency": "USD",
+            "default_language": "en",
             "contact_email": None,
             "contact_phone": None,
             "address": {},
@@ -272,6 +280,7 @@ class TestStoreResponse:
             "logo_url": None,
             "banner_url": None,
             "default_currency": "USD",
+            "default_language": "en",
             "contact_email": None,
             "contact_phone": None,
             "address": {},

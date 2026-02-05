@@ -38,6 +38,7 @@ class TestStoreRepository:
         model.description = kwargs.get("description", "A test store")
         model.status = kwargs.get("status", StoreStatus.ACTIVE)
         model.default_currency = kwargs.get("default_currency", "USD")
+        model.default_language = kwargs.get("default_language", "en")
         model.contact_email = kwargs.get("contact_email", "store@example.com")
         model.contact_phone = kwargs.get("contact_phone", None)
         model.logo_url = kwargs.get("logo_url", None)

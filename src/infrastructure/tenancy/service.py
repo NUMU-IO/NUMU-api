@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import re
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,7 @@ class TenantService:
         self.tenant_repo = TenantRepository(db)
 
     async def create_tenant(
-        self, name: str, subdomain: str, owner_id: str = None, plan: str = "free"
+        self, name: str, subdomain: str, owner_id: UUID = None, plan: str = "free"
     ):
         """Create a new tenant with its own database schema.
 
