@@ -10,6 +10,6 @@ SECURITY ARCHITECTURE:
 - In production, integrate with AWS Secrets Manager, HashiCorp Vault, etc.
 """
 
-from .secrets_manager import SecretsManager, SecretsManagerError
+from .secrets_manager import SecretsManager, SecretsManagerError, get_secrets_manager
 
-__all__ = ["SecretsManager", "SecretsManagerError"]
+__all__ = ["SecretsManager", "SecretsManagerError", "get_secrets_manager"]
