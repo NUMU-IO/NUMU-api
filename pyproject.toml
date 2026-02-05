@@ -23,6 +23,7 @@ dependencies = [
     # Authentication
     "PyJWT[crypto]>=2.9.0",
     "passlib[bcrypt]>=1.7.4",
+    "pyotp>=2.9.0",
 
     # External Services
     "stripe>=7.10.0",
