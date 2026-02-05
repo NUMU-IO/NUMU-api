@@ -1,6 +1,6 @@
 """Upload product image use case."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -15,6 +15,10 @@ from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.interfaces.services.storage_service import (
     IStorageService,
     StorageBucket,
+)
+from src.infrastructure.external_services.image.image_pipeline import ImagePipeline
+from src.infrastructure.external_services.image.image_processor import (
+    ImageProcessingError,
 )
 
 ALLOWED_IMAGE_TYPES = {
@@ -48,31 +52,40 @@ class UploadedImageDTO(BaseDTO):
     size: int
     content_type: str
     product_id: UUID
+    variant_urls: dict[str, str] = field(default_factory=dict)
 
 
 class UploadProductImageUseCase:
-    """Use case for uploading product images to Cloudflare R2.
+    """Use case for uploading product images with optimization pipeline.
 
     Validates:
     - File type (JPEG, PNG, WebP, GIF only)
     - File size (max 5 MB)
     - Product exists and belongs to user's store
+
+    Processing pipeline:
+    - Validates and opens image
+    - Strips EXIF metadata (preserving orientation)
+    - Converts to WebP format
+    - Generates 3 size variants (thumbnail 150px, medium 600px, large 1200px)
+    - Uploads all variants to Cloudflare R2
+    - Stores variant URLs in product.media_urls metadata
     """
 
     def __init__(
         self,
-        storage_service: IStorageService,
+        image_pipeline: ImagePipeline,
         product_repository: IProductRepository,
         store_repository: IStoreRepository,
     ) -> None:
         """Initialize use case.
 
         Args:
-            storage_service: Storage service (Cloudflare R2) instance.
+            image_pipeline: Image processing and upload pipeline.
             product_repository: Product repository instance.
             store_repository: Store repository instance.
         """
-        self.storage_service = storage_service
+        self.image_pipeline = image_pipeline
         self.product_repository = product_repository
         self.store_repository = store_repository
 
@@ -82,7 +95,7 @@ class UploadProductImageUseCase:
         store_id: UUID,
         user_id: UUID,
     ) -> UploadedImageDTO:
-        """Upload a product image.
+        """Upload a product image through the optimization pipeline.
 
         Args:
             dto: Upload data with file content and metadata.
@@ -90,7 +103,7 @@ class UploadProductImageUseCase:
             user_id: The user UUID (for authorization).
 
         Returns:
-            UploadedImageDTO with the image URL and metadata.
+            UploadedImageDTO with the image URL, variant URLs, and metadata.
 
         Raises:
             ValidationError: If file type or size is invalid.
@@ -133,33 +146,47 @@ class UploadProductImageUseCase:
         if product.store_id != store_id:
             raise EntityNotFoundError("Product", str(dto.product_id))
 
-        ext = ALLOWED_IMAGE_TYPES.get(content_type, ".jpg")
-        safe_filename = f"{dto.product_id}_{dto.filename}"
-        if not safe_filename.lower().endswith(ext):
-            safe_filename = f"{safe_filename}{ext}"
+        # Process through image pipeline: optimize + generate variants + upload
+        try:
+            pipeline_result = await self.image_pipeline.process_and_upload(
+                file_data=dto.file_content,
+                product_id=dto.product_id,
+                original_filename=dto.filename,
+                bucket=StorageBucket.PRODUCTS,
+            )
+        except ImageProcessingError as exc:
+            raise ValidationError(f"Image processing failed: {exc}")
 
-        uploaded_file = await self.storage_service.upload_file(
-            file_content=dto.file_content,
-            filename=safe_filename,
-            content_type=content_type,
-            bucket=StorageBucket.PRODUCTS,
-        )
+        # Add optimized original URL to product.images
+        if pipeline_result.url not in product.images:
+            product.images = [*product.images, pipeline_result.url]
 
-        if uploaded_file.url not in product.images:
-            product.images = [*product.images, uploaded_file.url]
-            await self.product_repository.update(product)
+        # Store variant URLs and keys in product.metadata for later retrieval
+        media_urls = product.metadata.get("media_urls", {})
+        media_urls[pipeline_result.url] = {
+            "variants": pipeline_result.variant_urls,
+            "variant_keys": pipeline_result.variant_keys,
+        }
+        product.metadata = {**product.metadata, "media_urls": media_urls}
+
+        await self.product_repository.update(product)
 
         return UploadedImageDTO(
-            url=uploaded_file.url,
-            key=uploaded_file.key,
-            size=uploaded_file.size,
-            content_type=uploaded_file.content_type,
+            url=pipeline_result.url,
+            key=pipeline_result.key,
+            size=pipeline_result.total_size,
+            content_type="image/webp",
             product_id=dto.product_id,
+            variant_urls=pipeline_result.variant_urls,
         )
 
 
 class DeleteProductImageUseCase:
-    """Use case for deleting product images from Cloudflare R2."""
+    """Use case for deleting product images from Cloudflare R2.
+
+    Handles cleanup of all image variants (original + size variants)
+    when an image pipeline was used for upload.
+    """
 
     def __init__(
         self,
@@ -185,7 +212,7 @@ class DeleteProductImageUseCase:
         store_id: UUID,
         user_id: UUID,
     ) -> bool:
-        """Delete a product image.
+        """Delete a product image and all its variants.
 
         Args:
             product_id: The product UUID.
@@ -221,24 +248,41 @@ class DeleteProductImageUseCase:
         if image_url not in product.images:
             raise ValidationError(f"Image not found on product. URL: {image_url}")
 
-        # Extract key from URL using proper URL parsing
-        # URL format: https://pub-xxx.r2.dev/products/abc123.jpg
-        # Key format: products/abc123.jpg
-        key = None
-        try:
-            parsed = urlparse(image_url)
-            path = parsed.path.lstrip("/")
-            if path:
-                key = path
-        except Exception:
-            # Fallback to simple string parsing if URL is malformed
-            if "/products/" in image_url:
-                key = "products/" + image_url.split("/products/")[-1]
+        # Check if this image has variant keys stored in metadata
+        media_urls = product.metadata.get("media_urls", {})
+        image_meta = media_urls.get(image_url, {})
+        variant_keys = image_meta.get("variant_keys", {})
 
-        if key:
-            await self.storage_service.delete_file(key)
+        if variant_keys:
+            # Delete all variant files from storage
+            for variant_name, key in variant_keys.items():
+                try:
+                    await self.storage_service.delete_file(key)
+                except Exception:
+                    pass  # Log but don't fail deletion
+        else:
+            # Fallback: delete single file by extracting key from URL
+            key = None
+            try:
+                parsed = urlparse(image_url)
+                path = parsed.path.lstrip("/")
+                if path:
+                    key = path
+            except Exception:
+                if "/products/" in image_url:
+                    key = "products/" + image_url.split("/products/")[-1]
 
+            if key:
+                await self.storage_service.delete_file(key)
+
+        # Remove URL from product images
         product.images = [img for img in product.images if img != image_url]
+
+        # Clean up media_urls metadata
+        if image_url in media_urls:
+            del media_urls[image_url]
+            product.metadata = {**product.metadata, "media_urls": media_urls}
+
         await self.product_repository.update(product)
 
         return True

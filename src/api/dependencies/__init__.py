@@ -21,6 +21,7 @@ from src.api.dependencies.repositories import (
 from src.api.dependencies.services import (
     get_ai_service,
     get_email_service,
+    get_image_pipeline,
     get_password_service,
     get_payment_service,
     get_storage_service,
@@ -53,4 +54,5 @@ __all__ = [
     "get_payment_service",
     "get_storage_service",
     "get_ai_service",
+    "get_image_pipeline",
 ]

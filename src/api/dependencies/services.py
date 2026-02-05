@@ -7,6 +7,7 @@ from src.infrastructure.external_services import (
 from src.infrastructure.external_services.cloudflare_r2 import (
     CloudflareR2StorageService,
 )
+from src.infrastructure.external_services.image import ImagePipeline, ImageProcessor
 from src.infrastructure.external_services.openai import OpenAIService
 from src.infrastructure.external_services.resend import ResendEmailService
 from src.infrastructure.external_services.stripe import StripePaymentService
@@ -46,3 +47,11 @@ def get_storage_service():
 def get_ai_service():
     """Get AI service dependency."""
     return OpenAIService()
+
+
+def get_image_pipeline():
+    """Get image processing pipeline dependency."""
+    return ImagePipeline(
+        image_processor=ImageProcessor(),
+        storage_service=CloudflareR2StorageService(),
+    )
