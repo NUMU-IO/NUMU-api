@@ -159,8 +159,8 @@ class ConfigureCredentialsUseCase:
         await self.db.commit()
         await self.db.refresh(credential)
 
-        # TODO: Emit event for notification service
-        # await self.event_bus.publish(CredentialsConfigured(credential))
+        # Auto-complete onboarding step based on service type
+        await self._try_onboarding_step(tenant_id, service_type)
 
         return CredentialStatusResponse(
             tenant_id=tenant_id,
@@ -174,6 +174,41 @@ class ConfigureCredentialsUseCase:
             last_validated_at=now,
             display_info=display_info,
         )
+
+    async def _try_onboarding_step(
+        self, tenant_id: UUID, service_type: ServiceType
+    ) -> None:
+        """Best-effort onboarding step completion after credential config."""
+        try:
+            from src.application.use_cases.onboarding.auto_complete import (
+                try_complete_onboarding_step,
+            )
+            from src.core.entities.onboarding import OnboardingStepKey
+            from src.infrastructure.database.models.tenant.store import StoreModel
+            from src.infrastructure.repositories.onboarding_repository import (
+                OnboardingRepository,
+            )
+
+            step_map = {
+                ServiceType.PAYMENT_GATEWAY: OnboardingStepKey.CONFIGURE_PAYMENT,
+                ServiceType.SHIPPING_CARRIER: OnboardingStepKey.ADD_SHIPPING,
+            }
+            step_key = step_map.get(service_type)
+            if not step_key:
+                return
+
+            # Find the store belonging to this tenant
+            result = await self.db.execute(
+                select(StoreModel.id).where(StoreModel.tenant_id == tenant_id).limit(1)
+            )
+            store_id = result.scalar_one_or_none()
+            if not store_id:
+                return
+
+            onboarding_repo = OnboardingRepository(self.db)
+            await try_complete_onboarding_step(onboarding_repo, store_id, step_key)
+        except Exception:
+            pass  # Never block credential configuration for onboarding
 
     async def get_status(
         self,

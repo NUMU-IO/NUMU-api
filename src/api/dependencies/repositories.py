@@ -10,6 +10,7 @@ from src.infrastructure.repositories import (
     CouponRepository,
     CustomerAddressRepository,
     CustomerRepository,
+    OnboardingRepository,
     OrderRepository,
     ProductRepository,
     StoreRepository,
@@ -57,6 +58,13 @@ def get_coupon_repository(
 ) -> CouponRepository:
     """Get coupon repository dependency."""
     return CouponRepository(session)
+
+
+def get_onboarding_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> OnboardingRepository:
+    """Get onboarding repository dependency."""
+    return OnboardingRepository(session)
 
 
 def get_order_repository(

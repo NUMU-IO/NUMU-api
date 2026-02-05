@@ -45,6 +45,10 @@ from src.api.v1.schemas.tenant.product_import import (
     ImportResultResponse,
     ImportRowErrorResponse,
 )
+from src.api.v1.schemas.tenant.onboarding import (
+    OnboardingResponse,
+    OnboardingStepResponse,
+)
 from src.api.v1.schemas.tenant.store import (
     CheckSubdomainRequest,
     CheckSubdomainResponse,
@@ -84,6 +88,9 @@ __all__ = [
     "CreateStoreRequest",
     "StoreResponse",
     "UpdateStoreRequest",
+    # Onboarding
+    "OnboardingResponse",
+    "OnboardingStepResponse",
     # Order
     "BulkUpdateOrderStatusRequest",
     "BulkUpdateOrderStatusResponse",

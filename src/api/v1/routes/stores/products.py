@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from src.api.dependencies import (
     get_image_pipeline,
+    get_onboarding_repository,
     get_product_repository,
     get_storage_service,
     get_store_repository,
@@ -45,7 +46,11 @@ from src.infrastructure.external_services.cloudflare_r2 import (
     CloudflareR2StorageService,
 )
 from src.infrastructure.external_services.image import ImagePipeline
-from src.infrastructure.repositories import ProductRepository, StoreRepository
+from src.infrastructure.repositories import (
+    OnboardingRepository,
+    ProductRepository,
+    StoreRepository,
+)
 
 router = APIRouter(prefix="/{store_id}/products")
 
@@ -62,11 +67,13 @@ async def create_product(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
 ):
     """Create a new product for the store."""
     use_case = CreateProductUseCase(
         product_repository=product_repo,
         store_repository=store_repo,
+        onboarding_repository=onboarding_repo,
     )
 
     dto = CreateProductDTO(

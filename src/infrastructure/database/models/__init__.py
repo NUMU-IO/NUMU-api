@@ -8,7 +8,11 @@ from src.infrastructure.database.models.base import (
 )
 
 # Public schema models
-from src.infrastructure.database.models.public import TenantModel, UserModel
+from src.infrastructure.database.models.public import (
+    StoreOnboardingModel,
+    TenantModel,
+    UserModel,
+)
 
 # Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
@@ -26,6 +30,7 @@ __all__ = [
     "UUIDMixin",
     "TenantMixin",
     # Public
+    "StoreOnboardingModel",
     "TenantModel",
     "UserModel",
     "AuditLogModel",

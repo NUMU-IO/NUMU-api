@@ -35,7 +35,7 @@ from src.application.use_cases.stores.create_store import (
     RESERVED_SUBDOMAINS,
     validate_subdomain,
 )
-from src.infrastructure.repositories import StoreRepository
+from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 from src.infrastructure.tenancy.service import TenantService
 
 router = APIRouter()
@@ -131,9 +131,12 @@ async def create_store(
 ):
     """Create a new store with a subdomain."""
     store_repo = StoreRepository(db)
+    onboarding_repo = OnboardingRepository(db)
     tenant_service = TenantService(db)
     use_case = CreateStoreUseCase(
-        store_repository=store_repo, tenant_service=tenant_service
+        store_repository=store_repo,
+        tenant_service=tenant_service,
+        onboarding_repository=onboarding_repo,
     )
 
     dto = CreateStoreDTO(
