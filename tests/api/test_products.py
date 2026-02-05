@@ -19,6 +19,7 @@ requires_postgres = pytest.mark.skip(
 class TestProductRoutes:
     """Tests for /stores/{store_id}/products endpoints."""
 
+    @requires_postgres
     @pytest.mark.asyncio
     async def test_create_product_success(
         self,
