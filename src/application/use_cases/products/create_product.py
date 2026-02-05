@@ -10,6 +10,9 @@ from src.application.dto.product import CreateProductDTO, ProductDTO
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.category_repository import ICategoryRepository
+from src.core.interfaces.repositories.onboarding_repository import (
+    IOnboardingRepository,
+)
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency, Money
@@ -31,10 +34,12 @@ class CreateProductUseCase:
         product_repository: IProductRepository,
         store_repository: IStoreRepository,
         category_repository: ICategoryRepository | None = None,
+        onboarding_repository: IOnboardingRepository | None = None,
     ) -> None:
         self.product_repository = product_repository
         self.store_repository = store_repository
         self.category_repository = category_repository
+        self.onboarding_repository = onboarding_repository
 
     def _validate_product_data(
         self, dto: CreateProductDTO, store_id: UUID
@@ -270,5 +275,18 @@ class CreateProductUseCase:
                     )
         except Exception:
             pass  # Never block product creation for onboarding emails
+
+        # Auto-complete the add_product onboarding step
+        if self.onboarding_repository:
+            from src.application.use_cases.onboarding.auto_complete import (
+                try_complete_onboarding_step,
+            )
+            from src.core.entities.onboarding import OnboardingStepKey
+
+            await try_complete_onboarding_step(
+                self.onboarding_repository,
+                store_id,
+                OnboardingStepKey.ADD_PRODUCT,
+            )
 
         return ProductDTO.from_entity(created_product)

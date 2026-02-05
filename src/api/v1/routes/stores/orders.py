@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 
 from src.api.dependencies import (
     get_customer_repository,
+    get_onboarding_repository,
     get_order_repository,
     get_store_repository,
     require_store_owner,
@@ -43,6 +44,7 @@ from src.application.use_cases.orders import (
 )
 from src.infrastructure.repositories import (
     CustomerRepository,
+    OnboardingRepository,
     OrderRepository,
     StoreRepository,
 )
@@ -154,12 +156,14 @@ async def create_order(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
 ):
     """Create a new order for the store."""
     use_case = CreateOrderUseCase(
         order_repository=order_repo,
         store_repository=store_repo,
         customer_repository=customer_repo,
+        onboarding_repository=onboarding_repo,
     )
 
     # Convert line items

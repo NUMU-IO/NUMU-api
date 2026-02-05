@@ -13,6 +13,9 @@ from src.core.entities.order import (
 )
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
+from src.core.interfaces.repositories.onboarding_repository import (
+    IOnboardingRepository,
+)
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 
@@ -27,10 +30,12 @@ class CreateOrderUseCase:
         order_repository: IOrderRepository,
         store_repository: IStoreRepository,
         customer_repository: ICustomerRepository,
+        onboarding_repository: IOnboardingRepository | None = None,
     ) -> None:
         self.order_repository = order_repository
         self.store_repository = store_repository
         self.customer_repository = customer_repository
+        self.onboarding_repository = onboarding_repository
 
     async def execute(
         self,
@@ -149,5 +154,21 @@ class CreateOrderUseCase:
             currency=dto.currency,
             payment_method=dto.payment_method,
         )
+
+        # Auto-complete the first_order onboarding step
+        if self.onboarding_repository:
+            try:
+                from src.application.use_cases.onboarding.auto_complete import (
+                    try_complete_onboarding_step,
+                )
+                from src.core.entities.onboarding import OnboardingStepKey
+
+                await try_complete_onboarding_step(
+                    self.onboarding_repository,
+                    store_id,
+                    OnboardingStepKey.FIRST_ORDER,
+                )
+            except Exception:
+                pass  # Never block order creation for onboarding
 
         return OrderDTO.from_entity(created_order)

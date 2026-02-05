@@ -9,6 +9,9 @@ from slugify import slugify
 from src.application.dto.store import CreateStoreDTO, StoreDTO
 from src.core.entities.store import Store, StoreStatus
 from src.core.exceptions import EntityAlreadyExistsError, ValidationError
+from src.core.interfaces.repositories.onboarding_repository import (
+    IOnboardingRepository,
+)
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency
 from src.infrastructure.tenancy.service import TenantService
@@ -109,9 +112,11 @@ class CreateStoreUseCase:
         self,
         store_repository: IStoreRepository,
         tenant_service: TenantService,
+        onboarding_repository: IOnboardingRepository | None = None,
     ) -> None:
         self.store_repository = store_repository
         self.tenant_service = tenant_service
+        self.onboarding_repository = onboarding_repository
 
     async def execute(self, dto: CreateStoreDTO, owner_id: UUID) -> StoreDTO:
         """Create a new store."""
@@ -174,5 +179,15 @@ class CreateStoreUseCase:
 
         # Save store
         created_store = await self.store_repository.create(store)
+
+        # Initialize onboarding with create_store step already completed
+        if self.onboarding_repository:
+            from src.application.use_cases.onboarding.auto_complete import (
+                init_onboarding_for_store,
+            )
+
+            await init_onboarding_for_store(
+                self.onboarding_repository, created_store.id
+            )
 
         return StoreDTO.from_entity(created_store)

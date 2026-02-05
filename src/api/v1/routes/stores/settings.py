@@ -7,7 +7,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from src.api.dependencies import get_current_store, get_store_repository
+from src.api.dependencies import (
+    get_current_store,
+    get_onboarding_repository,
+    get_store_repository,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     CreateShippingZoneRequest,
@@ -34,8 +38,12 @@ from src.api.v1.schemas.tenant.settings import (
     WhatsAppNotifications,
     WhatsAppSettingsResponse,
 )
+from src.application.use_cases.onboarding.auto_complete import (
+    try_complete_onboarding_step,
+)
+from src.core.entities.onboarding import OnboardingStepKey
 from src.core.entities.store import Store
-from src.infrastructure.repositories import StoreRepository
+from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/settings")
 
@@ -284,6 +292,7 @@ async def update_payment_settings(
     request: UpdatePaymentSettingsRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
 ):
     """Update payment settings for the store."""
     settings = store.settings or {}
@@ -326,6 +335,16 @@ async def update_payment_settings(
     store.settings = settings
     await store_repo.update(store)
 
+    # Auto-complete configure_payment onboarding step when any method is enabled
+    any_enabled = any(
+        payment_settings.get(m, {}).get("enabled", False)
+        for m in ("cod", "fawry", "paymob", "vodafone_cash", "bank_transfer")
+    )
+    if any_enabled:
+        await try_complete_onboarding_step(
+            onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+        )
+
     return SuccessResponse(
         data=_build_payment_response(payment_settings),
         message="Payment settings updated successfully",
@@ -362,6 +381,7 @@ async def update_shipping_settings(
     request: UpdateShippingSettingsRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
 ):
     """Update shipping settings for the store."""
     settings = store.settings or {}
@@ -399,6 +419,16 @@ async def update_shipping_settings(
     store.settings = settings
     await store_repo.update(store)
 
+    # Auto-complete add_shipping onboarding step when any carrier is enabled
+    any_enabled = any(
+        shipping_settings.get(c, {}).get("enabled", False)
+        for c in ("aramex", "bosta", "mylerz", "manual")
+    )
+    if any_enabled:
+        await try_complete_onboarding_step(
+            onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
+        )
+
     return SuccessResponse(
         data=_build_shipping_response(shipping_settings),
         message="Shipping settings updated successfully",
@@ -414,6 +444,7 @@ async def add_shipping_zone(
     request: CreateShippingZoneRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
 ):
     """Add a new shipping zone."""
     settings = store.settings or {}
@@ -434,6 +465,11 @@ async def add_shipping_zone(
     settings["shipping"] = shipping_settings
     store.settings = settings
     await store_repo.update(store)
+
+    # Auto-complete add_shipping onboarding step when a zone is added
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
+    )
 
     return SuccessResponse(
         data=ShippingZone(**new_zone),

@@ -1,5 +1,9 @@
 """Onboarding use cases."""
 
+from src.application.use_cases.onboarding.auto_complete import (
+    init_onboarding_for_store,
+    try_complete_onboarding_step,
+)
 from src.application.use_cases.onboarding.complete_step import (
     CompleteOnboardingStepUseCase,
 )
@@ -18,4 +22,6 @@ __all__ = [
     "CompleteOnboardingStepUseCase",
     "SkipOnboardingStepUseCase",
     "DismissOnboardingUseCase",
+    "init_onboarding_for_store",
+    "try_complete_onboarding_step",
 ]
