@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from src.api.dependencies import (
     get_customer_repository,
     get_password_service,
+    get_product_cache_service,
     get_product_repository,
     get_store_repository,
     get_token_service,
@@ -38,6 +39,7 @@ from src.application.use_cases.customers import (
 )
 from src.application.use_cases.products import ListProductsUseCase
 from src.core.exceptions import EntityNotFoundError
+from src.infrastructure.cache import ProductCacheService
 from src.infrastructure.external_services import PasswordService, TokenService
 from src.infrastructure.repositories import (
     CustomerRepository,
@@ -104,17 +106,41 @@ async def browse_products(
     store_id: Annotated[UUID, Path(description="Store ID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
     category_id: UUID | None = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
 ):
-    """Browse products in a store's catalog (public)."""
+    """Browse products in a store's catalog (public).
+
+    Uses Redis caching with 5-minute TTL for improved 3G performance.
+    Search queries bypass cache for real-time results.
+    """
     # Verify store exists
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
 
+    # Skip cache for search queries (dynamic, less cacheable)
+    use_cache = search is None
+
+    # Try cache first (cache-aside pattern)
+    if use_cache:
+        cached_data = await product_cache.get_products(
+            store_id=store_id,
+            category_id=category_id,
+            page=page,
+            limit=limit,
+        )
+        if cached_data:
+            # Cache hit - return directly
+            return SuccessResponse(
+                data=PaginatedListResponse(**cached_data),
+                message="Products retrieved successfully",
+            )
+
+    # Cache miss or search query - fetch from database
     use_case = ListProductsUseCase(product_repository=product_repo)
 
     if search:
@@ -170,6 +196,25 @@ async def browse_products(
         )
         for product in result.items
     ]
+
+    # Build response data
+    response_data = {
+        "items": [p.model_dump() for p in products],
+        "total": result.total,
+        "page": page,
+        "page_size": limit,
+        "total_pages": (result.total + limit - 1) // limit if limit > 0 else 0,
+    }
+
+    # Cache the result (only for non-search queries)
+    if use_cache:
+        await product_cache.set_products(
+            store_id=store_id,
+            category_id=category_id,
+            page=page,
+            limit=limit,
+            data=response_data,
+        )
 
     return SuccessResponse(
         data=PaginatedListResponse(
