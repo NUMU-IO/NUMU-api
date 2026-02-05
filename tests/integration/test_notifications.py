@@ -129,28 +129,18 @@ class TestWhatsAppOnOrderEvents:
         uc = _build_use_case(order_repo, store_repo, customer_repo)
 
         with patch(
-            "src.application.use_cases.orders.update_order_status.send_whatsapp_shipping_update_task"
-        ) as mock_wa:
-            mock_wa.delay = MagicMock()
-            # We need to patch the import inside _dispatch_notifications
-            with patch(
-                "src.infrastructure.messaging.tasks.notification_tasks.send_whatsapp_shipping_update_task"
-            ) as mock_task:
-                mock_task.delay = MagicMock()
+            "src.infrastructure.messaging.tasks.notification_tasks."
+            "send_whatsapp_shipping_update_task"
+        ) as mock_task:
+            mock_task.delay = MagicMock()
 
-                # Patch the import inside the method
-                with patch(
-                    "src.application.use_cases.orders.update_order_status."
-                    "send_whatsapp_shipping_update_task",
-                    mock_task,
-                ):
-                    dto = UpdateOrderStatusDTO(status="shipped")
-                    await uc.execute(order.id, dto, store.id, store.owner_id)
+            dto = UpdateOrderStatusDTO(status="shipped")
+            await uc.execute(order.id, dto, store.id, store.owner_id)
 
-                    mock_task.delay.assert_called_once()
-                    call_kwargs = mock_task.delay.call_args
-                    assert call_kwargs.kwargs["phone"] == "+201012345678"
-                    assert call_kwargs.kwargs["order_number"] == "ORD-TEST-001"
+            mock_task.delay.assert_called_once()
+            call_kwargs = mock_task.delay.call_args
+            assert call_kwargs.kwargs["phone"] == "+201012345678"
+            assert call_kwargs.kwargs["order_number"] == "ORD-TEST-001"
 
     @pytest.mark.asyncio
     async def test_whatsapp_delivery_task_called_on_delivered(self):

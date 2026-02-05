@@ -36,6 +36,7 @@ class Product(BaseEntity):
     """
 
     store_id: UUID
+    tenant_id: UUID | None = None
     name: str
     slug: str
     price: Money

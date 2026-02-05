@@ -96,11 +96,11 @@ class TestTenantMiddleware:
         mock_call_next.assert_called_once_with(mock_request)
 
     @pytest.mark.asyncio
-    @patch("src.api.middleware.tenant_middleware.reset_tenant_schema")
+    @patch("src.api.middleware.tenant_middleware.reset_tenant_context")
     @patch("src.api.middleware.tenant_middleware.set_tenant_schema")
     @patch("src.api.middleware.tenant_middleware.AsyncSessionLocal")
     async def test_dispatch_with_valid_tenant(
-        self, mock_session_local, mock_set_schema, mock_reset_schema
+        self, mock_session_local, mock_set_schema, mock_reset_context
     ):
         """Test dispatch with valid tenant subdomain."""
 
@@ -136,14 +136,14 @@ class TestTenantMiddleware:
 
             assert mock_request.state.tenant == mock_tenant
             mock_set_schema.assert_called_once_with("tenant_store1")
-            mock_reset_schema.assert_called_once()
+            mock_reset_context.assert_called_once()
             mock_call_next.assert_called_once_with(mock_request)
 
     @pytest.mark.asyncio
-    @patch("src.api.middleware.tenant_middleware.reset_tenant_schema")
+    @patch("src.api.middleware.tenant_middleware.reset_tenant_context")
     @patch("src.api.middleware.tenant_middleware.AsyncSessionLocal")
     async def test_dispatch_with_inactive_tenant_raises_404(
-        self, mock_session_local, mock_reset_schema
+        self, mock_session_local, mock_reset_context
     ):
         """Test dispatch with inactive tenant raises 404."""
         # Setup mock tenant
@@ -179,10 +179,10 @@ class TestTenantMiddleware:
             assert "inactive" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
-    @patch("src.api.middleware.tenant_middleware.reset_tenant_schema")
+    @patch("src.api.middleware.tenant_middleware.reset_tenant_context")
     @patch("src.api.middleware.tenant_middleware.AsyncSessionLocal")
     async def test_dispatch_with_nonexistent_tenant_raises_404(
-        self, mock_session_local, mock_reset_schema
+        self, mock_session_local, mock_reset_context
     ):
         """Test dispatch with nonexistent tenant raises 404."""
         # Setup mock session

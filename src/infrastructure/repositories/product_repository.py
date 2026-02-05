@@ -25,6 +25,7 @@ class ProductRepository(IProductRepository):
         return Product(
             id=model.id,
             store_id=model.store_id,
+            tenant_id=model.tenant_id,
             name=model.name,
             slug=model.slug,
             sku=model.sku,
@@ -57,6 +58,7 @@ class ProductRepository(IProductRepository):
         return ProductModel(
             id=entity.id,
             store_id=entity.store_id,
+            tenant_id=entity.tenant_id,
             name=entity.name,
             slug=entity.slug,
             sku=entity.sku,

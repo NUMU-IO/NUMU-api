@@ -233,7 +233,7 @@ class TestConfigureCredentialsSuccess:
 
             # Verify existing credential was updated
             assert (
-                mock_service_credential.encrypted_credentials == b"new_encrypted_data"
+                mock_service_credential.credentials_encrypted == b"new_encrypted_data"
             )
             assert mock_service_credential.is_validated is True
             assert mock_service_credential.is_active is True
