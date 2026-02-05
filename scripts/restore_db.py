@@ -40,7 +40,11 @@ def _get_settings() -> Settings:
 
 
 def _build_r2_client(settings: Settings):
-    if not all([settings.r2_account_id, settings.r2_access_key_id, settings.r2_secret_access_key]):
+    if not all([
+        settings.r2_account_id,
+        settings.r2_access_key_id,
+        settings.r2_secret_access_key,
+    ]):
         raise RuntimeError("R2 credentials are not configured.")
     return boto3.client(
         "s3",
@@ -88,9 +92,12 @@ def restore_database(settings: Settings, sql_path: Path) -> None:
         "PGPASSWORD": settings.postgres_password,
     }
     pg_args = [
-        "-h", settings.postgres_host,
-        "-p", str(settings.postgres_port),
-        "-U", settings.postgres_user,
+        "-h",
+        settings.postgres_host,
+        "-p",
+        str(settings.postgres_port),
+        "-U",
+        settings.postgres_user,
     ]
     db = settings.postgres_db
 
@@ -99,7 +106,11 @@ def restore_database(settings: Settings, sql_path: Path) -> None:
         f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
         f"WHERE datname = '{db}' AND pid <> pg_backend_pid();"
     )
-    for sql in [terminate_sql, f"DROP DATABASE IF EXISTS {db};", f"CREATE DATABASE {db};"]:
+    for sql in [
+        terminate_sql,
+        f"DROP DATABASE IF EXISTS {db};",
+        f"CREATE DATABASE {db};",
+    ]:
         subprocess.run(
             ["psql", *pg_args, "-d", "postgres", "-c", sql],
             env=env,

@@ -1,7 +1,7 @@
 # Credential Configuration System
 
-**Author**: Manus AI  
-**Date**: January 20, 2026  
+**Author**: Manus AI
+**Date**: January 20, 2026
 **Status**: Implemented
 
 ## 1. Overview
@@ -57,14 +57,14 @@ sequenceDiagram
     Merchant->>Backend: 1. POST /api/v1/configuration-requests
     Backend->>Backend: 2. Create ConfigurationRequest (status: PENDING)
     Backend->>Admin: 3. Notify Admin (Email, WebSocket)
-    
+
     Admin->>Backend: 4. GET /api/v1/admin/credentials/pending-requests
     Admin->>Admin: 5. Enters credentials in secure form
     Admin->>Backend: 6. POST /api/v1/admin/credentials/configure
-    
+
     Backend->>Provider: 7. Validate Credentials
     Provider-->>Backend: 8. Validation Result (Success/Failure)
-    
+
     alt Credentials Valid
         Backend->>Backend: 9a. Encrypt and store ServiceCredential
         Backend->>Backend: 10a. Update ConfigurationRequest (status: COMPLETED)

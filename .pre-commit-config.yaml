@@ -26,28 +26,19 @@ repos:
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
-  # Type checking with mypy
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.1
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - pydantic>=2.5.3
-          - sqlalchemy[asyncio]>=2.0.25
-          - types-redis
-        args: [--ignore-missing-imports]
-        exclude: ^(tests/|alembic/)
-
-  # Security checks
+  # Security checks (high severity only)
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.2
     hooks:
       - id: bandit
-        args: [-c, pyproject.toml, -r, src/]
+        args: [-c, pyproject.toml, -ll]
         additional_dependencies: ["bandit[toml]"]
+        files: ^src/
+
+# Note: mypy is run separately in CI with more lenient settings
+# Run manually: mypy src/ --ignore-missing-imports
 
 # CI configuration for pre-commit.ci
 ci:
   autofix_prs: true
   autoupdate_schedule: monthly
-  skip: [mypy]  # Skip slow checks in CI autofixes

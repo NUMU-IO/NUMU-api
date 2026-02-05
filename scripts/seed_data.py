@@ -29,9 +29,7 @@ async def seed_database():
 
     async with AsyncSessionLocal() as session:
         # Check if data already exists
-        existing_users = await session.execute(
-            UserModel.__table__.select().limit(1)
-        )
+        existing_users = await session.execute(UserModel.__table__.select().limit(1))
         if existing_users.scalar():
             print("Database already seeded. Skipping...")
             return

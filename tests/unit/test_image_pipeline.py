@@ -5,7 +5,6 @@ validation, color mode normalization, and full pipeline processing.
 """
 
 import io
-from unittest.mock import patch
 
 import pytest
 from PIL import Image
@@ -432,7 +431,9 @@ class TestDefaultVariantConfigs:
 
     def test_thumbnail_config(self):
         """Test thumbnail variant configuration."""
-        thumbnail = next(v for v in DEFAULT_VARIANTS if v.name == ImageVariantName.THUMBNAIL)
+        thumbnail = next(
+            v for v in DEFAULT_VARIANTS if v.name == ImageVariantName.THUMBNAIL
+        )
         assert thumbnail.max_width == 150
         assert thumbnail.max_height == 150
 

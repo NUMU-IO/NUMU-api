@@ -36,22 +36,63 @@ def upgrade() -> None:
     conn = op.get_bind()
 
     # Create enum types (idempotent)
-    _create_enum_if_not_exists(conn, "service_type_enum", [
-        "payment_gateway", "shipping_carrier", "whatsapp", "sms", "email",
-    ])
-    _create_enum_if_not_exists(conn, "service_name_enum", [
-        "fawry", "paymob", "vodafone_cash", "bank_transfer", "stripe", "tap",
-        "aramex", "bosta", "mylerz", "whatsapp_business", "twilio",
-    ])
-    _create_enum_if_not_exists(conn, "request_status_enum", [
-        "pending", "in_progress", "completed", "rejected", "cancelled",
-    ])
-    _create_enum_if_not_exists(conn, "request_priority_enum", [
-        "low", "normal", "high", "urgent",
-    ])
+    _create_enum_if_not_exists(
+        conn,
+        "service_type_enum",
+        [
+            "payment_gateway",
+            "shipping_carrier",
+            "whatsapp",
+            "sms",
+            "email",
+        ],
+    )
+    _create_enum_if_not_exists(
+        conn,
+        "service_name_enum",
+        [
+            "fawry",
+            "paymob",
+            "vodafone_cash",
+            "bank_transfer",
+            "stripe",
+            "tap",
+            "aramex",
+            "bosta",
+            "mylerz",
+            "whatsapp_business",
+            "twilio",
+        ],
+    )
+    _create_enum_if_not_exists(
+        conn,
+        "request_status_enum",
+        [
+            "pending",
+            "in_progress",
+            "completed",
+            "rejected",
+            "cancelled",
+        ],
+    )
+    _create_enum_if_not_exists(
+        conn,
+        "request_priority_enum",
+        [
+            "low",
+            "normal",
+            "high",
+            "urgent",
+        ],
+    )
 
     # --- configuration_requests (raw SQL to avoid SQLAlchemy enum auto-creation) ---
-    if conn.exec_driver_sql("SELECT to_regclass('public.configuration_requests')").scalar() is None:
+    if (
+        conn.exec_driver_sql(
+            "SELECT to_regclass('public.configuration_requests')"
+        ).scalar()
+        is None
+    ):
         conn.exec_driver_sql("""
             CREATE TABLE public.configuration_requests (
                 id UUID NOT NULL PRIMARY KEY,
@@ -79,7 +120,12 @@ def upgrade() -> None:
     )
 
     # --- service_credentials ---
-    if conn.exec_driver_sql("SELECT to_regclass('public.service_credentials')").scalar() is None:
+    if (
+        conn.exec_driver_sql(
+            "SELECT to_regclass('public.service_credentials')"
+        ).scalar()
+        is None
+    ):
         conn.exec_driver_sql("""
             CREATE TABLE public.service_credentials (
                 id UUID NOT NULL PRIMARY KEY,
@@ -103,7 +149,12 @@ def upgrade() -> None:
     )
 
     # --- credential_audit_logs ---
-    if conn.exec_driver_sql("SELECT to_regclass('public.credential_audit_logs')").scalar() is None:
+    if (
+        conn.exec_driver_sql(
+            "SELECT to_regclass('public.credential_audit_logs')"
+        ).scalar()
+        is None
+    ):
         conn.exec_driver_sql("""
             CREATE TABLE public.credential_audit_logs (
                 id UUID NOT NULL PRIMARY KEY,
@@ -134,5 +185,10 @@ def downgrade() -> None:
     conn.exec_driver_sql("DROP TABLE IF EXISTS public.credential_audit_logs")
     conn.exec_driver_sql("DROP TABLE IF EXISTS public.service_credentials")
     conn.exec_driver_sql("DROP TABLE IF EXISTS public.configuration_requests")
-    for name in ["request_priority_enum", "request_status_enum", "service_name_enum", "service_type_enum"]:
+    for name in [
+        "request_priority_enum",
+        "request_status_enum",
+        "service_name_enum",
+        "service_type_enum",
+    ]:
         conn.exec_driver_sql(f"DROP TYPE IF EXISTS public.{name}")

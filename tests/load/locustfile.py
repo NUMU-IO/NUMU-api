@@ -35,6 +35,7 @@ STORE_ID = os.environ.get("LOAD_TEST_STORE_ID", "")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _random_email(prefix: str = "loadtest") -> str:
     suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
     return f"{prefix}+{suffix}@numu-test.io"

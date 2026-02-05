@@ -517,15 +517,11 @@ async def update_notification_preferences(
     """Update customer notification preferences (opt-in / opt-out)."""
     update_dict: dict = {}
     if request.email:
-        update_dict["email"] = {
-            k: v
-            for k, v in request.email.model_dump(exclude_none=True).items()
-        }
+        update_dict["email"] = dict(request.email.model_dump(exclude_none=True).items())
     if request.whatsapp:
-        update_dict["whatsapp"] = {
-            k: v
-            for k, v in request.whatsapp.model_dump(exclude_none=True).items()
-        }
+        update_dict["whatsapp"] = dict(
+            request.whatsapp.model_dump(exclude_none=True).items()
+        )
 
     current_customer.update_notification_preferences(update_dict)
     await customer_repo.update(current_customer)

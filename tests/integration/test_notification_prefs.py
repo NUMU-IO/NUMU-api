@@ -11,12 +11,9 @@ Verifies:
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-import pytest
-
 from src.core.entities.customer import Customer
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,8 +50,14 @@ class TestDefaultNotificationPreferences:
     def test_all_events_true_by_default(self):
         prefs = Customer.default_notification_preferences()
         for channel in ("email", "whatsapp"):
-            for event in ("order_confirmation", "shipping_update", "delivery_confirmation"):
-                assert prefs[channel][event] is True, f"{channel}.{event} should be True"
+            for event in (
+                "order_confirmation",
+                "shipping_update",
+                "delivery_confirmation",
+            ):
+                assert prefs[channel][event] is True, (
+                    f"{channel}.{event} should be True"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -65,8 +68,16 @@ class TestDefaultNotificationPreferences:
 class TestNotificationPreferencesProperty:
     def test_returns_metadata_prefs_when_set(self):
         custom = {
-            "email": {"order_confirmation": False, "shipping_update": True, "delivery_confirmation": True},
-            "whatsapp": {"order_confirmation": True, "shipping_update": False, "delivery_confirmation": True},
+            "email": {
+                "order_confirmation": False,
+                "shipping_update": True,
+                "delivery_confirmation": True,
+            },
+            "whatsapp": {
+                "order_confirmation": True,
+                "shipping_update": False,
+                "delivery_confirmation": True,
+            },
         }
         customer = _make_customer(prefs=custom)
         assert customer.notification_preferences == custom
@@ -91,9 +102,7 @@ class TestNotificationPreferencesProperty:
 class TestUpdateNotificationPreferences:
     def test_partial_update_merges(self):
         customer = _make_customer()
-        customer.update_notification_preferences(
-            {"email": {"shipping_update": False}}
-        )
+        customer.update_notification_preferences({"email": {"shipping_update": False}})
         prefs = customer.notification_preferences
         # shipping_update should be changed
         assert prefs["email"]["shipping_update"] is False
@@ -103,21 +112,19 @@ class TestUpdateNotificationPreferences:
 
     def test_update_whatsapp_only(self):
         customer = _make_customer()
-        customer.update_notification_preferences(
-            {"whatsapp": {"delivery_confirmation": False}}
-        )
+        customer.update_notification_preferences({
+            "whatsapp": {"delivery_confirmation": False}
+        })
         prefs = customer.notification_preferences
         assert prefs["whatsapp"]["delivery_confirmation"] is False
         assert prefs["email"]["delivery_confirmation"] is True
 
     def test_update_both_channels(self):
         customer = _make_customer()
-        customer.update_notification_preferences(
-            {
-                "email": {"order_confirmation": False},
-                "whatsapp": {"order_confirmation": False},
-            }
-        )
+        customer.update_notification_preferences({
+            "email": {"order_confirmation": False},
+            "whatsapp": {"order_confirmation": False},
+        })
         prefs = customer.notification_preferences
         assert prefs["email"]["order_confirmation"] is False
         assert prefs["whatsapp"]["order_confirmation"] is False
@@ -125,21 +132,27 @@ class TestUpdateNotificationPreferences:
     def test_update_touches_entity(self):
         customer = _make_customer()
         old_updated = customer.updated_at
-        customer.update_notification_preferences(
-            {"email": {"shipping_update": False}}
-        )
+        customer.update_notification_preferences({"email": {"shipping_update": False}})
         assert customer.updated_at >= old_updated
 
     def test_preserves_existing_prefs(self):
         """Existing non-default prefs are preserved when updating other keys."""
         custom = {
-            "email": {"order_confirmation": False, "shipping_update": True, "delivery_confirmation": True},
-            "whatsapp": {"order_confirmation": True, "shipping_update": True, "delivery_confirmation": True},
+            "email": {
+                "order_confirmation": False,
+                "shipping_update": True,
+                "delivery_confirmation": True,
+            },
+            "whatsapp": {
+                "order_confirmation": True,
+                "shipping_update": True,
+                "delivery_confirmation": True,
+            },
         }
         customer = _make_customer(prefs=custom)
-        customer.update_notification_preferences(
-            {"email": {"delivery_confirmation": False}}
-        )
+        customer.update_notification_preferences({
+            "email": {"delivery_confirmation": False}
+        })
         prefs = customer.notification_preferences
         # Previously-set False should be preserved
         assert prefs["email"]["order_confirmation"] is False
@@ -231,9 +244,7 @@ class TestOnboardingEmailTasks:
 class TestNotificationCeleryTasks:
     """Verify core notification Celery tasks invoke services correctly."""
 
-    @patch(
-        "src.infrastructure.messaging.tasks.notification_tasks.ResendEmailService"
-    )
+    @patch("src.infrastructure.messaging.tasks.notification_tasks.ResendEmailService")
     def test_order_confirmation_email_task(self, MockEmailService):
         mock_service = MagicMock()
         mock_service.send_order_confirmation = AsyncMock(return_value=True)
@@ -246,7 +257,10 @@ class TestNotificationCeleryTasks:
         result = send_order_confirmation_email_task.run(
             email="buyer@test.io",
             order_number="ORD-002",
-            order_details={"items": [{"name": "Widget", "quantity": 1, "price": 50}], "total": 50},
+            order_details={
+                "items": [{"name": "Widget", "quantity": 1, "price": 50}],
+                "total": 50,
+            },
         )
 
         mock_service.send_order_confirmation.assert_called_once()
@@ -280,9 +294,7 @@ class TestNotificationCeleryTasks:
         assert result["sent"] is True
         assert result["message_id"] == "wamid_123"
 
-    @patch(
-        "src.infrastructure.messaging.tasks.notification_tasks.ResendEmailService"
-    )
+    @patch("src.infrastructure.messaging.tasks.notification_tasks.ResendEmailService")
     def test_shipping_notification_email_task(self, MockEmailService):
         mock_service = MagicMock()
         mock_service.send_shipping_notification = AsyncMock(return_value=True)
