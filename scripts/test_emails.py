@@ -13,7 +13,9 @@ sys.path.insert(0, ".")
 
 from src.config import settings  # noqa: E402
 from src.core.interfaces.services.email_service import EmailMessage  # noqa: E402
-from src.infrastructure.external_services.resend.email_service import ResendEmailService  # noqa: E402
+from src.infrastructure.external_services.resend.email_service import (
+    ResendEmailService,  # noqa: E402
+)
 from src.infrastructure.external_services.resend.email_templates.notifications import (  # noqa: E402
     DELIVERY_CONFIRMATION_TEMPLATE,
     ORDER_CONFIRMATION_TEMPLATE,
@@ -63,8 +65,14 @@ async def main() -> None:
             customer_name="Yousef",
             language=lang,
         )
-        subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"]("NUMU-TEST-1001", "Test Store", lang)
-        await send(svc, "Order Confirmation", EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html))
+        subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](
+            "NUMU-TEST-1001", "Test Store", lang
+        )
+        await send(
+            svc,
+            "Order Confirmation",
+            EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html),
+        )
         time.sleep(1)
 
         # 2. Shipping Notification
@@ -76,8 +84,14 @@ async def main() -> None:
             customer_name="Yousef",
             language=lang,
         )
-        subject = SHIPPING_NOTIFICATION_TEMPLATE["subject_fn"]("NUMU-TEST-1001", "Test Store", language=lang)
-        await send(svc, "Shipping Notification", EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html))
+        subject = SHIPPING_NOTIFICATION_TEMPLATE["subject_fn"](
+            "NUMU-TEST-1001", "Test Store", language=lang
+        )
+        await send(
+            svc,
+            "Shipping Notification",
+            EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html),
+        )
         time.sleep(1)
 
         # 3. Delivery Confirmation
@@ -87,8 +101,14 @@ async def main() -> None:
             customer_name="Yousef",
             language=lang,
         )
-        subject = DELIVERY_CONFIRMATION_TEMPLATE["subject_fn"]("NUMU-TEST-1001", "Test Store", language=lang)
-        await send(svc, "Delivery Confirmation", EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html))
+        subject = DELIVERY_CONFIRMATION_TEMPLATE["subject_fn"](
+            "NUMU-TEST-1001", "Test Store", language=lang
+        )
+        await send(
+            svc,
+            "Delivery Confirmation",
+            EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html),
+        )
         time.sleep(1)
 
         # 4. Welcome (Onboarding)
@@ -97,8 +117,14 @@ async def main() -> None:
             dashboard_url="https://dashboard.numu.io",
             language=lang,
         )
-        subject = WELCOME_TEMPLATE["subject"].get(lang, WELCOME_TEMPLATE["subject"]["en"])
-        await send(svc, "Welcome", EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html))
+        subject = WELCOME_TEMPLATE["subject"].get(
+            lang, WELCOME_TEMPLATE["subject"]["en"]
+        )
+        await send(
+            svc,
+            "Welcome",
+            EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html),
+        )
         time.sleep(1)
 
         # 5. First Product Added (Onboarding)
@@ -108,8 +134,14 @@ async def main() -> None:
             dashboard_url="https://dashboard.numu.io",
             language=lang,
         )
-        subject = FIRST_PRODUCT_ADDED_TEMPLATE["subject"].get(lang, FIRST_PRODUCT_ADDED_TEMPLATE["subject"]["en"])
-        await send(svc, "First Product Added", EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html))
+        subject = FIRST_PRODUCT_ADDED_TEMPLATE["subject"].get(
+            lang, FIRST_PRODUCT_ADDED_TEMPLATE["subject"]["en"]
+        )
+        await send(
+            svc,
+            "First Product Added",
+            EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html),
+        )
         time.sleep(1)
 
         # 6. First Order Received (Onboarding)
@@ -120,8 +152,14 @@ async def main() -> None:
             dashboard_url="https://dashboard.numu.io",
             language=lang,
         )
-        subject = FIRST_ORDER_RECEIVED_TEMPLATE["subject"].get(lang, FIRST_ORDER_RECEIVED_TEMPLATE["subject"]["en"])
-        await send(svc, "First Order Received", EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html))
+        subject = FIRST_ORDER_RECEIVED_TEMPLATE["subject"].get(
+            lang, FIRST_ORDER_RECEIVED_TEMPLATE["subject"]["en"]
+        )
+        await send(
+            svc,
+            "First Order Received",
+            EmailMessage(to=TARGET_EMAIL, subject=subject, html_content=html),
+        )
         time.sleep(1)
 
         print()
