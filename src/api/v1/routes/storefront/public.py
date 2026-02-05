@@ -14,6 +14,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, status
 
 from src.api.dependencies import (
+    CursorParams,
+    build_cursor_response,
+    get_cursor_params,
+    get_cursor_values,
     get_customer_repository,
     get_password_service,
     get_product_repository,
@@ -21,7 +25,11 @@ from src.api.dependencies import (
     get_token_service,
 )
 from src.api.responses import SuccessResponse
-from src.api.v1.schemas import PaginatedListResponse, ProductResponse
+from src.api.v1.schemas import (
+    CursorPaginatedListResponse,
+    PaginatedListResponse,
+    ProductResponse,
+)
 from src.api.v1.schemas.public.customer import (
     CustomerAuthResponse,
     CustomerLoginRequest,
@@ -178,6 +186,119 @@ async def browse_products(
             page=page,
             page_size=limit,
             total_pages=(result.total + limit - 1) // limit if limit > 0 else 0,
+        ),
+        message="Products retrieved successfully",
+    )
+
+
+@router.get(
+    "/products/cursor",
+    response_model=SuccessResponse[CursorPaginatedListResponse[ProductResponse]],
+    summary="Browse products with cursor pagination (3G optimized)",
+)
+async def browse_products_cursor(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    cursor_params: Annotated[CursorParams, Depends(get_cursor_params)],
+    category_id: UUID | None = Query(None, description="Filter by category"),
+):
+    """Browse products with cursor-based pagination.
+
+    Optimized for mobile/3G networks:
+    - O(1) performance regardless of page depth
+    - No expensive COUNT queries (no total)
+    - Opaque cursor tokens for stable pagination
+
+    Recommended page sizes:
+    - 3G: 10-15 items (default: 15)
+    - 4G: 20-30 items
+    - WiFi: 30-50 items
+    """
+    # Verify store exists
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    # Get cursor values if provided
+    cursor_data = get_cursor_values(cursor_params.cursor)
+
+    # Fetch products with cursor pagination
+    # Request one extra item to determine has_more
+    fetch_limit = cursor_params.limit + 1
+
+    # Build query with cursor filter
+    if cursor_data:
+        cursor_ts, cursor_id = cursor_data
+        # Fetch products created before the cursor (descending order)
+        result = await product_repo.list_with_cursor(
+            store_id=store_id,
+            category_id=category_id,
+            cursor_timestamp=cursor_ts,
+            cursor_id=cursor_id,
+            limit=fetch_limit,
+            is_active=True,
+        )
+    else:
+        # First page - no cursor
+        result = await product_repo.list_with_cursor(
+            store_id=store_id,
+            category_id=category_id,
+            cursor_timestamp=None,
+            cursor_id=None,
+            limit=fetch_limit,
+            is_active=True,
+        )
+
+    # Build cursor pagination metadata
+    pagination = build_cursor_response(
+        items=result,
+        limit=cursor_params.limit,
+        id_field="id",
+        timestamp_field="created_at",
+    )
+
+    # Trim to requested limit
+    items = result[: cursor_params.limit]
+
+    # Build product responses
+    products = [
+        ProductResponse(
+            id=str(product.id),
+            store_id=str(product.store_id),
+            name=product.name,
+            slug=product.slug,
+            description=product.description,
+            short_description=product.short_description,
+            product_type=product.product_type,
+            status=product.status,
+            price=str(product.price),
+            price_currency=product.price_currency,
+            compare_at_price=str(product.compare_at_price)
+            if product.compare_at_price
+            else None,
+            cost_price=None,  # Never expose in storefront
+            sku=product.sku,
+            quantity=product.quantity,
+            is_in_stock=product.is_in_stock,
+            is_low_stock=product.is_low_stock,
+            is_on_sale=product.is_on_sale,
+            category_id=str(product.category_id) if product.category_id else None,
+            images=product.images,
+            tags=product.tags,
+            attributes=product.attributes,
+            created_at=str(product.created_at),
+            updated_at=str(product.updated_at),
+        )
+        for product in items
+    ]
+
+    return SuccessResponse(
+        data=CursorPaginatedListResponse(
+            items=products,
+            next_cursor=pagination["next_cursor"],
+            prev_cursor=pagination["prev_cursor"],
+            has_more=pagination["has_more"],
         ),
         message="Products retrieved successfully",
     )
