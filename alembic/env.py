@@ -15,12 +15,14 @@ from src.infrastructure.database.connection import Base
 
 # Import all models for migration autogenerate support
 from src.infrastructure.database.models import (  # noqa: F401
+    AuditLogModel,
     CategoryModel,
     CouponModel,
     CustomerModel,
     OrderModel,
     ProductModel,
     StoreModel,
+    StoreOnboardingModel,
     TenantModel,
     UserModel,
 )
