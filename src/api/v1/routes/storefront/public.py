@@ -14,8 +14,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, status
 
 from src.api.dependencies import (
+    FieldSelector,
     get_customer_repository,
     get_password_service,
+    get_product_field_selector,
     get_product_repository,
     get_store_repository,
     get_token_service,
@@ -104,12 +106,24 @@ async def browse_products(
     store_id: Annotated[UUID, Path(description="Store ID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    field_selector: Annotated[FieldSelector, Depends(get_product_field_selector)],
     category_id: UUID | None = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
+    fields: str | None = Query(
+        None,
+        description="Comma-separated list of fields to include (e.g., id,name,price,images). "
+        "Omit for mobile-optimized default fields.",
+        example="id,name,slug,price,images",
+        max_length=500,
+    ),
 ):
-    """Browse products in a store's catalog (public)."""
+    """Browse products in a store's catalog (public).
+
+    Supports sparse fieldsets for 3G optimization via ?fields= parameter.
+    Default fields are optimized for mobile list views.
+    """
     # Verify store exists
     store = await store_repo.get_by_id(store_id)
     if not store:
@@ -140,36 +154,44 @@ async def browse_products(
             is_active=True,
         )
 
-    products = [
-        ProductResponse(
-            id=str(product.id),
-            store_id=str(product.store_id),
-            name=product.name,
-            slug=product.slug,
-            description=product.description,
-            short_description=product.short_description,
-            product_type=product.product_type,
-            status=product.status,
-            price=str(product.price),
-            price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price)
+    # Parse requested fields (uses mobile-optimized defaults if not specified)
+    requested_fields = field_selector.parse_fields(fields)
+
+    # Build product responses with only requested fields
+    products = []
+    for product in result.items:
+        # Build full product data first
+        product_data = {
+            "id": str(product.id),
+            "store_id": str(product.store_id),
+            "name": product.name,
+            "slug": product.slug,
+            "description": product.description,
+            "short_description": product.short_description,
+            "product_type": product.product_type,
+            "status": product.status,
+            "price": str(product.price),
+            "price_currency": product.price_currency,
+            "compare_at_price": str(product.compare_at_price)
             if product.compare_at_price
             else None,
-            cost_price=None,  # Don't expose cost price in storefront
-            sku=product.sku,
-            quantity=product.quantity,
-            is_in_stock=product.is_in_stock,
-            is_low_stock=product.is_low_stock,
-            is_on_sale=product.is_on_sale,
-            category_id=str(product.category_id) if product.category_id else None,
-            images=product.images,
-            tags=product.tags,
-            attributes=product.attributes,
-            created_at=str(product.created_at),
-            updated_at=str(product.updated_at),
-        )
-        for product in result.items
-    ]
+            "cost_price": None,  # Never expose cost price in storefront
+            "sku": product.sku,
+            "quantity": product.quantity,
+            "is_in_stock": product.is_in_stock,
+            "is_low_stock": product.is_low_stock,
+            "is_on_sale": product.is_on_sale,
+            "category_id": str(product.category_id) if product.category_id else None,
+            "images": product.images,
+            "tags": product.tags,
+            "attributes": product.attributes,
+            "created_at": str(product.created_at),
+            "updated_at": str(product.updated_at),
+        }
+
+        # Filter to only requested fields (sparse fieldsets)
+        filtered_data = field_selector.filter_dict(product_data, requested_fields)
+        products.append(filtered_data)
 
     return SuccessResponse(
         data=PaginatedListResponse(
