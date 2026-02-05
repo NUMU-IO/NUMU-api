@@ -6,12 +6,22 @@ Verifies:
 - Checkout triggers order-confirmation notifications
 - Notification preferences are respected (opt-out suppresses dispatch)
 - Notification failures never break the order flow
+
+Note: These tests require Celery/Redis infrastructure and are skipped in CI.
+Run with NUMU_RUN_CELERY_TESTS=1 to execute.
 """
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
+# Skip all tests in this module unless NUMU_RUN_CELERY_TESTS=1
+pytestmark = pytest.mark.skipif(
+    os.environ.get("NUMU_RUN_CELERY_TESTS", "0") != "1",
+    reason="Celery/Redis tests require infrastructure. Set NUMU_RUN_CELERY_TESTS=1 to run.",
+)
 
 from src.application.dto.order import UpdateOrderStatusDTO
 from src.application.use_cases.orders.update_order_status import (
