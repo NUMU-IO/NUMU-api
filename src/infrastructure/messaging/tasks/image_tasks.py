@@ -35,7 +35,9 @@ async def _process_and_upload_image(
         CloudflareR2StorageService,
     )
     from src.infrastructure.external_services.image.image_pipeline import ImagePipeline
-    from src.infrastructure.external_services.image.image_processor import ImageProcessor
+    from src.infrastructure.external_services.image.image_processor import (
+        ImageProcessor,
+    )
 
     processor = ImageProcessor()
     storage = CloudflareR2StorageService()
@@ -150,7 +152,7 @@ def process_product_image_task(
             "retryable": False,
         }
 
-    except (IOError, ConnectionError, TimeoutError) as exc:
+    except (OSError, ConnectionError, TimeoutError) as exc:
         # Transient failure -- retry with backoff
         logger.warning(
             "image_task_transient_failure",

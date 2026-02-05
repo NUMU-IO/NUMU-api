@@ -52,9 +52,7 @@ class OnboardingRepository(IOnboardingRepository):
     async def get_by_id(self, entity_id: UUID) -> StoreOnboarding | None:
         """Get onboarding by ID."""
         result = await self.session.execute(
-            select(StoreOnboardingModel).where(
-                StoreOnboardingModel.id == entity_id
-            )
+            select(StoreOnboardingModel).where(StoreOnboardingModel.id == entity_id)
         )
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
@@ -91,9 +89,7 @@ class OnboardingRepository(IOnboardingRepository):
     async def update(self, entity: StoreOnboarding) -> StoreOnboarding:
         """Update an existing onboarding record."""
         result = await self.session.execute(
-            select(StoreOnboardingModel).where(
-                StoreOnboardingModel.id == entity.id
-            )
+            select(StoreOnboardingModel).where(StoreOnboardingModel.id == entity.id)
         )
         model = result.scalar_one_or_none()
         if model:
@@ -118,9 +114,7 @@ class OnboardingRepository(IOnboardingRepository):
     async def delete(self, entity_id: UUID) -> bool:
         """Delete an onboarding record by ID."""
         result = await self.session.execute(
-            select(StoreOnboardingModel).where(
-                StoreOnboardingModel.id == entity_id
-            )
+            select(StoreOnboardingModel).where(StoreOnboardingModel.id == entity_id)
         )
         model = result.scalar_one_or_none()
         if model:
@@ -133,7 +127,5 @@ class OnboardingRepository(IOnboardingRepository):
         """Get total count of onboarding records."""
         from sqlalchemy import func
 
-        result = await self.session.execute(
-            select(func.count(StoreOnboardingModel.id))
-        )
+        result = await self.session.execute(select(func.count(StoreOnboardingModel.id)))
         return result.scalar() or 0

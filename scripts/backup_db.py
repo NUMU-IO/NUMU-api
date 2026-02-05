@@ -47,7 +47,11 @@ def _get_settings() -> Settings:
 
 def _build_r2_client(settings: Settings):
     """Build a boto3 S3 client pointed at Cloudflare R2."""
-    if not all([settings.r2_account_id, settings.r2_access_key_id, settings.r2_secret_access_key]):
+    if not all([
+        settings.r2_account_id,
+        settings.r2_access_key_id,
+        settings.r2_secret_access_key,
+    ]):
         raise RuntimeError(
             "R2 credentials are not configured. "
             "Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY."
@@ -68,10 +72,14 @@ def run_pg_dump(settings: Settings, output_path: Path) -> None:
     }
     cmd = [
         "pg_dump",
-        "-h", settings.postgres_host,
-        "-p", str(settings.postgres_port),
-        "-U", settings.postgres_user,
-        "-d", settings.postgres_db,
+        "-h",
+        settings.postgres_host,
+        "-p",
+        str(settings.postgres_port),
+        "-U",
+        settings.postgres_user,
+        "-d",
+        settings.postgres_db,
         "--no-owner",
         "--no-acl",
         "--format=plain",

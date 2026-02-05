@@ -57,6 +57,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_products_store_status", table_name="products", schema="public")
-    op.drop_index("ix_orders_store_payment_status", table_name="orders", schema="public")
+    op.drop_index(
+        "ix_orders_store_payment_status", table_name="orders", schema="public"
+    )
     op.drop_index("ix_orders_store_status", table_name="orders", schema="public")
     op.drop_index("ix_customers_store_email", table_name="customers", schema="public")

@@ -8,14 +8,15 @@ Verifies:
 - Notification failures never break the order flow
 """
 
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from src.application.dto.order import UpdateOrderStatusDTO
-from src.application.use_cases.orders.update_order_status import UpdateOrderStatusUseCase
+from src.application.use_cases.orders.update_order_status import (
+    UpdateOrderStatusUseCase,
+)
 from src.core.entities.customer import Customer
 from src.core.entities.order import (
     Order,
@@ -26,13 +27,13 @@ from src.core.entities.order import (
 )
 from src.core.entities.store import Store, StoreStatus
 from src.core.value_objects.email import Email
-from src.core.value_objects.money import Currency, Money
+from src.core.value_objects.money import Currency
 from src.core.value_objects.phone import PhoneNumber
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_store(owner_id=None):
     return Store(
@@ -290,13 +291,16 @@ class TestNotificationPreferencesRespected:
 
         uc = _build_use_case(order_repo, store_repo, customer_repo)
 
-        with patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_whatsapp_shipping_update_task"
-        ) as mock_wa, patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_shipping_notification_email_task"
-        ) as mock_email:
+        with (
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_whatsapp_shipping_update_task"
+            ) as mock_wa,
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_shipping_notification_email_task"
+            ) as mock_email,
+        ):
             mock_wa.delay = MagicMock()
             mock_email.delay = MagicMock()
 
@@ -341,13 +345,16 @@ class TestNotificationPreferencesRespected:
 
         uc = _build_use_case(order_repo, store_repo, customer_repo)
 
-        with patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_delivery_confirmation_email_task"
-        ) as mock_email, patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_whatsapp_delivery_confirmation_task"
-        ) as mock_wa:
+        with (
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_delivery_confirmation_email_task"
+            ) as mock_email,
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_whatsapp_delivery_confirmation_task"
+            ) as mock_wa,
+        ):
             mock_email.delay = MagicMock()
             mock_wa.delay = MagicMock()
 
@@ -378,13 +385,16 @@ class TestNotificationPreferencesRespected:
 
         uc = _build_use_case(order_repo, store_repo, customer_repo)
 
-        with patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_whatsapp_shipping_update_task"
-        ) as mock_wa, patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_shipping_notification_email_task"
-        ) as mock_email:
+        with (
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_whatsapp_shipping_update_task"
+            ) as mock_wa,
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_shipping_notification_email_task"
+            ) as mock_email,
+        ):
             mock_wa.delay = MagicMock()
             mock_email.delay = MagicMock()
 
@@ -483,13 +493,16 @@ class TestNoNotificationsForOtherStatuses:
 
         uc = _build_use_case(order_repo, store_repo, customer_repo)
 
-        with patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_whatsapp_shipping_update_task"
-        ) as mock_wa, patch(
-            "src.infrastructure.messaging.tasks.notification_tasks."
-            "send_shipping_notification_email_task"
-        ) as mock_email:
+        with (
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_whatsapp_shipping_update_task"
+            ) as mock_wa,
+            patch(
+                "src.infrastructure.messaging.tasks.notification_tasks."
+                "send_shipping_notification_email_task"
+            ) as mock_email,
+        ):
             mock_wa.delay = MagicMock()
             mock_email.delay = MagicMock()
 

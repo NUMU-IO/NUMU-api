@@ -5,13 +5,14 @@ Revises: a3b4c5d6e7f8
 Create Date: 2026-02-02 00:00:00.000000
 
 """
+
 from collections.abc import Sequence
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'b5c6d7e8f9a0'
-down_revision: str | None = 'a3b4c5d6e7f8'
+revision: str = "b5c6d7e8f9a0"
+down_revision: str | None = "a3b4c5d6e7f8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -19,10 +20,10 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # Change the server default for price_currency from USD to EGP
     op.alter_column(
-        'products',
-        'price_currency',
-        server_default='EGP',
-        schema='public',
+        "products",
+        "price_currency",
+        server_default="EGP",
+        schema="public",
     )
 
     # Update existing rows that still have USD as a leftover default
@@ -32,8 +33,7 @@ def upgrade() -> None:
 
     # Also update the store default_currency server default to EGP
     op.execute(
-        "ALTER TABLE public.stores "
-        "ALTER COLUMN default_currency SET DEFAULT 'EGP'"
+        "ALTER TABLE public.stores ALTER COLUMN default_currency SET DEFAULT 'EGP'"
     )
 
     # Update existing stores that have USD default
@@ -45,14 +45,13 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Revert store default_currency back to USD
     op.execute(
-        "ALTER TABLE public.stores "
-        "ALTER COLUMN default_currency SET DEFAULT 'USD'"
+        "ALTER TABLE public.stores ALTER COLUMN default_currency SET DEFAULT 'USD'"
     )
 
     # Revert product price_currency default back to USD
     op.alter_column(
-        'products',
-        'price_currency',
-        server_default='USD',
-        schema='public',
+        "products",
+        "price_currency",
+        server_default="USD",
+        schema="public",
     )

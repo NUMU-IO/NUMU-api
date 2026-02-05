@@ -67,7 +67,9 @@ async def create_product(
     user_id: Annotated[UUID, Depends(require_store_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
 ):
     """Create a new product for the store."""
     use_case = CreateProductUseCase(

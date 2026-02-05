@@ -54,7 +54,9 @@ def send_order_confirmation_email_task(
     try:
         service = ResendEmailService()
         result = run_async(
-            service.send_order_confirmation(email, order_number, order_details, language=language)
+            service.send_order_confirmation(
+                email, order_number, order_details, language=language
+            )
         )
         logger.info(
             "order_confirmation_email_sent",
@@ -158,7 +160,9 @@ def send_delivery_confirmation_email_task(
             store_name=store_name,
             language=language,
         )
-        subject = DELIVERY_CONFIRMATION_TEMPLATE["subject_fn"](order_number, store_name, language=language)
+        subject = DELIVERY_CONFIRMATION_TEMPLATE["subject_fn"](
+            order_number, store_name, language=language
+        )
         message = EmailMessage(
             to=email,
             subject=subject,
@@ -219,9 +223,7 @@ def send_whatsapp_order_confirmation_task(
 
     try:
         service = WhatsAppMessagingService()
-        recipient = MessageRecipient(
-            phone=phone, name=customer_name, language=language
-        )
+        recipient = MessageRecipient(phone=phone, name=customer_name, language=language)
         result = run_async(
             service.send_order_confirmation(recipient, order_number, total, store_name)
         )
@@ -278,9 +280,7 @@ def send_whatsapp_shipping_update_task(
 
     try:
         service = WhatsAppMessagingService()
-        recipient = MessageRecipient(
-            phone=phone, name=customer_name, language=language
-        )
+        recipient = MessageRecipient(phone=phone, name=customer_name, language=language)
         result = run_async(
             service.send_shipping_notification(
                 recipient, order_number, tracking_number, carrier
@@ -337,9 +337,7 @@ def send_whatsapp_delivery_confirmation_task(
 
     try:
         service = WhatsAppMessagingService()
-        recipient = MessageRecipient(
-            phone=phone, name=customer_name, language=language
-        )
+        recipient = MessageRecipient(phone=phone, name=customer_name, language=language)
         result = run_async(
             service.send_delivery_notification(recipient, order_number, store_name)
         )

@@ -4,10 +4,19 @@ from fpdf import FPDF
 class PlanPDF(FPDF):
     def header(self):
         self.set_font("Helvetica", "B", 18)
-        self.cell(0, 12, "NUMU API - 2-Week Execution Plan", new_x="LMARGIN", new_y="NEXT", align="C")
+        self.cell(
+            0,
+            12,
+            "NUMU API - 2-Week Execution Plan",
+            new_x="LMARGIN",
+            new_y="NEXT",
+            align="C",
+        )
         self.set_font("Helvetica", "", 10)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 6, "Days 1-14: Make It Work", new_x="LMARGIN", new_y="NEXT", align="C")
+        self.cell(
+            0, 6, "Days 1-14: Make It Work", new_x="LMARGIN", new_y="NEXT", align="C"
+        )
         self.set_text_color(0, 0, 0)
         self.ln(2)
         self.set_draw_color(50, 50, 50)
@@ -19,7 +28,12 @@ class PlanPDF(FPDF):
         self.set_y(-15)
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f"NUMU API Execution Plan  |  Page {self.page_no()}/{{nb}}", align="C")
+        self.cell(
+            0,
+            10,
+            f"NUMU API Execution Plan  |  Page {self.page_no()}/{{nb}}",
+            align="C",
+        )
 
     def section_title(self, title, r=30, g=100, b=180):
         self.set_font("Helvetica", "B", 14)
@@ -33,7 +47,15 @@ class PlanPDF(FPDF):
         self.set_font("Helvetica", "B", 11)
         self.set_fill_color(240, 240, 240)
         self.set_draw_color(180, 180, 180)
-        self.cell(0, 8, f"  {name} - {role}", new_x="LMARGIN", new_y="NEXT", fill=True, border=1)
+        self.cell(
+            0,
+            8,
+            f"  {name} - {role}",
+            new_x="LMARGIN",
+            new_y="NEXT",
+            fill=True,
+            border=1,
+        )
         self.ln(2)
 
     def task_table_header(self):
@@ -123,8 +145,20 @@ def build_pdf():
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(0, 7, "Team:", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, "  Yousef  -  Core business logic, payment integration & security", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 5, "  Yahia   -  Models, API endpoints, infrastructure & CI/CD", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        5,
+        "  Yousef  -  Core business logic, payment integration & security",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.cell(
+        0,
+        5,
+        "  Yahia   -  Models, API endpoints, infrastructure & CI/CD",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(4)
 
     # ============================
@@ -135,7 +169,11 @@ def build_pdf():
     # Current state
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(80, 80, 80)
-    pdf.multi_cell(0, 4, "Current State: Cart NOT implemented | Customer checkout NOT implemented | Paymob service IMPLEMENTED (webhook incomplete) | Product CRUD IMPLEMENTED (no image upload) | Order routes IMPLEMENTED | Dashboard & Analytics IMPLEMENTED")
+    pdf.multi_cell(
+        0,
+        4,
+        "Current State: Cart NOT implemented | Customer checkout NOT implemented | Paymob service IMPLEMENTED (webhook incomplete) | Product CRUD IMPLEMENTED (no image upload) | Order routes IMPLEMENTED | Dashboard & Analytics IMPLEMENTED",
+    )
     pdf.set_text_color(0, 0, 0)
     pdf.ln(3)
 
@@ -144,14 +182,46 @@ def build_pdf():
     pdf.task_table_header()
 
     yousef_w1 = [
-        ("1", "Create Cart entity with add/remove/update/clear methods + CartItem value object", "src/core/entities/cart.py, src/core/value_objects/cart_item.py"),
-        ("2", "Create ICartRepository interface + RedisCartRepository (session-based, TTL 7 days)", "src/core/interfaces/repositories/cart_repository.py, src/infrastructure/repositories/cart_repository.py"),
-        ("3", "Create cart use cases: AddToCart, RemoveFromCart, UpdateCartItem, GetCart, ClearCart + DTOs", "src/application/use_cases/cart/, src/application/dto/cart.py"),
-        ("4", "Implement CheckoutUseCase - validate cart, check stock, create order, initiate Paymob payment (return iframe URL)", "src/application/use_cases/orders/checkout.py"),
-        ("5", "Create UploadProductImageUseCase - validate image type/size, upload to R2, return URL", "src/application/use_cases/products/upload_image.py"),
-        ("6", "Create image upload endpoint (multipart) + image delete endpoint", "src/api/v1/routes/stores/products.py (modify)"),
-        ("7", "Create OrderTimelineUseCase + add order status transition validation (prevent invalid transitions)", "src/application/use_cases/orders/get_order_timeline.py, src/core/entities/order.py"),
-        ("8", "Add product validation in CreateProductUseCase (required fields, price > 0, category exists)", "src/application/use_cases/products/ (modify existing)"),
+        (
+            "1",
+            "Create Cart entity with add/remove/update/clear methods + CartItem value object",
+            "src/core/entities/cart.py, src/core/value_objects/cart_item.py",
+        ),
+        (
+            "2",
+            "Create ICartRepository interface + RedisCartRepository (session-based, TTL 7 days)",
+            "src/core/interfaces/repositories/cart_repository.py, src/infrastructure/repositories/cart_repository.py",
+        ),
+        (
+            "3",
+            "Create cart use cases: AddToCart, RemoveFromCart, UpdateCartItem, GetCart, ClearCart + DTOs",
+            "src/application/use_cases/cart/, src/application/dto/cart.py",
+        ),
+        (
+            "4",
+            "Implement CheckoutUseCase - validate cart, check stock, create order, initiate Paymob payment (return iframe URL)",
+            "src/application/use_cases/orders/checkout.py",
+        ),
+        (
+            "5",
+            "Create UploadProductImageUseCase - validate image type/size, upload to R2, return URL",
+            "src/application/use_cases/products/upload_image.py",
+        ),
+        (
+            "6",
+            "Create image upload endpoint (multipart) + image delete endpoint",
+            "src/api/v1/routes/stores/products.py (modify)",
+        ),
+        (
+            "7",
+            "Create OrderTimelineUseCase + add order status transition validation (prevent invalid transitions)",
+            "src/application/use_cases/orders/get_order_timeline.py, src/core/entities/order.py",
+        ),
+        (
+            "8",
+            "Add product validation in CreateProductUseCase (required fields, price > 0, category exists)",
+            "src/application/use_cases/products/ (modify existing)",
+        ),
     ]
 
     for i, (num, task, files) in enumerate(yousef_w1):
@@ -164,14 +234,46 @@ def build_pdf():
     pdf.task_table_header()
 
     yahia_w1 = [
-        ("1", "Create cart + checkout API schemas (request/response)", "src/api/v1/schemas/storefront/cart.py, src/api/v1/schemas/storefront/checkout.py"),
-        ("2", "Create storefront cart routes: GET /cart, POST /cart/items, PATCH /cart/items/{id}, DELETE /cart/items/{id}, DELETE /cart", "src/api/v1/routes/storefront/cart.py"),
-        ("3", "Create storefront checkout route: POST /storefront/store/{store_id}/checkout", "src/api/v1/routes/storefront/checkout.py"),
-        ("4", "Complete Paymob webhook handler - implement 4 TODO blocks (mark_paid, mark_failed, mark_refunded, update order)", "src/api/v1/routes/webhooks/paymob.py"),
-        ("5", "Create customer order routes: GET /storefront/me/orders, GET /storefront/me/orders/{id} + register all new routes", "src/api/v1/routes/storefront/customer.py, src/main.py"),
-        ("6", "Create order detail enriched schema + GET /orders/{id}/timeline endpoint + bulk status update endpoint", "src/api/v1/routes/stores/orders.py (modify), src/api/v1/schemas/tenant/orders.py"),
-        ("7", "Add order filtering (date range, payment_status, fulfillment_status) + product search improvements (SKU, price range, sort)", "src/api/v1/routes/stores/orders.py, src/api/v1/routes/stores/products.py"),
-        ("8", "Write integration tests for checkout flow + unit tests for product CRUD and order status transitions", "tests/integration/test_checkout_flow.py, tests/unit/test_products.py, tests/unit/test_orders.py"),
+        (
+            "1",
+            "Create cart + checkout API schemas (request/response)",
+            "src/api/v1/schemas/storefront/cart.py, src/api/v1/schemas/storefront/checkout.py",
+        ),
+        (
+            "2",
+            "Create storefront cart routes: GET /cart, POST /cart/items, PATCH /cart/items/{id}, DELETE /cart/items/{id}, DELETE /cart",
+            "src/api/v1/routes/storefront/cart.py",
+        ),
+        (
+            "3",
+            "Create storefront checkout route: POST /storefront/store/{store_id}/checkout",
+            "src/api/v1/routes/storefront/checkout.py",
+        ),
+        (
+            "4",
+            "Complete Paymob webhook handler - implement 4 TODO blocks (mark_paid, mark_failed, mark_refunded, update order)",
+            "src/api/v1/routes/webhooks/paymob.py",
+        ),
+        (
+            "5",
+            "Create customer order routes: GET /storefront/me/orders, GET /storefront/me/orders/{id} + register all new routes",
+            "src/api/v1/routes/storefront/customer.py, src/main.py",
+        ),
+        (
+            "6",
+            "Create order detail enriched schema + GET /orders/{id}/timeline endpoint + bulk status update endpoint",
+            "src/api/v1/routes/stores/orders.py (modify), src/api/v1/schemas/tenant/orders.py",
+        ),
+        (
+            "7",
+            "Add order filtering (date range, payment_status, fulfillment_status) + product search improvements (SKU, price range, sort)",
+            "src/api/v1/routes/stores/orders.py, src/api/v1/routes/stores/products.py",
+        ),
+        (
+            "8",
+            "Write integration tests for checkout flow + unit tests for product CRUD and order status transitions",
+            "tests/integration/test_checkout_flow.py, tests/unit/test_products.py, tests/unit/test_orders.py",
+        ),
     ]
 
     for i, (num, task, files) in enumerate(yahia_w1):
@@ -186,7 +288,11 @@ def build_pdf():
 
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(80, 80, 80)
-    pdf.multi_cell(0, 4, "Current State: Currency defaults to USD (should be EGP) | Coupon system NOT implemented | JWT uses HS256 (need RS256) | CI/CD partial (Slack only) | No DB backups | No CSV import/export")
+    pdf.multi_cell(
+        0,
+        4,
+        "Current State: Currency defaults to USD (should be EGP) | Coupon system NOT implemented | JWT uses HS256 (need RS256) | CI/CD partial (Slack only) | No DB backups | No CSV import/export",
+    )
     pdf.set_text_color(0, 0, 0)
     pdf.ln(3)
 
@@ -195,14 +301,46 @@ def build_pdf():
     pdf.task_table_header()
 
     yousef_w2 = [
-        ("1", "Fix currency defaults: change product price_currency from USD to EGP + add currency validation (match store default) + Alembic migration", "src/api/v1/schemas/tenant/products.py, src/infrastructure/database/models/tenant/product.py, alembic/versions/"),
-        ("2", "Create Coupon entity (code, type: percentage/fixed/free_shipping, value, min_order, max_discount, usage_limit, validity dates)", "src/core/entities/coupon.py"),
-        ("3", "Create ICouponRepository interface + CouponRepository SQLAlchemy implementation", "src/core/interfaces/repositories/coupon_repository.py, src/infrastructure/repositories/coupon_repository.py"),
-        ("4", "Create coupon use cases: CreateCoupon, ValidateCoupon, ApplyCoupon, ListCoupons, UpdateCoupon, DeleteCoupon", "src/application/use_cases/coupons/"),
-        ("5", "Integrate coupon validation into CheckoutUseCase - apply discount if valid coupon code provided", "src/application/use_cases/orders/checkout.py (modify)"),
-        ("6", "Migrate JWT from HS256 to RS256: generate RSA key pair, update settings + token service + key generation script", "src/config/settings.py, src/infrastructure/external_services/token_service.py, scripts/generate_jwt_keys.py"),
-        ("7", "Update .env.example with RS256 key paths + update all JWT tests for RS256", ".env.example, tests/security/test_jwt_validation.py"),
-        ("8", "Create DB backup script (pg_dump + upload to R2) + restore script + Celery periodic backup task", "scripts/backup_db.py, scripts/restore_db.py, src/infrastructure/messaging/tasks/backup_task.py"),
+        (
+            "1",
+            "Fix currency defaults: change product price_currency from USD to EGP + add currency validation (match store default) + Alembic migration",
+            "src/api/v1/schemas/tenant/products.py, src/infrastructure/database/models/tenant/product.py, alembic/versions/",
+        ),
+        (
+            "2",
+            "Create Coupon entity (code, type: percentage/fixed/free_shipping, value, min_order, max_discount, usage_limit, validity dates)",
+            "src/core/entities/coupon.py",
+        ),
+        (
+            "3",
+            "Create ICouponRepository interface + CouponRepository SQLAlchemy implementation",
+            "src/core/interfaces/repositories/coupon_repository.py, src/infrastructure/repositories/coupon_repository.py",
+        ),
+        (
+            "4",
+            "Create coupon use cases: CreateCoupon, ValidateCoupon, ApplyCoupon, ListCoupons, UpdateCoupon, DeleteCoupon",
+            "src/application/use_cases/coupons/",
+        ),
+        (
+            "5",
+            "Integrate coupon validation into CheckoutUseCase - apply discount if valid coupon code provided",
+            "src/application/use_cases/orders/checkout.py (modify)",
+        ),
+        (
+            "6",
+            "Migrate JWT from HS256 to RS256: generate RSA key pair, update settings + token service + key generation script",
+            "src/config/settings.py, src/infrastructure/external_services/token_service.py, scripts/generate_jwt_keys.py",
+        ),
+        (
+            "7",
+            "Update .env.example with RS256 key paths + update all JWT tests for RS256",
+            ".env.example, tests/security/test_jwt_validation.py",
+        ),
+        (
+            "8",
+            "Create DB backup script (pg_dump + upload to R2) + restore script + Celery periodic backup task",
+            "scripts/backup_db.py, scripts/restore_db.py, src/infrastructure/messaging/tasks/backup_task.py",
+        ),
     ]
 
     for i, (num, task, files) in enumerate(yousef_w2):
@@ -215,13 +353,41 @@ def build_pdf():
     pdf.task_table_header()
 
     yahia_w2 = [
-        ("1", "Create CouponModel (tenant-scoped) + Alembic migration for coupon table", "src/infrastructure/database/models/tenant/coupon.py, alembic/versions/"),
-        ("2", "Create coupon API schemas (CreateCouponRequest, CouponResponse, ApplyCouponRequest/Response)", "src/api/v1/schemas/tenant/coupons.py"),
-        ("3", "Create store coupon management routes: POST, GET, GET/{id}, PATCH/{id}, DELETE/{id} at /stores/{store_id}/coupons/", "src/api/v1/routes/stores/coupons.py"),
-        ("4", "Create storefront coupon apply route + add coupon_code/coupon_id fields to Order model + migration", "src/api/v1/routes/storefront/cart.py, src/infrastructure/database/models/tenant/order.py, alembic/versions/"),
-        ("5", "Create GitHub Actions CI pipeline (ruff + mypy + pytest + Docker build) + CD pipeline (deploy on push/tag)", ".github/workflows/ci.yml, .github/workflows/cd.yml"),
-        ("6", "Create CSV product import use case + import endpoint (multipart upload) + export endpoint + template download", "src/application/use_cases/products/import_products.py, src/api/v1/routes/stores/products.py"),
-        ("7", "Write tests: coupon CRUD + validation edge cases (expired, usage limit, min order) + CSV import tests", "tests/unit/test_coupons.py, tests/integration/test_csv_import.py"),
+        (
+            "1",
+            "Create CouponModel (tenant-scoped) + Alembic migration for coupon table",
+            "src/infrastructure/database/models/tenant/coupon.py, alembic/versions/",
+        ),
+        (
+            "2",
+            "Create coupon API schemas (CreateCouponRequest, CouponResponse, ApplyCouponRequest/Response)",
+            "src/api/v1/schemas/tenant/coupons.py",
+        ),
+        (
+            "3",
+            "Create store coupon management routes: POST, GET, GET/{id}, PATCH/{id}, DELETE/{id} at /stores/{store_id}/coupons/",
+            "src/api/v1/routes/stores/coupons.py",
+        ),
+        (
+            "4",
+            "Create storefront coupon apply route + add coupon_code/coupon_id fields to Order model + migration",
+            "src/api/v1/routes/storefront/cart.py, src/infrastructure/database/models/tenant/order.py, alembic/versions/",
+        ),
+        (
+            "5",
+            "Create GitHub Actions CI pipeline (ruff + mypy + pytest + Docker build) + CD pipeline (deploy on push/tag)",
+            ".github/workflows/ci.yml, .github/workflows/cd.yml",
+        ),
+        (
+            "6",
+            "Create CSV product import use case + import endpoint (multipart upload) + export endpoint + template download",
+            "src/application/use_cases/products/import_products.py, src/api/v1/routes/stores/products.py",
+        ),
+        (
+            "7",
+            "Write tests: coupon CRUD + validation edge cases (expired, usage limit, min order) + CSV import tests",
+            "tests/unit/test_coupons.py, tests/integration/test_csv_import.py",
+        ),
     ]
 
     for i, (num, task, files) in enumerate(yahia_w2):

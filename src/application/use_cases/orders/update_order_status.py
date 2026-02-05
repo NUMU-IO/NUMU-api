@@ -113,9 +113,7 @@ class UpdateOrderStatusUseCase:
 
         # Dispatch async notifications for shipped / delivered
         if new_status in (OrderStatus.SHIPPED, OrderStatus.DELIVERED):
-            await self._dispatch_notifications(
-                updated_order, new_status, store, log
-            )
+            await self._dispatch_notifications(updated_order, new_status, store, log)
 
         return OrderDTO.from_entity(updated_order)
 

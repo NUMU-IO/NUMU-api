@@ -3,11 +3,6 @@ from src.infrastructure.messaging.tasks.image_tasks import (  # noqa: F401
     process_bulk_product_images_task,
     process_product_image_task,
 )
-from src.infrastructure.messaging.tasks.onboarding_email_tasks import (  # noqa: F401
-    send_first_order_email_task,
-    send_first_product_email_task,
-    send_welcome_email_task,
-)
 from src.infrastructure.messaging.tasks.notification_tasks import (  # noqa: F401
     send_delivery_confirmation_email_task,
     send_order_confirmation_email_task,
@@ -15,6 +10,11 @@ from src.infrastructure.messaging.tasks.notification_tasks import (  # noqa: F40
     send_whatsapp_delivery_confirmation_task,
     send_whatsapp_order_confirmation_task,
     send_whatsapp_shipping_update_task,
+)
+from src.infrastructure.messaging.tasks.onboarding_email_tasks import (  # noqa: F401
+    send_first_order_email_task,
+    send_first_product_email_task,
+    send_welcome_email_task,
 )
 from src.infrastructure.messaging.tasks.slack_tasks import (  # noqa: F401
     process_slack_alert_queue,

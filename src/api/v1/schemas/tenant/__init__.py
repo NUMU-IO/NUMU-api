@@ -18,6 +18,10 @@ from src.api.v1.schemas.tenant.invoice import (
     SubmitInvoiceResponse,
     UpdateInvoiceRequest,
 )
+from src.api.v1.schemas.tenant.onboarding import (
+    OnboardingResponse,
+    OnboardingStepResponse,
+)
 from src.api.v1.schemas.tenant.order import (
     BulkUpdateOrderStatusRequest,
     BulkUpdateOrderStatusResponse,
@@ -44,10 +48,6 @@ from src.api.v1.schemas.tenant.product import (
 from src.api.v1.schemas.tenant.product_import import (
     ImportResultResponse,
     ImportRowErrorResponse,
-)
-from src.api.v1.schemas.tenant.onboarding import (
-    OnboardingResponse,
-    OnboardingStepResponse,
 )
 from src.api.v1.schemas.tenant.store import (
     CheckSubdomainRequest,

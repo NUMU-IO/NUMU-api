@@ -2,7 +2,11 @@
 
 from uuid import UUID
 
-from src.core.entities.onboarding import NON_SKIPPABLE_STEPS, OnboardingStepKey, StoreOnboarding
+from src.core.entities.onboarding import (
+    NON_SKIPPABLE_STEPS,
+    OnboardingStepKey,
+    StoreOnboarding,
+)
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.onboarding_repository import (
     IOnboardingRepository,

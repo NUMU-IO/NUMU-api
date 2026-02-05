@@ -115,7 +115,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         return response
 
-    def _add_security_headers(self, response: Response, *, use_docs_csp: bool = False) -> None:
+    def _add_security_headers(
+        self, response: Response, *, use_docs_csp: bool = False
+    ) -> None:
         """Add all security headers to the response.
 
         Args:
