@@ -77,6 +77,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self.hsts_max_age = hsts_max_age
         self.include_hsts = include_hsts
 
+    # Relaxed CSP for Swagger/ReDoc documentation pages (debug only)
+    DOCS_CSP = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' https: data:; "
+        "connect-src 'self' https:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+
+    DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
+
     async def dispatch(
         self,
         request: Request,
@@ -94,16 +109,18 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Process the request
         response = await call_next(request)
 
-        # Add security headers
-        self._add_security_headers(response)
+        # Use relaxed CSP for API documentation pages in debug mode
+        is_docs_path = request.url.path in self.DOCS_PATHS
+        self._add_security_headers(response, use_docs_csp=is_docs_path)
 
         return response
 
-    def _add_security_headers(self, response: Response) -> None:
+    def _add_security_headers(self, response: Response, *, use_docs_csp: bool = False) -> None:
         """Add all security headers to the response.
 
         Args:
             response: The HTTP response to modify
+            use_docs_csp: Whether to use the relaxed docs CSP policy
         """
         # X-Frame-Options: Prevent clickjacking by disallowing iframe embedding
         # DENY = never allow framing, SAMEORIGIN = only same origin can frame
@@ -123,7 +140,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Content-Security-Policy: Control resources the browser can load
         # Mitigates XSS, data injection, and other attacks
-        response.headers["Content-Security-Policy"] = self.csp
+        csp = self.DOCS_CSP if use_docs_csp else self.csp
+        response.headers["Content-Security-Policy"] = csp
 
         # X-XSS-Protection: Legacy XSS filter (deprecated but still useful)
         # 1; mode=block = Enable filter and block page if attack detected
