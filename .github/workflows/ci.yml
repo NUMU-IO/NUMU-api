@@ -145,7 +145,6 @@ jobs:
               console.log('Could not parse performance results:', e);
             }
 
-  docker-build:
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
