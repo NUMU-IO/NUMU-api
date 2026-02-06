@@ -183,6 +183,10 @@ class Invoice(BaseEntity):
     signature_type: str | None = None
     signature_timestamp: datetime | None = None
 
+    # PDF storage
+    pdf_r2_key: str | None = None  # R2 object key (e.g. "documents/abc123.pdf")
+    pdf_url: str | None = None  # Public URL for the generated PDF
+
     # Related documents
     related_invoice_id: UUID | None = None  # For credit/debit notes
     original_invoice_number: str | None = None
