@@ -98,7 +98,9 @@ class ResendEmailService(IEmailService):
             customer_name=customer_name,
             language=language,
         )
-        subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](order_number, store_name, language)
+        subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](
+            order_number, store_name, language
+        )
 
         message = EmailMessage(
             to=email,
@@ -126,7 +128,9 @@ class ResendEmailService(IEmailService):
             carrier=carrier,
             language=language,
         )
-        subject = SHIPPING_NOTIFICATION_TEMPLATE["subject_fn"](order_number, language=language)
+        subject = SHIPPING_NOTIFICATION_TEMPLATE["subject_fn"](
+            order_number, language=language
+        )
 
         message = EmailMessage(
             to=email,

@@ -54,10 +54,14 @@ def send_welcome_email_task(
 
     try:
         service = ResendEmailService()
-        html = WELCOME_TEMPLATE["html_fn"](merchant_name, dashboard_url, language=language)
+        html = WELCOME_TEMPLATE["html_fn"](
+            merchant_name, dashboard_url, language=language
+        )
         message = EmailMessage(
             to=email,
-            subject=WELCOME_TEMPLATE["subject"].get(language, WELCOME_TEMPLATE["subject"]["en"]),
+            subject=WELCOME_TEMPLATE["subject"].get(
+                language, WELCOME_TEMPLATE["subject"]["en"]
+            ),
             html_content=html,
         )
         result = run_async(service.send_email(message))
@@ -105,7 +109,9 @@ def send_first_product_email_task(
         )
         message = EmailMessage(
             to=email,
-            subject=FIRST_PRODUCT_ADDED_TEMPLATE["subject"].get(language, FIRST_PRODUCT_ADDED_TEMPLATE["subject"]["en"]),
+            subject=FIRST_PRODUCT_ADDED_TEMPLATE["subject"].get(
+                language, FIRST_PRODUCT_ADDED_TEMPLATE["subject"]["en"]
+            ),
             html_content=html,
         )
         result = run_async(service.send_email(message))
@@ -160,7 +166,9 @@ def send_first_order_email_task(
         )
         message = EmailMessage(
             to=email,
-            subject=FIRST_ORDER_RECEIVED_TEMPLATE["subject"].get(language, FIRST_ORDER_RECEIVED_TEMPLATE["subject"]["en"]),
+            subject=FIRST_ORDER_RECEIVED_TEMPLATE["subject"].get(
+                language, FIRST_ORDER_RECEIVED_TEMPLATE["subject"]["en"]
+            ),
             html_content=html,
         )
         result = run_async(service.send_email(message))

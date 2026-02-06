@@ -1,5 +1,14 @@
 """Pytest configuration and fixtures."""
 
+# Disable rate limiting for tests and set test encryption key before importing anything else
+import os
+
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Set a test encryption key for credential encryption (32 bytes base64 encoded)
+os.environ["CREDENTIAL_ENCRYPTION_KEY"] = (
+    "dGVzdF9lbmNyeXB0aW9uX2tleV9mb3JfdGVzdGluZzEyMzQ1Njc4OQ=="
+)
+
 # Import configuration fixtures
 pytest_plugins = [
     "tests.fixtures.configuration_fixtures",
@@ -178,8 +187,7 @@ def _generate_test_rsa_keypair() -> tuple[str, str]:
         encryption_algorithm=serialization.NoEncryption(),
     ).decode()
     public_pem = (
-        key
-        .public_key()
+        key.public_key()
         .public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,

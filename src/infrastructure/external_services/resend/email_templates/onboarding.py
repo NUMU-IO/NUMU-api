@@ -101,21 +101,24 @@ _WELCOME = {
 def welcome_html(merchant_name: str, dashboard_url: str, language: str = "en") -> str:
     c = _WELCOME.get(language, _WELCOME["en"])
     steps = "".join(
-        f'<div class="step"><strong>{c["step_label"]} {i+1}:</strong> {s}</div>'
+        f'<div class="step"><strong>{c["step_label"]} {i + 1}:</strong> {s}</div>'
         for i, s in enumerate(c["steps"])
     )
-    return _wrap(f"""
-    <div class="header"><h1>{c['title']}</h1><p>{c['subtitle']}</p></div>
+    return _wrap(
+        f"""
+    <div class="header"><h1>{c["title"]}</h1><p>{c["subtitle"]}</p></div>
     <div class="content">
-        <p>{c['greeting'].format(merchant_name=merchant_name)}</p>
-        <p>{c['intro']}</p>
-        <h2>{c['next_steps']}</h2>
+        <p>{c["greeting"].format(merchant_name=merchant_name)}</p>
+        <p>{c["intro"]}</p>
+        <h2>{c["next_steps"]}</h2>
         {steps}
         <p style="text-align:center; margin-top:25px;">
-            <a href="{dashboard_url}" class="btn">{c['btn']}</a>
+            <a href="{dashboard_url}" class="btn">{c["btn"]}</a>
         </p>
-        <p>{c['help']}</p>
-    </div>""", language=language)
+        <p>{c["help"]}</p>
+    </div>""",
+        language=language,
+    )
 
 
 WELCOME_TEMPLATE = {
@@ -163,20 +166,23 @@ def first_product_html(
     merchant_name: str, product_name: str, dashboard_url: str, language: str = "en"
 ) -> str:
     c = _FIRST_PRODUCT.get(language, _FIRST_PRODUCT["en"])
-    return _wrap(f"""
-    <div class="header"><h1>{c['title']}</h1></div>
+    return _wrap(
+        f"""
+    <div class="header"><h1>{c["title"]}</h1></div>
     <div class="content">
-        <p>{c['greeting'].format(merchant_name=merchant_name)}</p>
-        <p>{c['intro'].format(product_name=product_name)}</p>
-        <h2>{c['progress']}</h2>
-        <div class="step done">{c['step1_done']}</div>
-        <div class="step"><strong>{c['step2']}</strong></div>
-        <div class="step"><strong>{c['step3']}</strong></div>
-        <div class="step"><strong>{c['step4']}</strong></div>
+        <p>{c["greeting"].format(merchant_name=merchant_name)}</p>
+        <p>{c["intro"].format(product_name=product_name)}</p>
+        <h2>{c["progress"]}</h2>
+        <div class="step done">{c["step1_done"]}</div>
+        <div class="step"><strong>{c["step2"]}</strong></div>
+        <div class="step"><strong>{c["step3"]}</strong></div>
+        <div class="step"><strong>{c["step4"]}</strong></div>
         <p style="text-align:center; margin-top:25px;">
-            <a href="{dashboard_url}/products" class="btn">{c['btn']}</a>
+            <a href="{dashboard_url}/products" class="btn">{c["btn"]}</a>
         </p>
-    </div>""", language=language)
+    </div>""",
+        language=language,
+    )
 
 
 FIRST_PRODUCT_ADDED_TEMPLATE = {
@@ -227,26 +233,29 @@ def first_order_html(
 ) -> str:
     c = _FIRST_ORDER.get(language, _FIRST_ORDER["en"])
     border_side = "border-right-color" if language == "ar" else "border-left-color"
-    return _wrap(f"""
-    <div class="header"><h1>{c['title']}</h1></div>
+    return _wrap(
+        f"""
+    <div class="header"><h1>{c["title"]}</h1></div>
     <div class="content">
-        <p>{c['greeting'].format(merchant_name=merchant_name)}</p>
-        <p>{c['intro']}</p>
+        <p>{c["greeting"].format(merchant_name=merchant_name)}</p>
+        <p>{c["intro"]}</p>
 
         <div class="step done" style="{border_side}: #D4AF37;">
-            <p style="margin:0; font-size: 18px;"><strong>{c['order_label']} #{order_number}</strong></p>
+            <p style="margin:0; font-size: 18px;"><strong>{c["order_label"]} #{order_number}</strong></p>
             <p style="margin:5px 0 0; font-size: 22px; color: #D4AF37;"><strong>{total}</strong></p>
         </div>
 
-        <h2>{c['progress']}</h2>
-        <div class="step done">{c['step1_done']}</div>
-        <div class="step done">{c['step2_done']}</div>
+        <h2>{c["progress"]}</h2>
+        <div class="step done">{c["step1_done"]}</div>
+        <div class="step done">{c["step2_done"]}</div>
 
-        <p>{c['cta_text']}</p>
+        <p>{c["cta_text"]}</p>
         <p style="text-align:center; margin-top:15px;">
-            <a href="{dashboard_url}/orders" class="btn">{c['btn']}</a>
+            <a href="{dashboard_url}/orders" class="btn">{c["btn"]}</a>
         </p>
-    </div>""", language=language)
+    </div>""",
+        language=language,
+    )
 
 
 FIRST_ORDER_RECEIVED_TEMPLATE = {
