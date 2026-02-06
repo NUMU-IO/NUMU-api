@@ -55,13 +55,18 @@ class InvoicePDFGenerator:
         language: Language code ("ar" for Arabic/RTL, "en" for English/LTR).
     """
 
+    # Default fallback logo (NUMU branding) shipped with the template
+    _DEFAULT_LOGO = TEMPLATE_DIR / "numu_logo.png"
+
     def __init__(
         self,
         template_name: str = "invoice.html",
         language: str = "ar",
+        store_logo_url: str | None = None,
     ) -> None:
         self.template_name = template_name
         self.language = language
+        self.store_logo_url = store_logo_url
         self._template_path = TEMPLATE_DIR / template_name
 
     def generate(self, invoice: Invoice) -> bytes:
@@ -118,13 +123,26 @@ class InvoicePDFGenerator:
         context = self._build_context(invoice)
         return template.render(**context)
 
+    def _resolve_logo_url(self) -> str | None:
+        """Resolve the logo URL for the template.
+
+        Uses store_logo_url if provided, otherwise falls back to the
+        default NUMU logo bundled in the templates directory.
+        """
+        if self.store_logo_url:
+            return self.store_logo_url
+        if self._DEFAULT_LOGO.exists():
+            return self._DEFAULT_LOGO.as_uri()
+        return None
+
     def _build_context(self, invoice: Invoice) -> dict:
         """Build the template rendering context from an Invoice entity.
 
         Formats monetary values from cents to display currency,
         prepares QR code data URI, and computes layout direction.
         """
-        is_rtl = self.language == "ar"
+        is_rtl = self.language in ("ar", "ar_en")
+        is_bilingual = self.language == "ar_en"
 
         line_items = []
         for idx, item in enumerate(invoice.line_items, 1):
@@ -138,6 +156,8 @@ class InvoicePDFGenerator:
                     if is_rtl and item.description_ar
                     else item.description
                 ),
+                "description_ar": item.description_ar,
+                "description_en": item.description,
                 "item_code": item.item_code,
                 "quantity": f"{item.quantity:,.0f}",
                 "unit_price": f"{item.unit_price:,.2f}",
@@ -152,14 +172,25 @@ class InvoicePDFGenerator:
         if invoice.qr_code_image:
             qr_data_uri = f"data:image/png;base64,{invoice.qr_code_image}"
 
+        # Resolve labels based on language mode
+        if is_bilingual:
+            labels = _LABELS_AR
+        elif is_rtl:
+            labels = _LABELS_AR
+        else:
+            labels = _LABELS_EN
+
         return {
             "invoice": invoice,
             "line_items": line_items,
             "is_rtl": is_rtl,
+            "is_bilingual": is_bilingual,
             "direction": "rtl" if is_rtl else "ltr",
             "text_align": "right" if is_rtl else "left",
             "text_align_opposite": "left" if is_rtl else "right",
             "language": self.language,
+            # Logo
+            "logo_url": self._resolve_logo_url(),
             # Formatted totals (cents -> display currency)
             "subtotal": f"{invoice.subtotal / 100:,.2f}",
             "total_discount": f"{invoice.total_discount / 100:,.2f}",
@@ -182,7 +213,7 @@ class InvoicePDFGenerator:
             ),
             "buyer": invoice.buyer,
             # Labels (Arabic / English)
-            "labels": _LABELS_AR if is_rtl else _LABELS_EN,
+            "labels": labels,
         }
 
 
