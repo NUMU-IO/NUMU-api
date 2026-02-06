@@ -39,6 +39,7 @@ from src.api.dependencies.services import (
     get_image_pipeline,
     get_password_service,
     get_payment_service,
+    get_product_cache_service,
     get_storage_service,
     get_token_service,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "get_storage_service",
     "get_ai_service",
     "get_image_pipeline",
+    "get_product_cache_service",
     # Pagination
     "CursorEncoder",
     "CursorParams",
