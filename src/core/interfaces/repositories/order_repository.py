@@ -47,6 +47,11 @@ class IOrderRepository(BaseRepository[Order]):
         ...
 
     @abstractmethod
+    async def get_by_tracking_number(self, tracking_number: str) -> Order | None:
+        """Get order by shipping tracking number (cross-store lookup)."""
+        ...
+
+    @abstractmethod
     async def get_by_date_range(
         self,
         store_id: UUID,
