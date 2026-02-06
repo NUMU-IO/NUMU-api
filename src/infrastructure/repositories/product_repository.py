@@ -1,8 +1,9 @@
 """Product repository implementation."""
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.product import Product, ProductStatus
@@ -428,3 +429,64 @@ class ProductRepository(IProductRepository):
         )
         result = await self.session.execute(query)
         return result.scalar() or 0
+
+    async def list_with_cursor(
+        self,
+        store_id: UUID,
+        category_id: UUID | None = None,
+        cursor_timestamp: str | None = None,
+        cursor_id: str | None = None,
+        limit: int = 15,
+        is_active: bool | None = True,
+    ) -> list[Product]:
+        """List products with cursor-based pagination.
+
+        Uses (created_at, id) as cursor keys for stable, O(1) pagination.
+        Results are ordered by created_at DESC, id DESC (newest first).
+
+        Args:
+            store_id: Store to filter by
+            category_id: Optional category filter
+            cursor_timestamp: Timestamp from cursor (ISO format)
+            cursor_id: ID from cursor (UUID string)
+            limit: Maximum items to return
+            is_active: Filter by active status (default: True for storefront)
+
+        Returns:
+            List of products after the cursor position
+        """
+        query = select(ProductModel).where(ProductModel.store_id == store_id)
+
+        # Apply category filter
+        if category_id:
+            query = query.where(ProductModel.category_id == category_id)
+
+        # Apply active status filter
+        if is_active is not None:
+            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
+            query = query.where(ProductModel.status == target_status)
+
+        # Apply cursor filter (keyset pagination)
+        # For descending order: get items where (created_at, id) < (cursor_ts, cursor_id)
+        if cursor_timestamp and cursor_id:
+            # Parse the cursor timestamp
+            cursor_ts = datetime.fromisoformat(cursor_timestamp)
+            cursor_uuid = UUID(cursor_id)
+
+            # Keyset condition for descending order
+            query = query.where(
+                tuple_(ProductModel.created_at, ProductModel.id)
+                < tuple_(cursor_ts, cursor_uuid)
+            )
+
+        # Order by created_at DESC, id DESC for consistent ordering
+        query = query.order_by(
+            ProductModel.created_at.desc(),
+            ProductModel.id.desc(),
+        )
+
+        # Limit results
+        query = query.limit(limit)
+
+        result = await self.session.execute(query)
+        return [self._to_entity(model) for model in result.scalars().all()]

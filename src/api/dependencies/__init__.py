@@ -1,5 +1,12 @@
 """API dependencies module."""
 
+from src.api.dependencies.pagination import (
+    CursorEncoder,
+    CursorParams,
+    build_cursor_response,
+    get_cursor_params,
+    get_cursor_values,
+)
 from src.api.dependencies.auth import (
     get_current_store,
     get_current_user_id,
@@ -64,6 +71,12 @@ __all__ = [
     "get_storage_service",
     "get_ai_service",
     "get_image_pipeline",
+    # Pagination
+    "CursorEncoder",
+    "CursorParams",
+    "build_cursor_response",
+    "get_cursor_params",
+    "get_cursor_values",
     # Fieldsets
     "FieldSelector",
     "FieldsetConfig",
