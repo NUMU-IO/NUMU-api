@@ -186,7 +186,7 @@ class TestAPIUnder3GConditions:
                 if isinstance(result, Exception):
                     pytest.skip(f"Request {i} failed: {result}")
                 else:
-                    status_code, elapsed = result
+                    _status_code, elapsed = result
                     # Allow longer timeout for concurrent 3G requests
                     assert elapsed < 10000, (
                         f"Concurrent request took too long: {elapsed}ms"

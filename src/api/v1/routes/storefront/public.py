@@ -15,10 +15,10 @@ from fastapi import APIRouter, Depends, Path, Query, status
 
 from src.api.dependencies import (
     CursorParams,
+    FieldSelector,
     build_cursor_response,
     get_cursor_params,
     get_cursor_values,
-    FieldSelector,
     get_customer_repository,
     get_password_service,
     get_product_cache_service,
@@ -338,25 +338,6 @@ async def browse_products_cursor(
         )
         for product in items
     ]
-
-    # Build response data
-    response_data = {
-        "items": [p.model_dump() for p in products],
-        "total": result.total,
-        "page": page,
-        "page_size": limit,
-        "total_pages": (result.total + limit - 1) // limit if limit > 0 else 0,
-    }
-
-    # Cache the result (only for non-search queries)
-    if use_cache:
-        await product_cache.set_products(
-            store_id=store_id,
-            category_id=category_id,
-            page=page,
-            limit=limit,
-            data=response_data,
-        )
 
     return SuccessResponse(
         data=CursorPaginatedListResponse(
