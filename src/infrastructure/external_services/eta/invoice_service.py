@@ -325,6 +325,7 @@ class ETAInvoiceService:
     async def process_invoice_submission(
         self,
         invoice: Invoice,
+        storage_service=None,
     ) -> Invoice:
         """Submit invoice and update with ETA response.
 
@@ -332,9 +333,11 @@ class ETAInvoiceService:
         1. Submits the invoice to ETA
         2. Updates the invoice with ETA response
         3. Generates QR code
+        4. Optionally uploads QR image to R2
 
         Args:
             invoice: Invoice to submit
+            storage_service: Optional IStorageService for uploading QR image to R2.
 
         Returns:
             Updated Invoice with ETA data
@@ -375,6 +378,12 @@ class ETAInvoiceService:
                     invoice.qr_code_data = qr_data
                     invoice.qr_code_image = qr_image
 
+                    # Upload QR image to R2 if storage service is available
+                    if qr_image and storage_service:
+                        await self._upload_qr_to_storage(
+                            invoice, qr_image, storage_service
+                        )
+
             elif result.get("status") == "pending":
                 invoice.status = InvoiceStatus.SUBMITTED
                 invoice.eta_status_code = "pending"
@@ -387,6 +396,48 @@ class ETAInvoiceService:
 
         invoice.touch()
         return invoice
+
+    async def _upload_qr_to_storage(
+        self,
+        invoice: Invoice,
+        qr_image_b64: str,
+        storage_service,
+    ) -> None:
+        """Upload QR code image to R2 storage (best-effort)."""
+        import base64
+
+        try:
+            from src.core.interfaces.services.storage_service import StorageBucket
+
+            qr_bytes = base64.b64decode(qr_image_b64)
+            uploaded = await storage_service.upload_file(
+                file_content=qr_bytes,
+                filename=f"qr-{invoice.invoice_number}.png",
+                content_type="image/png",
+                bucket=StorageBucket.DOCUMENTS,
+            )
+            if not hasattr(invoice, "metadata") or invoice.metadata is None:
+                invoice.metadata = {}
+            # Store R2 references as flat attributes when available,
+            # otherwise fall back to metadata dict for flexibility.
+            invoice.metadata = {
+                **invoice.metadata,
+                "qr_r2_key": uploaded.key,
+                "qr_r2_url": uploaded.url,
+            }
+            logger.info(
+                "qr_uploaded_to_r2",
+                extra={
+                    "invoice_number": invoice.invoice_number,
+                    "r2_key": uploaded.key,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "qr_r2_upload_failed",
+                extra={"invoice_number": invoice.invoice_number},
+                exc_info=True,
+            )
 
     async def validate_document(
         self,

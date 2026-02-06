@@ -363,9 +363,23 @@ async def submit_invoice_to_eta(
             message="Invoice accepted (ETA simulation mode)",
         )
 
-    # Submit to ETA
+    # Submit to ETA (with optional R2 storage for QR code)
     eta_service = ETAInvoiceService()
-    updated_invoice = await eta_service.process_invoice_submission(invoice)
+    r2_service = None
+    try:
+        from src.infrastructure.external_services.cloudflare_r2 import (
+            CloudflareR2StorageService,
+        )
+
+        r2_service = CloudflareR2StorageService()
+        if not r2_service.client:
+            r2_service = None
+    except Exception:
+        pass
+
+    updated_invoice = await eta_service.process_invoice_submission(
+        invoice, storage_service=r2_service
+    )
     _invoices[invoice_id] = updated_invoice
 
     if updated_invoice.status == InvoiceStatus.ACCEPTED:
