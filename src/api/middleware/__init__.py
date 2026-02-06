@@ -16,6 +16,7 @@ from src.api.middleware.security_headers import (
     get_security_headers_middleware,
 )
 from src.api.middleware.sentry_middleware import SentryMiddleware
+from src.api.middleware.timing import ResponseTimeMiddleware, create_timing_middleware
 from src.infrastructure.tenancy.middleware import TenantMiddleware
 
 __all__ = [
@@ -31,4 +32,6 @@ __all__ = [
     "SecurityHeadersMiddleware",
     "get_security_headers_middleware",
     "SentryMiddleware",
+    "ResponseTimeMiddleware",
+    "create_timing_middleware",
 ]

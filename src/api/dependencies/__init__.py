@@ -1,5 +1,12 @@
 """API dependencies module."""
 
+from src.api.dependencies.pagination import (
+    CursorEncoder,
+    CursorParams,
+    build_cursor_response,
+    get_cursor_params,
+    get_cursor_values,
+)
 from src.api.dependencies.auth import (
     get_current_store,
     get_current_user_id,
@@ -9,6 +16,13 @@ from src.api.dependencies.auth import (
     require_store_owner,
 )
 from src.api.dependencies.database import get_db
+from src.api.dependencies.fieldsets import (
+    PRODUCT_DETAIL_FIELDS,
+    PRODUCT_FIELDSET_CONFIG,
+    FieldSelector,
+    FieldsetConfig,
+    get_product_field_selector,
+)
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_customer_address_repository,
@@ -59,4 +73,16 @@ __all__ = [
     "get_ai_service",
     "get_image_pipeline",
     "get_product_cache_service",
+    # Pagination
+    "CursorEncoder",
+    "CursorParams",
+    "build_cursor_response",
+    "get_cursor_params",
+    "get_cursor_values",
+    # Fieldsets
+    "FieldSelector",
+    "FieldsetConfig",
+    "PRODUCT_DETAIL_FIELDS",
+    "PRODUCT_FIELDSET_CONFIG",
+    "get_product_field_selector",
 ]

@@ -24,18 +24,18 @@ jobs:
         run: |
           import os
           import json
-          
+
           # Read the full event payload safely
           with open(os.environ['GITHUB_EVENT_PATH'], 'r') as f:
               event = json.load(f)
-          
+
           pr = event['pull_request']
           action = event['action']
-          
+
           # Determine status and color
           status = "opened"
           emoji = "🚀"
-          
+
           if action == "closed" and pr.get('merged', False):
               status = "merged"
               emoji = "✅"
@@ -48,7 +48,7 @@ jobs:
           elif action == "reopened":
               status = "reopened"
               emoji = "♻️"
-          
+
           # Get details
           title = pr['title']
           body = pr.get('body') or "No description provided"

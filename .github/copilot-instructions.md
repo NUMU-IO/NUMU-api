@@ -7,7 +7,7 @@
 ```
 src/
 ├── api/           → Presentation (routes, schemas, middleware)
-├── application/   → Use cases & DTOs (business logic orchestration)  
+├── application/   → Use cases & DTOs (business logic orchestration)
 ├── core/          → Domain (entities, interfaces, value objects)
 ├── infrastructure/→ External concerns (DB, repos, cache, services)
 └── config/        → Settings from environment
@@ -47,13 +47,13 @@ NUMU isolates data by tenant using PostgreSQL schemas. Critical request flow:
 class UserRepository(IUserRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     def _to_entity(self, model: UserModel) -> User:
         return User(id=model.id, email=Email(model.email), ...)
-    
+
     def _to_model(self, entity: User) -> UserModel:
         return UserModel(id=entity.id, email=str(entity.email), ...)
-    
+
     async def get_by_id(self, entity_id: UUID) -> User | None:
         result = await self.session.execute(select(UserModel).where(...))
         model = result.scalar_one_or_none()
@@ -73,7 +73,7 @@ Each use case in `application/use_cases/{domain}/` is a single-responsibility cl
 class GetCurrentUserUseCase:
     def __init__(self, user_repo: IUserRepository):
         self.user_repo = user_repo
-    
+
     async def execute(self, user_id: UUID) -> UserDTO:
         user = await self.user_repo.get_by_id(user_id)
         if not user:
@@ -134,7 +134,7 @@ All database, I/O, and service calls are **async**. Never block in async context
 
 Wrappers in `infrastructure/external_services/`:
 - `stripe/` — Payment processing
-- `openai/` — AI features  
+- `openai/` — AI features
 - `resend/` — Email delivery
 - `cloudflare_r2/` — Object storage (boto3)
 - `shippo/` — Shipping & logistics

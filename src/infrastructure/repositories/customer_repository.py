@@ -67,7 +67,8 @@ class CustomerRepository(ICustomerRepository):
             total_orders=entity.total_orders,
             total_spent=entity.total_spent,
             extra_data=meta,
-            notification_prefs=notif_prefs or Customer.default_notification_preferences(),
+            notification_prefs=notif_prefs
+            or Customer.default_notification_preferences(),
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )

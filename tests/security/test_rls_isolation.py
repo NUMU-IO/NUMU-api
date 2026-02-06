@@ -3,8 +3,12 @@
 These tests verify that PostgreSQL RLS policies correctly enforce tenant isolation
 even when application-level filtering is bypassed. This provides defense-in-depth
 security for multi-tenant data.
+
+NOTE: These tests require a real PostgreSQL database with RLS policies configured.
+They are skipped by default in CI when PostgreSQL is not properly configured.
 """
 
+import os
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +17,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config import settings
+
+# Skip all RLS tests unless explicitly enabled
+# These require a properly configured PostgreSQL database with RLS policies
+pytestmark = pytest.mark.skipif(
+    os.environ.get("NUMU_RUN_RLS_TESTS", "0") != "1",
+    reason="RLS tests require PostgreSQL with RLS policies. Set NUMU_RUN_RLS_TESTS=1 to run.",
+)
 
 
 @pytest.fixture(scope="module")

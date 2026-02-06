@@ -39,7 +39,7 @@ jobs:
               # Get commit message safely using subprocess
               commit_msg = subprocess.check_output(["git", "log", "-1", "--pretty=%B"], text=True).strip()
               short_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
-              
+
               # Get files changed count
               try:
                   files_changed = subprocess.check_output("git diff-tree --no-commit-id --name-only -r HEAD | wc -l", shell=True, text=True).strip()
@@ -49,7 +49,7 @@ jobs:
               # Determine type and emoji
               emoji = "📦"
               commit_type = "Update"
-              
+
               msg_lower = commit_msg.lower()
               if re.search(r"^(feat|feature)", msg_lower):
                   emoji = "✨"; commit_type = "Feature"
@@ -73,7 +73,7 @@ jobs:
               return commit_msg, short_sha, files_changed, emoji, commit_type
 
           commit_msg, short_sha, files_changed, emoji, commit_type = get_commit_info()
-          
+
           ref_name = os.environ['REF_NAME']
           repo_name = os.environ['REPO_NAME']
           pusher_name = os.environ['PUSHER_NAME']

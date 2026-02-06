@@ -122,8 +122,8 @@ def _wrap(body_html: str, language: str = "en") -> str:
 <html lang="{language}" dir="{direction}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">{style}</head>
 <body><div class="wrapper">{body_html}
 <div class="footer">
-  <p>{f['help']}</p>
-  <p style="margin-top:8px;">{f['copyright']}</p>
+  <p>{f["help"]}</p>
+  <p style="margin-top:8px;">{f["copyright"]}</p>
 </div>
 </div></body></html>"""
 
@@ -194,47 +194,50 @@ def order_confirmation_html(
             <td class="price">{currency} {price:,.2f}</td>
         </tr>"""
 
-    return _wrap(f"""
+    return _wrap(
+        f"""
     <div class="header">
-        <h1>{c['title']}</h1>
-        <p>{c['subtitle']}</p>
+        <h1>{c["title"]}</h1>
+        <p>{c["subtitle"]}</p>
         <span class="badge">#{order_number}</span>
     </div>
     <div class="body">
         <p>{greeting}</p>
-        <p>{c['intro']}</p>
+        <p>{c["intro"]}</p>
 
         <table class="items">
             <thead>
                 <tr>
-                    <th>{c['th_item']}</th>
-                    <th>{c['th_qty']}</th>
-                    <th class="price">{c['th_price']}</th>
+                    <th>{c["th_item"]}</th>
+                    <th>{c["th_qty"]}</th>
+                    <th class="price">{c["th_price"]}</th>
                 </tr>
             </thead>
             <tbody>
                 {rows}
                 <tr class="total-row">
-                    <td colspan="2">{c['total']}</td>
+                    <td colspan="2">{c["total"]}</td>
                     <td class="price">{currency} {total:,.2f}</td>
                 </tr>
             </tbody>
         </table>
 
         <div class="highlight-box">
-            <p class="label">{c['order_number_label']}</p>
+            <p class="label">{c["order_number_label"]}</p>
             <p class="value">#{order_number}</p>
         </div>
 
         <div class="divider"></div>
 
-        <p><strong>{c['what_next']}</strong></p>
-        <p>{c['what_next_body']}</p>
+        <p><strong>{c["what_next"]}</strong></p>
+        <p>{c["what_next_body"]}</p>
 
         <p class="center" style="margin-top: 24px;">
-            <a href="#" class="btn-outline">{c['btn']}</a>
+            <a href="#" class="btn-outline">{c["btn"]}</a>
         </p>
-    </div>""", language=language)
+    </div>""",
+        language=language,
+    )
 
 
 def _order_confirmation_subject(
@@ -313,19 +316,20 @@ def shipping_notification_html(
         carrier_label = carrier or ("شركة الشحن" if language == "ar" else "Carrier")
         tracking_section = f"""
         <div class="tracking-card">
-            <p class="carrier">{carrier_label} {c['tracking_label']}</p>
+            <p class="carrier">{carrier_label} {c["tracking_label"]}</p>
             <p class="number">{tracking_number}</p>
         </div>"""
 
-    return _wrap(f"""
+    return _wrap(
+        f"""
     <div class="header">
-        <h1>{c['title']}</h1>
-        <p>{c['subtitle']}</p>
+        <h1>{c["title"]}</h1>
+        <p>{c["subtitle"]}</p>
         <span class="badge">#{order_number}</span>
     </div>
     <div class="body">
         <p>{greeting}</p>
-        <p>{c['intro'].format(order_number=order_number, store_name=store_name)}</p>
+        <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
 
         {tracking_section}
 
@@ -333,32 +337,32 @@ def shipping_notification_html(
             <div class="step">
                 <div class="step-dot done">&#10003;</div>
                 <div class="step-text">
-                    <p class="title">{c['step1']}</p>
-                    <p class="sub">{c['step1_sub']}</p>
+                    <p class="title">{c["step1"]}</p>
+                    <p class="sub">{c["step1_sub"]}</p>
                 </div>
             </div>
             <div class="step-line done"></div>
             <div class="step">
                 <div class="step-dot done">&#10003;</div>
                 <div class="step-text">
-                    <p class="title">{c['step2']}</p>
-                    <p class="sub">{c['step2_sub']}</p>
+                    <p class="title">{c["step2"]}</p>
+                    <p class="sub">{c["step2_sub"]}</p>
                 </div>
             </div>
             <div class="step-line done"></div>
             <div class="step">
                 <div class="step-dot active">&#10148;</div>
                 <div class="step-text">
-                    <p class="title">{c['step3']}</p>
-                    <p class="sub">{c['step3_sub']}</p>
+                    <p class="title">{c["step3"]}</p>
+                    <p class="sub">{c["step3_sub"]}</p>
                 </div>
             </div>
             <div class="step-line pending"></div>
             <div class="step">
                 <div class="step-dot pending">4</div>
                 <div class="step-text">
-                    <p class="title">{c['step4']}</p>
-                    <p class="sub">{c['step4_sub']}</p>
+                    <p class="title">{c["step4"]}</p>
+                    <p class="sub">{c["step4_sub"]}</p>
                 </div>
             </div>
         </div>
@@ -366,9 +370,11 @@ def shipping_notification_html(
         <div class="divider"></div>
 
         <p class="center" style="margin-top: 16px;">
-            <a href="#" class="btn">{c['btn']}</a>
+            <a href="#" class="btn">{c["btn"]}</a>
         </p>
-    </div>""", language=language)
+    </div>""",
+        language=language,
+    )
 
 
 def _shipping_subject(
@@ -436,58 +442,61 @@ def delivery_confirmation_html(
         else c["greeting_default"]
     )
 
-    return _wrap(f"""
+    return _wrap(
+        f"""
     <div class="header">
-        <h1>{c['title']}</h1>
-        <p>{c['subtitle']}</p>
+        <h1>{c["title"]}</h1>
+        <p>{c["subtitle"]}</p>
         <span class="badge">#{order_number}</span>
     </div>
     <div class="body">
         <p>{greeting}</p>
-        <p>{c['intro'].format(order_number=order_number, store_name=store_name)}</p>
+        <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
 
         <div class="status-steps">
             <div class="step">
                 <div class="step-dot done">&#10003;</div>
                 <div class="step-text">
-                    <p class="title">{c['step1']}</p>
+                    <p class="title">{c["step1"]}</p>
                 </div>
             </div>
             <div class="step-line done"></div>
             <div class="step">
                 <div class="step-dot done">&#10003;</div>
                 <div class="step-text">
-                    <p class="title">{c['step2']}</p>
+                    <p class="title">{c["step2"]}</p>
                 </div>
             </div>
             <div class="step-line done"></div>
             <div class="step">
                 <div class="step-dot done">&#10003;</div>
                 <div class="step-text">
-                    <p class="title">{c['step3']}</p>
+                    <p class="title">{c["step3"]}</p>
                 </div>
             </div>
             <div class="step-line done"></div>
             <div class="step">
                 <div class="step-dot done">&#10003;</div>
                 <div class="step-text">
-                    <p class="title">{c['step4']}</p>
-                    <p class="sub">{c['step4_sub']}</p>
+                    <p class="title">{c["step4"]}</p>
+                    <p class="sub">{c["step4_sub"]}</p>
                 </div>
             </div>
         </div>
 
         <div class="highlight-box" style="text-align: center;">
             <p style="font-size: 32px; margin: 0;">&#127881;</p>
-            <p style="font-size: 16px; font-weight: 600; color: #28a745; margin: 8px 0 0;">{c['complete']}</p>
+            <p style="font-size: 16px; font-weight: 600; color: #28a745; margin: 8px 0 0;">{c["complete"]}</p>
         </div>
 
         <div class="divider"></div>
 
-        <p>{c['enjoy']}</p>
+        <p>{c["enjoy"]}</p>
 
-        <p>{c['thanks'].format(store_name=store_name)}</p>
-    </div>""", language=language)
+        <p>{c["thanks"].format(store_name=store_name)}</p>
+    </div>""",
+        language=language,
+    )
 
 
 def _delivery_subject(

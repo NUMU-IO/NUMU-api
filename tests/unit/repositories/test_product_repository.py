@@ -25,11 +25,12 @@ class TestProductRepository:
         self.mock_session.delete = AsyncMock()
         self.repository = ProductRepository(self.mock_session)
 
-    def _create_sample_product(self, store_id=None) -> Product:
+    def _create_sample_product(self, store_id=None, tenant_id=None) -> Product:
         """Create a sample product for testing."""
         return Product(
             id=uuid4(),
             store_id=store_id or uuid4(),
+            tenant_id=tenant_id or uuid4(),
             name="Test Product",
             slug="test-product",
             sku="TEST-001",
@@ -52,6 +53,7 @@ class TestProductRepository:
         mock_model = MagicMock()
         mock_model.id = product_id
         mock_model.store_id = uuid4()
+        mock_model.tenant_id = uuid4()
         mock_model.name = "Test Product"
         mock_model.slug = "test-product"
         mock_model.sku = "TEST-001"
@@ -175,10 +177,12 @@ class TestProductRepository:
         """Test getting products by store ID."""
         store_id = uuid4()
 
+        tenant_id = uuid4()
         mock_models = [MagicMock() for _ in range(3)]
         for i, model in enumerate(mock_models):
             model.id = uuid4()
             model.store_id = store_id
+            model.tenant_id = tenant_id
             model.name = f"Product {i}"
             model.slug = f"product-{i}"
             model.sku = f"SKU-{i}"
@@ -220,6 +224,7 @@ class TestProductRepository:
         mock_model = MagicMock()
         mock_model.id = uuid4()
         mock_model.store_id = store_id
+        mock_model.tenant_id = uuid4()
         mock_model.name = "Test Product"
         mock_model.slug = slug
         mock_model.sku = "TEST-001"
@@ -271,10 +276,12 @@ class TestProductRepository:
         store_id = uuid4()
         query = "test"
 
+        tenant_id = uuid4()
         mock_models = [MagicMock() for _ in range(2)]
         for i, model in enumerate(mock_models):
             model.id = uuid4()
             model.store_id = store_id
+            model.tenant_id = tenant_id
             model.name = f"Test Product {i}"
             model.slug = f"test-product-{i}"
             model.sku = f"TEST-{i}"

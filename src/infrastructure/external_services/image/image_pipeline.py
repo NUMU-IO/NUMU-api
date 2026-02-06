@@ -10,10 +10,9 @@ from uuid import UUID
 
 from src.core.interfaces.services.storage_service import IStorageService, StorageBucket
 from src.infrastructure.external_services.image.image_processor import (
-    ImageProcessor,
     ImageProcessingError,
+    ImageProcessor,
     ImageVariantName,
-    ProcessedImageResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,9 +128,7 @@ class ImagePipeline:
         except Exception as exc:
             # Cleanup any already-uploaded variants on failure
             await self._cleanup_uploaded(uploaded_keys)
-            raise ImageProcessingError(
-                f"Failed to upload image variants: {exc}"
-            )
+            raise ImageProcessingError(f"Failed to upload image variants: {exc}")
 
         # Step 3: Build result
         original_url = variant_urls.get(ImageVariantName.ORIGINAL.value, "")

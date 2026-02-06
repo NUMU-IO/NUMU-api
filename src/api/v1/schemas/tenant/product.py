@@ -11,7 +11,7 @@ from src.core.value_objects.money import Currency
 class CreateProductRequest(BaseModel):
     """Create product request schema."""
 
-    store_id: UUID
+    # Note: store_id is passed as a path parameter, not in the body
     name: str = Field(..., min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=255)
     sku: str | None = Field(None, max_length=100)

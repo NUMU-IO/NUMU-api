@@ -3,10 +3,10 @@
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-import jwt
 
 from src.core.entities.customer import Customer
 from src.core.entities.user import User, UserRole, UserStatus
@@ -24,8 +24,7 @@ def _generate_rsa_keypair() -> tuple[str, str]:
         encryption_algorithm=serialization.NoEncryption(),
     ).decode()
     public_pem = (
-        private_key
-        .public_key()
+        private_key.public_key()
         .public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,

@@ -410,7 +410,7 @@ class TestPromoteToSuperuser:
         existing_user.role = UserRole.STORE_OWNER
 
         # Create mocked session with existing user
-        mock_session, mock_cm = create_async_session_mock(existing_user=existing_user)
+        _, mock_cm = create_async_session_mock(existing_user=existing_user)
 
         with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
             with patch("builtins.print") as mock_print:
@@ -430,7 +430,7 @@ class TestPromoteToSuperuser:
         email = "nonexistent@example.com"
 
         # Create mocked session with no user
-        mock_session, mock_cm = create_async_session_mock(existing_user=None)
+        _, mock_cm = create_async_session_mock(existing_user=None)
 
         with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
             with patch("builtins.print") as mock_print:
@@ -451,7 +451,7 @@ class TestPromoteToSuperuser:
         existing_user.role = UserRole.SUPER_ADMIN
 
         # Create mocked session with existing user
-        mock_session, mock_cm = create_async_session_mock(existing_user=existing_user)
+        _, mock_cm = create_async_session_mock(existing_user=existing_user)
 
         with patch("create_superuser.AsyncSessionLocal", return_value=mock_cm):
             with patch("builtins.print") as mock_print:

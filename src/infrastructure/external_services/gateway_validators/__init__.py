@@ -27,7 +27,7 @@ from .shipping_validators import (
     BostaValidator,
     MylerzValidator,
 )
-from .validator_factory import GatewayValidatorFactory
+from .validator_factory import GatewayValidatorFactory, get_validator_factory
 
 __all__ = [
     # Base
@@ -36,6 +36,7 @@ __all__ = [
     "GatewayValidatorError",
     # Factory
     "GatewayValidatorFactory",
+    "get_validator_factory",
     # Payment
     "FawryValidator",
     "PaymobValidator",

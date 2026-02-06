@@ -227,39 +227,21 @@ Examples:
         """,
     )
 
+    parser.add_argument("--email", "-e", help="Email for the new superuser")
+    parser.add_argument("--password", "-p", help="Password for the new superuser")
     parser.add_argument(
-        "--email", "-e",
-        help="Email for the new superuser"
+        "--first-name", "-f", default="Super", help="First name (default: Super)"
     )
     parser.add_argument(
-        "--password", "-p",
-        help="Password for the new superuser"
+        "--last-name", "-l", default="Admin", help="Last name (default: Admin)"
     )
     parser.add_argument(
-        "--first-name", "-f",
-        default="Super",
-        help="First name (default: Super)"
+        "--promote", metavar="EMAIL", help="Promote an existing user to superadmin"
     )
     parser.add_argument(
-        "--last-name", "-l",
-        default="Admin",
-        help="Last name (default: Admin)"
+        "--reset-password", metavar="EMAIL", help="Reset password for a user"
     )
-    parser.add_argument(
-        "--promote",
-        metavar="EMAIL",
-        help="Promote an existing user to superadmin"
-    )
-    parser.add_argument(
-        "--reset-password",
-        metavar="EMAIL",
-        help="Reset password for a user"
-    )
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="List all superusers"
-    )
+    parser.add_argument("--list", action="store_true", help="List all superusers")
 
     args = parser.parse_args()
 
@@ -296,12 +278,14 @@ Examples:
         if not valid:
             print(f"❌ {msg}")
             sys.exit(1)
-        asyncio.run(create_superuser(
-            args.email,
-            args.password,
-            args.first_name,
-            args.last_name,
-        ))
+        asyncio.run(
+            create_superuser(
+                args.email,
+                args.password,
+                args.first_name,
+                args.last_name,
+            )
+        )
         return
 
     # Interactive mode
