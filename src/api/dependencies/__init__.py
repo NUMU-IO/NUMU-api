@@ -1,12 +1,5 @@
 """API dependencies module."""
 
-from src.api.dependencies.pagination import (
-    CursorEncoder,
-    CursorParams,
-    build_cursor_response,
-    get_cursor_params,
-    get_cursor_values,
-)
 from src.api.dependencies.auth import (
     get_current_store,
     get_current_user_id,
@@ -22,6 +15,13 @@ from src.api.dependencies.fieldsets import (
     FieldSelector,
     FieldsetConfig,
     get_product_field_selector,
+)
+from src.api.dependencies.pagination import (
+    CursorEncoder,
+    CursorParams,
+    build_cursor_response,
+    get_cursor_params,
+    get_cursor_values,
 )
 from src.api.dependencies.repositories import (
     get_coupon_repository,

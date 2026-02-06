@@ -128,7 +128,9 @@ def create_app() -> FastAPI:
     app.add_middleware(TenantMiddleware)
     app.add_middleware(SentryMiddleware)  # Captures request context for Sentry
     app.add_middleware(LoggingMiddleware)  # Structured logging with request context
-    app.add_middleware(ResponseTimeMiddleware)  # Response time tracking and slow request logging
+    app.add_middleware(
+        ResponseTimeMiddleware
+    )  # Response time tracking and slow request logging
 
     # Root endpoint
     @app.get("/", tags=["Root"])

@@ -10,12 +10,11 @@ Provides endpoints for:
 - Downloading invoice PDF
 """
 
+import asyncio
+import logging
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
-
-import asyncio
-import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import Response
@@ -479,9 +478,7 @@ async def download_invoice_pdf(
 
             r2 = CloudflareR2StorageService()
             if r2.client and await r2.file_exists(invoice.pdf_r2_key):
-                signed_url = await r2.get_signed_url(
-                    invoice.pdf_r2_key, expires_in=300
-                )
+                signed_url = await r2.get_signed_url(invoice.pdf_r2_key, expires_in=300)
                 return Response(
                     status_code=307,
                     headers={"Location": signed_url},
