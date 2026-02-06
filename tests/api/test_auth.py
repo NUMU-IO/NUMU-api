@@ -45,9 +45,9 @@ class TestAuthRoutes:
         self, client: AsyncClient, sample_user_data: dict
     ):
         """Test registration with invalid email."""
-        sample_user_data["email"] = "invalid-email"
+        data = {**sample_user_data, "email": "invalid-email"}
 
-        response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        response = await client.post("/api/v1/auth/register", json=data)
 
         assert response.status_code == 422  # Validation error
 
@@ -56,9 +56,9 @@ class TestAuthRoutes:
         self, client: AsyncClient, sample_user_data: dict
     ):
         """Test registration with weak password."""
-        sample_user_data["password"] = "123"
+        data = {**sample_user_data, "password": "123"}
 
-        response = await client.post("/api/v1/auth/register", json=sample_user_data)
+        response = await client.post("/api/v1/auth/register", json=data)
 
         assert response.status_code == 422  # Validation error
 
@@ -66,7 +66,12 @@ class TestAuthRoutes:
     async def test_login_success(self, client: AsyncClient, sample_user_data: dict):
         """Test successful login."""
         # First register
-        await client.post("/api/v1/auth/register", json=sample_user_data)
+        register_response = await client.post(
+            "/api/v1/auth/register", json=sample_user_data
+        )
+        assert register_response.status_code == 201, (
+            f"Registration failed: {register_response.json()}"
+        )
 
         # Then login
         login_data = {
@@ -75,7 +80,7 @@ class TestAuthRoutes:
         }
         response = await client.post("/api/v1/auth/login", json=login_data)
 
-        assert response.status_code == 200
+        assert response.status_code == 200, f"Login failed: {response.json()}"
         data = response.json()
         assert data["success"] is True
         assert "tokens" in data["data"]

@@ -255,7 +255,7 @@ class DeleteProductImageUseCase:
 
         if variant_keys:
             # Delete all variant files from storage
-            for variant_name, key in variant_keys.items():
+            for _variant_name, key in variant_keys.items():
                 try:
                     await self.storage_service.delete_file(key)
                 except Exception:

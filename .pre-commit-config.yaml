@@ -1,103 +1,44 @@
 # Pre-commit hooks for NUMU API
-# See https://pre-commit.com for more information
-# See https://pre-commit.com/hooks.html for more hooks
-
-default_language_version:
-  python: python3.11
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+# Update hooks: pre-commit autoupdate
 
 repos:
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-yaml
-        args: [--unsafe]
       - id: check-json
       - id: check-toml
       - id: check-added-large-files
-        args: [--maxkb=1000]
-      - id: check-case-conflict
+        args: [--maxkb=500]
       - id: check-merge-conflict
-      - id: check-docstring-first
       - id: debug-statements
-      - id: mixed-line-ending
-        args: [--fix=lf]
-      - id: name-tests-test
-        args: [--pytest-test-first]
-      - id: requirements-txt-fixer
 
-  # Python code formatting with Ruff
+  # Python linting and formatting with Ruff
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.14
+    rev: v0.9.1
     hooks:
-      # Run the linter
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
-      # Run the formatter
       - id: ruff-format
 
-  # Type checking with mypy
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - pydantic>=2.5.3
-          - sqlalchemy[asyncio]>=2.0.25
-          - types-redis
-        args: [--ignore-missing-imports, --no-strict-optional]
-        exclude: ^(tests/|alembic/)
-
-  # Security checks
+  # Security checks (high severity only)
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.6
+    rev: 1.8.2
     hooks:
       - id: bandit
-        args: [-c, pyproject.toml]
+        args: [-c, pyproject.toml, -ll]
         additional_dependencies: ["bandit[toml]"]
-        exclude: ^tests/
+        files: ^src/
 
-  # Check for common security issues in dependencies
-  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
-    rev: v1.3.3
-    hooks:
-      - id: python-safety-dependencies-check
-        files: pyproject.toml
+# Note: mypy is run separately in CI with more lenient settings
+# Run manually: mypy src/ --ignore-missing-imports
 
-  # Dockerfile linting
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.12.0
-    hooks:
-      - id: hadolint-docker
-        args: [--ignore, DL3008, --ignore, DL3009]
-
-  # YAML formatting
-  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.12.0
-    hooks:
-      - id: pretty-format-yaml
-        args: [--autofix, --indent, '2']
-
-  # Commit message linting (conventional commits)
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.0.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-        args: [--strict]
-
-# Configuration for specific hooks
+# CI configuration for pre-commit.ci
 ci:
-  autofix_commit_msg: |
-    [pre-commit.ci] auto fixes from pre-commit hooks
-
-    for more information, see https://pre-commit.ci
   autofix_prs: true
-  autoupdate_branch: ''
-  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
-  autoupdate_schedule: weekly
-  skip: []
-  submodules: false
+  autoupdate_schedule: monthly

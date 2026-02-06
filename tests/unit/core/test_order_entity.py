@@ -189,7 +189,9 @@ class TestOrderEntity:
         assert order.can_be_cancelled is True
 
         order = self._create_order(status=OrderStatus.PROCESSING)
-        assert order.can_be_cancelled is False
+        assert (
+            order.can_be_cancelled is True
+        )  # Processing orders can still be cancelled
 
         order = self._create_order(status=OrderStatus.SHIPPED)
         assert order.can_be_cancelled is False

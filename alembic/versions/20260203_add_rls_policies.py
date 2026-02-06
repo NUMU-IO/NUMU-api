@@ -21,26 +21,27 @@ Tables with RLS:
 The policies use a session variable `app.current_tenant` which must be set
 before any query. This is handled by the application's database connection layer.
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'c3d4e5f6a7b8'
-down_revision: Union[str, None] = 'b5c6d7e8f9a0'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "c3d4e5f6a7b8"
+down_revision: str | None = "b5c6d7e8f9a0"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # Tables that require RLS policies (all have tenant_id column)
 TENANT_SCOPED_TABLES = [
-    'stores',
-    'products',
-    'orders',
-    'customers',
-    'categories',
-    'invoices',
-    'customer_addresses',
-    'coupons',
+    "stores",
+    "products",
+    "orders",
+    "customers",
+    "categories",
+    "invoices",
+    "customer_addresses",
+    "coupons",
 ]
 
 

@@ -292,7 +292,9 @@ async def update_payment_settings(
     request: UpdatePaymentSettingsRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
 ):
     """Update payment settings for the store."""
     settings = store.settings or {}
@@ -381,7 +383,9 @@ async def update_shipping_settings(
     request: UpdateShippingSettingsRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
 ):
     """Update shipping settings for the store."""
     settings = store.settings or {}
@@ -444,7 +448,9 @@ async def add_shipping_zone(
     request: CreateShippingZoneRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    onboarding_repo: Annotated[OnboardingRepository, Depends(get_onboarding_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
 ):
     """Add a new shipping zone."""
     settings = store.settings or {}

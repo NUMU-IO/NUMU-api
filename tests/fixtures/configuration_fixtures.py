@@ -90,7 +90,7 @@ def invalid_paymob_credentials() -> dict[str, Any]:
 def valid_vodafone_cash_credentials() -> dict[str, Any]:
     """Valid Vodafone Cash credentials."""
     return {
-        "merchant_id": "VF123456",
+        "merchant_id": "123456",  # Must be numeric for validation
         "api_key": "vf_api_key_abcdef123456",
         "pin": "1234",
         "environment": "sandbox",
@@ -123,7 +123,7 @@ def valid_tap_credentials() -> dict[str, Any]:
     """Valid Tap Payments credentials."""
     return {
         "secret_key": "sk_test_XYZ123abc456def789",
-        "public_key": "pk_test_XYZ123abc456def789",
+        "publishable_key": "pk_test_XYZ123abc456def789",
         "merchant_id": "TAP123456",
         "environment": "sandbox",
     }
@@ -185,7 +185,7 @@ def mock_service_credential(tenant_id: UUID, admin_id: UUID):
     credential.tenant_id = tenant_id
     credential.service_type = ServiceType.PAYMENT_GATEWAY
     credential.service_name = ServiceName.FAWRY
-    credential.encrypted_credentials = b"encrypted_data"
+    credential.credentials_encrypted = b"encrypted_data"
     credential.is_validated = True
     credential.is_active = True
     credential.last_validated_at = datetime.utcnow()

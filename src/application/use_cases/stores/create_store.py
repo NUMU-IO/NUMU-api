@@ -158,7 +158,7 @@ class CreateStoreUseCase:
         tenant = await self.tenant_service.create_tenant(
             name=dto.name,
             subdomain=subdomain,
-            owner_id=str(owner_id),
+            owner_id=owner_id,
         )
 
         # Create store entity with tenant_id
