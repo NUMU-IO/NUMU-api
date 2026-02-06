@@ -48,6 +48,14 @@ dependencies = [
     "Pillow>=10.2.0",
     "qrcode[pil]>=7.4.0",
 
+    # PDF Generation
+    # WeasyPrint 68.0+ includes security fix CVE-2025-68616 (SSRF in url_fetcher).
+    # Requires system libs: pango, cairo, gdk-pixbuf, harfbuzz, fontconfig
+    # (installed in docker/Dockerfile). Uses Jinja2 (already a FastAPI dependency).
+    # Ref: https://doc.courtbouillon.org/weasyprint/stable/changelog.html
+    "weasyprint>=68.0",
+    "Jinja2>=3.1.0",
+
     # Admin Panel
     "sqladmin>=0.16.0",
     "wtforms>=3.1.0",

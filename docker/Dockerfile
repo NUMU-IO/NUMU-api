@@ -7,6 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -24,7 +25,20 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    # WeasyPrint runtime dependencies (HTML/CSS -> PDF generation)
+    # Ref: https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#debian-ubuntu
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libpangoft2-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libcairo2 \
+    libharfbuzz0b \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Arabic fonts for invoice PDF generation (Noto Sans Arabic, OFL license)
+COPY docker/fonts/ /usr/share/fonts/truetype/noto-arabic/
+RUN fc-cache -fv
 
 # Create non-root user
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
