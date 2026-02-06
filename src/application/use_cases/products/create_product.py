@@ -236,6 +236,7 @@ class CreateProductUseCase:
         # Create product entity
         product = Product(
             store_id=store_id,
+            tenant_id=store.tenant_id,
             name=dto.name.strip(),
             slug=slug,
             sku=dto.sku.strip() if dto.sku else None,

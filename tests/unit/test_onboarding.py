@@ -4,8 +4,7 @@ Tests StoreOnboarding entity: step completion, skip, dismiss, percentage
 calculation, current step tracking, and the auto-complete utility functions.
 """
 
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest

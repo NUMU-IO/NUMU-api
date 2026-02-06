@@ -39,15 +39,24 @@ def run_profile(profile: str, host: str):
     html_report = RESULTS_DIR / f"{profile}.html"
 
     cmd = [
-        sys.executable, "-m", "locust",
-        "-f", str(LOCUST_FILE),
-        "--host", host,
-        "--users", str(cfg["users"]),
-        "--spawn-rate", str(cfg["spawn_rate"]),
-        "--run-time", cfg["run_time"],
+        sys.executable,
+        "-m",
+        "locust",
+        "-f",
+        str(LOCUST_FILE),
+        "--host",
+        host,
+        "--users",
+        str(cfg["users"]),
+        "--spawn-rate",
+        str(cfg["spawn_rate"]),
+        "--run-time",
+        cfg["run_time"],
         "--headless",
-        "--csv", str(csv_prefix),
-        "--html", str(html_report),
+        "--csv",
+        str(csv_prefix),
+        "--html",
+        str(html_report),
     ]
 
     print(f"\n  Profile : {profile}")
@@ -63,10 +72,15 @@ def run_profile(profile: str, host: str):
 
 def run_ui(host: str, port: int):
     cmd = [
-        sys.executable, "-m", "locust",
-        "-f", str(LOCUST_FILE),
-        "--host", host,
-        "--web-port", str(port),
+        sys.executable,
+        "-m",
+        "locust",
+        "-f",
+        str(LOCUST_FILE),
+        "--host",
+        host,
+        "--web-port",
+        str(port),
     ]
 
     print(f"\n  Locust web UI starting on http://localhost:{port}")

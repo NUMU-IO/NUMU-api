@@ -1,5 +1,6 @@
 """Service dependencies."""
 
+from src.infrastructure.cache import ProductCacheService, get_product_cache
 from src.infrastructure.external_services import (
     password_service,
     token_service,
@@ -55,3 +56,12 @@ def get_image_pipeline():
         image_processor=ImageProcessor(),
         storage_service=CloudflareR2StorageService(),
     )
+
+
+def get_product_cache_service() -> ProductCacheService:
+    """Get product cache service dependency.
+
+    Returns a singleton instance of ProductCacheService for
+    caching product listings and category trees.
+    """
+    return get_product_cache()

@@ -5,6 +5,7 @@ Revises: a3b4c5d6e7f8
 Create Date: 2026-02-02 12:00:00.000000
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -12,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'b1c2d3e4f5a6'
-down_revision: str | None = 'a3b4c5d6e7f8'
+revision: str = "b1c2d3e4f5a6"
+down_revision: str | None = "a3b4c5d6e7f8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -32,9 +33,7 @@ def upgrade() -> None:
     """)
 
     # 2. Create coupons table via raw SQL (avoids SQLAlchemy enum auto-creation bug)
-    table_exists = conn.exec_driver_sql(
-        "SELECT to_regclass('public.coupons')"
-    ).scalar()
+    table_exists = conn.exec_driver_sql("SELECT to_regclass('public.coupons')").scalar()
 
     if table_exists is None:
         conn.exec_driver_sql("""
@@ -80,22 +79,24 @@ def upgrade() -> None:
 
     if not col_exists:
         op.add_column(
-            'orders',
-            sa.Column('coupon_code', sa.String(length=50), nullable=True),
-            schema='public',
+            "orders",
+            sa.Column("coupon_code", sa.String(length=50), nullable=True),
+            schema="public",
         )
         op.add_column(
-            'orders',
-            sa.Column('coupon_id', sa.UUID(), nullable=True),
-            schema='public',
+            "orders",
+            sa.Column("coupon_id", sa.UUID(), nullable=True),
+            schema="public",
         )
         op.create_foreign_key(
-            'fk_orders_coupon_id_coupons',
-            'orders', 'coupons',
-            ['coupon_id'], ['id'],
-            source_schema='public',
-            referent_schema='public',
-            ondelete='SET NULL',
+            "fk_orders_coupon_id_coupons",
+            "orders",
+            "coupons",
+            ["coupon_id"],
+            ["id"],
+            source_schema="public",
+            referent_schema="public",
+            ondelete="SET NULL",
         )
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS ix_public_orders_coupon_id ON public.orders (coupon_id)"
@@ -106,16 +107,24 @@ def downgrade() -> None:
     conn = op.get_bind()
 
     # 1. Remove coupon columns from orders
-    op.drop_index(op.f('ix_public_orders_coupon_id'), table_name='orders', schema='public')
-    op.drop_constraint('fk_orders_coupon_id_coupons', 'orders', schema='public', type_='foreignkey')
-    op.drop_column('orders', 'coupon_id', schema='public')
-    op.drop_column('orders', 'coupon_code', schema='public')
+    op.drop_index(
+        op.f("ix_public_orders_coupon_id"), table_name="orders", schema="public"
+    )
+    op.drop_constraint(
+        "fk_orders_coupon_id_coupons", "orders", schema="public", type_="foreignkey"
+    )
+    op.drop_column("orders", "coupon_id", schema="public")
+    op.drop_column("orders", "coupon_code", schema="public")
 
     # 2. Drop coupons table
-    op.drop_index(op.f('ix_public_coupons_tenant_id'), table_name='coupons', schema='public')
-    op.drop_index(op.f('ix_public_coupons_code'), table_name='coupons', schema='public')
-    op.drop_index(op.f('ix_public_coupons_store_id'), table_name='coupons', schema='public')
-    op.drop_table('coupons', schema='public')
+    op.drop_index(
+        op.f("ix_public_coupons_tenant_id"), table_name="coupons", schema="public"
+    )
+    op.drop_index(op.f("ix_public_coupons_code"), table_name="coupons", schema="public")
+    op.drop_index(
+        op.f("ix_public_coupons_store_id"), table_name="coupons", schema="public"
+    )
+    op.drop_table("coupons", schema="public")
 
     # 3. Drop discounttype enum
     conn.exec_driver_sql("DROP TYPE IF EXISTS public.discounttype")

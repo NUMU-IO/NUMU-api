@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import re
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,7 @@ class TenantService:
         self.tenant_repo = TenantRepository(db)
 
     async def create_tenant(
-        self, name: str, subdomain: str, owner_id: str = None, plan: str = "free"
+        self, name: str, subdomain: str, owner_id: UUID = None, plan: str = "free"
     ):
         """Create a new tenant with its own database schema.
 
@@ -87,8 +88,10 @@ class TenantService:
         """Generate a safe PostgreSQL schema name."""
         # Replace hyphens with underscores (hyphens not allowed in unquoted identifiers)
         safe_subdomain = subdomain.lower().replace("-", "_")
-        # Add hash for uniqueness and collision avoidance
-        schema_hash = hashlib.md5(subdomain.encode()).hexdigest()[:8]
+        # Add hash for uniqueness and collision avoidance (not security-sensitive)
+        schema_hash = hashlib.md5(
+            subdomain.encode(), usedforsecurity=False
+        ).hexdigest()[:8]
         return f"tenant_{safe_subdomain}_{schema_hash}"
 
     async def _provision_schema(self, schema_name: str):
