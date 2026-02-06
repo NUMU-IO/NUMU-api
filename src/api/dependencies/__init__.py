@@ -9,6 +9,13 @@ from src.api.dependencies.auth import (
     require_store_owner,
 )
 from src.api.dependencies.database import get_db
+from src.api.dependencies.fieldsets import (
+    PRODUCT_DETAIL_FIELDS,
+    PRODUCT_FIELDSET_CONFIG,
+    FieldSelector,
+    FieldsetConfig,
+    get_product_field_selector,
+)
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_customer_address_repository,
@@ -57,4 +64,10 @@ __all__ = [
     "get_storage_service",
     "get_ai_service",
     "get_image_pipeline",
+    # Fieldsets
+    "FieldSelector",
+    "FieldsetConfig",
+    "PRODUCT_DETAIL_FIELDS",
+    "PRODUCT_FIELDSET_CONFIG",
+    "get_product_field_selector",
 ]
