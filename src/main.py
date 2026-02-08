@@ -142,11 +142,16 @@ def create_app() -> FastAPI:
     @app.get("/", tags=["Root"])
     async def root():
         """Root endpoint - API information."""
+        if settings.debug:
+            return {
+                "name": settings.app_name,
+                "version": settings.app_version,
+                "docs": "/docs",
+                "health": "/api/v1/public/health",
+            }
+        # Production: minimal info to reduce info disclosure
         return {
-            "name": settings.app_name,
-            "version": settings.app_version,
-            "description": "E-commerce platform API for NUMU",
-            "docs": "/docs" if settings.debug else None,
+            "status": "ok",
             "health": "/api/v1/public/health",
         }
 
