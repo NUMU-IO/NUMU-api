@@ -2,14 +2,16 @@
 
 from pydantic import BaseModel, EmailStr, Field
 
+from src.api.dependencies.sanitization import SanitizedStr
+
 
 class RegisterRequest(BaseModel):
     """Registration request schema."""
 
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
+    first_name: SanitizedStr = Field(..., min_length=1, max_length=100)
+    last_name: SanitizedStr = Field(..., min_length=1, max_length=100)
     phone: str | None = Field(None, max_length=20)
 
 
@@ -84,7 +86,7 @@ class ChangePasswordRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     """Update profile request schema."""
 
-    first_name: str | None = Field(None, min_length=1, max_length=100)
-    last_name: str | None = Field(None, min_length=1, max_length=100)
+    first_name: SanitizedStr | None = Field(None, min_length=1, max_length=100)
+    last_name: SanitizedStr | None = Field(None, min_length=1, max_length=100)
     phone: str | None = Field(None, max_length=20)
     avatar_url: str | None = Field(None, max_length=500)

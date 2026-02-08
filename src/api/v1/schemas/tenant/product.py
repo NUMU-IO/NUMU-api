@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.api.dependencies.sanitization import SanitizedStr
 from src.core.value_objects.money import Currency
 
 
@@ -12,11 +13,11 @@ class CreateProductRequest(BaseModel):
     """Create product request schema."""
 
     # Note: store_id is passed as a path parameter, not in the body
-    name: str = Field(..., min_length=1, max_length=255)
+    name: SanitizedStr = Field(..., min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=255)
     sku: str | None = Field(None, max_length=100)
-    description: str | None = Field(None, max_length=10000)
-    short_description: str | None = Field(None, max_length=500)
+    description: SanitizedStr | None = Field(None, max_length=10000)
+    short_description: SanitizedStr | None = Field(None, max_length=500)
     product_type: str = Field(default="physical")
     price: Decimal = Field(..., ge=0)
     price_currency: str = Field(default="EGP", max_length=3)
@@ -46,11 +47,11 @@ class CreateProductRequest(BaseModel):
 class UpdateProductRequest(BaseModel):
     """Update product request schema."""
 
-    name: str | None = Field(None, min_length=1, max_length=255)
+    name: SanitizedStr | None = Field(None, min_length=1, max_length=255)
     slug: str | None = Field(None, max_length=255)
     sku: str | None = Field(None, max_length=100)
-    description: str | None = Field(None, max_length=10000)
-    short_description: str | None = Field(None, max_length=500)
+    description: SanitizedStr | None = Field(None, max_length=10000)
+    short_description: SanitizedStr | None = Field(None, max_length=500)
     price: Decimal | None = Field(None, ge=0)
     compare_at_price: Decimal | None = Field(None, ge=0)
     cost_price: Decimal | None = Field(None, ge=0)

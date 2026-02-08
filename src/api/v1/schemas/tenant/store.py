@@ -2,11 +2,13 @@
 
 from pydantic import BaseModel, EmailStr, Field
 
+from src.api.dependencies.sanitization import SanitizedStr
+
 
 class CreateStoreRequest(BaseModel):
     """Create store request schema."""
 
-    name: str = Field(..., min_length=1, max_length=255)
+    name: SanitizedStr = Field(..., min_length=1, max_length=255)
     subdomain: str = Field(
         ...,
         min_length=3,
@@ -24,8 +26,8 @@ class CreateStoreRequest(BaseModel):
 class UpdateStoreRequest(BaseModel):
     """Update store request schema."""
 
-    name: str | None = Field(None, min_length=1, max_length=255)
-    description: str | None = None
+    name: SanitizedStr | None = Field(None, min_length=1, max_length=255)
+    description: SanitizedStr | None = None
     logo_url: str | None = Field(None, max_length=500)
     banner_url: str | None = Field(None, max_length=500)
     contact_email: EmailStr | None = None

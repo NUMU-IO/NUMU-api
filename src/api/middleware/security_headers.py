@@ -29,14 +29,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     instructs browsers to enable various security features.
     """
 
-    # Default CSP directives - adjust based on your application's needs
+    # Default CSP directives for API responses (no browser-rendered content).
+    # Restrictive by default; docs pages get a relaxed policy below.
     DEFAULT_CSP = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
-        "font-src 'self' https: data:; "
-        "connect-src 'self' https:; "
+        "default-src 'none'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'"
@@ -77,14 +73,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self.hsts_max_age = hsts_max_age
         self.include_hsts = include_hsts
 
-    # Relaxed CSP for Swagger/ReDoc documentation pages (debug only)
+    # Relaxed CSP for Swagger/ReDoc documentation pages (debug only).
+    # Permits CDN scripts/styles needed by the Swagger UI and ReDoc renderers.
     DOCS_CSP = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
         "img-src 'self' data: https:; "
         "font-src 'self' https: data:; "
-        "connect-src 'self' https:; "
+        "connect-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'"
@@ -174,6 +171,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Cross-Origin-Resource-Policy: Control resource loading
         # same-origin = Only allow same-origin requests
         response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+
+        # X-DNS-Prefetch-Control: Prevent DNS prefetching of external links
+        response.headers["X-DNS-Prefetch-Control"] = "off"
+
+        # Strip Server header to reduce technology fingerprinting
+        if "server" in response.headers:
+            del response.headers["server"]
 
         # Cache-Control for security-sensitive responses
         # Prevent caching of authenticated content
