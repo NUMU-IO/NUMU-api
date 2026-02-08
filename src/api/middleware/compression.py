@@ -22,13 +22,13 @@ References:
 
 import logging
 
-from starlette.middleware.gzip import GzipMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
 
-class CompressionMiddleware(GzipMiddleware):
+class CompressionMiddleware(GZipMiddleware):
     """Gzip compression middleware with SSE bypass.
 
     Wraps Starlette's GzipMiddleware and adds a guard against
