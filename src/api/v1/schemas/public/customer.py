@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, EmailStr, Field
 
+from src.api.dependencies.sanitization import SanitizedStr
+
 # ============== Request Schemas ==============
 
 
@@ -10,8 +12,8 @@ class CustomerRegisterRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=100)
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
+    first_name: SanitizedStr = Field(..., min_length=1, max_length=100)
+    last_name: SanitizedStr = Field(..., min_length=1, max_length=100)
     phone: str | None = Field(None, max_length=20)
     accepts_marketing: bool = False
 
@@ -26,8 +28,8 @@ class CustomerLoginRequest(BaseModel):
 class CustomerUpdateProfileRequest(BaseModel):
     """Customer profile update request schema."""
 
-    first_name: str | None = Field(None, min_length=1, max_length=100)
-    last_name: str | None = Field(None, min_length=1, max_length=100)
+    first_name: SanitizedStr | None = Field(None, min_length=1, max_length=100)
+    last_name: SanitizedStr | None = Field(None, min_length=1, max_length=100)
     phone: str | None = Field(None, max_length=20)
     accepts_marketing: bool | None = None
 
@@ -55,14 +57,14 @@ class CustomerPasswordResetConfirmRequest(BaseModel):
 class CreateAddressRequest(BaseModel):
     """Create address request schema."""
 
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
-    address_line1: str = Field(..., min_length=1, max_length=255)
-    address_line2: str | None = Field(None, max_length=255)
-    city: str = Field(..., min_length=1, max_length=100)
-    state: str | None = Field(None, max_length=100)
+    first_name: SanitizedStr = Field(..., min_length=1, max_length=100)
+    last_name: SanitizedStr = Field(..., min_length=1, max_length=100)
+    address_line1: SanitizedStr = Field(..., min_length=1, max_length=255)
+    address_line2: SanitizedStr | None = Field(None, max_length=255)
+    city: SanitizedStr = Field(..., min_length=1, max_length=100)
+    state: SanitizedStr | None = Field(None, max_length=100)
     postal_code: str | None = Field(None, max_length=20)
-    country: str = Field(..., min_length=1, max_length=100)
+    country: SanitizedStr = Field(..., min_length=1, max_length=100)
     phone: str | None = Field(None, max_length=20)
     is_default: bool = False
     label: str = Field("home", pattern="^(home|work|other)$")
@@ -71,12 +73,12 @@ class CreateAddressRequest(BaseModel):
 class UpdateAddressRequest(BaseModel):
     """Update address request schema."""
 
-    first_name: str | None = Field(None, min_length=1, max_length=100)
-    last_name: str | None = Field(None, min_length=1, max_length=100)
-    address_line1: str | None = Field(None, min_length=1, max_length=255)
-    address_line2: str | None = Field(None, max_length=255)
-    city: str | None = Field(None, min_length=1, max_length=100)
-    state: str | None = Field(None, max_length=100)
+    first_name: SanitizedStr | None = Field(None, min_length=1, max_length=100)
+    last_name: SanitizedStr | None = Field(None, min_length=1, max_length=100)
+    address_line1: SanitizedStr | None = Field(None, min_length=1, max_length=255)
+    address_line2: SanitizedStr | None = Field(None, max_length=255)
+    city: SanitizedStr | None = Field(None, min_length=1, max_length=100)
+    state: SanitizedStr | None = Field(None, max_length=100)
     postal_code: str | None = Field(None, max_length=20)
     country: str | None = Field(None, min_length=1, max_length=100)
     phone: str | None = Field(None, max_length=20)

@@ -4,12 +4,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from src.api.dependencies.sanitization import SanitizedStr
+
 
 class OrderLineItemRequest(BaseModel):
     """Order line item request schema."""
 
     product_id: UUID
-    product_name: str = Field(..., min_length=1, max_length=255)
+    product_name: SanitizedStr = Field(..., min_length=1, max_length=255)
     variant_id: UUID | None = None
     variant_name: str | None = None
     sku: str | None = None
@@ -20,11 +22,11 @@ class OrderLineItemRequest(BaseModel):
 class OrderAddressRequest(BaseModel):
     """Order shipping/billing address request schema."""
 
-    first_name: str = Field(..., min_length=1, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
-    address_line1: str = Field(..., min_length=1, max_length=255)
-    address_line2: str | None = Field(None, max_length=255)
-    city: str = Field(..., min_length=1, max_length=100)
+    first_name: SanitizedStr = Field(..., min_length=1, max_length=100)
+    last_name: SanitizedStr = Field(..., min_length=1, max_length=100)
+    address_line1: SanitizedStr = Field(..., min_length=1, max_length=255)
+    address_line2: SanitizedStr | None = Field(None, max_length=255)
+    city: SanitizedStr = Field(..., min_length=1, max_length=100)
     state: str | None = Field(None, max_length=100)
     postal_code: str | None = Field(None, max_length=20)
     country: str = Field(..., min_length=2, max_length=100)
@@ -44,7 +46,7 @@ class CreateOrderRequest(BaseModel):
     currency: str = Field(default="EGP", max_length=3)
     payment_method: str | None = None
     shipping_method: str | None = None
-    customer_notes: str | None = None
+    customer_notes: SanitizedStr | None = None
 
 
 class UpdateOrderRequest(BaseModel):
@@ -58,8 +60,8 @@ class UpdateOrderRequest(BaseModel):
     payment_method: str | None = None
     shipping_method: str | None = None
     tracking_number: str | None = None
-    notes: str | None = None
-    customer_notes: str | None = None
+    notes: SanitizedStr | None = None
+    customer_notes: SanitizedStr | None = None
 
 
 class UpdateOrderStatusRequest(BaseModel):

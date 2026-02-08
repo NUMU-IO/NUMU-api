@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from src.api.dependencies.sanitization import SanitizedStr
 from src.api.v1.schemas.tenant.order import OrderAddressRequest
 
 
@@ -27,7 +28,7 @@ class CheckoutRequest(BaseModel):
     billing_address: OrderAddressRequest | None = None
     payment_method: str | None = Field(None, description="e.g. paymob_card, cod")
     shipping_method: str | None = None
-    customer_notes: str | None = Field(None, max_length=1000)
+    customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
 
 
