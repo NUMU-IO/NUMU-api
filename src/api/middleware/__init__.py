@@ -1,5 +1,7 @@
 """API middleware module."""
 
+from src.api.middleware.cache_headers import CacheHeadersMiddleware
+from src.api.middleware.compression import CompressionMiddleware
 from src.api.middleware.cors import setup_cors
 from src.api.middleware.error_handler import (
     error_handler_middleware,
@@ -23,6 +25,8 @@ __all__ = [
     "setup_cors",
     "error_handler_middleware",
     "setup_exception_handlers",
+    "CacheHeadersMiddleware",
+    "CompressionMiddleware",
     "LoggingMiddleware",
     "logging_middleware",
     "TenantMiddleware",

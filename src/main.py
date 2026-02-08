@@ -12,6 +12,8 @@ from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 from src.api.admin import setup_admin
 from src.api.middleware import (
+    CacheHeadersMiddleware,
+    CompressionMiddleware,
     LoggingMiddleware,
     RateLimitMiddleware,
     ResponseTimeMiddleware,
@@ -123,6 +125,10 @@ def create_app() -> FastAPI:
     # Add middleware (order matters: first added = outermost)
     # Security headers should be outermost to ensure all responses have them
     app.add_middleware(SecurityHeadersMiddleware)
+    # Cache headers for public storefront endpoints (before compression so Vary is correct)
+    app.add_middleware(CacheHeadersMiddleware)
+    # Gzip compression for dev/local (Nginx handles compression in staging/prod)
+    app.add_middleware(CompressionMiddleware)
     # Rate limiting should be next to block requests early
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(TenantMiddleware)
