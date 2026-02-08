@@ -204,6 +204,9 @@ class InvoiceResponse(BaseModel):
     qr_code_data: str | None
     qr_code_image: str | None
 
+    # PDF
+    pdf_url: str | None = None
+
     notes: str | None
     notes_ar: str | None
 

@@ -309,6 +309,14 @@ class OrderRepository(IOrderRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_by_tracking_number(self, tracking_number: str) -> Order | None:
+        """Get order by shipping tracking number (cross-store lookup)."""
+        result = await self.session.execute(
+            select(OrderModel).where(OrderModel.tracking_number == tracking_number)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def get_by_date_range(
         self,
         store_id: UUID,

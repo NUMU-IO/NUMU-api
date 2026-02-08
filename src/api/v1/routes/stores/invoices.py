@@ -14,7 +14,11 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi.responses import Response
 
 from src.api.dependencies import require_store_owner
 from src.api.responses import SuccessResponse
@@ -359,9 +363,23 @@ async def submit_invoice_to_eta(
             message="Invoice accepted (ETA simulation mode)",
         )
 
-    # Submit to ETA
+    # Submit to ETA (with optional R2 storage for QR code)
     eta_service = ETAInvoiceService()
-    updated_invoice = await eta_service.process_invoice_submission(invoice)
+    r2_service = None
+    try:
+        from src.infrastructure.external_services.cloudflare_r2 import (
+            CloudflareR2StorageService,
+        )
+
+        r2_service = CloudflareR2StorageService()
+        if not r2_service.client:
+            r2_service = None
+    except Exception:
+        pass
+
+    updated_invoice = await eta_service.process_invoice_submission(
+        invoice, storage_service=r2_service
+    )
     _invoices[invoice_id] = updated_invoice
 
     if updated_invoice.status == InvoiceStatus.ACCEPTED:
@@ -417,6 +435,102 @@ async def delete_invoice(
 
     del _invoices[invoice_id]
     return None
+
+
+logger = logging.getLogger(__name__)
+
+
+@router.get(
+    "/{invoice_id}/pdf",
+    summary="Download invoice PDF",
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Invoice PDF file",
+        }
+    },
+)
+async def download_invoice_pdf(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    invoice_id: Annotated[UUID, Path(description="Invoice ID")],
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    regenerate: bool = Query(False, description="Force PDF regeneration"),
+):
+    """Download invoice as PDF.
+
+    Generates a bilingual Arabic/English PDF using the invoice_ar template.
+    The PDF is cached in Cloudflare R2 for subsequent downloads.
+    Pass ?regenerate=true to force re-generation after invoice updates.
+    """
+    invoice = _invoices.get(invoice_id)
+
+    if not invoice or invoice.store_id != store_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found",
+        )
+
+    # Try to serve cached PDF from R2
+    if invoice.pdf_r2_key and not regenerate:
+        try:
+            from src.infrastructure.external_services.cloudflare_r2 import (
+                CloudflareR2StorageService,
+            )
+
+            r2 = CloudflareR2StorageService()
+            if r2.client and await r2.file_exists(invoice.pdf_r2_key):
+                signed_url = await r2.get_signed_url(
+                    invoice.pdf_r2_key, expires_in=300
+                )
+                return Response(
+                    status_code=307,
+                    headers={"Location": signed_url},
+                )
+        except Exception:
+            logger.debug("r2_cache_miss", extra={"invoice_id": str(invoice_id)})
+
+    # Generate PDF
+    from src.infrastructure.external_services.invoice import InvoicePDFGenerator
+
+    generator = InvoicePDFGenerator(
+        template_name="invoice_ar.html",
+        language="ar_en",
+    )
+    pdf_bytes = await asyncio.to_thread(generator.generate, invoice)
+
+    # Upload to R2 (non-blocking best-effort)
+    try:
+        from src.core.interfaces.services.storage_service import StorageBucket
+        from src.infrastructure.external_services.cloudflare_r2 import (
+            CloudflareR2StorageService,
+        )
+
+        r2 = CloudflareR2StorageService()
+        if r2.client:
+            uploaded = await r2.upload_file(
+                file_content=pdf_bytes,
+                filename=f"{invoice.invoice_number}.pdf",
+                content_type="application/pdf",
+                bucket=StorageBucket.DOCUMENTS,
+            )
+            invoice.pdf_r2_key = uploaded.key
+            invoice.pdf_url = uploaded.url
+            invoice.touch()
+    except Exception:
+        logger.warning(
+            "pdf_r2_upload_failed",
+            extra={"invoice_id": str(invoice_id)},
+            exc_info=True,
+        )
+
+    safe_filename = invoice.invoice_number.replace("/", "-")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_filename}.pdf"',
+        },
+    )
 
 
 def _build_invoice_response(invoice: Invoice) -> InvoiceResponse:
@@ -503,6 +617,7 @@ def _build_invoice_response(invoice: Invoice) -> InvoiceResponse:
         eta_portal_url=invoice.eta_portal_url,
         qr_code_data=invoice.qr_code_data,
         qr_code_image=invoice.qr_code_image,
+        pdf_url=invoice.pdf_url,
         notes=invoice.notes,
         notes_ar=invoice.notes_ar,
         created_at=invoice.created_at,

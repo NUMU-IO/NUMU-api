@@ -107,6 +107,10 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         DateTime(timezone=True), nullable=True
     )
 
+    # PDF storage
+    pdf_r2_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pdf_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Related documents
     related_invoice_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
