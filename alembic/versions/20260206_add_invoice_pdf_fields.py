@@ -11,6 +11,7 @@ PDFs in Cloudflare R2 and caching their public URLs.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.

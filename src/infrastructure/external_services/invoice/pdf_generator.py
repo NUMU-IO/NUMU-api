@@ -146,9 +146,7 @@ class InvoicePDFGenerator:
 
         line_items = []
         for idx, item in enumerate(invoice.line_items, 1):
-            tax_total = sum(
-                (t.amount for t in item.taxes), Decimal("0")
-            )
+            tax_total = sum((t.amount for t in item.taxes), Decimal("0"))
             line_items.append({
                 "number": idx,
                 "description": (
