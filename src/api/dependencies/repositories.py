@@ -10,11 +10,13 @@ from src.infrastructure.repositories import (
     CouponRepository,
     CustomerAddressRepository,
     CustomerRepository,
+    FeedbackRepository,
     OnboardingRepository,
     OrderRepository,
     ProductRepository,
     StoreRepository,
     UserRepository,
+    WaitlistRepository,
 )
 
 
@@ -72,3 +74,17 @@ def get_order_repository(
 ) -> OrderRepository:
     """Get order repository dependency."""
     return OrderRepository(session)
+
+
+def get_waitlist_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> WaitlistRepository:
+    """Get waitlist repository dependency."""
+    return WaitlistRepository(session)
+
+
+def get_feedback_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> FeedbackRepository:
+    """Get feedback repository dependency."""
+    return FeedbackRepository(session)

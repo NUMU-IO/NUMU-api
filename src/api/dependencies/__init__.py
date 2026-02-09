@@ -27,11 +27,13 @@ from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_customer_address_repository,
     get_customer_repository,
+    get_feedback_repository,
     get_onboarding_repository,
     get_order_repository,
     get_product_repository,
     get_store_repository,
     get_user_repository,
+    get_waitlist_repository,
 )
 from src.api.dependencies.services import (
     get_ai_service,
@@ -59,11 +61,12 @@ __all__ = [
     "get_user_repository",
     "get_store_repository",
     "get_product_repository",
-    "get_coupon_repository",
     "get_customer_repository",
     "get_customer_address_repository",
+    "get_feedback_repository",
     "get_onboarding_repository",
     "get_order_repository",
+    "get_waitlist_repository",
     # Services
     "get_password_service",
     "get_token_service",

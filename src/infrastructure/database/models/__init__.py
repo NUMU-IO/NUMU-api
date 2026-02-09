@@ -9,9 +9,11 @@ from src.infrastructure.database.models.base import (
 
 # Public schema models
 from src.infrastructure.database.models.public import (
+    FeedbackModel,
     StoreOnboardingModel,
     TenantModel,
     UserModel,
+    WaitlistModel,
 )
 
 # Tenant-scoped models (with tenant_id discriminator)
@@ -30,9 +32,11 @@ __all__ = [
     "UUIDMixin",
     "TenantMixin",
     # Public
+    "FeedbackModel",
     "StoreOnboardingModel",
     "TenantModel",
     "UserModel",
+    "WaitlistModel",
     "AuditLogModel",
     # Tenant-scoped
     "StoreModel",

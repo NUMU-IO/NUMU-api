@@ -34,10 +34,13 @@ URL Hierarchy:
 
 from fastapi import APIRouter
 
+# Admin routes (super admin only — waitlist, feedback)
+from src.api.v1.routes.admin import router as admin_router
 from src.api.v1.routes.auth import router as auth_router
 
-# Public routes
+# Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
+from src.api.v1.routes.public import router as public_router
 from src.api.v1.routes.storefront import (
     cart_router as storefront_cart_router,
 )
@@ -85,10 +88,14 @@ api_router.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 # Tenant management
 api_router.include_router(tenants_router, prefix="/tenants", tags=["Tenants"])
 
+# Public routes (no auth — waitlist, landing page stats)
+api_router.include_router(public_router, prefix="/public", tags=["Public"])
+
 # Admin routes (super admin only)
 api_router.include_router(
     tenants_admin_router, prefix="/admin/tenants", tags=["Admin - Tenants"]
 )
+api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores", tags=["Stores"])

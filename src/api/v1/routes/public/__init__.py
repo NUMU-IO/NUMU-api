@@ -1,13 +1,19 @@
-"""Public API routes (legacy module).
+"""Public API routes (no authentication required).
 
-NOTE: This module is deprecated. Routes have been reorganized:
-- Auth routes -> /api/v1/routes/auth.py
-- Health routes -> /api/v1/routes/health.py
-- Tenant routes -> /api/v1/routes/tenants.py
-- Customer routes -> /api/v1/routes/storefront/
+URL: /api/v1/public/
+- POST /waitlist — Join beta waitlist
+- GET  /stats    — Platform statistics for landing page
+- GET  /features — Feature list for marketing
 """
 
-# This module is kept for backwards compatibility but routes have moved
-# to the new structure in the parent routes module.
+from fastapi import APIRouter
 
-__all__: list[str] = []
+from src.api.v1.routes.public.landing import router as landing_router
+from src.api.v1.routes.public.waitlist import router as waitlist_router
+
+router = APIRouter()
+
+router.include_router(waitlist_router, tags=["Public - Waitlist"])
+router.include_router(landing_router, tags=["Public - Landing"])
+
+__all__ = ["router"]
