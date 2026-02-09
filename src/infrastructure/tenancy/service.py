@@ -1,21 +1,24 @@
-"""Tenant service for schema provisioning and management."""
+"""Tenant service for tenant lifecycle management.
+
+All tenant data lives in the shared 'public' PostgreSQL schema with a
+tenant_id discriminator column and RLS enforcement. No per-tenant schemas
+are created — isolation is handled entirely by Row-Level Security.
+"""
 
 import hashlib
 import logging
 import re
 from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.infrastructure.database.connection import engine
 from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = logging.getLogger(__name__)
 
 
 class TenantService:
-    """Service for managing tenants and their database schemas."""
+    """Service for managing tenant registration and lifecycle."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -24,11 +27,11 @@ class TenantService:
     async def create_tenant(
         self, name: str, subdomain: str, owner_id: UUID = None, plan: str = "free"
     ):
-        """Create a new tenant with its own database schema.
+        """Create a new tenant record.
 
         Args:
             name: Display name for the store
-            subdomain: Unique subdomain (e.g., 'mystore' for mystore.octyrafiy.com)
+            subdomain: Unique subdomain (e.g., 'mystore' for mystore.numu.io)
             owner_id: UUID of the user who owns this store
             plan: Subscription plan (free, pro, enterprise)
 
@@ -50,31 +53,21 @@ class TenantService:
         if existing:
             raise ValueError(f"Subdomain '{subdomain}' already exists")
 
-        # Generate safe schema name
+        # Generate a stable identifier for this tenant (used in settings/logs)
         schema_name = self._generate_schema_name(subdomain)
 
-        try:
-            # Provision schema FIRST (before creating tenant record)
-            await self._provision_schema(schema_name)
+        # Create tenant record in public schema
+        tenant = await self.tenant_repo.create(
+            name=name,
+            subdomain=subdomain,
+            owner_id=owner_id,
+            plan=plan,
+            is_active=True,
+            settings={"schema_name": schema_name},
+        )
 
-            # Create tenant record in public schema
-            tenant = await self.tenant_repo.create(
-                name=name,
-                subdomain=subdomain,
-                owner_id=owner_id,
-                plan=plan,
-                is_active=True,
-                settings={"schema_name": schema_name},
-            )
-
-            logger.info(f"Created tenant '{subdomain}' with schema '{schema_name}'")
-            return tenant
-
-        except Exception as e:
-            # Rollback: drop schema if tenant creation fails
-            logger.error(f"Failed to create tenant '{subdomain}': {e}")
-            await self._drop_schema(schema_name)
-            raise
+        logger.info(f"Created tenant '{subdomain}' (id={tenant.id})")
+        return tenant
 
     def _validate_subdomain(self, subdomain: str) -> bool:
         """Validate subdomain format (RFC 1123 compliant)."""
@@ -85,39 +78,14 @@ class TenantService:
         return bool(re.match(pattern, subdomain.lower()))
 
     def _generate_schema_name(self, subdomain: str) -> str:
-        """Generate a safe PostgreSQL schema name."""
-        # Replace hyphens with underscores (hyphens not allowed in unquoted identifiers)
+        """Generate a stable tenant identifier string.
+
+        This is stored in tenant.settings['schema_name'] for logging and
+        identification. No actual PostgreSQL schema is created — all data
+        lives in the public schema with RLS enforcement.
+        """
         safe_subdomain = subdomain.lower().replace("-", "_")
-        # Add hash for uniqueness and collision avoidance (not security-sensitive)
         schema_hash = hashlib.md5(
             subdomain.encode(), usedforsecurity=False
         ).hexdigest()[:8]
         return f"tenant_{safe_subdomain}_{schema_hash}"
-
-    async def _provision_schema(self, schema_name: str):
-        """Reserve a tenant schema namespace.
-
-        Creates the schema for future use. All tenant data tables live in the
-        public schema with a tenant_id discriminator, so no tables are created
-        inside the tenant schema itself — they are managed by Alembic migrations.
-        """
-        # Validate schema name to prevent SQL injection
-        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", schema_name):
-            raise ValueError(f"Invalid schema name: {schema_name}")
-
-        async with engine.begin() as conn:
-            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-
-        logger.info(f"Provisioned schema '{schema_name}'")
-
-    async def _drop_schema(self, schema_name: str):
-        """Drop a schema (used for rollback on failure)."""
-        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", schema_name):
-            return  # Don't attempt to drop invalid schema names
-
-        try:
-            async with engine.begin() as conn:
-                await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
-            logger.info(f"Dropped schema '{schema_name}'")
-        except Exception as e:
-            logger.error(f"Failed to drop schema '{schema_name}': {e}")
