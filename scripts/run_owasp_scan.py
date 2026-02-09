@@ -19,11 +19,10 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -160,7 +159,7 @@ def generate_report(
     scan_profile: str,
 ) -> str:
     """Generate Markdown report from ZAP alerts."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     # Deduplicate alerts by (name, risk, url)
     seen = set()
@@ -184,18 +183,18 @@ def generate_report(
         "",
         "## Scan Metadata",
         "",
-        f"| Field | Value |",
-        f"|-------|-------|",
+        "| Field | Value |",
+        "|-------|-------|",
         f"| **Scan Date** | {now} |",
         f"| **Target URL** | `{target}` |",
         f"| **ZAP Version** | {zap_version} |",
         f"| **Scan Profile** | {scan_profile} |",
-        f"| **Scanner** | OWASP ZAP (via `scripts/run_owasp_scan.py`) |",
+        "| **Scanner** | OWASP ZAP (via `scripts/run_owasp_scan.py`) |",
         "",
         "## Summary",
         "",
-        f"| Risk Level | Count |",
-        f"|------------|-------|",
+        "| Risk Level | Count |",
+        "|------------|-------|",
         f"| High | {counts.get('3', 0)} |",
         f"| Medium | {counts.get('2', 0)} |",
         f"| Low | {counts.get('1', 0)} |",

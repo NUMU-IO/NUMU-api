@@ -31,9 +31,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Generate frozen requirements from current environment
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
         freeze_result = subprocess.run(
             [sys.executable, "-m", "pip", "freeze"],
             capture_output=True,

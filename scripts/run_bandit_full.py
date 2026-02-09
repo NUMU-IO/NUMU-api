@@ -47,8 +47,8 @@ def main() -> None:
         "bandit",
         "-r",
         "src/",
-        severity_flag,        # severity filter
-        "-ii",                # high confidence only for noise reduction
+        severity_flag,  # severity filter
+        "-ii",  # high confidence only for noise reduction
         "-f",
         args.format,
         "--exclude",

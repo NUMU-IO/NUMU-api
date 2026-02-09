@@ -49,9 +49,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
     """Setup exception handlers for the FastAPI app."""
 
     @app.exception_handler(RequestValidationError)
-    async def request_validation_handler(
-        request: Request, exc: RequestValidationError
-    ):
+    async def request_validation_handler(request: Request, exc: RequestValidationError):
         """Override FastAPI default to prevent verbose field-level detail leak."""
         if settings.debug:
             # In debug, return full details for developer convenience
@@ -76,9 +74,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(StarletteHTTPException)
-    async def http_exception_handler(
-        request: Request, exc: StarletteHTTPException
-    ):
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         """Override default HTTPException handler to ensure consistent format."""
         return JSONResponse(
             status_code=exc.status_code,
