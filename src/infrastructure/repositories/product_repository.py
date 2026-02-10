@@ -9,14 +9,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.entities.product import Product, ProductStatus
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.value_objects.money import Currency, Money
+from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models import ProductModel
 
 
 class ProductRepository(IProductRepository):
-    """Product repository implementation using SQLAlchemy."""
+    """Product repository implementation using SQLAlchemy.
+
+    All queries include an explicit tenant_id filter as a defense-in-depth
+    measure alongside PostgreSQL RLS policies.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    def _tenant_filter(self, query):
+        """Apply tenant_id filter if a tenant context is active."""
+        tid = get_tenant_id()
+        if tid:
+            return query.where(ProductModel.tenant_id == tid)
+        return query
 
     def _to_entity(self, model: ProductModel) -> Product:
         """Convert database model to domain entity."""
@@ -88,9 +100,8 @@ class ProductRepository(IProductRepository):
 
     async def get_by_id(self, entity_id: UUID) -> Product | None:
         """Get product by ID."""
-        result = await self.session.execute(
-            select(ProductModel).where(ProductModel.id == entity_id)
-        )
+        query = select(ProductModel).where(ProductModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
@@ -100,9 +111,8 @@ class ProductRepository(IProductRepository):
         limit: int = 100,
     ) -> list[Product]:
         """Get all products with pagination."""
-        result = await self.session.execute(
-            select(ProductModel).offset(skip).limit(limit)
-        )
+        query = select(ProductModel).offset(skip).limit(limit)
+        result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def create(self, entity: Product) -> Product:
@@ -115,9 +125,8 @@ class ProductRepository(IProductRepository):
 
     async def update(self, entity: Product) -> Product:
         """Update an existing product."""
-        result = await self.session.execute(
-            select(ProductModel).where(ProductModel.id == entity.id)
-        )
+        query = select(ProductModel).where(ProductModel.id == entity.id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         if model:
             model.name = entity.name
@@ -149,9 +158,8 @@ class ProductRepository(IProductRepository):
 
     async def delete(self, entity_id: UUID) -> bool:
         """Delete a product by ID."""
-        result = await self.session.execute(
-            select(ProductModel).where(ProductModel.id == entity_id)
-        )
+        query = select(ProductModel).where(ProductModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         if model:
             await self.session.delete(model)
@@ -333,6 +341,7 @@ class ProductRepository(IProductRepository):
         price_max=None,
     ):
         """Apply shared filter predicates to a product query."""
+        query = self._tenant_filter(query)
         if store_id:
             query = query.where(ProductModel.store_id == store_id)
         if category_id:

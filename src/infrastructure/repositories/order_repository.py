@@ -15,14 +15,26 @@ from src.core.entities.order import (
     PaymentStatus,
 )
 from src.core.interfaces.repositories.order_repository import IOrderRepository
+from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models import OrderModel
 
 
 class OrderRepository(IOrderRepository):
-    """Order repository implementation using SQLAlchemy."""
+    """Order repository implementation using SQLAlchemy.
+
+    All queries include an explicit tenant_id filter as a defense-in-depth
+    measure alongside PostgreSQL RLS policies.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    def _tenant_filter(self, query):
+        """Apply tenant_id filter if a tenant context is active."""
+        tid = get_tenant_id()
+        if tid:
+            return query.where(OrderModel.tenant_id == tid)
+        return query
 
     def _line_item_to_dict(self, item: OrderLineItem) -> dict:
         """Convert OrderLineItem to dict for storage."""
@@ -158,9 +170,8 @@ class OrderRepository(IOrderRepository):
 
     async def get_by_id(self, entity_id: UUID) -> Order | None:
         """Get order by ID."""
-        result = await self.session.execute(
-            select(OrderModel).where(OrderModel.id == entity_id)
-        )
+        query = select(OrderModel).where(OrderModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
@@ -170,12 +181,13 @@ class OrderRepository(IOrderRepository):
         limit: int = 100,
     ) -> list[Order]:
         """Get all orders with pagination."""
-        result = await self.session.execute(
+        query = (
             select(OrderModel)
             .order_by(OrderModel.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
+        result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def create(self, entity: Order) -> Order:
@@ -188,9 +200,8 @@ class OrderRepository(IOrderRepository):
 
     async def update(self, entity: Order) -> Order:
         """Update an existing order."""
-        result = await self.session.execute(
-            select(OrderModel).where(OrderModel.id == entity.id)
-        )
+        query = select(OrderModel).where(OrderModel.id == entity.id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         if model:
             model.status = entity.status
@@ -228,9 +239,8 @@ class OrderRepository(IOrderRepository):
 
     async def delete(self, entity_id: UUID) -> bool:
         """Delete an order by ID."""
-        result = await self.session.execute(
-            select(OrderModel).where(OrderModel.id == entity_id)
-        )
+        query = select(OrderModel).where(OrderModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         if model:
             await self.session.delete(model)
@@ -267,7 +277,7 @@ class OrderRepository(IOrderRepository):
         if date_to:
             query = query.where(OrderModel.created_at <= date_to)
         query = query.order_by(OrderModel.created_at.desc()).offset(skip).limit(limit)
-        result = await self.session.execute(query)
+        result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def get_by_customer(
@@ -277,13 +287,14 @@ class OrderRepository(IOrderRepository):
         limit: int = 100,
     ) -> list[Order]:
         """Get all orders for a customer."""
-        result = await self.session.execute(
+        query = (
             select(OrderModel)
             .where(OrderModel.customer_id == customer_id)
             .order_by(OrderModel.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
+        result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def get_by_order_number(
@@ -292,28 +303,25 @@ class OrderRepository(IOrderRepository):
         order_number: str,
     ) -> Order | None:
         """Get order by order number within a store."""
-        result = await self.session.execute(
-            select(OrderModel).where(
-                OrderModel.store_id == store_id,
-                OrderModel.order_number == order_number,
-            )
+        query = select(OrderModel).where(
+            OrderModel.store_id == store_id,
+            OrderModel.order_number == order_number,
         )
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
     async def get_by_payment_id(self, payment_id: str) -> Order | None:
         """Get order by external payment ID."""
-        result = await self.session.execute(
-            select(OrderModel).where(OrderModel.payment_id == payment_id)
-        )
+        query = select(OrderModel).where(OrderModel.payment_id == payment_id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
     async def get_by_tracking_number(self, tracking_number: str) -> Order | None:
         """Get order by shipping tracking number (cross-store lookup)."""
-        result = await self.session.execute(
-            select(OrderModel).where(OrderModel.tracking_number == tracking_number)
-        )
+        query = select(OrderModel).where(OrderModel.tracking_number == tracking_number)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
@@ -326,7 +334,7 @@ class OrderRepository(IOrderRepository):
         limit: int = 100,
     ) -> list[Order]:
         """Get orders within a date range."""
-        result = await self.session.execute(
+        query = (
             select(OrderModel)
             .where(
                 OrderModel.store_id == store_id,
@@ -337,6 +345,7 @@ class OrderRepository(IOrderRepository):
             .offset(skip)
             .limit(limit)
         )
+        result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def count_by_store(
@@ -360,16 +369,15 @@ class OrderRepository(IOrderRepository):
             query = query.where(OrderModel.created_at >= date_from)
         if date_to:
             query = query.where(OrderModel.created_at <= date_to)
-        result = await self.session.execute(query)
+        result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
 
     async def count_by_customer(self, customer_id: UUID) -> int:
         """Get total count of orders for a customer."""
-        result = await self.session.execute(
-            select(func.count(OrderModel.id)).where(
-                OrderModel.customer_id == customer_id
-            )
+        query = select(func.count(OrderModel.id)).where(
+            OrderModel.customer_id == customer_id
         )
+        result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
 
     async def get_revenue_by_date_range(
@@ -379,36 +387,34 @@ class OrderRepository(IOrderRepository):
         end_date: datetime,
     ) -> int:
         """Get total revenue for a date range (in cents)."""
-        result = await self.session.execute(
-            select(func.coalesce(func.sum(OrderModel.total), 0)).where(
-                OrderModel.store_id == store_id,
-                OrderModel.created_at >= start_date,
-                OrderModel.created_at <= end_date,
-                OrderModel.payment_status == PaymentStatus.PAID,
-            )
+        query = select(func.coalesce(func.sum(OrderModel.total), 0)).where(
+            OrderModel.store_id == store_id,
+            OrderModel.created_at >= start_date,
+            OrderModel.created_at <= end_date,
+            OrderModel.payment_status == PaymentStatus.PAID,
         )
+        result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
 
     async def get_next_order_number(self, store_id: UUID) -> str:
         """Generate next order number for a store."""
-        result = await self.session.execute(
-            select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
-        )
+        query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
+        result = await self.session.execute(self._tenant_filter(query))
         count = result.scalar() or 0
         return f"ORD-{count + 1:06d}"
 
     async def search(
         self,
         store_id: UUID,
-        query: str,
+        query_str: str,
         skip: int = 0,
         limit: int = 100,
     ) -> list[Order]:
         """Search orders by order number or customer notes."""
         from sqlalchemy import or_
 
-        search_term = f"%{query}%"
-        result = await self.session.execute(
+        search_term = f"%{query_str}%"
+        query = (
             select(OrderModel)
             .where(
                 OrderModel.store_id == store_id,
@@ -421,4 +427,5 @@ class OrderRepository(IOrderRepository):
             .offset(skip)
             .limit(limit)
         )
+        result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(model) for model in result.scalars().all()]

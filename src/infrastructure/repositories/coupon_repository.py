@@ -8,14 +8,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.coupon import Coupon
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
+from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models.tenant.coupon import CouponModel
 
 
 class CouponRepository(ICouponRepository):
-    """Coupon repository implementation using SQLAlchemy."""
+    """Coupon repository implementation using SQLAlchemy.
+
+    All queries include an explicit tenant_id filter as a defense-in-depth
+    measure alongside PostgreSQL RLS policies.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    def _tenant_filter(self, query):
+        """Apply tenant_id filter if a tenant context is active."""
+        tid = get_tenant_id()
+        if tid:
+            return query.where(CouponModel.tenant_id == tid)
+        return query
 
     def _to_entity(self, model: CouponModel) -> Coupon:
         """Convert database model to domain entity."""
@@ -57,17 +69,15 @@ class CouponRepository(ICouponRepository):
 
     async def get_by_id(self, entity_id: UUID) -> Coupon | None:
         """Get coupon by ID."""
-        result = await self.session.execute(
-            select(CouponModel).where(CouponModel.id == entity_id)
-        )
+        query = select(CouponModel).where(CouponModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
     async def get_all(self, skip: int = 0, limit: int = 100) -> list[Coupon]:
         """Get all coupons with pagination."""
-        result = await self.session.execute(
-            select(CouponModel).offset(skip).limit(limit)
-        )
+        query = select(CouponModel).offset(skip).limit(limit)
+        result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(m) for m in result.scalars().all()]
 
     async def create(self, entity: Coupon) -> Coupon:
@@ -80,9 +90,8 @@ class CouponRepository(ICouponRepository):
 
     async def update(self, entity: Coupon) -> Coupon:
         """Update an existing coupon."""
-        result = await self.session.execute(
-            select(CouponModel).where(CouponModel.id == entity.id)
-        )
+        query = select(CouponModel).where(CouponModel.id == entity.id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         if model:
             model.code = entity.code
@@ -102,9 +111,8 @@ class CouponRepository(ICouponRepository):
 
     async def delete(self, entity_id: UUID) -> bool:
         """Delete a coupon by ID."""
-        result = await self.session.execute(
-            select(CouponModel).where(CouponModel.id == entity_id)
-        )
+        query = select(CouponModel).where(CouponModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         if model:
             await self.session.delete(model)
@@ -190,6 +198,7 @@ class CouponRepository(ICouponRepository):
 
     def _apply_filters(self, query, *, store_id=None, is_active=None, search=None):
         """Apply shared filter predicates to a coupon query."""
+        query = self._tenant_filter(query)
         if store_id:
             query = query.where(CouponModel.store_id == store_id)
         if is_active is not None:
