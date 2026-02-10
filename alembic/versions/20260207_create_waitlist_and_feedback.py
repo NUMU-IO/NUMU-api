@@ -1,7 +1,7 @@
 """Create waitlist and feedback tables for beta launch.
 
-Revision ID: c3d4e5f6a7b8
-Revises: b2c3d4e5f6a7
+Revision ID: 7e6d3c9b5a2f
+Revises: 5d4c8b2a1e9f
 Create Date: 2026-02-07
 
 Adds:
@@ -16,8 +16,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "c3d4e5f6a7b8"
-down_revision: str | None = "b2c3d4e5f6a7"
+revision: str = "7e6d3c9b5a2f"
+down_revision: str | None = "5d4c8b2a1e9f"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
