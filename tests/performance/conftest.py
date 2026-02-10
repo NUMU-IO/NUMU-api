@@ -313,3 +313,113 @@ def assert_performance(
             f"Average response size {metrics.avg_response_size:.0f} bytes exceeds "
             f"threshold {max_response_size} bytes"
         )
+
+
+# =============================================================================
+# 3G Network Simulation
+# =============================================================================
+
+
+@dataclass
+class NetworkProfile:
+    """Network profile for simulating different connection types."""
+
+    latency_ms: float
+    download_kbps: float
+    upload_kbps: float
+    packet_loss_percent: float = 0.0
+
+
+NETWORK_PROFILES: dict[str, NetworkProfile] = {
+    "3g_slow": NetworkProfile(
+        latency_ms=400, download_kbps=500, upload_kbps=250, packet_loss_percent=1.0
+    ),
+    "3g_regular": NetworkProfile(
+        latency_ms=200, download_kbps=1000, upload_kbps=500, packet_loss_percent=0.5
+    ),
+    "3g_fast": NetworkProfile(
+        latency_ms=100, download_kbps=2000, upload_kbps=1000, packet_loss_percent=0.1
+    ),
+}
+
+
+PERFORMANCE_THRESHOLDS: dict[str, dict[str, float]] = {
+    "3g_slow": {
+        "p95_max_ms": 5000,
+        "p99_max_ms": 8000,
+        "max_response_bytes": 50000,
+    },
+    "3g_regular": {
+        "p95_max_ms": 3000,
+        "p99_max_ms": 5000,
+        "max_response_bytes": 50000,
+    },
+    "3g_fast": {
+        "p95_max_ms": 2000,
+        "p99_max_ms": 3000,
+        "max_response_bytes": 100000,
+    },
+}
+
+
+class NetworkSimulator:
+    """Simulates network conditions for performance testing."""
+
+    def __init__(self, profile: NetworkProfile) -> None:
+        self.profile = profile
+
+    async def simulate_latency(self) -> None:
+        """Simulate network latency."""
+        await asyncio.sleep(self.profile.latency_ms / 1000)
+
+    def calculate_transfer_time(self, size_bytes: int) -> float:
+        """Calculate transfer time in ms for a given payload size."""
+        size_kb = size_bytes / 1024
+        return (size_kb / self.profile.download_kbps) * 1000
+
+
+class PerformanceValidator:
+    """Collects response times and validates against thresholds."""
+
+    def __init__(self) -> None:
+        self.response_times: list[float] = []
+
+    def record(self, time_ms: float) -> None:
+        self.response_times.append(time_ms)
+
+    def validate(self, profile_name: str) -> None:
+        thresholds = PERFORMANCE_THRESHOLDS[profile_name]
+        sorted_times = sorted(self.response_times)
+        p95_idx = int(len(sorted_times) * 0.95)
+        p99_idx = int(len(sorted_times) * 0.99)
+        p95 = sorted_times[min(p95_idx, len(sorted_times) - 1)]
+        p99 = sorted_times[min(p99_idx, len(sorted_times) - 1)]
+        assert p95 <= thresholds["p95_max_ms"], (
+            f"p95 ({p95:.0f}ms) exceeds {profile_name} threshold ({thresholds['p95_max_ms']}ms)"
+        )
+        assert p99 <= thresholds["p99_max_ms"], (
+            f"p99 ({p99:.0f}ms) exceeds {profile_name} threshold ({thresholds['p99_max_ms']}ms)"
+        )
+
+
+# Fixtures for 3G simulation
+
+
+@pytest.fixture
+def network_3g_slow() -> NetworkSimulator:
+    return NetworkSimulator(NETWORK_PROFILES["3g_slow"])
+
+
+@pytest.fixture
+def network_3g_regular() -> NetworkSimulator:
+    return NetworkSimulator(NETWORK_PROFILES["3g_regular"])
+
+
+@pytest.fixture
+def network_3g_fast() -> NetworkSimulator:
+    return NetworkSimulator(NETWORK_PROFILES["3g_fast"])
+
+
+@pytest.fixture
+def performance_validator() -> PerformanceValidator:
+    return PerformanceValidator()
