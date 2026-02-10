@@ -153,7 +153,7 @@ async def _seed_one_merchant(
     await session.execute(
         text("""
             INSERT INTO public.users (id, email, hashed_password, first_name, last_name, role, status, email_verified_at, created_at, updated_at)
-            VALUES (:id, :email, :pw, :first, :last, 'store_owner', 'active', :now, :now, :now)
+            VALUES (:id, :email, :pw, :first, :last, 'STORE_OWNER', 'ACTIVE', :now, :now, :now)
             ON CONFLICT (email) DO NOTHING
         """),
         {
@@ -190,7 +190,7 @@ async def _seed_one_merchant(
     await session.execute(
         text("""
             INSERT INTO public.stores (id, tenant_id, name, slug, subdomain, owner_id, status, default_currency, default_language, created_at, updated_at)
-            VALUES (:id, :tid, :name, :slug, :sub, :owner, 'active', 'EGP', 'ar', :now, :now)
+            VALUES (:id, :tid, :name, :slug, :sub, :owner, 'ACTIVE', 'EGP', 'ar', :now, :now)
             ON CONFLICT (slug) DO NOTHING
         """),
         {
@@ -211,8 +211,8 @@ async def _seed_one_merchant(
         product_ids.append((pid, prod))
         await session.execute(
             text("""
-                INSERT INTO public.products (id, tenant_id, store_id, name, slug, price_amount, quantity, low_stock_threshold, status, created_at, updated_at)
-                VALUES (:id, :tid, :sid, :name, :slug, :price, :qty, 10, 'active', :now, :now)
+                INSERT INTO public.products (id, tenant_id, store_id, name, slug, price_amount, price_currency, product_type, quantity, low_stock_threshold, status, created_at, updated_at)
+                VALUES (:id, :tid, :sid, :name, :slug, :price, 'EGP', 'PHYSICAL', :qty, 10, 'ACTIVE', :now, :now)
                 ON CONFLICT DO NOTHING
             """),
             {
@@ -236,8 +236,8 @@ async def _seed_one_merchant(
         lname = random.choice(CUSTOMER_LAST_NAMES)
         await session.execute(
             text("""
-                INSERT INTO public.customers (id, tenant_id, store_id, first_name, last_name, email, phone, status, created_at, updated_at)
-                VALUES (:id, :tid, :sid, :fn, :ln, :email, :phone, 'active', :now, :now)
+                INSERT INTO public.customers (id, tenant_id, store_id, first_name, last_name, email, phone, accepts_marketing, total_orders, total_spent, created_at, updated_at)
+                VALUES (:id, :tid, :sid, :fn, :ln, :email, :phone, true, 0, 0, :now, :now)
                 ON CONFLICT DO NOTHING
             """),
             {
@@ -254,24 +254,24 @@ async def _seed_one_merchant(
 
     # 6. Create orders (8 per store with varied statuses)
     statuses = [
-        "confirmed",
-        "confirmed",
-        "shipped",
-        "shipped",
-        "delivered",
-        "delivered",
-        "delivered",
-        "pending",
+        "CONFIRMED",
+        "CONFIRMED",
+        "SHIPPED",
+        "SHIPPED",
+        "DELIVERED",
+        "DELIVERED",
+        "DELIVERED",
+        "PENDING",
     ]
     payment_statuses = [
-        "paid",
-        "paid",
-        "paid",
-        "paid",
-        "paid",
-        "paid",
-        "paid",
-        "pending",
+        "PAID",
+        "PAID",
+        "PAID",
+        "PAID",
+        "PAID",
+        "PAID",
+        "PAID",
+        "PENDING",
     ]
 
     for i, (order_status, pay_status) in enumerate(zip(statuses, payment_statuses)):
@@ -306,14 +306,14 @@ async def _seed_one_merchant(
                     id, tenant_id, store_id, customer_id, order_number,
                     status, payment_status, fulfillment_status,
                     line_items, shipping_address,
-                    subtotal, tax_amount, total, currency,
+                    subtotal, shipping_cost, tax_amount, discount_amount, total, currency,
                     created_at, updated_at
                 )
                 VALUES (
                     :id, :tid, :sid, :cid, :num,
                     :status, :pay_status, :ful_status,
                     :items, :addr,
-                    :sub, :tax, :total, 'EGP',
+                    :sub, 0, :tax, 0, :total, 'EGP',
                     :date, :date
                 )
                 ON CONFLICT DO NOTHING
@@ -326,9 +326,9 @@ async def _seed_one_merchant(
                 "num": f"ORD-{merchant['subdomain'][:4].upper()}-{i + 1:04d}",
                 "status": order_status,
                 "pay_status": pay_status,
-                "ful_status": "fulfilled"
-                if order_status == "delivered"
-                else "unfulfilled",
+                "ful_status": "FULFILLED"
+                if order_status == "DELIVERED"
+                else "UNFULFILLED",
                 "items": json.dumps(line_items),
                 "addr": json.dumps(_random_address()),
                 "sub": subtotal,

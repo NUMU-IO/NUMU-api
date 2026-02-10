@@ -39,7 +39,7 @@ async def seed_database():
         admin_password = password_service.hash_password("admin123456")
         admin = UserModel(
             id=admin_id,
-            email="admin@octyrafiy.com",
+            email="admin@numu.io",
             hashed_password=admin_password,
             first_name="Super",
             last_name="Admin",
@@ -47,7 +47,7 @@ async def seed_database():
             status=UserStatus.ACTIVE,
         )
         session.add(admin)
-        print("Created admin user: admin@octyrafiy.com")
+        print("Created admin user: admin@numu.io")
 
         # Create store owner user
         owner_id = uuid4()
@@ -103,9 +103,11 @@ async def seed_database():
             owner_id=owner_id,
             name="Demo Store",
             slug="demo-store",
+            subdomain="demo",
             description="A sample demo store for testing",
             status=StoreStatus.ACTIVE,
-            default_currency=Currency.USD,
+            default_currency=Currency.EGP,
+            default_language="ar",
             contact_email="store@example.com",
         )
         session.add(store)
@@ -147,11 +149,10 @@ async def seed_database():
                 name="Wireless Headphones",
                 slug="wireless-headphones",
                 description="High-quality wireless headphones with noise cancellation",
-                price_amount=9999,  # $99.99 in cents
-                price_currency="USD",
+                price_amount=249900,  # 2,499.00 EGP in piasters
+                price_currency="EGP",
                 sku="WH-001",
                 quantity=50,
-                images=["https://example.com/headphones.jpg"],
                 product_type=ProductType.PHYSICAL,
                 status=ProductStatus.ACTIVE,
             ),
@@ -163,11 +164,10 @@ async def seed_database():
                 name="Smart Watch",
                 slug="smart-watch",
                 description="Feature-rich smartwatch with health tracking",
-                price_amount=19999,  # $199.99 in cents
-                price_currency="USD",
+                price_amount=499900,  # 4,999.00 EGP in piasters
+                price_currency="EGP",
                 sku="SW-001",
                 quantity=30,
-                images=["https://example.com/smartwatch.jpg"],
                 product_type=ProductType.PHYSICAL,
                 status=ProductStatus.ACTIVE,
             ),
@@ -179,11 +179,10 @@ async def seed_database():
                 name="Classic T-Shirt",
                 slug="classic-t-shirt",
                 description="Comfortable cotton t-shirt",
-                price_amount=2499,  # $24.99 in cents
-                price_currency="USD",
+                price_amount=59900,  # 599.00 EGP in piasters
+                price_currency="EGP",
                 sku="TS-001",
                 quantity=100,
-                images=["https://example.com/tshirt.jpg"],
                 product_type=ProductType.PHYSICAL,
                 status=ProductStatus.ACTIVE,
             ),
@@ -201,7 +200,7 @@ async def seed_database():
         print("\n" + "=" * 50)
         print("TEST ACCOUNTS:")
         print("=" * 50)
-        print("Admin:    admin@octyrafiy.com / admin123456")
+        print("Admin:    admin@numu.io / admin123456")
         print("Owner:    owner@example.com / owner123456")
         print("Customer: customer@example.com / customer123456")
         print("=" * 50)
