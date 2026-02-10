@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["*"]
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Beta launch
+    beta_mode: bool = True  # Require invite code for store creation
+
     # Database
     postgres_host: str = "localhost"
     postgres_port: int = 5432

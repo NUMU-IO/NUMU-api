@@ -19,6 +19,7 @@ from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
+from src.api.v1.routes.stores import feedback as feedback_module
 from src.api.v1.routes.stores import inventory as inventory_module
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
@@ -47,5 +48,6 @@ router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(settings_module.router, tags=["Store Settings"])
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
+router.include_router(feedback_module.router, tags=["Store Feedback"])
 
 __all__ = ["router"]
