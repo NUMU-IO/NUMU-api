@@ -13,8 +13,6 @@ Quick links:
 
 ## System Architecture
 
-Mermaid diagram (renders on GitHub and most Markdown viewers):
-
 ```mermaid
 flowchart TB
   U[Client / Admin UI] --> API[FastAPI API]
