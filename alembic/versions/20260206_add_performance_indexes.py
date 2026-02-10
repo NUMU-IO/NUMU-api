@@ -1,6 +1,6 @@
 """Add performance indexes for sorting and cursor pagination.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: 3f7a2e91c4b8
 Revises: 9c6da865096f
 Create Date: 2026-02-06
 
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
+revision: str = "3f7a2e91c4b8"
 down_revision: str | None = "9c6da865096f"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
