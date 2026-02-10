@@ -74,3 +74,10 @@ class WaitlistEntry(BaseEntity):
     def is_invitable(self) -> bool:
         """Check if entry can be sent an invite."""
         return self.status == WaitlistStatus.PENDING
+
+    def __eq__(self, other: object) -> bool:
+        """Define equality based on all model fields for waitlist entries."""
+        if not isinstance(other, WaitlistEntry):
+            return NotImplemented
+        # Use Pydantic's model_dump to include all fields, including those from BaseEntity.
+        return self.model_dump() == other.model_dump()
