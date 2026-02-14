@@ -80,6 +80,12 @@ class TokenService(ITokenService):
         expires_delta = timedelta(days=self.refresh_token_expire_days)
         return self._create_token(user, "refresh", expires_delta)
 
+    def create_reset_token(self, user: User) -> str:
+        """Create a password reset token for a user."""
+        # Reset token valid for 1 hour
+        expires_delta = timedelta(hours=1)
+        return self._create_token(user, "reset", expires_delta)
+
     def verify_token(self, token: str) -> TokenPayload:
         """Verify and decode a token. Raises exception if invalid."""
         try:

@@ -48,39 +48,44 @@ class ITokenService(ABC):
     @abstractmethod
     def create_access_token(self, user: User) -> str:
         """Create an access token for a user."""
-        ...
+        pass
 
     @abstractmethod
     def create_refresh_token(self, user: User) -> str:
         """Create a refresh token for a user."""
-        ...
+        pass
+
+    @abstractmethod
+    def create_reset_token(self, user: User) -> str:
+        """Create a password reset token for a user."""
+        pass
 
     @abstractmethod
     def verify_token(self, token: str) -> TokenPayload:
         """Verify and decode a token. Raises exception if invalid."""
-        ...
+        pass
 
     @abstractmethod
     def decode_token(self, token: str) -> TokenPayload | None:
         """Decode a token without raising exceptions."""
-        ...
+        pass
 
     @abstractmethod
     def create_customer_access_token(self, customer) -> str:
         """Create an access token for a customer."""
-        ...
+        pass
 
     @abstractmethod
     def create_customer_refresh_token(self, customer) -> str:
         """Create a refresh token for a customer."""
-        ...
+        pass
 
     @abstractmethod
     def verify_customer_token(self, token: str) -> CustomerTokenPayload:
         """Verify and decode a customer token. Raises exception if invalid."""
-        ...
+        pass
 
     @abstractmethod
     def decode_customer_token(self, token: str) -> CustomerTokenPayload | None:
         """Decode a customer token without raising exceptions."""
-        ...
+        pass
