@@ -56,6 +56,11 @@ class ITokenService(ABC):
         ...
 
     @abstractmethod
+    def create_reset_token(self, user: User) -> str:
+        """Create a password reset token for a user."""
+        ...
+
+    @abstractmethod
     def verify_token(self, token: str) -> TokenPayload:
         """Verify and decode a token. Raises exception if invalid."""
         ...

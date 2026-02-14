@@ -13,13 +13,18 @@ from src.api.dependencies import (
     get_token_service,
     get_user_repository,
 )
-from src.api.dependencies.services import get_totp_service
+from src.api.dependencies.services import (
+    get_email_service,
+    get_totp_service,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     AuthResponse,
     ChangePasswordRequest,
     LoginRequest,
     MessageResponse,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     RefreshTokenRequest,
     RegisterRequest,
     TokenResponse,
@@ -35,13 +40,21 @@ from src.api.v1.schemas.public.two_factor import (
     Verify2FARequest,
     Verify2FAResponse,
 )
-from src.application.dto.auth import LoginDTO, RefreshTokenDTO, RegisterDTO
+from src.application.dto.auth import (
+    LoginDTO,
+    PasswordResetDTO,
+    PasswordResetRequestDTO,
+    RefreshTokenDTO,
+    RegisterDTO,
+)
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
     ChangePasswordUseCase,
+    ForgotPasswordUseCase,
     LoginUserUseCase,
     RefreshTokenUseCase,
     RegisterUserUseCase,
+    ResetPasswordUseCase,
     UpdateProfileDTO,
     UpdateProfileUseCase,
 )
@@ -52,7 +65,11 @@ from src.application.use_cases.auth.two_factor import (
     Verify2FAUseCase,
 )
 from src.core.exceptions import EntityNotFoundError
-from src.infrastructure.external_services import PasswordService, TokenService
+from src.infrastructure.external_services import (
+    PasswordService,
+    ResendEmailService,
+    TokenService,
+)
 from src.infrastructure.external_services.totp_service import TOTPService
 from src.infrastructure.repositories import UserRepository
 from src.infrastructure.repositories.two_factor_repository import (
@@ -193,6 +210,65 @@ async def refresh_token(
             token_type="bearer",
         ),
         message="Token refreshed successfully",
+    )
+
+
+@router.post(
+    "/forgot-password",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Request password reset",
+    description="Send password reset email to user.",
+)
+async def forgot_password(
+    request: PasswordResetRequest,
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+    email_service: Annotated[ResendEmailService, Depends(get_email_service)],
+):
+    """Initiate password reset process."""
+    use_case = ForgotPasswordUseCase(
+        user_repository=user_repo,
+        token_service=token_service,
+        email_service=email_service,
+    )
+
+    dto = PasswordResetRequestDTO(email=request.email)
+    await use_case.execute(dto)
+
+    return SuccessResponse(
+        data=MessageResponse(message="If the email exists, a reset link has been sent"),
+        message="Password reset request received",
+    )
+
+
+@router.post(
+    "/reset-password",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Reset password",
+    description="Reset password using token from email.",
+)
+async def reset_password(
+    request: PasswordResetConfirm,
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+    password_service: Annotated[PasswordService, Depends(get_password_service)],
+):
+    """Reset user password using token."""
+    use_case = ResetPasswordUseCase(
+        user_repository=user_repo,
+        token_service=token_service,
+        password_service=password_service,
+    )
+
+    dto = PasswordResetDTO(
+        token=request.token,
+        new_password=request.new_password,
+    )
+    await use_case.execute(dto)
+
+    return SuccessResponse(
+        data=MessageResponse(message="Password has been reset successfully"),
+        message="Password reset successful",
     )
 
 

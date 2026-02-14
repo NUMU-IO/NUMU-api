@@ -35,6 +35,13 @@ class ResendEmailService(IEmailService):
             if message.reply_to:
                 params["reply_to"] = message.reply_to
 
+            # Print email to terminal for development
+            print("=" * 60)
+            print(f"SENDING EMAIL TO: {to_list}")
+            print(f"SUBJECT: {message.subject}")
+            print(f"CONTENT:\n{message.html_content}")
+            print("=" * 60)
+
             resend.Emails.send(params)
             return True
         except Exception as e:
