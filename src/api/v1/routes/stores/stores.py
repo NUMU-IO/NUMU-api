@@ -148,9 +148,10 @@ async def create_store(
         default_language=request.default_language,
         contact_email=request.contact_email,
         contact_phone=request.contact_phone,
+        invite_code=request.invite_code,
     )
 
-    result = await use_case.execute(dto, owner_id=user_id)
+    result = await use_case.execute(dto, owner_id=user_id, invite_code=request.invite_code)
 
     return SuccessResponse(
         data=_build_store_response(result),

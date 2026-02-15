@@ -110,9 +110,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Setup CORS
-    setup_cors(app)
-
     # Setup exception handlers
     setup_exception_handlers(app)
 
@@ -137,6 +134,10 @@ def create_app() -> FastAPI:
     app.add_middleware(
         ResponseTimeMiddleware
     )  # Response time tracking and slow request logging
+
+    # Setup CORS — added LAST so it's the outermost middleware
+    # This ensures preflight OPTIONS requests are handled before any other middleware
+    setup_cors(app)
 
     # Root endpoint
     @app.get("/", tags=["Root"])

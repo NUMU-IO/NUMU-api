@@ -21,6 +21,7 @@ class CreateStoreRequest(BaseModel):
     default_language: str = Field(default="en", pattern="^(en|ar)$")
     contact_email: EmailStr | None = None
     contact_phone: str | None = Field(None, max_length=20)
+    invite_code: str | None = Field(None, max_length=100, description="Beta invite code")
 
 
 class UpdateStoreRequest(BaseModel):
