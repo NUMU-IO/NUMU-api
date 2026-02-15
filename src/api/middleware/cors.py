@@ -113,6 +113,7 @@ def setup_cors(app: FastAPI) -> None:
                 "http://127.0.0.1:3002",
                 "http://127.0.0.1:3030",  # Dashboard
                 "http://127.0.0.1:5173",
+                "http://172.30.144.1:3030",  # LAN access
             ]
             logger.info(
                 f"CORS: Debug mode - using default development origins: {configured_origins}"

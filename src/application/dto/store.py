@@ -74,6 +74,7 @@ class CreateStoreDTO(BaseDTO):
     default_language: str = "en"
     contact_email: str | None = None
     contact_phone: str | None = None
+    invite_code: str | None = None
 
 
 @dataclass
