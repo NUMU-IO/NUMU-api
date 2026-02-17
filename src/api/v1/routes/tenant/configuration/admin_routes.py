@@ -51,6 +51,7 @@ router = APIRouter(
     response_model=ConfigurationRequestListResponse,
     summary="List pending configuration requests",
     description="Get all pending configuration requests across all merchants.",
+    operation_id="list_pending_requests",
 )
 async def list_pending_requests(
     status_filter: RequestStatus | None = Query(
@@ -81,6 +82,7 @@ async def list_pending_requests(
     response_model=ConfigurationRequestResponse,
     summary="Get configuration request details",
     description="Get details of a specific configuration request.",
+    operation_id="get_request_details",
 )
 async def get_request_details(
     request_id: UUID,
@@ -106,6 +108,7 @@ async def get_request_details(
     response_model=ConfigurationRequestResponse,
     summary="Update configuration request",
     description="Update a configuration request (assign, change status, add notes).",
+    operation_id="update_request",
 )
 async def update_request(
     request_id: UUID,
@@ -149,6 +152,7 @@ async def update_request(
 
     **Security**: Credentials are encrypted using AES-256 before storage.
     """,
+    operation_id="configure_credentials",
 )
 async def configure_credentials(
     config: CredentialConfigureRequest,
@@ -182,6 +186,7 @@ async def configure_credentials(
 
     Use this to test credentials before configuring them for a merchant.
     """,
+    operation_id="validate_credentials",
 )
 async def validate_credentials(
     request: CredentialValidateRequest,
@@ -211,6 +216,7 @@ async def validate_credentials(
     response_model=CredentialStatusResponse,
     summary="Get credential status",
     description="Get the credential status for a specific merchant and service.",
+    operation_id="get_credential_status",
 )
 async def get_credential_status(
     tenant_id: UUID,
@@ -249,6 +255,7 @@ async def get_credential_status(
 
     **Requires**: Super admin privileges.
     """,
+    operation_id="revoke_credentials",
 )
 async def revoke_credentials(
     tenant_id: UUID,
@@ -278,6 +285,7 @@ async def revoke_credentials(
     response_model=SupportedServicesResponse,
     summary="Get supported services",
     description="Get list of all supported services and their required credentials.",
+    operation_id="get_supported_services",
 )
 async def get_supported_services(
     admin=Depends(require_admin),
@@ -292,6 +300,7 @@ async def get_supported_services(
     response_model=ServiceInfoResponse,
     summary="Get service information",
     description="Get detailed information about a specific service.",
+    operation_id="get_service_info",
 )
 async def get_service_info(
     service_type: ServiceType,

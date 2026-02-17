@@ -60,6 +60,7 @@ router = APIRouter(prefix="/{store_id}/products")
     response_model=SuccessResponse[ProductResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create new product",
+    operation_id="create_product",
 )
 async def create_product(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -139,6 +140,7 @@ async def create_product(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[ProductResponse]],
     summary="List products",
+    operation_id="list_products",
 )
 async def list_products(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -268,6 +270,7 @@ async def list_products(
     "/{product_id}",
     response_model=SuccessResponse[ProductResponse],
     summary="Get product by ID",
+    operation_id="get_product",
 )
 async def get_product(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -315,6 +318,7 @@ async def get_product(
     "/{product_id}",
     response_model=SuccessResponse[ProductResponse],
     summary="Update product",
+    operation_id="update_product",
 )
 async def update_product(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -388,8 +392,9 @@ async def update_product(
 
 @router.delete(
     "/{product_id}",
-    response_model=SuccessResponse[DeleteResponse],
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete product",
+    operation_id="delete_product",
 )
 async def delete_product(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -406,10 +411,7 @@ async def delete_product(
 
     await use_case.execute(product_id=product_id, user_id=user_id)
 
-    return SuccessResponse(
-        data=DeleteResponse(deleted=True, id=str(product_id)),
-        message="Product deleted successfully",
-    )
+    return None
 
 
 # =============================================================================
@@ -422,6 +424,7 @@ async def delete_product(
     response_model=SuccessResponse[UploadedImageResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Upload product image",
+    operation_id="upload_product_image",
 )
 async def upload_product_image(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -480,8 +483,9 @@ async def upload_product_image(
 
 @router.delete(
     "/{product_id}/images",
-    response_model=SuccessResponse[DeleteResponse],
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete product image",
+    operation_id="delete_product_image",
 )
 async def delete_product_image(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -511,10 +515,7 @@ async def delete_product_image(
         user_id=user_id,
     )
 
-    return SuccessResponse(
-        data=DeleteResponse(deleted=True, id=str(product_id)),
-        message="Image deleted successfully",
-    )
+    return None
 
 
 # =============================================================================
@@ -525,6 +526,7 @@ async def delete_product_image(
 @router.get(
     "/template",
     summary="Download CSV import template",
+    operation_id="download_csv_template",
 )
 async def download_csv_template() -> StreamingResponse:
     """Download an empty CSV template with the correct column headers."""
@@ -550,6 +552,7 @@ async def download_csv_template() -> StreamingResponse:
     "/import",
     response_model=SuccessResponse[ImportResultResponse],
     summary="Import products from CSV",
+    operation_id="import_products",
 )
 async def import_products(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -595,6 +598,7 @@ async def import_products(
 @router.get(
     "/export",
     summary="Export products as CSV",
+    operation_id="export_products",
 )
 async def export_products(
     store_id: Annotated[UUID, Path(description="Store ID")],

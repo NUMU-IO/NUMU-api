@@ -148,6 +148,7 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
     response_model=SuccessResponse[OrderResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create new order",
+    operation_id="create_order",
 )
 async def create_order(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -239,6 +240,7 @@ async def create_order(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[OrderListItemResponse]],
     summary="List orders",
+    operation_id="list_orders",
 )
 async def list_orders(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -299,6 +301,7 @@ async def list_orders(
     "/{order_id}",
     response_model=SuccessResponse[OrderResponse],
     summary="Get order by ID",
+    operation_id="get_order",
 )
 async def get_order(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -329,6 +332,7 @@ async def get_order(
     "/{order_id}",
     response_model=SuccessResponse[OrderResponse],
     summary="Update order",
+    operation_id="update_order",
 )
 async def update_order(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -403,6 +407,7 @@ async def update_order(
     "/{order_id}/status",
     response_model=SuccessResponse[OrderResponse],
     summary="Update order status",
+    operation_id="update_order_status",
 )
 async def update_order_status(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -440,8 +445,9 @@ async def update_order_status(
 
 @router.delete(
     "/{order_id}",
-    response_model=SuccessResponse[DeleteResponse],
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Cancel order",
+    operation_id="cancel_order",
 )
 async def cancel_order(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -471,10 +477,7 @@ async def cancel_order(
         user_id=user_id,
     )
 
-    return SuccessResponse(
-        data=DeleteResponse(deleted=True, id=str(order_id)),
-        message="Order cancelled successfully",
-    )
+    return None
 
 
 # ============================================================================
@@ -575,6 +578,7 @@ def _build_timeline(order_dto: OrderDTO) -> list[OrderTimelineEvent]:
     "/{order_id}/timeline",
     response_model=SuccessResponse[OrderTimelineResponse],
     summary="Get order timeline",
+    operation_id="get_order_timeline",
 )
 async def get_order_timeline(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -611,6 +615,7 @@ async def get_order_timeline(
     "/bulk-status",
     response_model=SuccessResponse[BulkUpdateOrderStatusResponse],
     summary="Bulk update order statuses",
+    operation_id="bulk_update_order_status",
 )
 async def bulk_update_order_status(
     store_id: Annotated[UUID, Path(description="Store ID")],

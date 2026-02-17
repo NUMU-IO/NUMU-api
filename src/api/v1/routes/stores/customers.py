@@ -23,6 +23,7 @@ router = APIRouter(prefix="/{store_id}/customers")
     "/",
     response_model=SuccessResponse[PaginatedListResponse[CustomerResponse]],
     summary="List store customers",
+    operation_id="list_store_customers",
 )
 async def list_store_customers(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -79,6 +80,7 @@ async def list_store_customers(
     "/{customer_id}",
     response_model=SuccessResponse[CustomerResponse],
     summary="Get customer by ID",
+    operation_id="get_store_customer",
 )
 async def get_store_customer(
     store_id: Annotated[UUID, Path(description="Store ID")],

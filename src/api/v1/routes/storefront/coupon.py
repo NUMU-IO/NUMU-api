@@ -26,6 +26,7 @@ router = APIRouter()
     "/coupons/apply",
     response_model=SuccessResponse[ApplyCouponResponse],
     summary="Validate and apply coupon code",
+    operation_id="apply_coupon",
 )
 async def apply_coupon(
     store_id: Annotated[UUID, Path(description="Store ID")],

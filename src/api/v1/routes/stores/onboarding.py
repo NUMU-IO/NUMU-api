@@ -70,6 +70,7 @@ def _build_onboarding_response(entity: StoreOnboarding) -> OnboardingResponse:
     "",
     response_model=SuccessResponse[OnboardingResponse],
     summary="Get onboarding progress",
+    operation_id="get_onboarding",
 )
 async def get_onboarding(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -102,6 +103,7 @@ async def get_onboarding(
     "/complete/{step}",
     response_model=SuccessResponse[OnboardingResponse],
     summary="Complete an onboarding step",
+    operation_id="complete_step",
 )
 async def complete_step(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -139,6 +141,7 @@ async def complete_step(
     "/skip/{step}",
     response_model=SuccessResponse[OnboardingResponse],
     summary="Skip an onboarding step",
+    operation_id="skip_step",
 )
 async def skip_step(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -176,6 +179,7 @@ async def skip_step(
     "/dismiss",
     response_model=SuccessResponse[OnboardingResponse],
     summary="Dismiss onboarding",
+    operation_id="dismiss_onboarding",
 )
 async def dismiss_onboarding(
     store_id: Annotated[UUID, Path(description="Store ID")],

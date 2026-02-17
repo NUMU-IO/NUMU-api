@@ -72,6 +72,7 @@ lookup_router = APIRouter()
     "/store-by-subdomain/{subdomain}",
     response_model=SuccessResponse,
     summary="Get store info by subdomain",
+    operation_id="get_store_by_subdomain",
 )
 async def get_store_by_subdomain(
     subdomain: Annotated[str, Path(description="Store subdomain")],
@@ -111,6 +112,7 @@ async def get_store_by_subdomain(
     "/products",
     response_model=SuccessResponse[PaginatedListResponse[ProductResponse]],
     summary="Browse store products",
+    operation_id="browse_products",
 )
 async def browse_products(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -241,6 +243,7 @@ async def browse_products(
     "/products/cursor",
     response_model=SuccessResponse[CursorPaginatedListResponse[ProductResponse]],
     summary="Browse products with cursor pagination (3G optimized)",
+    operation_id="browse_products_cursor",
 )
 async def browse_products_cursor(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -354,6 +357,7 @@ async def browse_products_cursor(
     "/products/{product_slug}",
     response_model=SuccessResponse[ProductResponse],
     summary="Get product by slug",
+    operation_id="get_product_by_slug",
 )
 async def get_product_by_slug(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -414,6 +418,7 @@ async def get_product_by_slug(
     response_model=SuccessResponse[CustomerAuthResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Register new customer",
+    operation_id="register_customer",
 )
 async def register_customer(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -485,6 +490,7 @@ async def register_customer(
     "/auth/login",
     response_model=SuccessResponse[CustomerAuthResponse],
     summary="Login customer",
+    operation_id="login_customer",
 )
 async def login_customer(
     store_id: Annotated[UUID, Path(description="Store ID")],

@@ -3,61 +3,124 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateCouponRequest(BaseModel):
     """Create coupon request schema."""
 
-    code: str = Field(..., min_length=1, max_length=50)
-    coupon_type: str = Field(..., description="percentage, fixed, or free_shipping")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "code": "SUMMER25",
+                "coupon_type": "percentage",
+                "value": "25.00",
+                "min_order_amount": "100.00",
+                "max_discount_amount": "50.00",
+                "usage_limit": 100,
+                "valid_from": "2025-06-01T00:00:00Z",
+                "valid_until": "2025-08-31T23:59:59Z",
+            }
+        }
+    )
+
+    code: str = Field(
+        ..., min_length=1, max_length=50, description="Unique coupon code (case-insensitive)"
+    )
+    coupon_type: str = Field(
+        ..., description="Discount type: percentage, fixed, or free_shipping"
+    )
     value: Decimal = Field(
-        default=Decimal("0"), ge=0, description="Percentage (0-100) or fixed amount"
+        default=Decimal("0"), ge=0, description="Discount value — percentage (0-100) or fixed amount"
     )
     min_order_amount: Decimal | None = Field(
-        None, ge=0, description="Minimum order subtotal"
+        None, ge=0, description="Minimum order subtotal required to apply the coupon"
     )
     max_discount_amount: Decimal | None = Field(
-        None, ge=0, description="Max discount cap (for percentage)"
+        None, ge=0, description="Maximum discount cap (for percentage coupons)"
     )
-    usage_limit: int | None = Field(None, ge=1, description="Total usage limit")
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
+    usage_limit: int | None = Field(
+        None, ge=1, description="Maximum number of times this coupon can be used"
+    )
+    valid_from: datetime | None = Field(
+        None, description="ISO 8601 start of validity period"
+    )
+    valid_until: datetime | None = Field(
+        None, description="ISO 8601 end of validity period"
+    )
 
 
 class UpdateCouponRequest(BaseModel):
     """Update coupon request schema."""
 
-    code: str | None = Field(None, min_length=1, max_length=50)
-    coupon_type: str | None = None
-    value: Decimal | None = Field(None, ge=0)
-    min_order_amount: Decimal | None = Field(None, ge=0)
-    max_discount_amount: Decimal | None = Field(None, ge=0)
-    usage_limit: int | None = Field(None, ge=1)
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
-    is_active: bool | None = None
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "value": "30.00",
+                "is_active": False,
+            }
+        }
+    )
+
+    code: str | None = Field(
+        None, min_length=1, max_length=50, description="Coupon code"
+    )
+    coupon_type: str | None = Field(
+        None, description="Discount type: percentage, fixed, or free_shipping"
+    )
+    value: Decimal | None = Field(None, ge=0, description="Discount value")
+    min_order_amount: Decimal | None = Field(
+        None, ge=0, description="Minimum order subtotal"
+    )
+    max_discount_amount: Decimal | None = Field(
+        None, ge=0, description="Maximum discount cap"
+    )
+    usage_limit: int | None = Field(None, ge=1, description="Total usage limit")
+    valid_from: datetime | None = Field(None, description="Validity start")
+    valid_until: datetime | None = Field(None, description="Validity end")
+    is_active: bool | None = Field(None, description="Enable or disable the coupon")
 
 
 class CouponResponse(BaseModel):
     """Coupon response schema."""
 
-    id: str
-    store_id: str
-    code: str
-    coupon_type: str
-    value: str
-    min_order_amount: str | None
-    max_discount_amount: str | None
-    usage_limit: int | None
-    usage_count: int
-    valid_from: str | None
-    valid_until: str | None
-    is_active: bool
-    is_expired: bool
-    is_usable: bool
-    created_at: str
-    updated_at: str
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": "880e8400-e29b-41d4-a716-446655440000",
+                "store_id": "660e8400-e29b-41d4-a716-446655440000",
+                "code": "SUMMER25",
+                "coupon_type": "percentage",
+                "value": "25.00",
+                "min_order_amount": "100.00",
+                "max_discount_amount": "50.00",
+                "usage_limit": 100,
+                "usage_count": 12,
+                "valid_from": "2025-06-01T00:00:00Z",
+                "valid_until": "2025-08-31T23:59:59Z",
+                "is_active": True,
+                "is_expired": False,
+                "is_usable": True,
+                "created_at": "2025-05-15T10:00:00Z",
+                "updated_at": "2025-05-15T10:00:00Z",
+            }
+        },
+    )
 
-    class Config:
-        from_attributes = True
+    id: str = Field(description="Coupon UUID")
+    store_id: str = Field(description="Owning store UUID")
+    code: str = Field(description="Coupon code")
+    coupon_type: str = Field(description="percentage, fixed, or free_shipping")
+    value: str = Field(description="Formatted discount value")
+    min_order_amount: str | None = Field(description="Minimum order amount")
+    max_discount_amount: str | None = Field(description="Max discount cap")
+    usage_limit: int | None = Field(description="Total usage limit")
+    usage_count: int = Field(description="Number of times used")
+    valid_from: str | None = Field(description="Validity start ISO 8601")
+    valid_until: str | None = Field(description="Validity end ISO 8601")
+    is_active: bool = Field(description="Whether the coupon is active")
+    is_expired: bool = Field(description="Whether the coupon has expired")
+    is_usable: bool = Field(description="Whether the coupon can be used right now")
+    created_at: str = Field(description="ISO 8601 creation timestamp")
+    updated_at: str = Field(description="ISO 8601 last-update timestamp")

@@ -71,6 +71,7 @@ def _build_store_response(store) -> StoreResponse:
     "/check-subdomain",
     response_model=SuccessResponse[CheckSubdomainResponse],
     summary="Check subdomain availability",
+    operation_id="check_subdomain",
 )
 async def check_subdomain(
     request: CheckSubdomainRequest,
@@ -123,6 +124,7 @@ async def check_subdomain(
     response_model=SuccessResponse[StoreResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create new store",
+    operation_id="create_store",
 )
 async def create_store(
     request: CreateStoreRequest,
@@ -163,6 +165,7 @@ async def create_store(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[StoreResponse]],
     summary="List my stores",
+    operation_id="list_stores",
 )
 async def list_stores(
     user_id: Annotated[UUID, Depends(require_store_owner)],
@@ -197,6 +200,7 @@ async def list_stores(
     "/{store_id}",
     response_model=SuccessResponse[StoreResponse],
     summary="Get store by ID",
+    operation_id="get_store",
 )
 async def get_store(
     store_id: UUID,
@@ -225,6 +229,7 @@ async def get_store(
     "/{store_id}",
     response_model=SuccessResponse[StoreResponse],
     summary="Update store",
+    operation_id="update_store",
 )
 async def update_store(
     store_id: UUID,
@@ -263,8 +268,9 @@ async def update_store(
 
 @router.delete(
     "/{store_id}",
-    response_model=SuccessResponse[DeleteResponse],
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete store",
+    operation_id="delete_store",
 )
 async def delete_store(
     store_id: UUID,
@@ -276,7 +282,4 @@ async def delete_store(
 
     await use_case.execute(store_id=store_id, user_id=user_id)
 
-    return SuccessResponse(
-        data=DeleteResponse(deleted=True, id=str(store_id)),
-        message="Store deleted successfully",
-    )
+    return None

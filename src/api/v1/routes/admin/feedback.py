@@ -24,6 +24,7 @@ router = APIRouter()
     "/",
     response_model=SuccessResponse[FeedbackSummaryResponse],
     summary="Get aggregated feedback",
+    operation_id="get_feedback_summary",
 )
 async def get_feedback_summary(
     _admin_id: Annotated[UUID, Depends(require_admin)],

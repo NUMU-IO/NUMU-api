@@ -66,6 +66,7 @@ class StockAdjustmentResponse(BaseModel):
     "/",
     response_model=SuccessResponse[list[InventoryItemResponse]],
     summary="Get inventory list",
+    operation_id="get_inventory",
 )
 async def get_inventory(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -124,6 +125,7 @@ async def get_inventory(
     "/stats",
     response_model=SuccessResponse[InventoryStatsResponse],
     summary="Get inventory statistics",
+    operation_id="get_inventory_stats",
 )
 async def get_inventory_stats(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -167,6 +169,7 @@ async def get_inventory_stats(
     "/adjust",
     response_model=SuccessResponse[StockAdjustmentResponse],
     summary="Adjust stock level",
+    operation_id="adjust_stock",
 )
 async def adjust_stock(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -215,6 +218,7 @@ async def adjust_stock(
     "/bulk-adjust",
     response_model=SuccessResponse[list[StockAdjustmentResponse]],
     summary="Bulk adjust stock levels",
+    operation_id="bulk_adjust_stock",
 )
 async def bulk_adjust_stock(
     store_id: Annotated[UUID, Path(description="Store ID")],

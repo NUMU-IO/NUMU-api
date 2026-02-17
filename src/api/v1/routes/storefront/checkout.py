@@ -49,6 +49,7 @@ router = APIRouter()
     response_model=SuccessResponse[CheckoutResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create order from checkout",
+    operation_id="checkout",
 )
 async def checkout(
     store_id: Annotated[UUID, Path(description="Store ID")],

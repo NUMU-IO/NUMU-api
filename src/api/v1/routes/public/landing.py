@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/stats", summary="Public platform statistics for landing page")
+@router.get("/stats", summary="Public platform statistics for landing page", operation_id="get_public_stats")
 async def get_public_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
@@ -59,7 +59,7 @@ async def get_public_stats(
     )
 
 
-@router.get("/features", summary="Feature list for marketing page")
+@router.get("/features", summary="Feature list for marketing page", operation_id="get_features")
 async def get_features():
     """Return the NUMU feature list for the landing page.
 

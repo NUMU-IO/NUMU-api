@@ -24,7 +24,7 @@ router = APIRouter()
 paymob_service = PaymobPaymentService()
 
 
-@router.post("/callback")
+@router.post("/callback", operation_id="paymob_callback")
 async def paymob_callback(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -128,7 +128,7 @@ async def paymob_callback(
     return {"status": "received", "transaction_id": transaction_id}
 
 
-@router.get("/callback")
+@router.get("/callback", operation_id="paymob_callback_redirect")
 async def paymob_callback_redirect(
     success: bool = False,
     txn_response_code: str | None = None,

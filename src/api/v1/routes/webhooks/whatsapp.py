@@ -20,7 +20,7 @@ router = APIRouter()
 whatsapp_service = WhatsAppMessagingService()
 
 
-@router.get("/callback")
+@router.get("/callback", operation_id="whatsapp_verify")
 async def whatsapp_verify(
     hub_mode: str = Query(None, alias="hub.mode"),
     hub_verify_token: str = Query(None, alias="hub.verify_token"),
@@ -66,7 +66,7 @@ async def whatsapp_verify(
     return int(hub_challenge) if hub_challenge.isdigit() else hub_challenge
 
 
-@router.post("/callback")
+@router.post("/callback", operation_id="whatsapp_callback")
 async def whatsapp_callback(
     request: Request,
     x_hub_signature_256: str = Header(None, alias="x-hub-signature-256"),
@@ -226,7 +226,7 @@ async def _process_message_event(account_id: str, value: dict):
         # This could be done via the API to show read receipts
 
 
-@router.get("/status/{message_id}")
+@router.get("/status/{message_id}", operation_id="get_message_status")
 async def get_message_status(message_id: str):
     """Get status of a sent WhatsApp message.
 

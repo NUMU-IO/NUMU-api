@@ -43,7 +43,7 @@ async def _find_order(repo: OrderRepository, tracking_number: str, log):
         return None
 
 
-@router.post("/callback")
+@router.post("/callback", operation_id="bosta_callback")
 async def bosta_callback(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
@@ -223,7 +223,7 @@ async def bosta_callback(
     }
 
 
-@router.get("/track/{tracking_number}")
+@router.get("/track/{tracking_number}", operation_id="track_bosta_delivery")
 async def track_bosta_delivery(tracking_number: str):
     """Get Bosta delivery tracking information.
 

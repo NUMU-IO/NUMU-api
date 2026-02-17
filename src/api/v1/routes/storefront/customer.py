@@ -71,6 +71,7 @@ router = APIRouter()
     "/profile",
     response_model=SuccessResponse[CustomerResponse],
     summary="Get customer profile",
+    operation_id="get_customer_profile",
 )
 async def get_customer_profile(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -103,6 +104,7 @@ async def get_customer_profile(
     "/profile",
     response_model=SuccessResponse[CustomerResponse],
     summary="Update customer profile",
+    operation_id="update_customer_profile",
 )
 async def update_customer_profile(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -146,6 +148,7 @@ async def update_customer_profile(
     "/password",
     response_model=SuccessResponse[dict],
     summary="Change customer password",
+    operation_id="change_customer_password",
 )
 async def change_customer_password(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -181,6 +184,7 @@ async def change_customer_password(
     "/addresses",
     response_model=SuccessResponse[CustomerAddressListResponse],
     summary="List customer addresses",
+    operation_id="list_customer_addresses",
 )
 async def list_customer_addresses(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -229,6 +233,7 @@ async def list_customer_addresses(
     response_model=SuccessResponse[CustomerAddressResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create customer address",
+    operation_id="create_customer_address",
 )
 async def create_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -297,6 +302,7 @@ async def create_customer_address(
     "/addresses/{address_id}",
     response_model=SuccessResponse[CustomerAddressResponse],
     summary="Get customer address",
+    operation_id="get_customer_address",
 )
 async def get_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -339,6 +345,7 @@ async def get_customer_address(
     "/addresses/{address_id}",
     response_model=SuccessResponse[CustomerAddressResponse],
     summary="Update customer address",
+    operation_id="update_customer_address",
 )
 async def update_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -392,8 +399,9 @@ async def update_customer_address(
 
 @router.delete(
     "/addresses/{address_id}",
-    response_model=SuccessResponse[dict],
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete customer address",
+    operation_id="delete_customer_address",
 )
 async def delete_customer_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -411,16 +419,14 @@ async def delete_customer_address(
 
     await use_case.execute(current_customer.id, address_id)
 
-    return SuccessResponse(
-        data={"success": True},
-        message="Address deleted successfully",
-    )
+    return None
 
 
 @router.put(
     "/addresses/{address_id}/default",
     response_model=SuccessResponse[CustomerAddressResponse],
     summary="Set default address",
+    operation_id="set_default_address",
 )
 async def set_default_address(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -489,6 +495,7 @@ class NotificationPrefsResponse(_BaseModel):
     "/notification-preferences",
     response_model=SuccessResponse[NotificationPrefsResponse],
     summary="Get notification preferences",
+    operation_id="get_notification_preferences",
 )
 async def get_notification_preferences(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -508,6 +515,7 @@ async def get_notification_preferences(
     "/notification-preferences",
     response_model=SuccessResponse[NotificationPrefsResponse],
     summary="Update notification preferences",
+    operation_id="update_notification_preferences",
 )
 async def update_notification_preferences(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -622,6 +630,7 @@ def _order_to_response(order_dto) -> OrderResponse:
     "/orders",
     response_model=SuccessResponse[PaginatedListResponse[OrderListItemResponse]],
     summary="List customer orders",
+    operation_id="list_customer_orders",
 )
 async def list_customer_orders(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -672,6 +681,7 @@ async def list_customer_orders(
     "/orders/{order_id}",
     response_model=SuccessResponse[OrderResponse],
     summary="Get customer order detail",
+    operation_id="get_customer_order",
 )
 async def get_customer_order(
     order_id: Annotated[UUID, Path(description="Order ID")],
