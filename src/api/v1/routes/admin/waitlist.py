@@ -54,6 +54,7 @@ def _build_response(entry) -> WaitlistEntryResponse:
     "/",
     response_model=SuccessResponse[PaginatedListResponse[WaitlistEntryResponse]],
     summary="List waitlist entries",
+    operation_id="list_waitlist",
 )
 async def list_waitlist(
     _admin_id: Annotated[UUID, Depends(require_admin)],
@@ -86,6 +87,7 @@ async def list_waitlist(
     "/invite",
     response_model=SuccessResponse[WaitlistEntryResponse],
     summary="Send beta invite to waitlist entry",
+    operation_id="invite_waitlist_entry",
 )
 async def invite_waitlist_entry(
     request: InviteWaitlistRequest,
@@ -154,6 +156,7 @@ async def invite_waitlist_entry(
     "/{entry_id}/priority",
     response_model=SuccessResponse[WaitlistEntryResponse],
     summary="Update waitlist entry priority",
+    operation_id="update_priority",
 )
 async def update_priority(
     entry_id: Annotated[UUID, Path(description="Waitlist entry ID")],

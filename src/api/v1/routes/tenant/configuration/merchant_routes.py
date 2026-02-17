@@ -51,6 +51,7 @@ router = APIRouter(
 
     **Note**: Only one pending request per service is allowed.
     """,
+    operation_id="create_configuration_request",
 )
 async def create_configuration_request(
     request: ConfigurationRequestCreate,
@@ -85,6 +86,7 @@ async def create_configuration_request(
     Returns whether credentials are configured, validated, and if there
     are any pending configuration requests.
     """,
+    operation_id="get_configuration_status",
 )
 async def get_configuration_status(
     service_type: ServiceType,
@@ -108,6 +110,7 @@ async def get_configuration_status(
     response_model=ConfigurationRequestListResponse,
     summary="List configuration requests",
     description="Get all configuration requests for the current merchant.",
+    operation_id="list_configuration_requests",
 )
 async def list_configuration_requests(
     status_filter: RequestStatus | None = Query(
@@ -139,6 +142,7 @@ async def list_configuration_requests(
     response_model=ConfigurationRequestResponse,
     summary="Get configuration request",
     description="Get details of a specific configuration request.",
+    operation_id="get_configuration_request",
 )
 async def get_configuration_request(
     request_id: UUID,
@@ -172,6 +176,7 @@ async def get_configuration_request(
     Only pending requests can be cancelled. Requests that are already
     in progress or completed cannot be cancelled.
     """,
+    operation_id="cancel_configuration_request",
 )
 async def cancel_configuration_request(
     request_id: UUID,

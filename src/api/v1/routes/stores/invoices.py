@@ -64,6 +64,7 @@ def _format_currency(cents: int, currency: str = "EGP") -> str:
     response_model=SuccessResponse[InvoiceResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create new invoice",
+    operation_id="create_invoice",
 )
 async def create_invoice(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -155,6 +156,7 @@ async def create_invoice(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[InvoiceListResponse]],
     summary="List store invoices",
+    operation_id="list_invoices",
 )
 async def list_invoices(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -213,6 +215,7 @@ async def list_invoices(
     "/{invoice_id}",
     response_model=SuccessResponse[InvoiceResponse],
     summary="Get invoice details",
+    operation_id="get_invoice",
 )
 async def get_invoice(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -236,6 +239,7 @@ async def get_invoice(
     "/{invoice_id}",
     response_model=SuccessResponse[InvoiceResponse],
     summary="Update draft invoice",
+    operation_id="update_invoice",
 )
 async def update_invoice(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -314,6 +318,7 @@ async def update_invoice(
     "/{invoice_id}/submit",
     response_model=SuccessResponse[SubmitInvoiceResponse],
     summary="Submit invoice to ETA",
+    operation_id="submit_invoice_to_eta",
 )
 async def submit_invoice_to_eta(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -411,6 +416,7 @@ async def submit_invoice_to_eta(
     "/{invoice_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete draft invoice",
+    operation_id="delete_invoice",
 )
 async def delete_invoice(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -448,6 +454,7 @@ logger = logging.getLogger(__name__)
             "description": "Invoice PDF file",
         }
     },
+    operation_id="download_invoice_pdf",
 )
 async def download_invoice_pdf(
     store_id: Annotated[UUID, Path(description="Store ID")],

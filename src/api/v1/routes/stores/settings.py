@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from src.api.dependencies import (
     get_current_store,
@@ -245,6 +245,7 @@ def _build_whatsapp_response(settings: dict) -> WhatsAppSettingsResponse:
     "/",
     response_model=SuccessResponse[StoreSettingsResponse],
     summary="Get all store settings",
+    operation_id="get_all_settings",
 )
 async def get_all_settings(
     store: Annotated[Store, Depends(get_current_store)],
@@ -269,6 +270,7 @@ async def get_all_settings(
     "/payment",
     response_model=SuccessResponse[PaymentSettingsResponse],
     summary="Get payment settings",
+    operation_id="get_payment_settings",
 )
 async def get_payment_settings(
     store: Annotated[Store, Depends(get_current_store)],
@@ -287,6 +289,7 @@ async def get_payment_settings(
     "/payment",
     response_model=SuccessResponse[PaymentSettingsResponse],
     summary="Update payment settings",
+    operation_id="update_payment_settings",
 )
 async def update_payment_settings(
     request: UpdatePaymentSettingsRequest,
@@ -360,6 +363,7 @@ async def update_payment_settings(
     "/shipping",
     response_model=SuccessResponse[ShippingSettingsResponse],
     summary="Get shipping settings",
+    operation_id="get_shipping_settings",
 )
 async def get_shipping_settings(
     store: Annotated[Store, Depends(get_current_store)],
@@ -378,6 +382,7 @@ async def get_shipping_settings(
     "/shipping",
     response_model=SuccessResponse[ShippingSettingsResponse],
     summary="Update shipping settings",
+    operation_id="update_shipping_settings",
 )
 async def update_shipping_settings(
     request: UpdateShippingSettingsRequest,
@@ -443,6 +448,7 @@ async def update_shipping_settings(
     "/shipping/zones",
     response_model=SuccessResponse[ShippingZone],
     summary="Add shipping zone",
+    operation_id="add_shipping_zone",
 )
 async def add_shipping_zone(
     request: CreateShippingZoneRequest,
@@ -487,6 +493,7 @@ async def add_shipping_zone(
     "/shipping/zones/{zone_id}",
     response_model=SuccessResponse[ShippingZone],
     summary="Update shipping zone",
+    operation_id="update_shipping_zone",
 )
 async def update_shipping_zone(
     zone_id: str,
@@ -528,8 +535,9 @@ async def update_shipping_zone(
 
 @router.delete(
     "/shipping/zones/{zone_id}",
-    response_model=SuccessResponse[dict],
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete shipping zone",
+    operation_id="delete_shipping_zone",
 )
 async def delete_shipping_zone(
     zone_id: str,
@@ -552,10 +560,7 @@ async def delete_shipping_zone(
     store.settings = settings
     await store_repo.update(store)
 
-    return SuccessResponse(
-        data={"deleted": True, "id": zone_id},
-        message="Shipping zone deleted successfully",
-    )
+    return None
 
 
 # ============ WhatsApp Settings ============
@@ -565,6 +570,7 @@ async def delete_shipping_zone(
     "/whatsapp",
     response_model=SuccessResponse[WhatsAppSettingsResponse],
     summary="Get WhatsApp settings",
+    operation_id="get_whatsapp_settings",
 )
 async def get_whatsapp_settings(
     store: Annotated[Store, Depends(get_current_store)],
@@ -583,6 +589,7 @@ async def get_whatsapp_settings(
     "/whatsapp",
     response_model=SuccessResponse[WhatsAppSettingsResponse],
     summary="Update WhatsApp settings",
+    operation_id="update_whatsapp_settings",
 )
 async def update_whatsapp_settings(
     request: UpdateWhatsAppSettingsRequest,
@@ -731,6 +738,7 @@ def _build_customization_response(settings: dict) -> CustomizationResponse:
     "/customization",
     response_model=SuccessResponse[CustomizationResponse],
     summary="Get storefront customization settings",
+    operation_id="get_customization",
 )
 async def get_customization(
     store: Annotated[Store, Depends(get_current_store)],
@@ -749,6 +757,7 @@ async def get_customization(
     "/customization",
     response_model=SuccessResponse[CustomizationResponse],
     summary="Update storefront customization (save draft)",
+    operation_id="update_customization",
 )
 async def update_customization(
     request: UpdateCustomizationRequest,
@@ -813,6 +822,7 @@ async def update_customization(
     "/customization/publish",
     response_model=SuccessResponse[CustomizationResponse],
     summary="Publish storefront customization to live store",
+    operation_id="publish_customization",
 )
 async def publish_customization(
     store: Annotated[Store, Depends(get_current_store)],
@@ -852,6 +862,7 @@ async def publish_customization(
     "/customization/assets",
     response_model=SuccessResponse[dict],
     summary="Upload a customization asset (logo, favicon, hero image)",
+    operation_id="upload_customization_asset",
 )
 async def upload_customization_asset(
     store: Annotated[Store, Depends(get_current_store)],

@@ -14,6 +14,7 @@ from src.api.admin import setup_admin
 from src.api.middleware import (
     CacheHeadersMiddleware,
     CompressionMiddleware,
+    DocsAuthMiddleware,
     LoggingMiddleware,
     RateLimitMiddleware,
     ResponseTimeMiddleware,
@@ -98,15 +99,87 @@ async def lifespan(app: FastAPI):
     logger.info("database_closed", msg="Database connection closed")
 
 
+# Ordered tag metadata for OpenAPI documentation grouping
+OPENAPI_TAGS = [
+    # ── Core ──────────────────────────────────────────────
+    {"name": "Root", "description": "Root API information"},
+    {"name": "Health", "description": "Health checks and system status"},
+    {"name": "Authentication", "description": "User authentication and authorization"},
+    {"name": "Tenants", "description": "Multi-tenant management"},
+    # ── Store management ──────────────────────────────────
+    {"name": "Stores", "description": "Store CRUD operations"},
+    {"name": "Store Products", "description": "Product catalog management"},
+    {"name": "Store Orders", "description": "Order processing and fulfillment"},
+    {"name": "Store Customers", "description": "Customer management"},
+    {"name": "Store Coupons", "description": "Coupon and discount management"},
+    {"name": "Store Invoices", "description": "ETA e-invoicing for the Egyptian market"},
+    {"name": "Store Inventory", "description": "Inventory tracking and stock management"},
+    {"name": "Store Analytics", "description": "Store analytics and reporting"},
+    {"name": "Store Dashboard", "description": "Dashboard metrics and summaries"},
+    {"name": "Store Settings", "description": "Store settings and configuration"},
+    {"name": "Store Onboarding", "description": "Store onboarding progress"},
+    {"name": "Store Feedback", "description": "User feedback management"},
+    # ── Storefront (customer-facing) ──────────────────────
+    {"name": "Storefront - Public", "description": "Public storefront catalog and customer auth"},
+    {"name": "Storefront - Customer", "description": "Customer account and profile endpoints"},
+    {"name": "Storefront - Cart", "description": "Shopping cart operations"},
+    {"name": "Storefront - Checkout", "description": "Checkout and payment processing"},
+    {"name": "Storefront - Coupons", "description": "Coupon validation for shoppers"},
+    # ── Configuration ─────────────────────────────────────
+    {"name": "Configuration Requests", "description": "Tenant configuration requests (payment, shipping, etc.)"},
+    # ── Admin ─────────────────────────────────────────────
+    {"name": "Admin", "description": "Admin panel endpoints"},
+    {"name": "Admin - Tenants", "description": "Admin tenant management"},
+    {"name": "Admin - Waitlist", "description": "Admin waitlist management"},
+    {"name": "Admin - Feedback", "description": "Admin feedback management"},
+    {"name": "Admin - Credentials", "description": "Admin credentials management"},
+    # ── Public ────────────────────────────────────────────
+    {"name": "Public", "description": "Public landing and waitlist endpoints"},
+    {"name": "Public - Waitlist", "description": "Public waitlist signup"},
+    {"name": "Public - Landing", "description": "Public landing page data"},
+    # ── Webhooks ──────────────────────────────────────────
+    {"name": "Webhooks - Paymob", "description": "Paymob payment webhook receiver"},
+    {"name": "Webhooks - Fawry", "description": "Fawry payment webhook receiver"},
+    {"name": "Webhooks - Bosta", "description": "Bosta shipping webhook receiver"},
+    {"name": "Webhooks - WhatsApp", "description": "WhatsApp messaging webhook receiver"},
+]
+
+
+def _should_expose_docs() -> bool:
+    """Determine if API docs should be exposed (debug or staging)."""
+    return settings.debug or settings.environment == "staging"
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    expose_docs = _should_expose_docs()
+
     app = FastAPI(
         title=settings.app_name,
-        description="E-commerce platform API for NUMU",
+        description=(
+            "NUMU is an e-commerce platform API built for the Egyptian market. "
+            "It provides endpoints for store management, product catalog, orders, "
+            "invoicing (ETA e-invoicing), payments (Paymob, Fawry, COD), "
+            "and shipping (Bosta)."
+        ),
         version=settings.app_version,
-        docs_url="/docs" if settings.debug else None,
-        redoc_url="/redoc" if settings.debug else None,
-        openapi_url="/openapi.json" if settings.debug else None,
+        docs_url="/docs" if expose_docs else None,
+        redoc_url="/redoc" if expose_docs else None,
+        openapi_url="/openapi.json" if expose_docs else None,
+        contact={
+            "name": "NUMU Engineering",
+            "email": "engineering@numu.com",
+        },
+        license_info={
+            "name": "Proprietary",
+            "url": "https://numu.com/terms",
+        },
+        openapi_tags=OPENAPI_TAGS,
+        servers=[
+            {"url": "http://localhost:8021", "description": "Local development"},
+            {"url": "https://api.staging.numu.com", "description": "Staging"},
+            {"url": "https://api.numu.com", "description": "Production"},
+        ],
         lifespan=lifespan,
     )
 
@@ -122,6 +195,9 @@ def create_app() -> FastAPI:
     # Add middleware (order matters: first added = outermost)
     # Security headers should be outermost to ensure all responses have them
     app.add_middleware(SecurityHeadersMiddleware)
+    # Protect /docs, /redoc, /openapi.json with basic auth on staging
+    if settings.environment == "staging" and settings.docs_username:
+        app.add_middleware(DocsAuthMiddleware)
     # Cache headers for public storefront endpoints (before compression so Vary is correct)
     app.add_middleware(CacheHeadersMiddleware)
     # Gzip compression for dev/local (Nginx handles compression in staging/prod)

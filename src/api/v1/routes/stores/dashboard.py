@@ -64,8 +64,8 @@ class RevenueDataPointResponse(BaseModel):
     orders: int
 
 
-class TopProductResponse(BaseModel):
-    """Top product response."""
+class DashboardTopProductResponse(BaseModel):
+    """Top product response (dashboard view)."""
 
     id: str
     name: str
@@ -78,6 +78,7 @@ class TopProductResponse(BaseModel):
     "/stats",
     response_model=SuccessResponse[DashboardStatsResponse],
     summary="Get dashboard statistics",
+    operation_id="get_dashboard_stats",
 )
 async def get_dashboard_stats(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -127,6 +128,7 @@ async def get_dashboard_stats(
     "/revenue",
     response_model=SuccessResponse[list[RevenueDataPointResponse]],
     summary="Get revenue chart data",
+    operation_id="get_revenue_chart",
 )
 async def get_revenue_chart(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -166,10 +168,11 @@ async def get_revenue_chart(
 
 @router.get(
     "/top-products",
-    response_model=SuccessResponse[list[TopProductResponse]],
-    summary="Get top selling products",
+    response_model=SuccessResponse[list[DashboardTopProductResponse]],
+    summary="Get top selling products (dashboard)",
+    operation_id="get_dashboard_top_products",
 )
-async def get_top_products(
+async def get_dashboard_top_products(
     store_id: Annotated[UUID, Path(description="Store ID")],
     user_id: Annotated[UUID, Depends(require_store_owner)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
@@ -194,7 +197,7 @@ async def get_top_products(
 
     return SuccessResponse(
         data=[
-            TopProductResponse(
+            DashboardTopProductResponse(
                 id=product.id,
                 name=product.name,
                 sku=product.sku,

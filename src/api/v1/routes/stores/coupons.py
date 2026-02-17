@@ -65,6 +65,7 @@ def _coupon_response(result) -> CouponResponse:
     response_model=SuccessResponse[CouponResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create new coupon",
+    operation_id="create_coupon",
 )
 async def create_coupon(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -102,6 +103,7 @@ async def create_coupon(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[CouponResponse]],
     summary="List coupons",
+    operation_id="list_coupons",
 )
 async def list_coupons(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -140,6 +142,7 @@ async def list_coupons(
     "/{coupon_id}",
     response_model=SuccessResponse[CouponResponse],
     summary="Get coupon by ID",
+    operation_id="get_coupon",
 )
 async def get_coupon(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -160,6 +163,7 @@ async def get_coupon(
     "/{coupon_id}",
     response_model=SuccessResponse[CouponResponse],
     summary="Update coupon",
+    operation_id="update_coupon",
 )
 async def update_coupon(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -197,8 +201,9 @@ async def update_coupon(
 
 @router.delete(
     "/{coupon_id}",
-    response_model=SuccessResponse[DeleteResponse],
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete coupon",
+    operation_id="delete_coupon",
 )
 async def delete_coupon(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -215,7 +220,4 @@ async def delete_coupon(
 
     await use_case.execute(coupon_id=coupon_id, user_id=user_id)
 
-    return SuccessResponse(
-        data=DeleteResponse(deleted=True, id=str(coupon_id)),
-        message="Coupon deleted successfully",
-    )
+    return None

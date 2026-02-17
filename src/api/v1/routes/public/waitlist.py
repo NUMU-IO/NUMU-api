@@ -34,6 +34,7 @@ def _generate_referral_code() -> str:
     response_model=SuccessResponse[WaitlistPositionResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Join beta waitlist",
+    operation_id="join_waitlist",
 )
 async def join_waitlist(
     request: JoinWaitlistRequest,

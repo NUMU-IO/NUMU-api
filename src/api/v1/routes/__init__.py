@@ -98,7 +98,7 @@ api_router.include_router(
 api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
 # Store management (for authenticated store owners)
-api_router.include_router(stores_router, prefix="/stores", tags=["Stores"])
+api_router.include_router(stores_router, prefix="/stores")
 
 # Storefront - store lookup by subdomain (no store_id needed)
 api_router.include_router(

@@ -53,6 +53,7 @@ def _get_cart(customer_id: UUID) -> list[dict]:
     "/cart",
     response_model=SuccessResponse[CartResponse],
     summary="Get cart",
+    operation_id="get_cart",
 )
 async def get_cart(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -109,6 +110,7 @@ async def get_cart(
     response_model=SuccessResponse[CartResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Add item to cart",
+    operation_id="add_cart_item",
 )
 async def add_cart_item(
     request: AddCartItemRequest,
@@ -170,6 +172,7 @@ async def add_cart_item(
     "/cart/items/{item_id}",
     response_model=SuccessResponse[CartResponse],
     summary="Update cart item quantity",
+    operation_id="update_cart_item",
 )
 async def update_cart_item(
     item_id: Annotated[str, Path(description="Cart item ID")],
@@ -195,6 +198,7 @@ async def update_cart_item(
     "/cart/items/{item_id}",
     response_model=SuccessResponse[CartResponse],
     summary="Remove item from cart",
+    operation_id="remove_cart_item",
 )
 async def remove_cart_item(
     item_id: Annotated[str, Path(description="Cart item ID")],
@@ -219,6 +223,7 @@ async def remove_cart_item(
     "/cart",
     response_model=SuccessResponse[CartResponse],
     summary="Clear cart",
+    operation_id="clear_cart",
 )
 async def clear_cart(
     current_customer: Annotated[Customer, Depends(get_current_customer)],

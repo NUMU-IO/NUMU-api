@@ -21,7 +21,7 @@ router = APIRouter()
 fawry_service = FawryPaymentService()
 
 
-@router.post("/callback")
+@router.post("/callback", operation_id="fawry_callback")
 async def fawry_callback(
     request: Request,
     x_fawry_signature: str = Header(None, alias="x-fawry-signature"),
@@ -119,7 +119,7 @@ async def fawry_callback(
     }
 
 
-@router.get("/verify")
+@router.get("/verify", operation_id="fawry_verify_payment")
 async def fawry_verify_payment(
     merchant_ref_number: str,
 ):

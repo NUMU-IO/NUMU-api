@@ -85,6 +85,7 @@ router = APIRouter()
     response_model=SuccessResponse[AuthResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Register new user",
+    operation_id="register",
 )
 async def register(
     request: RegisterRequest,
@@ -138,6 +139,7 @@ async def register(
     "/login",
     response_model=SuccessResponse[AuthResponse],
     summary="Login user",
+    operation_id="login",
 )
 async def login(
     request: LoginRequest,
@@ -188,6 +190,7 @@ async def login(
     "/refresh",
     response_model=SuccessResponse[TokenResponse],
     summary="Refresh access token",
+    operation_id="refresh_token",
 )
 async def refresh_token(
     request: RefreshTokenRequest,
@@ -218,6 +221,7 @@ async def refresh_token(
     response_model=SuccessResponse[MessageResponse],
     summary="Request password reset",
     description="Send password reset email to user.",
+    operation_id="forgot_password",
 )
 async def forgot_password(
     request: PasswordResetRequest,
@@ -246,6 +250,7 @@ async def forgot_password(
     response_model=SuccessResponse[MessageResponse],
     summary="Reset password",
     description="Reset password using token from email.",
+    operation_id="reset_password",
 )
 async def reset_password(
     request: PasswordResetConfirm,
@@ -276,6 +281,7 @@ async def reset_password(
     "/me",
     response_model=SuccessResponse[UserResponse],
     summary="Get current user",
+    operation_id="get_current_user",
 )
 async def get_current_user(
     user_id: Annotated[str, Depends(get_current_user_id)],
@@ -310,6 +316,7 @@ async def get_current_user(
     "/me",
     response_model=SuccessResponse[UserResponse],
     summary="Update profile",
+    operation_id="update_profile",
 )
 async def update_profile(
     request: UpdateProfileRequest,
@@ -363,6 +370,7 @@ async def update_profile(
     "/me/password",
     response_model=SuccessResponse[MessageResponse],
     summary="Change password",
+    operation_id="change_password",
 )
 async def change_password(
     request: ChangePasswordRequest,
@@ -404,6 +412,7 @@ async def change_password(
     response_model=SuccessResponse[Enable2FAResponse],
     summary="Enable 2FA",
     description="Generate TOTP secret, QR code URI, and 10 backup codes to enable 2FA.",
+    operation_id="enable_2fa",
 )
 async def enable_2fa(
     user_id: Annotated[str, Depends(get_current_user_id)],
@@ -452,6 +461,7 @@ async def enable_2fa(
     response_model=SuccessResponse[Verify2FAResponse],
     summary="Verify 2FA code",
     description="Verify a TOTP code or backup code. Completes 2FA setup if pending.",
+    operation_id="verify_2fa",
 )
 async def verify_2fa(
     request: Verify2FARequest,
@@ -507,6 +517,7 @@ async def verify_2fa(
     response_model=SuccessResponse[TwoFactorStatusResponse],
     summary="Disable 2FA",
     description="Disable Two-Factor Authentication. Requires password confirmation.",
+    operation_id="disable_2fa",
 )
 async def disable_2fa(
     request: Disable2FARequest,
@@ -557,6 +568,7 @@ async def disable_2fa(
     response_model=SuccessResponse[TwoFactorStatusResponse],
     summary="Get 2FA status",
     description="Get the current 2FA status for the authenticated user.",
+    operation_id="get_2fa_status",
 )
 async def get_2fa_status(
     user_id: Annotated[str, Depends(get_current_user_id)],
@@ -596,6 +608,7 @@ async def get_2fa_status(
     response_model=SuccessResponse[RegenerateBackupCodesResponse],
     summary="Regenerate backup codes",
     description="Generate new backup codes. Requires current TOTP code.",
+    operation_id="regenerate_backup_codes",
 )
 async def regenerate_backup_codes(
     request: RegenerateBackupCodesRequest,

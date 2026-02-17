@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Beta launch
     beta_mode: bool = True  # Require invite code for store creation
 
+    # API Documentation auth (staging only)
+    docs_username: str = ""
+    docs_password: str = ""
+
     # Database
     postgres_host: str = "localhost"
     postgres_port: int = 5432

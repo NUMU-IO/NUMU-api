@@ -163,7 +163,7 @@ def determine_overall_status(components: dict[str, ComponentHealth]) -> HealthSt
     return HealthStatus.HEALTHY
 
 
-@router.get("/health", summary="Basic health check")
+@router.get("/health", summary="Basic health check", operation_id="health_check")
 async def health_check():
     """Basic health check - returns healthy if API is running.
 
@@ -179,6 +179,7 @@ async def health_check():
     "/health/detailed",
     summary="Detailed health check",
     response_model=DetailedHealthResponse,
+    operation_id="detailed_health_check",
 )
 async def detailed_health_check(
     db: AsyncSession = Depends(get_db),
@@ -229,7 +230,7 @@ async def detailed_health_check(
     )
 
 
-@router.get("/", summary="Root endpoint")
+@router.get("/", summary="Root endpoint", operation_id="root")
 async def root():
     """Root endpoint with API information."""
     return SuccessResponse(

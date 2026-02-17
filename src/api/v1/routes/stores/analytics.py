@@ -46,8 +46,8 @@ class SalesDataPointResponse(BaseModel):
     orders: int
 
 
-class TopProductResponse(BaseModel):
-    """Top product by sales."""
+class AnalyticsTopProductResponse(BaseModel):
+    """Top product by sales (analytics view with percentage)."""
 
     id: str
     name: str
@@ -88,6 +88,7 @@ class ConversionStatsResponse(BaseModel):
     "/overview",
     response_model=SuccessResponse[SalesOverviewResponse],
     summary="Get sales overview",
+    operation_id="get_sales_overview",
 )
 async def get_sales_overview(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -154,6 +155,7 @@ async def get_sales_overview(
     "/sales-chart",
     response_model=SuccessResponse[list[SalesDataPointResponse]],
     summary="Get sales chart data",
+    operation_id="get_sales_chart",
 )
 async def get_sales_chart(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -198,10 +200,11 @@ async def get_sales_chart(
 
 @router.get(
     "/top-products",
-    response_model=SuccessResponse[list[TopProductResponse]],
-    summary="Get top selling products",
+    response_model=SuccessResponse[list[AnalyticsTopProductResponse]],
+    summary="Get top selling products (analytics)",
+    operation_id="get_analytics_top_products",
 )
-async def get_top_products(
+async def get_analytics_top_products(
     store_id: Annotated[UUID, Path(description="Store ID")],
     user_id: Annotated[UUID, Depends(require_store_owner)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
@@ -257,7 +260,7 @@ async def get_top_products(
     for p in sorted_products:
         percentage = (p["revenue"] / total_revenue * 100) if total_revenue > 0 else 0
         result.append(
-            TopProductResponse(
+            AnalyticsTopProductResponse(
                 id=str(p["id"]),
                 name=p["name"],
                 sku=p["sku"],
@@ -277,6 +280,7 @@ async def get_top_products(
     "/sales-by-location",
     response_model=SuccessResponse[list[SalesByLocationResponse]],
     summary="Get sales by location",
+    operation_id="get_sales_by_location",
 )
 async def get_sales_by_location(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -355,6 +359,7 @@ async def get_sales_by_location(
     "/customers",
     response_model=SuccessResponse[CustomerAnalyticsResponse],
     summary="Get customer analytics",
+    operation_id="get_customer_analytics",
 )
 async def get_customer_analytics(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -411,6 +416,7 @@ async def get_customer_analytics(
     "/conversion",
     response_model=SuccessResponse[ConversionStatsResponse],
     summary="Get conversion statistics",
+    operation_id="get_conversion_stats",
 )
 async def get_conversion_stats(
     store_id: Annotated[UUID, Path(description="Store ID")],

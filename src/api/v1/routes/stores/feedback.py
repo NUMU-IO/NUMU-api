@@ -46,6 +46,7 @@ def _build_response(fb: Feedback) -> FeedbackResponse:
     response_model=SuccessResponse[FeedbackResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Submit beta feedback",
+    operation_id="create_feedback",
 )
 async def create_feedback(
     store_id: Annotated[UUID, Path(description="Store ID")],
@@ -98,6 +99,7 @@ async def create_feedback(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[FeedbackResponse]],
     summary="List store feedback",
+    operation_id="list_store_feedback",
 )
 async def list_store_feedback(
     store_id: Annotated[UUID, Path(description="Store ID")],

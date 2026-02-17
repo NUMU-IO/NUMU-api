@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format type-check test test-cov run migrate seed docker-up docker-down clean staging-deploy staging-stop staging-logs staging-status load-smoke load-test load-stress load-ui
+.PHONY: help install dev lint format type-check test test-cov run migrate seed docker-up docker-down clean staging-deploy staging-stop staging-logs staging-status load-smoke load-test load-stress load-ui types
 
 # Default target
 help:
@@ -14,6 +14,9 @@ help:
 	@echo "  lint         Run linter (ruff)"
 	@echo "  format       Format code (ruff)"
 	@echo "  type-check   Run type checker (mypy)"
+	@echo ""
+	@echo "API Types:"
+	@echo "  types        Generate TypeScript types from OpenAPI spec"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test         Run all tests"
@@ -70,6 +73,12 @@ format:
 
 type-check:
 	mypy src/
+
+# API TypeScript types generation
+types:
+	@echo "Generating TypeScript types from OpenAPI spec..."
+	cd packages/api-types && npm install && npm run generate
+	@echo "✅ Types generated at packages/api-types/dist/index.ts"
 
 # Testing
 test:

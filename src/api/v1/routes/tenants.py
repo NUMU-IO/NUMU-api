@@ -36,6 +36,7 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     summary="Create a new store/tenant",
     description="Register a new store/tenant. Creates a new database schema for the store.",
+    operation_id="create_tenant",
 )
 async def create_tenant(
     request: CreateTenantRequest,
@@ -94,6 +95,7 @@ async def create_tenant(
     "/check-subdomain/{subdomain}",
     summary="Check subdomain availability",
     description="Check if a subdomain is available for registration.",
+    operation_id="check_subdomain_availability",
 )
 async def check_subdomain_availability(
     subdomain: str,
@@ -121,6 +123,7 @@ admin_router = APIRouter()
     response_model=list[TenantResponse],
     summary="List all tenants",
     description="List all tenants (admin only).",
+    operation_id="list_tenants",
 )
 async def list_tenants(
     db: Annotated[AsyncSession, Depends(get_db_session)],
@@ -142,6 +145,7 @@ async def list_tenants(
     response_model=TenantResponse,
     summary="Get tenant by ID",
     description="Get a specific tenant by ID (admin only).",
+    operation_id="get_tenant",
 )
 async def get_tenant(
     tenant_id: UUID,
@@ -168,6 +172,7 @@ async def get_tenant(
     response_model=TenantResponse,
     summary="Update tenant",
     description="Update tenant settings (admin only).",
+    operation_id="update_tenant",
 )
 async def update_tenant(
     tenant_id: UUID,
@@ -206,6 +211,7 @@ async def update_tenant(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Deactivate tenant",
     description="Deactivate a tenant (soft delete, admin only).",
+    operation_id="deactivate_tenant",
 )
 async def deactivate_tenant(
     tenant_id: UUID,
