@@ -14,7 +14,6 @@ from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateStoreRequest,
-    DeleteResponse,
     PaginatedListResponse,
     StoreResponse,
     UpdateStoreRequest,
@@ -153,7 +152,9 @@ async def create_store(
         invite_code=request.invite_code,
     )
 
-    result = await use_case.execute(dto, owner_id=user_id, invite_code=request.invite_code)
+    result = await use_case.execute(
+        dto, owner_id=user_id, invite_code=request.invite_code
+    )
 
     return SuccessResponse(
         data=_build_store_response(result),

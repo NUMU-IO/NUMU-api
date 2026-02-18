@@ -64,6 +64,58 @@ lookup_router = APIRouter()
 
 
 # ============================================================================
+# Available Themes (public, no auth needed)
+# ============================================================================
+
+# Static theme list matching numu-egyptian-bazaar's theme engine.
+# Kept in code so the dashboard can discover available themes without
+# bundling storefront source.
+AVAILABLE_THEMES = [
+    {
+        "id": "modern",
+        "name": "Modern Minimal",
+        "nameAr": "مودرن",
+        "layout": "default",
+        "description": "Clean, contemporary design with teal accents",
+    },
+    {
+        "id": "boutique",
+        "name": "Boutique Chic",
+        "nameAr": "بوتيك",
+        "layout": "default",
+        "description": "Warm pink/magenta tones for fashion-forward stores",
+    },
+    {
+        "id": "elegant",
+        "name": "Elegant Luxury",
+        "nameAr": "أنيق",
+        "layout": "default",
+        "description": "Rich brown and gold palette for premium brands",
+    },
+    {
+        "id": "skeuomorphic",
+        "name": "Skeuomorphic",
+        "nameAr": "واقعي",
+        "layout": "skeuomorphic",
+        "description": "Textured 3D design with depth and shadow effects",
+    },
+]
+
+
+@lookup_router.get(
+    "/themes",
+    response_model=SuccessResponse,
+    summary="List available storefront themes",
+)
+async def list_themes():
+    """Return the list of available storefront themes for the dashboard."""
+    return SuccessResponse(
+        data=AVAILABLE_THEMES,
+        message="Themes retrieved successfully",
+    )
+
+
+# ============================================================================
 # Store Lookup by Subdomain
 # ============================================================================
 
