@@ -146,12 +146,17 @@ class CustomizationIdentity(BaseModel):
 class CustomizationTheme(BaseModel):
     """Store theme customization."""
 
-    base_theme: str = "modern"  # modern | classic | minimal | bold
+    base_theme: str = "modern"  # modern | boutique | elegant | skeuomorphic
     primary_color: str = ""
     secondary_color: str = ""
+    accent_color: str = ""
     background_color: str = ""
     text_color: str = ""
     button_style: str = "rounded"  # rounded | square | pill
+    enable_animations: bool = True
+    border_radius: int = 12  # px
+    heading_font: str = "Cairo"
+    nav_style: str = "floating"  # floating | fixed | sticky
 
 
 class CustomizationHeader(BaseModel):
