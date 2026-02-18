@@ -99,6 +99,13 @@ AVAILABLE_THEMES = [
         "layout": "skeuomorphic",
         "description": "Textured 3D design with depth and shadow effects",
     },
+    {
+        "id": "tech-wave",
+        "name": "Tech Wave",
+        "nameAr": "موجة تقنية",
+        "layout": "default",
+        "description": "Futuristic dark theme with neon accents, glassmorphism, and wave effects",
+    },
 ]
 
 

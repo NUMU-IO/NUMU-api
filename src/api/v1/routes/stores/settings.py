@@ -19,6 +19,10 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationHeader,
     CustomizationHero,
     CustomizationIdentity,
+    CustomizationLabels,
+    CustomizationLayout,
+    CustomizationNavigation,
+    CustomizationNavLink,
     CustomizationProducts,
     CustomizationResponse,
     CustomizationSocialLinks,
@@ -653,6 +657,7 @@ def _get_default_customization() -> dict:
             "show_cart_icon": True,
             "announcement_text": "",
             "announcement_color": "#4318FF",
+            "announcement_text_color": "#FFFFFF",
         },
         "hero": {
             "hero_image_url": "",
@@ -722,6 +727,14 @@ def _build_customization_response(settings: dict) -> CustomizationResponse:
         "social_links", defaults["footer"]["social_links"]
     )
 
+    # Build navigation
+    nav_data = merged.get("navigation", {})
+    raw_links = nav_data.get("links", [])
+    nav_links = [CustomizationNavLink(**lnk) for lnk in raw_links] if raw_links else []
+
+    # Build layout
+    layout_data = merged.get("layout", {})
+
     return CustomizationResponse(
         customization_mode=merged.get("customization_mode", "preset"),
         identity=CustomizationIdentity(**merged.get("identity", defaults["identity"])),
@@ -734,6 +747,14 @@ def _build_customization_response(settings: dict) -> CustomizationResponse:
             social_links=CustomizationSocialLinks(**social_links_data),
             show_newsletter=footer_data.get("show_newsletter", True),
         ),
+        navigation=CustomizationNavigation(
+            links=nav_links,
+            show_categories_in_nav=nav_data.get("show_categories_in_nav", True),
+        ),
+        labels=CustomizationLabels(**merged.get("labels", {})),
+        layout=CustomizationLayout(**layout_data)
+        if layout_data
+        else CustomizationLayout(),
         is_published=merged.get("is_published", False),
         last_published_at=merged.get("last_published_at"),
     )
@@ -811,6 +832,21 @@ async def update_customization(
                 **footer_update["social_links"],
             }
         customization["footer"] = {**existing_footer, **footer_update}
+    if request.navigation is not None:
+        customization["navigation"] = {
+            **customization.get("navigation", {}),
+            **request.navigation,
+        }
+    if request.labels is not None:
+        customization["labels"] = {
+            **customization.get("labels", {}),
+            **request.labels,
+        }
+    if request.layout is not None:
+        customization["layout"] = {
+            **customization.get("layout", {}),
+            **request.layout,
+        }
 
     # Save to store settings
     settings["customization"] = customization
@@ -851,6 +887,9 @@ async def publish_customization(
         "hero": customization.get("hero", {}),
         "products": customization.get("products", {}),
         "footer": customization.get("footer", {}),
+        "navigation": customization.get("navigation", {}),
+        "labels": customization.get("labels", {}),
+        "layout": customization.get("layout", {}),
     })
 
     settings["customization"] = customization

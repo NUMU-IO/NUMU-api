@@ -167,6 +167,7 @@ class CustomizationHeader(BaseModel):
     show_cart_icon: bool = True
     announcement_text: str = ""
     announcement_color: str = "#4318FF"
+    announcement_text_color: str = "#FFFFFF"
 
 
 class CustomizationHero(BaseModel):
@@ -207,6 +208,58 @@ class CustomizationFooter(BaseModel):
     show_newsletter: bool = True
 
 
+class CustomizationNavLink(BaseModel):
+    """Navigation link."""
+
+    label: str = ""
+    to: str = ""
+
+
+class CustomizationNavigation(BaseModel):
+    """Store navigation customization."""
+
+    links: list[CustomizationNavLink] = Field(default_factory=list)
+    show_categories_in_nav: bool = True
+
+
+class CustomizationLabels(BaseModel):
+    """Store label customization."""
+
+    home_title: str = ""
+    products_title: str = ""
+    checkout_title: str = ""
+    order_confirmed_title: str = ""
+    cart_empty: str = ""
+    search_placeholder: str = ""
+    add_to_cart: str = ""
+    added_to_cart: str = ""
+    continue_shopping: str = ""
+    footer_shop_heading: str = ""
+    footer_help_heading: str = ""
+    footer_contact_heading: str = ""
+
+
+class CustomizationLayout(BaseModel):
+    """Store page layout customization."""
+
+    header_layout: str = "logo-right"
+    footer_layout: str = "4-col"
+    footer_columns: int = 4
+    home_sections: list[str] = Field(
+        default_factory=lambda: [
+            "hero",
+            "categories",
+            "new_arrivals",
+            "promo",
+            "best_sellers",
+            "testimonials",
+            "newsletter",
+        ]
+    )
+    hero_position: str = "top"
+    product_card_style: str = "default"
+
+
 class CustomizationResponse(BaseModel):
     """Full customization settings response."""
 
@@ -217,6 +270,9 @@ class CustomizationResponse(BaseModel):
     hero: CustomizationHero = Field(default_factory=CustomizationHero)
     products: CustomizationProducts = Field(default_factory=CustomizationProducts)
     footer: CustomizationFooter = Field(default_factory=CustomizationFooter)
+    navigation: CustomizationNavigation = Field(default_factory=CustomizationNavigation)
+    labels: CustomizationLabels = Field(default_factory=CustomizationLabels)
+    layout: CustomizationLayout = Field(default_factory=CustomizationLayout)
     is_published: bool = False
     last_published_at: str | None = None
 
@@ -231,6 +287,9 @@ class UpdateCustomizationRequest(BaseModel):
     hero: dict[str, Any] | None = None
     products: dict[str, Any] | None = None
     footer: dict[str, Any] | None = None
+    navigation: dict[str, Any] | None = None
+    labels: dict[str, Any] | None = None
+    layout: dict[str, Any] | None = None
 
 
 # Combined Store Settings
