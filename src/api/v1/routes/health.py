@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+import sentry_sdk
 import redis.asyncio as redis
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -242,3 +243,28 @@ async def root():
         },
         message="Welcome to NUMU API",
     )
+
+
+@router.get(
+    "/debug/sentry-test",
+    summary="Trigger test Sentry error",
+    operation_id="sentry_test",
+    include_in_schema=False,
+)
+async def sentry_test():
+    """Trigger a test error to verify Sentry integration.
+
+    Only available when DEBUG=true. Returns 403 in non-debug environments.
+    """
+    if not settings.debug:
+        raise HTTPException(status_code=403, detail="Debug endpoints disabled")
+
+    try:
+        1 / 0  # Deliberate error to test Sentry capture
+    except ZeroDivisionError:
+        sentry_sdk.capture_exception()
+        return {
+            "status": "error_captured",
+            "message": "Test error sent to Sentry. Check your Sentry dashboard.",
+            "sentry_dsn_configured": bool(settings.sentry_dsn),
+        }
