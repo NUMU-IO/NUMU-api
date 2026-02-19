@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 
 from src.main import create_app
 
-
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
 
@@ -50,7 +49,7 @@ class TestOperationIds:
                     continue  # skip path-level metadata
                 if "operationId" not in details:
                     missing.append(f"{method.upper()} {path}")
-        assert missing == [], f"Endpoints missing operationId:\n" + "\n".join(missing)
+        assert missing == [], "Endpoints missing operationId:\n" + "\n".join(missing)
 
     def test_operation_ids_are_unique(self, spec):
         """No two endpoints may share the same operationId."""
@@ -69,13 +68,9 @@ class TestOperationIds:
         for path, methods in spec["paths"].items():
             for method, details in methods.items():
                 oid = details.get("operationId")
-                if oid and (
-                    " " in oid
-                    or "-" in oid
-                    or oid != oid.lower()
-                ):
+                if oid and (" " in oid or "-" in oid or oid != oid.lower()):
                     bad.append(f"{oid} ({method.upper()} {path})")
-        assert bad == [], f"Non-snake_case operationIds:\n" + "\n".join(bad)
+        assert bad == [], "Non-snake_case operationIds:\n" + "\n".join(bad)
 
 
 # ─── 2. Tags are consistent ─────────────────────────────────────────────────
@@ -104,7 +99,7 @@ class TestTags:
                 tags = details.get("tags", [])
                 if len(tags) != len(set(tags)):
                     bad.append(f"{method.upper()} {path}: {tags}")
-        assert bad == [], f"Endpoints with duplicate tags:\n" + "\n".join(bad)
+        assert bad == [], "Endpoints with duplicate tags:\n" + "\n".join(bad)
 
     def test_no_orphan_tag_definitions(self, spec):
         """Every defined tag should be used by at least one endpoint."""
@@ -124,9 +119,7 @@ class TestTags:
 
     def test_tag_definitions_have_descriptions(self, spec):
         """Every tag definition should include a description."""
-        missing = [
-            t["name"] for t in spec.get("tags", []) if not t.get("description")
-        ]
+        missing = [t["name"] for t in spec.get("tags", []) if not t.get("description")]
         assert missing == [], f"Tags without description: {missing}"
 
 
@@ -159,8 +152,8 @@ class TestDeleteStatusCodes:
             if not has_204 or has_200:
                 bad.append(f"DELETE {path}: responses={list(responses.keys())}")
 
-        assert bad == [], (
-            "DELETE endpoints should return 204 (not 200):\n" + "\n".join(bad)
+        assert bad == [], "DELETE endpoints should return 204 (not 200):\n" + "\n".join(
+            bad
         )
 
     def test_exception_deletes_return_200(self, spec):
@@ -182,8 +175,7 @@ class TestSchemas:
         schemas = spec.get("components", {}).get("schemas", {})
         collisions = [name for name in schemas if name.startswith("src__")]
         assert collisions == [], (
-            f"Schema name collisions (module-qualified names):\n"
-            + "\n".join(collisions)
+            "Schema name collisions (module-qualified names):\n" + "\n".join(collisions)
         )
 
     def test_key_schemas_have_examples(self, spec):
