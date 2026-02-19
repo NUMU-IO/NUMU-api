@@ -108,18 +108,29 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Use relaxed CSP for API documentation pages in debug mode
         is_docs_path = request.url.path in self.DOCS_PATHS
-        self._add_security_headers(response, use_docs_csp=is_docs_path)
+        # /uploads/ serves static assets that must be loadable from storefront/dashboard origins
+        is_uploads_path = request.url.path.startswith("/uploads/")
+        self._add_security_headers(
+            response,
+            use_docs_csp=is_docs_path,
+            is_public_asset=is_uploads_path,
+        )
 
         return response
 
     def _add_security_headers(
-        self, response: Response, *, use_docs_csp: bool = False
+        self,
+        response: Response,
+        *,
+        use_docs_csp: bool = False,
+        is_public_asset: bool = False,
     ) -> None:
         """Add all security headers to the response.
 
         Args:
             response: The HTTP response to modify
             use_docs_csp: Whether to use the relaxed docs CSP policy
+            is_public_asset: Whether this is a public asset (e.g. /uploads/)
         """
         # X-Frame-Options: Prevent clickjacking by disallowing iframe embedding
         # DENY = never allow framing, SAMEORIGIN = only same origin can frame
@@ -170,7 +181,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Cross-Origin-Resource-Policy: Control resource loading
         # same-origin = Only allow same-origin requests
-        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        # Public assets (e.g. /uploads/) need cross-origin so dashboard/storefront can load them
+        response.headers["Cross-Origin-Resource-Policy"] = (
+            "cross-origin" if is_public_asset else "same-origin"
+        )
 
         # X-DNS-Prefetch-Control: Prevent DNS prefetching of external links
         response.headers["X-DNS-Prefetch-Control"] = "off"
