@@ -1,5 +1,8 @@
 """Service dependencies."""
 
+import logging
+
+from src.config import settings
 from src.infrastructure.cache import ProductCacheService, get_product_cache
 from src.infrastructure.external_services import (
     password_service,
@@ -9,10 +12,13 @@ from src.infrastructure.external_services.cloudflare_r2 import (
     CloudflareR2StorageService,
 )
 from src.infrastructure.external_services.image import ImagePipeline, ImageProcessor
+from src.infrastructure.external_services.local_storage import LocalStorageService
 from src.infrastructure.external_services.openai import OpenAIService
 from src.infrastructure.external_services.resend import ResendEmailService
 from src.infrastructure.external_services.stripe import StripePaymentService
 from src.infrastructure.external_services.totp_service import totp_service
+
+_logger = logging.getLogger(__name__)
 
 
 def get_password_service():
@@ -40,9 +46,21 @@ def get_payment_service():
     return StripePaymentService()
 
 
+def _get_storage():
+    """Return R2 storage if configured, otherwise local filesystem storage."""
+    if (
+        settings.r2_account_id
+        and settings.r2_access_key_id
+        and settings.r2_secret_access_key
+    ):
+        return CloudflareR2StorageService()
+    _logger.info("R2 not configured — using local filesystem storage")
+    return LocalStorageService()
+
+
 def get_storage_service():
     """Get storage service dependency."""
-    return CloudflareR2StorageService()
+    return _get_storage()
 
 
 def get_ai_service():
@@ -54,7 +72,7 @@ def get_image_pipeline():
     """Get image processing pipeline dependency."""
     return ImagePipeline(
         image_processor=ImageProcessor(),
-        storage_service=CloudflareR2StorageService(),
+        storage_service=_get_storage(),
     )
 
 

@@ -112,21 +112,36 @@ OPENAPI_TAGS = [
     {"name": "Store Orders", "description": "Order processing and fulfillment"},
     {"name": "Store Customers", "description": "Customer management"},
     {"name": "Store Coupons", "description": "Coupon and discount management"},
-    {"name": "Store Invoices", "description": "ETA e-invoicing for the Egyptian market"},
-    {"name": "Store Inventory", "description": "Inventory tracking and stock management"},
+    {
+        "name": "Store Invoices",
+        "description": "ETA e-invoicing for the Egyptian market",
+    },
+    {
+        "name": "Store Inventory",
+        "description": "Inventory tracking and stock management",
+    },
     {"name": "Store Analytics", "description": "Store analytics and reporting"},
     {"name": "Store Dashboard", "description": "Dashboard metrics and summaries"},
     {"name": "Store Settings", "description": "Store settings and configuration"},
     {"name": "Store Onboarding", "description": "Store onboarding progress"},
     {"name": "Store Feedback", "description": "User feedback management"},
     # ── Storefront (customer-facing) ──────────────────────
-    {"name": "Storefront - Public", "description": "Public storefront catalog and customer auth"},
-    {"name": "Storefront - Customer", "description": "Customer account and profile endpoints"},
+    {
+        "name": "Storefront - Public",
+        "description": "Public storefront catalog and customer auth",
+    },
+    {
+        "name": "Storefront - Customer",
+        "description": "Customer account and profile endpoints",
+    },
     {"name": "Storefront - Cart", "description": "Shopping cart operations"},
     {"name": "Storefront - Checkout", "description": "Checkout and payment processing"},
     {"name": "Storefront - Coupons", "description": "Coupon validation for shoppers"},
     # ── Configuration ─────────────────────────────────────
-    {"name": "Configuration Requests", "description": "Tenant configuration requests (payment, shipping, etc.)"},
+    {
+        "name": "Configuration Requests",
+        "description": "Tenant configuration requests (payment, shipping, etc.)",
+    },
     # ── Admin ─────────────────────────────────────────────
     {"name": "Admin", "description": "Admin panel endpoints"},
     {"name": "Admin - Tenants", "description": "Admin tenant management"},
@@ -141,7 +156,10 @@ OPENAPI_TAGS = [
     {"name": "Webhooks - Paymob", "description": "Paymob payment webhook receiver"},
     {"name": "Webhooks - Fawry", "description": "Fawry payment webhook receiver"},
     {"name": "Webhooks - Bosta", "description": "Bosta shipping webhook receiver"},
-    {"name": "Webhooks - WhatsApp", "description": "WhatsApp messaging webhook receiver"},
+    {
+        "name": "Webhooks - WhatsApp",
+        "description": "WhatsApp messaging webhook receiver",
+    },
 ]
 
 
@@ -234,6 +252,16 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(api_router)
+
+    # Serve local uploads in development (when R2 is not configured)
+    if settings.debug and not settings.r2_account_id:
+        from pathlib import Path
+
+        from starlette.staticfiles import StaticFiles
+
+        uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
     # Setup admin panel (public schema only)
     setup_admin(app)

@@ -106,6 +106,27 @@ AVAILABLE_THEMES = [
         "layout": "default",
         "description": "Futuristic dark theme with neon accents, glassmorphism, and wave effects",
     },
+    {
+        "id": "neo-brutalism",
+        "name": "Neo Brutalism",
+        "nameAr": "نيو بروتاليزم",
+        "layout": "neo-brutalism",
+        "description": "Bold, raw design with thick borders, hard shadows, and neon accents",
+    },
+    {
+        "id": "editorial",
+        "name": "Editorial",
+        "nameAr": "إيديتوريال",
+        "layout": "editorial",
+        "description": "Bold editorial fashion theme with oversized typography and dramatic green palette",
+    },
+    {
+        "id": "luxury-minimal",
+        "name": "Luxury Minimal",
+        "nameAr": "فخامة مينيمال",
+        "layout": "luxury-minimal",
+        "description": "Ultra-clean luxury minimalist theme with refined typography and understated elegance",
+    },
 ]
 
 
@@ -247,13 +268,9 @@ async def browse_products(
             is_active=True,
         )
 
-    # Parse requested fields (uses mobile-optimized defaults if not specified)
-    requested_fields = field_selector.parse_fields(fields)
-
-    # Build product responses with only requested fields
+    # Build product responses
     products = []
     for product in result.items:
-        # Build full product data first
         product_data = {
             "id": str(product.id),
             "store_id": str(product.store_id),
@@ -282,9 +299,11 @@ async def browse_products(
             "updated_at": str(product.updated_at),
         }
 
-        # Filter to only requested fields (sparse fieldsets)
-        filtered_data = field_selector.filter_dict(product_data, requested_fields)
-        products.append(filtered_data)
+        # Apply sparse fieldsets only when client explicitly requests specific fields
+        if fields:
+            requested_fields = field_selector.parse_fields(fields)
+            product_data = field_selector.filter_dict(product_data, requested_fields)
+        products.append(product_data)
 
     return SuccessResponse(
         data=PaginatedListResponse(
