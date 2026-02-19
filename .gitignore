@@ -45,6 +45,8 @@ alembic.ini.local
 .env.local
 .env.*.local
 *.env
+.env.staging
+!.env.staging.example
 
 # IDE
 .vscode/
