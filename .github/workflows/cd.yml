@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [prod]
+    branches: [staging, prod]
     tags: ["v*"]
 
 env:
@@ -52,15 +52,58 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # TODO: Add deployment step for your provider (AWS ECS, Railway, Fly.io, etc.)
-  # Example for Railway:
-  # deploy:
-  #   name: Deploy
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    steps:
+      - name: Install SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
+
+      - name: Deploy to staging VPS
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << 'DEPLOY_SCRIPT'
+            set -e
+            cd /opt/numu
+
+            echo "==> Pulling latest images..."
+            docker compose -f docker/docker-compose.staging.yml pull
+
+            echo "==> Starting services..."
+            docker compose -f docker/docker-compose.staging.yml up -d
+
+            echo "==> Running database migrations..."
+            docker compose -f docker/docker-compose.staging.yml exec -T api alembic upgrade head
+
+            echo "==> Verifying health..."
+            sleep 10
+            curl -f http://localhost:8000/api/v1/health || echo "Health check pending..."
+
+            echo "==> Deployment complete."
+          DEPLOY_SCRIPT
+
+  # deploy-prod:
+  #   name: Deploy to Production
   #   runs-on: ubuntu-latest
   #   needs: build-and-push
+  #   if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')
+  #   environment: production
   #   steps:
-  #     - name: Deploy to Railway
-  #       uses: bervProject/railway-deploy@main
+  #     - name: Install SSH key
+  #       uses: webfactory/ssh-agent@v0.9.0
   #       with:
-  #         railway_token: ${{ secrets.RAILWAY_TOKEN }}
-  #         service: numu-api
+  #         ssh-private-key: ${{ secrets.PROD_SSH_KEY }}
+  #
+  #     - name: Deploy to production VPS
+  #       run: |
+  #         ssh -o StrictHostKeyChecking=no ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_HOST }} << 'DEPLOY_SCRIPT'
+  #           set -e
+  #           cd /opt/numu
+  #           docker compose -f docker/docker-compose.prod.yml pull
+  #           docker compose -f docker/docker-compose.prod.yml up -d
+  #           docker compose -f docker/docker-compose.prod.yml exec -T api alembic upgrade head
+  #         DEPLOY_SCRIPT
