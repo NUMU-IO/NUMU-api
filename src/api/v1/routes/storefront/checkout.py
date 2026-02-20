@@ -111,7 +111,7 @@ async def checkout(
                 product_name=product.name,
                 sku=product.sku,
                 quantity=item.quantity,
-                unit_price=int(product.price.amount_cents),
+                unit_price=product.price.cents,
                 variant_id=item.variant_id,
             )
         )
@@ -251,6 +251,7 @@ async def checkout(
 
     order = Order(
         store_id=store_id,
+        tenant_id=store.tenant_id,
         customer_id=current_customer.id,
         order_number=order_number,
         line_items=order_line_items,
@@ -272,6 +273,13 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # Update customer lifetime stats
+    current_customer.total_orders = (current_customer.total_orders or 0) + 1
+    current_customer.total_spent = (
+        current_customer.total_spent or 0
+    ) + created_order.total
+    await customer_repo.update(current_customer)
 
     # Build payment URL if applicable
     payment_url: str | None = None

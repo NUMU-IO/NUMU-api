@@ -3,7 +3,7 @@
 URL: /stores/{store_id}/analytics
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -105,7 +105,7 @@ async def get_sales_overview(
     if store.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
     previous_period_start = period_start - timedelta(days=days)
 
@@ -113,16 +113,17 @@ async def get_sales_overview(
     current_revenue = await order_repo.get_revenue_by_date_range(
         store_id, period_start, now
     )
-    current_orders = await order_repo.count_by_store(store_id)
+    current_orders = await order_repo.count_by_store(
+        store_id, date_from=period_start, date_to=now
+    )
 
     # Previous period for comparison
     previous_revenue = await order_repo.get_revenue_by_date_range(
         store_id, previous_period_start, period_start
     )
-    previous_orders_list = await order_repo.get_by_date_range(
-        store_id, previous_period_start, period_start
+    previous_orders = await order_repo.count_by_store(
+        store_id, date_from=previous_period_start, date_to=period_start
     )
-    previous_orders = len(previous_orders_list)
 
     # Calculate changes
     if previous_revenue > 0:
@@ -145,7 +146,7 @@ async def get_sales_overview(
             avg_order_value=avg_order_value,
             sales_change_percent=round(sales_change, 1),
             orders_change_percent=round(orders_change, 1),
-            currency=store.default_currency or "EGP",
+            currency=store.default_currency.value if store.default_currency else "EGP",
         ),
         message="Sales overview retrieved successfully",
     )
@@ -172,7 +173,7 @@ async def get_sales_chart(
     if store.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     data_points = []
 
     for i in range(days - 1, -1, -1):
@@ -220,7 +221,7 @@ async def get_analytics_top_products(
     if store.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
     orders = await order_repo.get_by_date_range(store_id, period_start, now, limit=1000)
@@ -297,7 +298,7 @@ async def get_sales_by_location(
     if store.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
     orders = await order_repo.get_by_date_range(store_id, period_start, now, limit=1000)
@@ -317,18 +318,15 @@ async def get_sales_by_location(
         location = "Unknown"
         if order.shipping_address:
             location = (
-                order.shipping_address.get("governorate")
-                or order.shipping_address.get("city")
-                or order.shipping_address.get("state")
-                or "Unknown"
+                order.shipping_address.city or order.shipping_address.state or "Unknown"
             )
 
         if location not in location_sales:
             location_sales[location] = {"sales": 0, "orders": 0}
 
-        location_sales[location]["sales"] += order.total_amount
+        location_sales[location]["sales"] += order.total
         location_sales[location]["orders"] += 1
-        total_sales += order.total_amount
+        total_sales += order.total
 
     # Sort by sales and format
     sorted_locations = sorted(
@@ -377,7 +375,7 @@ async def get_customer_analytics(
     if store.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
     total_customers = await customer_repo.count_by_store(store_id)
@@ -394,7 +392,7 @@ async def get_customer_analytics(
             customer_orders[order.customer_id] = (
                 customer_orders.get(order.customer_id, 0) + 1
             )
-        total_revenue += order.total_amount
+        total_revenue += order.total
 
     new_customers = sum(1 for count in customer_orders.values() if count == 1)
     returning_customers = sum(1 for count in customer_orders.values() if count > 1)
@@ -433,7 +431,7 @@ async def get_conversion_stats(
     if store.owner_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
     orders = await order_repo.get_by_date_range(store_id, period_start, now, limit=1000)

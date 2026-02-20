@@ -34,6 +34,7 @@ class CouponRepository(ICouponRepository):
         return Coupon(
             id=model.id,
             store_id=model.store_id,
+            tenant_id=model.tenant_id,
             code=model.code,
             coupon_type=model.coupon_type,
             value=model.value,
@@ -44,6 +45,8 @@ class CouponRepository(ICouponRepository):
             valid_from=model.valid_from,
             valid_until=model.valid_until,
             is_active=model.is_active,
+            applicable_product_ids=model.applicable_product_ids,
+            applicable_category_ids=model.applicable_category_ids,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -53,6 +56,7 @@ class CouponRepository(ICouponRepository):
         return CouponModel(
             id=entity.id,
             store_id=entity.store_id,
+            tenant_id=entity.tenant_id,
             code=entity.code,
             coupon_type=entity.coupon_type,
             value=entity.value,
@@ -63,6 +67,8 @@ class CouponRepository(ICouponRepository):
             valid_from=entity.valid_from,
             valid_until=entity.valid_until,
             is_active=entity.is_active,
+            applicable_product_ids=entity.applicable_product_ids,
+            applicable_category_ids=entity.applicable_category_ids,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -104,6 +110,8 @@ class CouponRepository(ICouponRepository):
             model.valid_from = entity.valid_from
             model.valid_until = entity.valid_until
             model.is_active = entity.is_active
+            model.applicable_product_ids = entity.applicable_product_ids
+            model.applicable_category_ids = entity.applicable_category_ids
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)

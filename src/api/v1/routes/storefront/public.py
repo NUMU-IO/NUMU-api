@@ -17,6 +17,7 @@ from src.api.dependencies import (
     CursorParams,
     FieldSelector,
     build_cursor_response,
+    get_category_repository,
     get_cursor_params,
     get_cursor_values,
     get_customer_repository,
@@ -52,6 +53,7 @@ from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.cache import ProductCacheService
 from src.infrastructure.external_services import PasswordService, TokenService
 from src.infrastructure.repositories import (
+    CategoryRepository,
     CustomerRepository,
     ProductRepository,
     StoreRepository,
@@ -483,6 +485,50 @@ async def get_product_by_slug(
             updated_at=str(product.updated_at),
         ),
         message="Product retrieved successfully",
+    )
+
+
+# ============================================================================
+# Category Routes (public)
+# ============================================================================
+
+
+@router.get(
+    "/categories",
+    response_model=SuccessResponse[list],
+    summary="List store categories",
+    operation_id="browse_categories",
+)
+async def browse_categories(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
+):
+    """List active categories for a store (public)."""
+    from src.application.use_cases.categories import ListCategoriesUseCase
+
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    use_case = ListCategoriesUseCase(category_repository=category_repo)
+    results = await use_case.execute(store_id=store_id, include_inactive=False)
+
+    return SuccessResponse(
+        data=[
+            {
+                "id": str(r.id),
+                "name": r.name,
+                "slug": r.slug,
+                "description": r.description,
+                "image_url": r.image_url,
+                "parent_id": str(r.parent_id) if r.parent_id else None,
+                "position": r.position,
+                "product_count": r.product_count,
+            }
+            for r in results
+        ],
+        message="Categories retrieved successfully",
     )
 
 

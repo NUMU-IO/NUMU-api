@@ -34,12 +34,15 @@ class DashboardStatsResponse(BaseModel):
     # Revenue
     total_revenue: int
     revenue_change_percent: float
+    avg_order_value: int
     currency: str
 
     # Orders
     total_orders: int
     pending_orders: int
+    confirmed_orders: int
     processing_orders: int
+    shipped_orders: int
     completed_orders: int
     cancelled_orders: int
 
@@ -107,10 +110,13 @@ async def get_dashboard_stats(
         data=DashboardStatsResponse(
             total_revenue=result.total_revenue,
             revenue_change_percent=result.revenue_change_percent,
+            avg_order_value=result.avg_order_value,
             currency=result.currency,
             total_orders=result.total_orders,
             pending_orders=result.pending_orders,
+            confirmed_orders=result.confirmed_orders,
             processing_orders=result.processing_orders,
+            shipped_orders=result.shipped_orders,
             completed_orders=result.completed_orders,
             cancelled_orders=result.cancelled_orders,
             total_customers=result.total_customers,

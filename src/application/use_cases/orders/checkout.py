@@ -25,6 +25,7 @@ from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.product_repository import IProductRepository
+from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.interfaces.services.payment_service import IPaymentService
 
 
@@ -87,6 +88,7 @@ class CheckoutUseCase:
         product_repository: IProductRepository,
         customer_repository: ICustomerRepository,
         payment_service: IPaymentService,
+        store_repository: IStoreRepository | None = None,
         coupon_repository: ICouponRepository | None = None,
     ) -> None:
         """Initialize use case.
@@ -97,6 +99,7 @@ class CheckoutUseCase:
             product_repository: Product repository instance.
             customer_repository: Customer repository instance.
             payment_service: Payment service (Paymob) instance.
+            store_repository: Store repository instance (optional).
             coupon_repository: Coupon repository instance (optional).
         """
         self.cart_repository = cart_repository
@@ -104,6 +107,7 @@ class CheckoutUseCase:
         self.product_repository = product_repository
         self.customer_repository = customer_repository
         self.payment_service = payment_service
+        self.store_repository = store_repository
         self.coupon_repository = coupon_repository
 
     async def execute(
@@ -129,6 +133,13 @@ class CheckoutUseCase:
             ValidationError: If cart is empty or stock is insufficient.
             PaymentError: If payment initiation fails.
         """
+
+        # Resolve tenant_id from the store
+        tenant_id = None
+        if self.store_repository:
+            store = await self.store_repository.get_by_id(store_id)
+            if store:
+                tenant_id = store.tenant_id
 
         cart = await self.cart_repository.get_by_customer_id(customer_id, store_id)
         if not cart:
@@ -278,6 +289,7 @@ class CheckoutUseCase:
 
         order = Order(
             store_id=store_id,
+            tenant_id=tenant_id,
             customer_id=customer_id,
             order_number=order_number,
             line_items=line_items,

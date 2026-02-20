@@ -68,7 +68,7 @@ async def get_cart(
         product = await product_repo.get_by_id(UUID(entry["product_id"]))
         if not product or product.status != ProductStatus.ACTIVE:
             continue
-        unit_price = int(product.price.amount_cents)
+        unit_price = product.price.cents
         total_price = unit_price * entry["quantity"]
         subtotal += total_price
         items.append(

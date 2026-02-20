@@ -90,6 +90,10 @@ class UpdateCouponUseCase:
             coupon.valid_until = dto.valid_until
         if dto.is_active is not None:
             coupon.is_active = dto.is_active
+        if dto.applicable_product_ids is not None:
+            coupon.applicable_product_ids = dto.applicable_product_ids or None
+        if dto.applicable_category_ids is not None:
+            coupon.applicable_category_ids = dto.applicable_category_ids or None
 
         coupon.touch()
         updated = await self.coupon_repository.update(coupon)

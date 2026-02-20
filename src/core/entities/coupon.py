@@ -26,6 +26,7 @@ class Coupon(BaseEntity):
     """
 
     store_id: UUID
+    tenant_id: UUID | None = None
     code: str = Field(..., min_length=1, max_length=50)
     coupon_type: CouponType
     value: Decimal = Field(default=Decimal("0"), ge=0)
@@ -36,6 +37,8 @@ class Coupon(BaseEntity):
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     is_active: bool = True
+    applicable_product_ids: list[UUID] | None = None
+    applicable_category_ids: list[UUID] | None = None
 
     @field_validator("code", mode="before")
     @classmethod

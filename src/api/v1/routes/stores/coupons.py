@@ -17,7 +17,6 @@ from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CouponResponse,
     CreateCouponRequest,
-    DeleteResponse,
     PaginatedListResponse,
     UpdateCouponRequest,
 )
@@ -55,6 +54,12 @@ def _coupon_response(result) -> CouponResponse:
         is_active=result.is_active,
         is_expired=result.is_expired,
         is_usable=result.is_usable,
+        applicable_product_ids=[str(pid) for pid in result.applicable_product_ids]
+        if result.applicable_product_ids
+        else None,
+        applicable_category_ids=[str(cid) for cid in result.applicable_category_ids]
+        if result.applicable_category_ids
+        else None,
         created_at=str(result.created_at),
         updated_at=str(result.updated_at),
     )
@@ -89,6 +94,12 @@ async def create_coupon(
         usage_limit=request.usage_limit,
         valid_from=request.valid_from,
         valid_until=request.valid_until,
+        applicable_product_ids=[UUID(pid) for pid in request.applicable_product_ids]
+        if request.applicable_product_ids
+        else None,
+        applicable_category_ids=[UUID(cid) for cid in request.applicable_category_ids]
+        if request.applicable_category_ids
+        else None,
     )
 
     result = await use_case.execute(dto=dto, store_id=store_id, user_id=user_id)
@@ -189,6 +200,12 @@ async def update_coupon(
         valid_from=request.valid_from,
         valid_until=request.valid_until,
         is_active=request.is_active,
+        applicable_product_ids=[UUID(pid) for pid in request.applicable_product_ids]
+        if request.applicable_product_ids is not None
+        else None,
+        applicable_category_ids=[UUID(cid) for cid in request.applicable_category_ids]
+        if request.applicable_category_ids is not None
+        else None,
     )
 
     result = await use_case.execute(coupon_id=coupon_id, dto=dto, user_id=user_id)
