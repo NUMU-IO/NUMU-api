@@ -27,6 +27,8 @@ class CouponDTO(BaseDTO):
     is_active: bool
     is_expired: bool
     is_usable: bool
+    applicable_product_ids: list[UUID] | None
+    applicable_category_ids: list[UUID] | None
     created_at: datetime
     updated_at: datetime
 
@@ -48,6 +50,8 @@ class CouponDTO(BaseDTO):
             is_active=entity.is_active,
             is_expired=entity.is_expired,
             is_usable=entity.is_usable,
+            applicable_product_ids=entity.applicable_product_ids,
+            applicable_category_ids=entity.applicable_category_ids,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -65,6 +69,8 @@ class CreateCouponDTO(BaseDTO):
     usage_limit: int | None = None
     valid_from: datetime | None = None
     valid_until: datetime | None = None
+    applicable_product_ids: list[UUID] | None = None
+    applicable_category_ids: list[UUID] | None = None
 
 
 @dataclass
@@ -80,6 +86,8 @@ class UpdateCouponDTO(BaseDTO):
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     is_active: bool | None = None
+    applicable_product_ids: list[UUID] | None = None
+    applicable_category_ids: list[UUID] | None = None
 
 
 @dataclass

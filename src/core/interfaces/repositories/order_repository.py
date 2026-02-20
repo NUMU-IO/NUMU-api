@@ -68,6 +68,8 @@ class IOrderRepository(BaseRepository[Order]):
         self,
         store_id: UUID,
         status: OrderStatus | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> int:
         """Get total count of orders for a store."""
         ...

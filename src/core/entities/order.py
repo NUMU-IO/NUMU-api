@@ -159,6 +159,7 @@ class Order(BaseEntity):
     """
 
     store_id: UUID
+    tenant_id: UUID | None = None
     customer_id: UUID
     order_number: str
     line_items: list[OrderLineItem] = Field(default_factory=list)
@@ -357,6 +358,13 @@ class Order(BaseEntity):
             self.fulfillment_status = FulfillmentStatus.FULFILLED
         elif new_status == OrderStatus.DELIVERED:
             self.delivered_at = datetime.now(UTC)
+            # COD: cash collected at delivery -> mark as paid
+            if (
+                self.payment_method == "cod"
+                and self.payment_status == PaymentStatus.PENDING
+            ):
+                self.payment_status = PaymentStatus.PAID
+                self.paid_at = datetime.now(UTC)
 
         self.touch()
 
@@ -423,11 +431,22 @@ class Order(BaseEntity):
         self.touch()
 
     def deliver(self) -> None:
-        """Mark order as delivered."""
+        """Mark order as delivered.
+
+        For COD orders, payment_status is automatically set to PAID
+        since cash is collected at delivery.
+        """
         if self.status != OrderStatus.SHIPPED:
             raise ValueError(f"Cannot deliver order in {self.status} status")
         self.status = OrderStatus.DELIVERED
         self.delivered_at = datetime.now(UTC)
+        # COD: cash collected at delivery -> mark as paid
+        if (
+            self.payment_method == "cod"
+            and self.payment_status == PaymentStatus.PENDING
+        ):
+            self.payment_status = PaymentStatus.PAID
+            self.paid_at = datetime.now(UTC)
         self.touch()
 
     def cancel(self, reason: str | None = None) -> None:

@@ -1,5 +1,10 @@
 """Tenant-scoped API schemas (products, stores, orders, invoices)."""
 
+from src.api.v1.schemas.tenant.category import (
+    CategoryResponse,
+    CreateCategoryRequest,
+    UpdateCategoryRequest,
+)
 from src.api.v1.schemas.tenant.common import (
     DeleteResponse,
     MessageResponse,
@@ -63,6 +68,10 @@ __all__ = [
     "MessageResponse",
     "PaginatedListResponse",
     "PaginationParams",
+    # Category
+    "CategoryResponse",
+    "CreateCategoryRequest",
+    "UpdateCategoryRequest",
     # Coupon
     "CouponResponse",
     "CreateCouponRequest",

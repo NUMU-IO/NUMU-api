@@ -101,6 +101,7 @@ class OrderRepository(IOrderRepository):
         return Order(
             id=model.id,
             store_id=model.store_id,
+            tenant_id=model.tenant_id,
             customer_id=model.customer_id,
             order_number=model.order_number,
             line_items=[
@@ -138,6 +139,7 @@ class OrderRepository(IOrderRepository):
         return OrderModel(
             id=entity.id,
             store_id=entity.store_id,
+            tenant_id=entity.tenant_id,
             customer_id=entity.customer_id,
             order_number=entity.order_number,
             line_items=[self._line_item_to_dict(item) for item in entity.line_items],
@@ -386,15 +388,48 @@ class OrderRepository(IOrderRepository):
         start_date: datetime,
         end_date: datetime,
     ) -> int:
-        """Get total revenue for a date range (in cents)."""
+        """Get total revenue for a date range (in cents).
+
+        Includes all orders except cancelled and refunded, so COD orders
+        (payment still pending) are counted toward revenue.
+        """
         query = select(func.coalesce(func.sum(OrderModel.total), 0)).where(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= start_date,
             OrderModel.created_at <= end_date,
-            OrderModel.payment_status == PaymentStatus.PAID,
+            OrderModel.status.notin_([
+                OrderStatus.CANCELLED,
+                OrderStatus.REFUNDED,
+            ]),
         )
         result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
+
+    async def get_customer_order_stats(
+        self, store_id: UUID
+    ) -> dict[UUID, tuple[int, int]]:
+        """Get (order_count, total_spent) per customer for a store.
+
+        Returns a dict of {customer_id: (order_count, total_spent_cents)}.
+        Only counts non-cancelled/refunded orders.
+        """
+        query = (
+            select(
+                OrderModel.customer_id,
+                func.count(OrderModel.id),
+                func.coalesce(func.sum(OrderModel.total), 0),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.status.notin_([
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                ]),
+            )
+            .group_by(OrderModel.customer_id)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return {row[0]: (row[1], row[2]) for row in result.all()}
 
     async def get_next_order_number(self, store_id: UUID) -> str:
         """Generate next order number for a store."""

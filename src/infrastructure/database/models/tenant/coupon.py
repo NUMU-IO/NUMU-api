@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.coupon import CouponType
@@ -30,7 +30,12 @@ class CouponModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     coupon_type: Mapped[CouponType] = mapped_column(
-        Enum(CouponType, name="coupontype", schema="public"),
+        Enum(
+            CouponType,
+            name="coupontype",
+            schema="public",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
     value: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
@@ -49,6 +54,8 @@ class CouponModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         DateTime(timezone=True), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    applicable_product_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    applicable_category_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
 
     # Relationships
     store = relationship("StoreModel", lazy="selectin")

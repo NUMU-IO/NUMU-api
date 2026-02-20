@@ -1,6 +1,7 @@
 """Customer repository interface."""
 
 from abc import abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 from src.core.entities.customer import Customer
@@ -57,7 +58,11 @@ class ICustomerRepository(BaseRepository[Customer]):
         ...
 
     @abstractmethod
-    async def count_by_store(self, store_id: UUID) -> int:
+    async def count_by_store(
+        self,
+        store_id: UUID,
+        date_from: datetime | None = None,
+    ) -> int:
         """Get total count of customers for a store."""
         ...
 

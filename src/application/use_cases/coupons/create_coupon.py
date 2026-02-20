@@ -111,6 +111,7 @@ class CreateCouponUseCase:
         # Create entity
         coupon = Coupon(
             store_id=store_id,
+            tenant_id=store.tenant_id,
             code=code,
             coupon_type=coupon_type,
             value=dto.value,
@@ -119,6 +120,8 @@ class CreateCouponUseCase:
             usage_limit=dto.usage_limit,
             valid_from=dto.valid_from,
             valid_until=dto.valid_until,
+            applicable_product_ids=dto.applicable_product_ids,
+            applicable_category_ids=dto.applicable_category_ids,
         )
 
         created = await self.coupon_repository.create(coupon)

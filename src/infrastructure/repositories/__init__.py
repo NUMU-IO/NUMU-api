@@ -2,6 +2,7 @@
 
 from src.infrastructure.repositories.address_repository import CustomerAddressRepository
 from src.infrastructure.repositories.cart_repository import RedisCartRepository
+from src.infrastructure.repositories.category_repository import CategoryRepository
 from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
@@ -16,6 +17,7 @@ __all__ = [
     "UserRepository",
     "StoreRepository",
     "ProductRepository",
+    "CategoryRepository",
     "CouponRepository",
     "CustomerRepository",
     "CustomerAddressRepository",

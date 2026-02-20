@@ -126,6 +126,7 @@ class CreateOrderUseCase:
         # Create order entity
         order = Order(
             store_id=store_id,
+            tenant_id=store.tenant_id,
             customer_id=dto.customer_id,
             order_number=order_number,
             line_items=line_items,

@@ -25,13 +25,18 @@ class CreateCouponRequest(BaseModel):
     )
 
     code: str = Field(
-        ..., min_length=1, max_length=50, description="Unique coupon code (case-insensitive)"
+        ...,
+        min_length=1,
+        max_length=50,
+        description="Unique coupon code (case-insensitive)",
     )
     coupon_type: str = Field(
         ..., description="Discount type: percentage, fixed, or free_shipping"
     )
     value: Decimal = Field(
-        default=Decimal("0"), ge=0, description="Discount value — percentage (0-100) or fixed amount"
+        default=Decimal("0"),
+        ge=0,
+        description="Discount value — percentage (0-100) or fixed amount",
     )
     min_order_amount: Decimal | None = Field(
         None, ge=0, description="Minimum order subtotal required to apply the coupon"
@@ -47,6 +52,12 @@ class CreateCouponRequest(BaseModel):
     )
     valid_until: datetime | None = Field(
         None, description="ISO 8601 end of validity period"
+    )
+    applicable_product_ids: list[str] | None = Field(
+        None, description="List of product UUIDs this coupon applies to (null = all)"
+    )
+    applicable_category_ids: list[str] | None = Field(
+        None, description="List of category UUIDs this coupon applies to (null = all)"
     )
 
 
@@ -79,6 +90,12 @@ class UpdateCouponRequest(BaseModel):
     valid_from: datetime | None = Field(None, description="Validity start")
     valid_until: datetime | None = Field(None, description="Validity end")
     is_active: bool | None = Field(None, description="Enable or disable the coupon")
+    applicable_product_ids: list[str] | None = Field(
+        None, description="Product UUIDs this coupon applies to (null = all)"
+    )
+    applicable_category_ids: list[str] | None = Field(
+        None, description="Category UUIDs this coupon applies to (null = all)"
+    )
 
 
 class CouponResponse(BaseModel):
@@ -122,5 +139,11 @@ class CouponResponse(BaseModel):
     is_active: bool = Field(description="Whether the coupon is active")
     is_expired: bool = Field(description="Whether the coupon has expired")
     is_usable: bool = Field(description="Whether the coupon can be used right now")
+    applicable_product_ids: list[str] | None = Field(
+        None, description="Product UUIDs this coupon applies to"
+    )
+    applicable_category_ids: list[str] | None = Field(
+        None, description="Category UUIDs this coupon applies to"
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")

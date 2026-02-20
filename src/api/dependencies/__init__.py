@@ -24,6 +24,7 @@ from src.api.dependencies.pagination import (
     get_cursor_values,
 )
 from src.api.dependencies.repositories import (
+    get_category_repository,
     get_coupon_repository,
     get_customer_address_repository,
     get_customer_repository,
@@ -57,6 +58,7 @@ __all__ = [
     "require_store_owner",
     "require_admin",
     # Repositories
+    "get_category_repository",
     "get_coupon_repository",
     "get_user_repository",
     "get_store_repository",

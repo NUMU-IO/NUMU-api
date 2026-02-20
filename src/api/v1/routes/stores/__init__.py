@@ -10,12 +10,14 @@ Provides REST endpoints for store CRUD operations and nested resources:
 - /stores/{store_id}/inventory - Inventory management
 - /stores/{store_id}/analytics - Analytics and reporting
 - /stores/{store_id}/settings - Store settings (payment, shipping, whatsapp)
+- /stores/{store_id}/categories - Category management
 - /stores/{store_id}/onboarding - Merchant onboarding progress
 """
 
 from fastapi import APIRouter
 
 from src.api.v1.routes.stores import analytics as analytics_module
+from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
@@ -45,6 +47,7 @@ router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(inventory_module.router, tags=["Store Inventory"])
 router.include_router(analytics_module.router, tags=["Store Analytics"])
+router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(settings_module.router, tags=["Store Settings"])
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])

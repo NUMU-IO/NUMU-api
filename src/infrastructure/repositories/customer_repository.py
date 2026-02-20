@@ -1,5 +1,6 @@
 """Customer repository implementation."""
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -229,13 +230,18 @@ class CustomerRepository(ICustomerRepository):
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 
-    async def count_by_store(self, store_id: UUID) -> int:
+    async def count_by_store(
+        self,
+        store_id: UUID,
+        date_from: datetime | None = None,
+    ) -> int:
         """Get total count of customers for a store."""
-        result = await self.session.execute(
-            select(func.count(CustomerModel.id)).where(
-                CustomerModel.store_id == store_id
-            )
+        query = select(func.count(CustomerModel.id)).where(
+            CustomerModel.store_id == store_id
         )
+        if date_from:
+            query = query.where(CustomerModel.created_at >= date_from)
+        result = await self.session.execute(query)
         return result.scalar() or 0
 
     async def update_password(

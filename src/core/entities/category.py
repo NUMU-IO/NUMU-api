@@ -16,6 +16,7 @@ class Category(BaseEntity):
     """
 
     store_id: UUID
+    tenant_id: UUID | None = None
     name: str
     slug: str
     description: str | None = None

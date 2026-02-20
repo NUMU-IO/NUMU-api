@@ -1,7 +1,7 @@
 """Get dashboard stats use case."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from src.core.entities.order import OrderStatus, PaymentStatus
@@ -19,12 +19,15 @@ class DashboardStatsDTO:
     # Revenue
     total_revenue: int  # In cents
     revenue_change_percent: float  # Compared to previous period
+    avg_order_value: int  # In cents (revenue / paid-orders in the period)
     currency: str
 
     # Orders
     total_orders: int
     pending_orders: int
+    confirmed_orders: int
     processing_orders: int
+    shipped_orders: int
     completed_orders: int
     cancelled_orders: int
 
@@ -93,7 +96,7 @@ class GetDashboardStatsUseCase:
                 "You don't have permission to view this store's dashboard"
             )
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         period_start = now - timedelta(days=days)
         previous_period_start = period_start - timedelta(days=days)
 
@@ -117,39 +120,55 @@ class GetDashboardStatsUseCase:
         else:
             revenue_change_percent = 0.0
 
-        # Get order counts by status
-        total_orders = await self.order_repository.count_by_store(store_id)
+        # Get order counts by status (filtered to the period)
+        total_orders = await self.order_repository.count_by_store(
+            store_id, date_from=period_start, date_to=now
+        )
         pending_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.PENDING
+            store_id, OrderStatus.PENDING, date_from=period_start, date_to=now
+        )
+        confirmed_orders = await self.order_repository.count_by_store(
+            store_id, OrderStatus.CONFIRMED, date_from=period_start, date_to=now
         )
         processing_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.PROCESSING
+            store_id, OrderStatus.PROCESSING, date_from=period_start, date_to=now
+        )
+        shipped_orders = await self.order_repository.count_by_store(
+            store_id, OrderStatus.SHIPPED, date_from=period_start, date_to=now
         )
         completed_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.DELIVERED
+            store_id, OrderStatus.DELIVERED, date_from=period_start, date_to=now
         )
         cancelled_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.CANCELLED
+            store_id, OrderStatus.CANCELLED, date_from=period_start, date_to=now
         )
 
         # Get customer counts
         total_customers = await self.customer_repository.count_by_store(store_id)
-        # For new customers in period, we would need a date-filtered count
-        # For now, approximate with a subset
-        new_customers = min(total_customers, days)  # Simplified approximation
+        new_customers = await self.customer_repository.count_by_store(
+            store_id, date_from=period_start
+        )
 
         # Get product stats
         total_products = await self.product_repository.count_by_store(store_id)
         low_stock_products = await self.product_repository.get_low_stock(store_id)
         low_stock_count = len(low_stock_products)
 
+        # Avg order value = revenue / orders (for the period), 0 if no orders
+        avg_order_value = (
+            round(current_revenue / total_orders) if total_orders > 0 else 0
+        )
+
         return DashboardStatsDTO(
             total_revenue=current_revenue,
             revenue_change_percent=round(revenue_change_percent, 1),
+            avg_order_value=avg_order_value,
             currency=store.default_currency or "EGP",
             total_orders=total_orders,
             pending_orders=pending_orders,
+            confirmed_orders=confirmed_orders,
             processing_orders=processing_orders,
+            shipped_orders=shipped_orders,
             completed_orders=completed_orders,
             cancelled_orders=cancelled_orders,
             total_customers=total_customers,
@@ -177,7 +196,7 @@ class GetDashboardStatsUseCase:
                 "You don't have permission to view this store's dashboard"
             )
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         data_points = []
 
         # Get daily data for the period
@@ -222,7 +241,7 @@ class GetDashboardStatsUseCase:
             )
 
         # Get recent orders to aggregate product sales
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         period_start = now - timedelta(days=30)
 
         orders = await self.order_repository.get_by_date_range(

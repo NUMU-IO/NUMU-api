@@ -3,7 +3,7 @@
 URL: /stores/{store_id}/orders
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -19,7 +19,6 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateOrderRequest,
-    DeleteResponse,
     OrderAddressResponse,
     OrderLineItemResponse,
     OrderListItemResponse,
@@ -478,6 +477,51 @@ async def cancel_order(
     )
 
     return None
+
+
+@router.post(
+    "/{order_id}/mark-paid",
+    response_model=SuccessResponse[OrderResponse],
+    summary="Mark order as paid",
+    operation_id="mark_order_paid",
+)
+async def mark_order_paid(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Manually mark an order's payment as paid (e.g. COD collected)."""
+    from src.core.entities.order import PaymentStatus
+
+    store = await store_repo.get_by_id(store_id)
+    if not store or store.owner_id != user_id:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store_id:
+        from src.core.exceptions import EntityNotFoundError
+
+        raise EntityNotFoundError("Order", str(order_id))
+
+    if order.payment_status == PaymentStatus.PAID:
+        return SuccessResponse(
+            data=_order_to_response(OrderDTO.from_entity(order)),
+            message="Order is already marked as paid",
+        )
+
+    order.payment_status = PaymentStatus.PAID
+    order.paid_at = datetime.now(UTC)
+    order.touch()
+    updated = await order_repo.update(order)
+
+    return SuccessResponse(
+        data=_order_to_response(OrderDTO.from_entity(updated)),
+        message="Order marked as paid",
+    )
 
 
 # ============================================================================
