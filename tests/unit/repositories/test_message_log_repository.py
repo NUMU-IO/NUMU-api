@@ -408,7 +408,7 @@ class TestMessageLogRepository:
         )
         self.mock_session.refresh.side_effect = None
 
-        result = await self.repository.create(entity)
+        await self.repository.create(entity)
         self.mock_session.add.assert_called_once()
         self.mock_session.flush.assert_awaited_once()
 
