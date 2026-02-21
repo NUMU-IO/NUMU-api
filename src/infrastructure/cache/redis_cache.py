@@ -64,6 +64,27 @@ class RedisCacheService(ICacheService):
             return await client.setex(key, expire, serialized)
         return await client.set(key, serialized)
 
+    async def set_if_absent(
+        self,
+        key: str,
+        value: Any,
+        expire: int | None = None,
+    ) -> bool:
+        """Set key only if it does not already exist (atomic SETNX).
+
+        Args:
+            key: Cache key.
+            value: Value to store.
+            expire: Optional TTL in seconds.
+
+        Returns:
+            True if the key was newly set, False if it already existed.
+        """
+        client = await self._get_client()
+        serialized = self._serialize(value)
+        result = await client.set(key, serialized, ex=expire, nx=True)
+        return result is not None and result is not False
+
     async def delete(self, key: str) -> bool:
         """Delete value from cache."""
         client = await self._get_client()

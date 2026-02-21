@@ -5,31 +5,59 @@ Receives payment notifications from Fawry when:
 - Customer pays via Fawry app/online
 - Payment reference expires
 - Refund is processed
+
+Agent collaboration:
+- Security Agent: signature verification + replay protection
+- DB Agent: order lookup & status persistence
+- Payment Agent: state transitions (paid, expired, failed, refunded)
+- Inventory Agent: stock release on expiry
+- Messaging Agent: WhatsApp notifications on cancellation
+- Audit Agent: event logging for every status change
 """
 
-import logging
+import json
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.fawry_webhook_service import FawryWebhookService
 from src.config import settings
+from src.config.logging_config import get_logger
+from src.infrastructure.cache.redis_cache import RedisCacheService
+from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.fawry import FawryPaymentService
+from src.infrastructure.external_services.whatsapp.messaging_service import (
+    WhatsAppMessagingService,
+)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
-# Initialize service
+# Initialize services once at module level to reuse connections
 fawry_service = FawryPaymentService()
+_cache_service: RedisCacheService | None = (
+    RedisCacheService() if settings.redis_host else None
+)
+_messaging_service: WhatsAppMessagingService | None = (
+    WhatsAppMessagingService() if settings.whatsapp_enabled else None
+)
 
 
 @router.post("/callback", operation_id="fawry_callback")
 async def fawry_callback(
     request: Request,
+    db: AsyncSession = Depends(get_admin_db_session),
     x_fawry_signature: str = Header(None, alias="x-fawry-signature"),
 ):
     """Handle Fawry payment notification.
 
     Fawry sends a POST request when payment status changes.
     The x-fawry-signature header contains the SHA-256 signature.
+
+    Uses an admin DB session (RLS bypass) because webhooks are
+    system-level events with no tenant context in the HTTP request.
+    Tenant isolation is enforced at the application level via explicit
+    tenant_id filters on every write query.
 
     Payment statuses:
     - NEW: Reference created (initial)
@@ -39,15 +67,16 @@ async def fawry_callback(
     - REFUNDED: Payment refunded
     """
     payload = await request.body()
+    log = logger.bind(webhook="fawry")
 
-    # Verify signature
+    # ── Security Agent: signature verification ──────────────────────
     if settings.fawry_security_key:
         verified_data = fawry_service.verify_webhook_signature(
             payload,
             x_fawry_signature or "",
         )
         if not verified_data:
-            logger.warning("Fawry webhook signature verification failed")
+            log.warning("webhook_signature_invalid")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid webhook signature",
@@ -55,12 +84,8 @@ async def fawry_callback(
         data = verified_data
     else:
         # In development, accept without verification
-        import json
-
         data = json.loads(payload)
-        logger.warning(
-            "Fawry webhook received without signature verification (dev mode)"
-        )
+        log.warning("webhook_no_signature_verification", mode="development")
 
     # Extract notification details
     reference_number = data.get("referenceNumber")
@@ -70,46 +95,73 @@ async def fawry_callback(
     payment_method = data.get("paymentMethod")
     fawry_fees = data.get("fawryFees", 0)
 
-    logger.info(
-        f"Fawry webhook: ref={reference_number}, merchant_ref={merchant_ref_number}, "
-        f"status={order_status}, amount={payment_amount}, method={payment_method}"
+    log = log.bind(
+        reference_number=reference_number,
+        merchant_ref=merchant_ref_number,
+        order_status=order_status,
+        payment_amount=payment_amount,
+        payment_method=payment_method,
+    )
+    log.info("webhook_received")
+
+    # ── Build service (reuses module-level cache/messaging singletons) ──
+    webhook_service = FawryWebhookService(
+        db=db, cache=_cache_service, messaging=_messaging_service
     )
 
-    # Process based on status
-    if order_status == "PAID":
-        logger.info(
-            f"Fawry payment received for {merchant_ref_number}: "
-            f"{payment_amount} EGP (fees: {fawry_fees})"
+    # ── Security Agent: replay protection ───────────────────────────
+    if reference_number and await webhook_service.check_replay(reference_number):
+        log.warning("webhook_duplicate_rejected")
+        return {
+            "status": "duplicate",
+            "reference_number": reference_number,
+            "order_status": order_status,
+        }
+
+    # ── Security Agent: timestamp freshness ─────────────────────────
+    if not webhook_service.check_timestamp(data):
+        log.warning("webhook_timestamp_stale")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook timestamp too old",
         )
-        # TODO: Update order status in database
-        # await order_service.mark_paid(
-        #     merchant_ref_number,
-        #     reference_number,
-        #     int(payment_amount * 100),  # Convert to cents
-        #     fawry_fees=int(fawry_fees * 100) if fawry_fees else 0,
-        # )
+
+    # ── Process based on status ─────────────────────────────────────
+    if order_status == "PAID":
+        await webhook_service.handle_paid(
+            merchant_ref=merchant_ref_number,
+            reference_number=reference_number,
+            payment_amount=payment_amount,
+            payment_method=payment_method,
+            fawry_fees=fawry_fees,
+            raw_data=data,
+        )
 
     elif order_status == "EXPIRED":
-        logger.info(f"Fawry reference expired for {merchant_ref_number}")
-        # TODO: Update order status in database
-        # await order_service.mark_payment_expired(merchant_ref_number)
+        await webhook_service.handle_expired(
+            merchant_ref=merchant_ref_number,
+            raw_data=data,
+        )
 
     elif order_status == "CANCELED":
-        logger.info(f"Fawry reference cancelled for {merchant_ref_number}")
-        # TODO: Update order status in database
-        # await order_service.mark_cancelled(merchant_ref_number)
+        await webhook_service.handle_canceled(
+            merchant_ref=merchant_ref_number,
+            raw_data=data,
+        )
 
     elif order_status == "REFUNDED":
-        logger.info(f"Fawry refund processed for {merchant_ref_number}")
-        # TODO: Update order status in database
-        # await order_service.mark_refunded(merchant_ref_number, int(payment_amount * 100))
+        await webhook_service.handle_refunded(
+            merchant_ref=merchant_ref_number,
+            payment_amount=payment_amount,
+            raw_data=data,
+        )
 
     elif order_status == "NEW":
-        # Initial reference creation - usually no action needed
-        logger.debug(f"Fawry reference created: {reference_number}")
+        # Initial reference creation — no action needed
+        log.debug("webhook_new_reference")
 
     else:
-        logger.warning(f"Unknown Fawry status: {order_status}")
+        log.warning("webhook_unknown_status")
 
     # Always return 200 to acknowledge receipt
     return {
@@ -146,7 +198,7 @@ async def fawry_verify_payment(
             "payment_method": status_data.get("paymentMethod"),
         }
     except Exception as e:
-        logger.error(f"Fawry status check failed: {e}")
+        logger.error("fawry_status_check_failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to verify payment status",
