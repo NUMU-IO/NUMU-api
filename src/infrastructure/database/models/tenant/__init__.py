@@ -18,6 +18,7 @@ from src.infrastructure.database.models.tenant.configuration import (
 )
 from src.infrastructure.database.models.tenant.coupon import CouponModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
+from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.product import ProductModel
@@ -29,6 +30,7 @@ __all__ = [
     "CustomerAddressModel",
     "CustomerModel",
     "InvoiceModel",
+    "MessageLogModel",
     "OrderModel",
     # Configuration models
     "ConfigurationRequest",

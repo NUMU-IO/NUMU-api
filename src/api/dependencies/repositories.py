@@ -12,6 +12,7 @@ from src.infrastructure.repositories import (
     CustomerAddressRepository,
     CustomerRepository,
     FeedbackRepository,
+    MessageLogRepository,
     OnboardingRepository,
     OrderRepository,
     ProductRepository,
@@ -96,3 +97,10 @@ def get_feedback_repository(
 ) -> FeedbackRepository:
     """Get feedback repository dependency."""
     return FeedbackRepository(session)
+
+
+def get_message_log_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageLogRepository:
+    """Get message log repository dependency."""
+    return MessageLogRepository(session)
