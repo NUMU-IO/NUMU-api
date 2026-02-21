@@ -214,7 +214,10 @@ async def list_orders(
             query = query.where(OrderModel.status == parsed)
             count_query = count_query.where(OrderModel.status == parsed)
         except ValueError:
-            pass
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid order status filter: {order_status}",
+            )
 
     if payment_status:
         try:
@@ -222,7 +225,10 @@ async def list_orders(
             query = query.where(OrderModel.payment_status == parsed)
             count_query = count_query.where(OrderModel.payment_status == parsed)
         except ValueError:
-            pass
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid payment status filter: {payment_status}",
+            )
 
     if store_id:
         query = query.where(OrderModel.store_id == store_id)
