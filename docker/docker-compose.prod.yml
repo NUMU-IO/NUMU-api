@@ -1,13 +1,14 @@
 version: '3.8'
 
 # =============================================================================
-# NUMU API - Staging Environment
+# NUMU API - Production Environment
 # =============================================================================
 # Features:
 # - Nginx reverse proxy with SSL termination
 # - PostgreSQL with WAL archiving for point-in-time recovery
 # - Redis Sentinel for high availability
-# - API service with staging environment variables
+# - API service with production environment variables
+# - Higher resource limits than staging
 
 services:
   # ===========================================================================
@@ -17,8 +18,8 @@ services:
     build:
       context: ./nginx
       dockerfile: Dockerfile
-    image: numu-nginx:staging
-    container_name: numu-nginx-staging
+    image: numu-nginx:prod
+    container_name: numu-nginx-prod
     restart: unless-stopped
     ports:
       - "80:80"
@@ -29,7 +30,7 @@ services:
     depends_on:
       - api
     networks:
-      - numu-staging
+      - numu-prod
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -43,12 +44,12 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: numu-api-staging
+    container_name: numu-api-prod
     restart: unless-stopped
     env_file:
-      - ../.env.staging
+      - ../.env.prod
     environment:
-      - ENVIRONMENT=staging
+      - ENVIRONMENT=production
       - DEBUG=false
       - LOG_FORMAT=json
     expose:
@@ -63,7 +64,7 @@ services:
       minio:
         condition: service_healthy
     networks:
-      - numu-staging
+      - numu-prod
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/public/health"]
       interval: 30s
@@ -73,23 +74,23 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '4'
+          memory: 4G
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '1'
+          memory: 1G
 
   # ===========================================================================
   # PostgreSQL with WAL Archiving
   # ===========================================================================
   postgres:
     image: postgres:16-alpine
-    container_name: numu-postgres-staging
+    container_name: numu-postgres-prod
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-numu}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-numu_staging}
+      POSTGRES_DB: ${POSTGRES_DB:-numu_prod}
       # WAL archiving settings
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
@@ -101,24 +102,24 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - numu-staging
+      - numu-prod
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-numu} -d ${POSTGRES_DB:-numu_staging}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-numu} -d ${POSTGRES_DB:-numu_prod}"]
       interval: 10s
       timeout: 5s
       retries: 5
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '4'
+          memory: 4G
 
   # ===========================================================================
   # MinIO Object Storage
   # ===========================================================================
   minio:
     image: minio/minio:latest
-    container_name: numu-minio-staging
+    container_name: numu-minio-prod
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -130,7 +131,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     networks:
-      - numu-staging
+      - numu-prod
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
@@ -139,21 +140,21 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '2'
+          memory: 2G
 
   # ===========================================================================
   # Redis Master
   # ===========================================================================
   redis-master:
     image: redis:7-alpine
-    container_name: numu-redis-master-staging
+    container_name: numu-redis-master-prod
     restart: unless-stopped
     command: >
       redis-server
       --appendonly yes
       --appendfsync everysec
-      --maxmemory 512mb
+      --maxmemory 1gb
       --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_PASSWORD}
     volumes:
@@ -161,7 +162,7 @@ services:
     ports:
       - "6379:6379"
     networks:
-      - numu-staging
+      - numu-prod
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -173,7 +174,7 @@ services:
   # ===========================================================================
   redis-sentinel-1:
     image: redis:7-alpine
-    container_name: numu-redis-sentinel-1-staging
+    container_name: numu-redis-sentinel-1-prod
     restart: unless-stopped
     command: redis-sentinel /etc/redis/sentinel.conf
     volumes:
@@ -181,7 +182,7 @@ services:
     depends_on:
       - redis-master
     networks:
-      - numu-staging
+      - numu-prod
     ports:
       - "26379:26379"
 
@@ -190,7 +191,7 @@ services:
   # ===========================================================================
   redis-sentinel-2:
     image: redis:7-alpine
-    container_name: numu-redis-sentinel-2-staging
+    container_name: numu-redis-sentinel-2-prod
     restart: unless-stopped
     command: redis-sentinel /etc/redis/sentinel.conf
     volumes:
@@ -198,7 +199,7 @@ services:
     depends_on:
       - redis-master
     networks:
-      - numu-staging
+      - numu-prod
     ports:
       - "26380:26379"
 
@@ -207,7 +208,7 @@ services:
   # ===========================================================================
   redis-sentinel-3:
     image: redis:7-alpine
-    container_name: numu-redis-sentinel-3-staging
+    container_name: numu-redis-sentinel-3-prod
     restart: unless-stopped
     command: redis-sentinel /etc/redis/sentinel.conf
     volumes:
@@ -215,7 +216,7 @@ services:
     depends_on:
       - redis-master
     networks:
-      - numu-staging
+      - numu-prod
     ports:
       - "26381:26379"
 
@@ -226,24 +227,24 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: numu-celery-worker-staging
+    container_name: numu-celery-worker-prod
     restart: unless-stopped
-    command: celery -A src.infrastructure.messaging.celery_app worker --loglevel=info
+    command: celery -A src.infrastructure.messaging.celery_app worker --loglevel=info --concurrency=4
     env_file:
-      - ../.env.staging
+      - ../.env.prod
     environment:
-      - ENVIRONMENT=staging
+      - ENVIRONMENT=production
       - LOG_FORMAT=json
     depends_on:
       - redis-master
       - postgres
     networks:
-      - numu-staging
+      - numu-prod
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '2'
+          memory: 2G
 
   # ===========================================================================
   # Celery Beat (Scheduler)
@@ -252,29 +253,29 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: numu-celery-beat-staging
+    container_name: numu-celery-beat-prod
     restart: unless-stopped
     command: celery -A src.infrastructure.messaging.celery_app beat --loglevel=info
     env_file:
-      - ../.env.staging
+      - ../.env.prod
     environment:
-      - ENVIRONMENT=staging
+      - ENVIRONMENT=production
       - LOG_FORMAT=json
     depends_on:
       - redis-master
       - postgres
     networks:
-      - numu-staging
+      - numu-prod
 
 # =============================================================================
 # Networks
 # =============================================================================
 networks:
-  numu-staging:
+  numu-prod:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.0.0/16
+        - subnet: 172.29.0.0/16
 
 # =============================================================================
 # Volumes
