@@ -107,7 +107,17 @@ class TestReplayProtection:
         await service.check_replay("REF-XYZ")
         cache.set_if_absent.assert_called_once()
         key = cache.set_if_absent.call_args[0][0]
-        assert key == "fawry:nonce:REF-XYZ"
+        assert key == "fawry:processed:REF-XYZ"
+
+    @pytest.mark.asyncio
+    async def test_replay_check_uses_correct_ttl(self):
+        """Redis key TTL should be 86400 seconds (24 hours)."""
+        cache = _make_cache(is_duplicate=False)
+        service = FawryWebhookService(db=_make_db_session(), cache=cache)
+        await service.check_replay("REF-TTL")
+        cache.set_if_absent.assert_called_once_with(
+            "fawry:processed:REF-TTL", "1", expire=86400
+        )
 
 
 class TestTimestampCheck:

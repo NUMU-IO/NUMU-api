@@ -4,14 +4,27 @@ Handles incoming webhooks from WhatsApp Business API:
 - Message status updates (sent, delivered, read)
 - Incoming messages from customers
 - Webhook verification challenge
+
+Agent collaboration:
+- WhatsApp Agent: signature verification + event dispatch
+- Repository Agent: persists MessageLog entries for every event
+- Security Agent: tenant context applied via admin session
 """
 
 import logging
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies.auth import get_current_user_id
 from src.config import settings
+from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.whatsapp import WhatsAppMessagingService
+from src.infrastructure.repositories.message_log_repository import (
+    MessageLogRepository,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -69,6 +82,7 @@ async def whatsapp_verify(
 @router.post("/callback", operation_id="whatsapp_callback")
 async def whatsapp_callback(
     request: Request,
+    db: AsyncSession = Depends(get_admin_db_session),
     x_hub_signature_256: str = Header(None, alias="x-hub-signature-256"),
 ):
     """Handle WhatsApp webhook notifications.
@@ -79,6 +93,10 @@ async def whatsapp_callback(
     - Template message status
 
     The x-hub-signature-256 header contains HMAC signature.
+
+    Uses an admin DB session (RLS bypass) because webhooks arrive
+    without tenant context. Tenant isolation is enforced at the
+    application level via explicit tenant_id on every log entry.
     """
     payload = await request.body()
 
@@ -114,6 +132,9 @@ async def whatsapp_callback(
             return {"status": "ignored", "reason": "unknown object type"}
 
         # Process entries
+        # Build message log repository for persistence
+        message_log_repo = MessageLogRepository(db)
+
         entries = data.get("entry", [])
 
         for entry in entries:
@@ -125,113 +146,31 @@ async def whatsapp_callback(
                 value = change.get("value", {})
 
                 if field == "messages":
-                    # Process message-related events
-                    await _process_message_event(account_id, value)
+                    # Delegate to the service which now persists via repo
+                    await whatsapp_service.handle_webhook_event(
+                        data={"entry": [{"changes": [change]}]},
+                        message_log_repo=message_log_repo,
+                    )
 
         return {"status": "received"}
 
     except Exception as e:
-        logger.error(f"WhatsApp webhook processing error: {e}")
+        logger.error(f"WhatsApp webhook processing error: {e}", exc_info=True)
         # Return 200 to acknowledge receipt even on processing error
-        # to prevent WhatsApp from retrying
-        return {"status": "error", "message": str(e)}
-
-
-async def _process_message_event(account_id: str, value: dict):
-    """Process a message-related webhook event.
-
-    Args:
-        account_id: WhatsApp Business Account ID
-        value: Event value containing messages or statuses
-    """
-    metadata = value.get("metadata", {})
-    metadata.get("phone_number_id")
-    metadata.get("display_phone_number")
-
-    # Process message status updates
-    statuses = value.get("statuses", [])
-    for status_update in statuses:
-        message_id = status_update.get("id")
-        status_value = status_update.get("status")
-        timestamp = status_update.get("timestamp")
-        recipient_id = status_update.get("recipient_id")
-
-        logger.info(
-            f"WhatsApp message status: {message_id} -> {status_value} "
-            f"for {recipient_id} at {timestamp}"
-        )
-
-        # Map WhatsApp status to our status
-        status_map = {
-            "sent": "sent",
-            "delivered": "delivered",
-            "read": "read",
-            "failed": "failed",
-        }
-        status_map.get(status_value, "unknown")
-
-        # TODO: Update message status in database
-        # await message_repository.update_status(
-        #     message_id=message_id,
-        #     status=mapped_status,
-        #     recipient=recipient_id,
-        # )
-
-        # Handle failed messages
-        if status_value == "failed":
-            errors = status_update.get("errors", [])
-            for error in errors:
-                error_code = error.get("code")
-                error_title = error.get("title")
-                error_message = error.get("message")
-                logger.error(
-                    f"WhatsApp message failed: {message_id}, "
-                    f"code={error_code}, title={error_title}, message={error_message}"
-                )
-
-    # Process incoming messages
-    messages = value.get("messages", [])
-    for message in messages:
-        from_number = message.get("from")
-        msg_id = message.get("id")
-        msg_type = message.get("type")
-        timestamp = message.get("timestamp")
-
-        logger.info(
-            f"WhatsApp incoming message: {msg_id} from {from_number}, type={msg_type}"
-        )
-
-        # Handle different message types
-        if msg_type == "text":
-            text_body = message.get("text", {}).get("body", "")
-            logger.info(f"Text message: {text_body[:100]}...")
-            # TODO: Handle customer text message
-            # Could trigger customer service workflow
-
-        elif msg_type == "button":
-            # Customer clicked a button in previous message
-            button_payload = message.get("button", {}).get("payload")
-            button_text = message.get("button", {}).get("text")
-            logger.info(f"Button click: {button_text} ({button_payload})")
-            # TODO: Handle button response
-
-        elif msg_type == "interactive":
-            # Customer responded to interactive message
-            interactive = message.get("interactive", {})
-            interactive_type = interactive.get("type")
-            logger.info(f"Interactive response: {interactive_type}")
-            # TODO: Handle interactive response
-
-        # Mark message as read (optional)
-        # This could be done via the API to show read receipts
+        # to prevent WhatsApp from retrying.
+        # Never leak internal error details to the external caller.
+        return {"status": "error", "message": "Internal processing error"}
 
 
 @router.get("/status/{message_id}", operation_id="get_message_status")
-async def get_message_status(message_id: str):
+async def get_message_status(
+    message_id: str,
+    _user_id: Annotated[UUID, Depends(get_current_user_id)],
+    db: AsyncSession = Depends(get_admin_db_session),
+):
     """Get status of a sent WhatsApp message.
 
-    Note: Status is typically delivered via webhooks.
-    This endpoint is for manual status checks.
+    Queries the MessageLog table for the latest status.
 
     Args:
         message_id: WhatsApp message ID
@@ -239,10 +178,19 @@ async def get_message_status(message_id: str):
     Returns:
         Message status information
     """
-    # In production, this would query the database for stored status
-    # For now, return a placeholder
+    repo = MessageLogRepository(db)
+    log = await repo.get_by_message_id(message_id)
+    if log:
+        return {
+            "message_id": message_id,
+            "status": log.status,
+            "direction": log.direction,
+            "phone": log.phone,
+            "created_at": log.created_at.isoformat(),
+            "updated_at": log.updated_at.isoformat(),
+        }
     return {
         "message_id": message_id,
-        "status": "sent",
-        "note": "Use webhooks for real-time status updates",
+        "status": "unknown",
+        "note": "No log entry found for this message ID",
     }

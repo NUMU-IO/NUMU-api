@@ -34,7 +34,7 @@ from src.infrastructure.external_services.whatsapp.messaging_service import (
 logger = get_logger(__name__)
 
 # Replay protection constants
-NONCE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+NONCE_TTL_SECONDS = 86400  # 24 hours (full day)
 MAX_WEBHOOK_AGE_SECONDS = 15 * 60  # 15 minutes
 
 # Valid prior states for each webhook status. Webhooks arriving when the
@@ -68,12 +68,12 @@ class FawryWebhookService:
     async def check_replay(self, reference_number: str) -> bool:
         """Return True if this webhook is a duplicate (replay).
 
-        Uses Redis SETNX to atomically check-and-set a nonce key.
+        Uses Redis SETNX to atomically check-and-set a processed key.
         """
         if not self.cache:
             return False
 
-        nonce_key = f"fawry:nonce:{reference_number}"
+        nonce_key = f"fawry:processed:{reference_number}"
         was_set = await self.cache.set_if_absent(
             nonce_key, "1", expire=NONCE_TTL_SECONDS
         )
