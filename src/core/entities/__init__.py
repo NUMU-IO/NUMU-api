@@ -16,6 +16,11 @@ from src.core.entities.invoice import (
     TaxLine,
     TaxType,
 )
+from src.core.entities.message_log import (
+    MessageDirection,
+    MessageLog,
+    MessageStatus,
+)
 from src.core.entities.order import (
     VALID_STATUS_TRANSITIONS,
     FulfillmentStatus,
@@ -62,6 +67,10 @@ __all__ = [
     "PaymentStatus",
     "ShippingAddress",
     "VALID_STATUS_TRANSITIONS",
+    # MessageLog
+    "MessageLog",
+    "MessageDirection",
+    "MessageStatus",
     # Invoice
     "BuyerInfo",
     "Invoice",

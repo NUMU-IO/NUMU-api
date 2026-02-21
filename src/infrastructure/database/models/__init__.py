@@ -22,6 +22,8 @@ from src.infrastructure.database.models.tenant import (
     CouponModel,
     CustomerAddressModel,
     CustomerModel,
+    InvoiceModel,
+    MessageLogModel,
     OrderModel,
     ProductModel,
     StoreModel,
@@ -45,5 +47,7 @@ __all__ = [
     "CouponModel",
     "CustomerModel",
     "CustomerAddressModel",
+    "InvoiceModel",
+    "MessageLogModel",
     "OrderModel",
 ]
