@@ -265,3 +265,87 @@ FIRST_ORDER_RECEIVED_TEMPLATE = {
     },
     "html_fn": first_order_html,
 }
+
+
+# ---------------------------------------------------------------------------
+# 4. Store approved
+# ---------------------------------------------------------------------------
+
+_STORE_APPROVED = {
+    "en": {
+        "title": "Your Store is Live!",
+        "subtitle": "Time to start selling",
+        "greeting": "Hi {merchant_name},",
+        "intro": "Great news! Your store <strong>{store_name}</strong> has been reviewed and approved. It's now live and ready for customers.",
+        "store_url_label": "Your store URL:",
+        "next_steps": "What's Next?",
+        "steps": [
+            "Add products to your store",
+            "Set up your payment methods",
+            "Customize your store's look and feel",
+            "Share your store link on social media",
+        ],
+        "step_label": "Step",
+        "btn": "Go to Dashboard",
+        "help": "Need help getting started? Our support team is here for you.",
+    },
+    "ar": {
+        "title": "متجرك اتفعّل!",
+        "subtitle": "وقت البيع",
+        "greeting": "أهلاً {merchant_name}،",
+        "intro": "خبر حلو! متجرك <strong>{store_name}</strong> اتراجع واتقبل. المتجر شغّال دلوقتي ومستني الزباين.",
+        "store_url_label": "لينك متجرك:",
+        "next_steps": "إيه الخطوة الجاية؟",
+        "steps": [
+            "أضف منتجات في متجرك",
+            "اظبط طرق الدفع",
+            "خصّص شكل متجرك",
+            "شارك لينك متجرك على السوشيال ميديا",
+        ],
+        "step_label": "الخطوة",
+        "btn": "روح للوحة التحكم",
+        "help": "محتاج مساعدة؟ فريق الدعم موجود عشانك.",
+    },
+}
+
+
+def store_approved_html(
+    merchant_name: str,
+    store_name: str,
+    store_url: str,
+    dashboard_url: str,
+    language: str = "en",
+) -> str:
+    c = _STORE_APPROVED.get(language, _STORE_APPROVED["en"])
+    steps = "".join(
+        f'<div class="step"><strong>{c["step_label"]} {i + 1}:</strong> {s}</div>'
+        for i, s in enumerate(c["steps"])
+    )
+    return _wrap(
+        f"""
+    <div class="header"><h1>{c["title"]}</h1><p>{c["subtitle"]}</p></div>
+    <div class="content">
+        <p>{c["greeting"].format(merchant_name=merchant_name)}</p>
+        <p>{c["intro"].format(store_name=store_name)}</p>
+        <div class="step done">
+            <strong>{c["store_url_label"]}</strong><br>
+            <a href="{store_url}" style="color: #1034A6; font-size: 16px;">{store_url}</a>
+        </div>
+        <h2>{c["next_steps"]}</h2>
+        {steps}
+        <p style="text-align:center; margin-top:25px;">
+            <a href="{dashboard_url}" class="btn">{c["btn"]}</a>
+        </p>
+        <p>{c["help"]}</p>
+    </div>""",
+        language=language,
+    )
+
+
+STORE_APPROVED_TEMPLATE = {
+    "subject": {
+        "en": "Your NUMU Store is Live!",
+        "ar": "متجرك على نُمو اتفعّل!",
+    },
+    "html_fn": store_approved_html,
+}

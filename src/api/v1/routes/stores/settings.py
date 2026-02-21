@@ -757,6 +757,9 @@ def _build_customization_response(settings: dict) -> CustomizationResponse:
         else CustomizationLayout(),
         is_published=merged.get("is_published", False),
         last_published_at=merged.get("last_published_at"),
+        # V2 section engine fields
+        schema_version=merged.get("schema_version"),
+        templates=merged.get("templates"),
     )
 
 
@@ -848,6 +851,35 @@ async def update_customization(
             **request.layout,
         }
 
+    # V2 section engine fields
+    if request.schema_version is not None:
+        if request.schema_version not in (1, 2):
+            raise HTTPException(
+                status_code=422,
+                detail="schema_version must be 1 or 2",
+            )
+        customization["schema_version"] = request.schema_version
+    if request.templates is not None:
+        # Validate template structure
+        for tpl_name, tpl_data in request.templates.items():
+            if not isinstance(tpl_data, dict):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Template '{tpl_name}' must be an object",
+                )
+            if "sections" not in tpl_data or "order" not in tpl_data:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Template '{tpl_name}' must have 'sections' and 'order' keys",
+                )
+            if not isinstance(tpl_data["order"], list):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Template '{tpl_name}'.order must be an array",
+                )
+        existing_templates = customization.get("templates", {})
+        customization["templates"] = {**existing_templates, **request.templates}
+
     # Save to store settings
     settings["customization"] = customization
     store.settings = settings
@@ -880,7 +912,7 @@ async def publish_customization(
     customization["last_published_at"] = datetime.now(UTC).isoformat()
 
     # Copy to theme_settings for the storefront to consume (normalized snake_case)
-    store.theme_settings = _normalize_keys({
+    published = _normalize_keys({
         "identity": customization.get("identity", {}),
         "theme": customization.get("theme", {}),
         "header": customization.get("header", {}),
@@ -891,6 +923,13 @@ async def publish_customization(
         "labels": customization.get("labels", {}),
         "layout": customization.get("layout", {}),
     })
+
+    # Include v2 section engine data if present (alongside v1 keys for compat)
+    if customization.get("schema_version") == 2:
+        published["schema_version"] = 2
+        published["templates"] = customization.get("templates", {})
+
+    store.theme_settings = published
 
     settings["customization"] = customization
     store.settings = settings

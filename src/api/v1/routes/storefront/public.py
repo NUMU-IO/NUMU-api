@@ -29,6 +29,7 @@ from src.api.dependencies import (
     get_token_service,
 )
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.storefront.theme_schemas import get_theme_schema
 from src.api.v1.schemas import (
     CursorPaginatedListResponse,
     PaginatedListResponse,
@@ -49,6 +50,7 @@ from src.application.use_cases.customers import (
     RegisterCustomerUseCase,
 )
 from src.application.use_cases.products import ListProductsUseCase
+from src.core.entities.store import StoreStatus
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.cache import ProductCacheService
 from src.infrastructure.external_services import PasswordService, TokenService
@@ -145,6 +147,30 @@ async def list_themes():
     )
 
 
+@lookup_router.get(
+    "/themes/{theme_id}/schemas",
+    response_model=SuccessResponse,
+    summary="Get theme schemas (global settings + section schemas)",
+    operation_id="get_theme_schemas",
+)
+async def get_theme_schemas(
+    theme_id: Annotated[str, Path(description="Theme ID (e.g., modern, skeuomorphic)")],
+):
+    """Return the full schema bundle for a theme.
+
+    The dashboard uses these schemas to dynamically generate the editor UI.
+    Returns global settings, all section schemas, and default templates.
+    """
+    schema_bundle = get_theme_schema(theme_id)
+    if schema_bundle is None:
+        raise EntityNotFoundError("Theme", theme_id)
+
+    return SuccessResponse(
+        data=schema_bundle,
+        message="Theme schemas retrieved successfully",
+    )
+
+
 # ============================================================================
 # Store Lookup by Subdomain
 # ============================================================================
@@ -165,6 +191,10 @@ async def get_store_by_subdomain(
     if not store:
         raise EntityNotFoundError("Store", subdomain)
 
+    # Pending stores are not public yet
+    if store.status == StoreStatus.PENDING_APPROVAL:
+        raise EntityNotFoundError("Store", subdomain)
+
     return SuccessResponse(
         data={
             "id": str(store.id),
@@ -174,6 +204,9 @@ async def get_store_by_subdomain(
             "description": store.description,
             "logo_url": store.logo_url,
             "banner_url": store.banner_url,
+            "status": store.status.value
+            if hasattr(store.status, "value")
+            else str(store.status),
             "theme_settings": store.theme_settings,
             "default_currency": store.default_currency.value
             if hasattr(store.default_currency, "value")

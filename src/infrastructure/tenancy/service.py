@@ -25,7 +25,12 @@ class TenantService:
         self.tenant_repo = TenantRepository(db)
 
     async def create_tenant(
-        self, name: str, subdomain: str, owner_id: UUID = None, plan: str = "free"
+        self,
+        name: str,
+        subdomain: str,
+        owner_id: UUID = None,
+        plan: str = "free",
+        is_active: bool = True,
     ):
         """Create a new tenant record.
 
@@ -62,7 +67,7 @@ class TenantService:
             subdomain=subdomain,
             owner_id=owner_id,
             plan=plan,
-            is_active=True,
+            is_active=is_active,
             settings={"schema_name": schema_name},
         )
 

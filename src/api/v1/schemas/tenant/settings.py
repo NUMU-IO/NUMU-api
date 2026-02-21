@@ -275,10 +275,18 @@ class CustomizationResponse(BaseModel):
     layout: CustomizationLayout = Field(default_factory=CustomizationLayout)
     is_published: bool = False
     last_published_at: str | None = None
+    # V2 section engine fields
+    schema_version: int | None = None
+    templates: dict[str, Any] | None = None
 
 
 class UpdateCustomizationRequest(BaseModel):
-    """Update customization settings request. All fields optional for partial updates."""
+    """Update customization settings request. All fields optional for partial updates.
+
+    Supports both v1 (flat sections) and v2 (section engine) formats.
+    When schema_version=2, the ``templates`` field holds per-page TemplateConfig objects.
+    V1 fields (hero, products, layout, etc.) are still accepted for backwards compat.
+    """
 
     customization_mode: str | None = None  # preset | custom
     identity: dict[str, Any] | None = None
@@ -290,6 +298,9 @@ class UpdateCustomizationRequest(BaseModel):
     navigation: dict[str, Any] | None = None
     labels: dict[str, Any] | None = None
     layout: dict[str, Any] | None = None
+    # V2 section engine fields
+    schema_version: int | None = None  # 2 for v2 format
+    templates: dict[str, Any] | None = None  # { "home": { sections, order } }
 
 
 # Combined Store Settings

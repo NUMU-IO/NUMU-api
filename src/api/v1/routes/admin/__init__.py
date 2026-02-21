@@ -1,18 +1,33 @@
 """Admin routes (SUPER_ADMIN only).
 
 URL: /api/v1/admin/
-- /waitlist  — Waitlist management
-- /feedback  — Feedback aggregation
+- /waitlist   — Waitlist management
+- /feedback   — Feedback aggregation
+- /orders     — Platform-wide order management
+- /customers  — Platform-wide customer listing
+- /dashboard  — Dashboard statistics
+- /products   — Platform-wide product listing
+- /stores     — Store lifecycle management
 """
 
 from fastapi import APIRouter
 
+from src.api.v1.routes.admin.customers import router as customers_router
+from src.api.v1.routes.admin.dashboard import router as dashboard_router
 from src.api.v1.routes.admin.feedback import router as feedback_router
+from src.api.v1.routes.admin.orders import router as orders_router
+from src.api.v1.routes.admin.products import router as products_router
+from src.api.v1.routes.admin.stores import router as stores_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
 
 router = APIRouter()
 
 router.include_router(waitlist_router, prefix="/waitlist", tags=["Admin - Waitlist"])
 router.include_router(feedback_router, prefix="/feedback", tags=["Admin - Feedback"])
+router.include_router(orders_router, prefix="/orders", tags=["Admin - Orders"])
+router.include_router(customers_router, prefix="/customers", tags=["Admin - Customers"])
+router.include_router(dashboard_router, prefix="/dashboard", tags=["Admin - Dashboard"])
+router.include_router(products_router, prefix="/products", tags=["Admin - Products"])
+router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
 
 __all__ = ["router"]

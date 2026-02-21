@@ -135,7 +135,7 @@ async def list_tenants(
     await db.execute(text("SET search_path TO public"))
 
     tenant_repo = TenantRepository(db)
-    tenants = await tenant_repo.list_active(skip=skip, limit=limit)
+    tenants = await tenant_repo.list_all(skip=skip, limit=limit)
 
     return [TenantResponse.model_validate(t) for t in tenants]
 
@@ -200,9 +200,10 @@ async def update_tenant(
     if request.is_active is not None:
         tenant.is_active = request.is_active
     if request.settings is not None:
-        tenant.settings = str(request.settings)
+        tenant.settings = request.settings
 
     updated = await tenant_repo.update(tenant)
+    await db.refresh(updated)
     return TenantResponse.model_validate(updated)
 
 

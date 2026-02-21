@@ -180,6 +180,7 @@ class CreateStoreUseCase:
             name=dto.name,
             subdomain=subdomain,
             owner_id=owner_id,
+            is_active=False,
         )
 
         # Create store entity with tenant_id
@@ -189,7 +190,7 @@ class CreateStoreUseCase:
             subdomain=subdomain,
             owner_id=owner_id,
             description=dto.description,
-            status=StoreStatus.ACTIVE,  # Auto-activate for now
+            status=StoreStatus.PENDING_APPROVAL,
             default_currency=currency,
             default_language=dto.default_language,
             contact_email=dto.contact_email,

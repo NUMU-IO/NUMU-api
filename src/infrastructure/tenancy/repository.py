@@ -65,3 +65,14 @@ class TenantRepository(ITenantRepository):
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def list_all(self, skip: int = 0, limit: int = 100) -> list[TenantModel]:
+        """List all tenants (active and inactive) with pagination."""
+        query = (
+            select(TenantModel)
+            .offset(skip)
+            .limit(limit)
+            .order_by(TenantModel.created_at.desc())
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        /* ================================================================
+         * NUMU Invoice PDF Template
+         * Supports Arabic RTL and English LTR via Jinja2 variables.
+         * Rendered by WeasyPrint (HTML/CSS -> PDF).
+         * Font: Noto Sans Arabic (installed via fontconfig in Docker).
+         * ================================================================ */
+
+        @page {
+            size: A4;
+            margin: 1.5cm 1.5cm 2.5cm 1.5cm;
+
+            @bottom-center {
+                content: "Page " counter(page) " / " counter(pages);
+                font-size: 8pt;
+                color: #999;
+            }
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans Arabic', 'Noto Sans', Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.6;
+            color: #1a1a2e;
+            direction: ltr;
+            text-align: left;
+        }
+
+        /* --- Header --- */
+        .invoice-header {
+            border-bottom: 3px solid #1034A6;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .invoice-title {
+            font-size: 22pt;
+            font-weight: bold;
+            color: #1034A6;
+        }
+
+        .invoice-meta {
+            text-align: right;
+            font-size: 9pt;
+            color: #555;
+        }
+
+        .invoice-meta strong {
+            color: #1a1a2e;
+        }
+
+        /* --- Party boxes (seller / buyer) --- */
+        .parties {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .party-box {
+            flex: 1;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 12px 14px;
+            background: #fafbfc;
+        }
+
+        .party-label {
+            font-size: 8pt;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 6px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 4px;
+        }
+
+        .party-name {
+            font-size: 12pt;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .party-detail {
+            font-size: 9pt;
+            color: #495057;
+            margin-bottom: 2px;
+        }
+
+        /* --- Line items table --- */
+        table.items {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        table.items th {
+            background: #f1f3f5;
+            padding: 8px 6px;
+            border-bottom: 2px solid #1034A6;
+            font-size: 8pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #495057;
+            text-align: left;
+        }
+
+        table.items th.num {
+            text-align: center;
+            width: 30px;
+        }
+
+        table.items td {
+            padding: 7px 6px;
+            border-bottom: 1px solid #eee;
+            font-size: 9pt;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        table.items td.num {
+            text-align: center;
+        }
+
+        table.items td.money {
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        table.items th.money {
+            text-align: right;
+        }
+
+        table.items tbody tr:nth-child(even) {
+            background: #fafbfc;
+        }
+
+        /* --- Totals --- */
+        .totals-wrapper {
+            display: flex;
+            justify-content: right;
+            margin-top: 10px;
+        }
+
+        .totals {
+            width: 45%;
+        }
+
+        .totals table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .totals td {
+            padding: 5px 8px;
+            font-size: 9pt;
+        }
+
+        .totals td.label {
+            text-align: left;
+            color: #6c757d;
+        }
+
+        .totals td.value {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .totals tr.grand-total td {
+            font-size: 13pt;
+            font-weight: bold;
+            color: #1034A6;
+            border-top: 2px solid #1034A6;
+            padding-top: 8px;
+        }
+
+        /* --- QR Code section --- */
+        .qr-section {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 16px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .qr-section img {
+            width: 110px;
+            height: 110px;
+        }
+
+        .qr-section p {
+            font-size: 8pt;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        /* --- Notes --- */
+        .notes {
+            margin-top: 16px;
+            padding: 10px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 9pt;
+            color: #495057;
+        }
+
+        .notes-label {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        /* --- Footer notice --- */
+        .eta-notice {
+            margin-top: 24px;
+            text-align: center;
+            font-size: 8pt;
+            color: #adb5bd;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Invoice Header -->
+    <div class="invoice-header">
+        <div>
+            <div class="invoice-title">Tax Invoice</div>
+        </div>
+        <div class="invoice-meta">
+            <div><strong>Invoice No.:</strong> INV-2026-000042</div>
+            <div><strong>Date:</strong> 2026-02-08</div>
+            <div><strong>Currency:</strong> EGP</div>
+
+        </div>
+    </div>
+
+    <!-- Seller & Buyer -->
+    <div class="parties">
+        <div class="party-box">
+            <div class="party-label">Seller</div>
+            <div class="party-name">NUMU Technologies Ltd.</div>
+            <div class="party-detail">Tax ID: 514-786-4321</div>
+
+            <div class="party-detail">
+                Address:
+                45,
+                Abbas El-Akkad St.,
+                Nasr City
+                , Cairo
+            </div>
+
+        </div>
+        <div class="party-box">
+            <div class="party-label">Buyer</div>
+            <div class="party-name">Al-Nile Trading Co.</div>
+
+            <div class="party-detail">Tax ID: 200-431-8765</div>
+
+
+            <div class="party-detail">
+                Address:
+                12,
+                Tahrir St.,
+                Dokki
+                , Giza
+            </div>
+
+
+            <div class="party-detail">+20 100 123 4567</div>
+
+        </div>
+    </div>
+
+    <!-- Line Items -->
+    <table class="items">
+        <thead>
+            <tr>
+                <th class="num">#</th>
+                <th>Description</th>
+                <th>Code</th>
+                <th class="money">Qty</th>
+                <th class="money">Unit Price</th>
+                <th class="money">Discount</th>
+                <th class="money">Net</th>
+                <th class="money">Tax</th>
+                <th class="money">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+
+            <tr>
+                <td class="num">1</td>
+                <td>Annual SaaS Subscription - Pro Plan</td>
+                <td>EG-SVC-001</td>
+                <td class="money">1</td>
+                <td class="money">12,000.00</td>
+                <td class="money">1,000.00</td>
+                <td class="money">11,000.00</td>
+                <td class="money">1,540.00</td>
+                <td class="money">12,540.00</td>
+            </tr>
+
+            <tr>
+                <td class="num">2</td>
+                <td>Custom Domain Setup</td>
+                <td>EG-SVC-002</td>
+                <td class="money">2</td>
+                <td class="money">500.00</td>
+                <td class="money">0.00</td>
+                <td class="money">1,000.00</td>
+                <td class="money">140.00</td>
+                <td class="money">1,140.00</td>
+            </tr>
+
+            <tr>
+                <td class="num">3</td>
+                <td>WhatsApp Business Integration</td>
+                <td>EG-SVC-003</td>
+                <td class="money">1</td>
+                <td class="money">3,500.00</td>
+                <td class="money">350.00</td>
+                <td class="money">3,150.00</td>
+                <td class="money">441.00</td>
+                <td class="money">3,591.00</td>
+            </tr>
+
+            <tr>
+                <td class="num">4</td>
+                <td>Payment Gateway Setup (Paymob)</td>
+                <td>EG-SVC-004</td>
+                <td class="money">1</td>
+                <td class="money">2,500.00</td>
+                <td class="money">0.00</td>
+                <td class="money">2,500.00</td>
+                <td class="money">350.00</td>
+                <td class="money">2,850.00</td>
+            </tr>
+
+            <tr>
+                <td class="num">5</td>
+                <td>SMS Notification Credits (5000 msgs)</td>
+                <td>EG-SVC-005</td>
+                <td class="money">5,000</td>
+                <td class="money">0.15</td>
+                <td class="money">50.00</td>
+                <td class="money">700.00</td>
+                <td class="money">98.00</td>
+                <td class="money">798.00</td>
+            </tr>
+
+        </tbody>
+    </table>
+
+    <!-- Totals -->
+    <div class="totals-wrapper">
+        <div class="totals">
+            <table>
+                <tr>
+                    <td class="label">Subtotal</td>
+                    <td class="value">18,350.00 EGP</td>
+                </tr>
+
+                <tr>
+                    <td class="label">Total Discount</td>
+                    <td class="value">-1,400.00 EGP</td>
+                </tr>
+
+                <tr>
+                    <td class="label">Total Tax (14%)</td>
+                    <td class="value">2,569.00 EGP</td>
+                </tr>
+                <tr class="grand-total">
+                    <td class="label">Grand Total</td>
+                    <td class="value">20,919.00 EGP</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- Notes -->
+
+    <div class="notes">
+        <div class="notes-label">Notes</div>
+
+            Payment due within 30 days. Bank transfer preferred.
+
+    </div>
+
+
+    <!-- QR Code -->
+
+
+    <!-- ETA Notice -->
+
+    <div class="eta-notice">
+        This is an electronic invoice issued per Egyptian Tax Authority requirements
+    </div>
+
+
+</body>
+</html>
