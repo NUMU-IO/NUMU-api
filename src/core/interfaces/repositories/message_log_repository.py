@@ -42,11 +42,27 @@ class IMessageLogRepository(BaseRepository[MessageLog]):
         ...
 
     @abstractmethod
+    async def get_latest_by_phone(self, phone: str) -> MessageLog | None:
+        """Get the most recent message log entry for a phone number.
+
+        Used by webhook handlers to resolve store/tenant context when
+        the incoming request has no tenant information (e.g. WhatsApp
+        inbound messages from a customer who was previously messaged).
+        """
+        ...
+
+    @abstractmethod
     async def update_status(
         self,
         message_id: str,
         status: MessageStatus,
         error_code: str | None = None,
     ) -> MessageLog | None:
-        """Update the delivery status of a message by its provider message ID."""
+        """Update the delivery status of a message by its provider message ID.
+
+        Applies a regression guard: the status is only updated if the new
+        status represents forward progress (QUEUED→SENT→DELIVERED→READ).
+        FAILED is always accepted regardless of current status.
+        Returns the (possibly unchanged) entity, or None if not found.
+        """
         ...

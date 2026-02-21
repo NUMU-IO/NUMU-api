@@ -17,6 +17,17 @@ from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 
 
+
+# Forward-progress ordering for status updates.  FAILED is handled
+# specially (always accepted) and is therefore not in this map.
+_STATUS_ORDER: dict[MessageStatus, int] = {
+    MessageStatus.QUEUED: 0,
+    MessageStatus.SENT: 1,
+    MessageStatus.DELIVERED: 2,
+    MessageStatus.READ: 3,
+}
+
+
 class MessageLogRepository(IMessageLogRepository):
     """MessageLog repository implementation using SQLAlchemy.
 
@@ -195,13 +206,35 @@ class MessageLogRepository(IMessageLogRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(m) for m in result.scalars().all()]
 
+    async def get_latest_by_phone(self, phone: str) -> MessageLog | None:
+        """Get the most recent message log entry for a phone number.
+
+        Intentionally skips the tenant filter so webhook handlers that
+        operate without tenant context can resolve store/tenant from
+        prior messages.
+        """
+        query = (
+            select(MessageLogModel)
+            .where(MessageLogModel.phone == phone)
+            .order_by(MessageLogModel.created_at.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def update_status(
         self,
         message_id: str,
         status: MessageStatus,
         error_code: str | None = None,
     ) -> MessageLog | None:
-        """Update the delivery status of a message by its provider message ID."""
+        """Update the delivery status of a message by its provider message ID.
+
+        Applies a regression guard: the status is only updated if the new
+        status represents forward progress (QUEUED→SENT→DELIVERED→READ).
+        FAILED is always accepted regardless of current status.
+        """
         query = select(MessageLogModel).where(
             MessageLogModel.message_id == message_id
         )
@@ -209,6 +242,14 @@ class MessageLogRepository(IMessageLogRepository):
         model = result.scalar_one_or_none()
         if model is None:
             return None
+
+        # Regression guard: only move forward, but always accept FAILED.
+        if status != MessageStatus.FAILED:
+            new_order = _STATUS_ORDER.get(status, 0)
+            current_order = _STATUS_ORDER.get(model.status, 0)
+            if new_order <= current_order:
+                return self._to_entity(model)
+
         model.status = status
         model.error_code = error_code
         await self.session.flush()
