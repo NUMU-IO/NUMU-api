@@ -47,14 +47,21 @@ def get_payment_service():
 
 
 def _get_storage():
-    """Return R2 storage if configured, otherwise local filesystem storage."""
-    if (
+    """Return S3 storage if configured, otherwise local filesystem storage."""
+    # Prefer new s3_* settings, fall back to legacy r2_* settings
+    has_s3 = (
+        settings.s3_endpoint_url
+        and settings.s3_access_key_id
+        and settings.s3_secret_access_key
+    )
+    has_r2 = (
         settings.r2_account_id
         and settings.r2_access_key_id
         and settings.r2_secret_access_key
-    ):
+    )
+    if has_s3 or has_r2:
         return CloudflareR2StorageService()
-    _logger.info("R2 not configured — using local filesystem storage")
+    _logger.info("S3 storage not configured — using local filesystem storage")
     return LocalStorageService()
 
 

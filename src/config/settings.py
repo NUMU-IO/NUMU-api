@@ -167,7 +167,15 @@ class Settings(BaseSettings):
     email_from_address: str = "noreply@numu.com"
     email_from_name: str = "numu"
 
-    # Cloudflare R2
+    # S3-compatible Object Storage (MinIO / Cloudflare R2 / AWS S3)
+    s3_endpoint_url: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    s3_bucket_name: str = "numu"
+    s3_public_url: str | None = None
+    s3_region: str = "us-east-1"
+
+    # Legacy R2 aliases (mapped to s3_* settings)
     r2_account_id: str | None = None
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None

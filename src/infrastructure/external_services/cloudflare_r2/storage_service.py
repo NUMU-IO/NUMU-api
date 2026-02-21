@@ -1,4 +1,4 @@
-"""Cloudflare R2 storage service implementation."""
+"""S3-compatible storage service implementation (MinIO / Cloudflare R2 / AWS S3)."""
 
 from io import BytesIO
 from uuid import uuid4
@@ -16,27 +16,45 @@ from src.core.interfaces.services.storage_service import (
 
 
 class CloudflareR2StorageService(IStorageService):
-    """Storage service implementation using Cloudflare R2."""
+    """Storage service implementation using any S3-compatible backend."""
 
     def __init__(
         self,
-        account_id: str | None = None,
+        endpoint_url: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
         bucket_name: str | None = None,
     ) -> None:
-        self.account_id = account_id or settings.r2_account_id
-        self.access_key_id = access_key_id or settings.r2_access_key_id
-        self.secret_access_key = secret_access_key or settings.r2_secret_access_key
-        self.bucket_name = bucket_name or settings.r2_bucket_name
-        self.public_url = settings.r2_public_url
+        # Prefer new s3_* settings, fall back to legacy r2_* settings
+        self.endpoint_url = (
+            endpoint_url
+            or settings.s3_endpoint_url
+            or (
+                f"https://{settings.r2_account_id}.r2.cloudflarestorage.com"
+                if settings.r2_account_id
+                else None
+            )
+        )
+        self.access_key_id = (
+            access_key_id or settings.s3_access_key_id or settings.r2_access_key_id
+        )
+        self.secret_access_key = (
+            secret_access_key
+            or settings.s3_secret_access_key
+            or settings.r2_secret_access_key
+        )
+        self.bucket_name = (
+            bucket_name or settings.s3_bucket_name or settings.r2_bucket_name
+        )
+        self.public_url = settings.s3_public_url or settings.r2_public_url
 
-        if self.account_id and self.access_key_id and self.secret_access_key:
+        if self.endpoint_url and self.access_key_id and self.secret_access_key:
             self.client = boto3.client(
                 "s3",
-                endpoint_url=f"https://{self.account_id}.r2.cloudflarestorage.com",
+                endpoint_url=self.endpoint_url,
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
+                region_name=settings.s3_region,
                 config=Config(signature_version="s3v4"),
             )
         else:
@@ -60,9 +78,9 @@ class CloudflareR2StorageService(IStorageService):
         content_type: str,
         bucket: StorageBucket = StorageBucket.PRODUCTS,
     ) -> UploadedFile:
-        """Upload a file to Cloudflare R2."""
+        """Upload a file to S3-compatible storage."""
         if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
             key = self._generate_key(filename, bucket)
@@ -81,18 +99,18 @@ class CloudflareR2StorageService(IStorageService):
                 content_type=content_type,
             )
         except Exception as e:
-            raise ExternalServiceError("Cloudflare R2", str(e))
+            raise ExternalServiceError("S3 Storage", str(e))
 
     async def delete_file(self, key: str) -> bool:
-        """Delete a file from Cloudflare R2."""
+        """Delete a file from S3-compatible storage."""
         if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
             self.client.delete_object(Bucket=self.bucket_name, Key=key)
             return True
         except Exception as e:
-            raise ExternalServiceError("Cloudflare R2", str(e))
+            raise ExternalServiceError("S3 Storage", str(e))
 
     async def get_signed_url(
         self,
@@ -101,7 +119,7 @@ class CloudflareR2StorageService(IStorageService):
     ) -> str:
         """Get a signed URL for a file."""
         if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
             url = self.client.generate_presigned_url(
@@ -111,12 +129,12 @@ class CloudflareR2StorageService(IStorageService):
             )
             return url
         except Exception as e:
-            raise ExternalServiceError("Cloudflare R2", str(e))
+            raise ExternalServiceError("S3 Storage", str(e))
 
     async def file_exists(self, key: str) -> bool:
-        """Check if a file exists in Cloudflare R2."""
+        """Check if a file exists in S3-compatible storage."""
         if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
             self.client.head_object(Bucket=self.bucket_name, Key=key)
@@ -128,4 +146,4 @@ class CloudflareR2StorageService(IStorageService):
         """Get the public URL for a file."""
         if self.public_url:
             return f"{self.public_url}/{key}"
-        return f"https://{self.bucket_name}.{self.account_id}.r2.cloudflarestorage.com/{key}"
+        return f"{self.endpoint_url}/{self.bucket_name}/{key}"
