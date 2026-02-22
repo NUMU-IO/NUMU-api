@@ -73,11 +73,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: '1'
           memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
   # ===========================================================================
   # PostgreSQL with WAL Archiving
@@ -110,7 +107,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: '1'
           memory: 2G
 
   # ===========================================================================
