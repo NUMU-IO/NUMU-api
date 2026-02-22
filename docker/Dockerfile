@@ -47,6 +47,9 @@ RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 COPY --from=builder /app/wheels /wheels
 RUN pip install --no-cache-dir /wheels/*
 
+# Ensure src is importable (needed by Alembic, Celery, etc.)
+ENV PYTHONPATH=/app
+
 # Copy application code
 COPY . .
 
