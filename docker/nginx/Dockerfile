@@ -65,8 +65,8 @@ RUN apk add --no-cache brotli-libs
 # Copy our custom Nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
-# Validate configuration at build time
-RUN nginx -t
+# Skip nginx -t at build time — upstream "api" only resolves at runtime
+# inside the Docker Compose network. Validation happens via healthcheck.
 
 EXPOSE 80 443
 
