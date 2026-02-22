@@ -1,12 +1,11 @@
-version: '3.8'
-
 # =============================================================================
 # NUMU API - Staging Environment
 # =============================================================================
 # Features:
-# - Nginx reverse proxy with SSL termination
+# - Nginx reverse proxy (HTTP-only; add SSL block when certs are ready)
 # - PostgreSQL with WAL archiving for point-in-time recovery
-# - Redis Sentinel for high availability
+# - Redis standalone (add Sentinels when replicas are available)
+# - MinIO S3-compatible object storage
 # - API service with staging environment variables
 
 services:
@@ -22,9 +21,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx/ssl:/etc/nginx/ssl:ro
       - nginx_logs:/var/log/nginx
     depends_on:
       - api
@@ -164,57 +161,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ===========================================================================
-  # Redis Sentinel 1
-  # ===========================================================================
-  redis-sentinel-1:
-    image: redis:7-alpine
-    container_name: numu-redis-sentinel-1-staging
-    restart: unless-stopped
-    command: redis-sentinel /etc/redis/sentinel.conf
-    volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
-    depends_on:
-      - redis-master
-    networks:
-      - numu-staging
-    ports:
-      - "26379:26379"
-
-  # ===========================================================================
-  # Redis Sentinel 2
-  # ===========================================================================
-  redis-sentinel-2:
-    image: redis:7-alpine
-    container_name: numu-redis-sentinel-2-staging
-    restart: unless-stopped
-    command: redis-sentinel /etc/redis/sentinel.conf
-    volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
-    depends_on:
-      - redis-master
-    networks:
-      - numu-staging
-    ports:
-      - "26380:26379"
-
-  # ===========================================================================
-  # Redis Sentinel 3
-  # ===========================================================================
-  redis-sentinel-3:
-    image: redis:7-alpine
-    container_name: numu-redis-sentinel-3-staging
-    restart: unless-stopped
-    command: redis-sentinel /etc/redis/sentinel.conf
-    volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
-    depends_on:
-      - redis-master
-    networks:
-      - numu-staging
-    ports:
-      - "26381:26379"
 
   # ===========================================================================
   # Celery Worker
