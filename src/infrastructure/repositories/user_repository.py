@@ -32,6 +32,7 @@ class UserRepository(IUserRepository):
             avatar_url=model.avatar_url,
             email_verified_at=model.email_verified_at,
             last_login_at=model.last_login_at,
+            trial_ends_at=model.trial_ends_at,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -50,6 +51,7 @@ class UserRepository(IUserRepository):
             avatar_url=entity.avatar_url,
             email_verified_at=entity.email_verified_at,
             last_login_at=entity.last_login_at,
+            trial_ends_at=entity.trial_ends_at,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )

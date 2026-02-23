@@ -20,6 +20,7 @@ from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.core.entities.store import StoreStatus
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
+from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.store import StoreModel
 from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.tenancy.repository import TenantRepository
@@ -46,6 +47,8 @@ class AdminStoreListItem(BaseModel):
     owner_email: str | None = None
     plan: str | None = None
     logo_url: str | None = None
+    total_revenue: int = 0
+    total_orders: int = 0
     created_at: str
 
 
@@ -75,6 +78,8 @@ def _store_to_list_item(
     store: StoreModel,
     owner: UserModel | None = None,
     tenant: TenantModel | None = None,
+    total_revenue: int = 0,
+    total_orders: int = 0,
 ) -> AdminStoreListItem:
     return AdminStoreListItem(
         id=str(store.id),
@@ -90,6 +95,8 @@ def _store_to_list_item(
         owner_email=owner.email if owner else None,
         plan=tenant.plan if tenant else None,
         logo_url=store.logo_url,
+        total_revenue=total_revenue,
+        total_orders=total_orders,
         created_at=_ts(store.created_at) or "",
     )
 
@@ -167,11 +174,29 @@ async def list_stores(
         for t in tenants_result.scalars().all():
             tenants_map[str(t.id)] = t
 
+    # Batch-aggregate revenue and order counts per store
+    order_agg: dict[str, tuple[int, int]] = {}
+    store_ids = [s.id for s in stores]
+    if store_ids:
+        agg_result = await db.execute(
+            select(
+                OrderModel.store_id,
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+                func.count(OrderModel.id).label("order_count"),
+            )
+            .where(OrderModel.store_id.in_(store_ids))
+            .group_by(OrderModel.store_id)
+        )
+        for row in agg_result.all():
+            order_agg[str(row.store_id)] = (int(row.revenue), int(row.order_count))
+
     items = [
         _store_to_list_item(
             s,
             owner=owners_map.get(str(s.owner_id)),
             tenant=tenants_map.get(str(s.tenant_id)),
+            total_revenue=order_agg.get(str(s.id), (0, 0))[0],
+            total_orders=order_agg.get(str(s.id), (0, 0))[1],
         )
         for s in stores
     ]
@@ -245,6 +270,18 @@ async def update_store_status(
         if tenant:
             tenant.is_active = new_status == StoreStatus.ACTIVE
             await tenant_repo.update(tenant)
+
+    # Sync owner user status when store is approved
+    if was_pending and new_status == StoreStatus.ACTIVE and store.owner_id:
+        from src.core.entities.user import UserStatus
+
+        owner_result = await db.execute(
+            select(UserModel).where(UserModel.id == store.owner_id)
+        )
+        owner = owner_result.scalar_one_or_none()
+        if owner and owner.status != UserStatus.ACTIVE:
+            owner.status = UserStatus.ACTIVE
+            await db.flush()
 
     await db.commit()
 

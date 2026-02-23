@@ -92,6 +92,7 @@ class UserResponse(BaseModel):
     is_verified: bool = Field(description="Whether email is verified")
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
+    trial_ends_at: str | None = Field(None, description="Trial period end date")
 
 
 class AuthResponse(BaseModel):

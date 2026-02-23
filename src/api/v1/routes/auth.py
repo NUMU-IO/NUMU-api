@@ -124,6 +124,9 @@ async def register(
                 is_verified=result.user.is_verified,
                 created_at=str(result.user.created_at),
                 updated_at=str(result.user.updated_at),
+                trial_ends_at=str(result.user.trial_ends_at)
+                if result.user.trial_ends_at
+                else None,
             ),
             tokens=TokenResponse(
                 access_token=result.tokens.access_token,
@@ -175,6 +178,9 @@ async def login(
                 is_verified=result.user.is_verified,
                 created_at=str(result.user.created_at),
                 updated_at=str(result.user.updated_at),
+                trial_ends_at=str(result.user.trial_ends_at)
+                if result.user.trial_ends_at
+                else None,
             ),
             tokens=TokenResponse(
                 access_token=result.tokens.access_token,
@@ -307,6 +313,7 @@ async def get_current_user(
             is_verified=user.is_verified,
             created_at=str(user.created_at),
             updated_at=str(user.updated_at),
+            trial_ends_at=str(user.trial_ends_at) if user.trial_ends_at else None,
         ),
         message="User retrieved successfully",
     )
@@ -358,6 +365,9 @@ async def update_profile(
                 is_verified=result.is_verified,
                 created_at=str(result.created_at),
                 updated_at=str(result.updated_at),
+                trial_ends_at=str(result.trial_ends_at)
+                if result.trial_ends_at
+                else None,
             ),
             message="Profile updated successfully",
         )
