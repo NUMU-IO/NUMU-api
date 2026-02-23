@@ -1,5 +1,6 @@
 """Store CRUD routes."""
 
+from datetime import UTC
 from typing import Annotated
 from uuid import UUID
 
@@ -131,6 +132,21 @@ async def create_store(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a new store with a subdomain."""
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.public.user import UserModel
+
+    # Determine plan based on user's trial status
+    user_result = await db.execute(select(UserModel).where(UserModel.id == user_id))
+    user = user_result.scalar_one_or_none()
+    plan = (
+        "demo"
+        if user and user.trial_ends_at and user.trial_ends_at > datetime.now(UTC)
+        else "free"
+    )
+
     store_repo = StoreRepository(db)
     onboarding_repo = OnboardingRepository(db)
     tenant_service = TenantService(db)
@@ -153,7 +169,7 @@ async def create_store(
     )
 
     result = await use_case.execute(
-        dto, owner_id=user_id, invite_code=request.invite_code
+        dto, owner_id=user_id, invite_code=request.invite_code, plan=plan
     )
 
     return SuccessResponse(

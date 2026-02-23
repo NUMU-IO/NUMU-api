@@ -52,6 +52,10 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    trial_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # Relationships
     owned_tenants = relationship("TenantModel", back_populates="owner", lazy="selectin")

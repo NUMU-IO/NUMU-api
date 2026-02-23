@@ -21,6 +21,7 @@ class TenantPlan(str, Enum):
     """Tenant subscription plan."""
 
     FREE = "free"
+    DEMO = "demo"
     STARTER = "starter"
     PRO = "pro"
     ENTERPRISE = "enterprise"

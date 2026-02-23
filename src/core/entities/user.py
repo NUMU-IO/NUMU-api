@@ -48,6 +48,7 @@ class User(BaseEntity):
     avatar_url: str | None = None
     email_verified_at: datetime | None = None
     last_login_at: datetime | None = None
+    trial_ends_at: datetime | None = None
 
     @property
     def full_name(self) -> str:

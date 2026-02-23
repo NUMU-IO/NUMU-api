@@ -129,6 +129,7 @@ class CreateStoreUseCase:
         dto: CreateStoreDTO,
         owner_id: UUID,
         invite_code: str | None = None,
+        plan: str = "free",
     ) -> StoreDTO:
         """Create a new store.
 
@@ -180,6 +181,7 @@ class CreateStoreUseCase:
             name=dto.name,
             subdomain=subdomain,
             owner_id=owner_id,
+            plan=plan,
             is_active=False,
         )
 

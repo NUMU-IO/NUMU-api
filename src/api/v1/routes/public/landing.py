@@ -1,6 +1,6 @@
 """Public landing page endpoints — no auth required.
 
-URL: /api/v1/public/stats, /api/v1/public/features
+URL: /api/v1/public/stats, /api/v1/public/features, /api/v1/public/landing-config
 """
 
 import logging
@@ -12,13 +12,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.infrastructure.database.models.public.platform_config import (
+    DEFAULT_LANDING_CONFIG,
+    PlatformConfigModel,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/stats", summary="Public platform statistics for landing page", operation_id="get_public_stats")
+@router.get(
+    "/stats",
+    summary="Public platform statistics for landing page",
+    operation_id="get_public_stats",
+)
 async def get_public_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
@@ -59,7 +67,9 @@ async def get_public_stats(
     )
 
 
-@router.get("/features", summary="Feature list for marketing page", operation_id="get_features")
+@router.get(
+    "/features", summary="Feature list for marketing page", operation_id="get_features"
+)
 async def get_features():
     """Return the NUMU feature list for the landing page.
 
@@ -128,4 +138,30 @@ async def get_features():
     return SuccessResponse(
         data={"features": features, "count": len(features)},
         message="Feature list",
+    )
+
+
+@router.get(
+    "/landing-config",
+    summary="Landing page section configuration",
+    operation_id="get_public_landing_config",
+)
+async def get_public_landing_config(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return landing page section visibility for the frontend.
+
+    Returns the default configuration if no custom config exists yet.
+    This is a public endpoint — no authentication required.
+    """
+    result = await db.execute(
+        select(PlatformConfigModel).where(PlatformConfigModel.key == "landing_page")
+    )
+    config = result.scalar_one_or_none()
+
+    data = config.value if config else DEFAULT_LANDING_CONFIG
+
+    return SuccessResponse(
+        data=data,
+        message="Landing page configuration",
     )

@@ -1,5 +1,7 @@
 """Register user use case."""
 
+from datetime import UTC, datetime, timedelta
+
 from src.application.dto.auth import AuthResponseDTO, RegisterDTO, TokenDTO
 from src.application.dto.user import UserDTO
 from src.config.logging_config import get_logger
@@ -49,6 +51,7 @@ class RegisterUserUseCase:
             last_name=dto.last_name,
             role=UserRole.STORE_OWNER,
             status=UserStatus.PENDING_VERIFICATION,
+            trial_ends_at=datetime.now(UTC) + timedelta(days=14),
         )
 
         # Save user
@@ -67,8 +70,8 @@ class RegisterUserUseCase:
                 email=dto.email,
                 merchant_name=dto.first_name,
             )
-        except Exception:
-            log.warning("welcome_email_dispatch_failed")
+        except Exception as exc:
+            log.warning("welcome_email_dispatch_failed", error=str(exc))
 
         # Generate tokens
         access_token = self.token_service.create_access_token(created_user)

@@ -68,9 +68,9 @@ class CreateTenantRequest(BaseModel):
     @classmethod
     def validate_plan(cls, v: str) -> str:
         """Validate subscription plan."""
-        allowed_plans = {"free", "pro", "enterprise"}
+        allowed_plans = {"free", "demo", "starter", "pro", "enterprise"}
         if v.lower() not in allowed_plans:
-            raise ValueError(f"Plan must be one of: {', '.join(allowed_plans)}")
+            raise ValueError(f"Plan must be one of: {', '.join(sorted(allowed_plans))}")
         return v.lower()
 
 

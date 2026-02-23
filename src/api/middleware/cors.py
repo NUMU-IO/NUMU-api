@@ -115,11 +115,15 @@ def setup_cors(app: FastAPI) -> None:
                 "http://localhost:3000",
                 "http://localhost:3002",
                 "http://localhost:3030",  # Dashboard
+                "http://localhost:3090",  # Landing page
+                "http://localhost:3091",  # Landing page (alt port)
                 "http://localhost:5173",  # Vite default
                 "http://localhost:8080",  # Storefront
                 "http://127.0.0.1:3000",
                 "http://127.0.0.1:3002",
                 "http://127.0.0.1:3030",  # Dashboard
+                "http://127.0.0.1:3090",  # Landing page
+                "http://127.0.0.1:3091",  # Landing page (alt port)
                 "http://127.0.0.1:5173",
                 "http://172.30.144.1:3030",  # LAN access
                 "http://127.0.0.1:8080",  # Storefront
