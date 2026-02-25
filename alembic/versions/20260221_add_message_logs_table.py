@@ -6,16 +6,17 @@ Create Date: 2026-02-21
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f7e6d5c4b3a2"
-down_revision: Union[str, None] = "9a8b7c6d5e4f"
-branch_labels: Union[str, Sequence[str], None] = None
+down_revision: str | None = "9a8b7c6d5e4f"
+branch_labels: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -48,7 +49,9 @@ def upgrade() -> None:
     # ------------------------------------------------------------------ #
     op.create_table(
         "message_logs",
-        sa.Column("id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")),
+        sa.Column(
+            "id", sa.UUID(), nullable=False, default=sa.text("gen_random_uuid()")
+        ),
         sa.Column("tenant_id", sa.UUID(), nullable=False),
         sa.Column("store_id", sa.UUID(), nullable=False),
         sa.Column("phone", sa.String(length=20), nullable=False),
@@ -129,12 +132,8 @@ def upgrade() -> None:
     # ------------------------------------------------------------------ #
     conn = op.get_bind()
 
-    conn.exec_driver_sql(
-        "ALTER TABLE public.message_logs ENABLE ROW LEVEL SECURITY"
-    )
-    conn.exec_driver_sql(
-        "ALTER TABLE public.message_logs FORCE ROW LEVEL SECURITY"
-    )
+    conn.exec_driver_sql("ALTER TABLE public.message_logs ENABLE ROW LEVEL SECURITY")
+    conn.exec_driver_sql("ALTER TABLE public.message_logs FORCE ROW LEVEL SECURITY")
 
     # -- Tenant isolation policies ------------------------------------ #
     conn.exec_driver_sql("""
@@ -187,19 +186,21 @@ def downgrade() -> None:
         "tenant_isolation_insert",
         "tenant_isolation_select",
     ):
-        conn.exec_driver_sql(
-            f"DROP POLICY IF EXISTS {policy} ON public.message_logs"
-        )
+        conn.exec_driver_sql(f"DROP POLICY IF EXISTS {policy} ON public.message_logs")
 
-    conn.exec_driver_sql(
-        "ALTER TABLE public.message_logs DISABLE ROW LEVEL SECURITY"
-    )
+    conn.exec_driver_sql("ALTER TABLE public.message_logs DISABLE ROW LEVEL SECURITY")
 
     # Drop indexes
     op.drop_index("ix_message_logs_phone", table_name="message_logs", schema="public")
-    op.drop_index("ix_message_logs_message_id", table_name="message_logs", schema="public")
-    op.drop_index("ix_message_logs_store_id", table_name="message_logs", schema="public")
-    op.drop_index("ix_message_logs_tenant_id", table_name="message_logs", schema="public")
+    op.drop_index(
+        "ix_message_logs_message_id", table_name="message_logs", schema="public"
+    )
+    op.drop_index(
+        "ix_message_logs_store_id", table_name="message_logs", schema="public"
+    )
+    op.drop_index(
+        "ix_message_logs_tenant_id", table_name="message_logs", schema="public"
+    )
 
     # Drop table
     op.drop_table("message_logs", schema="public")
