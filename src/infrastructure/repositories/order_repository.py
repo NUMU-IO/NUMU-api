@@ -127,6 +127,7 @@ class OrderRepository(IOrderRepository):
             notes=model.notes,
             customer_notes=model.customer_notes,
             metadata=model.extra_data or {},
+            version=model.version,
             cancelled_at=model.cancelled_at,
             paid_at=model.paid_at,
             fulfilled_at=model.fulfilled_at,
@@ -163,6 +164,7 @@ class OrderRepository(IOrderRepository):
             notes=entity.notes,
             customer_notes=entity.customer_notes,
             extra_data=entity.metadata,
+            version=entity.version,
             cancelled_at=entity.cancelled_at,
             paid_at=entity.paid_at,
             fulfilled_at=entity.fulfilled_at,
@@ -316,6 +318,30 @@ class OrderRepository(IOrderRepository):
     async def get_by_payment_id(self, payment_id: str) -> Order | None:
         """Get order by external payment ID."""
         query = select(OrderModel).where(OrderModel.payment_id == payment_id)
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_payment_id_for_update(self, payment_id: str) -> Order | None:
+        """Get order by payment ID with a row-level lock (SELECT ... FOR UPDATE)."""
+        query = (
+            select(OrderModel)
+            .where(OrderModel.payment_id == payment_id)
+            .with_for_update()
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_tracking_number_for_update(
+        self, tracking_number: str
+    ) -> Order | None:
+        """Get order by tracking number with a row-level lock."""
+        query = (
+            select(OrderModel)
+            .where(OrderModel.tracking_number == tracking_number)
+            .with_for_update()
+        )
         result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None

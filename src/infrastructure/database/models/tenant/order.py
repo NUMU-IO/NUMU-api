@@ -94,6 +94,13 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Extra Data
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
+    # Optimistic locking — auto-incremented by SQLAlchemy on every UPDATE
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+
+    __mapper_args__ = {"version_id_col": version}
+
     # Timestamps
     cancelled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

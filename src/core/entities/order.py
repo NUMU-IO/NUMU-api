@@ -184,6 +184,7 @@ class Order(BaseEntity):
     coupon_id: UUID | None = None
     customer_notes: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    version: int = 1  # optimistic locking
     cancelled_at: datetime | None = None
     paid_at: datetime | None = None
     fulfilled_at: datetime | None = None

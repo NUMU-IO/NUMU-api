@@ -88,7 +88,7 @@ async def paymob_callback(
     order = None
     lookup_id = merchant_order_id or str(order_id) if order_id else None
     if lookup_id:
-        order = await order_repo.get_by_payment_id(lookup_id)
+        order = await order_repo.get_by_payment_id_for_update(lookup_id)
 
     if not order:
         log.warning("webhook_order_not_found", lookup_id=lookup_id)
