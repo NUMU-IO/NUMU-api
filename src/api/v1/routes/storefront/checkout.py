@@ -6,12 +6,13 @@ Creates an order from the submitted line items, calculates totals
 using live product prices, and optionally initiates payment.
 """
 
+import json
 import logging
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response, status
 
 from src.api.dependencies.auth import get_current_customer
 from src.api.dependencies.repositories import (
@@ -28,9 +29,11 @@ from src.application.dto.order import (
     CreateOrderDTO,
     CreateOrderLineItemDTO,
 )
+from src.config import settings
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
+from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.repositories import (
     CouponRepository,
     CustomerRepository,
@@ -43,6 +46,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_cache_service: RedisCacheService | None = (
+    RedisCacheService() if settings.redis_host else None
+)
+IDEMPOTENCY_TTL_SECONDS = 86_400  # 24 hours
+
 
 @router.post(
     "/checkout",
@@ -52,6 +60,7 @@ router = APIRouter()
     operation_id="checkout",
 )
 async def checkout(
+    response: Response,
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: CheckoutRequest,
     current_customer: Annotated[Customer, Depends(get_current_customer)],
@@ -60,6 +69,7 @@ async def checkout(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
     """Process checkout for the authenticated customer.
 
@@ -68,6 +78,23 @@ async def checkout(
     3. Creates an Order in PENDING status.
     4. Returns an optional payment_url when the payment method requires redirect.
     """
+    # ── Idempotency check ──────────────────────────────────────────────
+    if idempotency_key and _cache_service:
+        cache_key = (
+            f"checkout:idempotency:{store_id}:{current_customer.id}:{idempotency_key}"
+        )
+        cached = await _cache_service.get(cache_key)
+        if cached:
+            logger.info(
+                f"Idempotent checkout hit: key={idempotency_key}, "
+                f"customer={current_customer.id}"
+            )
+            response.status_code = status.HTTP_200_OK
+            return SuccessResponse(
+                data=CheckoutResponse(**json.loads(cached)),
+                message="Order already created",
+            )
+
     # Verify the customer belongs to this store
     if current_customer.store_id != store_id:
         raise HTTPException(
@@ -365,14 +392,27 @@ async def checkout(
 
     _carts.pop(current_customer.id, None)
 
+    checkout_response = CheckoutResponse(
+        order_id=str(created_order.id),
+        order_number=created_order.order_number,
+        total=created_order.total,
+        currency=created_order.currency,
+        payment_status=created_order.payment_status.value,
+        payment_url=payment_url,
+    )
+
+    # ── Cache response for idempotency ───────────────────────────────
+    if idempotency_key and _cache_service:
+        cache_key = (
+            f"checkout:idempotency:{store_id}:{current_customer.id}:{idempotency_key}"
+        )
+        await _cache_service.set(
+            cache_key,
+            checkout_response.model_dump_json(),
+            expire=IDEMPOTENCY_TTL_SECONDS,
+        )
+
     return SuccessResponse(
-        data=CheckoutResponse(
-            order_id=str(created_order.id),
-            order_number=created_order.order_number,
-            total=created_order.total,
-            currency=created_order.currency,
-            payment_status=created_order.payment_status.value,
-            payment_url=payment_url,
-        ),
+        data=checkout_response,
         message="Order created successfully",
     )
