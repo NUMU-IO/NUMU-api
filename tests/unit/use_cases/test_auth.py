@@ -1,11 +1,18 @@
 """Unit tests for authentication use cases."""
 
+import time
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from src.application.dto.auth import LoginDTO, RefreshTokenDTO, RegisterDTO
+from src.application.dto.auth import (
+    LoginDTO,
+    PasswordResetRequestDTO,
+    RefreshTokenDTO,
+    RegisterDTO,
+)
+from src.application.use_cases.auth.forgot_password import ForgotPasswordUseCase
 from src.application.use_cases.auth.login import LoginUserUseCase
 from src.application.use_cases.auth.refresh_token import RefreshTokenUseCase
 from src.application.use_cases.auth.register import RegisterUserUseCase
@@ -232,3 +239,70 @@ class TestRefreshTokenUseCase:
 
         with pytest.raises(EntityNotFoundError):
             await self.use_case.execute(dto)
+
+
+class TestForgotPasswordUseCase:
+    """Tests for ForgotPasswordUseCase — C-17 timing attack fix."""
+
+    def setup_method(self):
+        self.mock_user_repo = MagicMock()
+        self.mock_user_repo.get_by_email = AsyncMock(return_value=None)
+
+        self.mock_token_service = MagicMock()
+        self.mock_token_service.create_reset_token = MagicMock(return_value="tok")
+
+        self.mock_email_service = MagicMock()
+        self.mock_email_service.send_password_reset_email = AsyncMock()
+
+        self.use_case = ForgotPasswordUseCase(
+            user_repository=self.mock_user_repo,
+            token_service=self.mock_token_service,
+            email_service=self.mock_email_service,
+        )
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_user_takes_at_least_2_seconds(self):
+        """Response time must not reveal whether the email exists."""
+        dto = PasswordResetRequestDTO(email="ghost@example.com")
+
+        start = time.monotonic()
+        await self.use_case.execute(dto)
+        elapsed = time.monotonic() - start
+
+        assert elapsed >= 2.0, (
+            f"Forgot-password for unknown user returned in {elapsed:.2f}s; "
+            "expected >= 2s to prevent timing attacks"
+        )
+
+    @pytest.mark.asyncio
+    async def test_existing_user_takes_at_least_2_seconds(self):
+        """Even when the user exists, the minimum delay is enforced."""
+        user = User(
+            id=uuid4(),
+            email=Email(value="real@example.com"),
+            hashed_password="hashed",
+            first_name="A",
+            last_name="B",
+            role=UserRole.STORE_OWNER,
+            status=UserStatus.ACTIVE,
+        )
+        self.mock_user_repo.get_by_email.return_value = user
+
+        dto = PasswordResetRequestDTO(email="real@example.com")
+
+        start = time.monotonic()
+        await self.use_case.execute(dto)
+        elapsed = time.monotonic() - start
+
+        assert elapsed >= 2.0
+        self.mock_email_service.send_password_reset_email.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_email_sent_for_nonexistent_user(self):
+        """No token or email should be generated for unknown emails."""
+        dto = PasswordResetRequestDTO(email="nobody@example.com")
+
+        await self.use_case.execute(dto)
+
+        self.mock_token_service.create_reset_token.assert_not_called()
+        self.mock_email_service.send_password_reset_email.assert_not_called()
