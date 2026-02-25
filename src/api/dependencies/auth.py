@@ -1,23 +1,24 @@
-"""Authentication dependencies."""
+"""Authentication dependencies — cookie-based."""
 
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, HTTPException, Request, status
 
 from src.core.entities.user import UserRole
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
 from src.infrastructure.external_services.token_service import token_service
 
-security = HTTPBearer()
 
+async def get_current_user_id(request: Request) -> UUID:
+    """Get current user ID from access_token httpOnly cookie."""
+    token = request.cookies.get("access_token")
 
-async def get_current_user_id(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-) -> UUID:
-    """Get current user ID from JWT token."""
-    token = credentials.credentials
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
 
     try:
         payload = token_service.verify_token(token)
@@ -26,21 +27,23 @@ async def get_current_user_id(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
         )
     except InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
-async def get_current_user_role(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-) -> tuple[UUID, str]:
-    """Get current user ID and role from JWT token."""
-    token = credentials.credentials
+async def get_current_user_role(request: Request) -> tuple[UUID, str]:
+    """Get current user ID and role from access_token httpOnly cookie."""
+    token = request.cookies.get("access_token")
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
 
     try:
         payload = token_service.verify_token(token)
@@ -49,7 +52,6 @@ async def get_current_user_role(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
@@ -61,12 +63,9 @@ def require_roles(*allowed_roles: UserRole):
     ) -> UUID:
         user_id, role = user_data
 
-        # Convert role string to enum for comparison
-        # Handle both uppercase (from DB enum name) and lowercase (from Python enum value)
         try:
             user_role = UserRole(role)
         except ValueError:
-            # Try matching by name (uppercase) if value match fails
             try:
                 user_role = UserRole[role.upper()]
             except KeyError:
@@ -100,14 +99,16 @@ from src.core.interfaces.services.token_service import CustomerTokenPayload
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
 
-# ... existing code ...
 
+async def get_current_customer_payload(request: Request) -> CustomerTokenPayload:
+    """Get current customer payload from customer_access_token httpOnly cookie."""
+    token = request.cookies.get("customer_access_token")
 
-async def get_current_customer_payload(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-) -> CustomerTokenPayload:
-    """Get current customer payload from JWT token."""
-    token = credentials.credentials
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
 
     try:
         return token_service.verify_customer_token(token)
@@ -115,7 +116,6 @@ async def get_current_customer_payload(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
@@ -129,7 +129,6 @@ async def get_current_customer(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Customer not found",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return customer

@@ -1,11 +1,13 @@
 """User authentication routes.
 
 These routes handle platform user authentication (not store customers).
+Tokens are set via httpOnly cookies — never exposed in JSON response body.
 """
 
+import secrets
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from src.api.dependencies import (
     get_current_user_id,
@@ -18,16 +20,16 @@ from src.api.dependencies.services import (
     get_totp_service,
 )
 from src.api.responses import SuccessResponse
+from src.api.utils.cookies import clear_auth_cookies, set_auth_cookies
 from src.api.v1.schemas import (
     AuthResponse,
     ChangePasswordRequest,
+    CsrfTokenResponse,
     LoginRequest,
     MessageResponse,
     PasswordResetConfirm,
     PasswordResetRequest,
-    RefreshTokenRequest,
     RegisterRequest,
-    TokenResponse,
     UpdateProfileRequest,
     UserResponse,
 )
@@ -64,6 +66,7 @@ from src.application.use_cases.auth.two_factor import (
     RegenerateBackupCodesUseCase,
     Verify2FAUseCase,
 )
+from src.config import settings
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.external_services import (
     PasswordService,
@@ -80,6 +83,70 @@ from src.infrastructure.repositories.two_factor_repository import (
 router = APIRouter()
 
 
+# ---------------------------------------------------------------------------
+# Helper to build UserResponse from auth result
+# ---------------------------------------------------------------------------
+
+
+def _user_response(user) -> UserResponse:
+    return UserResponse(
+        id=str(user.id),
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        full_name=user.full_name,
+        phone=user.phone,
+        role=user.role,
+        status=user.status,
+        avatar_url=user.avatar_url,
+        is_verified=user.is_verified,
+        created_at=str(user.created_at),
+        updated_at=str(user.updated_at),
+        trial_ends_at=str(user.trial_ends_at) if user.trial_ends_at else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSRF Token
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/csrf-token",
+    response_model=SuccessResponse[CsrfTokenResponse],
+    summary="Get CSRF token",
+    operation_id="get_csrf_token",
+)
+async def get_csrf_token(response: Response):
+    """Generate a CSRF token.
+
+    Sets a non-httpOnly `csrf_token` cookie so JavaScript can read it,
+    and also returns the value in the response body.
+    The client must send this token in the `X-CSRF-Token` header
+    on every state-changing request.
+    """
+    token = secrets.token_urlsafe(32)
+    response.set_cookie(
+        key="csrf_token",
+        value=token,
+        httponly=False,  # JS must be able to read this
+        secure=settings.SECURE_COOKIES,
+        samesite=settings.SAMESITE_COOKIES,
+        domain=settings.COOKIE_DOMAIN,
+        path="/",
+        max_age=86400,  # 24 hours
+    )
+    return SuccessResponse(
+        data=CsrfTokenResponse(csrf_token=token),
+        message="CSRF token generated",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Register
+# ---------------------------------------------------------------------------
+
+
 @router.post(
     "/register",
     response_model=SuccessResponse[AuthResponse],
@@ -89,11 +156,15 @@ router = APIRouter()
 )
 async def register(
     request: RegisterRequest,
+    response: Response,
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
 ):
-    """Register a new platform user account."""
+    """Register a new platform user account.
+
+    Tokens are set as httpOnly cookies — not included in the JSON body.
+    """
     use_case = RegisterUserUseCase(
         user_repository=user_repo,
         password_service=password_service,
@@ -109,33 +180,22 @@ async def register(
     )
     result = await use_case.execute(dto)
 
+    # Set tokens as httpOnly cookies
+    set_auth_cookies(
+        response,
+        result.tokens.access_token,
+        result.tokens.refresh_token,
+    )
+
     return SuccessResponse(
-        data=AuthResponse(
-            user=UserResponse(
-                id=str(result.user.id),
-                email=result.user.email,
-                first_name=result.user.first_name,
-                last_name=result.user.last_name,
-                full_name=result.user.full_name,
-                phone=result.user.phone,
-                role=result.user.role,
-                status=result.user.status,
-                avatar_url=result.user.avatar_url,
-                is_verified=result.user.is_verified,
-                created_at=str(result.user.created_at),
-                updated_at=str(result.user.updated_at),
-                trial_ends_at=str(result.user.trial_ends_at)
-                if result.user.trial_ends_at
-                else None,
-            ),
-            tokens=TokenResponse(
-                access_token=result.tokens.access_token,
-                refresh_token=result.tokens.refresh_token,
-                token_type="bearer",
-            ),
-        ),
+        data=AuthResponse(user=_user_response(result.user)),
         message="User registered successfully",
     )
+
+
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -146,11 +206,12 @@ async def register(
 )
 async def login(
     request: LoginRequest,
+    response: Response,
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
 ):
-    """Authenticate user and return tokens."""
+    """Authenticate user and set tokens as httpOnly cookies."""
     use_case = LoginUserUseCase(
         user_repository=user_repo,
         password_service=password_service,
@@ -163,63 +224,89 @@ async def login(
     )
     result = await use_case.execute(dto)
 
+    # Set tokens as httpOnly cookies
+    set_auth_cookies(
+        response,
+        result.tokens.access_token,
+        result.tokens.refresh_token,
+    )
+
     return SuccessResponse(
-        data=AuthResponse(
-            user=UserResponse(
-                id=str(result.user.id),
-                email=result.user.email,
-                first_name=result.user.first_name,
-                last_name=result.user.last_name,
-                full_name=result.user.full_name,
-                phone=result.user.phone,
-                role=result.user.role,
-                status=result.user.status,
-                avatar_url=result.user.avatar_url,
-                is_verified=result.user.is_verified,
-                created_at=str(result.user.created_at),
-                updated_at=str(result.user.updated_at),
-                trial_ends_at=str(result.user.trial_ends_at)
-                if result.user.trial_ends_at
-                else None,
-            ),
-            tokens=TokenResponse(
-                access_token=result.tokens.access_token,
-                refresh_token=result.tokens.refresh_token,
-                token_type="bearer",
-            ),
-        ),
+        data=AuthResponse(user=_user_response(result.user)),
         message="Login successful",
     )
 
 
+# ---------------------------------------------------------------------------
+# Refresh
+# ---------------------------------------------------------------------------
+
+
 @router.post(
     "/refresh",
-    response_model=SuccessResponse[TokenResponse],
+    response_model=SuccessResponse[MessageResponse],
     summary="Refresh access token",
     operation_id="refresh_token",
 )
 async def refresh_token(
-    request: RefreshTokenRequest,
+    request: Request,
+    response: Response,
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
 ):
-    """Refresh access token using refresh token."""
+    """Refresh access token using refresh_token cookie.
+
+    No request body needed — the refresh token is read from the httpOnly cookie.
+    New tokens are set as httpOnly cookies on the response.
+    """
+    refresh_tok = request.cookies.get("refresh_token")
+    if not refresh_tok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found",
+        )
+
     use_case = RefreshTokenUseCase(
         user_repository=user_repo,
         token_service=token_service,
     )
 
-    dto = RefreshTokenDTO(refresh_token=request.refresh_token)
+    dto = RefreshTokenDTO(refresh_token=refresh_tok)
     result = await use_case.execute(dto)
 
+    # Set new tokens as httpOnly cookies
+    set_auth_cookies(response, result.access_token, result.refresh_token)
+
     return SuccessResponse(
-        data=TokenResponse(
-            access_token=result.access_token,
-            refresh_token=result.refresh_token,
-            token_type="bearer",
-        ),
+        data=MessageResponse(message="Token refreshed"),
         message="Token refreshed successfully",
     )
+
+
+# ---------------------------------------------------------------------------
+# Logout
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/logout",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Logout user",
+    operation_id="logout",
+)
+async def logout(response: Response):
+    """Clear auth cookies to log the user out."""
+    clear_auth_cookies(response)
+    response.delete_cookie(key="csrf_token", path="/", domain=settings.COOKIE_DOMAIN)
+    return SuccessResponse(
+        data=MessageResponse(message="Logged out successfully"),
+        message="Logged out successfully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Forgot / Reset Password (unchanged logic, no tokens in body)
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -281,6 +368,11 @@ async def reset_password(
         data=MessageResponse(message="Password has been reset successfully"),
         message="Password reset successful",
     )
+
+
+# ---------------------------------------------------------------------------
+# Profile
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -413,7 +505,7 @@ async def change_password(
 
 
 # =============================================================================
-# Two-Factor Authentication (2FA) Routes
+# Two-Factor Authentication (2FA) Routes — unchanged
 # =============================================================================
 
 
@@ -432,16 +524,7 @@ async def enable_2fa(
     ],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
-    """Enable Two-Factor Authentication for the current user.
-
-    This generates:
-    - A TOTP secret for authenticator apps
-    - A provisioning URI (for QR code generation)
-    - 10 backup codes for recovery
-
-    The user must verify with a TOTP code to complete setup.
-    Backup codes should be saved securely - they are only shown once!
-    """
+    """Enable Two-Factor Authentication for the current user."""
     from uuid import UUID
 
     use_case = Enable2FAUseCase(
@@ -481,17 +564,9 @@ async def verify_2fa(
     ],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
-    """Verify a 2FA code (TOTP or backup code).
-
-    This endpoint serves two purposes:
-    1. Complete 2FA setup after calling /2fa/enable (first verification)
-    2. Verify 2FA during sensitive operations
-
-    Accepts both 6-digit TOTP codes and backup codes (XXXX-XXXX format).
-    """
+    """Verify a 2FA code (TOTP or backup code)."""
     from uuid import UUID
 
-    # Check if this is initial setup verification
     two_factor = await two_factor_repo.get_by_user_id(
         UUID(user_id) if isinstance(user_id, str) else user_id
     )
@@ -539,13 +614,7 @@ async def disable_2fa(
     password_svc: Annotated[PasswordService, Depends(get_password_service)],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
-    """Disable Two-Factor Authentication for the current user.
-
-    Requires password confirmation for security. Optionally accepts
-    a TOTP code for additional verification.
-
-    WARNING: This removes all 2FA protection from the account.
-    """
+    """Disable Two-Factor Authentication for the current user."""
     from uuid import UUID
 
     use_case = Disable2FAUseCase(
@@ -586,11 +655,7 @@ async def get_2fa_status(
         InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
     ],
 ):
-    """Get the current 2FA status for the authenticated user.
-
-    Returns whether 2FA is enabled, the method used, and
-    the number of remaining backup codes.
-    """
+    """Get the current 2FA status for the authenticated user."""
     from uuid import UUID
 
     from src.application.dto.two_factor import TwoFactorStatusDTO
@@ -629,13 +694,7 @@ async def regenerate_backup_codes(
     ],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
-    """Regenerate backup codes for 2FA recovery.
-
-    Requires a valid TOTP code to prevent abuse. All existing
-    backup codes are invalidated and replaced with new ones.
-
-    Save the new backup codes securely - they are only shown once!
-    """
+    """Regenerate backup codes for 2FA recovery."""
     from uuid import UUID
 
     use_case = RegenerateBackupCodesUseCase(

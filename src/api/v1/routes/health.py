@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-import sentry_sdk
 import redis.asyncio as redis
+import sentry_sdk
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -260,7 +260,7 @@ async def sentry_test():
         raise HTTPException(status_code=403, detail="Debug endpoints disabled")
 
     try:
-        1 / 0  # Deliberate error to test Sentry capture
+        _ = 1 / 0  # Deliberate error to test Sentry capture
     except ZeroDivisionError:
         sentry_sdk.capture_exception()
         return {

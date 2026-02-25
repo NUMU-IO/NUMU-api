@@ -37,6 +37,7 @@ def _get_sync_url() -> str:
     # so just return the base URL and let SQLAlchemy raise a clear error
     return base
 
+
 # Tables that must have RLS enabled (matches the migration)
 REQUIRED_TABLES = [
     "stores",
@@ -60,7 +61,9 @@ def verify_rls() -> bool:
     print()
 
     # Header
-    print(f"{'Table':<22} {'RLS Enabled':<14} {'Force RLS':<12} {'Policies':<10} {'Result'}")
+    print(
+        f"{'Table':<22} {'RLS Enabled':<14} {'Force RLS':<12} {'Policies':<10} {'Result'}"
+    )
     print("-" * 72)
 
     with engine.connect() as conn:
@@ -76,7 +79,9 @@ def verify_rls() -> bool:
             ).fetchone()
 
             if result is None:
-                print(f"{table_name:<22} {'N/A':<14} {'N/A':<12} {'N/A':<10} FAIL (table not found)")
+                print(
+                    f"{table_name:<22} {'N/A':<14} {'N/A':<12} {'N/A':<10} FAIL (table not found)"
+                )
                 all_passed = False
                 continue
 
@@ -103,7 +108,9 @@ def verify_rls() -> bool:
             rls_str = "Yes" if rls_enabled else "No"
             force_str = "Yes" if force_rls else "No"
 
-            print(f"{table_name:<22} {rls_str:<14} {force_str:<12} {policy_count:<10} {status}")
+            print(
+                f"{table_name:<22} {rls_str:<14} {force_str:<12} {policy_count:<10} {status}"
+            )
 
     print("-" * 72)
     print()

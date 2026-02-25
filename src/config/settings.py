@@ -100,6 +100,12 @@ class Settings(BaseSettings):
     session_secret_key: str = Field(
         default="dev-only-session-secret-change-in-prod-32chars"
     )
+    # Secure cookie settings (should be True in production with HTTPS)
+    SECURE_COOKIES: bool = False
+    SAMESITE_COOKIES: Literal["lax", "strict", "none"] = "lax"
+    COOKIE_DOMAIN: str | None = (
+        None  # Set to your domain in production (e.g., "numu.com")
+    )
 
     @model_validator(mode="after")
     def validate_jwt_keys(self) -> "Settings":

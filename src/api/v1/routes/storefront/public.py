@@ -11,7 +11,7 @@ These routes are publicly accessible without authentication:
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 
 from src.api.dependencies import (
     CursorParams,
@@ -29,6 +29,7 @@ from src.api.dependencies import (
     get_token_service,
 )
 from src.api.responses import SuccessResponse
+from src.api.utils.cookies import set_customer_auth_cookies
 from src.api.v1.routes.storefront.theme_schemas import get_theme_schema
 from src.api.v1.schemas import (
     CursorPaginatedListResponse,
@@ -584,6 +585,7 @@ async def register_customer(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
+    response: Response,
 ):
     """Register a new customer for the store."""
     # Verify store exists and get tenant_id
@@ -611,6 +613,11 @@ async def register_customer(
     tenant_id = getattr(store, "tenant_id", store.id)
     result = await use_case.execute(dto, tenant_id)
 
+    # Set customer auth cookies
+    set_customer_auth_cookies(
+        response, result.tokens.access_token, result.tokens.refresh_token
+    )
+
     return SuccessResponse(
         data=CustomerAuthResponse(
             customer=CustomerResponse(
@@ -633,11 +640,6 @@ async def register_customer(
                 if result.customer.updated_at
                 else None,
             ),
-            tokens={
-                "access_token": result.tokens.access_token,
-                "refresh_token": result.tokens.refresh_token,
-                "token_type": result.tokens.token_type,
-            },
         ),
         message="Customer registered successfully",
     )
@@ -655,6 +657,7 @@ async def login_customer(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
+    response: Response,
 ):
     """Authenticate customer and return tokens."""
     use_case = LoginCustomerUseCase(
@@ -670,6 +673,11 @@ async def login_customer(
     )
 
     result = await use_case.execute(dto)
+
+    # Set customer auth cookies
+    set_customer_auth_cookies(
+        response, result.tokens.access_token, result.tokens.refresh_token
+    )
 
     return SuccessResponse(
         data=CustomerAuthResponse(
@@ -693,11 +701,6 @@ async def login_customer(
                 if result.customer.updated_at
                 else None,
             ),
-            tokens={
-                "access_token": result.tokens.access_token,
-                "refresh_token": result.tokens.refresh_token,
-                "token_type": result.tokens.token_type,
-            },
         ),
         message="Login successful",
     )

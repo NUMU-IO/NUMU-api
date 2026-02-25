@@ -54,8 +54,8 @@ class TestOperationIds:
     def test_operation_ids_are_unique(self, spec):
         """No two endpoints may share the same operationId."""
         ids = []
-        for path, methods in spec["paths"].items():
-            for method, details in methods.items():
+        for _path, methods in spec["paths"].items():
+            for _method, details in methods.items():
                 if "operationId" in details:
                     ids.append(details["operationId"])
 
@@ -83,8 +83,8 @@ class TestTags:
         """Every tag used on a route must appear in the top-level tags list."""
         defined = {t["name"] for t in spec.get("tags", [])}
         used = set()
-        for path, methods in spec["paths"].items():
-            for method, details in methods.items():
+        for _path, methods in spec["paths"].items():
+            for _method, details in methods.items():
                 for tag in details.get("tags", []):
                     used.add(tag)
 
@@ -105,8 +105,8 @@ class TestTags:
         """Every defined tag should be used by at least one endpoint."""
         defined = {t["name"] for t in spec.get("tags", [])}
         used = set()
-        for path, methods in spec["paths"].items():
-            for method, details in methods.items():
+        for _path, methods in spec["paths"].items():
+            for _method, details in methods.items():
                 for tag in details.get("tags", []):
                     used.add(tag)
 

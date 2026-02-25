@@ -49,14 +49,6 @@ class LoginRequest(BaseModel):
     password: str = Field(description="User password")
 
 
-class TokenResponse(BaseModel):
-    """Token response schema."""
-
-    access_token: str = Field(description="JWT access token")
-    refresh_token: str = Field(description="JWT refresh token")
-    token_type: str = Field("bearer", description="Token type (always 'bearer')")
-
-
 class UserResponse(BaseModel):
     """User response schema."""
 
@@ -96,16 +88,24 @@ class UserResponse(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    """Authentication response schema."""
+    """Auth response — tokens are in httpOnly cookies, not in the body."""
 
     user: UserResponse = Field(description="User profile")
-    tokens: TokenResponse = Field(description="Auth tokens")
 
 
-class RefreshTokenRequest(BaseModel):
-    """Refresh token request schema."""
+class CsrfTokenResponse(BaseModel):
+    """CSRF token response."""
 
+    csrf_token: str = Field(description="CSRF token (also set as cookie)")
+
+
+# Keep TokenResponse for internal use / backward compat with use-case DTOs
+class TokenResponse(BaseModel):
+    """Token response schema (internal — not exposed to clients)."""
+
+    access_token: str = Field(description="JWT access token")
     refresh_token: str = Field(description="JWT refresh token")
+    token_type: str = Field("bearer", description="Token type (always 'bearer')")
 
 
 class PasswordResetRequest(BaseModel):

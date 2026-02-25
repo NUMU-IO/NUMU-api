@@ -1,6 +1,6 @@
 """Unit tests for MessageLogRepository."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -43,8 +43,8 @@ class TestMessageLogRepository:
         model.content = overrides.get("content", "Test content")
         model.status = overrides.get("status", MessageStatus.SENT)
         model.error_code = overrides.get("error_code", None)
-        model.created_at = overrides.get("created_at", datetime.now(timezone.utc))
-        model.updated_at = overrides.get("updated_at", datetime.now(timezone.utc))
+        model.created_at = overrides.get("created_at", datetime.now(UTC))
+        model.updated_at = overrides.get("updated_at", datetime.now(UTC))
         return model
 
     # ------------------------------------------------------------------ #
@@ -171,9 +171,7 @@ class TestMessageLogRepository:
         mock_result.scalars.return_value.all.return_value = []
         self.mock_session.execute.return_value = mock_result
 
-        results = await self.repository.get_by_phone(
-            store_id, phone, skip=10, limit=5
-        )
+        results = await self.repository.get_by_phone(store_id, phone, skip=10, limit=5)
         assert results == []
         # The important thing is that the method accepted the params
 
@@ -402,7 +400,7 @@ class TestMessageLogRepository:
         )
 
         # Mock refresh to keep the same model
-        mock_model = self._create_mock_model(
+        _mock_model = self._create_mock_model(
             id=entity.id,
             message_id=entity.message_id,
         )
@@ -426,7 +424,7 @@ class TestMessageLogRepository:
             metadata={"type": "text"},
         )
 
-        result = await self.repository.create(entity)
+        await self.repository.create(entity)
         self.mock_session.add.assert_called_once()
 
     # ------------------------------------------------------------------ #

@@ -15,12 +15,13 @@ import pytest
 from src.core.entities.message_log import (
     MessageDirection,
     MessageLog,
+)
+from src.core.entities.message_log import (
     MessageStatus as LogStatus,
 )
 from src.infrastructure.external_services.whatsapp.messaging_service import (
     WhatsAppMessagingService,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

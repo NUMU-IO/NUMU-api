@@ -138,12 +138,12 @@ async def whatsapp_callback(
         entries = data.get("entry", [])
 
         for entry in entries:
-            account_id = entry.get("id")
+            _account_id = entry.get("id")
             changes = entry.get("changes", [])
 
             for change in changes:
                 field = change.get("field")
-                value = change.get("value", {})
+                _value = change.get("value", {})
 
                 if field == "messages":
                     # Delegate to the service which now persists via repo

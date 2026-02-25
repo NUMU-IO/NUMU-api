@@ -54,9 +54,7 @@ class CreateProductRequest(BaseModel):
     product_type: str = Field(
         default="physical", description="Product type: physical or digital"
     )
-    price: Decimal = Field(
-        ..., ge=0, description="Product price in the store currency"
-    )
+    price: Decimal = Field(..., ge=0, description="Product price in the store currency")
     price_currency: str = Field(
         default="EGP", max_length=3, description="ISO 4217 currency code"
     )
@@ -66,9 +64,7 @@ class CreateProductRequest(BaseModel):
     cost_price: Decimal | None = Field(
         None, ge=0, description="Cost of goods for profit calculation"
     )
-    quantity: int = Field(
-        default=0, ge=0, description="Available stock quantity"
-    )
+    quantity: int = Field(default=0, ge=0, description="Available stock quantity")
     low_stock_threshold: int = Field(
         default=5, ge=0, description="Threshold to trigger low-stock alerts"
     )
@@ -82,7 +78,8 @@ class CreateProductRequest(BaseModel):
         default_factory=list, max_length=50, description="Searchable tags"
     )
     attributes: dict = Field(
-        default_factory=dict, description="Arbitrary key-value attributes (size, color, etc.)"
+        default_factory=dict,
+        description="Arbitrary key-value attributes (size, color, etc.)",
     )
 
     @field_validator("price_currency")
@@ -115,9 +112,7 @@ class UpdateProductRequest(BaseModel):
     name: SanitizedStr | None = Field(
         None, min_length=1, max_length=255, description="Product display name"
     )
-    slug: str | None = Field(
-        None, max_length=255, description="URL-friendly slug"
-    )
+    slug: str | None = Field(None, max_length=255, description="URL-friendly slug")
     sku: str | None = Field(
         None, max_length=100, description="Stock Keeping Unit identifier"
     )
@@ -136,24 +131,16 @@ class UpdateProductRequest(BaseModel):
     cost_price: Decimal | None = Field(
         None, ge=0, description="Cost of goods for profit calculation"
     )
-    quantity: int | None = Field(
-        None, ge=0, description="Available stock quantity"
-    )
+    quantity: int | None = Field(None, ge=0, description="Available stock quantity")
     low_stock_threshold: int | None = Field(
         None, ge=0, description="Threshold to trigger low-stock alerts"
     )
     images: list[str] | None = Field(
         None, max_length=50, description="Product image URLs"
     )
-    category_id: UUID | None = Field(
-        None, description="Category UUID"
-    )
-    tags: list[str] | None = Field(
-        None, max_length=50, description="Searchable tags"
-    )
-    attributes: dict | None = Field(
-        None, description="Arbitrary key-value attributes"
-    )
+    category_id: UUID | None = Field(None, description="Category UUID")
+    tags: list[str] | None = Field(None, max_length=50, description="Searchable tags")
+    attributes: dict | None = Field(None, description="Arbitrary key-value attributes")
     status: str | None = Field(
         None, description="Product status: active, draft, or archived"
     )
@@ -251,9 +238,7 @@ class DeleteImageRequest(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "image_url": "https://cdn.numu.com/products/img-001.jpg"
-            }
+            "example": {"image_url": "https://cdn.numu.com/products/img-001.jpg"}
         }
     )
 
