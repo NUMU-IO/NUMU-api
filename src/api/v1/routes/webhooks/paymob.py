@@ -14,14 +14,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.database import get_db
 from src.config import settings
 from src.config.logging_config import get_logger
+from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services.paymob import PaymobPaymentService
 from src.infrastructure.repositories.order_repository import OrderRepository
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Initialize service
+# Initialize services once at module level to reuse connections
 paymob_service = PaymobPaymentService()
+_cache_service: RedisCacheService | None = (
+    RedisCacheService() if settings.redis_host else None
+)
+
+NONCE_TTL_SECONDS = 86_400  # 24 hours
 
 
 @router.post("/callback", operation_id="paymob_callback")
@@ -80,6 +86,16 @@ async def paymob_callback(
         currency=currency,
     )
     log.info("webhook_received")
+
+    # ── Replay protection ────────────────────────────────────────────
+    if transaction_id and _cache_service:
+        nonce_key = f"paymob:processed:{transaction_id}"
+        was_set = await _cache_service.set_if_absent(
+            nonce_key, "1", expire=NONCE_TTL_SECONDS
+        )
+        if not was_set:
+            log.warning("webhook_duplicate_rejected")
+            return {"status": "duplicate", "transaction_id": transaction_id}
 
     order_repo = OrderRepository(db)
 
