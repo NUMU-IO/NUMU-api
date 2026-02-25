@@ -1,9 +1,8 @@
 """MessageLog database model (public schema with tenant_id discriminator)."""
 
-from datetime import datetime
 from uuid import UUID as PyUUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,9 +28,7 @@ class MessageLogModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         index=True,
     )
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    metadata_: Mapped[dict | None] = mapped_column(
-        "metadata", JSONB, nullable=True
-    )
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
     message_id: Mapped[str] = mapped_column(
         String(255), nullable=False, unique=True, index=True
     )
@@ -44,9 +41,7 @@ class MessageLogModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         ),
         nullable=False,
     )
-    template_name: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
+    template_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[MessageStatus] = mapped_column(
         Enum(

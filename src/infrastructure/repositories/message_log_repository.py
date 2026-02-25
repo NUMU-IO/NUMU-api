@@ -16,8 +16,6 @@ from src.core.interfaces.repositories.message_log_repository import (
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 
-
-
 # Forward-progress ordering for status updates.  FAILED is handled
 # specially (always accepted) and is therefore not in this map.
 _STATUS_ORDER: dict[MessageStatus, int] = {
@@ -157,9 +155,7 @@ class MessageLogRepository(IMessageLogRepository):
 
     async def get_by_message_id(self, message_id: str) -> MessageLog | None:
         """Get a message log entry by its provider message ID."""
-        query = select(MessageLogModel).where(
-            MessageLogModel.message_id == message_id
-        )
+        query = select(MessageLogModel).where(MessageLogModel.message_id == message_id)
         result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
@@ -172,15 +168,11 @@ class MessageLogRepository(IMessageLogRepository):
         limit: int = 100,
     ) -> list[MessageLog]:
         """Get message logs for a store, optionally filtered by direction."""
-        query = select(MessageLogModel).where(
-            MessageLogModel.store_id == store_id
-        )
+        query = select(MessageLogModel).where(MessageLogModel.store_id == store_id)
         if direction is not None:
             query = query.where(MessageLogModel.direction == direction)
         query = (
-            query.order_by(MessageLogModel.created_at.desc())
-            .offset(skip)
-            .limit(limit)
+            query.order_by(MessageLogModel.created_at.desc()).offset(skip).limit(limit)
         )
         result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(m) for m in result.scalars().all()]
@@ -235,9 +227,7 @@ class MessageLogRepository(IMessageLogRepository):
         status represents forward progress (QUEUED→SENT→DELIVERED→READ).
         FAILED is always accepted regardless of current status.
         """
-        query = select(MessageLogModel).where(
-            MessageLogModel.message_id == message_id
-        )
+        query = select(MessageLogModel).where(MessageLogModel.message_id == message_id)
         result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         if model is None:

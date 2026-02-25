@@ -26,7 +26,9 @@ class OrderLineItemRequest(BaseModel):
         ..., min_length=1, max_length=255, description="Product name at time of order"
     )
     variant_id: UUID | None = Field(None, description="Product variant UUID")
-    variant_name: str | None = Field(None, description="Variant label (e.g. 'Large / Blue')")
+    variant_name: str | None = Field(
+        None, description="Variant label (e.g. 'Large / Blue')"
+    )
     sku: str | None = Field(None, description="SKU at time of order")
     quantity: int = Field(default=1, ge=1, description="Quantity ordered")
     unit_price: int = Field(..., ge=0, description="Price per unit in cents")
@@ -64,13 +66,13 @@ class OrderAddressRequest(BaseModel):
         ..., min_length=1, max_length=100, description="City name"
     )
     state: str | None = Field(None, max_length=100, description="State or governorate")
-    postal_code: str | None = Field(None, max_length=20, description="Postal / ZIP code")
+    postal_code: str | None = Field(
+        None, max_length=20, description="Postal / ZIP code"
+    )
     country: str = Field(
         ..., min_length=2, max_length=100, description="Country name or ISO code"
     )
-    phone: str | None = Field(
-        None, max_length=20, description="Contact phone number"
-    )
+    phone: str | None = Field(None, max_length=20, description="Contact phone number")
 
 
 class CreateOrderRequest(BaseModel):
@@ -110,12 +112,8 @@ class CreateOrderRequest(BaseModel):
     billing_address: OrderAddressRequest | None = Field(
         None, description="Billing address; defaults to shipping address if omitted"
     )
-    shipping_cost: int = Field(
-        default=0, ge=0, description="Shipping cost in cents"
-    )
-    tax_amount: int = Field(
-        default=0, ge=0, description="Tax amount in cents"
-    )
+    shipping_cost: int = Field(default=0, ge=0, description="Shipping cost in cents")
+    tax_amount: int = Field(default=0, ge=0, description="Tax amount in cents")
     discount_amount: int = Field(
         default=0, ge=0, description="Discount amount in cents"
     )
@@ -157,8 +155,12 @@ class UpdateOrderRequest(BaseModel):
     payment_method: str | None = Field(None, description="Payment method")
     shipping_method: str | None = Field(None, description="Shipping method")
     tracking_number: str | None = Field(None, description="Shipment tracking number")
-    notes: SanitizedStr | None = Field(None, description="Internal notes for the merchant")
-    customer_notes: SanitizedStr | None = Field(None, description="Notes from the customer")
+    notes: SanitizedStr | None = Field(
+        None, description="Internal notes for the merchant"
+    )
+    customer_notes: SanitizedStr | None = Field(
+        None, description="Notes from the customer"
+    )
 
 
 class UpdateOrderStatusRequest(BaseModel):
@@ -246,9 +248,13 @@ class OrderResponse(BaseModel):
     line_items: list[OrderLineItemResponse] = Field(description="Line items")
     shipping_address: OrderAddressResponse = Field(description="Shipping address")
     billing_address: OrderAddressResponse | None = Field(description="Billing address")
-    status: str = Field(description="Order status: pending, confirmed, shipped, delivered, cancelled")
+    status: str = Field(
+        description="Order status: pending, confirmed, shipped, delivered, cancelled"
+    )
     payment_status: str = Field(description="Payment status: unpaid, paid, refunded")
-    fulfillment_status: str = Field(description="Fulfillment status: unfulfilled, fulfilled, partial")
+    fulfillment_status: str = Field(
+        description="Fulfillment status: unfulfilled, fulfilled, partial"
+    )
     subtotal: int = Field(description="Subtotal in cents")
     shipping_cost: int = Field(description="Shipping cost in cents")
     tax_amount: int = Field(description="Tax amount in cents")
@@ -264,7 +270,9 @@ class OrderResponse(BaseModel):
     customer_notes: str | None = Field(description="Customer-provided notes")
     item_count: int = Field(description="Total number of items")
     is_paid: bool = Field(description="Whether the order has been paid")
-    can_be_cancelled: bool = Field(description="Whether the order can still be cancelled")
+    can_be_cancelled: bool = Field(
+        description="Whether the order can still be cancelled"
+    )
     cancelled_at: str | None = Field(description="ISO 8601 cancellation timestamp")
     paid_at: str | None = Field(description="ISO 8601 payment timestamp")
     fulfilled_at: str | None = Field(description="ISO 8601 fulfilment timestamp")
@@ -314,7 +322,9 @@ class OrderTimelineResponse(BaseModel):
 
     order_id: str = Field(description="Order UUID")
     order_number: str = Field(description="Order number")
-    events: list[OrderTimelineEvent] = Field(description="Timeline events in chronological order")
+    events: list[OrderTimelineEvent] = Field(
+        description="Timeline events in chronological order"
+    )
 
 
 class OrderDetailEnrichedResponse(OrderResponse):

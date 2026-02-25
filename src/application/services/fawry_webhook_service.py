@@ -41,7 +41,11 @@ MAX_WEBHOOK_AGE_SECONDS = 15 * 60  # 15 minutes
 # order is already in a later state are silently ignored (idempotency).
 _PAID_VALID_PRIOR = {OrderStatus.PENDING, OrderStatus.PAYMENT_FAILED}
 _EXPIRED_VALID_PRIOR = {OrderStatus.PENDING}
-_CANCELED_VALID_PRIOR = {OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING}
+_CANCELED_VALID_PRIOR = {
+    OrderStatus.PENDING,
+    OrderStatus.CONFIRMED,
+    OrderStatus.PROCESSING,
+}
 
 
 class FawryWebhookService:
@@ -296,7 +300,9 @@ class FawryWebhookService:
         """EXPIRED: Mark payment expired → release reserved inventory."""
         order = await self._get_order_by_payment_id(merchant_ref)
         if not order:
-            logger.warning("webhook_order_not_found", status="EXPIRED", ref=merchant_ref)
+            logger.warning(
+                "webhook_order_not_found", status="EXPIRED", ref=merchant_ref
+            )
             return None
 
         # Guard: only transition from valid prior states
@@ -345,7 +351,9 @@ class FawryWebhookService:
         """CANCELED: Cancel order → mark payment failed → notify merchant."""
         order = await self._get_order_by_payment_id(merchant_ref)
         if not order:
-            logger.warning("webhook_order_not_found", status="CANCELED", ref=merchant_ref)
+            logger.warning(
+                "webhook_order_not_found", status="CANCELED", ref=merchant_ref
+            )
             return None
 
         # Guard: shipped/delivered/refunded orders cannot be cancelled
@@ -397,7 +405,9 @@ class FawryWebhookService:
         """REFUNDED: Mark payment refunded → create audit entry."""
         order = await self._get_order_by_payment_id(merchant_ref)
         if not order:
-            logger.warning("webhook_order_not_found", status="REFUNDED", ref=merchant_ref)
+            logger.warning(
+                "webhook_order_not_found", status="REFUNDED", ref=merchant_ref
+            )
             return None
 
         # Guard: can only refund a paid order

@@ -121,7 +121,8 @@ class CreateInvoiceRequest(BaseModel):
     order_id: UUID | None = Field(None, description="Associated order ID")
     customer_id: UUID | None = Field(None, description="Customer ID")
     invoice_type: InvoiceType = Field(
-        default=InvoiceType.INVOICE, description="Invoice type: I=Invoice, C=Credit, D=Debit"
+        default=InvoiceType.INVOICE,
+        description="Invoice type: I=Invoice, C=Credit, D=Debit",
     )
 
     seller: SellerInfoRequest = Field(description="Seller / issuer information")
