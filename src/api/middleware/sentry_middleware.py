@@ -50,11 +50,14 @@ class SentryMiddleware(BaseHTTPMiddleware):
                 scope.set_tag("request_id", request_id)
 
             # Set grouped tenant context for Sentry dashboard
-            scope.set_context("tenant", {
-                "tenant_id": str(tenant_id) if tenant_id else None,
-                "tenant_slug": tenant_slug,
-                "store_id": str(store_id) if store_id else None,
-            })
+            scope.set_context(
+                "tenant",
+                {
+                    "tenant_id": str(tenant_id) if tenant_id else None,
+                    "tenant_slug": tenant_slug,
+                    "store_id": str(store_id) if store_id else None,
+                },
+            )
 
             # Start a transaction for performance monitoring
             transaction_name = f"{request.method} {request.url.path}"

@@ -21,7 +21,6 @@ from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.main import app
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -140,9 +139,11 @@ async def _post_webhook(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        with patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings, \
-             patch("src.api.v1.routes.webhooks.fawry._cache_service", None), \
-             patch("src.api.v1.routes.webhooks.fawry._messaging_service", None):
+        with (
+            patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings,
+            patch("src.api.v1.routes.webhooks.fawry._cache_service", None),
+            patch("src.api.v1.routes.webhooks.fawry._messaging_service", None),
+        ):
             mock_settings.fawry_security_key = None
             mock_settings.redis_host = None
             mock_settings.whatsapp_enabled = False
@@ -236,9 +237,11 @@ class TestReplayProtection:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            with patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings, \
-                 patch("src.api.v1.routes.webhooks.fawry._cache_service") as mock_cache, \
-                 patch("src.api.v1.routes.webhooks.fawry._messaging_service", None):
+            with (
+                patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings,
+                patch("src.api.v1.routes.webhooks.fawry._cache_service") as mock_cache,
+                patch("src.api.v1.routes.webhooks.fawry._messaging_service", None),
+            ):
                 mock_settings.fawry_security_key = None
                 mock_settings.redis_host = "localhost"
                 mock_settings.whatsapp_enabled = False
@@ -279,10 +282,12 @@ class TestSignatureVerification:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            with patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings, \
-                 patch("src.api.v1.routes.webhooks.fawry._cache_service", None), \
-                 patch("src.api.v1.routes.webhooks.fawry._messaging_service", None), \
-                 patch("src.api.v1.routes.webhooks.fawry.fawry_service") as mock_fawry:
+            with (
+                patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings,
+                patch("src.api.v1.routes.webhooks.fawry._cache_service", None),
+                patch("src.api.v1.routes.webhooks.fawry._messaging_service", None),
+                patch("src.api.v1.routes.webhooks.fawry.fawry_service") as mock_fawry,
+            ):
                 mock_settings.fawry_security_key = FAWRY_SECURITY_KEY
                 mock_settings.redis_host = None
                 mock_settings.whatsapp_enabled = False
@@ -319,10 +324,12 @@ class TestSignatureVerification:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            with patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings, \
-                 patch("src.api.v1.routes.webhooks.fawry._cache_service", None), \
-                 patch("src.api.v1.routes.webhooks.fawry._messaging_service", None), \
-                 patch("src.api.v1.routes.webhooks.fawry.fawry_service") as mock_fawry:
+            with (
+                patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings,
+                patch("src.api.v1.routes.webhooks.fawry._cache_service", None),
+                patch("src.api.v1.routes.webhooks.fawry._messaging_service", None),
+                patch("src.api.v1.routes.webhooks.fawry.fawry_service") as mock_fawry,
+            ):
                 mock_settings.fawry_security_key = FAWRY_SECURITY_KEY
                 mock_settings.redis_host = None
                 mock_settings.whatsapp_enabled = False
@@ -367,9 +374,11 @@ class TestTimestampFreshness:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            with patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings, \
-                 patch("src.api.v1.routes.webhooks.fawry._cache_service", None), \
-                 patch("src.api.v1.routes.webhooks.fawry._messaging_service", None):
+            with (
+                patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings,
+                patch("src.api.v1.routes.webhooks.fawry._cache_service", None),
+                patch("src.api.v1.routes.webhooks.fawry._messaging_service", None),
+            ):
                 mock_settings.fawry_security_key = None
                 mock_settings.redis_host = None
                 mock_settings.whatsapp_enabled = False
@@ -405,9 +414,11 @@ class TestMalformedPayload:
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            with patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings, \
-                 patch("src.api.v1.routes.webhooks.fawry._cache_service", None), \
-                 patch("src.api.v1.routes.webhooks.fawry._messaging_service", None):
+            with (
+                patch("src.api.v1.routes.webhooks.fawry.settings") as mock_settings,
+                patch("src.api.v1.routes.webhooks.fawry._cache_service", None),
+                patch("src.api.v1.routes.webhooks.fawry._messaging_service", None),
+            ):
                 mock_settings.fawry_security_key = None
                 mock_settings.redis_host = None
                 mock_settings.whatsapp_enabled = False

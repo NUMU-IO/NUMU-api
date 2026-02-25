@@ -21,7 +21,6 @@ from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateProductRequest,
     DeleteImageRequest,
-    DeleteResponse,
     ImportResultResponse,
     ImportRowErrorResponse,
     PaginatedListResponse,

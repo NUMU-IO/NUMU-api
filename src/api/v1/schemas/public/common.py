@@ -35,7 +35,9 @@ class CursorPaginatedListResponse(BaseModel, Generic[T]):
 
     items: list[T] = Field(description="Page of results")
     next_cursor: str | None = Field(None, description="Opaque cursor for the next page")
-    prev_cursor: str | None = Field(None, description="Opaque cursor for the previous page")
+    prev_cursor: str | None = Field(
+        None, description="Opaque cursor for the previous page"
+    )
     has_more: bool = Field(False, description="Whether more results exist")
 
 

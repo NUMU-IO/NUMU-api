@@ -5,21 +5,16 @@ checks (replay protection, timestamp validation), and edge cases.
 """
 
 import time
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
 from src.application.services.fawry_webhook_service import (
-    FawryWebhookService,
     MAX_WEBHOOK_AGE_SECONDS,
-    _CANCELED_VALID_PRIOR,
-    _EXPIRED_VALID_PRIOR,
-    _PAID_VALID_PRIOR,
+    FawryWebhookService,
 )
 from src.core.entities.order import OrderStatus, PaymentStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,9 +38,12 @@ def _make_order_model(**overrides):
     order.extra_data = overrides.get("extra_data", {})
     order.total = overrides.get("total", 25000)  # 250.00 EGP
     order.currency = "EGP"
-    order.line_items = overrides.get("line_items", [
-        {"product_id": str(uuid4()), "quantity": 2, "product_name": "Widget"},
-    ])
+    order.line_items = overrides.get(
+        "line_items",
+        [
+            {"product_id": str(uuid4()), "quantity": 2, "product_name": "Widget"},
+        ],
+    )
     # Store relationship for messaging
     store = MagicMock()
     store.name = "Test Store"
@@ -304,7 +302,9 @@ class TestHandleExpired:
     async def test_expired_releases_inventory(self):
         product_id = str(uuid4())
         order = _make_order_model(
-            line_items=[{"product_id": product_id, "quantity": 3, "product_name": "Widget"}]
+            line_items=[
+                {"product_id": product_id, "quantity": 3, "product_name": "Widget"}
+            ]
         )
         db = _make_db_session(order)
         service = FawryWebhookService(db=db)
@@ -343,7 +343,9 @@ class TestHandleExpired:
         db = _make_db_session(order)
         service = FawryWebhookService(db=db)
 
-        result = await service.handle_expired(merchant_ref="MERCHANT-REF-001", raw_data={})
+        result = await service.handle_expired(
+            merchant_ref="MERCHANT-REF-001", raw_data={}
+        )
 
         assert result.status == OrderStatus.CONFIRMED
         db.flush.assert_not_called()

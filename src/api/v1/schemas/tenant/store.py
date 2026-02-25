@@ -33,20 +33,18 @@ class CreateStoreRequest(BaseModel):
         description="Store subdomain (e.g., 'mystore' for mystore.numu.io)",
     )
     slug: str | None = Field(
-        None, max_length=255, description="URL-friendly slug; auto-generated from name if omitted"
+        None,
+        max_length=255,
+        description="URL-friendly slug; auto-generated from name if omitted",
     )
-    description: str | None = Field(
-        None, description="Short store description"
-    )
+    description: str | None = Field(None, description="Short store description")
     default_currency: str = Field(
         default="EGP", max_length=3, description="ISO 4217 default currency"
     )
     default_language: str = Field(
         default="en", pattern="^(en|ar)$", description="Default language: en or ar"
     )
-    contact_email: EmailStr | None = Field(
-        None, description="Public contact email"
-    )
+    contact_email: EmailStr | None = Field(None, description="Public contact email")
     contact_phone: str | None = Field(
         None, max_length=20, description="Public contact phone number"
     )

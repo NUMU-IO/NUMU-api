@@ -516,6 +516,8 @@ class WhatsAppMessagingService(IMessagingService):
         from src.core.entities.message_log import (
             MessageDirection,
             MessageLog,
+        )
+        from src.core.entities.message_log import (
             MessageStatus as LogStatus,
         )
 
@@ -564,6 +566,8 @@ class WhatsAppMessagingService(IMessagingService):
         from src.core.entities.message_log import (
             MessageDirection,
             MessageLog,
+        )
+        from src.core.entities.message_log import (
             MessageStatus as LogStatus,
         )
 
@@ -602,12 +606,12 @@ class WhatsAppMessagingService(IMessagingService):
                                 await message_log_repo.update_status(
                                     message_id=wa_message_id,
                                     status=mapped,
-                                    error_code=error_code if status_value == "failed" else None,
+                                    error_code=error_code
+                                    if status_value == "failed"
+                                    else None,
                                 )
                             except Exception as e:
-                                logger.error(
-                                    f"Failed to update message status: {e}"
-                                )
+                                logger.error(f"Failed to update message status: {e}")
 
                     if status_value == "failed":
                         for error in status_update.get("errors", []):
@@ -663,9 +667,7 @@ class WhatsAppMessagingService(IMessagingService):
                                 )
                                 continue
                         except Exception as e:
-                            logger.error(
-                                f"Failed to resolve store context: {e}"
-                            )
+                            logger.error(f"Failed to resolve store context: {e}")
                             continue
 
                     try:
@@ -682,6 +684,4 @@ class WhatsAppMessagingService(IMessagingService):
                         await message_log_repo.create(inbound)
                         logger.info(f"Inbound message logged: {msg_id}")
                     except Exception as e:
-                        logger.error(
-                            f"Failed to log inbound message: {e}"
-                        )
+                        logger.error(f"Failed to log inbound message: {e}")
