@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import Response
 
-from src.api.dependencies import require_store_owner
+from src.api.dependencies import verify_store_ownership
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.api.v1.schemas.tenant.invoice import (
@@ -36,6 +36,7 @@ from src.core.entities.invoice import (
     InvoiceStatus,
     SellerInfo,
 )
+from src.core.entities.store import Store
 from src.infrastructure.external_services.eta import ETAInvoiceService
 
 router = APIRouter(prefix="/{store_id}/invoices")
@@ -67,9 +68,8 @@ def _format_currency(cents: int, currency: str = "EGP") -> str:
     operation_id="create_invoice",
 )
 async def create_invoice(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     request: CreateInvoiceRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
 ):
     """Create a new invoice for the store.
 
@@ -106,12 +106,12 @@ async def create_invoice(
     )
 
     # Generate invoice number
-    invoice_number = _generate_invoice_number(store_id)
+    invoice_number = _generate_invoice_number(store.id)
 
     # Create invoice entity
     invoice = Invoice(
         id=uuid4(),
-        store_id=store_id,
+        store_id=store.id,
         order_id=request.order_id,
         customer_id=request.customer_id,
         invoice_number=invoice_number,
@@ -159,15 +159,14 @@ async def create_invoice(
     operation_id="list_invoices",
 )
 async def list_invoices(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     status_filter: Annotated[InvoiceStatus | None, Query(alias="status")] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """List all invoices for the store with optional filtering."""
     # Filter invoices for this store
-    store_invoices = [inv for inv in _invoices.values() if inv.store_id == store_id]
+    store_invoices = [inv for inv in _invoices.values() if inv.store_id == store.id]
 
     # Apply status filter
     if status_filter:
@@ -218,14 +217,13 @@ async def list_invoices(
     operation_id="get_invoice",
 )
 async def get_invoice(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
 ):
     """Get detailed invoice information including line items and ETA status."""
     invoice = _invoices.get(invoice_id)
 
-    if not invoice or invoice.store_id != store_id:
+    if not invoice or invoice.store_id != store.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found",
@@ -242,15 +240,14 @@ async def get_invoice(
     operation_id="update_invoice",
 )
 async def update_invoice(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
     request: UpdateInvoiceRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
 ):
     """Update a draft invoice. Only draft invoices can be modified."""
     invoice = _invoices.get(invoice_id)
 
-    if not invoice or invoice.store_id != store_id:
+    if not invoice or invoice.store_id != store.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found",
@@ -321,9 +318,8 @@ async def update_invoice(
     operation_id="submit_invoice_to_eta",
 )
 async def submit_invoice_to_eta(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
 ):
     """Submit invoice to Egyptian Tax Authority (ETA).
 
@@ -333,7 +329,7 @@ async def submit_invoice_to_eta(
     """
     invoice = _invoices.get(invoice_id)
 
-    if not invoice or invoice.store_id != store_id:
+    if not invoice or invoice.store_id != store.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found",
@@ -419,14 +415,13 @@ async def submit_invoice_to_eta(
     operation_id="delete_invoice",
 )
 async def delete_invoice(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
 ):
     """Delete a draft invoice. Only draft invoices can be deleted."""
     invoice = _invoices.get(invoice_id)
 
-    if not invoice or invoice.store_id != store_id:
+    if not invoice or invoice.store_id != store.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found",
@@ -457,9 +452,8 @@ logger = logging.getLogger(__name__)
     operation_id="download_invoice_pdf",
 )
 async def download_invoice_pdf(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
     regenerate: bool = Query(False, description="Force PDF regeneration"),
 ):
     """Download invoice as PDF.
@@ -470,7 +464,7 @@ async def download_invoice_pdf(
     """
     invoice = _invoices.get(invoice_id)
 
-    if not invoice or invoice.store_id != store_id:
+    if not invoice or invoice.store_id != store.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found",

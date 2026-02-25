@@ -7,6 +7,7 @@ from src.api.dependencies.auth import (
     require_admin,
     require_roles,
     require_store_owner,
+    verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
 from src.api.dependencies.fieldsets import (
@@ -57,6 +58,7 @@ __all__ = [
     "require_roles",
     "require_store_owner",
     "require_admin",
+    "verify_store_ownership",
     # Repositories
     "get_category_repository",
     "get_coupon_repository",

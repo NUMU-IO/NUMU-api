@@ -6,12 +6,11 @@ Allows beta merchants to submit product feedback.
 
 import logging
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.auth import require_store_owner
+from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
@@ -20,6 +19,7 @@ from src.api.v1.schemas.tenant.feedback import (
     FeedbackResponse,
 )
 from src.core.entities.feedback import Feedback, FeedbackCategory
+from src.core.entities.store import Store
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
 
 logger = logging.getLogger(__name__)
@@ -49,9 +49,8 @@ def _build_response(fb: Feedback) -> FeedbackResponse:
     operation_id="create_feedback",
 )
 async def create_feedback(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     request: CreateFeedbackRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Submit feedback for the NUMU platform.
@@ -67,8 +66,8 @@ async def create_feedback(
         )
 
     entry = Feedback(
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
         category=category,
         rating=request.rating,
         title=request.title,
@@ -83,7 +82,7 @@ async def create_feedback(
     logger.info(
         "feedback_submitted",
         extra={
-            "store_id": str(store_id),
+            "store_id": str(store.id),
             "category": request.category,
             "rating": request.rating,
         },
@@ -102,8 +101,7 @@ async def create_feedback(
     operation_id="list_store_feedback",
 )
 async def list_store_feedback(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -112,8 +110,8 @@ async def list_store_feedback(
     repo = FeedbackRepository(db)
 
     skip = (page - 1) * page_size
-    items = await repo.list_all(store_id=store_id, skip=skip, limit=page_size)
-    total = await repo.count(store_id=store_id)
+    items = await repo.list_all(store_id=store.id, skip=skip, limit=page_size)
+    total = await repo.count(store_id=store.id)
 
     return SuccessResponse(
         data=PaginatedListResponse(

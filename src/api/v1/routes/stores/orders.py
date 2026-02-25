@@ -14,7 +14,7 @@ from src.api.dependencies import (
     get_onboarding_repository,
     get_order_repository,
     get_store_repository,
-    require_store_owner,
+    verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
@@ -41,6 +41,7 @@ from src.application.use_cases.orders import (
     UpdateOrderStatusUseCase,
     UpdateOrderUseCase,
 )
+from src.core.entities.store import Store
 from src.infrastructure.repositories import (
     CustomerRepository,
     OnboardingRepository,
@@ -150,9 +151,8 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
     operation_id="create_order",
 )
 async def create_order(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     request: CreateOrderRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
@@ -225,8 +225,8 @@ async def create_order(
 
     result = await use_case.execute(
         dto=dto,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -242,8 +242,7 @@ async def create_order(
     operation_id="list_orders",
 )
 async def list_orders(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
@@ -270,8 +269,8 @@ async def list_orders(
     )
 
     result = await use_case.execute(
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
         page=page,
         limit=limit,
         status=order_status,
@@ -303,9 +302,8 @@ async def list_orders(
     operation_id="get_order",
 )
 async def get_order(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     order_id: Annotated[UUID, Path(description="Order ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -317,8 +315,8 @@ async def get_order(
 
     result = await use_case.execute(
         order_id=order_id,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -334,10 +332,9 @@ async def get_order(
     operation_id="update_order",
 )
 async def update_order(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     order_id: Annotated[UUID, Path(description="Order ID")],
     request: UpdateOrderRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -392,8 +389,8 @@ async def update_order(
     result = await use_case.execute(
         order_id=order_id,
         dto=dto,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -409,10 +406,9 @@ async def update_order(
     operation_id="update_order_status",
 )
 async def update_order_status(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     order_id: Annotated[UUID, Path(description="Order ID")],
     request: UpdateOrderStatusRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
@@ -432,8 +428,8 @@ async def update_order_status(
     result = await use_case.execute(
         order_id=order_id,
         dto=dto,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -449,9 +445,8 @@ async def update_order_status(
     operation_id="cancel_order",
 )
 async def cancel_order(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     order_id: Annotated[UUID, Path(description="Order ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
@@ -472,8 +467,8 @@ async def cancel_order(
     await use_case.execute(
         order_id=order_id,
         dto=dto,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return None
@@ -486,23 +481,16 @@ async def cancel_order(
     operation_id="mark_order_paid",
 )
 async def mark_order_paid(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     order_id: Annotated[UUID, Path(description="Order ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Manually mark an order's payment as paid (e.g. COD collected)."""
     from src.core.entities.order import PaymentStatus
 
-    store = await store_repo.get_by_id(store_id)
-    if not store or store.owner_id != user_id:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=403, detail="Not authorized")
-
     order = await order_repo.get_by_id(order_id)
-    if not order or order.store_id != store_id:
+    if not order or order.store_id != store.id:
         from src.core.exceptions import EntityNotFoundError
 
         raise EntityNotFoundError("Order", str(order_id))
@@ -625,9 +613,8 @@ def _build_timeline(order_dto: OrderDTO) -> list[OrderTimelineEvent]:
     operation_id="get_order_timeline",
 )
 async def get_order_timeline(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     order_id: Annotated[UUID, Path(description="Order ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -639,8 +626,8 @@ async def get_order_timeline(
 
     result = await use_case.execute(
         order_id=order_id,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     timeline = _build_timeline(result)
@@ -662,9 +649,8 @@ async def get_order_timeline(
     operation_id="bulk_update_order_status",
 )
 async def bulk_update_order_status(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     request: BulkUpdateOrderStatusRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
@@ -689,8 +675,8 @@ async def bulk_update_order_status(
             await use_case.execute(
                 order_id=oid,
                 dto=dto,
-                store_id=store_id,
-                user_id=user_id,
+                store_id=store.id,
+                user_id=store.owner_id,
             )
             updated += 1
         except Exception as exc:

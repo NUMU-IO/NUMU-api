@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query
 
-from src.api.dependencies.auth import require_store_owner
+from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.repositories import (
     get_customer_repository,
     get_order_repository,
@@ -17,6 +17,7 @@ from src.api.responses import SuccessResponse
 from src.api.v1.schemas import PaginatedListResponse
 from src.api.v1.schemas.public.customer import CustomerResponse
 from src.application.use_cases.customers.list_customers import ListCustomersUseCase
+from src.core.entities.store import Store
 from src.infrastructure.repositories import CustomerRepository, OrderRepository
 
 router = APIRouter(prefix="/{store_id}/customers")
@@ -29,8 +30,7 @@ router = APIRouter(prefix="/{store_id}/customers")
     operation_id="list_store_customers",
 )
 async def list_store_customers(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     page: int = Query(1, ge=1),
@@ -42,14 +42,14 @@ async def list_store_customers(
 
     skip = (page - 1) * limit
     result = await use_case.execute(
-        store_id=store_id,
+        store_id=store.id,
         skip=skip,
         limit=limit,
         query=query,
     )
 
     # Compute live order stats from the orders table (keys are UUID)
-    raw_stats = await order_repo.get_customer_order_stats(store_id)
+    raw_stats = await order_repo.get_customer_order_stats(store.id)
     # Convert keys to str so they match CustomerDTO.id
     order_stats = {str(k): v for k, v in raw_stats.items()}
 
@@ -92,9 +92,8 @@ async def list_store_customers(
     operation_id="get_store_customer",
 )
 async def get_store_customer(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     customer_id: Annotated[UUID, Path(description="Customer ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
 ):
@@ -103,11 +102,11 @@ async def get_store_customer(
 
     customer = await customer_repo.get_by_id(customer_id)
 
-    if not customer or customer.store_id != store_id:
+    if not customer or customer.store_id != store.id:
         raise EntityNotFoundError("Customer", str(customer_id))
 
     # Get live order stats
-    raw_stats = await order_repo.get_customer_order_stats(store_id)
+    raw_stats = await order_repo.get_customer_order_stats(store.id)
     stats = raw_stats.get(customer_id, (0, 0))
 
     return SuccessResponse(

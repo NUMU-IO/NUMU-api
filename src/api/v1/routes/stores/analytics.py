@@ -7,21 +7,20 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.api.dependencies import (
     get_customer_repository,
     get_order_repository,
-    get_store_repository,
-    require_store_owner,
+    verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
 from src.core.entities.order import PaymentStatus
+from src.core.entities.store import Store
 from src.infrastructure.repositories import (
     CustomerRepository,
     OrderRepository,
-    StoreRepository,
 )
 
 router = APIRouter(prefix="/{store_id}/analytics")
@@ -91,38 +90,29 @@ class ConversionStatsResponse(BaseModel):
     operation_id="get_sales_overview",
 )
 async def get_sales_overview(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     days: int = Query(30, ge=1, le=365, description="Number of days"),
 ):
     """Get sales overview for the store."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
     previous_period_start = period_start - timedelta(days=days)
 
     # Current period
     current_revenue = await order_repo.get_revenue_by_date_range(
-        store_id, period_start, now
+        store.id, period_start, now
     )
     current_orders = await order_repo.count_by_store(
-        store_id, date_from=period_start, date_to=now
+        store.id, date_from=period_start, date_to=now
     )
 
     # Previous period for comparison
     previous_revenue = await order_repo.get_revenue_by_date_range(
-        store_id, previous_period_start, period_start
+        store.id, previous_period_start, period_start
     )
     previous_orders = await order_repo.count_by_store(
-        store_id, date_from=previous_period_start, date_to=period_start
+        store.id, date_from=previous_period_start, date_to=period_start
     )
 
     # Calculate changes
@@ -159,20 +149,11 @@ async def get_sales_overview(
     operation_id="get_sales_chart",
 )
 async def get_sales_chart(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     days: int = Query(30, ge=1, le=365, description="Number of days"),
 ):
     """Get sales data for chart visualization."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     now = datetime.now(UTC)
     data_points = []
 
@@ -181,9 +162,9 @@ async def get_sales_chart(
         day_start = day_end - timedelta(days=1)
 
         revenue = await order_repo.get_revenue_by_date_range(
-            store_id, day_start, day_end
+            store.id, day_start, day_end
         )
-        orders = await order_repo.get_by_date_range(store_id, day_start, day_end)
+        orders = await order_repo.get_by_date_range(store.id, day_start, day_end)
 
         data_points.append(
             SalesDataPointResponse(
@@ -206,25 +187,16 @@ async def get_sales_chart(
     operation_id="get_analytics_top_products",
 )
 async def get_analytics_top_products(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(5, ge=1, le=20),
 ):
     """Get top selling products for the store."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store_id, period_start, now, limit=1000)
+    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
 
     # Aggregate by product
     product_sales: dict[UUID, dict] = {}
@@ -284,24 +256,15 @@ async def get_analytics_top_products(
     operation_id="get_sales_by_location",
 )
 async def get_sales_by_location(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
     """Get sales breakdown by location/governorate."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store_id, period_start, now, limit=1000)
+    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
 
     # Aggregate by location
     location_sales: dict[str, dict] = {}
@@ -360,28 +323,19 @@ async def get_sales_by_location(
     operation_id="get_customer_analytics",
 )
 async def get_customer_analytics(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
     """Get customer analytics for the store."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    total_customers = await customer_repo.count_by_store(store_id)
+    total_customers = await customer_repo.count_by_store(store.id)
 
     # Get orders to calculate metrics
-    orders = await order_repo.get_by_date_range(store_id, period_start, now, limit=1000)
+    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
 
     # Count unique customers and their order frequency
     customer_orders: dict[UUID, int] = {}
@@ -417,24 +371,15 @@ async def get_customer_analytics(
     operation_id="get_conversion_stats",
 )
 async def get_conversion_stats(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
     """Get conversion statistics for the store."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store_id, period_start, now, limit=1000)
+    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
     total_orders = len(orders)
 
     # These would typically come from analytics/tracking integration

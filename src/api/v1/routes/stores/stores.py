@@ -4,12 +4,13 @@ from datetime import UTC
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_store_repository,
     require_store_owner,
+    verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
@@ -27,7 +28,6 @@ from src.application.dto.store import CreateStoreDTO, UpdateStoreDTO
 from src.application.use_cases.stores import (
     CreateStoreUseCase,
     DeleteStoreUseCase,
-    GetStoreUseCase,
     ListStoresUseCase,
     UpdateStoreUseCase,
 )
@@ -35,6 +35,7 @@ from src.application.use_cases.stores.create_store import (
     RESERVED_SUBDOMAINS,
     validate_subdomain,
 )
+from src.core.entities.store import Store
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 from src.infrastructure.tenancy.service import TenantService
 
@@ -220,24 +221,11 @@ async def list_stores(
     operation_id="get_store",
 )
 async def get_store(
-    store_id: UUID,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
 ):
     """Get store details by ID. Only accessible by the store owner."""
-    use_case = GetStoreUseCase(store_repository=store_repo)
-
-    result = await use_case.execute(store_id=store_id)
-
-    # Verify ownership
-    if result.owner_id != user_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You do not have access to this store",
-        )
-
     return SuccessResponse(
-        data=_build_store_response(result),
+        data=_build_store_response(store),
         message="Store retrieved successfully",
     )
 
@@ -249,9 +237,8 @@ async def get_store(
     operation_id="update_store",
 )
 async def update_store(
-    store_id: UUID,
     request: UpdateStoreRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Update store details."""
@@ -272,9 +259,9 @@ async def update_store(
     )
 
     result = await use_case.execute(
-        store_id=store_id,
+        store_id=store.id,
         dto=dto,
-        user_id=user_id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -290,13 +277,12 @@ async def update_store(
     operation_id="delete_store",
 )
 async def delete_store(
-    store_id: UUID,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Delete a store."""
     use_case = DeleteStoreUseCase(store_repository=store_repo)
 
-    await use_case.execute(store_id=store_id, user_id=user_id)
+    await use_case.execute(store_id=store.id, user_id=store.owner_id)
 
     return None
