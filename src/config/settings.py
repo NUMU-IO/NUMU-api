@@ -152,8 +152,10 @@ class Settings(BaseSettings):
 
     # Rate limiting
     rate_limit_enabled: bool = True
-    rate_limit_requests_per_minute: int = 60
-    rate_limit_auth_requests_per_minute: int = 5
+    rate_limit_requests_per_minute: int = 100  # Authenticated general
+    rate_limit_anon_requests_per_minute: int = 60  # Anonymous general
+    rate_limit_auth_requests_per_minute: int = 5  # Login/register/refresh
+    rate_limit_checkout_requests_per_minute: int = 10  # Storefront checkout
 
     # Stripe
     stripe_secret_key: str | None = None

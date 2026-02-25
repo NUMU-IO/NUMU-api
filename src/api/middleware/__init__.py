@@ -10,11 +10,7 @@ from src.api.middleware.error_handler import (
     setup_exception_handlers,
 )
 from src.api.middleware.logging import LoggingMiddleware, logging_middleware
-from src.api.middleware.rate_limit import (
-    RateLimitExceeded,
-    RateLimitMiddleware,
-    rate_limit_exceeded_handler,
-)
+from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import (
     SecurityHeadersMiddleware,
     get_security_headers_middleware,
@@ -34,8 +30,6 @@ __all__ = [
     "logging_middleware",
     "TenantMiddleware",
     "RateLimitMiddleware",
-    "rate_limit_exceeded_handler",
-    "RateLimitExceeded",
     "SecurityHeadersMiddleware",
     "get_security_headers_middleware",
     "SentryMiddleware",
