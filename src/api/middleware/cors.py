@@ -28,6 +28,7 @@ DEFAULT_ALLOWED_HEADERS = [
     "X-Requested-With",
     "X-Request-ID",
     "X-Tenant-Subdomain",
+    "X-CSRF-Token",
 ]
 
 # Headers to expose to the client
@@ -37,6 +38,7 @@ DEFAULT_EXPOSED_HEADERS = [
     "X-RateLimit-Limit",
     "X-RateLimit-Remaining",
     "Retry-After",
+    "X-CSRF-Token",
 ]
 
 

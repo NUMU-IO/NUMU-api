@@ -3,6 +3,7 @@
 from src.api.middleware.cache_headers import CacheHeadersMiddleware
 from src.api.middleware.compression import CompressionMiddleware
 from src.api.middleware.cors import setup_cors
+from src.api.middleware.csrf import CSRFMiddleware
 from src.api.middleware.docs_auth import DocsAuthMiddleware
 from src.api.middleware.error_handler import (
     error_handler_middleware,
@@ -40,4 +41,5 @@ __all__ = [
     "SentryMiddleware",
     "ResponseTimeMiddleware",
     "create_timing_middleware",
+    "CSRFMiddleware",
 ]
