@@ -14,6 +14,7 @@ from src.api.admin import setup_admin
 from src.api.middleware import (
     CacheHeadersMiddleware,
     CompressionMiddleware,
+    CSRFMiddleware,
     DocsAuthMiddleware,
     LoggingMiddleware,
     RateLimitMiddleware,
@@ -222,6 +223,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CompressionMiddleware)
     # Rate limiting should be next to block requests early
     app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(CSRFMiddleware)
     app.add_middleware(TenantMiddleware)
     app.add_middleware(SentryMiddleware)  # Captures request context for Sentry
     app.add_middleware(LoggingMiddleware)  # Structured logging with request context

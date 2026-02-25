@@ -33,9 +33,7 @@ class CustomerRegisterRequest(BaseModel):
     last_name: SanitizedStr = Field(
         ..., min_length=1, max_length=100, description="Last name"
     )
-    phone: str | None = Field(
-        None, max_length=20, description="Phone number"
-    )
+    phone: str | None = Field(None, max_length=20, description="Phone number")
     accepts_marketing: bool = Field(
         False, description="Whether the customer opts in to marketing"
     )
@@ -147,14 +145,12 @@ class CreateAddressRequest(BaseModel):
     country: SanitizedStr = Field(
         ..., min_length=1, max_length=100, description="Country"
     )
-    phone: str | None = Field(
-        None, max_length=20, description="Phone number"
-    )
-    is_default: bool = Field(
-        False, description="Set as the default address"
-    )
+    phone: str | None = Field(None, max_length=20, description="Phone number")
+    is_default: bool = Field(False, description="Set as the default address")
     label: str = Field(
-        "home", pattern="^(home|work|other)$", description="Address label: home, work, or other"
+        "home",
+        pattern="^(home|work|other)$",
+        description="Address label: home, work, or other",
     )
 
 
@@ -241,10 +237,9 @@ class CustomerTokenResponse(BaseModel):
 
 
 class CustomerAuthResponse(BaseModel):
-    """Customer auth response schema."""
+    """Customer auth response — tokens set via httpOnly cookies."""
 
     customer: CustomerResponse = Field(description="Customer profile")
-    tokens: CustomerTokenResponse = Field(description="Auth tokens")
 
 
 class CustomerAddressResponse(BaseModel):
