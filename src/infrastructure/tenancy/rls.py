@@ -154,6 +154,20 @@ async def is_rls_bypassed(session: AsyncSession) -> bool:
     return value == "true"
 
 
+async def narrow_to_tenant(session: AsyncSession, tenant_id: UUID | str) -> None:
+    """Switch from RLS bypass to tenant-scoped context.
+
+    Call this in webhook handlers after looking up the order:
+    the initial lookup needs bypass (no tenant known yet), but all
+    subsequent writes should be scoped to the order's tenant_id.
+
+    This disables the blanket bypass and sets ``app.current_tenant``
+    so that RLS policies restrict access to the single tenant.
+    """
+    await disable_rls_bypass(session)
+    await set_tenant_context(session, tenant_id)
+
+
 class RLSContext:
     """Context manager for tenant RLS context.
 

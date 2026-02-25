@@ -11,11 +11,12 @@ import json
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.database import get_db
 from src.config import settings
 from src.config.logging_config import get_logger
+from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.paymob import PaymobPaymentService
 from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.tenancy.rls import narrow_to_tenant
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -27,7 +28,7 @@ paymob_service = PaymobPaymentService()
 @router.post("/callback", operation_id="paymob_callback")
 async def paymob_callback(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_admin_db_session),
     hmac: str = Header(None, alias="hmac"),
 ):
     """Handle Paymob payment callback.
@@ -95,6 +96,9 @@ async def paymob_callback(
         return {"status": "received", "transaction_id": transaction_id}
 
     log = log.bind(order_id=str(order.id), order_number=order.order_number)
+
+    # Narrow RLS from bypass → tenant-scoped for all subsequent writes
+    await narrow_to_tenant(db, order.tenant_id)
 
     # Process based on event type
     if is_refunded:
