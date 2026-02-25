@@ -6,16 +6,16 @@ URL: /stores/{store_id}/inventory
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.api.dependencies import (
     get_product_repository,
-    get_store_repository,
-    require_store_owner,
+    verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
-from src.infrastructure.repositories import ProductRepository, StoreRepository
+from src.core.entities.store import Store
+from src.infrastructure.repositories import ProductRepository
 
 router = APIRouter(prefix="/{store_id}/inventory")
 
@@ -69,31 +69,22 @@ class StockAdjustmentResponse(BaseModel):
     operation_id="get_inventory",
 )
 async def get_inventory(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     filter: str = Query("all", description="Filter: all, low_stock, out_of_stock"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
 ):
     """Get inventory list for the store."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     # Get products based on filter
     skip = (page - 1) * limit
 
     if filter == "low_stock":
-        products = await product_repo.get_low_stock(store_id, limit=limit)
+        products = await product_repo.get_low_stock(store.id, limit=limit)
     elif filter == "out_of_stock":
-        products = await product_repo.get_out_of_stock(store_id, limit=limit)
+        products = await product_repo.get_out_of_stock(store.id, limit=limit)
     else:
-        products = await product_repo.get_by_store(store_id, skip=skip, limit=limit)
+        products = await product_repo.get_by_store(store.id, skip=skip, limit=limit)
 
     items = []
     for product in products:
@@ -128,26 +119,17 @@ async def get_inventory(
     operation_id="get_inventory_stats",
 )
 async def get_inventory_stats(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Get inventory statistics for the store."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     # Get counts
-    total_products = await product_repo.count_by_store(store_id)
-    low_stock_products = await product_repo.get_low_stock(store_id)
-    out_of_stock_products = await product_repo.get_out_of_stock(store_id)
+    total_products = await product_repo.count_by_store(store.id)
+    low_stock_products = await product_repo.get_low_stock(store.id)
+    out_of_stock_products = await product_repo.get_out_of_stock(store.id)
 
     # Calculate total inventory value
-    all_products = await product_repo.get_by_store(store_id, skip=0, limit=10000)
+    all_products = await product_repo.get_by_store(store.id, skip=0, limit=10000)
     total_value = 0
     for product in all_products:
         price_cents = int(product.price.amount * 100) if product.price else 0
@@ -172,25 +154,16 @@ async def get_inventory_stats(
     operation_id="adjust_stock",
 )
 async def adjust_stock(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     request: StockAdjustmentRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Adjust stock level for a product."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     # Get product
     product = await product_repo.get_by_id(UUID(request.product_id))
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    if product.store_id != store_id:
+    if product.store_id != store.id:
         raise HTTPException(
             status_code=403, detail="Product does not belong to this store"
         )
@@ -221,24 +194,15 @@ async def adjust_stock(
     operation_id="bulk_adjust_stock",
 )
 async def bulk_adjust_stock(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     adjustments: list[StockAdjustmentRequest],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Bulk adjust stock levels for multiple products."""
-    # Verify store ownership
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise HTTPException(status_code=404, detail="Store not found")
-    if store.owner_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     results = []
     for adj in adjustments:
         product = await product_repo.get_by_id(UUID(adj.product_id))
-        if not product or product.store_id != store_id:
+        if not product or product.store_id != store.id:
             continue
 
         previous_quantity = product.quantity

@@ -153,3 +153,7 @@ async def get_current_store(
             detail="You do not have access to this store",
         )
     return store
+
+
+# Alias — use in store-scoped routes for explicit ownership verification
+verify_store_ownership = get_current_store

@@ -4,9 +4,8 @@ URL: /stores/{store_id}/dashboard
 """
 
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.api.dependencies import (
@@ -14,10 +13,11 @@ from src.api.dependencies import (
     get_order_repository,
     get_product_repository,
     get_store_repository,
-    require_store_owner,
+    verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
 from src.application.use_cases.stores import GetDashboardStatsUseCase
+from src.core.entities.store import Store
 from src.infrastructure.repositories import (
     CustomerRepository,
     OrderRepository,
@@ -84,8 +84,7 @@ class DashboardTopProductResponse(BaseModel):
     operation_id="get_dashboard_stats",
 )
 async def get_dashboard_stats(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
@@ -101,8 +100,8 @@ async def get_dashboard_stats(
     )
 
     result = await use_case.execute(
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
         days=days,
     )
 
@@ -137,8 +136,7 @@ async def get_dashboard_stats(
     operation_id="get_revenue_chart",
 )
 async def get_revenue_chart(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
@@ -154,8 +152,8 @@ async def get_revenue_chart(
     )
 
     result = await use_case.get_revenue_chart(
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
         days=days,
     )
 
@@ -179,8 +177,7 @@ async def get_revenue_chart(
     operation_id="get_dashboard_top_products",
 )
 async def get_dashboard_top_products(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
@@ -196,8 +193,8 @@ async def get_dashboard_top_products(
     )
 
     result = await use_case.get_top_products(
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
         limit=limit,
     )
 

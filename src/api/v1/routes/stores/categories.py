@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from src.api.dependencies import (
     get_category_repository,
     get_store_repository,
-    require_store_owner,
+    verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
@@ -27,6 +27,7 @@ from src.application.use_cases.categories import (
     ListCategoriesUseCase,
     UpdateCategoryUseCase,
 )
+from src.core.entities.store import Store
 from src.infrastructure.repositories import CategoryRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/categories")
@@ -58,9 +59,8 @@ def _category_response(result) -> CategoryResponse:
     operation_id="create_category",
 )
 async def create_category(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     request: CreateCategoryRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -80,7 +80,7 @@ async def create_category(
         is_active=request.is_active,
     )
 
-    result = await use_case.execute(dto=dto, store_id=store_id, user_id=user_id)
+    result = await use_case.execute(dto=dto, store_id=store.id, user_id=store.owner_id)
 
     return SuccessResponse(
         data=_category_response(result),
@@ -95,8 +95,7 @@ async def create_category(
     operation_id="list_categories",
 )
 async def list_categories(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
     include_inactive: bool = Query(False),
 ):
@@ -104,7 +103,7 @@ async def list_categories(
     use_case = ListCategoriesUseCase(category_repository=category_repo)
 
     results = await use_case.execute(
-        store_id=store_id,
+        store_id=store.id,
         include_inactive=include_inactive,
     )
 
@@ -121,8 +120,8 @@ async def list_categories(
     operation_id="get_category",
 )
 async def get_category(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     category_id: Annotated[UUID, Path(description="Category ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
 ):
     """Get category details by ID."""
@@ -142,10 +141,9 @@ async def get_category(
     operation_id="update_category",
 )
 async def update_category(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     category_id: Annotated[UUID, Path(description="Category ID")],
     request: UpdateCategoryRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -165,7 +163,9 @@ async def update_category(
         is_active=request.is_active,
     )
 
-    result = await use_case.execute(category_id=category_id, dto=dto, user_id=user_id)
+    result = await use_case.execute(
+        category_id=category_id, dto=dto, user_id=store.owner_id
+    )
 
     return SuccessResponse(
         data=_category_response(result),
@@ -180,9 +180,8 @@ async def update_category(
     operation_id="delete_category",
 )
 async def delete_category(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     category_id: Annotated[UUID, Path(description="Category ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -192,6 +191,6 @@ async def delete_category(
         store_repository=store_repo,
     )
 
-    await use_case.execute(category_id=category_id, user_id=user_id)
+    await use_case.execute(category_id=category_id, user_id=store.owner_id)
 
     return None

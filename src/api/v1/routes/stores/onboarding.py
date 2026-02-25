@@ -8,11 +8,10 @@ Provides REST endpoints for merchant onboarding progress:
 """
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path
 
-from src.api.dependencies import get_store_repository, require_store_owner
+from src.api.dependencies import get_store_repository, verify_store_ownership
 from src.api.dependencies.repositories import get_onboarding_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.onboarding import (
@@ -30,6 +29,7 @@ from src.core.entities.onboarding import (
     OnboardingStepKey,
     StoreOnboarding,
 )
+from src.core.entities.store import Store
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/onboarding")
@@ -73,8 +73,7 @@ def _build_onboarding_response(entity: StoreOnboarding) -> OnboardingResponse:
     operation_id="get_onboarding",
 )
 async def get_onboarding(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
@@ -91,7 +90,7 @@ async def get_onboarding(
         store_repository=store_repo,
     )
 
-    result = await use_case.execute(store_id=store_id, user_id=user_id)
+    result = await use_case.execute(store_id=store.id, user_id=store.owner_id)
 
     return SuccessResponse(
         data=_build_onboarding_response(result),
@@ -106,9 +105,8 @@ async def get_onboarding(
     operation_id="complete_step",
 )
 async def complete_step(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     step: Annotated[str, Path(description="Step key to complete")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
@@ -126,9 +124,9 @@ async def complete_step(
     )
 
     result = await use_case.execute(
-        store_id=store_id,
+        store_id=store.id,
         step_key=step,
-        user_id=user_id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -144,9 +142,8 @@ async def complete_step(
     operation_id="skip_step",
 )
 async def skip_step(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     step: Annotated[str, Path(description="Step key to skip")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
@@ -164,9 +161,9 @@ async def skip_step(
     )
 
     result = await use_case.execute(
-        store_id=store_id,
+        store_id=store.id,
         step_key=step,
-        user_id=user_id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -182,8 +179,7 @@ async def skip_step(
     operation_id="dismiss_onboarding",
 )
 async def dismiss_onboarding(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
@@ -199,7 +195,7 @@ async def dismiss_onboarding(
         store_repository=store_repo,
     )
 
-    result = await use_case.execute(store_id=store_id, user_id=user_id)
+    result = await use_case.execute(store_id=store.id, user_id=store.owner_id)
 
     return SuccessResponse(
         data=_build_onboarding_response(result),

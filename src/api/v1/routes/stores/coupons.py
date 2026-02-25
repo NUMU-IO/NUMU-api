@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from src.api.dependencies import (
     get_coupon_repository,
     get_store_repository,
-    require_store_owner,
+    verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
@@ -28,6 +28,7 @@ from src.application.use_cases.coupons import (
     ListCouponsUseCase,
     UpdateCouponUseCase,
 )
+from src.core.entities.store import Store
 from src.infrastructure.repositories import CouponRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/coupons")
@@ -73,9 +74,8 @@ def _coupon_response(result) -> CouponResponse:
     operation_id="create_coupon",
 )
 async def create_coupon(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     request: CreateCouponRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -102,7 +102,7 @@ async def create_coupon(
         else None,
     )
 
-    result = await use_case.execute(dto=dto, store_id=store_id, user_id=user_id)
+    result = await use_case.execute(dto=dto, store_id=store.id, user_id=store.owner_id)
 
     return SuccessResponse(
         data=_coupon_response(result),
@@ -117,8 +117,7 @@ async def create_coupon(
     operation_id="list_coupons",
 )
 async def list_coupons(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -129,7 +128,7 @@ async def list_coupons(
     skip = (page - 1) * limit
 
     result = await use_case.execute(
-        store_id=store_id,
+        store_id=store.id,
         skip=skip,
         limit=limit,
         is_active=is_active,
@@ -156,8 +155,8 @@ async def list_coupons(
     operation_id="get_coupon",
 )
 async def get_coupon(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     coupon_id: Annotated[UUID, Path(description="Coupon ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
 ):
     """Get coupon details by ID."""
@@ -177,10 +176,9 @@ async def get_coupon(
     operation_id="update_coupon",
 )
 async def update_coupon(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     coupon_id: Annotated[UUID, Path(description="Coupon ID")],
     request: UpdateCouponRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -208,7 +206,9 @@ async def update_coupon(
         else None,
     )
 
-    result = await use_case.execute(coupon_id=coupon_id, dto=dto, user_id=user_id)
+    result = await use_case.execute(
+        coupon_id=coupon_id, dto=dto, user_id=store.owner_id
+    )
 
     return SuccessResponse(
         data=_coupon_response(result),
@@ -223,9 +223,8 @@ async def update_coupon(
     operation_id="delete_coupon",
 )
 async def delete_coupon(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     coupon_id: Annotated[UUID, Path(description="Coupon ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -235,6 +234,6 @@ async def delete_coupon(
         store_repository=store_repo,
     )
 
-    await use_case.execute(coupon_id=coupon_id, user_id=user_id)
+    await use_case.execute(coupon_id=coupon_id, user_id=store.owner_id)
 
     return None

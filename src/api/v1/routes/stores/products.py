@@ -15,13 +15,12 @@ from src.api.dependencies import (
     get_product_repository,
     get_storage_service,
     get_store_repository,
-    require_store_owner,
+    verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateProductRequest,
     DeleteImageRequest,
-    DeleteResponse,
     ImportResultResponse,
     ImportRowErrorResponse,
     PaginatedListResponse,
@@ -42,6 +41,7 @@ from src.application.use_cases.products import (
     UploadProductImageUseCase,
 )
 from src.application.use_cases.products.upload_image import UploadProductImageDTO
+from src.core.entities.store import Store
 from src.infrastructure.external_services.cloudflare_r2 import (
     CloudflareR2StorageService,
 )
@@ -63,9 +63,8 @@ router = APIRouter(prefix="/{store_id}/products")
     operation_id="create_product",
 )
 async def create_product(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     request: CreateProductRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     onboarding_repo: Annotated[
@@ -100,8 +99,8 @@ async def create_product(
 
     result = await use_case.execute(
         dto=dto,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -143,7 +142,7 @@ async def create_product(
     operation_id="list_products",
 )
 async def list_products(
-    store_id: Annotated[UUID, Path(description="Store ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     category_id: UUID | None = Query(None),
     page: int = Query(1, ge=1),
@@ -178,7 +177,7 @@ async def list_products(
             is_active = False
 
         items = await product_repo.list_with_filters(
-            store_id=store_id,
+            store_id=store.id,
             category_id=category_id,
             skip=skip,
             limit=limit,
@@ -191,7 +190,7 @@ async def list_products(
             sort_order=sort_order,
         )
         total = await product_repo.count_with_filters(
-            store_id=store_id,
+            store_id=store.id,
             category_id=category_id,
             is_active=is_active,
             search=search,
@@ -218,7 +217,7 @@ async def list_products(
     else:
         skip = (page - 1) * limit
         result = await use_case.execute(
-            store_id=store_id,
+            store_id=store.id,
             skip=skip,
             limit=limit,
         )
@@ -273,8 +272,8 @@ async def list_products(
     operation_id="get_product",
 )
 async def get_product(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     product_id: Annotated[UUID, Path(description="Product ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Get product details by ID."""
@@ -321,10 +320,9 @@ async def get_product(
     operation_id="update_product",
 )
 async def update_product(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     product_id: Annotated[UUID, Path(description="Product ID")],
     request: UpdateProductRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -355,7 +353,7 @@ async def update_product(
     result = await use_case.execute(
         product_id=product_id,
         dto=dto,
-        user_id=user_id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -397,9 +395,8 @@ async def update_product(
     operation_id="delete_product",
 )
 async def delete_product(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     product_id: Annotated[UUID, Path(description="Product ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -409,7 +406,7 @@ async def delete_product(
         store_repository=store_repo,
     )
 
-    await use_case.execute(product_id=product_id, user_id=user_id)
+    await use_case.execute(product_id=product_id, user_id=store.owner_id)
 
     return None
 
@@ -427,10 +424,9 @@ async def delete_product(
     operation_id="upload_product_image",
 )
 async def upload_product_image(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     product_id: Annotated[UUID, Path(description="Product ID")],
     file: Annotated[UploadFile, File(description="Image file to upload")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     image_pipeline: Annotated[ImagePipeline, Depends(get_image_pipeline)],
@@ -464,8 +460,8 @@ async def upload_product_image(
 
     result = await use_case.execute(
         dto=dto,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -488,10 +484,9 @@ async def upload_product_image(
     operation_id="delete_product_image",
 )
 async def delete_product_image(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     product_id: Annotated[UUID, Path(description="Product ID")],
     request: DeleteImageRequest,
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     storage_service: Annotated[
@@ -511,8 +506,8 @@ async def delete_product_image(
     await use_case.execute(
         product_id=product_id,
         image_url=request.image_url,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return None
@@ -555,9 +550,8 @@ async def download_csv_template() -> StreamingResponse:
     operation_id="import_products",
 )
 async def import_products(
-    store_id: Annotated[UUID, Path(description="Store ID")],
     file: Annotated[UploadFile, File(description="CSV file to import")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
@@ -577,8 +571,8 @@ async def import_products(
 
     result = await use_case.execute(
         csv_content=csv_content,
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return SuccessResponse(
@@ -601,8 +595,7 @@ async def import_products(
     operation_id="export_products",
 )
 async def export_products(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ) -> StreamingResponse:
@@ -613,14 +606,14 @@ async def export_products(
     )
 
     csv_content = await use_case.execute(
-        store_id=store_id,
-        user_id=user_id,
+        store_id=store.id,
+        user_id=store.owner_id,
     )
 
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
         headers={
-            "Content-Disposition": f'attachment; filename="products_{store_id}.csv"',
+            "Content-Disposition": f'attachment; filename="products_{store.id}.csv"',
         },
     )
