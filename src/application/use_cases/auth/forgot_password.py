@@ -1,6 +1,8 @@
 """Forgot password use case."""
 
+import asyncio
 import logging
+import time
 
 from src.application.dto.auth import PasswordResetRequestDTO
 from src.core.interfaces.repositories.user_repository import IUserRepository
@@ -8,6 +10,11 @@ from src.core.interfaces.services.email_service import IEmailService
 from src.core.interfaces.services.token_service import ITokenService
 
 logger = logging.getLogger(__name__)
+
+# Constant delay applied to every forgot-password request so that an
+# attacker cannot distinguish "user exists" from "user does not exist"
+# based on response timing.
+_MIN_RESPONSE_SECONDS = 2.0
 
 
 class ForgotPasswordUseCase:
@@ -24,11 +31,24 @@ class ForgotPasswordUseCase:
         self.email_service = email_service
 
     async def execute(self, dto: PasswordResetRequestDTO) -> None:
-        """Send password reset email if user exists."""
+        """Send password reset email if user exists.
+
+        A constant-time delay is enforced so the caller cannot infer
+        whether the email address is registered.
+        """
+        start = time.monotonic()
+
+        try:
+            await self._do_reset(dto)
+        finally:
+            elapsed = time.monotonic() - start
+            remaining = _MIN_RESPONSE_SECONDS - elapsed
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+
+    async def _do_reset(self, dto: PasswordResetRequestDTO) -> None:
         user = await self.user_repository.get_by_email(dto.email)
 
-        # Security: Don't reveal if user exists or not, but for MVP we just return if not found.
-        # Ideally, we should simulate a delay to prevent timing attacks.
         if not user:
             return
 

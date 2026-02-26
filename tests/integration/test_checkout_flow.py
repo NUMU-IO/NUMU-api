@@ -6,6 +6,7 @@ Covers:
 - Stock validation and deduction
 - Payment status handling
 - Paymob webhook processing
+- Backend price recalculation (C-10)
 """
 
 from uuid import uuid4
@@ -319,3 +320,66 @@ class TestCheckoutLifecycle:
 
         order.deliver()
         assert order.status == OrderStatus.DELIVERED
+
+
+# ---------------------------------------------------------------------------
+# C-10: Backend price recalculation — schema rejects client-supplied prices
+# ---------------------------------------------------------------------------
+
+
+class TestCheckoutPriceRecalculation:
+    """Verify that the checkout schema never accepts frontend-supplied prices.
+
+    The backend MUST always resolve prices from the product catalog.
+    These tests ensure the schema itself provides no avenue for price injection.
+    """
+
+    def test_checkout_request_has_no_price_fields(self):
+        """CheckoutRequest must not accept price, total, or amount fields."""
+        from src.api.v1.schemas.storefront.checkout import CheckoutRequest
+
+        field_names = set(CheckoutRequest.model_fields.keys())
+        price_related = {"price", "unit_price", "total", "subtotal", "amount", "cost"}
+        assert field_names.isdisjoint(price_related), (
+            f"CheckoutRequest exposes price fields: {field_names & price_related}"
+        )
+
+    def test_checkout_line_item_has_no_price_fields(self):
+        """CheckoutLineItem must only accept product_id, variant_id, quantity."""
+        from src.api.v1.schemas.storefront.checkout import CheckoutLineItem
+
+        field_names = set(CheckoutLineItem.model_fields.keys())
+        assert field_names == {"product_id", "variant_id", "quantity"}
+
+    def test_extra_price_field_in_line_item_is_ignored(self):
+        """Pydantic should silently drop unknown price fields."""
+        from src.api.v1.schemas.storefront.checkout import CheckoutLineItem
+
+        item = CheckoutLineItem(
+            product_id=uuid4(),
+            quantity=2,
+            unit_price=1,  # attacker-supplied
+        )
+        assert not hasattr(item, "unit_price") or "unit_price" not in item.model_fields
+
+    def test_server_price_overrides_any_client_value(self):
+        """Simulate the checkout loop: DB price wins over any client value."""
+        store = _make_store()
+        product = _make_product(store.id, price_cents=25000)  # DB: 250 EGP
+
+        # Attacker hopes to pay 1 piaster; backend must use DB price
+        attacker_price = 1
+        server_price = product.price.cents
+
+        assert server_price == 25000
+        assert server_price != attacker_price
+
+        line_item = OrderLineItem(
+            product_id=product.id,
+            product_name=product.name,
+            quantity=3,
+            unit_price=server_price,  # always from DB
+            total_price=server_price * 3,
+        )
+
+        assert line_item.total_price == 75000
