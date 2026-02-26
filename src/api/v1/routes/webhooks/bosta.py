@@ -15,12 +15,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db
 from src.config import settings
 from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
+from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.bosta import BostaShippingService
 from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.tenancy.rls import narrow_to_tenant
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -46,7 +47,7 @@ async def _find_order(repo: OrderRepository, tracking_number: str, log):
 @router.post("/callback", operation_id="bosta_callback")
 async def bosta_callback(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: Annotated[AsyncSession, Depends(get_admin_db_session)],
     x_bosta_signature: str = Header(None, alias="x-bosta-signature"),
 ):
     """Handle Bosta delivery status webhook.
@@ -107,6 +108,7 @@ async def bosta_callback(
         log.info("delivery_completed")
         order = await _find_order(order_repo, tracking_number, log)
         if order:
+            await narrow_to_tenant(session, order.tenant_id)
             try:
                 if order.status == OrderStatus.SHIPPED:
                     order.deliver()
@@ -137,6 +139,7 @@ async def bosta_callback(
         log.info("delivery_picked_up")
         order = await _find_order(order_repo, tracking_number, log)
         if order:
+            await narrow_to_tenant(session, order.tenant_id)
             try:
                 if order.status == OrderStatus.PROCESSING:
                     order.ship(tracking_number=tracking_number)
@@ -157,6 +160,7 @@ async def bosta_callback(
         log.info("delivery_returned")
         order = await _find_order(order_repo, tracking_number, log)
         if order:
+            await narrow_to_tenant(session, order.tenant_id)
             try:
                 if order.can_be_cancelled:
                     order.cancel(reason="Returned by carrier (Bosta)")
@@ -186,6 +190,7 @@ async def bosta_callback(
         log.warning("delivery_failed", failure_reason=failure_reason)
         order = await _find_order(order_repo, tracking_number, log)
         if order:
+            await narrow_to_tenant(session, order.tenant_id)
             try:
                 if "delivery_failures" not in order.metadata:
                     order.metadata["delivery_failures"] = []
@@ -203,6 +208,7 @@ async def bosta_callback(
         log.info("delivery_cancelled")
         order = await _find_order(order_repo, tracking_number, log)
         if order:
+            await narrow_to_tenant(session, order.tenant_id)
             try:
                 if order.can_be_cancelled:
                     order.cancel(reason="Cancelled via Bosta")

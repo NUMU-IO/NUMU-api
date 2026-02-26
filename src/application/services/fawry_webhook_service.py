@@ -30,6 +30,7 @@ from src.infrastructure.database.models.tenant.product import ProductModel
 from src.infrastructure.external_services.whatsapp.messaging_service import (
     WhatsAppMessagingService,
 )
+from src.infrastructure.tenancy.rls import narrow_to_tenant
 
 logger = get_logger(__name__)
 
@@ -247,6 +248,9 @@ class FawryWebhookService:
             logger.warning("webhook_order_not_found", status="PAID", ref=merchant_ref)
             return None
 
+        # Narrow RLS from bypass → tenant-scoped for all subsequent writes
+        await narrow_to_tenant(self.db, order.tenant_id)
+
         # Guard: only transition from valid prior states
         if order.status not in _PAID_VALID_PRIOR:
             logger.info(
@@ -305,6 +309,8 @@ class FawryWebhookService:
             )
             return None
 
+        await narrow_to_tenant(self.db, order.tenant_id)
+
         # Guard: only transition from valid prior states
         if order.status not in _EXPIRED_VALID_PRIOR:
             logger.info(
@@ -355,6 +361,8 @@ class FawryWebhookService:
                 "webhook_order_not_found", status="CANCELED", ref=merchant_ref
             )
             return None
+
+        await narrow_to_tenant(self.db, order.tenant_id)
 
         # Guard: shipped/delivered/refunded orders cannot be cancelled
         if order.status not in _CANCELED_VALID_PRIOR:
@@ -409,6 +417,8 @@ class FawryWebhookService:
                 "webhook_order_not_found", status="REFUNDED", ref=merchant_ref
             )
             return None
+
+        await narrow_to_tenant(self.db, order.tenant_id)
 
         # Guard: can only refund a paid order
         if order.payment_status != PaymentStatus.PAID:
