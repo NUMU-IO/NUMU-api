@@ -31,11 +31,11 @@ bosta_service = BostaShippingService()
 
 
 async def _find_order(repo: OrderRepository, tracking_number: str, log):
-    """Look up order by tracking number, return None on miss."""
+    """Look up order by tracking number with row-level lock, return None on miss."""
     if not tracking_number:
         return None
     try:
-        order = await repo.get_by_tracking_number(tracking_number)
+        order = await repo.get_by_tracking_number_for_update(tracking_number)
         if not order:
             log.debug("order_not_found_for_tracking", tracking_number=tracking_number)
         return order

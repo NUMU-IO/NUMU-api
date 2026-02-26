@@ -111,16 +111,16 @@ class FawryWebhookService:
     # ------------------------------------------------------------------ #
 
     async def _get_order_by_payment_id(self, payment_id: str) -> OrderModel | None:
-        """Fetch the order row by payment_id (merchant reference).
+        """Fetch the order row by payment_id with a row-level lock.
 
-        Webhooks are system-level events with no tenant context in the
-        HTTP request. The query uses the admin session (RLS bypass) set
-        up by the caller, but we still match on payment_id which is
-        globally unique.  After lookup the order's ``tenant_id`` is used
-        to scope all subsequent writes.
+        Uses ``SELECT ... FOR UPDATE`` so that concurrent webhook
+        deliveries for the same order block until the first transaction
+        commits, preventing race-condition state corruption.
         """
         result = await self.db.execute(
-            select(OrderModel).where(OrderModel.payment_id == payment_id)
+            select(OrderModel)
+            .where(OrderModel.payment_id == payment_id)
+            .with_for_update()
         )
         return result.scalar_one_or_none()
 
