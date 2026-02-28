@@ -71,6 +71,17 @@ class InvalidTokenError(AuthenticationError):
         super().__init__("Invalid token")
 
 
+class AccountLockedError(AuthenticationError):
+    """Raised when an account is temporarily locked after too many failed logins."""
+
+    def __init__(self, retry_after: int) -> None:
+        self.retry_after = retry_after
+        super().__init__(
+            f"Account temporarily locked due to too many failed attempts. "
+            f"Try again in {retry_after} seconds."
+        )
+
+
 class InsufficientStockError(DomainException):
     """Raised when there is insufficient stock."""
 
