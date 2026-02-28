@@ -49,6 +49,9 @@ from src.application.dto.auth import (
     RefreshTokenDTO,
     RegisterDTO,
 )
+from src.application.services.refresh_token_blacklist_service import (
+    RefreshTokenBlacklistService,
+)
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
     ChangePasswordUseCase,
@@ -68,6 +71,7 @@ from src.application.use_cases.auth.two_factor import (
 )
 from src.config import settings
 from src.core.exceptions import EntityNotFoundError
+from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services import (
     PasswordService,
     ResendEmailService,
@@ -269,6 +273,7 @@ async def refresh_token(
     use_case = RefreshTokenUseCase(
         user_repository=user_repo,
         token_service=token_service,
+        blacklist_service=RefreshTokenBlacklistService(RedisCacheService()),
     )
 
     dto = RefreshTokenDTO(refresh_token=refresh_tok)
