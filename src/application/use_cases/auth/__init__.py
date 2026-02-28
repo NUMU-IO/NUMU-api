@@ -15,6 +15,7 @@ from src.application.use_cases.auth.update_profile import (
     UpdateProfileUseCase,
     UserProfileDTO,
 )
+from src.application.use_cases.auth.verify_email import VerifyEmailUseCase
 
 __all__ = [
     "RegisterUserUseCase",
@@ -28,4 +29,5 @@ __all__ = [
     "UpdateProfileDTO",
     "UserProfileDTO",
     "ChangePasswordDTO",
+    "VerifyEmailUseCase",
 ]

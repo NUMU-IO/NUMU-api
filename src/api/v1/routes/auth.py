@@ -32,6 +32,7 @@ from src.api.v1.schemas import (
     RegisterRequest,
     UpdateProfileRequest,
     UserResponse,
+    VerifyEmailRequest,
 )
 from src.api.v1.schemas.public.two_factor import (
     Disable2FARequest,
@@ -59,6 +60,7 @@ from src.application.use_cases.auth import (
     ResetPasswordUseCase,
     UpdateProfileDTO,
     UpdateProfileUseCase,
+    VerifyEmailUseCase,
 )
 from src.application.use_cases.auth.two_factor import (
     Disable2FAUseCase,
@@ -160,15 +162,18 @@ async def register(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
+    email_service: Annotated[ResendEmailService, Depends(get_email_service)],
 ):
     """Register a new platform user account.
 
     Tokens are set as httpOnly cookies — not included in the JSON body.
+    A verification email is sent after registration.
     """
     use_case = RegisterUserUseCase(
         user_repository=user_repo,
         password_service=password_service,
         token_service=token_service,
+        email_service=email_service,
     )
 
     dto = RegisterDTO(
@@ -190,6 +195,35 @@ async def register(
     return SuccessResponse(
         data=AuthResponse(user=_user_response(result.user)),
         message="User registered successfully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Verify Email
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/verify-email",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Verify email address",
+    operation_id="verify_email",
+)
+async def verify_email(
+    request: VerifyEmailRequest,
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+):
+    """Verify a user's email address using the token from the verification email."""
+    use_case = VerifyEmailUseCase(
+        user_repository=user_repo,
+        token_service=token_service,
+    )
+    await use_case.execute(request.token)
+
+    return SuccessResponse(
+        data=MessageResponse(message="Email verified successfully"),
+        message="Email verified successfully",
     )
 
 

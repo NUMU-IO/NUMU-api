@@ -8,6 +8,7 @@ from src.config.logging_config import get_logger
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.exceptions import EntityAlreadyExistsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
+from src.core.interfaces.services.email_service import IEmailService
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
 from src.core.value_objects.email import Email
@@ -23,10 +24,12 @@ class RegisterUserUseCase:
         user_repository: IUserRepository,
         password_service: IPasswordService,
         token_service: ITokenService,
+        email_service: IEmailService | None = None,
     ) -> None:
         self.user_repository = user_repository
         self.password_service = password_service
         self.token_service = token_service
+        self.email_service = email_service
 
     async def execute(self, dto: RegisterDTO) -> AuthResponseDTO:
         """Register a new user and return auth response."""
@@ -72,6 +75,19 @@ class RegisterUserUseCase:
             )
         except Exception as exc:
             log.warning("welcome_email_dispatch_failed", error=str(exc))
+
+        # Send email verification link
+        if self.email_service:
+            try:
+                verification_token = self.token_service.create_email_verification_token(
+                    created_user
+                )
+                await self.email_service.send_verification_email(
+                    email=dto.email,
+                    token=verification_token,
+                )
+            except Exception as exc:
+                log.warning("verification_email_dispatch_failed", error=str(exc))
 
         # Generate tokens
         access_token = self.token_service.create_access_token(created_user)

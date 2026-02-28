@@ -145,3 +145,11 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: str | None = Field(
         None, max_length=500, description="Profile avatar URL"
     )
+
+
+class VerifyEmailRequest(BaseModel):
+    """Email verification request schema."""
+
+    token: str = Field(
+        description="Email verification token from the verification link"
+    )

@@ -11,6 +11,7 @@ from src.api.v1.schemas.public.auth import (
     TokenResponse,
     UpdateProfileRequest,
     UserResponse,
+    VerifyEmailRequest,
 )
 from src.api.v1.schemas.public.common import (
     CursorPaginatedListResponse,
@@ -49,6 +50,7 @@ __all__ = [
     "PasswordResetConfirm",
     "ChangePasswordRequest",
     "UpdateProfileRequest",
+    "VerifyEmailRequest",
     # 2FA
     "Enable2FAResponse",
     "Verify2FARequest",
