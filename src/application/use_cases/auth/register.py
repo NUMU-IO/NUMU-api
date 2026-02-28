@@ -10,6 +10,7 @@ from src.core.exceptions import EntityAlreadyExistsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
+from src.core.validators.password import validate_password
 from src.core.value_objects.email import Email
 
 logger = get_logger(__name__)
@@ -39,6 +40,9 @@ class RegisterUserUseCase:
         if await self.user_repository.email_exists(email):
             log.warning("auth_register_failed", reason="email_exists")
             raise EntityAlreadyExistsError("User", "email", dto.email)
+
+        # Enforce password policy before hashing
+        validate_password(dto.password)
 
         # Hash password
         hashed_password = self.password_service.hash_password(dto.password)
