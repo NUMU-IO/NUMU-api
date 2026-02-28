@@ -15,12 +15,15 @@ from src.api.v1.schemas.public import (
     PasswordResetConfirm,
     PasswordResetRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     TenantCreatedResponse,
     TenantResponse,
     TokenResponse,
     UpdateProfileRequest,
     UpdateTenantRequest,
     UserResponse,
+    VerifyEmailCodeRequest,
+    VerifyEmailRequest,
 )
 
 # Import from tenant schemas
@@ -64,6 +67,9 @@ __all__ = [
     "PasswordResetConfirm",
     "ChangePasswordRequest",
     "UpdateProfileRequest",
+    "VerifyEmailRequest",
+    "VerifyEmailCodeRequest",
+    "ResendVerificationRequest",
     # Tenant management (public)
     "CreateTenantRequest",
     "UpdateTenantRequest",

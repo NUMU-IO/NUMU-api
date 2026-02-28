@@ -86,6 +86,11 @@ class TokenService(ITokenService):
         expires_delta = timedelta(hours=1)
         return self._create_token(user, "reset", expires_delta)
 
+    def create_email_verification_token(self, user: User) -> str:
+        """Create an email verification token for a user (24 h expiry)."""
+        expires_delta = timedelta(hours=24)
+        return self._create_token(user, "email_verification", expires_delta)
+
     def verify_token(self, token: str) -> TokenPayload:
         """Verify and decode a token. Raises exception if invalid."""
         try:

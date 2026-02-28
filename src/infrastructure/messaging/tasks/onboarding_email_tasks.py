@@ -14,15 +14,20 @@ from src.infrastructure.messaging.celery_app import celery_app
 
 logger = get_logger(__name__)
 
+_task_loop: asyncio.AbstractEventLoop | None = None
+
 
 def run_async(coro):
-    """Run async code in Celery task."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    """Run async code in Celery task.
+
+    Reuses a persistent event loop per worker thread so that cached
+    async connections (e.g. Redis) aren't invalidated between tasks.
+    """
+    global _task_loop
+    if _task_loop is None or _task_loop.is_closed():
+        _task_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_task_loop)
+    return _task_loop.run_until_complete(coro)
 
 
 @celery_app.task(
@@ -47,6 +52,7 @@ def send_welcome_email_task(
     """
     from src.core.interfaces.services.email_service import EmailMessage
     from src.infrastructure.external_services.resend.email_service import (
+        EmailConfigurationError,
         ResendEmailService,
     )
     from src.infrastructure.external_services.resend.email_templates.onboarding import (
@@ -68,6 +74,9 @@ def send_welcome_email_task(
         result = run_async(service.send_email(message))
         logger.info("welcome_email_sent", email=email, success=result)
         return {"sent": result}
+    except EmailConfigurationError as e:
+        logger.error("welcome_email_config_error", email=email, error=str(e))
+        return {"sent": False, "error": str(e)}  # Don't retry config errors
     except Exception as e:
         logger.error("welcome_email_failed", email=email, error=str(e))
         raise self.retry(exc=e)
@@ -97,6 +106,7 @@ def send_first_product_email_task(
     """
     from src.core.interfaces.services.email_service import EmailMessage
     from src.infrastructure.external_services.resend.email_service import (
+        EmailConfigurationError,
         ResendEmailService,
     )
     from src.infrastructure.external_services.resend.email_templates.onboarding import (
@@ -123,6 +133,9 @@ def send_first_product_email_task(
             success=result,
         )
         return {"sent": result}
+    except EmailConfigurationError as e:
+        logger.error("first_product_email_config_error", email=email, error=str(e))
+        return {"sent": False, "error": str(e)}
     except Exception as e:
         logger.error("first_product_email_failed", email=email, error=str(e))
         raise self.retry(exc=e)
@@ -154,6 +167,7 @@ def send_first_order_email_task(
     """
     from src.core.interfaces.services.email_service import EmailMessage
     from src.infrastructure.external_services.resend.email_service import (
+        EmailConfigurationError,
         ResendEmailService,
     )
     from src.infrastructure.external_services.resend.email_templates.onboarding import (
@@ -180,6 +194,9 @@ def send_first_order_email_task(
             success=result,
         )
         return {"sent": result}
+    except EmailConfigurationError as e:
+        logger.error("first_order_email_config_error", email=email, error=str(e))
+        return {"sent": False, "error": str(e)}
     except Exception as e:
         logger.error("first_order_email_failed", email=email, error=str(e))
         raise self.retry(exc=e)
@@ -206,6 +223,7 @@ def send_store_approved_email_task(self, store_id: str):
     from src.infrastructure.database.models.public.user import UserModel
     from src.infrastructure.database.models.tenant.store import StoreModel
     from src.infrastructure.external_services.resend.email_service import (
+        EmailConfigurationError,
         ResendEmailService,
     )
     from src.infrastructure.external_services.resend.email_templates.onboarding import (
@@ -270,6 +288,11 @@ def send_store_approved_email_task(self, store_id: str):
 
     try:
         return run_async(_send())
+    except EmailConfigurationError as e:
+        logger.error(
+            "store_approved_email_config_error", store_id=store_id, error=str(e)
+        )
+        return {"sent": False, "error": str(e)}
     except Exception as e:
         logger.error("store_approved_email_failed", store_id=store_id, error=str(e))
         raise self.retry(exc=e)

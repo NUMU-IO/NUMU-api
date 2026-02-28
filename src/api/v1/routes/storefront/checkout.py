@@ -95,6 +95,13 @@ async def checkout(
                 message="Order already created",
             )
 
+    # Require email verification for account-based customers
+    if current_customer.has_account and not current_customer.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email address before placing orders.",
+        )
+
     # Verify the customer belongs to this store
     if current_customer.store_id != store_id:
         raise HTTPException(

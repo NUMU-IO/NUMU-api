@@ -145,3 +145,29 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: str | None = Field(
         None, max_length=500, description="Profile avatar URL"
     )
+
+
+class VerifyEmailRequest(BaseModel):
+    """Email verification request schema (link-based)."""
+
+    token: str = Field(
+        description="Email verification token from the verification link"
+    )
+
+
+class VerifyEmailCodeRequest(BaseModel):
+    """Email verification request schema (code-based)."""
+
+    code: str = Field(
+        ...,
+        min_length=6,
+        max_length=6,
+        pattern=r"^\d{6}$",
+        description="6-digit verification code sent to the user's email",
+    )
+
+
+class ResendVerificationRequest(BaseModel):
+    """Request to resend the verification email."""
+
+    pass  # Uses the authenticated user's session — no body needed
