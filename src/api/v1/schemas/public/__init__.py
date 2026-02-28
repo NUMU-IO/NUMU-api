@@ -8,9 +8,11 @@ from src.api.v1.schemas.public.auth import (
     PasswordResetConfirm,
     PasswordResetRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     TokenResponse,
     UpdateProfileRequest,
     UserResponse,
+    VerifyEmailCodeRequest,
     VerifyEmailRequest,
 )
 from src.api.v1.schemas.public.common import (
@@ -51,6 +53,8 @@ __all__ = [
     "ChangePasswordRequest",
     "UpdateProfileRequest",
     "VerifyEmailRequest",
+    "VerifyEmailCodeRequest",
+    "ResendVerificationRequest",
     # 2FA
     "Enable2FAResponse",
     "Verify2FARequest",

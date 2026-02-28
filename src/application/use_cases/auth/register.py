@@ -1,5 +1,6 @@
 """Register user use case."""
 
+import random
 from datetime import UTC, datetime, timedelta
 
 from src.application.dto.auth import AuthResponseDTO, RegisterDTO, TokenDTO
@@ -14,6 +15,15 @@ from src.core.interfaces.services.token_service import ITokenService
 from src.core.value_objects.email import Email
 
 logger = get_logger(__name__)
+
+# Redis key prefix for email verification codes
+VERIFY_CODE_KEY_PREFIX = "email_verify_code"
+VERIFY_CODE_TTL = 86400  # 24 hours
+
+
+def _generate_verification_code() -> str:
+    """Generate a random 6-digit verification code."""
+    return f"{random.randint(0, 999999):06d}"
 
 
 class RegisterUserUseCase:
@@ -63,28 +73,34 @@ class RegisterUserUseCase:
         log = log.bind(user_id=str(created_user.id), role=created_user.role.value)
         log.info("auth_register_success")
 
-        # Send welcome onboarding email (non-blocking via Celery)
-        try:
-            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
-                send_welcome_email_task,
-            )
+        # NOTE: Welcome email is now sent after email verification,
+        # not at registration time. See verify_email / verify_email_code routes.
 
-            send_welcome_email_task.delay(
-                email=dto.email,
-                merchant_name=dto.first_name,
-            )
-        except Exception as exc:
-            log.warning("welcome_email_dispatch_failed", error=str(exc))
-
-        # Send email verification link
+        # Send email verification link + code
         if self.email_service:
             try:
                 verification_token = self.token_service.create_email_verification_token(
                     created_user
                 )
+                # Generate a 6-digit code and store it in Redis keyed to user id
+                code = _generate_verification_code()
+                try:
+                    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+                    cache = RedisCacheService()
+                    await cache.set(
+                        f"{VERIFY_CODE_KEY_PREFIX}:{created_user.id}",
+                        code,
+                        expire=VERIFY_CODE_TTL,
+                    )
+                except Exception as exc:
+                    log.warning("verification_code_cache_failed", error=str(exc))
+                    code = None  # Still send link-only email
+
                 await self.email_service.send_verification_email(
                     email=dto.email,
                     token=verification_token,
+                    code=code,
                 )
             except Exception as exc:
                 log.warning("verification_email_dispatch_failed", error=str(exc))

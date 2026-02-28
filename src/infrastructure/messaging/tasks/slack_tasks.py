@@ -12,15 +12,20 @@ from src.infrastructure.messaging.celery_app import celery_app
 
 logger = get_logger(__name__)
 
+_task_loop: asyncio.AbstractEventLoop | None = None
+
 
 def run_async(coro):
-    """Run async code in Celery task."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    """Run async code in Celery task.
+
+    Reuses a persistent event loop per worker thread so that cached
+    async connections (e.g. Redis) aren't invalidated between tasks.
+    """
+    global _task_loop
+    if _task_loop is None or _task_loop.is_closed():
+        _task_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_task_loop)
+    return _task_loop.run_until_complete(coro)
 
 
 @celery_app.task(
