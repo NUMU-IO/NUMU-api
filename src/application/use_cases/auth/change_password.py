@@ -6,6 +6,7 @@ from uuid import UUID
 from src.core.exceptions import AuthenticationError, EntityNotFoundError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
+from src.core.validators.password import validate_password
 
 
 @dataclass
@@ -42,6 +43,9 @@ class ChangePasswordUseCase:
             dto.current_password, user.hashed_password
         ):
             raise AuthenticationError("Current password is incorrect")
+
+        # Enforce password policy
+        validate_password(dto.new_password)
 
         # Hash new password
         new_hashed_password = await self.password_service.hash_password(
