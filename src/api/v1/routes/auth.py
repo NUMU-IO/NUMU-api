@@ -51,6 +51,7 @@ from src.application.dto.auth import (
     RefreshTokenDTO,
     RegisterDTO,
 )
+from src.application.services.lockout_service import AccountLockoutService
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
     ChangePasswordUseCase,
@@ -71,6 +72,7 @@ from src.application.use_cases.auth.two_factor import (
 )
 from src.config import settings
 from src.core.exceptions import EntityNotFoundError
+from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services import (
     PasswordService,
     ResendEmailService,
@@ -384,6 +386,7 @@ async def login(
         user_repository=user_repo,
         password_service=password_service,
         token_service=token_service,
+        lockout_service=AccountLockoutService(RedisCacheService()),
     )
 
     dto = LoginDTO(
