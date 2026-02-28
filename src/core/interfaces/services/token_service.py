@@ -16,12 +16,14 @@ class TokenPayload:
         role: str,
         exp: int,
         token_type: str = "access",
+        iat: int = 0,
     ) -> None:
         self.user_id = user_id
         self.email = email
         self.role = role
         self.exp = exp
         self.token_type = token_type
+        self.iat = iat
 
 
 class CustomerTokenPayload:
