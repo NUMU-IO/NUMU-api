@@ -1,10 +1,9 @@
 """Risk assessment model — stores risk scores for orders."""
 
 from datetime import datetime
-
 from uuid import UUID as PyUUID
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,7 +18,9 @@ class RiskAssessmentModel(Base, UUIDMixin, TimestampMixin):
     __table_args__ = {"schema": "public"}
 
     tenant_id: Mapped[PyUUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True, index=True,
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
     )
 
     store_id: Mapped[str] = mapped_column(

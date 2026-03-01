@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -27,9 +27,9 @@ logger = logging.getLogger("numu.audit")
 
 # Path prefixes that touch personal / protected customer data
 _PII_PREFIXES: Sequence[str] = (
-    "/api/v1/shopify/",       # All Shopify endpoints (risk, orders, settings …)
-    "/api/v1/customers",      # Customer endpoints
-    "/api/v1/orders",         # Order endpoints
+    "/api/v1/shopify/",  # All Shopify endpoints (risk, orders, settings …)
+    "/api/v1/customers",  # Customer endpoints
+    "/api/v1/orders",  # Order endpoints
 )
 
 

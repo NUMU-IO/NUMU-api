@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete
 
@@ -29,7 +29,9 @@ def _run_purge(retention_days: int) -> dict[str, int]:
 
 
 async def _async_purge(retention_days: int) -> dict[str, int]:
-    from src.infrastructure.database.connection import AsyncSessionLocal as async_session_factory
+    from src.infrastructure.database.connection import (
+        AsyncSessionLocal as async_session_factory,
+    )
     from src.infrastructure.database.models.tenant.automation_log import (
         AutomationLogModel,
     )
@@ -40,7 +42,7 @@ async def _async_purge(retention_days: int) -> dict[str, int]:
         RiskAssessmentModel,
     )
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
 
     results: dict[str, int] = {}
 
@@ -73,12 +75,11 @@ def purge_shopify_pii(self, retention_days: int | None = None) -> dict:
     """
     if retention_days is None:
         from src.config import settings
+
         retention_days = settings.shopify_data_retention_days
 
     try:
-        logger.info(
-            "Starting Shopify PII purge (retention=%d days) …", retention_days
-        )
+        logger.info("Starting Shopify PII purge (retention=%d days) …", retention_days)
         counts = _run_purge(retention_days)
         logger.info("PII purge complete: %s", counts)
         return {"status": "ok", "deleted": counts}

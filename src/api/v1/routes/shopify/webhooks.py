@@ -60,7 +60,12 @@ async def _handle_order_created(
     customer = payload.get("customer") or {}
     total_price = payload.get("total_price", "0")
     currency = payload.get("currency", "EGP")
-    payment_method = payload.get("gateway", payload.get("payment_gateway_names", ["unknown"])[0] if payload.get("payment_gateway_names") else "unknown")
+    payment_method = payload.get(
+        "gateway",
+        payload.get("payment_gateway_names", ["unknown"])[0]
+        if payload.get("payment_gateway_names")
+        else "unknown",
+    )
 
     # Convert monetary string to cents
     try:
@@ -75,7 +80,8 @@ async def _handle_order_created(
         "total_cents": total_cents,
         "currency": currency,
         "payment_method": payment_method,
-        "phone": customer.get("phone") or (payload.get("shipping_address") or {}).get("phone", ""),
+        "phone": customer.get("phone")
+        or (payload.get("shipping_address") or {}).get("phone", ""),
         "shipping_address": payload.get("shipping_address") or {},
         "orders_count": customer.get("orders_count", 0),
         "cancel_rate": 0.0,  # Would need historical lookup
@@ -83,11 +89,14 @@ async def _handle_order_created(
 
     # Score
     address_parts = order_data["shipping_address"]
-    address_str = ", ".join(
-        str(address_parts.get(k, ""))
-        for k in ("address1", "city", "province", "country")
-        if address_parts.get(k)
-    ) or None
+    address_str = (
+        ", ".join(
+            str(address_parts.get(k, ""))
+            for k in ("address1", "city", "province", "country")
+            if address_parts.get(k)
+        )
+        or None
+    )
     risk_result = score_order(
         total_cents=order_data["total_cents"],
         payment_method=order_data["payment_method"],
@@ -111,7 +120,10 @@ async def _handle_order_created(
         risk_score=risk_result.risk_score,
         risk_level=risk_result.risk_level,
         suggested_action=risk_result.suggested_action,
-        factors=[{"name": f.factor, "score": f.score, "weight": f.weight, "detail": f.reason} for f in risk_result.factors],
+        factors=[
+            {"name": f.factor, "score": f.score, "weight": f.weight, "detail": f.reason}
+            for f in risk_result.factors
+        ],
     )
 
     # Auto-apply action based on settings thresholds
@@ -139,9 +151,15 @@ async def _handle_order_created(
         conditions = rule.conditions or {}
         # Simple condition matching
         match = True
-        if "payment_method" in conditions and conditions["payment_method"] != payment_method:
+        if (
+            "payment_method" in conditions
+            and conditions["payment_method"] != payment_method
+        ):
             match = False
-        if "amount_gte_cents" in conditions and total_cents < conditions["amount_gte_cents"]:
+        if (
+            "amount_gte_cents" in conditions
+            and total_cents < conditions["amount_gte_cents"]
+        ):
             match = False
         if "min_previous_orders" in conditions:
             if order_data.get("orders_count", 0) < conditions["min_previous_orders"]:
@@ -207,11 +225,17 @@ async def _handle_payment_event(
 )
 async def process_webhook(
     body: WebhookProcessRequest,
-    install_repo: Annotated[ShopifyInstallationRepository, Depends(get_shopify_installation_repo)],
+    install_repo: Annotated[
+        ShopifyInstallationRepository, Depends(get_shopify_installation_repo)
+    ],
     risk_repo: Annotated[RiskAssessmentRepository, Depends(get_risk_assessment_repo)],
-    pt_repo: Annotated[PaymentTransactionRepository, Depends(get_payment_transaction_repo)],
+    pt_repo: Annotated[
+        PaymentTransactionRepository, Depends(get_payment_transaction_repo)
+    ],
     automation_repo: Annotated[AutomationRepository, Depends(get_automation_repo)],
-    settings_repo: Annotated[ShopifyAppSettingsRepository, Depends(get_shopify_settings_repo)],
+    settings_repo: Annotated[
+        ShopifyAppSettingsRepository, Depends(get_shopify_settings_repo)
+    ],
 ):
     store_id = await _resolve_store_id(body.shop_domain, install_repo)
     topic = body.topic
@@ -249,15 +273,26 @@ async def process_webhook(
         email = customer.get("email", "")
         if email:
             deleted = await risk_repo.delete_by_customer_email(store_id, email)
-            logger.info("GDPR customers/redact for %s (%s): deleted %d records", body.shop_domain, email, deleted)
+            logger.info(
+                "GDPR customers/redact for %s (%s): deleted %d records",
+                body.shop_domain,
+                email,
+                deleted,
+            )
             result = {"redacted": True, "records_deleted": deleted}
         else:
-            result = {"redacted": True, "records_deleted": 0, "note": "no email in payload"}
+            result = {
+                "redacted": True,
+                "records_deleted": 0,
+                "note": "no email in payload",
+            }
     elif topic == "customers/data_request":
         # GDPR: Report what data we hold for a specific customer
         customer = body.payload.get("customer", {})
         email = customer.get("email", "")
-        records = await risk_repo.list_by_customer_email(store_id, email) if email else []
+        records = (
+            await risk_repo.list_by_customer_email(store_id, email) if email else []
+        )
         result = {
             "customer_email": email,
             "data_held": [

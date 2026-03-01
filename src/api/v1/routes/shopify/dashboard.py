@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -32,7 +31,9 @@ router = APIRouter(dependencies=[Depends(verify_internal_key)])
 async def dashboard_overview(
     store_id: Annotated[UUID, Path()],
     risk_repo: Annotated[RiskAssessmentRepository, Depends(get_risk_assessment_repo)],
-    pt_repo: Annotated[PaymentTransactionRepository, Depends(get_payment_transaction_repo)],
+    pt_repo: Annotated[
+        PaymentTransactionRepository, Depends(get_payment_transaction_repo)
+    ],
     days: int = Query(30, ge=1, le=365),
 ):
     """Aggregate dashboard stats for the Shopify app home screen."""

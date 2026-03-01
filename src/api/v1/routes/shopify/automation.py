@@ -32,7 +32,11 @@ TEMPLATES: dict[str, dict] = {
         "trigger_event": "order.created",
         "conditions": {"payment_method": "cod"},
         "actions": [
-            {"type": "whatsapp_confirm", "template": "cod_confirmation", "timeout_hours": 24}
+            {
+                "type": "whatsapp_confirm",
+                "template": "cod_confirmation",
+                "timeout_hours": 24,
+            }
         ],
         "priority": 10,
     },
@@ -58,7 +62,11 @@ TEMPLATES: dict[str, dict] = {
         "trigger_event": "payment.failed",
         "conditions": {},
         "actions": [
-            {"type": "whatsapp_notify", "template": "payment_retry", "include_retry_link": True}
+            {
+                "type": "whatsapp_notify",
+                "template": "payment_retry",
+                "include_retry_link": True,
+            }
         ],
         "priority": 15,
     },
@@ -115,7 +123,9 @@ async def update_rule(
 ):
     model = await repo.update_rule(rule_id, body.model_dump(exclude_unset=True))
     if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found"
+        )
     return SuccessResponse(data=_rule_to_response(model), message="Rule updated")
 
 
@@ -132,7 +142,9 @@ async def delete_rule(
 ):
     ok = await repo.delete_rule(rule_id)
     if not ok:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found"
+        )
     return SuccessResponse(data={"deleted": True}, message="Rule deleted")
 
 
@@ -164,7 +176,9 @@ async def create_from_template(
         actions=template["actions"],
         priority=template["priority"],
     )
-    return SuccessResponse(data=_rule_to_response(model), message="Rule created from template")
+    return SuccessResponse(
+        data=_rule_to_response(model), message="Rule created from template"
+    )
 
 
 @router.get(

@@ -32,7 +32,9 @@ router = APIRouter(dependencies=[Depends(verify_internal_key)])
 )
 async def payment_channels(
     store_id: Annotated[UUID, Path()],
-    repo: Annotated[PaymentTransactionRepository, Depends(get_payment_transaction_repo)],
+    repo: Annotated[
+        PaymentTransactionRepository, Depends(get_payment_transaction_repo)
+    ],
     days: int = Query(30, ge=1, le=365),
 ):
     channels_raw = await repo.aggregate_channels(store_id, days=days)

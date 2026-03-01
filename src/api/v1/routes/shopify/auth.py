@@ -33,7 +33,9 @@ router = APIRouter(dependencies=[Depends(verify_internal_key)])
 )
 async def register_shop(
     request: RegisterShopRequest,
-    repo: Annotated[ShopifyInstallationRepository, Depends(get_shopify_installation_repo)],
+    repo: Annotated[
+        ShopifyInstallationRepository, Depends(get_shopify_installation_repo)
+    ],
 ):
     """Called by the Shopify app's afterAuth hook.
 
@@ -49,7 +51,6 @@ async def register_shop(
         existing.is_active = True
         existing.uninstalled_at = None
 
-        from sqlalchemy.ext.asyncio import AsyncSession
         # flush is handled by upsert, but we already have the model
         return SuccessResponse(
             data=InstallationResponse(
@@ -94,7 +95,9 @@ async def register_shop(
 )
 async def lookup_shop(
     domain: Annotated[str, Query(description="e.g. example.myshopify.com")],
-    repo: Annotated[ShopifyInstallationRepository, Depends(get_shopify_installation_repo)],
+    repo: Annotated[
+        ShopifyInstallationRepository, Depends(get_shopify_installation_repo)
+    ],
 ):
     installation = await repo.get_by_domain(domain)
     if not installation:

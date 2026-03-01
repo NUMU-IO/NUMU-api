@@ -6,15 +6,25 @@ import logging
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import Integer, case, delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.models.tenant.automation_log import AutomationLogModel
-from src.infrastructure.database.models.tenant.automation_rule import AutomationRuleModel
-from src.infrastructure.database.models.tenant.payment_transaction import PaymentTransactionModel
-from src.infrastructure.database.models.tenant.risk_assessment import RiskAssessmentModel
-from src.infrastructure.database.models.tenant.shopify_app_settings import ShopifyAppSettingsModel
-from src.infrastructure.database.models.tenant.shopify_installation import ShopifyInstallationModel
+from src.infrastructure.database.models.tenant.automation_rule import (
+    AutomationRuleModel,
+)
+from src.infrastructure.database.models.tenant.payment_transaction import (
+    PaymentTransactionModel,
+)
+from src.infrastructure.database.models.tenant.risk_assessment import (
+    RiskAssessmentModel,
+)
+from src.infrastructure.database.models.tenant.shopify_app_settings import (
+    ShopifyAppSettingsModel,
+)
+from src.infrastructure.database.models.tenant.shopify_installation import (
+    ShopifyInstallationModel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # ShopifyInstallationRepository
 # ---------------------------------------------------------------------------
+
 
 class ShopifyInstallationRepository:
     """CRUD for shopify_installations table."""
@@ -99,7 +110,9 @@ class ShopifyInstallationRepository:
             counts[label] = r.rowcount or 0
         # Finally remove the installation itself
         r = await self.session.execute(
-            delete(ShopifyInstallationModel).where(ShopifyInstallationModel.store_id == store_id)
+            delete(ShopifyInstallationModel).where(
+                ShopifyInstallationModel.store_id == store_id
+            )
         )
         counts["installations"] = r.rowcount or 0
         return counts
@@ -108,6 +121,7 @@ class ShopifyInstallationRepository:
 # ---------------------------------------------------------------------------
 # RiskAssessmentRepository
 # ---------------------------------------------------------------------------
+
 
 class RiskAssessmentRepository:
     """CRUD for risk_assessments table."""
@@ -174,7 +188,9 @@ class RiskAssessmentRepository:
         )
         return result.rowcount or 0
 
-    async def list_by_customer_email(self, store_id: UUID, email: str) -> list[RiskAssessmentModel]:
+    async def list_by_customer_email(
+        self, store_id: UUID, email: str
+    ) -> list[RiskAssessmentModel]:
         """GDPR customers/data_request — return all risk assessments for a customer."""
         result = await self.session.execute(
             select(RiskAssessmentModel).where(
@@ -189,6 +205,7 @@ class RiskAssessmentRepository:
 # PaymentTransactionRepository
 # ---------------------------------------------------------------------------
 
+
 class PaymentTransactionRepository:
     """CRUD for payment_transactions table."""
 
@@ -201,9 +218,7 @@ class PaymentTransactionRepository:
         await self.session.flush()
         return model
 
-    async def aggregate_channels(
-        self, store_id: UUID, *, days: int = 30
-    ) -> list[dict]:
+    async def aggregate_channels(self, store_id: UUID, *, days: int = 30) -> list[dict]:
         """Aggregate payment transactions by channel for analytics."""
         since = datetime.utcnow() - timedelta(days=days)
 
@@ -221,7 +236,10 @@ class PaymentTransactionRepository:
                 func.sum(success_case).label("successful_raw"),
                 func.sum(
                     case(
-                        (PaymentTransactionModel.status == "completed", PaymentTransactionModel.amount_cents),
+                        (
+                            PaymentTransactionModel.status == "completed",
+                            PaymentTransactionModel.amount_cents,
+                        ),
                         else_=0,
                     )
                 ).label("revenue_cents"),
@@ -238,9 +256,7 @@ class PaymentTransactionRepository:
         )
         return [dict(row._mapping) for row in result.all()]
 
-    async def aggregate_failures(
-        self, store_id: UUID, *, days: int = 30
-    ) -> list[dict]:
+    async def aggregate_failures(self, store_id: UUID, *, days: int = 30) -> list[dict]:
         since = datetime.utcnow() - timedelta(days=days)
         result = await self.session.execute(
             select(
@@ -268,6 +284,7 @@ class PaymentTransactionRepository:
 # AutomationRepository
 # ---------------------------------------------------------------------------
 
+
 class AutomationRepository:
     """CRUD for automation_rules + automation_logs tables."""
 
@@ -280,7 +297,9 @@ class AutomationRepository:
         result = await self.session.execute(
             select(AutomationRuleModel)
             .where(AutomationRuleModel.store_id == store_id)
-            .order_by(AutomationRuleModel.priority.desc(), AutomationRuleModel.created_at)
+            .order_by(
+                AutomationRuleModel.priority.desc(), AutomationRuleModel.created_at
+            )
         )
         return list(result.scalars().all())
 
@@ -357,6 +376,7 @@ class AutomationRepository:
 # ---------------------------------------------------------------------------
 # ShopifyAppSettingsRepository
 # ---------------------------------------------------------------------------
+
 
 class ShopifyAppSettingsRepository:
     """CRUD for shopify_app_settings table."""

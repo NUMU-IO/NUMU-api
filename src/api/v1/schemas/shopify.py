@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
+
 
 class RegisterShopRequest(BaseModel):
     """POST /shopify/auth/register-shop."""
@@ -38,6 +37,7 @@ class LookupResponse(BaseModel):
 # Dashboard
 # ---------------------------------------------------------------------------
 
+
 class DashboardOverviewResponse(BaseModel):
     cod_success_rate: float = 0.0
     revenue_protected_cents: int = 0
@@ -52,6 +52,7 @@ class DashboardOverviewResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Risk
 # ---------------------------------------------------------------------------
+
 
 class RiskFactorSchema(BaseModel):
     factor: str
@@ -86,6 +87,7 @@ class RiskActionRequest(BaseModel):
 # Payment Channels
 # ---------------------------------------------------------------------------
 
+
 class PaymentChannelSchema(BaseModel):
     channel: str
     gateway: str
@@ -119,6 +121,7 @@ class PaymentChannelsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Automation
 # ---------------------------------------------------------------------------
+
 
 class RuleConditionSchema(BaseModel):
     field: str
@@ -178,6 +181,7 @@ class AutomationLogResponse(BaseModel):
 # Settings
 # ---------------------------------------------------------------------------
 
+
 class AppSettingsResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -208,6 +212,7 @@ class ConnectPaymobRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Webhooks
 # ---------------------------------------------------------------------------
+
 
 class WebhookProcessRequest(BaseModel):
     topic: str

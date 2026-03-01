@@ -17,7 +17,9 @@ class AutomationLogModel(Base, UUIDMixin, TimestampMixin):
     __table_args__ = {"schema": "public"}
 
     tenant_id: Mapped[PyUUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True, index=True,
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
     )
 
     store_id: Mapped[str] = mapped_column(

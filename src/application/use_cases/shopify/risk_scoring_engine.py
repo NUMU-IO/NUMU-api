@@ -16,22 +16,21 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass
 class RiskFactor:
     factor: str
-    score: float          # 0-100
+    score: float  # 0-100
     weight: float
     reason: str
 
 
 @dataclass
 class RiskResult:
-    risk_score: int       # 0-100
-    risk_level: str       # low | medium | high | critical
-    suggested_action: str # auto_approve | whatsapp_confirm | hold | cancel
+    risk_score: int  # 0-100
+    risk_level: str  # low | medium | high | critical
+    suggested_action: str  # auto_approve | whatsapp_confirm | hold | cancel
     factors: list[RiskFactor] = field(default_factory=list)
 
 
@@ -66,6 +65,7 @@ def _suggested_action(score: int) -> str:
 
 # ── factor scorers ───────────────────────────────────────────
 
+
 def _score_customer_history(
     total_orders: int,
     cod_success_rate: float | None,
@@ -84,7 +84,9 @@ def _score_customer_history(
             f"Returning customer — {total_orders} orders, "
             f"{int(rate * 100)}% COD success rate"
         )
-    return RiskFactor(factor="customer_history", score=score, weight=0.35, reason=reason)
+    return RiskFactor(
+        factor="customer_history", score=score, weight=0.35, reason=reason
+    )
 
 
 def _score_order_value(
@@ -189,6 +191,7 @@ def _score_phone_validation(phone: str | None) -> RiskFactor:
 
 
 # ── main entry point ────────────────────────────────────────
+
 
 def score_order(
     *,
