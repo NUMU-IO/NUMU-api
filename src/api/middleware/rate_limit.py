@@ -65,6 +65,13 @@ def _is_checkout(path: str) -> bool:
     return path.startswith("/api/v1/storefront/store/") and path.endswith("/checkout")
 
 
+def _is_coupon_apply(path: str) -> bool:
+    """Check if the path is a coupon apply endpoint."""
+    return path.startswith("/api/v1/storefront/store/") and path.endswith(
+        "/coupons/apply"
+    )
+
+
 # ------------------------------------------------------------------ #
 # Redis sliding-window check
 # ------------------------------------------------------------------ #
@@ -134,6 +141,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif _is_checkout(path):
             tier = "checkout"
             limit = settings.rate_limit_checkout_requests_per_minute
+        elif _is_coupon_apply(path):
+            tier = "coupon"
+            limit = 10  # 10 coupon validations per minute per IP
         else:
             tier = "general"
             has_auth = "authorization" in request.headers
