@@ -51,6 +51,7 @@ from src.application.dto.auth import (
     RefreshTokenDTO,
     RegisterDTO,
 )
+from src.application.services.token_revocation_service import TokenRevocationService
 from src.application.services.lockout_service import AccountLockoutService
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
@@ -657,6 +658,7 @@ async def change_password(
     use_case = ChangePasswordUseCase(
         user_repository=user_repo,
         password_service=password_service,
+        revocation_service=TokenRevocationService(RedisCacheService()),
     )
 
     dto = ChangePasswordDTO(
