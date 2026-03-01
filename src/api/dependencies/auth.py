@@ -5,9 +5,13 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 
+from src.application.services.token_revocation_service import TokenRevocationService
 from src.core.entities.user import UserRole
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
+from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services.token_service import token_service
+
+_revocation_service = TokenRevocationService(RedisCacheService())
 
 
 async def get_current_user_id(request: Request) -> UUID:
@@ -22,7 +26,6 @@ async def get_current_user_id(request: Request) -> UUID:
 
     try:
         payload = token_service.verify_token(token)
-        return payload.user_id
     except TokenExpiredError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -33,6 +36,14 @@ async def get_current_user_id(request: Request) -> UUID:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
         )
+
+    if await _revocation_service.is_revoked(payload.user_id, payload.iat):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked. Please log in again.",
+        )
+
+    return payload.user_id
 
 
 async def get_current_user_role(request: Request) -> tuple[UUID, str]:
@@ -47,12 +58,19 @@ async def get_current_user_role(request: Request) -> tuple[UUID, str]:
 
     try:
         payload = token_service.verify_token(token)
-        return payload.user_id, payload.role
     except (TokenExpiredError, InvalidTokenError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
         )
+
+    if await _revocation_service.is_revoked(payload.user_id, payload.iat):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked. Please log in again.",
+        )
+
+    return payload.user_id, payload.role
 
 
 def require_roles(*allowed_roles: UserRole):

@@ -97,12 +97,17 @@ class TokenService(ITokenService):
             payload = jwt.decode(
                 token, self._get_verification_key(), algorithms=[self.algorithm]
             )
+            iat = payload.get("iat", 0)
+            # PyJWT may return iat as datetime; normalise to int
+            if hasattr(iat, "timestamp"):
+                iat = int(iat.timestamp())
             return TokenPayload(
                 user_id=UUID(payload["sub"]),
                 email=payload["email"],
                 role=payload["role"],
                 exp=payload["exp"],
                 token_type=payload.get("token_type", "access"),
+                iat=int(iat),
             )
         except ExpiredSignatureError:
             raise TokenExpiredError()
