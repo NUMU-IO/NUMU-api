@@ -164,15 +164,49 @@ def determine_overall_status(components: dict[str, ComponentHealth]) -> HealthSt
     return HealthStatus.HEALTHY
 
 
-@router.get("/health", summary="Basic health check", operation_id="health_check")
+@router.get(
+    "/health", summary="Basic health check (liveness)", operation_id="health_check"
+)
 async def health_check():
-    """Basic health check - returns healthy if API is running.
+    """Basic liveness probe - returns healthy if API process is running.
 
-    Use /health/detailed for comprehensive system status.
+    Use /ready for readiness or /health/detailed for comprehensive status.
     """
     return SuccessResponse(
         data={"status": "healthy"},
         message="Service is running",
+    )
+
+
+@router.get("/ready", summary="Readiness probe", operation_id="readiness_check")
+async def readiness_check(db: AsyncSession = Depends(get_db)):
+    """Readiness probe — returns 200 only when DB and Redis are reachable.
+
+    Returns 503 Service Unavailable if any critical dependency is down.
+    Suitable for Kubernetes readinessProbe / load-balancer health checks.
+    """
+    db_health = await check_database(db)
+    redis_health = await check_redis()
+
+    ready = (
+        db_health.status != HealthStatus.UNHEALTHY
+        and redis_health.status != HealthStatus.UNHEALTHY
+    )
+
+    status_code = 200 if ready else 503
+    status_value = HealthStatus.HEALTHY if ready else HealthStatus.UNHEALTHY
+
+    from fastapi.responses import JSONResponse as _JSONResponse
+
+    return _JSONResponse(
+        status_code=status_code,
+        content={
+            "status": status_value.value,
+            "components": {
+                "database": db_health.status.value,
+                "redis": redis_health.status.value,
+            },
+        },
     )
 
 
