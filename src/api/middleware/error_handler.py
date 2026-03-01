@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.config import settings
 from src.core.exceptions import (
+    AccountLockedError,
     AuthenticationError,
     AuthorizationError,
     DomainException,
@@ -52,7 +53,6 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def request_validation_handler(request: Request, exc: RequestValidationError):
         """Override FastAPI default to prevent verbose field-level detail leak."""
         if settings.debug:
-            # In debug, return full details for developer convenience
             return JSONResponse(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 content={
@@ -62,7 +62,6 @@ def setup_exception_handlers(app: FastAPI) -> None:
                     "details": exc.errors(),
                 },
             )
-        # Production: generic message, no field-level detail
         logger.warning("Request validation failed: %s", exc.errors())
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -105,6 +104,20 @@ def setup_exception_handlers(app: FastAPI) -> None:
                 "message": str(exc),
                 "error_code": "VALIDATION_ERROR",
             },
+        )
+
+    # Must be registered before AuthenticationError so it takes priority
+    @app.exception_handler(AccountLockedError)
+    async def account_locked_handler(request: Request, exc: AccountLockedError):
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={
+                "success": False,
+                "message": str(exc),
+                "error_code": "ACCOUNT_LOCKED",
+                "details": {"retry_after": exc.retry_after},
+            },
+            headers={"Retry-After": str(exc.retry_after)},
         )
 
     @app.exception_handler(AuthenticationError)

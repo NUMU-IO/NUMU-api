@@ -63,6 +63,11 @@ class ITokenService(ABC):
         pass
 
     @abstractmethod
+    def create_email_verification_token(self, user: User) -> str:
+        """Create an email verification token for a user (24 h expiry)."""
+        pass
+
+    @abstractmethod
     def verify_token(self, token: str) -> TokenPayload:
         """Verify and decode a token. Raises exception if invalid."""
         pass

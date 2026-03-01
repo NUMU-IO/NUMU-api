@@ -32,6 +32,8 @@ from src.api.v1.schemas import (
     RegisterRequest,
     UpdateProfileRequest,
     UserResponse,
+    VerifyEmailCodeRequest,
+    VerifyEmailRequest,
 )
 from src.api.v1.schemas.public.two_factor import (
     Disable2FARequest,
@@ -50,6 +52,7 @@ from src.application.dto.auth import (
     RegisterDTO,
 )
 from src.application.services.token_revocation_service import TokenRevocationService
+from src.application.services.lockout_service import AccountLockoutService
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
     ChangePasswordUseCase,
@@ -60,6 +63,7 @@ from src.application.use_cases.auth import (
     ResetPasswordUseCase,
     UpdateProfileDTO,
     UpdateProfileUseCase,
+    VerifyEmailUseCase,
 )
 from src.application.use_cases.auth.two_factor import (
     Disable2FAUseCase,
@@ -162,15 +166,18 @@ async def register(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
+    email_service: Annotated[ResendEmailService, Depends(get_email_service)],
 ):
     """Register a new platform user account.
 
     Tokens are set as httpOnly cookies — not included in the JSON body.
+    A verification email is sent after registration.
     """
     use_case = RegisterUserUseCase(
         user_repository=user_repo,
         password_service=password_service,
         token_service=token_service,
+        email_service=email_service,
     )
 
     dto = RegisterDTO(
@@ -192,6 +199,168 @@ async def register(
     return SuccessResponse(
         data=AuthResponse(user=_user_response(result.user)),
         message="User registered successfully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Verify Email
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/verify-email",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Verify email address",
+    operation_id="verify_email",
+)
+async def verify_email(
+    request: VerifyEmailRequest,
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+):
+    """Verify a user's email address using the token from the verification email."""
+    use_case = VerifyEmailUseCase(
+        user_repository=user_repo,
+        token_service=token_service,
+    )
+    await use_case.execute(request.token)
+
+    # Dispatch welcome email now that the address is verified
+    try:
+        payload = token_service.verify_token(request.token)
+        user = await user_repo.get_by_id(payload.user_id)
+        if user:
+            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                send_welcome_email_task,
+            )
+
+            send_welcome_email_task.delay(
+                email=str(user.email),
+                merchant_name=user.first_name or "",
+            )
+    except Exception:
+        pass  # Non-critical; don't block verification response
+
+    return SuccessResponse(
+        data=MessageResponse(message="Email verified successfully"),
+        message="Email verified successfully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Verify Email by Code
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/verify-email-code",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Verify email with 6-digit code",
+    operation_id="verify_email_code",
+)
+async def verify_email_code(
+    request: VerifyEmailCodeRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+):
+    """Verify a user's email using the 6-digit code sent to their email."""
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    cache = RedisCacheService()
+    cache_key = f"email_verify_code:{user_id}"
+    stored_code = await cache.get(cache_key)
+
+    if not stored_code or stored_code != request.code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code",
+        )
+
+    # Code matches — verify the user
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.is_verified:
+        user.verify_email()
+        await user_repo.update(user)
+
+        # Dispatch welcome email now that the address is verified
+        try:
+            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                send_welcome_email_task,
+            )
+
+            send_welcome_email_task.delay(
+                email=str(user.email),
+                merchant_name=user.first_name or "",
+            )
+        except Exception:
+            pass  # Non-critical; don't block verification response
+
+    # Clean up the used code
+    await cache.delete(cache_key)
+
+    return SuccessResponse(
+        data=MessageResponse(message="Email verified successfully"),
+        message="Email verified successfully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Resend Verification Email
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/resend-verification",
+    response_model=SuccessResponse[MessageResponse],
+    summary="Resend verification email",
+    operation_id="resend_verification",
+)
+async def resend_verification(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+    email_service: Annotated[ResendEmailService, Depends(get_email_service)],
+):
+    """Resend the verification email with a new code and link."""
+    import random
+
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_verified:
+        return SuccessResponse(
+            data=MessageResponse(message="Email is already verified"),
+            message="Email is already verified",
+        )
+
+    # Generate new code and store in Redis
+    code = f"{random.randint(0, 999999):06d}"
+    cache = RedisCacheService()
+    await cache.set(
+        f"email_verify_code:{user_id}",
+        code,
+        expire=86400,  # 24 hours
+    )
+
+    # Generate new verification token (link)
+    verification_token = token_service.create_email_verification_token(user)
+
+    # Send the email
+    await email_service.send_verification_email(
+        email=str(user.email),
+        token=verification_token,
+        code=code,
+    )
+
+    return SuccessResponse(
+        data=MessageResponse(message="Verification email sent"),
+        message="Verification email sent",
     )
 
 
@@ -218,6 +387,7 @@ async def login(
         user_repository=user_repo,
         password_service=password_service,
         token_service=token_service,
+        lockout_service=AccountLockoutService(RedisCacheService()),
     )
 
     dto = LoginDTO(

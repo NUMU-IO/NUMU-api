@@ -1,6 +1,6 @@
 """Add version column to orders table for optimistic locking.
 
-Revision ID: c3d4e5f6a7b8
+Revision ID: c4d5e6f7a8b9
 Revises: b2d3e4f5a6c7
 Create Date: 2026-02-25
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "c3d4e5f6a7b8"
+revision: str = "c4d5e6f7a8b9"
 down_revision: str | None = "b2d3e4f5a6c7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
