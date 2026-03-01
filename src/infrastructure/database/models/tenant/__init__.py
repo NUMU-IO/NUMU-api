@@ -5,6 +5,8 @@ They include all e-commerce related data that is specific to a store.
 """
 
 from src.infrastructure.database.models.tenant.address import CustomerAddressModel
+from src.infrastructure.database.models.tenant.automation_log import AutomationLogModel
+from src.infrastructure.database.models.tenant.automation_rule import AutomationRuleModel
 from src.infrastructure.database.models.tenant.category import CategoryModel
 from src.infrastructure.database.models.tenant.configuration import (
     AuditAction,
@@ -21,10 +23,16 @@ from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.payment_transaction import PaymentTransactionModel
 from src.infrastructure.database.models.tenant.product import ProductModel
+from src.infrastructure.database.models.tenant.risk_assessment import RiskAssessmentModel
+from src.infrastructure.database.models.tenant.shopify_app_settings import ShopifyAppSettingsModel
+from src.infrastructure.database.models.tenant.shopify_installation import ShopifyInstallationModel
 from src.infrastructure.database.models.tenant.store import StoreModel
 
 __all__ = [
+    "AutomationLogModel",
+    "AutomationRuleModel",
     "CategoryModel",
     "CouponModel",
     "CustomerAddressModel",
@@ -32,6 +40,10 @@ __all__ = [
     "InvoiceModel",
     "MessageLogModel",
     "OrderModel",
+    "PaymentTransactionModel",
+    "RiskAssessmentModel",
+    "ShopifyAppSettingsModel",
+    "ShopifyInstallationModel",
     # Configuration models
     "ConfigurationRequest",
     "ServiceCredential",
