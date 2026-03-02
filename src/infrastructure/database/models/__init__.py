@@ -18,6 +18,8 @@ from src.infrastructure.database.models.public import (
 
 # Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
+    AutomationLogModel,
+    AutomationRuleModel,
     CategoryModel,
     CouponModel,
     CustomerAddressModel,
@@ -25,7 +27,11 @@ from src.infrastructure.database.models.tenant import (
     InvoiceModel,
     MessageLogModel,
     OrderModel,
+    PaymentTransactionModel,
     ProductModel,
+    RiskAssessmentModel,
+    ShopifyAppSettingsModel,
+    ShopifyInstallationModel,
     StoreModel,
 )
 
@@ -41,6 +47,8 @@ __all__ = [
     "WaitlistModel",
     "AuditLogModel",
     # Tenant-scoped
+    "AutomationLogModel",
+    "AutomationRuleModel",
     "StoreModel",
     "ProductModel",
     "CategoryModel",
@@ -50,4 +58,8 @@ __all__ = [
     "InvoiceModel",
     "MessageLogModel",
     "OrderModel",
+    "PaymentTransactionModel",
+    "RiskAssessmentModel",
+    "ShopifyAppSettingsModel",
+    "ShopifyInstallationModel",
 ]

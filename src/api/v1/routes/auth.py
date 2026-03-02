@@ -51,8 +51,8 @@ from src.application.dto.auth import (
     RefreshTokenDTO,
     RegisterDTO,
 )
-from src.application.services.token_revocation_service import TokenRevocationService
 from src.application.services.lockout_service import AccountLockoutService
+from src.application.services.token_revocation_service import TokenRevocationService
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
     ChangePasswordUseCase,
