@@ -5,6 +5,7 @@ This module provides:
 - Tenant schema switching via search_path
 - Row-Level Security (RLS) context management
 - Session lifecycle management with automatic tenant isolation
+- Connection pool monitoring via SQLAlchemy events
 """
 
 import logging
@@ -13,9 +14,10 @@ from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import Pool
 
 from src.config import settings
 
@@ -74,14 +76,41 @@ class Base(DeclarativeBase):
     pass
 
 
-# Create async engine
+# Create async engine with configurable pool settings
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
 )
+
+
+# ---------------------------------------------------------------------------
+# Connection pool monitoring
+# ---------------------------------------------------------------------------
+
+
+@event.listens_for(Pool, "checkout")
+def _pool_checkout(dbapi_conn, connection_record, connection_proxy) -> None:  # type: ignore[misc]
+    """Log when a connection is checked out of the pool."""
+    logger.debug(
+        "db_pool_checkout",
+        extra={
+            "pool_size": connection_proxy._pool.size(),
+            "checked_out": connection_proxy._pool.checkedout(),
+            "overflow": connection_proxy._pool.overflow(),
+        },
+    )
+
+
+@event.listens_for(Pool, "connect")
+def _pool_connect(dbapi_conn, connection_record) -> None:  # type: ignore[misc]
+    """Log when a new physical connection is created."""
+    logger.info("db_pool_new_connection")
+
 
 # Create async session factory
 AsyncSessionLocal = async_sessionmaker(

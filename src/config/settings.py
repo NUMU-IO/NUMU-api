@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     postgres_password: str = "postgres"
     postgres_db: str = "numu"
 
+    # Connection pool
+    db_pool_size: int = 10  # Persistent connections maintained in pool
+    db_max_overflow: int = 20  # Extra connections allowed beyond pool_size
+    db_pool_timeout: int = 30  # Seconds to wait for a connection before error
+    db_pool_recycle: int = 1800  # Recycle connections older than 30 minutes
+
     @property
     def database_url(self) -> str:
         """Construct async PostgreSQL connection URL."""
@@ -136,18 +142,55 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
-        """Validate that default secrets are not used in production."""
-        if self.environment == "production":
-            if self.session_secret_key == "change-me-session-secret":
+        """Validate environment-appropriate secrets and required configuration."""
+        is_production = self.environment == "production"
+        is_staging = self.environment == "staging"
+
+        if is_production or is_staging:
+            # --- Debug mode check ---
+            if self.debug and is_production:
                 raise ValueError(
-                    "CRITICAL: SESSION_SECRET_KEY must be changed from default in production! "
-                    "Set a secure value in your environment or .env file."
+                    "CRITICAL: DEBUG must be false in production. "
+                    "Set DEBUG=false in your environment."
                 )
-            if self.debug:
+
+            # --- Default/weak secrets check ---
+            weak_defaults = {
+                "dev-only-session-secret-change-in-prod-32chars",
+                "change-me-session-secret",
+            }
+            if self.session_secret_key in weak_defaults:
+                raise ValueError(
+                    "CRITICAL: SESSION_SECRET_KEY is set to a development default. "
+                    "Generate a secure secret: "
+                    'python -c "import secrets; print(secrets.token_urlsafe(32))"'
+                )
+
+            # --- Sentry DSN strongly recommended in non-dev ---
+            if not self.sentry_dsn:
                 logger.warning(
-                    "WARNING: Debug mode is enabled in production. "
-                    "This exposes sensitive information and should be disabled."
+                    "SENTRY_DSN is not set. Error tracking is disabled for %s.",
+                    self.environment,
                 )
+
+            # --- Required production-only checks ---
+            if is_production:
+                if not self.cors_origins or self.cors_origins == ["*"]:
+                    raise ValueError(
+                        "CORS_ORIGINS must be explicitly set to your production domains. "
+                        "Wildcard (*) is not allowed in production."
+                    )
+
+                if not self.resend_api_key:
+                    logger.warning(
+                        "RESEND_API_KEY is not set. Email delivery will fail in production."
+                    )
+
+                if not self.slack_enabled:
+                    logger.warning(
+                        "SLACK_ENABLED is false. Operational alerts are disabled in production."
+                    )
+
         return self
 
     # Rate limiting

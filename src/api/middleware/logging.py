@@ -14,19 +14,28 @@ from src.config.logging_config import (
 
 logger = get_logger(__name__)
 
+# Paths that generate too much noise and don't need request logs
+_SKIP_PATHS = frozenset(["/api/v1/health", "/health", "/api/v1/health/ready"])
+
 
 class LoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for structured request/response logging.
 
     Features:
     - Generates unique request IDs
-    - Binds request context (request_id, tenant_id, user_id) to all logs
+    - Binds request context (request_id, tenant_id, user_id, store_id) to all logs
     - Logs request start and completion with timing
     - Adds X-Request-ID and X-Process-Time response headers
+    - Skips logging for health-check endpoints
+    - Excludes sensitive headers and body from logs
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
         """Process request with structured logging."""
+        # Skip noisy health check paths
+        if request.url.path in _SKIP_PATHS:
+            return await call_next(request)
+
         # Generate unique request ID
         request_id = str(uuid.uuid4())[:8]
         request.state.request_id = request_id
@@ -63,11 +72,17 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             # Calculate processing time
             process_time_ms = round((time.time() - start_time) * 1000, 2)
 
-            # Log response
+            # Extract auth context set by route handlers / auth dependencies
+            user_id = getattr(request.state, "user_id", None)
+            store_id = getattr(request.state, "store_id", None)
+
+            # Log response with user/store context when available
             log.info(
                 "request_completed",
                 status_code=response.status_code,
                 duration_ms=process_time_ms,
+                user_id=str(user_id) if user_id else None,
+                store_id=str(store_id) if store_id else None,
             )
 
             # Add response headers
