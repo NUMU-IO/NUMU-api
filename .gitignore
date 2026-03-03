@@ -107,3 +107,6 @@ Pipfile.lock.claude/
 
 # claude-specific
 .claude/
+
+# Celery runtime files
+celerybeat-schedule*

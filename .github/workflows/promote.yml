@@ -1,0 +1,44 @@
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Promote to which environment?"
+        required: true
+        type: choice
+        options:
+          - staging   # merges dev → staging  (triggers staging deploy)
+          - prod      # merges staging → prod  (triggers prod deploy)
+
+jobs:
+  promote:
+    name: Promote ${{ github.event.inputs.environment == 'staging' && 'dev → staging' || 'staging → prod' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Promote to staging (dev → staging)
+        if: github.event.inputs.environment == 'staging'
+        run: |
+          git checkout staging
+          git merge --ff-only origin/dev
+          git push origin staging
+
+      - name: Promote to prod (staging → prod)
+        if: github.event.inputs.environment == 'prod'
+        run: |
+          git checkout prod
+          git merge --ff-only origin/staging
+          git push origin prod

@@ -52,10 +52,10 @@ from src.application.dto.auth import (
     RegisterDTO,
 )
 from src.application.services.lockout_service import AccountLockoutService
-from src.application.services.token_revocation_service import TokenRevocationService
 from src.application.services.refresh_token_blacklist_service import (
     RefreshTokenBlacklistService,
 )
+from src.application.services.token_revocation_service import TokenRevocationService
 from src.application.use_cases.auth import (
     ChangePasswordDTO,
     ChangePasswordUseCase,

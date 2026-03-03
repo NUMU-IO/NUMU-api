@@ -10,14 +10,28 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # ===========================================================================
+  # Build the Docker image and push to GHCR
+  # Runs on every push to staging, prod, or a version tag.
+  # ===========================================================================
   build-and-push:
     name: Build & Push Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      # The branch/tag-based image ref used by deploy jobs below.
+      # For branch pushes  → ghcr.io/org/repo:main | ghcr.io/org/repo:staging
+      # For version tags   → ghcr.io/org/repo:v1.0.0
+      image_ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.ref_tag.outputs.value }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: ref_tag
+        # Use the branch name for branch pushes, or the tag name for tag pushes.
+        run: echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -37,9 +51,10 @@ jobs:
           tags: |
             type=sha
             type=ref,event=branch
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref_name == 'prod' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -52,70 +67,127 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ===========================================================================
+  # Deploy to Staging (DigitalOcean Droplet)
+  # Triggers on push to staging branch (promoted from dev).
+  # ===========================================================================
   deploy-staging:
-    name: Deploy to Staging
+    name: Deploy to Staging (DO)
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.ref == 'refs/heads/staging'
     environment: staging
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
 
-      - name: Deploy to staging VPS
+      # Push the latest compose file to the DO machine so it reflects repo changes.
+      - name: Sync compose file to staging server
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << 'DEPLOY_SCRIPT'
+          scp -o StrictHostKeyChecking=no \
+            docker/docker-compose.staging.yml \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.staging.yml
+
+      - name: Deploy to staging DO Droplet
+        # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from
+        # the runner environment before being forwarded over SSH.
+        env:
+          NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
             set -e
             cd /opt/numu
 
-            echo "==> Pulling latest images..."
-            docker compose -f docker/docker-compose.staging.yml pull
+            echo "==> Authenticating with GHCR..."
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+            echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
+            export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
+            docker compose -f docker/docker-compose.staging.yml pull api celery-worker celery-beat
 
             echo "==> Starting services..."
-            docker compose -f docker/docker-compose.staging.yml up -d
+            docker compose -f docker/docker-compose.staging.yml up -d --remove-orphans
 
             echo "==> Running database migrations..."
             docker compose -f docker/docker-compose.staging.yml exec -T api alembic upgrade head
 
             echo "==> Verifying health..."
-            sleep 10
-            curl -f http://localhost:8000/api/v1/health || echo "Health check pending..."
+            sleep 15
+            curl -sf http://localhost:8080/api/v1/health | grep -q '"success":true' || {
+              echo "ERROR: Health check failed — dumping recent API logs:"
+              docker compose -f docker/docker-compose.staging.yml logs --tail=80 api
+              exit 1
+            }
 
-            echo "==> Deployment complete."
+            echo "==> Removing dangling images..."
+            docker image prune -f
+
+            echo "==> Staging deployment complete."
           DEPLOY_SCRIPT
 
+  # ===========================================================================
+  # Deploy to Production (DigitalOcean Droplet)
+  # Triggers on push to prod branch or a version tag (v*).
+  # ===========================================================================
   deploy-prod:
-    name: Deploy to Production
+    name: Deploy to Production (DO)
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')
     environment: production
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.PROD_SSH_KEY }}
 
-      - name: Deploy to production VPS
+      - name: Sync compose file to production server
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_HOST }} << 'DEPLOY_SCRIPT'
+          scp -o StrictHostKeyChecking=no \
+            docker/docker-compose.prod.yml \
+            ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_HOST }}:/opt/numu/docker/docker-compose.prod.yml
+
+      - name: Deploy to production DO Droplet
+        env:
+          NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_HOST }} << DEPLOY_SCRIPT
             set -e
             cd /opt/numu
 
-            echo "==> Pulling latest images..."
-            docker compose -f docker/docker-compose.prod.yml pull
+            echo "==> Authenticating with GHCR..."
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+            echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
+            export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
+            docker compose -f docker/docker-compose.prod.yml pull api celery-worker celery-beat
 
             echo "==> Starting services..."
-            docker compose -f docker/docker-compose.prod.yml up -d
+            docker compose -f docker/docker-compose.prod.yml up -d --remove-orphans
 
             echo "==> Running database migrations..."
             docker compose -f docker/docker-compose.prod.yml exec -T api alembic upgrade head
 
             echo "==> Verifying health..."
-            sleep 10
-            curl -f http://localhost:8000/api/v1/health || echo "Health check pending..."
+            sleep 15
+            curl -sf http://localhost:8000/api/v1/health | grep -q '"success":true' || {
+              echo "ERROR: Health check failed — dumping recent API logs:"
+              docker compose -f docker/docker-compose.prod.yml logs --tail=80 api
+              exit 1
+            }
+
+            echo "==> Removing dangling images..."
+            docker image prune -f
 
             echo "==> Production deployment complete."
           DEPLOY_SCRIPT
