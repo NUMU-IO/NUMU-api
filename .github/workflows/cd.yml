@@ -90,6 +90,7 @@ jobs:
       # Push the latest compose file to the DO machine so it reflects repo changes.
       - name: Sync compose file to stage server
         run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker"
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.staging.yml \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/docker-compose.staging.yml
@@ -155,6 +156,7 @@ jobs:
 
       - name: Sync compose file to production server
         run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_HOST }} "mkdir -p /opt/numu/docker"
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.prod.yml \
             ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_HOST }}:/opt/numu/docker/docker-compose.prod.yml
