@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [staging, prod]
+    branches: [stage, prod]
     tags: ["v*"]
 
 env:
@@ -12,7 +12,7 @@ env:
 jobs:
   # ===========================================================================
   # Build the Docker image and push to GHCR
-  # Runs on every push to staging, prod, or a version tag.
+  # Runs on every push to stage, prod, or a version tag.
   # ===========================================================================
   build-and-push:
     name: Build & Push Image
@@ -22,7 +22,7 @@ jobs:
       packages: write
     outputs:
       # The branch/tag-based image ref used by deploy jobs below.
-      # For branch pushes  → ghcr.io/org/repo:main | ghcr.io/org/repo:staging
+      # For branch pushes  → ghcr.io/org/repo:main | ghcr.io/org/repo:stage
       # For version tags   → ghcr.io/org/repo:v1.0.0
       image_ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.ref_tag.outputs.value }}
     steps:
@@ -69,14 +69,14 @@ jobs:
 
   # ===========================================================================
   # Deploy to Staging (DigitalOcean Droplet)
-  # Triggers on push to staging branch (promoted from dev).
+  # Triggers on push to stage branch (promoted from dev).
   # ===========================================================================
-  deploy-staging:
+  deploy-stage:
     name: Deploy to Staging (DO)
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: github.ref == 'refs/heads/staging'
-    environment: staging
+    if: github.ref == 'refs/heads/stage'
+    environment: stage
     steps:
       - uses: actions/checkout@v4
 
@@ -86,13 +86,13 @@ jobs:
           ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
 
       # Push the latest compose file to the DO machine so it reflects repo changes.
-      - name: Sync compose file to staging server
+      - name: Sync compose file to stage server
         run: |
           scp -o StrictHostKeyChecking=no \
             docker/docker-compose.staging.yml \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.staging.yml
 
-      - name: Deploy to staging DO Droplet
+      - name: Deploy to stage DO Droplet
         # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from
         # the runner environment before being forwarded over SSH.
         env:
