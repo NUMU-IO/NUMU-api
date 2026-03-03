@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [main, staging, prod]
+    branches: [staging, prod]
     tags: ["v*"]
 
 env:
@@ -12,7 +12,7 @@ env:
 jobs:
   # ===========================================================================
   # Build the Docker image and push to GHCR
-  # Runs on every push to main, staging, prod, or a version tag.
+  # Runs on every push to staging, prod, or a version tag.
   # ===========================================================================
   build-and-push:
     name: Build & Push Image
@@ -54,7 +54,7 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
+            type=raw,value=latest,enable=${{ github.ref_name == 'prod' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -69,13 +69,13 @@ jobs:
 
   # ===========================================================================
   # Deploy to Staging (DigitalOcean Droplet)
-  # Triggers on push to main or staging.
+  # Triggers on push to staging branch (promoted from dev).
   # ===========================================================================
   deploy-staging:
     name: Deploy to Staging (DO)
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    if: github.ref == 'refs/heads/staging'
     environment: staging
     steps:
       - uses: actions/checkout@v4
