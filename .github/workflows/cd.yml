@@ -98,9 +98,10 @@ jobs:
           scp -i ~/.ssh/deploy_key \
             docker/nginx/Dockerfile docker/nginx/nginx.conf \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/nginx/
-          scp -i ~/.ssh/deploy_key \
-            docker/postgres/postgresql.conf docker/postgres/init-wal-archiving.sh \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/
+          scp -i ~/.ssh/deploy_key docker/postgres/postgresql.conf \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+          scp -i ~/.ssh/deploy_key docker/postgres/init-wal-archiving.sh \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
 
       - name: Deploy to stage DO Droplet
         # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from
