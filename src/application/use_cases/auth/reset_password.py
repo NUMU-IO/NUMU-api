@@ -9,6 +9,7 @@ from src.core.exceptions import (
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
+from src.core.validators.password import validate_password
 
 
 class ResetPasswordUseCase:
@@ -42,6 +43,9 @@ class ResetPasswordUseCase:
         user = await self.user_repository.get_by_id(payload.user_id)
         if not user:
             raise EntityNotFoundError("User", str(payload.user_id))
+
+        # Enforce password policy
+        validate_password(dto.new_password)
 
         # Hash new password
         new_hashed_password = self.password_service.hash_password(dto.new_password)

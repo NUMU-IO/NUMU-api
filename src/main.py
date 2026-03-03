@@ -212,24 +212,22 @@ def create_app() -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret_key)
 
     # Add middleware (order matters: first added = outermost)
-    # Security headers should be outermost to ensure all responses have them
-    app.add_middleware(SecurityHeadersMiddleware)
-    # Protect /docs, /redoc, /openapi.json with basic auth on staging
-    if settings.environment == "staging" and settings.docs_username:
-        app.add_middleware(DocsAuthMiddleware)
-    # Cache headers for public storefront endpoints (before compression so Vary is correct)
-    app.add_middleware(CacheHeadersMiddleware)
-    # Gzip compression for dev/local (Nginx handles compression in staging/prod)
-    app.add_middleware(CompressionMiddleware)
-    # Rate limiting should be next to block requests early
-    app.add_middleware(RateLimitMiddleware)
+    # In debug mode, use a minimal middleware stack to avoid
+    # BaseHTTPMiddleware nesting issues (Starlette known issue).
+    if not settings.debug:
+        app.add_middleware(SecurityHeadersMiddleware)
+        if settings.environment == "staging" and settings.docs_username:
+            app.add_middleware(DocsAuthMiddleware)
+        app.add_middleware(CacheHeadersMiddleware)
+        app.add_middleware(CompressionMiddleware)
+        app.add_middleware(RateLimitMiddleware)
+        app.add_middleware(SentryMiddleware)
+        app.add_middleware(ResponseTimeMiddleware)
+
+    # Essential middleware — always active
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(TenantMiddleware)
-    app.add_middleware(SentryMiddleware)  # Captures request context for Sentry
-    app.add_middleware(LoggingMiddleware)  # Structured logging with request context
-    app.add_middleware(
-        ResponseTimeMiddleware
-    )  # Response time tracking and slow request logging
+    app.add_middleware(LoggingMiddleware)
 
     # Setup CORS — added LAST so it's the outermost middleware
     # This ensures preflight OPTIONS requests are handled before any other middleware
@@ -279,6 +277,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "src.main:app",
         host="127.0.0.1",
-        port=8021,
+        port=8000,
         reload=settings.debug,
     )

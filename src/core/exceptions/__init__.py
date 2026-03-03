@@ -1,6 +1,7 @@
 """Core exceptions module."""
 
 from src.core.exceptions.base import (
+    AccountLockedError,
     AuthenticationError,
     AuthorizationError,
     BusinessRuleViolationError,
@@ -27,6 +28,7 @@ __all__ = [
     "InvalidCredentialsError",
     "TokenExpiredError",
     "InvalidTokenError",
+    "AccountLockedError",
     "InsufficientStockError",
     "PaymentError",
     "ExternalServiceError",

@@ -3,8 +3,23 @@
 import resend
 
 from src.config import settings
+from src.config.logging_config import get_logger
 from src.core.exceptions import ExternalServiceError
 from src.core.interfaces.services.email_service import EmailMessage, IEmailService
+
+logger = get_logger(__name__)
+
+# Resend errors that indicate a permanent configuration problem (no point retrying).
+_PERMANENT_ERROR_PHRASES = [
+    "domain with your API key is not verified",
+    "api key is invalid",
+    "api_key is required",
+    "missing api key",
+]
+
+
+class EmailConfigurationError(ExternalServiceError):
+    """Raised for permanent email configuration problems (non-retryable)."""
 
 
 class ResendEmailService(IEmailService):
@@ -19,8 +34,19 @@ class ResendEmailService(IEmailService):
 
     async def send_email(self, message: EmailMessage) -> bool:
         """Send an email using Resend."""
+        to_list = message.to if isinstance(message.to, list) else [message.to]
+
+        # ── Dev / missing-key guard ─────────────────────────────────
+        if not self.api_key:
+            logger.warning(
+                "email_skipped_no_api_key",
+                to=to_list,
+                subject=message.subject,
+                hint="Set RESEND_API_KEY in .env to enable email sending.",
+            )
+            return True  # Don't block the caller in dev
+
         try:
-            to_list = message.to if isinstance(message.to, list) else [message.to]
             from_address = f"{message.from_name or self.from_name} <{message.from_email or self.from_email}>"
 
             params = {
@@ -35,29 +61,70 @@ class ResendEmailService(IEmailService):
             if message.reply_to:
                 params["reply_to"] = message.reply_to
 
-            # Print email to terminal for development
-            print("=" * 60)
-            print(f"SENDING EMAIL TO: {to_list}")
-            print(f"SUBJECT: {message.subject}")
-            print(f"CONTENT:\n{message.html_content}")
-            print("=" * 60)
-
             resend.Emails.send(params)
+            logger.info("email_sent", to=to_list, subject=message.subject)
             return True
         except Exception as e:
+            error_msg = str(e).lower()
+            if any(phrase in error_msg for phrase in _PERMANENT_ERROR_PHRASES):
+                raise EmailConfigurationError(
+                    "Resend",
+                    f"{e}  -- This is a configuration issue; fix RESEND_API_KEY / "
+                    f"EMAIL_FROM_ADDRESS or verify the domain in Resend dashboard.",
+                )
             raise ExternalServiceError("Resend", str(e))
 
-    async def send_verification_email(self, email: str, token: str) -> bool:
-        """Send email verification email."""
+    async def send_verification_email(
+        self, email: str, token: str, code: str | None = None
+    ) -> bool:
+        """Send email verification email with a 6-digit code and a verification link."""
+        verify_url = f"{settings.cors_origins[0]}/verify-email?token={token}"
+        code_display = code or "------"
+
         html_content = f"""
-        <h1>Verify Your Email</h1>
-        <p>Please click the link below to verify your email address:</p>
-        <a href="{settings.cors_origins[0]}/verify-email?token={token}">Verify Email</a>
-        <p>If you didn't create an account, please ignore this email.</p>
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+  <!-- Header -->
+  <tr><td style="background:linear-gradient(135deg,#D4AF37,#1034A6);padding:32px;text-align:center;">
+    <h1 style="color:#fff;margin:0;font-size:28px;letter-spacing:1px;">NUMU</h1>
+    <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Verify Your Email</p>
+  </td></tr>
+  <!-- Body -->
+  <tr><td style="padding:36px 32px;">
+    <p style="font-size:16px;color:#333;margin:0 0 20px;">Enter this verification code in your dashboard:</p>
+    <!-- Code box -->
+    <div style="text-align:center;margin:24px 0;">
+      <div style="display:inline-block;background:#f8f9fa;border:2px dashed #D4AF37;border-radius:8px;padding:16px 32px;">
+        <span style="font-size:36px;font-weight:bold;letter-spacing:12px;color:#1034A6;font-family:monospace;">{code_display}</span>
+      </div>
+      <p style="color:#999;font-size:13px;margin:12px 0 0;">This code expires in 24 hours</p>
+    </div>
+    <!-- Divider -->
+    <div style="border-top:1px solid #eee;margin:28px 0;"></div>
+    <p style="font-size:14px;color:#666;margin:0 0 16px;">Or click the button below to verify instantly:</p>
+    <div style="text-align:center;margin:20px 0;">
+      <a href="{verify_url}" style="display:inline-block;padding:14px 36px;background:#D4AF37;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold;font-size:15px;">Verify My Email</a>
+    </div>
+    <p style="font-size:12px;color:#999;margin:24px 0 0;">If you didn't create a NUMU account, you can safely ignore this email.</p>
+  </td></tr>
+  <!-- Footer -->
+  <tr><td style="padding:20px 32px;text-align:center;background:#f8f9fa;border-top:1px solid #eee;">
+    <p style="color:#999;font-size:12px;margin:0;">&copy; 2026 NUMU. All rights reserved.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
         """
         message = EmailMessage(
             to=email,
-            subject="Verify Your Email - Octyrafiy",
+            subject="Verify Your Email - NUMU",
             html_content=html_content,
         )
         return await self.send_email(message)
