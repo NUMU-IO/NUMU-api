@@ -194,11 +194,6 @@ def create_app() -> FastAPI:
             "url": "https://numu.com/terms",
         },
         openapi_tags=OPENAPI_TAGS,
-        servers=[
-            {"url": "http://localhost:8021", "description": "Local development"},
-            {"url": "https://api.staging.numu.com", "description": "Staging"},
-            {"url": "https://api.numu.com", "description": "Production"},
-        ],
         lifespan=lifespan,
     )
 
