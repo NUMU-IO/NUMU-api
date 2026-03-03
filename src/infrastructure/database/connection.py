@@ -96,12 +96,15 @@ engine = create_async_engine(
 @event.listens_for(Pool, "checkout")
 def _pool_checkout(dbapi_conn, connection_record, connection_proxy) -> None:  # type: ignore[misc]
     """Log when a connection is checked out of the pool."""
+    pool = connection_proxy._pool
+    if not hasattr(pool, "size"):
+        return  # NullPool (used by alembic) doesn't support pool stats
     logger.debug(
         "db_pool_checkout",
         extra={
-            "pool_size": connection_proxy._pool.size(),
-            "checked_out": connection_proxy._pool.checkedout(),
-            "overflow": connection_proxy._pool.overflow(),
+            "pool_size": pool.size(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
         },
     )
 
