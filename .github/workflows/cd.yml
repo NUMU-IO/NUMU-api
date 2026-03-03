@@ -118,6 +118,9 @@ jobs:
             set -e
             cd /opt/numu
 
+            echo "==> Pruning unused Docker resources to free disk space..."
+            docker system prune -f --volumes=false
+
             echo "==> Authenticating with GHCR..."
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
@@ -181,6 +184,9 @@ jobs:
           ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_HOST }} << DEPLOY_SCRIPT
             set -e
             cd /opt/numu
+
+            echo "==> Pruning unused Docker resources to free disk space..."
+            docker system prune -f --volumes=false
 
             echo "==> Authenticating with GHCR..."
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
