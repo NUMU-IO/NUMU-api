@@ -17,6 +17,7 @@ class TokenPayload:
         exp: int,
         token_type: str = "access",
         iat: int = 0,
+        jti: str | None = None,
     ) -> None:
         self.user_id = user_id
         self.email = email
@@ -24,6 +25,7 @@ class TokenPayload:
         self.exp = exp
         self.token_type = token_type
         self.iat = iat
+        self.jti = jti
 
 
 class CustomerTokenPayload:

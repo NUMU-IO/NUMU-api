@@ -1,5 +1,6 @@
 """JWT token service implementation using RS256 asymmetric signing."""
 
+import secrets
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -76,9 +77,20 @@ class TokenService(ITokenService):
         return self._create_token(user, "access", expires_delta)
 
     def create_refresh_token(self, user: User) -> str:
-        """Create a refresh token for a user."""
+        """Create a refresh token for a user (includes jti for rotation tracking)."""
         expires_delta = timedelta(days=self.refresh_token_expire_days)
-        return self._create_token(user, "refresh", expires_delta)
+        expire = datetime.utcnow() + expires_delta
+        role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
+        payload = {
+            "sub": str(user.id),
+            "email": str(user.email),
+            "role": role_value,
+            "token_type": "refresh",
+            "exp": expire,
+            "iat": datetime.utcnow(),
+            "jti": secrets.token_hex(16),
+        }
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_reset_token(self, user: User) -> str:
         """Create a password reset token for a user."""
@@ -98,7 +110,6 @@ class TokenService(ITokenService):
                 token, self._get_verification_key(), algorithms=[self.algorithm]
             )
             iat = payload.get("iat", 0)
-            # PyJWT may return iat as datetime; normalise to int
             if hasattr(iat, "timestamp"):
                 iat = int(iat.timestamp())
             return TokenPayload(
@@ -108,6 +119,7 @@ class TokenService(ITokenService):
                 exp=payload["exp"],
                 token_type=payload.get("token_type", "access"),
                 iat=int(iat),
+                jti=payload.get("jti"),
             )
         except ExpiredSignatureError:
             raise TokenExpiredError()
