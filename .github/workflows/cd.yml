@@ -83,7 +83,7 @@ jobs:
       - name: Install SSH key
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.STAGE_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           echo "StrictHostKeyChecking no" >> ~/.ssh/config
 
@@ -92,7 +92,7 @@ jobs:
         run: |
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.staging.yml \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.staging.yml
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/docker-compose.staging.yml
 
       - name: Deploy to stage DO Droplet
         # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from
@@ -102,7 +102,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} << DEPLOY_SCRIPT
             set -e
             cd /opt/numu
 
