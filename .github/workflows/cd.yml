@@ -87,16 +87,20 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           echo "StrictHostKeyChecking no" >> ~/.ssh/config
 
-      # Push the latest compose file and nginx config to the DO machine.
+      # Push the latest compose file, nginx, and postgres configs to the DO machine.
       - name: Sync files to stage server
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker/nginx/ssl"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} \
+            "mkdir -p /opt/numu/docker/nginx/ssl /opt/numu/docker/postgres"
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.staging.yml \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/docker-compose.staging.yml
           scp -i ~/.ssh/deploy_key \
             docker/nginx/Dockerfile docker/nginx/nginx.conf \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/nginx/
+          scp -i ~/.ssh/deploy_key \
+            docker/postgres/postgresql.conf docker/postgres/init-wal-archiving.sh \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/
 
       - name: Deploy to stage DO Droplet
         # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from
