@@ -87,13 +87,16 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           echo "StrictHostKeyChecking no" >> ~/.ssh/config
 
-      # Push the latest compose file to the DO machine so it reflects repo changes.
-      - name: Sync compose file to stage server
+      # Push the latest compose file and nginx config to the DO machine.
+      - name: Sync files to stage server
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker/nginx/ssl"
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.staging.yml \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/docker-compose.staging.yml
+          scp -i ~/.ssh/deploy_key \
+            docker/nginx/Dockerfile docker/nginx/nginx.conf \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/nginx/
 
       - name: Deploy to stage DO Droplet
         # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from
@@ -112,19 +115,19 @@ jobs:
 
             echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
             export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
-            docker compose -f docker/docker-compose.staging.yml pull api celery-worker celery-beat
+            docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml pull api celery-worker celery-beat
 
             echo "==> Starting services..."
-            docker compose -f docker/docker-compose.staging.yml up -d --remove-orphans
+            docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml up -d --build --remove-orphans
 
             echo "==> Running database migrations..."
-            docker compose -f docker/docker-compose.staging.yml exec -T api alembic upgrade head
+            docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml exec -T api alembic upgrade head
 
             echo "==> Verifying health..."
             sleep 15
             curl -sf http://localhost:8080/api/v1/health | grep -q '"success":true' || {
               echo "ERROR: Health check failed — dumping recent API logs:"
-              docker compose -f docker/docker-compose.staging.yml logs --tail=80 api
+              docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml logs --tail=80 api
               exit 1
             }
 
