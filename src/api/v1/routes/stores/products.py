@@ -6,7 +6,16 @@ URL: /stores/{store_id}/products
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 
 from src.api.dependencies import (
@@ -18,6 +27,7 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
+from src.api.utils.upload_validation import validate_csv_upload, validate_image_upload
 from src.api.v1.schemas import (
     CreateProductRequest,
     DeleteImageRequest,
@@ -53,6 +63,8 @@ from src.infrastructure.repositories import (
 )
 
 router = APIRouter(prefix="/{store_id}/products")
+
+PRODUCT_SORT_FIELDS = {"name", "price", "created_at", "updated_at", "quantity"}
 
 
 @router.post(
@@ -158,6 +170,20 @@ async def list_products(
     sort_order: str = Query("asc", description="Sort direction: asc or desc"),
 ):
     """List products for a store with optional filtering, search, and sorting."""
+    # Validate sort parameters against whitelist
+    if sort_by is not None and sort_by not in PRODUCT_SORT_FIELDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid sort field '{sort_by}'. "
+                f"Allowed: {', '.join(sorted(PRODUCT_SORT_FIELDS))}"
+            ),
+        )
+    if sort_order not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sort_order must be 'asc' or 'desc'.",
+        )
     use_case = ListProductsUseCase(product_repository=product_repo)
 
     # Use the advanced filter path when any extended filter is present
@@ -442,8 +468,8 @@ async def upload_product_image(
     - Resized to 3 variants: thumbnail (150px), medium (600px), large (1200px)
     - Uploaded to Cloudflare R2 storage
     """
-    # Read file content
-    file_content = await file.read()
+    # Validate file size (max 5 MB) and magic bytes before processing
+    file_content = await validate_image_upload(file)
 
     use_case = UploadProductImageUseCase(
         image_pipeline=image_pipeline,
@@ -562,7 +588,8 @@ async def import_products(
     - Returns row-level errors without aborting the entire import.
     - Maximum file size: 5 MB.
     """
-    csv_content = await file.read()
+    # Validate CSV file size (max 10 MB) and content type
+    csv_content = await validate_csv_upload(file)
 
     use_case = ImportProductsUseCase(
         product_repository=product_repo,

@@ -1,12 +1,23 @@
 """Error handling middleware.
 
 Provides a global error handler and per-exception-type handlers that
-return safe, structured JSON responses. In production, internal details
+return safe, structured JSON responses.  In production, internal details
 are suppressed to prevent information disclosure (OWASP A01/A09).
+
+Every error response follows a consistent envelope:
+    {
+        "success": false,
+        "error": {
+            "code": "ENTITY_NOT_FOUND",
+            "message": "Human-readable message",
+            "details": { ... }            // optional, never in production
+        }
+    }
 """
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -30,6 +41,41 @@ from src.core.exceptions import (
 logger = logging.getLogger(__name__)
 
 
+# ── Standardised error body builder ──────────────────────────
+
+
+def _error_body(
+    code: str,
+    message: str,
+    details: Any = None,
+) -> dict:
+    """Build a consistent error response dict.
+
+    ``details`` is only included when non-None, and in production it is
+    always stripped for safety (except for whitelisted codes like
+    ACCOUNT_LOCKED where the client needs ``retry_after``).
+    """
+    error: dict[str, Any] = {"code": code, "message": message}
+    if details is not None:
+        error["details"] = details
+    return {"success": False, "error": error}
+
+
+_DETAILS_ALLOWED_IN_PROD = {"ACCOUNT_LOCKED", "RATE_LIMIT_EXCEEDED"}
+
+
+def _safe_error_body(
+    code: str,
+    message: str,
+    details: Any = None,
+) -> dict:
+    """Same as ``_error_body`` but suppresses ``details`` in production
+    unless the code is whitelisted."""
+    if not settings.debug and code not in _DETAILS_ALLOWED_IN_PROD:
+        details = None
+    return _error_body(code, message, details)
+
+
 async def error_handler_middleware(request: Request, call_next: Callable):
     """Global error handling middleware."""
     try:
@@ -38,11 +84,9 @@ async def error_handler_middleware(request: Request, call_next: Callable):
         logger.exception("Unhandled error: %s", e)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "success": False,
-                "message": "An unexpected error occurred",
-                "error_code": "INTERNAL_SERVER_ERROR",
-            },
+            content=_error_body(
+                "INTERNAL_SERVER_ERROR", "An unexpected error occurred"
+            ),
         )
 
 
@@ -52,24 +96,14 @@ def setup_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(request: Request, exc: RequestValidationError):
         """Override FastAPI default to prevent verbose field-level detail leak."""
-        if settings.debug:
-            return JSONResponse(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                content={
-                    "success": False,
-                    "message": "Request validation failed",
-                    "error_code": "VALIDATION_ERROR",
-                    "details": exc.errors(),
-                },
-            )
         logger.warning("Request validation failed: %s", exc.errors())
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={
-                "success": False,
-                "message": "Request validation failed",
-                "error_code": "VALIDATION_ERROR",
-            },
+            content=_safe_error_body(
+                "VALIDATION_ERROR",
+                "Request validation failed",
+                exc.errors(),
+            ),
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -77,33 +111,21 @@ def setup_exception_handlers(app: FastAPI) -> None:
         """Override default HTTPException handler to ensure consistent format."""
         return JSONResponse(
             status_code=exc.status_code,
-            content={
-                "success": False,
-                "message": str(exc.detail),
-                "error_code": "HTTP_ERROR",
-            },
+            content=_error_body("HTTP_ERROR", str(exc.detail)),
         )
 
     @app.exception_handler(EntityNotFoundError)
     async def entity_not_found_handler(request: Request, exc: EntityNotFoundError):
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "ENTITY_NOT_FOUND",
-            },
+            content=_error_body("ENTITY_NOT_FOUND", str(exc)),
         )
 
     @app.exception_handler(ValidationError)
     async def validation_error_handler(request: Request, exc: ValidationError):
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "VALIDATION_ERROR",
-            },
+            content=_error_body("VALIDATION_ERROR", str(exc)),
         )
 
     # Must be registered before AuthenticationError so it takes priority
@@ -111,12 +133,11 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def account_locked_handler(request: Request, exc: AccountLockedError):
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "ACCOUNT_LOCKED",
-                "details": {"retry_after": exc.retry_after},
-            },
+            content=_safe_error_body(
+                "ACCOUNT_LOCKED",
+                str(exc),
+                {"retry_after": exc.retry_after},
+            ),
             headers={"Retry-After": str(exc.retry_after)},
         )
 
@@ -124,11 +145,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def authentication_error_handler(request: Request, exc: AuthenticationError):
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "AUTHENTICATION_ERROR",
-            },
+            content=_error_body("AUTHENTICATION_ERROR", str(exc)),
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -136,11 +153,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def token_expired_handler(request: Request, exc: TokenExpiredError):
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "TOKEN_EXPIRED",
-            },
+            content=_error_body("TOKEN_EXPIRED", str(exc)),
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -148,11 +161,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def invalid_token_handler(request: Request, exc: InvalidTokenError):
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "INVALID_TOKEN",
-            },
+            content=_error_body("INVALID_TOKEN", str(exc)),
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -160,42 +169,28 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def authorization_error_handler(request: Request, exc: AuthorizationError):
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "AUTHORIZATION_ERROR",
-            },
+            content=_error_body("AUTHORIZATION_ERROR", str(exc)),
         )
 
     @app.exception_handler(PaymentError)
     async def payment_error_handler(request: Request, exc: PaymentError):
         return JSONResponse(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "PAYMENT_ERROR",
-            },
+            content=_error_body("PAYMENT_ERROR", str(exc)),
         )
 
     @app.exception_handler(ExternalServiceError)
     async def storage_error_handler(request: Request, exc: ExternalServiceError):
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "success": False,
-                "message": "External service operation failed",
-                "error_code": "EXTERNAL_SERVICE_ERROR",
-            },
+            content=_error_body(
+                "EXTERNAL_SERVICE_ERROR", "External service operation failed"
+            ),
         )
 
     @app.exception_handler(DomainException)
     async def domain_error_handler(request: Request, exc: DomainException):
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "success": False,
-                "message": str(exc),
-                "error_code": "DOMAIN_ERROR",
-            },
+            content=_error_body("DOMAIN_ERROR", str(exc)),
         )

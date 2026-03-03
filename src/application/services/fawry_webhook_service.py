@@ -16,6 +16,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.interfaces.services.messaging_service import (
@@ -36,7 +37,7 @@ logger = get_logger(__name__)
 
 # Replay protection constants
 NONCE_TTL_SECONDS = 86400  # 24 hours (full day)
-MAX_WEBHOOK_AGE_SECONDS = 15 * 60  # 15 minutes
+MAX_WEBHOOK_AGE_SECONDS = 5 * 60  # 5 minutes (hardened from 15min)
 
 # Valid prior states for each webhook status. Webhooks arriving when the
 # order is already in a later state are silently ignored (idempotency).
@@ -92,19 +93,32 @@ class FawryWebhookService:
         reference expiry and is NOT used — it points to the future and
         would always pass.
 
-        If no usable timestamp is present we accept the webhook (Fawry
-        sandbox does not always include timestamps).
+        In production, webhooks without a timestamp are rejected.
+        In development/sandbox, they are accepted to support Fawry sandbox.
         """
         timestamp_ms = data.get("timestamp")
         if not timestamp_ms:
-            return True  # No timestamp in payload — accept
+            if settings.environment == "production":
+                logger.warning("webhook_missing_timestamp", data_keys=list(data.keys()))
+                return False  # Reject in production
+            return True  # Accept in dev/sandbox
 
         try:
             webhook_time = int(timestamp_ms) / 1000  # Convert ms → seconds
             age = time.time() - webhook_time
-            return abs(age) <= MAX_WEBHOOK_AGE_SECONDS
+            if abs(age) > MAX_WEBHOOK_AGE_SECONDS:
+                logger.warning(
+                    "webhook_timestamp_expired",
+                    age_seconds=int(abs(age)),
+                    max_age=MAX_WEBHOOK_AGE_SECONDS,
+                )
+                return False
+            return True
         except (ValueError, TypeError):
-            return True  # Unparseable timestamp — accept
+            if settings.environment == "production":
+                logger.warning("webhook_unparseable_timestamp", timestamp=timestamp_ms)
+                return False  # Reject in production
+            return True  # Accept in dev/sandbox
 
     # ------------------------------------------------------------------ #
     # DB Agent: order lookup (tenant-safe)
