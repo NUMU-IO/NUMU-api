@@ -5,10 +5,8 @@
 
 set -e
 
-# Create WAL archive directory
+# Create WAL archive directory (Docker volume is already owned by postgres user)
 mkdir -p /var/lib/postgresql/wal_archive
-chown postgres:postgres /var/lib/postgresql/wal_archive
-chmod 700 /var/lib/postgresql/wal_archive
 
 echo "WAL archiving directory initialized"
 
