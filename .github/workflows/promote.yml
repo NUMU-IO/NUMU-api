@@ -8,12 +8,12 @@ on:
         required: true
         type: choice
         options:
-          - staging   # merges dev → staging  (triggers staging deploy)
-          - prod      # merges staging → prod  (triggers prod deploy)
+          - stage   # merges dev → stage  (triggers stage deploy)
+          - prod      # merges stage → prod  (triggers prod deploy)
 
 jobs:
   promote:
-    name: Promote ${{ github.event.inputs.environment == 'staging' && 'dev → staging' || 'staging → prod' }}
+    name: Promote ${{ github.event.inputs.environment == 'stage' && 'dev → stage' || 'stage → prod' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -29,16 +29,16 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Promote to staging (dev → staging)
-        if: github.event.inputs.environment == 'staging'
+      - name: Promote to stage (dev → stage)
+        if: github.event.inputs.environment == 'stage'
         run: |
-          git checkout staging
+          git checkout stage
           git merge --ff-only origin/dev
-          git push origin staging
+          git push origin stage
 
-      - name: Promote to prod (staging → prod)
+      - name: Promote to prod (stage → prod)
         if: github.event.inputs.environment == 'prod'
         run: |
           git checkout prod
-          git merge --ff-only origin/staging
+          git merge --ff-only origin/stage
           git push origin prod
