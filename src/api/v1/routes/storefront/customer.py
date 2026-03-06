@@ -62,6 +62,28 @@ from src.infrastructure.repositories import (
 router = APIRouter()
 
 
+def _customer_response(c: Customer) -> CustomerResponse:
+    """Build a CustomerResponse from a Customer entity, converting value objects to str."""
+    return CustomerResponse(
+        id=str(c.id),
+        store_id=str(c.store_id),
+        email=c.email.value if hasattr(c.email, "value") else str(c.email),
+        first_name=c.first_name,
+        last_name=c.last_name,
+        full_name=c.full_name,
+        phone=c.phone.value
+        if c.phone and hasattr(c.phone, "value")
+        else (str(c.phone) if c.phone else None),
+        accepts_marketing=c.accepts_marketing,
+        is_verified=c.is_verified,
+        total_orders=c.total_orders,
+        total_spent=c.total_spent,
+        default_address_id=str(c.default_address_id) if c.default_address_id else None,
+        created_at=str(c.created_at) if c.created_at else None,
+        updated_at=str(c.updated_at) if c.updated_at else None,
+    )
+
+
 # ============================================================================
 # Profile Routes
 # ============================================================================
@@ -80,22 +102,7 @@ async def get_customer_profile(
     result = current_customer
 
     return SuccessResponse(
-        data=CustomerResponse(
-            id=result.id,
-            store_id=result.store_id,
-            email=result.email,
-            first_name=result.first_name,
-            last_name=result.last_name,
-            full_name=result.full_name,
-            phone=result.phone,
-            accepts_marketing=result.accepts_marketing,
-            is_verified=result.is_verified,
-            total_orders=result.total_orders,
-            total_spent=result.total_spent,
-            default_address_id=result.default_address_id,
-            created_at=str(result.created_at) if result.created_at else None,
-            updated_at=str(result.updated_at) if result.updated_at else None,
-        ),
+        data=_customer_response(result),
         message="Customer profile retrieved successfully",
     )
 
@@ -124,22 +131,7 @@ async def update_customer_profile(
     result = await use_case.execute(current_customer.id, dto)
 
     return SuccessResponse(
-        data=CustomerResponse(
-            id=result.id,
-            store_id=result.store_id,
-            email=result.email,
-            first_name=result.first_name,
-            last_name=result.last_name,
-            full_name=result.full_name,
-            phone=result.phone,
-            accepts_marketing=result.accepts_marketing,
-            is_verified=result.is_verified,
-            total_orders=result.total_orders,
-            total_spent=result.total_spent,
-            default_address_id=result.default_address_id,
-            created_at=str(result.created_at) if result.created_at else None,
-            updated_at=str(result.updated_at) if result.updated_at else None,
-        ),
+        data=_customer_response(result),
         message="Customer profile updated successfully",
     )
 

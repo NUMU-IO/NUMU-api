@@ -31,14 +31,18 @@ CSRF_EXEMPT_PATHS = (
     "/openapi.json",
 )
 
-STOREFRONT_AUTH_EXEMPT_PATHS = (
+STOREFRONT_AUTH_EXEMPT_SUFFIXES = (
     "/auth/login",
     "/auth/register",
+    "/auth/refresh",
+    "/auth/logout",
+    "/auth/verify-email",
+    "/auth/resend-verification",
 )
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
-    """vaildate CSRF token on state changing.
+    """Validate CSRF token on state-changing requests.
     Uses double-submit cookie pattern:
        - A non-httpOnly `csrf_token` cookie is set via /auth/csrf-token
        - Client reads cookie and sends value in X-CSRF-Token header
@@ -53,13 +57,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         # Skip CSRF check for exempt paths
         if path.startswith(CSRF_EXEMPT_PATHS):
-            # for storefront auth exempt paths, also skip if path starts with /storefront/
+            # Storefront store routes: only exempt auth endpoints
             if path.startswith("/api/v1/storefront/store/"):
-                if not any(path.startswith(p) for p in STOREFRONT_AUTH_EXEMPT_PATHS):
-                    # not an auth exempt path, fail through to CSRF check
-                    pass
-                else:
+                if any(path.endswith(s) for s in STOREFRONT_AUTH_EXEMPT_SUFFIXES):
                     return await call_next(request)
+                # Not an auth path — fall through to CSRF check
             else:
                 return await call_next(request)
 

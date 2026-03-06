@@ -46,6 +46,36 @@ def get_payment_service():
     return StripePaymentService()
 
 
+def get_payment_service_for_provider(provider: str):
+    """Get payment service for a specific provider.
+
+    Used by the refund system to resolve the correct payment
+    service based on the order's original payment method.
+    """
+
+    match provider:
+        case "paymob":
+            from src.infrastructure.external_services.paymob import (
+                PaymobPaymentService,
+            )
+
+            return PaymobPaymentService()
+        case "fawry":
+            from src.infrastructure.external_services.fawry import (
+                FawryPaymentService,
+            )
+
+            return FawryPaymentService()
+        case "stripe":
+            return StripePaymentService()
+        case "cod":
+            from src.infrastructure.external_services.cod import CODPaymentService
+
+            return CODPaymentService()
+        case _:
+            raise ValueError(f"Unknown payment provider: {provider}")
+
+
 def _get_storage():
     """Return S3 storage if configured, otherwise local filesystem storage."""
     # Prefer new s3_* settings, fall back to legacy r2_* settings

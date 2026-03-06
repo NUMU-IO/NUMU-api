@@ -27,6 +27,7 @@ from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import orders as orders_module
 from src.api.v1.routes.stores import products as products_module
+from src.api.v1.routes.stores import refunds as refunds_module
 from src.api.v1.routes.stores import settings as settings_module
 
 # Import all routers
@@ -52,5 +53,6 @@ router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(settings_module.router, tags=["Store Settings"])
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
+router.include_router(refunds_module.router, tags=["Store Refunds"])
 
 __all__ = ["router"]
