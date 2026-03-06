@@ -67,6 +67,8 @@ def _validate_origins(origins: list[str], environment: str) -> list[str]:
             "http://127.0.0.1:3000",
             "http://127.0.0.1:3030",
             "http://127.0.0.1:8080",
+            "http://localhost:5000",
+            "http://127.0.0.1:5000",
         ]
 
     validated = []
@@ -121,6 +123,7 @@ def setup_cors(app: FastAPI) -> None:
                 "http://localhost:3091",  # Landing page (alt port)
                 "http://localhost:5173",  # Vite default
                 "http://localhost:8080",  # Storefront
+                "http://localhost:8081",  # Storefront (alt port)
                 "http://127.0.0.1:3000",
                 "http://127.0.0.1:3002",
                 "http://127.0.0.1:3030",  # Dashboard
@@ -128,7 +131,9 @@ def setup_cors(app: FastAPI) -> None:
                 "http://127.0.0.1:3091",  # Landing page (alt port)
                 "http://127.0.0.1:5173",
                 "http://172.30.144.1:3030",  # LAN access
+                "http://localhost:5000",  # Admin panel
                 "http://127.0.0.1:8080",  # Storefront
+                "http://127.0.0.1:8081",  # Storefront (alt port)
             ]
             logger.info(
                 f"CORS: Debug mode - using default development origins: {configured_origins}"

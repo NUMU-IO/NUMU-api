@@ -33,6 +33,7 @@ from src.api.dependencies.repositories import (
     get_onboarding_repository,
     get_order_repository,
     get_product_repository,
+    get_refund_repository,
     get_store_repository,
     get_user_repository,
     get_waitlist_repository,
@@ -70,6 +71,7 @@ __all__ = [
     "get_feedback_repository",
     "get_onboarding_repository",
     "get_order_repository",
+    "get_refund_repository",
     "get_waitlist_repository",
     # Services
     "get_password_service",

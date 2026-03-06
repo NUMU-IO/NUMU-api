@@ -11,7 +11,16 @@ These routes are publicly accessible without authentication:
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
 
 from src.api.dependencies import (
     CursorParams,
@@ -29,7 +38,10 @@ from src.api.dependencies import (
     get_token_service,
 )
 from src.api.responses import SuccessResponse
-from src.api.utils.cookies import set_customer_auth_cookies
+from src.api.utils.cookies import (
+    clear_customer_auth_cookies,
+    set_customer_auth_cookies,
+)
 from src.api.v1.routes.storefront.theme_schemas import get_theme_schema
 from src.api.v1.schemas import (
     CursorPaginatedListResponse,
@@ -63,6 +75,29 @@ from src.infrastructure.repositories import (
 )
 
 router = APIRouter()
+
+
+def _customer_response(c) -> CustomerResponse:
+    """Build a CustomerResponse, converting value objects to str."""
+    return CustomerResponse(
+        id=str(c.id),
+        store_id=str(c.store_id),
+        email=c.email.value if hasattr(c.email, "value") else str(c.email),
+        first_name=c.first_name,
+        last_name=c.last_name,
+        full_name=c.full_name,
+        phone=c.phone.value
+        if c.phone and hasattr(c.phone, "value")
+        else (str(c.phone) if c.phone else None),
+        accepts_marketing=c.accepts_marketing,
+        is_verified=c.is_verified,
+        total_orders=c.total_orders,
+        total_spent=c.total_spent,
+        default_address_id=str(c.default_address_id) if c.default_address_id else None,
+        created_at=str(c.created_at) if c.created_at else None,
+        updated_at=str(c.updated_at) if c.updated_at else None,
+    )
+
 
 # Router for routes that don't require a store_id path param
 lookup_router = APIRouter()
@@ -618,29 +653,33 @@ async def register_customer(
         response, result.tokens.access_token, result.tokens.refresh_token
     )
 
+    # Send verification email in the background (non-blocking)
+    try:
+        import random
+
+        from src.infrastructure.cache.redis_cache import RedisCacheService
+        from src.infrastructure.external_services.resend.email_service import (
+            ResendEmailService,
+        )
+
+        code = f"{random.randint(0, 999999):06d}"
+        cache = RedisCacheService()
+        await cache.set(
+            f"customer_email_verify_code:{result.customer.id}",
+            code,
+            expire=86400,
+        )
+        email_service = ResendEmailService()
+        await email_service.send_verification_email(
+            email=request.email,
+            token="",
+            code=code,
+        )
+    except Exception:
+        pass  # Non-critical — customer can request resend later
+
     return SuccessResponse(
-        data=CustomerAuthResponse(
-            customer=CustomerResponse(
-                id=result.customer.id,
-                store_id=result.customer.store_id,
-                email=result.customer.email,
-                first_name=result.customer.first_name,
-                last_name=result.customer.last_name,
-                full_name=result.customer.full_name,
-                phone=result.customer.phone,
-                accepts_marketing=result.customer.accepts_marketing,
-                is_verified=result.customer.is_verified,
-                total_orders=result.customer.total_orders,
-                total_spent=result.customer.total_spent,
-                default_address_id=result.customer.default_address_id,
-                created_at=str(result.customer.created_at)
-                if result.customer.created_at
-                else None,
-                updated_at=str(result.customer.updated_at)
-                if result.customer.updated_at
-                else None,
-            ),
-        ),
+        data=CustomerAuthResponse(customer=_customer_response(result.customer)),
         message="Customer registered successfully",
     )
 
@@ -680,27 +719,218 @@ async def login_customer(
     )
 
     return SuccessResponse(
-        data=CustomerAuthResponse(
-            customer=CustomerResponse(
-                id=result.customer.id,
-                store_id=result.customer.store_id,
-                email=result.customer.email,
-                first_name=result.customer.first_name,
-                last_name=result.customer.last_name,
-                full_name=result.customer.full_name,
-                phone=result.customer.phone,
-                accepts_marketing=result.customer.accepts_marketing,
-                is_verified=result.customer.is_verified,
-                total_orders=result.customer.total_orders,
-                total_spent=result.customer.total_spent,
-                default_address_id=result.customer.default_address_id,
-                created_at=str(result.customer.created_at)
-                if result.customer.created_at
-                else None,
-                updated_at=str(result.customer.updated_at)
-                if result.customer.updated_at
-                else None,
-            ),
-        ),
+        data=CustomerAuthResponse(customer=_customer_response(result.customer)),
         message="Login successful",
+    )
+
+
+# ============================================================================
+# Customer Token Refresh
+# ============================================================================
+
+
+@router.post(
+    "/auth/refresh",
+    response_model=SuccessResponse,
+    summary="Refresh customer access token",
+    operation_id="refresh_customer_token",
+)
+async def refresh_customer_token(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    request: Request,
+    response: Response,
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+):
+    """Refresh customer access token using the customer_refresh_token cookie."""
+    refresh_tok = request.cookies.get("customer_refresh_token")
+    if not refresh_tok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found",
+        )
+
+    from src.core.exceptions import InvalidTokenError, TokenExpiredError
+
+    try:
+        payload = token_service.verify_customer_token(refresh_tok)
+    except TokenExpiredError:
+        clear_customer_auth_cookies(response)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired",
+        )
+    except InvalidTokenError:
+        clear_customer_auth_cookies(response)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    if payload.token_type != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+        )
+
+    if payload.store_id != store_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token does not belong to this store",
+        )
+
+    customer = await customer_repo.get_by_id(payload.customer_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Customer not found",
+        )
+
+    new_access = token_service.create_customer_access_token(customer)
+    new_refresh = token_service.create_customer_refresh_token(customer)
+    set_customer_auth_cookies(response, new_access, new_refresh)
+
+    return SuccessResponse(
+        data={"message": "Token refreshed"},
+        message="Token refreshed successfully",
+    )
+
+
+# ============================================================================
+# Customer Logout
+# ============================================================================
+
+
+@router.post(
+    "/auth/logout",
+    response_model=SuccessResponse,
+    summary="Logout customer",
+    operation_id="logout_customer",
+)
+async def logout_customer(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    response: Response,
+):
+    """Clear customer auth cookies to log them out."""
+    clear_customer_auth_cookies(response)
+    return SuccessResponse(
+        data={"message": "Logged out successfully"},
+        message="Logged out successfully",
+    )
+
+
+# ============================================================================
+# Customer Email Verification
+# ============================================================================
+
+from pydantic import BaseModel as _BaseModel
+from pydantic import Field as _Field
+
+from src.api.dependencies.auth import get_current_customer_payload
+from src.core.interfaces.services.token_service import CustomerTokenPayload
+
+
+class _VerifyEmailCodeRequest(_BaseModel):
+    code: str = _Field(
+        ..., min_length=6, max_length=6, description="6-digit verification code"
+    )
+
+
+@router.post(
+    "/auth/verify-email",
+    response_model=SuccessResponse,
+    summary="Verify customer email with code",
+    operation_id="verify_customer_email",
+)
+async def verify_customer_email(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    body: _VerifyEmailCodeRequest,
+    payload: Annotated[CustomerTokenPayload, Depends(get_current_customer_payload)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+):
+    """Verify a customer's email address using the 6-digit code."""
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    cache = RedisCacheService()
+    cache_key = f"customer_email_verify_code:{payload.customer_id}"
+    stored_code = await cache.get(cache_key)
+
+    if not stored_code or stored_code != body.code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code",
+        )
+
+    customer = await customer_repo.get_by_id(payload.customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    if not customer.is_verified:
+        customer.verify()
+        await customer_repo.update(customer)
+
+    await cache.delete(cache_key)
+
+    return SuccessResponse(
+        data={"message": "Email verified successfully"},
+        message="Email verified successfully",
+    )
+
+
+@router.post(
+    "/auth/resend-verification",
+    response_model=SuccessResponse,
+    summary="Resend customer verification email",
+    operation_id="resend_customer_verification",
+)
+async def resend_customer_verification(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    payload: Annotated[CustomerTokenPayload, Depends(get_current_customer_payload)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+):
+    """Resend verification email with a new 6-digit code."""
+    import random
+
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+
+    customer = await customer_repo.get_by_id(payload.customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    if customer.is_verified:
+        return SuccessResponse(
+            data={"message": "Email is already verified"},
+            message="Email is already verified",
+        )
+
+    code = f"{random.randint(0, 999999):06d}"
+    cache = RedisCacheService()
+    await cache.set(
+        f"customer_email_verify_code:{customer.id}",
+        code,
+        expire=86400,
+    )
+
+    email_addr = (
+        customer.email.value
+        if hasattr(customer.email, "value")
+        else str(customer.email)
+    )
+
+    try:
+        email_service = ResendEmailService()
+        await email_service.send_verification_email(
+            email=email_addr,
+            token="",  # no link-based verification for customers
+            code=code,
+        )
+    except Exception:
+        pass  # Non-critical — code is stored; customer can retry
+
+    return SuccessResponse(
+        data={"message": "Verification email sent"},
+        message="Verification email sent",
     )

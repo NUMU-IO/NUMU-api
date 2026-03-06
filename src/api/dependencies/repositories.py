@@ -16,6 +16,7 @@ from src.infrastructure.repositories import (
     OnboardingRepository,
     OrderRepository,
     ProductRepository,
+    RefundRepository,
     StoreRepository,
     UserRepository,
     WaitlistRepository,
@@ -83,6 +84,13 @@ def get_order_repository(
 ) -> OrderRepository:
     """Get order repository dependency."""
     return OrderRepository(session)
+
+
+def get_refund_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> RefundRepository:
+    """Get refund repository dependency."""
+    return RefundRepository(session)
 
 
 def get_waitlist_repository(
