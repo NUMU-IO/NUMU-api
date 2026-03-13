@@ -27,6 +27,7 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationResponse,
     CustomizationSocialLinks,
     CustomizationTheme,
+    InvoiceSettingsResponse,
     NotificationTemplate,
     PaymentMethodStatus,
     PaymentSettingsResponse,
@@ -35,6 +36,7 @@ from src.api.v1.schemas.tenant.settings import (
     ShippingZone,
     StoreSettingsResponse,
     UpdateCustomizationRequest,
+    UpdateInvoiceSettingsRequest,
     UpdatePaymentSettingsRequest,
     UpdateShippingSettingsRequest,
     UpdateShippingZoneRequest,
@@ -565,6 +567,118 @@ async def delete_shipping_zone(
     await store_repo.update(store)
 
     return None
+
+
+# ============ Invoice / Tax Settings ============
+
+
+@router.get(
+    "/invoice",
+    response_model=SuccessResponse[InvoiceSettingsResponse],
+    summary="Get invoice/tax settings",
+    operation_id="get_invoice_settings",
+)
+async def get_invoice_settings(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get invoice and tax settings (ETA seller info)."""
+    settings = store.settings or {}
+    invoice = settings.get("invoice", {})
+    # Also check legacy top-level keys for backwards compat
+    address = store.address or {}
+
+    return SuccessResponse(
+        data=InvoiceSettingsResponse(
+            tax_id=invoice.get("tax_id", settings.get("tax_id", "")),
+            name_ar=invoice.get("name_ar", settings.get("name_ar", "")),
+            branch_id=invoice.get("branch_id", settings.get("branch_id", "0")),
+            activity_code=invoice.get(
+                "activity_code", settings.get("activity_code", "4649")
+            ),
+            governorate=invoice.get(
+                "governorate", address.get("governorate", address.get("state", ""))
+            ),
+            city=invoice.get("city", address.get("city", "")),
+            street=invoice.get(
+                "street", address.get("street", address.get("address_line1", ""))
+            ),
+            building_number=invoice.get(
+                "building_number", address.get("building_number", "")
+            ),
+        ),
+        message="Invoice settings retrieved successfully",
+    )
+
+
+@router.patch(
+    "/invoice",
+    response_model=SuccessResponse[InvoiceSettingsResponse],
+    summary="Update invoice/tax settings",
+    operation_id="update_invoice_settings",
+)
+async def update_invoice_settings(
+    request: UpdateInvoiceSettingsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Update invoice and tax settings (ETA seller info)."""
+    settings = store.settings or {}
+    invoice = settings.get("invoice", {})
+
+    # Migrate legacy top-level keys on first save
+    if not invoice:
+        invoice = {
+            "tax_id": settings.get("tax_id", ""),
+            "name_ar": settings.get("name_ar", ""),
+            "branch_id": settings.get("branch_id", "0"),
+            "activity_code": settings.get("activity_code", "4649"),
+        }
+        address = store.address or {}
+        invoice["governorate"] = address.get("governorate", address.get("state", ""))
+        invoice["city"] = address.get("city", "")
+        invoice["street"] = address.get("street", address.get("address_line1", ""))
+        invoice["building_number"] = address.get("building_number", "")
+
+    # Update provided fields
+    if request.tax_id is not None:
+        invoice["tax_id"] = request.tax_id
+    if request.name_ar is not None:
+        invoice["name_ar"] = request.name_ar
+    if request.branch_id is not None:
+        invoice["branch_id"] = request.branch_id
+    if request.activity_code is not None:
+        invoice["activity_code"] = request.activity_code
+    if request.governorate is not None:
+        invoice["governorate"] = request.governorate
+    if request.city is not None:
+        invoice["city"] = request.city
+    if request.street is not None:
+        invoice["street"] = request.street
+    if request.building_number is not None:
+        invoice["building_number"] = request.building_number
+
+    # Also write to top-level settings keys for checkout backwards compat
+    settings["invoice"] = invoice
+    settings["tax_id"] = invoice["tax_id"]
+    settings["name_ar"] = invoice["name_ar"]
+    settings["branch_id"] = invoice["branch_id"]
+    settings["activity_code"] = invoice["activity_code"]
+    store.settings = settings
+
+    # Update address fields too
+    address = store.address or {}
+    address["governorate"] = invoice["governorate"]
+    address["city"] = invoice["city"]
+    address["street"] = invoice["street"]
+    address["building_number"] = invoice["building_number"]
+    store.address = address
+
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=InvoiceSettingsResponse(**invoice),
+        message="Invoice settings updated successfully",
+    )
 
 
 # ============ WhatsApp Settings ============

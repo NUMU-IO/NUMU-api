@@ -9,6 +9,7 @@ from src.api.v1.schemas.public.auth import (
     PasswordResetRequest,
     RegisterRequest,
     ResendVerificationRequest,
+    TokenHandoffRequest,
     TokenResponse,
     UpdateProfileRequest,
     UserResponse,
@@ -76,4 +77,5 @@ __all__ = [
     "CursorPaginatedListResponse",
     "MessageResponse",
     "DeleteResponse",
+    "TokenHandoffRequest",
 ]

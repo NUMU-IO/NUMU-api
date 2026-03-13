@@ -30,6 +30,8 @@ from src.api.v1.schemas import (
     PasswordResetConfirm,
     PasswordResetRequest,
     RegisterRequest,
+    TokenHandoffRequest,
+    TokenResponse,
     UpdateProfileRequest,
     UserResponse,
     VerifyEmailCodeRequest,
@@ -100,7 +102,7 @@ router = APIRouter()
 def _user_response(user) -> UserResponse:
     return UserResponse(
         id=str(user.id),
-        email=user.email,
+        email=str(user.email),
         first_name=user.first_name,
         last_name=user.last_name,
         full_name=user.full_name,
@@ -148,6 +150,53 @@ async def get_csrf_token(response: Response):
     return SuccessResponse(
         data=CsrfTokenResponse(csrf_token=token),
         message="CSRF token generated",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Token Handoff  (landing-page → dashboard cross-origin redirect)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/token-handoff",
+    response_model=SuccessResponse[AuthResponse],
+    summary="Exchange tokens from URL params into httpOnly cookies",
+    operation_id="token_handoff",
+)
+async def token_handoff(
+    request: TokenHandoffRequest,
+    response: Response,
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+):
+    """Accept the access_token & refresh_token passed as URL query params
+    after a cross-origin redirect from the landing page, validate them,
+    then set fresh httpOnly cookies so the dashboard can operate normally.
+    """
+    payload = token_service.verify_token(request.access_token)
+    user = await user_repo.get_by_id(payload.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
+    # Issue a fresh pair of tokens so the redirected session is independent
+    new_access = token_service.create_access_token(user)
+    new_refresh = token_service.create_refresh_token(user)
+    set_auth_cookies(response, new_access, new_refresh)
+
+    return SuccessResponse(
+        data=AuthResponse(
+            user=_user_response(user),
+            tokens=TokenResponse(
+                access_token=new_access,
+                refresh_token=new_refresh,
+                token_type="bearer",
+            ),
+        ),
+        message="Session established",
     )
 
 
@@ -200,7 +249,14 @@ async def register(
     )
 
     return SuccessResponse(
-        data=AuthResponse(user=_user_response(result.user)),
+        data=AuthResponse(
+            user=_user_response(result.user),
+            tokens=TokenResponse(
+                access_token=result.tokens.access_token,
+                refresh_token=result.tokens.refresh_token,
+                token_type="bearer",
+            ),
+        ),
         message="User registered successfully",
     )
 
@@ -407,7 +463,14 @@ async def login(
     )
 
     return SuccessResponse(
-        data=AuthResponse(user=_user_response(result.user)),
+        data=AuthResponse(
+            user=_user_response(result.user),
+            tokens=TokenResponse(
+                access_token=result.tokens.access_token,
+                refresh_token=result.tokens.refresh_token,
+                token_type="bearer",
+            ),
+        ),
         message="Login successful",
     )
 

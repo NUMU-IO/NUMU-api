@@ -192,6 +192,220 @@ def send_delivery_confirmation_email_task(
 
 
 # ---------------------------------------------------------------------------
+# Invoice tasks
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(
+    name="tasks.generate_and_send_invoice",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+)
+def generate_and_send_invoice_task(
+    self,
+    store_id: str,
+    order_id: str,
+    order_number: str,
+    customer_id: str,
+    customer_email: str,
+    customer_name: str,
+    line_items: list[dict],
+    subtotal: int,
+    tax_amount: int,
+    discount_amount: int,
+    total: int,
+    currency: str,
+    store_name: str,
+    shipping_address: dict | None = None,
+    language: str = "ar",
+):
+    """Generate invoice from order data, create PDF, persist to DB, and email customer.
+
+    This task runs asynchronously after checkout to:
+    1. Create an Invoice entity from order data
+    2. Generate a bilingual PDF using the ETA-compliant template
+    3. Persist the invoice to the database
+    4. Email the PDF to the customer
+    """
+    from decimal import Decimal
+    from uuid import UUID, uuid4
+
+    from src.core.entities.invoice import (
+        BuyerInfo,
+        Invoice,
+        InvoiceStatus,
+        SellerInfo,
+    )
+
+    try:
+        # Build seller info from store
+        seller = SellerInfo(
+            tax_id="",  # Will be populated from store settings if available
+            name=store_name,
+            name_ar=store_name,
+        )
+
+        # Build buyer info from customer/shipping address
+        buyer_name = customer_name or "Customer"
+        buyer_city = ""
+        buyer_street = ""
+        buyer_phone = ""
+        if shipping_address:
+            buyer_name = (
+                f"{shipping_address.get('first_name', '')} {shipping_address.get('last_name', '')}".strip()
+                or buyer_name
+            )
+            buyer_city = shipping_address.get("city", "")
+            buyer_street = shipping_address.get("address_line1", "")
+            buyer_phone = shipping_address.get("phone", "")
+
+        buyer = BuyerInfo(
+            buyer_type="P",  # Person (consumer)
+            name=buyer_name,
+            name_ar=buyer_name,
+            city=buyer_city,
+            street=buyer_street,
+            phone=buyer_phone,
+            email=customer_email,
+        )
+
+        # Generate invoice number via DB
+        async def _create_invoice():
+            from src.infrastructure.database.connection import AsyncSessionLocal
+            from src.infrastructure.repositories.invoice_repository import (
+                InvoiceRepository,
+            )
+
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    repo = InvoiceRepository(session)
+                    inv_number = await repo.get_next_invoice_number(UUID(store_id))
+
+                    # Create invoice entity
+                    invoice = Invoice(
+                        id=uuid4(),
+                        store_id=UUID(store_id),
+                        order_id=UUID(order_id),
+                        customer_id=UUID(customer_id),
+                        invoice_number=inv_number,
+                        internal_id=order_number,
+                        status=InvoiceStatus.ACCEPTED,
+                        seller=seller,
+                        buyer=buyer,
+                        currency=currency,
+                    )
+
+                    # Add line items
+                    for item in line_items:
+                        unit_price_decimal = (
+                            Decimal(str(item["price"]))
+                            if item.get("price")
+                            else Decimal(str(item.get("unit_price", 0))) / 100
+                        )
+                        invoice.add_line_item(
+                            description=item.get(
+                                "name", item.get("product_name", "Item")
+                            ),
+                            description_ar=item.get(
+                                "name", item.get("product_name", "منتج")
+                            ),
+                            item_code=item.get("sku", "EG-0000-0000"),
+                            quantity=Decimal(str(item.get("quantity", 1))),
+                            unit_price=unit_price_decimal,
+                            internal_code=item.get("sku"),
+                        )
+
+                    # Persist to DB
+                    created_invoice = await repo.create(invoice)
+                    return created_invoice
+
+        invoice = run_async(_create_invoice())
+
+        # Generate PDF
+        from src.infrastructure.external_services.invoice import InvoicePDFGenerator
+
+        generator = InvoicePDFGenerator(
+            template_name="invoice_ar.html",
+            language="ar_en",
+        )
+        pdf_bytes = generator.generate(invoice)
+
+        # Upload PDF to R2 (best-effort)
+        async def _upload_pdf():
+            try:
+                from src.core.interfaces.services.storage_service import StorageBucket
+                from src.infrastructure.external_services.cloudflare_r2 import (
+                    CloudflareR2StorageService,
+                )
+
+                r2 = CloudflareR2StorageService()
+                if r2.client:
+                    uploaded = await r2.upload_file(
+                        file_content=pdf_bytes,
+                        filename=f"{invoice.invoice_number}.pdf",
+                        content_type="application/pdf",
+                        bucket=StorageBucket.DOCUMENTS,
+                    )
+                    # Update invoice with PDF URL
+                    from src.infrastructure.database.connection import (
+                        AsyncSessionLocal,
+                    )
+                    from src.infrastructure.repositories.invoice_repository import (
+                        InvoiceRepository,
+                    )
+
+                    async with AsyncSessionLocal() as session:
+                        async with session.begin():
+                            repo = InvoiceRepository(session)
+                            invoice.pdf_r2_key = uploaded.key
+                            invoice.pdf_url = uploaded.url
+                            await repo.update(invoice)
+            except Exception:
+                logger.warning(
+                    "invoice_pdf_r2_upload_failed", invoice_id=str(invoice.id)
+                )
+
+        run_async(_upload_pdf())
+
+        # Send email with PDF attachment
+        from src.infrastructure.external_services.resend.email_service import (
+            ResendEmailService,
+        )
+
+        service = ResendEmailService()
+        result = run_async(
+            service.send_invoice_email(
+                email=customer_email,
+                order_number=order_number,
+                invoice_number=invoice.invoice_number,
+                pdf_bytes=pdf_bytes,
+                store_name=store_name,
+                language=language,
+            )
+        )
+        logger.info(
+            "invoice_generated_and_sent",
+            invoice_number=invoice.invoice_number,
+            order_number=order_number,
+            email=customer_email,
+            success=result,
+        )
+        return {
+            "sent": result,
+            "invoice_number": invoice.invoice_number,
+            "order_number": order_number,
+        }
+    except Exception as e:
+        logger.error(
+            "invoice_generation_failed",
+            order_number=order_number,
+            error=str(e),
+        )
+        raise self.retry(exc=e)
+
+
+# ---------------------------------------------------------------------------
 # WhatsApp tasks
 # ---------------------------------------------------------------------------
 

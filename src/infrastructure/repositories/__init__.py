@@ -6,6 +6,7 @@ from src.infrastructure.repositories.category_repository import CategoryReposito
 from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
+from src.infrastructure.repositories.invoice_repository import InvoiceRepository
 from src.infrastructure.repositories.message_log_repository import MessageLogRepository
 from src.infrastructure.repositories.onboarding_repository import OnboardingRepository
 from src.infrastructure.repositories.order_repository import OrderRepository
@@ -24,6 +25,7 @@ __all__ = [
     "CustomerRepository",
     "CustomerAddressRepository",
     "FeedbackRepository",
+    "InvoiceRepository",
     "MessageLogRepository",
     "OnboardingRepository",
     "OrderRepository",

@@ -88,6 +88,11 @@ class RegisterUserUseCase:
                 )
                 # Generate a 6-digit code and store it in Redis keyed to user id
                 code = _generate_verification_code()
+                log.info(
+                    "verification_code_generated",
+                    code=code,
+                    hint="DEV ONLY — remove this log in production",
+                )
                 try:
                     from src.infrastructure.cache.redis_cache import RedisCacheService
 

@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <style>
         /* ================================================================
-         * NUMU Invoice PDF Template
-         * Supports Arabic RTL and English LTR via Jinja2 variables.
+         * NUMU Bilingual Invoice PDF Template (Arabic/English)
+         * Arabic RTL primary with English labels alongside.
          * Rendered by WeasyPrint (HTML/CSS -> PDF).
          * Font: Noto Sans Arabic (installed via fontconfig in Docker).
          * ================================================================ */
@@ -33,33 +33,70 @@
             line-height: 1.6;
             color: #1a1a2e;
             direction: {{ direction }};
-            text-align: {{ text_align }};
         }
 
-        /* --- Header --- */
+        /* --- Header with Logo --- */
         .invoice-header {
             border-bottom: 3px solid #1034A6;
             padding-bottom: 12px;
             margin-bottom: 20px;
             display: flex;
             justify-content: space-between;
-            align-items: flex-end;
+            align-items: center;
         }
 
-        .invoice-title {
-            font-size: 22pt;
+        .header-logo {
+            flex-shrink: 0;
+        }
+
+        .header-logo img {
+            max-height: 55px;
+            max-width: 180px;
+        }
+
+        .header-center {
+            text-align: center;
+            flex-grow: 1;
+        }
+
+        .invoice-title-ar {
+            font-size: 20pt;
             font-weight: bold;
             color: #1034A6;
         }
 
-        .invoice-meta {
-            text-align: {{ text_align_opposite }};
-            font-size: 9pt;
-            color: #555;
+        .invoice-title-en {
+            font-size: 12pt;
+            font-weight: bold;
+            color: #1034A6;
+            direction: ltr;
         }
 
-        .invoice-meta strong {
+        .header-meta {
+            text-align: {{ text_align_opposite }};
+            direction: ltr;
+            font-size: 9pt;
+            color: #555;
+            flex-shrink: 0;
+        }
+
+        .header-meta .meta-row {
+            margin-bottom: 2px;
+        }
+
+        .meta-label-ar {
             color: #1a1a2e;
+            font-weight: bold;
+        }
+
+        .meta-label-en {
+            color: #6c757d;
+            font-size: 8pt;
+        }
+
+        .meta-value {
+            color: #1a1a2e;
+            font-weight: bold;
         }
 
         /* --- Party boxes (seller / buyer) --- */
@@ -88,9 +125,17 @@
             padding-bottom: 4px;
         }
 
-        .party-name {
+        .party-name-ar {
             font-size: 12pt;
             font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .party-name-en {
+            font-size: 9pt;
+            color: #6c757d;
+            direction: ltr;
+            text-align: {{ text_align_opposite }};
             margin-bottom: 4px;
         }
 
@@ -98,6 +143,10 @@
             font-size: 9pt;
             color: #495057;
             margin-bottom: 2px;
+        }
+
+        .party-detail-label {
+            color: #6c757d;
         }
 
         /* --- Line items table --- */
@@ -113,10 +162,20 @@
             border-bottom: 2px solid #1034A6;
             font-size: 8pt;
             font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
             color: #495057;
             text-align: {{ text_align }};
+        }
+
+        table.items th .th-ar {
+            display: block;
+            font-size: 8pt;
+        }
+
+        table.items th .th-en {
+            display: block;
+            font-size: 7pt;
+            color: #868e96;
+            direction: ltr;
         }
 
         table.items th.num {
@@ -146,6 +205,18 @@
             text-align: {{ text_align_opposite }};
         }
 
+        table.items td .desc-ar {
+            display: block;
+        }
+
+        table.items td .desc-en {
+            display: block;
+            font-size: 8pt;
+            color: #868e96;
+            direction: ltr;
+            text-align: {{ text_align_opposite }};
+        }
+
         table.items tbody tr:nth-child(even) {
             background: #fafbfc;
         }
@@ -153,7 +224,7 @@
         /* --- Totals --- */
         .totals-wrapper {
             display: flex;
-            justify-content: {{ text_align_opposite }};
+            justify-content: {{ text_align }};
             margin-top: 10px;
         }
 
@@ -174,6 +245,12 @@
         .totals td.label {
             text-align: {{ text_align }};
             color: #6c757d;
+        }
+
+        .totals td.label .label-en {
+            font-size: 7pt;
+            color: #adb5bd;
+            direction: ltr;
         }
 
         .totals td.value {
@@ -223,28 +300,62 @@
             margin-bottom: 4px;
         }
 
-        /* --- Footer notice --- */
-        .eta-notice {
+        /* --- ETA compliance footer --- */
+        .eta-footer {
             margin-top: 24px;
+            padding-top: 12px;
+            border-top: 1px solid #e9ecef;
             text-align: center;
+        }
+
+        .eta-footer .eta-ar {
             font-size: 8pt;
+            color: #6c757d;
+            margin-bottom: 2px;
+        }
+
+        .eta-footer .eta-en {
+            font-size: 7pt;
             color: #adb5bd;
+            direction: ltr;
         }
     </style>
 </head>
 <body>
 
-    <!-- Invoice Header -->
+    <!-- Invoice Header with Logo -->
     <div class="invoice-header">
-        <div>
-            <div class="invoice-title">{{ labels.invoice }}</div>
+        <div class="header-logo">
+            {% if logo_url %}
+            <img src="{{ logo_url }}" alt="Store Logo">
+            {% endif %}
         </div>
-        <div class="invoice-meta">
-            <div><strong>{{ labels.invoice_number }}:</strong> {{ invoice.invoice_number }}</div>
-            <div><strong>{{ labels.date }}:</strong> {{ invoice.date_issued.strftime('%Y-%m-%d') }}</div>
-            <div><strong>{{ labels.currency }}:</strong> {{ currency }}</div>
+        <div class="header-center">
+            <div class="invoice-title-ar">{{ labels_ar.invoice }}</div>
+            <div class="invoice-title-en">{{ labels_en.invoice }}</div>
+        </div>
+        <div class="header-meta">
+            <div class="meta-row">
+                <span class="meta-label-ar">{{ labels_ar.invoice_number }}</span>
+                <span class="meta-label-en">/ {{ labels_en.invoice_number }}</span><br>
+                <span class="meta-value">{{ invoice.invoice_number }}</span>
+            </div>
+            <div class="meta-row">
+                <span class="meta-label-ar">{{ labels_ar.date }}</span>
+                <span class="meta-label-en">/ {{ labels_en.date }}</span><br>
+                <span class="meta-value">{{ invoice.date_issued.strftime('%Y-%m-%d') }}</span>
+            </div>
+            <div class="meta-row">
+                <span class="meta-label-ar">{{ labels_ar.currency }}</span>
+                <span class="meta-label-en">/ {{ labels_en.currency }}</span><br>
+                <span class="meta-value">{{ currency }}</span>
+            </div>
             {% if invoice.invoice_type.value != 'I' %}
-            <div><strong>Type:</strong> {{ invoice.invoice_type.value }}</div>
+            <div class="meta-row">
+                <span class="meta-label-ar">النوع</span>
+                <span class="meta-label-en">/ Type</span><br>
+                <span class="meta-value">{{ invoice.invoice_type.value }}</span>
+            </div>
             {% endif %}
         </div>
     </div>
@@ -252,34 +363,49 @@
     <!-- Seller & Buyer -->
     <div class="parties">
         <div class="party-box">
-            <div class="party-label">{{ labels.seller }}</div>
-            <div class="party-name">{{ seller_name }}</div>
-            <div class="party-detail">{{ labels.tax_id }}: {{ seller.tax_id }}</div>
+            <div class="party-label">{{ labels_ar.seller }} / {{ labels_en.seller | upper }}</div>
+            {% if seller.name_ar %}
+            <div class="party-name-ar">{{ seller.name_ar }}</div>
+            {% endif %}
+            <div class="party-name-en">{{ seller.name }}</div>
+            <div class="party-detail">
+                <span class="party-detail-label">{{ labels_ar.tax_id }} / {{ labels_en.tax_id }}:</span>
+                {{ seller.tax_id }}
+            </div>
             {% if seller.street or seller.city %}
             <div class="party-detail">
-                {{ labels.address }}:
-                {% if seller.building_number %}{{ seller.building_number }}, {% endif %}
-                {% if seller.street %}{{ seller.street }}, {% endif %}
+                <span class="party-detail-label">{{ labels_ar.address }} / {{ labels_en.address }}:</span>
+                {% if seller.building_number %}{{ seller.building_number }}، {% endif %}
+                {% if seller.street %}{{ seller.street }}، {% endif %}
                 {% if seller.city %}{{ seller.city }}{% endif %}
-                {% if seller.governorate %}, {{ seller.governorate }}{% endif %}
+                {% if seller.governorate %}، {{ seller.governorate }}{% endif %}
             </div>
             {% endif %}
         </div>
         <div class="party-box">
-            <div class="party-label">{{ labels.buyer }}</div>
-            <div class="party-name">{{ buyer_name }}</div>
+            <div class="party-label">{{ labels_ar.buyer }} / {{ labels_en.buyer | upper }}</div>
+            {% if buyer.name_ar %}
+            <div class="party-name-ar">{{ buyer.name_ar }}</div>
+            {% endif %}
+            <div class="party-name-en">{{ buyer.name }}</div>
             {% if buyer.tax_id %}
-            <div class="party-detail">{{ labels.tax_id }}: {{ buyer.tax_id }}</div>
+            <div class="party-detail">
+                <span class="party-detail-label">{{ labels_ar.tax_id }} / {{ labels_en.tax_id }}:</span>
+                {{ buyer.tax_id }}
+            </div>
             {% elif buyer.national_id %}
-            <div class="party-detail">ID: {{ buyer.national_id }}</div>
+            <div class="party-detail">
+                <span class="party-detail-label">ID:</span>
+                {{ buyer.national_id }}
+            </div>
             {% endif %}
             {% if buyer.street or buyer.city %}
             <div class="party-detail">
-                {{ labels.address }}:
-                {% if buyer.building_number %}{{ buyer.building_number }}, {% endif %}
-                {% if buyer.street %}{{ buyer.street }}, {% endif %}
+                <span class="party-detail-label">{{ labels_ar.address }} / {{ labels_en.address }}:</span>
+                {% if buyer.building_number %}{{ buyer.building_number }}، {% endif %}
+                {% if buyer.street %}{{ buyer.street }}، {% endif %}
                 {% if buyer.city %}{{ buyer.city }}{% endif %}
-                {% if buyer.governorate %}, {{ buyer.governorate }}{% endif %}
+                {% if buyer.governorate %}، {{ buyer.governorate }}{% endif %}
             </div>
             {% endif %}
             {% if buyer.phone %}
@@ -292,22 +418,51 @@
     <table class="items">
         <thead>
             <tr>
-                <th class="num">{{ labels.item_no }}</th>
-                <th>{{ labels.description }}</th>
-                <th>{{ labels.code }}</th>
-                <th class="money">{{ labels.qty }}</th>
-                <th class="money">{{ labels.unit_price }}</th>
-                <th class="money">{{ labels.discount }}</th>
-                <th class="money">{{ labels.net }}</th>
-                <th class="money">{{ labels.tax }}</th>
-                <th class="money">{{ labels.total }}</th>
+                <th class="num">#</th>
+                <th>
+                    <span class="th-ar">{{ labels_ar.description }}</span>
+                    <span class="th-en">{{ labels_en.description }}</span>
+                </th>
+                <th>
+                    <span class="th-ar">{{ labels_ar.code }}</span>
+                    <span class="th-en">{{ labels_en.code }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.qty }}</span>
+                    <span class="th-en">{{ labels_en.qty }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.unit_price }}</span>
+                    <span class="th-en">{{ labels_en.unit_price }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.discount }}</span>
+                    <span class="th-en">{{ labels_en.discount }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.net }}</span>
+                    <span class="th-en">{{ labels_en.net }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.tax }}</span>
+                    <span class="th-en">{{ labels_en.tax }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.total }}</span>
+                    <span class="th-en">{{ labels_en.total }}</span>
+                </th>
             </tr>
         </thead>
         <tbody>
             {% for item in line_items %}
             <tr>
                 <td class="num">{{ item.number }}</td>
-                <td>{{ item.description }}</td>
+                <td>
+                    {% if item.description_ar %}
+                    <span class="desc-ar">{{ item.description_ar }}</span>
+                    {% endif %}
+                    <span class="desc-en">{{ item.description_en }}</span>
+                </td>
                 <td>{{ item.item_code }}</td>
                 <td class="money">{{ item.quantity }}</td>
                 <td class="money">{{ item.unit_price }}</td>
@@ -325,21 +480,33 @@
         <div class="totals">
             <table>
                 <tr>
-                    <td class="label">{{ labels.subtotal }}</td>
+                    <td class="label">
+                        {{ labels_ar.subtotal }}
+                        <span class="label-en">/ {{ labels_en.subtotal }}</span>
+                    </td>
                     <td class="value">{{ subtotal }} {{ currency }}</td>
                 </tr>
                 {% if total_discount != '0.00' %}
                 <tr>
-                    <td class="label">{{ labels.total_discount }}</td>
+                    <td class="label">
+                        {{ labels_ar.total_discount }}
+                        <span class="label-en">/ {{ labels_en.total_discount }}</span>
+                    </td>
                     <td class="value">-{{ total_discount }} {{ currency }}</td>
                 </tr>
                 {% endif %}
                 <tr>
-                    <td class="label">{{ labels.total_tax }} (14%)</td>
+                    <td class="label">
+                        {{ labels_ar.total_tax }} (14%)
+                        <span class="label-en">/ {{ labels_en.total_tax }}</span>
+                    </td>
                     <td class="value">{{ total_taxes }} {{ currency }}</td>
                 </tr>
                 <tr class="grand-total">
-                    <td class="label">{{ labels.grand_total }}</td>
+                    <td class="label">
+                        {{ labels_ar.grand_total }}
+                        <span class="label-en">/ {{ labels_en.grand_total }}</span>
+                    </td>
                     <td class="value">{{ grand_total }} {{ currency }}</td>
                 </tr>
             </table>
@@ -349,9 +516,13 @@
     <!-- Notes -->
     {% if invoice.notes or invoice.notes_ar %}
     <div class="notes">
-        <div class="notes-label">{{ labels.notes }}</div>
-        {% if is_rtl and invoice.notes_ar %}
+        <div class="notes-label">{{ labels_ar.notes }} / {{ labels_en.notes }}</div>
+        {% if invoice.notes_ar %}
             {{ invoice.notes_ar }}
+        {% endif %}
+        {% if invoice.notes and invoice.notes_ar %}
+            <br>
+            <span style="direction: ltr; text-align: left; display: block; color: #6c757d;">{{ invoice.notes }}</span>
         {% elif invoice.notes %}
             {{ invoice.notes }}
         {% endif %}
@@ -362,14 +533,15 @@
     {% if qr_data_uri %}
     <div class="qr-section">
         <img src="{{ qr_data_uri }}" alt="ETA QR Code">
-        <p>{{ labels.eta_notice }}</p>
+        <p>{{ labels_ar.eta_notice }}</p>
     </div>
     {% endif %}
 
-    <!-- ETA Notice -->
+    <!-- ETA Compliance Footer -->
     {% if not qr_data_uri %}
-    <div class="eta-notice">
-        {{ labels.eta_notice }}
+    <div class="eta-footer">
+        <div class="eta-ar">{{ labels_ar.eta_notice }}</div>
+        <div class="eta-en">{{ labels_en.eta_notice }}</div>
     </div>
     {% endif %}
 
