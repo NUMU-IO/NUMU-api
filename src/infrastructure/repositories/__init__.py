@@ -13,8 +13,15 @@ from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
 from src.infrastructure.repositories.refund_repository import RefundRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
+from src.infrastructure.repositories.two_factor_repository import TwoFactorRepository
 from src.infrastructure.repositories.user_repository import UserRepository
 from src.infrastructure.repositories.waitlist_repository import WaitlistRepository
+from src.infrastructure.repositories.webhook_delivery_log_repository import (
+    WebhookDeliveryLogRepository,
+)
+from src.infrastructure.repositories.webhook_subscription_repository import (
+    WebhookSubscriptionRepository,
+)
 
 __all__ = [
     "UserRepository",
@@ -32,4 +39,7 @@ __all__ = [
     "RedisCartRepository",
     "RefundRepository",
     "WaitlistRepository",
+    "TwoFactorRepository",
+    "WebhookSubscriptionRepository",
+    "WebhookDeliveryLogRepository",
 ]

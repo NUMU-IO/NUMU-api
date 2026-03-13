@@ -12,6 +12,7 @@ Provides REST endpoints for store CRUD operations and nested resources:
 - /stores/{store_id}/settings - Store settings (payment, shipping, whatsapp)
 - /stores/{store_id}/categories - Category management
 - /stores/{store_id}/onboarding - Merchant onboarding progress
+- /stores/{store_id}/webhooks - Outgoing webhook subscriptions
 """
 
 from fastapi import APIRouter
@@ -27,11 +28,13 @@ from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import orders as orders_module
 from src.api.v1.routes.stores import products as products_module
+from src.api.v1.routes.stores import reconciliation as reconciliation_module
 from src.api.v1.routes.stores import refunds as refunds_module
 from src.api.v1.routes.stores import settings as settings_module
 
 # Import all routers
 from src.api.v1.routes.stores import stores as stores_module
+from src.api.v1.routes.stores import webhooks as webhooks_module
 
 # Create main stores router - this will be mounted at /stores in the main router
 router = APIRouter()
@@ -54,5 +57,7 @@ router.include_router(settings_module.router, tags=["Store Settings"])
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
 router.include_router(refunds_module.router, tags=["Store Refunds"])
+router.include_router(webhooks_module.router, tags=["Store Webhooks"])
+router.include_router(reconciliation_module.router, tags=["Store Reconciliation"])
 
 __all__ = ["router"]

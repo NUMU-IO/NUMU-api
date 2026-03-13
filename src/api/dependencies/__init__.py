@@ -37,6 +37,8 @@ from src.api.dependencies.repositories import (
     get_store_repository,
     get_user_repository,
     get_waitlist_repository,
+    get_webhook_delivery_log_repository,
+    get_webhook_subscription_repository,
 )
 from src.api.dependencies.services import (
     get_ai_service,
@@ -73,6 +75,8 @@ __all__ = [
     "get_order_repository",
     "get_refund_repository",
     "get_waitlist_repository",
+    "get_webhook_subscription_repository",
+    "get_webhook_delivery_log_repository",
     # Services
     "get_password_service",
     "get_token_service",

@@ -15,6 +15,7 @@ from src.api.dependencies import (
     get_token_service,
     get_user_repository,
 )
+from src.api.dependencies.repositories import get_two_factor_repository
 from src.api.dependencies.services import (
     get_email_service,
     get_totp_service,
@@ -38,6 +39,7 @@ from src.api.v1.schemas import (
     VerifyEmailRequest,
 )
 from src.api.v1.schemas.public.two_factor import (
+    Complete2FALoginRequest,
     Disable2FARequest,
     Enable2FAResponse,
     RegenerateBackupCodesRequest,
@@ -71,6 +73,7 @@ from src.application.use_cases.auth import (
     VerifyEmailUseCase,
 )
 from src.application.use_cases.auth.two_factor import (
+    CompleteTwoFactorLoginUseCase,
     Disable2FAUseCase,
     Enable2FAUseCase,
     RegenerateBackupCodesUseCase,
@@ -85,11 +88,7 @@ from src.infrastructure.external_services import (
     TokenService,
 )
 from src.infrastructure.external_services.totp_service import TOTPService
-from src.infrastructure.repositories import UserRepository
-from src.infrastructure.repositories.two_factor_repository import (
-    InMemoryTwoFactorRepository,
-    get_two_factor_repository,
-)
+from src.infrastructure.repositories import TwoFactorRepository, UserRepository
 
 router = APIRouter()
 
@@ -440,8 +439,13 @@ async def login(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
 ):
-    """Authenticate user and set tokens as httpOnly cookies."""
+    """Authenticate user and set tokens as httpOnly cookies.
+
+    If the user has 2FA enabled, returns a challenge token instead of full auth tokens.
+    The client must exchange the challenge token at /auth/2fa/complete-login with a valid code.
+    """
     use_case = LoginUserUseCase(
         user_repository=user_repo,
         password_service=password_service,
@@ -454,6 +458,24 @@ async def login(
         password=request.password,
     )
     result = await use_case.execute(dto)
+
+    # Check if user has 2FA enabled — if so, return a challenge token instead
+    from uuid import UUID as _UUID
+
+    user_uuid = (
+        _UUID(str(result.user.id))
+        if isinstance(result.user.id, str)
+        else result.user.id
+    )
+    if await two_factor_repo.user_has_2fa_enabled(user_uuid):
+        challenge_token = token_service.create_challenge_token(user_uuid)
+        return SuccessResponse(
+            data=AuthResponse(
+                requires_2fa=True,
+                challenge_token=challenge_token,
+            ),
+            message="2FA verification required",
+        )
 
     # Set tokens as httpOnly cookies
     set_auth_cookies(
@@ -759,9 +781,7 @@ async def change_password(
 async def enable_2fa(
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
-    two_factor_repo: Annotated[
-        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
-    ],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Enable Two-Factor Authentication for the current user."""
@@ -799,9 +819,7 @@ async def enable_2fa(
 async def verify_2fa(
     request: Verify2FARequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    two_factor_repo: Annotated[
-        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
-    ],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Verify a 2FA code (TOTP or backup code)."""
@@ -848,9 +866,7 @@ async def disable_2fa(
     request: Disable2FARequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
-    two_factor_repo: Annotated[
-        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
-    ],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
     password_svc: Annotated[PasswordService, Depends(get_password_service)],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
@@ -891,9 +907,7 @@ async def disable_2fa(
 )
 async def get_2fa_status(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    two_factor_repo: Annotated[
-        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
-    ],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
 ):
     """Get the current 2FA status for the authenticated user."""
     from uuid import UUID
@@ -929,9 +943,7 @@ async def regenerate_backup_codes(
     request: RegenerateBackupCodesRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
-    two_factor_repo: Annotated[
-        InMemoryTwoFactorRepository, Depends(get_two_factor_repository)
-    ],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
     totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
 ):
     """Regenerate backup codes for 2FA recovery."""
@@ -955,4 +967,55 @@ async def regenerate_backup_codes(
             new_count=result.new_count,
         ),
         message="Backup codes regenerated successfully. Save them securely!",
+    )
+
+
+@router.post(
+    "/2fa/complete-login",
+    response_model=SuccessResponse[AuthResponse],
+    summary="Complete 2FA login",
+    description="Exchange a 2FA challenge token + TOTP code for full auth tokens.",
+    operation_id="complete_2fa_login",
+)
+async def complete_2fa_login(
+    request: Complete2FALoginRequest,
+    response: Response,
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+    totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
+):
+    """Complete the 2FA login flow.
+
+    Accepts the challenge token issued at /auth/login and a valid TOTP or backup code.
+    Returns full auth tokens on success and sets httpOnly cookies.
+    """
+    use_case = CompleteTwoFactorLoginUseCase(
+        user_repository=user_repo,
+        two_factor_repository=two_factor_repo,
+        totp_service=totp_svc,
+        token_service=token_service,
+    )
+
+    result = await use_case.execute(
+        challenge_token=request.challenge_token,
+        code=request.code,
+    )
+
+    set_auth_cookies(
+        response,
+        result.tokens.access_token,
+        result.tokens.refresh_token,
+    )
+
+    return SuccessResponse(
+        data=AuthResponse(
+            user=_user_response(result.user),
+            tokens=TokenResponse(
+                access_token=result.tokens.access_token,
+                refresh_token=result.tokens.refresh_token,
+                token_type="bearer",
+            ),
+        ),
+        message="Login successful",
     )

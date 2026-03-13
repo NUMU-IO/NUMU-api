@@ -191,6 +191,39 @@ class TokenService(ITokenService):
         except Exception:
             return None
 
+    # ------------------------------------------------------------------
+    # 2FA challenge token
+    # ------------------------------------------------------------------
+
+    def create_challenge_token(self, user_id) -> str:
+        """Create a short-lived 2FA challenge token (expires in 5 minutes).
+
+        Issued after successful password login when 2FA is enabled.
+        Must be exchanged at /auth/2fa/complete-login with a valid TOTP code.
+        """
+        expire = datetime.utcnow() + timedelta(minutes=5)
+        payload = {
+            "sub": str(user_id),
+            "token_type": "2fa_challenge",
+            "exp": expire,
+            "iat": datetime.utcnow(),
+        }
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
+
+    def decode_challenge_token(self, token: str):
+        """Decode a 2FA challenge token. Returns user_id UUID or None if invalid/expired."""
+        from uuid import UUID as _UUID
+
+        try:
+            payload = jwt.decode(
+                token, self._get_verification_key(), algorithms=[self.algorithm]
+            )
+            if payload.get("token_type") != "2fa_challenge":
+                return None
+            return _UUID(payload["sub"])
+        except Exception:
+            return None
+
 
 # Singleton instance
 token_service = TokenService()

@@ -5,6 +5,29 @@ from uuid import UUID
 from src.core.events.base import DomainEvent
 
 
+class OrderCreatedEvent(DomainEvent):
+    """Emitted when a new order is created."""
+
+    order_id: UUID
+    order_number: str
+    store_id: UUID
+    customer_id: UUID
+    total: float
+    currency: str
+
+
+class OrderPaidEvent(DomainEvent):
+    """Emitted when an order's payment is confirmed."""
+
+    order_id: UUID
+    order_number: str
+    store_id: UUID
+    customer_id: UUID
+    payment_id: str | None = None
+    payment_method: str | None = None
+    total: float
+
+
 class OrderStatusChangedEvent(DomainEvent):
     """Emitted when an order's status changes.
 

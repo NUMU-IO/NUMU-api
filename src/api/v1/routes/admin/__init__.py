@@ -9,6 +9,7 @@ URL: /api/v1/admin/
 - /products        — Platform-wide product listing
 - /stores          — Store lifecycle management
 - /landing-config  — Landing page section visibility
+- /reconciliation  — Payment reconciliation runs and mismatches
 """
 
 from fastapi import APIRouter
@@ -19,6 +20,7 @@ from src.api.v1.routes.admin.feedback import router as feedback_router
 from src.api.v1.routes.admin.landing_page import router as landing_page_router
 from src.api.v1.routes.admin.orders import router as orders_router
 from src.api.v1.routes.admin.products import router as products_router
+from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.stores import router as stores_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
 
@@ -33,6 +35,9 @@ router.include_router(products_router, prefix="/products", tags=["Admin - Produc
 router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
 router.include_router(
     landing_page_router, prefix="/landing-config", tags=["Admin - Landing Page"]
+)
+router.include_router(
+    reconciliation_router, prefix="/reconciliation", tags=["Admin - Reconciliation"]
 )
 
 __all__ = ["router"]

@@ -19,8 +19,11 @@ from src.infrastructure.repositories import (
     ProductRepository,
     RefundRepository,
     StoreRepository,
+    TwoFactorRepository,
     UserRepository,
     WaitlistRepository,
+    WebhookDeliveryLogRepository,
+    WebhookSubscriptionRepository,
 )
 
 
@@ -120,3 +123,24 @@ def get_message_log_repository(
 ) -> MessageLogRepository:
     """Get message log repository dependency."""
     return MessageLogRepository(session)
+
+
+def get_two_factor_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> TwoFactorRepository:
+    """Get two-factor authentication repository dependency."""
+    return TwoFactorRepository(session)
+
+
+def get_webhook_subscription_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> WebhookSubscriptionRepository:
+    """Get webhook subscription repository dependency."""
+    return WebhookSubscriptionRepository(session)
+
+
+def get_webhook_delivery_log_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> WebhookDeliveryLogRepository:
+    """Get webhook delivery log repository dependency."""
+    return WebhookDeliveryLogRepository(session)

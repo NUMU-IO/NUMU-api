@@ -10,14 +10,22 @@ They include:
 
 from src.infrastructure.database.models.public.feedback import FeedbackModel
 from src.infrastructure.database.models.public.onboarding import StoreOnboardingModel
+from src.infrastructure.database.models.public.reconciliation import (
+    PaymentReconciliationRunModel,
+    ReconciliationMismatchModel,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.public.two_factor import TwoFactorAuthModel
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.public.waitlist import WaitlistModel
 
 __all__ = [
     "FeedbackModel",
+    "PaymentReconciliationRunModel",
+    "ReconciliationMismatchModel",
     "StoreOnboardingModel",
     "TenantModel",
+    "TwoFactorAuthModel",
     "UserModel",
     "WaitlistModel",
 ]

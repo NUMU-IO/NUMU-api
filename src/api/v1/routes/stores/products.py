@@ -52,6 +52,7 @@ from src.application.use_cases.products import (
 )
 from src.application.use_cases.products.upload_image import UploadProductImageDTO
 from src.core.entities.store import Store
+from src.infrastructure.events.setup import get_event_bus
 from src.infrastructure.external_services.cloudflare_r2 import (
     CloudflareR2StorageService,
 )
@@ -88,6 +89,7 @@ async def create_product(
         product_repository=product_repo,
         store_repository=store_repo,
         onboarding_repository=onboarding_repo,
+        event_bus=get_event_bus(),
     )
 
     dto = CreateProductDTO(
@@ -356,6 +358,7 @@ async def update_product(
     use_case = UpdateProductUseCase(
         product_repository=product_repo,
         store_repository=store_repo,
+        event_bus=get_event_bus(),
     )
 
     dto = UpdateProductDTO(
@@ -430,6 +433,7 @@ async def delete_product(
     use_case = DeleteProductUseCase(
         product_repository=product_repo,
         store_repository=store_repo,
+        event_bus=get_event_bus(),
     )
 
     await use_case.execute(product_id=product_id, user_id=store.owner_id)

@@ -167,6 +167,7 @@ async def create_order(
         store_repository=store_repo,
         customer_repository=customer_repo,
         onboarding_repository=onboarding_repo,
+        event_bus=get_event_bus(),
     )
 
     # Convert line items
@@ -508,6 +509,22 @@ async def mark_order_paid(
     order.paid_at = datetime.now(UTC)
     order.touch()
     updated = await order_repo.update(order)
+
+    try:
+        from src.core.events.order_events import OrderPaidEvent
+
+        get_event_bus().publish(
+            OrderPaidEvent(
+                order_id=updated.id,
+                order_number=updated.order_number,
+                store_id=updated.store_id,
+                customer_id=updated.customer_id,
+                payment_method=updated.payment_method,
+                total=float(updated.total),
+            )
+        )
+    except Exception:
+        pass
 
     return SuccessResponse(
         data=_order_to_response(OrderDTO.from_entity(updated)),

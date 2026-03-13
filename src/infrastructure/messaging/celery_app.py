@@ -62,4 +62,12 @@ celery_app.conf.beat_schedule = {
         "schedule": 30.0,  # Every 30 seconds
         "kwargs": {"max_alerts": 10},
     },
+    "retry-pending-webhook-deliveries": {
+        "task": "tasks.retry_pending_webhook_deliveries",
+        "schedule": 15.0,  # Every 15 seconds (shortest retry delay is 10s)
+    },
+    "daily-payment-reconciliation": {
+        "task": "tasks.daily_payment_reconciliation",
+        "schedule": crontab(hour=2, minute=0),  # Every day at 02:00 UTC
+    },
 }

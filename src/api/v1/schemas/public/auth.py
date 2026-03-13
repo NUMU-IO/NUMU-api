@@ -104,12 +104,24 @@ class TokenHandoffRequest(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    """Auth response — tokens are in httpOnly cookies AND in the body for SPA redirects."""
+    """Auth response — tokens are in httpOnly cookies AND in the body for SPA redirects.
 
-    user: UserResponse = Field(description="User profile")
+    When 2FA is required, `requires_2fa` is True and `challenge_token` is set.
+    In that case `user` and `tokens` will be None.
+    """
+
+    user: UserResponse | None = Field(None, description="User profile")
     tokens: TokenResponse | None = Field(
         None,
         description="JWT tokens (also set as httpOnly cookies)",
+    )
+    requires_2fa: bool = Field(
+        default=False,
+        description="True when login requires a 2FA code to continue",
+    )
+    challenge_token: str | None = Field(
+        None,
+        description="Short-lived token to exchange at /auth/2fa/complete-login",
     )
 
 

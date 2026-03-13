@@ -1,87 +1,142 @@
-"""In-memory Two-Factor Authentication repository.
-
-This is a temporary implementation for development/testing.
-For production, replace with a proper database-backed repository.
-"""
+"""Database-backed Two-Factor Authentication repository."""
 
 from uuid import UUID
 
-from src.core.entities.two_factor import TwoFactorAuth, TwoFactorStatus
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.entities.two_factor import TwoFactorAuth, TwoFactorMethod, TwoFactorStatus
 from src.core.interfaces.repositories.two_factor_repository import ITwoFactorRepository
+from src.infrastructure.database.models.public.two_factor import TwoFactorAuthModel
 
 
-class InMemoryTwoFactorRepository(ITwoFactorRepository):
-    """In-memory implementation of ITwoFactorRepository.
+class TwoFactorRepository(ITwoFactorRepository):
+    """SQLAlchemy-backed 2FA repository (public schema)."""
 
-    WARNING: This is for development/testing only.
-    Data is lost when the application restarts.
-    """
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
 
-    def __init__(self) -> None:
-        self._storage: dict[UUID, TwoFactorAuth] = {}
+    # ------------------------------------------------------------------
+    # Conversion helpers
+    # ------------------------------------------------------------------
+
+    def _to_entity(self, model: TwoFactorAuthModel) -> TwoFactorAuth:
+        return TwoFactorAuth(
+            id=model.id,
+            user_id=model.user_id,
+            method=TwoFactorMethod(model.method),
+            status=TwoFactorStatus(model.status),
+            secret=model.secret,
+            backup_codes=list(model.backup_codes or []),
+            backup_codes_remaining=model.backup_codes_remaining,
+            verified_at=model.verified_at,
+            last_used_at=model.last_used_at,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
+        )
+
+    def _to_model(self, entity: TwoFactorAuth) -> TwoFactorAuthModel:
+        return TwoFactorAuthModel(
+            id=entity.id,
+            user_id=entity.user_id,
+            method=entity.method.value,
+            status=entity.status.value,
+            secret=entity.secret,
+            backup_codes=entity.backup_codes,
+            backup_codes_remaining=entity.backup_codes_remaining,
+            verified_at=entity.verified_at,
+            last_used_at=entity.last_used_at,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+        )
+
+    # ------------------------------------------------------------------
+    # BaseRepository interface
+    # ------------------------------------------------------------------
 
     async def get_by_id(self, entity_id: UUID) -> TwoFactorAuth | None:
-        """Get 2FA by ID."""
-        return self._storage.get(entity_id)
-
-    async def get_by_user_id(self, user_id: UUID) -> TwoFactorAuth | None:
-        """Get 2FA configuration by user ID."""
-        for entity in self._storage.values():
-            if entity.user_id == user_id:
-                return entity
-        return None
+        result = await self.session.execute(
+            select(TwoFactorAuthModel).where(TwoFactorAuthModel.id == entity_id)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
 
     async def get_all(self, skip: int = 0, limit: int = 100) -> list[TwoFactorAuth]:
-        """Get all 2FA entities with pagination."""
-        items = list(self._storage.values())
-        return items[skip : skip + limit]
+        result = await self.session.execute(
+            select(TwoFactorAuthModel).offset(skip).limit(limit)
+        )
+        return [self._to_entity(m) for m in result.scalars().all()]
 
     async def create(self, entity: TwoFactorAuth) -> TwoFactorAuth:
-        """Create a new 2FA entity."""
-        self._storage[entity.id] = entity
-        return entity
+        model = self._to_model(entity)
+        self.session.add(model)
+        await self.session.flush()
+        await self.session.refresh(model)
+        return self._to_entity(model)
 
     async def update(self, entity: TwoFactorAuth) -> TwoFactorAuth:
-        """Update an existing 2FA entity."""
-        if entity.id not in self._storage:
-            raise ValueError(f"Entity with id {entity.id} not found")
-        self._storage[entity.id] = entity
-        return entity
+        result = await self.session.execute(
+            select(TwoFactorAuthModel).where(TwoFactorAuthModel.id == entity.id)
+        )
+        model = result.scalar_one_or_none()
+        if not model:
+            raise ValueError(f"TwoFactorAuth with id {entity.id} not found")
+        model.method = entity.method.value
+        model.status = entity.status.value
+        model.secret = entity.secret
+        model.backup_codes = entity.backup_codes
+        model.backup_codes_remaining = entity.backup_codes_remaining
+        model.verified_at = entity.verified_at
+        model.last_used_at = entity.last_used_at
+        model.updated_at = entity.updated_at
+        await self.session.flush()
+        await self.session.refresh(model)
+        return self._to_entity(model)
 
     async def delete(self, entity_id: UUID) -> bool:
-        """Delete a 2FA entity by ID."""
-        if entity_id in self._storage:
-            del self._storage[entity_id]
-            return True
-        return False
-
-    async def delete_by_user_id(self, user_id: UUID) -> bool:
-        """Delete 2FA configuration by user ID."""
-        to_delete = None
-        for entity_id, entity in self._storage.items():
-            if entity.user_id == user_id:
-                to_delete = entity_id
-                break
-        if to_delete:
-            del self._storage[to_delete]
-            return True
-        return False
-
-    async def user_has_2fa_enabled(self, user_id: UUID) -> bool:
-        """Check if a user has 2FA enabled."""
-        entity = await self.get_by_user_id(user_id)
-        return entity is not None and entity.status == TwoFactorStatus.ENABLED
+        result = await self.session.execute(
+            select(TwoFactorAuthModel).where(TwoFactorAuthModel.id == entity_id)
+        )
+        model = result.scalar_one_or_none()
+        if not model:
+            return False
+        await self.session.delete(model)
+        await self.session.flush()
+        return True
 
     async def count(self) -> int:
-        """Get total count of 2FA entities."""
-        return len(self._storage)
+        result = await self.session.execute(
+            select(func.count()).select_from(TwoFactorAuthModel)
+        )
+        return result.scalar_one()
 
+    # ------------------------------------------------------------------
+    # Domain-specific methods
+    # ------------------------------------------------------------------
 
-# Singleton instance for dependency injection
-# Replace with proper database repository in production
-_two_factor_repository = InMemoryTwoFactorRepository()
+    async def get_by_user_id(self, user_id: UUID) -> TwoFactorAuth | None:
+        result = await self.session.execute(
+            select(TwoFactorAuthModel).where(TwoFactorAuthModel.user_id == user_id)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
 
+    async def delete_by_user_id(self, user_id: UUID) -> bool:
+        result = await self.session.execute(
+            select(TwoFactorAuthModel).where(TwoFactorAuthModel.user_id == user_id)
+        )
+        model = result.scalar_one_or_none()
+        if not model:
+            return False
+        await self.session.delete(model)
+        await self.session.flush()
+        return True
 
-def get_two_factor_repository() -> InMemoryTwoFactorRepository:
-    """Get the 2FA repository instance."""
-    return _two_factor_repository
+    async def user_has_2fa_enabled(self, user_id: UUID) -> bool:
+        result = await self.session.execute(
+            select(TwoFactorAuthModel).where(
+                TwoFactorAuthModel.user_id == user_id,
+                TwoFactorAuthModel.status == TwoFactorStatus.ENABLED.value,
+            )
+        )
+        return result.scalar_one_or_none() is not None

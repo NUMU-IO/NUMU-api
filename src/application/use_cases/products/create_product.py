@@ -8,6 +8,8 @@ from slugify import slugify
 
 from src.application.dto.product import CreateProductDTO, ProductDTO
 from src.core.entities.product import Product, ProductStatus, ProductType
+from src.core.events.base import EventBus
+from src.core.events.product_events import ProductCreatedEvent
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.category_repository import ICategoryRepository
 from src.core.interfaces.repositories.onboarding_repository import (
@@ -35,11 +37,13 @@ class CreateProductUseCase:
         store_repository: IStoreRepository,
         category_repository: ICategoryRepository | None = None,
         onboarding_repository: IOnboardingRepository | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.product_repository = product_repository
         self.store_repository = store_repository
         self.category_repository = category_repository
         self.onboarding_repository = onboarding_repository
+        self.event_bus = event_bus
 
     def _validate_product_data(
         self, dto: CreateProductDTO, store_id: UUID
@@ -289,5 +293,18 @@ class CreateProductUseCase:
                 store_id,
                 OnboardingStepKey.ADD_PRODUCT,
             )
+
+        if self.event_bus:
+            try:
+                self.event_bus.publish(
+                    ProductCreatedEvent(
+                        product_id=created_product.id,
+                        store_id=created_product.store_id,
+                        name=created_product.name,
+                        sku=created_product.sku,
+                    )
+                )
+            except Exception:
+                pass
 
         return ProductDTO.from_entity(created_product)

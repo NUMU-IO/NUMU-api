@@ -11,6 +11,8 @@ from src.core.entities.order import (
     OrderStatus,
     PaymentStatus,
 )
+from src.core.events.base import EventBus
+from src.core.events.order_events import OrderCreatedEvent
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.onboarding_repository import (
@@ -31,11 +33,13 @@ class CreateOrderUseCase:
         store_repository: IStoreRepository,
         customer_repository: ICustomerRepository,
         onboarding_repository: IOnboardingRepository | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.order_repository = order_repository
         self.store_repository = store_repository
         self.customer_repository = customer_repository
         self.onboarding_repository = onboarding_repository
+        self.event_bus = event_bus
 
     async def execute(
         self,
@@ -171,5 +175,20 @@ class CreateOrderUseCase:
                 )
             except Exception:
                 pass  # Never block order creation for onboarding
+
+        if self.event_bus:
+            try:
+                self.event_bus.publish(
+                    OrderCreatedEvent(
+                        order_id=created_order.id,
+                        order_number=created_order.order_number,
+                        store_id=created_order.store_id,
+                        customer_id=created_order.customer_id,
+                        total=float(created_order.total),
+                        currency=created_order.currency,
+                    )
+                )
+            except Exception:
+                pass
 
         return OrderDTO.from_entity(created_order)

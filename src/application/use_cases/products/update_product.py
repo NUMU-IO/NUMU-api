@@ -4,6 +4,8 @@ from uuid import UUID
 
 from src.application.dto.product import ProductDTO, UpdateProductDTO
 from src.core.entities.product import ProductStatus
+from src.core.events.base import EventBus
+from src.core.events.product_events import ProductUpdatedEvent
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
@@ -17,9 +19,11 @@ class UpdateProductUseCase:
         self,
         product_repository: IProductRepository,
         store_repository: IStoreRepository,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.product_repository = product_repository
         self.store_repository = store_repository
+        self.event_bus = event_bus
 
     async def execute(
         self,
@@ -79,5 +83,17 @@ class UpdateProductUseCase:
 
         # Save product
         updated_product = await self.product_repository.update(product)
+
+        if self.event_bus:
+            try:
+                self.event_bus.publish(
+                    ProductUpdatedEvent(
+                        product_id=updated_product.id,
+                        store_id=updated_product.store_id,
+                        name=updated_product.name,
+                    )
+                )
+            except Exception:
+                pass
 
         return ProductDTO.from_entity(updated_product)
