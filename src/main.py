@@ -84,6 +84,12 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     init_sentry()
+
+    # Initialize event bus (registers all event handlers)
+    from src.infrastructure.events.setup import create_event_bus
+
+    create_event_bus()
+
     logger.info(
         "app_startup",
         app_name=settings.app_name,

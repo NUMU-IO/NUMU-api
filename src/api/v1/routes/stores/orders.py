@@ -42,6 +42,7 @@ from src.application.use_cases.orders import (
     UpdateOrderUseCase,
 )
 from src.core.entities.store import Store
+from src.infrastructure.events.setup import get_event_bus
 from src.infrastructure.repositories import (
     CustomerRepository,
     OnboardingRepository,
@@ -418,6 +419,7 @@ async def update_order_status(
         order_repository=order_repo,
         store_repository=store_repo,
         customer_repository=customer_repo,
+        event_bus=get_event_bus(),
     )
 
     dto = UpdateOrderStatusDTO(
@@ -457,6 +459,7 @@ async def cancel_order(
         order_repository=order_repo,
         store_repository=store_repo,
         customer_repository=customer_repo,
+        event_bus=get_event_bus(),
     )
 
     dto = UpdateOrderStatusDTO(
@@ -660,6 +663,7 @@ async def bulk_update_order_status(
         order_repository=order_repo,
         store_repository=store_repo,
         customer_repository=customer_repo,
+        event_bus=get_event_bus(),
     )
 
     updated = 0
@@ -691,3 +695,130 @@ async def bulk_update_order_status(
         ),
         message=f"Bulk status update completed: {updated} updated, {failed} failed",
     )
+
+
+# ============================================================================
+# Notification endpoints
+# ============================================================================
+
+
+@router.post(
+    "/{order_id}/resend-email",
+    response_model=SuccessResponse,
+    summary="Resend order status email",
+    operation_id="resend_order_email",
+)
+async def resend_order_email(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+):
+    """Resend the status email for an order's current status."""
+    from src.core.exceptions import EntityNotFoundError
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+    from src.infrastructure.external_services.resend.email_templates.notifications import (
+        order_status_email,
+    )
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        raise EntityNotFoundError("Order", str(order_id))
+
+    customer = await customer_repo.get_by_id(order.customer_id)
+    if not customer or not customer.email:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail="Customer has no email address")
+
+    template = order_status_email(
+        status=order.status.value,
+        order_number=order.order_number,
+        store_name=store.name,
+        customer_name=customer.full_name,
+        tracking_number=order.tracking_number,
+        carrier=order.shipping_method,
+        language=store.default_language or "en",
+    )
+
+    if not template:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"No email template for status '{order.status.value}'",
+        )
+
+    from src.core.interfaces.services.email_service import EmailMessage
+
+    service = ResendEmailService()
+    await service.send_email(
+        EmailMessage(
+            to=str(customer.email),
+            subject=template["subject"],
+            html_content=template["html"],
+        )
+    )
+
+    return SuccessResponse(
+        data={"order_id": str(order_id), "status": order.status.value},
+        message="Email resent successfully",
+    )
+
+
+@router.get(
+    "/{order_id}/email-preview",
+    summary="Preview order status email",
+    operation_id="preview_order_email",
+)
+async def preview_order_email(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    email_status: str | None = Query(
+        None,
+        alias="status",
+        description="Preview a specific status (defaults to current)",
+    ),
+):
+    """Preview the email HTML that would be sent for an order status.
+
+    Useful for merchants to review notification content before sending.
+    """
+    from src.infrastructure.external_services.resend.email_templates.notifications import (
+        order_status_email,
+    )
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        from src.core.exceptions import EntityNotFoundError
+
+        raise EntityNotFoundError("Order", str(order_id))
+
+    customer = await customer_repo.get_by_id(order.customer_id)
+    target_status = email_status or order.status.value
+
+    template = order_status_email(
+        status=target_status,
+        order_number=order.order_number,
+        store_name=store.name,
+        customer_name=customer.full_name if customer else None,
+        tracking_number=order.tracking_number,
+        carrier=order.shipping_method,
+        language=store.default_language or "en",
+    )
+
+    if not template:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"No email template for status '{target_status}'",
+        )
+
+    from fastapi.responses import HTMLResponse
+
+    return HTMLResponse(content=template["html"])

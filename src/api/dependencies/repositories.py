@@ -12,6 +12,7 @@ from src.infrastructure.repositories import (
     CustomerAddressRepository,
     CustomerRepository,
     FeedbackRepository,
+    InvoiceRepository,
     MessageLogRepository,
     OnboardingRepository,
     OrderRepository,
@@ -105,6 +106,13 @@ def get_feedback_repository(
 ) -> FeedbackRepository:
     """Get feedback repository dependency."""
     return FeedbackRepository(session)
+
+
+def get_invoice_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> InvoiceRepository:
+    """Get invoice repository dependency."""
+    return InvoiceRepository(session)
 
 
 def get_message_log_repository(

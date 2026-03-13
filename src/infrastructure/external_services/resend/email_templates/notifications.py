@@ -303,6 +303,7 @@ def shipping_notification_html(
     store_name: str = "NUMU",
     customer_name: str | None = None,
     language: str = "en",
+    **_kwargs,
 ) -> str:
     c = _SHIPPING.get(language, _SHIPPING["en"])
     greeting = (
@@ -434,6 +435,7 @@ def delivery_confirmation_html(
     store_name: str = "NUMU",
     customer_name: str | None = None,
     language: str = "en",
+    **_kwargs,
 ) -> str:
     c = _DELIVERY.get(language, _DELIVERY["en"])
     greeting = (
@@ -511,3 +513,328 @@ DELIVERY_CONFIRMATION_TEMPLATE = {
     "subject_fn": _delivery_subject,
     "html_fn": delivery_confirmation_html,
 }
+
+
+# ---------------------------------------------------------------------------
+# 4. Order Confirmed (merchant confirms pending order)
+# ---------------------------------------------------------------------------
+
+_CONFIRMED = {
+    "en": {
+        "title": "Your Order Has Been Confirmed!",
+        "subtitle": "We're getting it ready for you",
+        "greeting": "Hi {customer_name},",
+        "greeting_default": "Hi there,",
+        "intro": "Great news! Your order <strong>#{order_number}</strong> from <strong>{store_name}</strong> has been confirmed and is being prepared.",
+        "what_next": "What happens next?",
+        "what_next_body": "The merchant will begin processing your order. You'll receive another email once it ships with tracking details.",
+    },
+    "ar": {
+        "title": "!تم تأكيد طلبك",
+        "subtitle": "بنجهّزهولك",
+        "greeting": "أهلاً {customer_name}،",
+        "greeting_default": "أهلاً،",
+        "intro": "خبر حلو! طلبك <strong>#{order_number}</strong> من <strong>{store_name}</strong> اتأكّد وبيتجهّز.",
+        "what_next": "إيه اللي هيحصل بعد كده؟",
+        "what_next_body": "التاجر هيبدأ يجهّز طلبك. هتوصلك رسالة تانية لما الطلب يتشحن مع تفاصيل التتبع.",
+    },
+}
+
+
+def order_confirmed_html(
+    order_number: str,
+    store_name: str = "NUMU",
+    customer_name: str | None = None,
+    language: str = "en",
+    **_kwargs,
+) -> str:
+    c = _CONFIRMED.get(language, _CONFIRMED["en"])
+    greeting = (
+        c["greeting"].format(customer_name=customer_name)
+        if customer_name
+        else c["greeting_default"]
+    )
+    return _wrap(
+        f"""
+    <div class="header">
+        <h1>{c["title"]}</h1>
+        <p>{c["subtitle"]}</p>
+        <span class="badge">#{order_number}</span>
+    </div>
+    <div class="body">
+        <p>{greeting}</p>
+        <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
+        <div class="divider"></div>
+        <p><strong>{c["what_next"]}</strong></p>
+        <p>{c["what_next_body"]}</p>
+    </div>""",
+        language=language,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5. Processing
+# ---------------------------------------------------------------------------
+
+_PROCESSING = {
+    "en": {
+        "title": "Your Order is Being Prepared",
+        "subtitle": "Almost ready to ship!",
+        "greeting": "Hi {customer_name},",
+        "greeting_default": "Hi there,",
+        "intro": "Your order <strong>#{order_number}</strong> from <strong>{store_name}</strong> is now being prepared and packed for shipping.",
+        "note": "We'll send you another email once your order has been shipped.",
+    },
+    "ar": {
+        "title": "طلبك بيتجهّز",
+        "subtitle": "!قرّب يتشحن",
+        "greeting": "أهلاً {customer_name}،",
+        "greeting_default": "أهلاً،",
+        "intro": "طلبك <strong>#{order_number}</strong> من <strong>{store_name}</strong> بيتجهّز ويتغلّف للشحن.",
+        "note": "هنبعتلك رسالة تانية لما الطلب يتشحن.",
+    },
+}
+
+
+def order_processing_html(
+    order_number: str,
+    store_name: str = "NUMU",
+    customer_name: str | None = None,
+    language: str = "en",
+    **_kwargs,
+) -> str:
+    c = _PROCESSING.get(language, _PROCESSING["en"])
+    greeting = (
+        c["greeting"].format(customer_name=customer_name)
+        if customer_name
+        else c["greeting_default"]
+    )
+    return _wrap(
+        f"""
+    <div class="header">
+        <h1>{c["title"]}</h1>
+        <p>{c["subtitle"]}</p>
+        <span class="badge">#{order_number}</span>
+    </div>
+    <div class="body">
+        <p>{greeting}</p>
+        <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
+        <div class="divider"></div>
+        <p>{c["note"]}</p>
+    </div>""",
+        language=language,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. Cancelled
+# ---------------------------------------------------------------------------
+
+_CANCELLED = {
+    "en": {
+        "title": "Your Order Has Been Cancelled",
+        "subtitle": "We're sorry to see this order go",
+        "greeting": "Hi {customer_name},",
+        "greeting_default": "Hi there,",
+        "intro": "Your order <strong>#{order_number}</strong> from <strong>{store_name}</strong> has been cancelled.",
+        "reason_label": "Reason",
+        "note": "If you didn't request this cancellation or have questions, please contact the store.",
+        "refund_note": "If payment was already processed, a refund will be issued automatically.",
+    },
+    "ar": {
+        "title": "تم إلغاء طلبك",
+        "subtitle": "نأسف لإلغاء الطلب",
+        "greeting": "أهلاً {customer_name}،",
+        "greeting_default": "أهلاً،",
+        "intro": "طلبك <strong>#{order_number}</strong> من <strong>{store_name}</strong> تم إلغاؤه.",
+        "reason_label": "السبب",
+        "note": "لو ماطلبتش الإلغاء ده أو عندك أسئلة، تواصل مع المتجر.",
+        "refund_note": "لو الدفع اتعمل، هيتم استرداد المبلغ تلقائياً.",
+    },
+}
+
+
+def order_cancelled_html(
+    order_number: str,
+    store_name: str = "NUMU",
+    customer_name: str | None = None,
+    reason: str | None = None,
+    language: str = "en",
+    **_kwargs,
+) -> str:
+    c = _CANCELLED.get(language, _CANCELLED["en"])
+    greeting = (
+        c["greeting"].format(customer_name=customer_name)
+        if customer_name
+        else c["greeting_default"]
+    )
+
+    reason_section = ""
+    if reason:
+        reason_section = f"""
+        <div class="highlight-box">
+            <p class="label">{c["reason_label"]}</p>
+            <p class="value" style="font-size:14px; color:#dc3545;">{reason}</p>
+        </div>"""
+
+    return _wrap(
+        f"""
+    <div class="header" style="background: linear-gradient(135deg, #dc3545 0%, #6c757d 100%);">
+        <h1>{c["title"]}</h1>
+        <p>{c["subtitle"]}</p>
+        <span class="badge">#{order_number}</span>
+    </div>
+    <div class="body">
+        <p>{greeting}</p>
+        <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
+        {reason_section}
+        <div class="divider"></div>
+        <p>{c["note"]}</p>
+        <p style="font-size:13px; color:#6c757d;">{c["refund_note"]}</p>
+    </div>""",
+        language=language,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 7. Refunded
+# ---------------------------------------------------------------------------
+
+_REFUNDED = {
+    "en": {
+        "title": "Your Refund Has Been Processed",
+        "subtitle": "Refund on its way",
+        "greeting": "Hi {customer_name},",
+        "greeting_default": "Hi there,",
+        "intro": "A refund for your order <strong>#{order_number}</strong> from <strong>{store_name}</strong> has been processed.",
+        "reason_label": "Reason",
+        "note": "The refund should appear in your account within 5-10 business days depending on your bank.",
+    },
+    "ar": {
+        "title": "تم استرداد المبلغ",
+        "subtitle": "الاسترداد في الطريق",
+        "greeting": "أهلاً {customer_name}،",
+        "greeting_default": "أهلاً،",
+        "intro": "تم استرداد مبلغ طلبك <strong>#{order_number}</strong> من <strong>{store_name}</strong>.",
+        "reason_label": "السبب",
+        "note": "المبلغ هيظهر في حسابك خلال ٥-١٠ أيام عمل حسب البنك.",
+    },
+}
+
+
+def order_refunded_html(
+    order_number: str,
+    store_name: str = "NUMU",
+    customer_name: str | None = None,
+    reason: str | None = None,
+    language: str = "en",
+    **_kwargs,
+) -> str:
+    c = _REFUNDED.get(language, _REFUNDED["en"])
+    greeting = (
+        c["greeting"].format(customer_name=customer_name)
+        if customer_name
+        else c["greeting_default"]
+    )
+
+    reason_section = ""
+    if reason:
+        reason_section = f"""
+        <div class="highlight-box">
+            <p class="label">{c["reason_label"]}</p>
+            <p class="value" style="font-size:14px;">{reason}</p>
+        </div>"""
+
+    return _wrap(
+        f"""
+    <div class="header" style="background: linear-gradient(135deg, #17a2b8 0%, #1034A6 100%);">
+        <h1>{c["title"]}</h1>
+        <p>{c["subtitle"]}</p>
+        <span class="badge">#{order_number}</span>
+    </div>
+    <div class="body">
+        <p>{greeting}</p>
+        <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
+        {reason_section}
+        <div class="divider"></div>
+        <p>{c["note"]}</p>
+    </div>""",
+        language=language,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unified status-based email factory
+# ---------------------------------------------------------------------------
+
+_STATUS_SUBJECTS = {
+    "confirmed": {
+        "en": "Your Order #{order_number} is Confirmed — {store_name}",
+        "ar": "تم تأكيد طلبك #{order_number} — {store_name}",
+    },
+    "processing": {
+        "en": "Your Order #{order_number} is Being Prepared — {store_name}",
+        "ar": "طلبك #{order_number} بيتجهّز — {store_name}",
+    },
+    "shipped": {
+        "en": "Your Order #{order_number} Has Shipped! — {store_name}",
+        "ar": "طلبك #{order_number} اتشحن! — {store_name}",
+    },
+    "delivered": {
+        "en": "Order #{order_number} Delivered — {store_name}",
+        "ar": "الطلب #{order_number} اتسلّم — {store_name}",
+    },
+    "cancelled": {
+        "en": "Order #{order_number} Cancelled — {store_name}",
+        "ar": "تم إلغاء الطلب #{order_number} — {store_name}",
+    },
+    "refunded": {
+        "en": "Refund Processed for Order #{order_number} — {store_name}",
+        "ar": "تم استرداد مبلغ الطلب #{order_number} — {store_name}",
+    },
+}
+
+_STATUS_HTML_FNS = {
+    "confirmed": order_confirmed_html,
+    "processing": order_processing_html,
+    "shipped": shipping_notification_html,
+    "delivered": delivery_confirmation_html,
+    "cancelled": order_cancelled_html,
+    "refunded": order_refunded_html,
+}
+
+
+def order_status_email(
+    status: str,
+    order_number: str,
+    store_name: str = "NUMU",
+    customer_name: str | None = None,
+    tracking_number: str | None = None,
+    carrier: str | None = None,
+    reason: str | None = None,
+    language: str = "en",
+) -> dict | None:
+    """Generate subject + HTML for any order status email.
+
+    Returns {"subject": str, "html": str} or None if no template exists.
+    """
+    subjects = _STATUS_SUBJECTS.get(status)
+    html_fn = _STATUS_HTML_FNS.get(status)
+
+    if not subjects or not html_fn:
+        return None
+
+    lang = language if language in subjects else "en"
+    subject = subjects[lang].format(order_number=order_number, store_name=store_name)
+
+    html = html_fn(
+        order_number=order_number,
+        store_name=store_name,
+        customer_name=customer_name,
+        tracking_number=tracking_number,
+        carrier=carrier,
+        reason=reason,
+        language=language,
+    )
+
+    return {"subject": subject, "html": html}

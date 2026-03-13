@@ -134,6 +134,7 @@ class Invoice(BaseEntity):
 
     # Identifiers
     store_id: UUID
+    tenant_id: UUID | None = None
     order_id: UUID | None = None
     customer_id: UUID | None = None
 

@@ -5,6 +5,8 @@ from uuid import UUID
 from src.application.dto.order import OrderDTO, UpdateOrderStatusDTO
 from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
+from src.core.events.base import EventBus
+from src.core.events.order_events import OrderStatusChangedEvent
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
@@ -14,17 +16,24 @@ logger = get_logger(__name__)
 
 
 class UpdateOrderStatusUseCase:
-    """Use case for updating an order's status."""
+    """Use case for updating an order's status.
+
+    After persisting the status change, publishes an OrderStatusChangedEvent
+    to the event bus. All downstream side-effects (email, WhatsApp, activity
+    log, webhooks) are handled by event handlers asynchronously.
+    """
 
     def __init__(
         self,
         order_repository: IOrderRepository,
         store_repository: IStoreRepository,
         customer_repository: ICustomerRepository | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.order_repository = order_repository
         self.store_repository = store_repository
         self.customer_repository = customer_repository
+        self.event_bus = event_bus
 
     async def execute(
         self,
@@ -111,88 +120,68 @@ class UpdateOrderStatusUseCase:
             reason=dto.reason,
         )
 
-        # Dispatch async notifications for shipped / delivered
-        if new_status in (OrderStatus.SHIPPED, OrderStatus.DELIVERED):
-            await self._dispatch_notifications(updated_order, new_status, store, log)
+        # Publish domain event — all side-effects handled by event handlers
+        await self._publish_status_event(
+            updated_order, old_status, new_status, store, dto.reason, log
+        )
 
         return OrderDTO.from_entity(updated_order)
 
-    async def _dispatch_notifications(self, order, new_status, store, log):
-        """Fire Celery tasks for WhatsApp + email notifications.
+    async def _publish_status_event(
+        self, order, old_status, new_status, store, reason, log
+    ):
+        """Publish OrderStatusChangedEvent to the event bus.
 
-        Runs inside a try/except so notification failures never block
-        the order flow.
+        Gathers customer context (email, phone, notification preferences)
+        and packages it into the event so handlers don't need DB access.
         """
+        if not self.event_bus:
+            log.debug("event_bus_not_configured")
+            return
+
         try:
             customer = None
             if self.customer_repository:
                 customer = await self.customer_repository.get_by_id(order.customer_id)
 
-            if not customer:
-                log.warning("notification_skipped", reason="customer_not_found")
-                return
+            customer_email = (
+                str(customer.email) if customer and customer.email else None
+            )
+            customer_phone = (
+                str(customer.phone) if customer and customer.phone else None
+            )
+            customer_name = customer.full_name if customer else None
 
-            customer_email = str(customer.email) if customer.email else None
-            customer_phone = str(customer.phone) if customer.phone else None
-            customer_name = customer.full_name
-            store_name = store.name
+            prefs = {}
+            if customer and customer.metadata:
+                prefs = customer.metadata.get("notification_preferences", {})
 
-            # Check notification preferences (stored in customer.metadata)
-            prefs = customer.metadata.get("notification_preferences", {})
-            email_prefs = prefs.get("email", {})
-            whatsapp_prefs = prefs.get("whatsapp", {})
-
-            from src.infrastructure.messaging.tasks.notification_tasks import (
-                send_delivery_confirmation_email_task,
-                send_shipping_notification_email_task,
-                send_whatsapp_delivery_confirmation_task,
-                send_whatsapp_shipping_update_task,
+            event = OrderStatusChangedEvent(
+                order_id=order.id,
+                order_number=order.order_number,
+                store_id=order.store_id,
+                store_name=store.name,
+                customer_id=order.customer_id,
+                customer_email=customer_email,
+                customer_phone=customer_phone,
+                customer_name=customer_name,
+                previous_status=old_status,
+                new_status=new_status.value,
+                reason=reason,
+                tracking_number=order.tracking_number,
+                tracking_url=order.tracking_url,
+                carrier=order.shipping_method,
+                language=store.default_language or "en",
+                email_prefs=prefs.get("email", {}),
+                whatsapp_prefs=prefs.get("whatsapp", {}),
             )
 
-            if new_status == OrderStatus.SHIPPED:
-                # Email notification
-                if customer_email and email_prefs.get("shipping_update", True):
-                    send_shipping_notification_email_task.delay(
-                        email=customer_email,
-                        order_number=order.order_number,
-                        tracking_number=order.tracking_number,
-                        carrier=order.shipping_method or "Bosta",
-                    )
-
-                # WhatsApp notification
-                if customer_phone and whatsapp_prefs.get("shipping_update", True):
-                    send_whatsapp_shipping_update_task.delay(
-                        phone=customer_phone,
-                        customer_name=customer_name,
-                        order_number=order.order_number,
-                        tracking_number=order.tracking_number or "N/A",
-                        carrier=order.shipping_method or "Bosta",
-                    )
-
-            elif new_status == OrderStatus.DELIVERED:
-                # Email notification
-                if customer_email and email_prefs.get("delivery_confirmation", True):
-                    send_delivery_confirmation_email_task.delay(
-                        email=customer_email,
-                        order_number=order.order_number,
-                        store_name=store_name,
-                    )
-
-                # WhatsApp notification
-                if customer_phone and whatsapp_prefs.get("delivery_confirmation", True):
-                    send_whatsapp_delivery_confirmation_task.delay(
-                        phone=customer_phone,
-                        customer_name=customer_name,
-                        order_number=order.order_number,
-                        store_name=store_name,
-                    )
+            self.event_bus.publish(event)
 
             log.info(
-                "order_notifications_dispatched",
+                "order_status_event_published",
+                event_id=str(event.event_id),
                 status=new_status.value,
-                has_email=bool(customer_email),
-                has_phone=bool(customer_phone),
             )
         except Exception as e:
-            # Never let notification failures break the order flow
-            log.error("order_notification_dispatch_failed", error=str(e))
+            log.error("order_status_event_publish_failed", error=str(e))

@@ -60,6 +60,8 @@ class ResendEmailService(IEmailService):
                 params["text"] = message.text_content
             if message.reply_to:
                 params["reply_to"] = message.reply_to
+            if message.attachments:
+                params["attachments"] = message.attachments
 
             resend.Emails.send(params)
             logger.info("email_sent", to=to_list, subject=message.subject)
@@ -180,6 +182,113 @@ class ResendEmailService(IEmailService):
             to=email,
             subject=subject,
             html_content=html_content,
+        )
+        return await self.send_email(message)
+
+    async def send_invoice_email(
+        self,
+        email: str,
+        order_number: str,
+        invoice_number: str,
+        pdf_bytes: bytes,
+        store_name: str = "NUMU",
+        language: str = "ar",
+    ) -> bool:
+        """Send invoice email with PDF attachment to customer."""
+        is_ar = language == "ar"
+        subject = (
+            f"فاتورتك من {store_name} - طلب #{order_number}"
+            if is_ar
+            else f"Your Invoice from {store_name} - Order #{order_number}"
+        )
+
+        if is_ar:
+            html_content = f"""
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+  <tr><td style="background:linear-gradient(135deg,#D4AF37,#1034A6);padding:32px;text-align:center;">
+    <h1 style="color:#fff;margin:0;font-size:28px;letter-spacing:1px;">{store_name}</h1>
+    <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">فاتورة ضريبية</p>
+  </td></tr>
+  <tr><td style="padding:36px 32px;text-align:right;">
+    <p style="font-size:16px;color:#333;margin:0 0 20px;">مرحباً،</p>
+    <p style="font-size:15px;color:#555;margin:0 0 16px;">
+      شكراً لطلبك رقم <strong style="color:#1034A6;">#{order_number}</strong>.
+      مرفق فاتورتك الضريبية رقم <strong>{invoice_number}</strong>.
+    </p>
+    <div style="background:#f8f9fa;border-radius:8px;padding:16px;margin:24px 0;border-right:4px solid #D4AF37;">
+      <p style="margin:0;font-size:14px;color:#666;">
+        📎 الفاتورة مرفقة كملف PDF. يمكنك تحميلها والاحتفاظ بها لسجلاتك.
+      </p>
+    </div>
+    <p style="font-size:12px;color:#999;margin:24px 0 0;">
+      هذه فاتورة إلكترونية صادرة وفقاً لمتطلبات مصلحة الضرائب المصرية.
+    </p>
+  </td></tr>
+  <tr><td style="padding:20px 32px;text-align:center;background:#f8f9fa;border-top:1px solid #eee;">
+    <p style="color:#999;font-size:12px;margin:0;">&copy; 2026 {store_name}. جميع الحقوق محفوظة.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+        else:
+            html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+  <tr><td style="background:linear-gradient(135deg,#D4AF37,#1034A6);padding:32px;text-align:center;">
+    <h1 style="color:#fff;margin:0;font-size:28px;letter-spacing:1px;">{store_name}</h1>
+    <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Tax Invoice</p>
+  </td></tr>
+  <tr><td style="padding:36px 32px;">
+    <p style="font-size:16px;color:#333;margin:0 0 20px;">Hello,</p>
+    <p style="font-size:15px;color:#555;margin:0 0 16px;">
+      Thank you for your order <strong style="color:#1034A6;">#{order_number}</strong>.
+      Please find attached your tax invoice <strong>{invoice_number}</strong>.
+    </p>
+    <div style="background:#f8f9fa;border-radius:8px;padding:16px;margin:24px 0;border-left:4px solid #D4AF37;">
+      <p style="margin:0;font-size:14px;color:#666;">
+        📎 Your invoice is attached as a PDF file. You may download it for your records.
+      </p>
+    </div>
+    <p style="font-size:12px;color:#999;margin:24px 0 0;">
+      This is an electronic invoice issued per Egyptian Tax Authority requirements.
+    </p>
+  </td></tr>
+  <tr><td style="padding:20px 32px;text-align:center;background:#f8f9fa;border-top:1px solid #eee;">
+    <p style="color:#999;font-size:12px;margin:0;">&copy; 2026 {store_name}. All rights reserved.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+        import base64
+
+        safe_filename = invoice_number.replace("/", "-")
+        message = EmailMessage(
+            to=email,
+            subject=subject,
+            html_content=html_content,
+            attachments=[
+                {
+                    "filename": f"{safe_filename}.pdf",
+                    "content": base64.b64encode(pdf_bytes).decode("utf-8"),
+                    "content_type": "application/pdf",
+                }
+            ],
         )
         return await self.send_email(message)
 

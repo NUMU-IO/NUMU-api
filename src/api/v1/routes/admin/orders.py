@@ -354,9 +354,37 @@ async def update_order_status(
             f"Valid: {valid_names or 'none (terminal state)'}",
         )
 
+    old_status = current.value
     order.status = new_status
     await db.commit()
     await db.refresh(order)
+
+    # Publish domain event for notifications / activity log
+    try:
+        from src.core.events.order_events import OrderStatusChangedEvent
+        from src.infrastructure.events.setup import get_event_bus
+
+        customer = order.customer
+        store = order.store
+        event = OrderStatusChangedEvent(
+            order_id=order.id,
+            order_number=order.order_number,
+            store_id=order.store_id,
+            store_name=store.name if store else "Unknown",
+            customer_id=order.customer_id,
+            customer_email=customer.email if customer else None,
+            customer_name=(
+                f"{customer.first_name} {customer.last_name}" if customer else None
+            ),
+            previous_status=old_status,
+            new_status=new_status.value,
+            tracking_number=order.tracking_number,
+            carrier=order.shipping_method,
+            language=(store.default_language if store else "en") or "en",
+        )
+        get_event_bus().publish(event)
+    except Exception:
+        logger.exception("admin_order_event_publish_failed")
 
     return SuccessResponse(
         data=_order_to_detail(order),

@@ -303,6 +303,33 @@ class UpdateCustomizationRequest(BaseModel):
     templates: dict[str, Any] | None = None  # { "home": { sections, order } }
 
 
+# Invoice / Tax Settings
+class InvoiceSettingsResponse(BaseModel):
+    """Invoice and tax settings for ETA compliance."""
+
+    tax_id: str = ""
+    name_ar: str = ""
+    branch_id: str = "0"
+    activity_code: str = "4649"
+    governorate: str = ""
+    city: str = ""
+    street: str = ""
+    building_number: str = ""
+
+
+class UpdateInvoiceSettingsRequest(BaseModel):
+    """Update invoice/tax settings."""
+
+    tax_id: str | None = None
+    name_ar: str | None = None
+    branch_id: str | None = None
+    activity_code: str | None = None
+    governorate: str | None = None
+    city: str | None = None
+    street: str | None = None
+    building_number: str | None = None
+
+
 # Combined Store Settings
 class StoreSettingsResponse(BaseModel):
     """Combined store settings response."""

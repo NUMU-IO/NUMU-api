@@ -87,18 +87,6 @@ class UserResponse(BaseModel):
     trial_ends_at: str | None = Field(None, description="Trial period end date")
 
 
-class AuthResponse(BaseModel):
-    """Auth response — tokens are in httpOnly cookies, not in the body."""
-
-    user: UserResponse = Field(description="User profile")
-
-
-class CsrfTokenResponse(BaseModel):
-    """CSRF token response."""
-
-    csrf_token: str = Field(description="CSRF token (also set as cookie)")
-
-
 # Keep TokenResponse for internal use / backward compat with use-case DTOs
 class TokenResponse(BaseModel):
     """Token response schema (internal — not exposed to clients)."""
@@ -106,6 +94,29 @@ class TokenResponse(BaseModel):
     access_token: str = Field(description="JWT access token")
     refresh_token: str = Field(description="JWT refresh token")
     token_type: str = Field("bearer", description="Token type (always 'bearer')")
+
+
+class TokenHandoffRequest(BaseModel):
+    """Token hand-off from landing page → dashboard via URL params."""
+
+    access_token: str = Field(description="JWT access token from redirect URL")
+    refresh_token: str = Field(description="JWT refresh token from redirect URL")
+
+
+class AuthResponse(BaseModel):
+    """Auth response — tokens are in httpOnly cookies AND in the body for SPA redirects."""
+
+    user: UserResponse = Field(description="User profile")
+    tokens: TokenResponse | None = Field(
+        None,
+        description="JWT tokens (also set as httpOnly cookies)",
+    )
+
+
+class CsrfTokenResponse(BaseModel):
+    """CSRF token response."""
+
+    csrf_token: str = Field(description="CSRF token (also set as cookie)")
 
 
 class PasswordResetRequest(BaseModel):

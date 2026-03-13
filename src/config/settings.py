@@ -4,7 +4,7 @@ import logging
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, field_validator, model_validator
+from pydantic import AliasChoices, Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -239,6 +239,23 @@ class Settings(BaseSettings):
 
     # Shippo
     shippo_api_key: str | None = None
+
+    # =========================================================================
+    # Shopify App Integration
+    # =========================================================================
+
+    # Shared secret between the Shopify app and this API.
+    # Set SHOPIFY_INTERNAL_KEY (or NUMU_API_INTERNAL_KEY) in your .env.
+    # Must match NUMU_API_INTERNAL_KEY in the numu-payments-intelligence .env.
+    shopify_internal_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "shopify_internal_key",
+            "numu_api_internal_key",
+            "SHOPIFY_INTERNAL_KEY",
+            "NUMU_API_INTERNAL_KEY",
+        ),
+    )
 
     # =========================================================================
     # Egyptian Market Integrations

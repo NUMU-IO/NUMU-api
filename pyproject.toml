@@ -55,6 +55,9 @@ dependencies = [
     # Ref: https://doc.courtbouillon.org/weasyprint/stable/changelog.html
     "weasyprint>=68.0",
     "Jinja2>=3.1.0",
+    "fpdf2>=2.8.0",
+    "arabic-reshaper>=3.0.0",
+    "python-bidi>=0.6.0",
 
     # Admin Panel
     "sqladmin>=0.16.0",

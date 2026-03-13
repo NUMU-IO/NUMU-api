@@ -52,6 +52,18 @@ _cache_service: RedisCacheService | None = (
 IDEMPOTENCY_TTL_SECONDS = 86_400  # 24 hours
 
 
+def _generate_invoice_pdf(invoice, store_logo_url: str | None = None) -> bytes:
+    """Generate invoice PDF (sync, meant to run in thread)."""
+    from src.infrastructure.external_services.invoice import InvoicePDFGenerator
+
+    generator = InvoicePDFGenerator(
+        template_name="invoice_ar.html",
+        language="ar_en",
+        store_logo_url=store_logo_url,
+    )
+    return generator.generate(invoice)
+
+
 @router.post(
     "/checkout",
     response_model=SuccessResponse[CheckoutResponse],
@@ -325,24 +337,17 @@ async def checkout(
         f"customer={current_customer.id}, total={created_order.total} {currency}"
     )
 
-    # Dispatch async order-confirmation notifications (non-blocking)
-    try:
-        from src.infrastructure.messaging.tasks.notification_tasks import (
-            send_order_confirmation_email_task,
-            send_whatsapp_order_confirmation_task,
-        )
+    # Dispatch order-confirmation notifications (non-blocking)
+    customer_email = str(current_customer.email) if current_customer.email else None
 
-        prefs = current_customer.metadata.get("notification_preferences", {})
-        email_prefs = prefs.get("email", {})
-        whatsapp_prefs = prefs.get("whatsapp", {})
+    if customer_email:
+        try:
+            import asyncio
 
-        customer_email = str(current_customer.email) if current_customer.email else None
-        customer_phone = str(current_customer.phone) if current_customer.phone else None
+            from src.infrastructure.external_services.resend.email_service import (
+                ResendEmailService,
+            )
 
-        total_display = f"{currency} {created_order.total / 100:.2f}"
-
-        # Email: order confirmation
-        if customer_email and email_prefs.get("order_confirmation", True):
             order_details = {
                 "items": [
                     {
@@ -353,26 +358,220 @@ async def checkout(
                     for li in order_line_items
                 ],
                 "total": created_order.total / 100,
+                "currency": currency,
+                "store_name": store.name,
+                "customer_name": current_customer.full_name,
             }
-            send_order_confirmation_email_task.delay(
-                email=customer_email,
-                order_number=created_order.order_number,
-                order_details=order_details,
-                language=store.default_language,
+
+            async def _send_order_email():
+                try:
+                    svc = ResendEmailService()
+                    await svc.send_order_confirmation(
+                        email=customer_email,
+                        order_number=created_order.order_number,
+                        order_details=order_details,
+                        language=store.default_language,
+                    )
+                    logger.info(f"Order confirmation email sent to {customer_email}")
+                except Exception as exc:
+                    logger.warning(f"Order confirmation email failed: {exc}")
+
+            asyncio.create_task(_send_order_email())
+        except Exception as e:
+            logger.warning(f"Failed to dispatch order confirmation email: {e}")
+
+    # WhatsApp notification (via Celery — optional)
+    try:
+        customer_phone = str(current_customer.phone) if current_customer.phone else None
+        if customer_phone:
+            prefs = current_customer.metadata.get("notification_preferences", {})
+            whatsapp_prefs = prefs.get("whatsapp", {})
+            if whatsapp_prefs.get("order_confirmation", True):
+                from src.infrastructure.messaging.tasks.notification_tasks import (
+                    send_whatsapp_order_confirmation_task,
+                )
+
+                total_display = f"{currency} {created_order.total / 100:.2f}"
+                send_whatsapp_order_confirmation_task.delay(
+                    phone=customer_phone,
+                    customer_name=current_customer.full_name,
+                    order_number=created_order.order_number,
+                    total=total_display,
+                    store_name=store.name,
+                    language=store.default_language,
+                )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch WhatsApp notification: {e}")
+
+    # Dispatch async invoice generation + email to customer
+    if customer_email:
+        try:
+            import asyncio
+            from uuid import uuid4
+
+            from src.core.entities.invoice import (
+                BuyerInfo,
+                Invoice,
+                InvoiceStatus,
+                SellerInfo,
+            )
+            from src.infrastructure.external_services.resend.email_service import (
+                ResendEmailService,
+            )
+            from src.infrastructure.repositories.invoice_repository import (
+                InvoiceRepository,
             )
 
-        # WhatsApp: order confirmation
-        if customer_phone and whatsapp_prefs.get("order_confirmation", True):
-            send_whatsapp_order_confirmation_task.delay(
-                phone=customer_phone,
-                customer_name=current_customer.full_name,
-                order_number=created_order.order_number,
-                total=total_display,
-                store_name=store.name,
-                language=store.default_language,
-            )
-    except Exception as e:
-        logger.warning(f"Failed to dispatch checkout notifications: {e}")
+            # Capture all data needed before creating the background task
+            _inv_store_id = store_id
+            _inv_tenant_id = store.tenant_id
+            _inv_order_id = created_order.id
+            _inv_order_number = created_order.order_number
+            _inv_customer_id = current_customer.id
+            _inv_customer_email = customer_email
+            _inv_customer_name = current_customer.full_name
+            _inv_store_name = store.name
+            _inv_store_logo_url = store.logo_url
+            _inv_currency = currency
+            _inv_language = store.default_language
+            _inv_line_items = [
+                {
+                    "name": li.product_name,
+                    "sku": li.sku,
+                    "quantity": li.quantity,
+                    "unit_price": li.unit_price,
+                }
+                for li in order_line_items
+            ]
+            _inv_ship_addr = {
+                "first_name": ship_addr.first_name,
+                "last_name": ship_addr.last_name,
+                "address_line1": ship_addr.address_line1,
+                "city": ship_addr.city,
+                "phone": ship_addr.phone,
+            }
+            # Pull store address & ETA/invoice settings for proper seller info
+            _inv_store_address = dict(store.address) if store.address else {}
+            _inv_store_settings = dict(store.settings) if store.settings else {}
+
+            async def _generate_invoice():
+                try:
+                    from src.infrastructure.database.connection import (
+                        AsyncSessionLocal,
+                    )
+                    from src.infrastructure.external_services.eta.qr_generator import (
+                        generate_eta_qr_code,
+                    )
+
+                    # Build seller from store address + settings (ETA fields)
+                    seller = SellerInfo(
+                        tax_id=_inv_store_settings.get("tax_id", ""),
+                        name=_inv_store_name,
+                        name_ar=_inv_store_settings.get("name_ar", _inv_store_name),
+                        branch_id=_inv_store_settings.get("branch_id", "0"),
+                        country=_inv_store_address.get("country", "EG"),
+                        governorate=_inv_store_address.get(
+                            "governorate", _inv_store_address.get("state", "")
+                        ),
+                        city=_inv_store_address.get("city", ""),
+                        street=_inv_store_address.get(
+                            "street", _inv_store_address.get("address_line1", "")
+                        ),
+                        building_number=_inv_store_address.get("building_number", ""),
+                        activity_code=_inv_store_settings.get("activity_code", "4649"),
+                    )
+                    buyer_name = (
+                        f"{_inv_ship_addr.get('first_name', '')} {_inv_ship_addr.get('last_name', '')}".strip()
+                        or _inv_customer_name
+                    )
+                    buyer = BuyerInfo(
+                        buyer_type="P",
+                        name=buyer_name,
+                        name_ar=buyer_name,
+                        city=_inv_ship_addr.get("city", ""),
+                        street=_inv_ship_addr.get("address_line1", ""),
+                        phone=_inv_ship_addr.get("phone", ""),
+                        email=_inv_customer_email,
+                    )
+
+                    # Create invoice in DB
+                    async with AsyncSessionLocal() as session:
+                        async with session.begin():
+                            repo = InvoiceRepository(session)
+                            inv_number = await repo.get_next_invoice_number(
+                                _inv_store_id
+                            )
+
+                            invoice = Invoice(
+                                id=uuid4(),
+                                store_id=_inv_store_id,
+                                tenant_id=_inv_tenant_id,
+                                order_id=_inv_order_id,
+                                customer_id=_inv_customer_id,
+                                invoice_number=inv_number,
+                                internal_id=_inv_order_number,
+                                status=InvoiceStatus.ACCEPTED,
+                                seller=seller,
+                                buyer=buyer,
+                                currency=_inv_currency,
+                            )
+
+                            for item in _inv_line_items:
+                                invoice.add_line_item(
+                                    description=item["name"],
+                                    description_ar=item["name"],
+                                    item_code=item.get("sku") or "EG-0000-0000",
+                                    quantity=Decimal(str(item["quantity"])),
+                                    unit_price=Decimal(str(item["unit_price"])) / 100,
+                                    internal_code=item.get("sku"),
+                                )
+
+                            # Generate ETA QR code
+                            try:
+                                qr_data, qr_image = generate_eta_qr_code(
+                                    seller_name=seller.name_ar or seller.name,
+                                    tax_number=seller.tax_id or "",
+                                    invoice_date=invoice.date_issued,
+                                    total_with_vat=invoice.total / 100,
+                                    vat_amount=invoice.total_taxes / 100,
+                                )
+                                invoice.qr_code_data = qr_data
+                                invoice.qr_code_image = qr_image
+                            except Exception as qr_exc:
+                                logger.warning(f"QR code generation failed: {qr_exc}")
+
+                            # Simulate ETA acceptance
+                            invoice.eta_uuid = f"simulated-{uuid4().hex[:12]}"
+                            invoice.eta_long_id = f"simulated-long-{uuid4().hex[:20]}"
+                            invoice.eta_status_code = "accepted"
+
+                            created_inv = await repo.create(invoice)
+
+                    # Generate PDF with store logo
+                    pdf_bytes = await asyncio.to_thread(
+                        _generate_invoice_pdf, created_inv, _inv_store_logo_url
+                    )
+
+                    # Send email with PDF
+                    svc = ResendEmailService()
+                    await svc.send_invoice_email(
+                        email=_inv_customer_email,
+                        order_number=_inv_order_number,
+                        invoice_number=created_inv.invoice_number,
+                        pdf_bytes=pdf_bytes,
+                        store_name=_inv_store_name,
+                        language=_inv_language,
+                    )
+                    logger.info(
+                        f"Invoice {created_inv.invoice_number} generated and emailed "
+                        f"to {_inv_customer_email}"
+                    )
+                except Exception as exc:
+                    logger.warning(f"Invoice generation/email failed: {exc}")
+
+            asyncio.create_task(_generate_invoice())
+        except Exception as e:
+            logger.warning(f"Failed to dispatch invoice generation: {e}")
 
     # Merchant onboarding: send first-order email if this is order #1
     try:

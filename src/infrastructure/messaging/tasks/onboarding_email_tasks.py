@@ -219,7 +219,7 @@ def send_store_approved_email_task(self, store_id: str):
     from sqlalchemy import select
 
     from src.core.interfaces.services.email_service import EmailMessage
-    from src.infrastructure.database.connection import async_session_factory
+    from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.public.user import UserModel
     from src.infrastructure.database.models.tenant.store import StoreModel
     from src.infrastructure.external_services.resend.email_service import (
@@ -231,7 +231,7 @@ def send_store_approved_email_task(self, store_id: str):
     )
 
     async def _send():
-        async with async_session_factory() as session:
+        async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(StoreModel).where(StoreModel.id == store_id)
             )

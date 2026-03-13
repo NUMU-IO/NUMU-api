@@ -12,7 +12,6 @@ Provides endpoints for:
 
 import asyncio
 import logging
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -20,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import Response
 
 from src.api.dependencies import verify_store_ownership
+from src.api.dependencies.repositories import get_invoice_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.api.v1.schemas.tenant.invoice import (
@@ -38,21 +38,10 @@ from src.core.entities.invoice import (
 )
 from src.core.entities.store import Store
 from src.infrastructure.external_services.eta import ETAInvoiceService
+from src.infrastructure.repositories.invoice_repository import InvoiceRepository
 
 router = APIRouter(prefix="/{store_id}/invoices")
-
-# In-memory storage for demo (replace with repository in production)
-_invoices: dict[UUID, Invoice] = {}
-_invoice_counter: dict[UUID, int] = {}  # Per-store counter
-
-
-def _generate_invoice_number(store_id: UUID) -> str:
-    """Generate sequential invoice number for store."""
-    if store_id not in _invoice_counter:
-        _invoice_counter[store_id] = 0
-    _invoice_counter[store_id] += 1
-    year = datetime.utcnow().year
-    return f"INV-{year}-{_invoice_counter[store_id]:06d}"
+logger = logging.getLogger(__name__)
 
 
 def _format_currency(cents: int, currency: str = "EGP") -> str:
@@ -70,6 +59,7 @@ def _format_currency(cents: int, currency: str = "EGP") -> str:
 async def create_invoice(
     store: Annotated[Store, Depends(verify_store_ownership)],
     request: CreateInvoiceRequest,
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
 ):
     """Create a new invoice for the store.
 
@@ -77,7 +67,6 @@ async def create_invoice(
     calculated with 14% VAT. After review, submit to ETA using the
     submit endpoint.
     """
-    # Create seller info
     seller = SellerInfo(
         tax_id=request.seller.tax_id,
         name=request.seller.name,
@@ -90,7 +79,6 @@ async def create_invoice(
         activity_code=request.seller.activity_code,
     )
 
-    # Create buyer info
     buyer = BuyerInfo(
         buyer_type=request.buyer.buyer_type,
         tax_id=request.buyer.tax_id,
@@ -105,10 +93,8 @@ async def create_invoice(
         email=request.buyer.email,
     )
 
-    # Generate invoice number
-    invoice_number = _generate_invoice_number(store.id)
+    invoice_number = await invoice_repo.get_next_invoice_number(store.id)
 
-    # Create invoice entity
     invoice = Invoice(
         id=uuid4(),
         store_id=store.id,
@@ -125,7 +111,6 @@ async def create_invoice(
         original_invoice_number=request.original_invoice_number,
     )
 
-    # Add line items with tax calculation
     for item in request.line_items:
         invoice.add_line_item(
             description=item.description,
@@ -140,11 +125,8 @@ async def create_invoice(
             internal_code=item.internal_code,
         )
 
-    # Store invoice
-    _invoices[invoice.id] = invoice
-
-    # Build response
-    response = _build_invoice_response(invoice)
+    created = await invoice_repo.create(invoice)
+    response = _build_invoice_response(created)
 
     return SuccessResponse(
         data=response,
@@ -160,28 +142,16 @@ async def create_invoice(
 )
 async def list_invoices(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
     status_filter: Annotated[InvoiceStatus | None, Query(alias="status")] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """List all invoices for the store with optional filtering."""
-    # Filter invoices for this store
-    store_invoices = [inv for inv in _invoices.values() if inv.store_id == store.id]
+    invoices, total = await invoice_repo.list_by_store(
+        store.id, status_filter=status_filter, page=page, page_size=page_size
+    )
 
-    # Apply status filter
-    if status_filter:
-        store_invoices = [inv for inv in store_invoices if inv.status == status_filter]
-
-    # Sort by date descending
-    store_invoices.sort(key=lambda x: x.created_at, reverse=True)
-
-    # Paginate
-    total = len(store_invoices)
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated = store_invoices[start:end]
-
-    # Build list responses
     items = [
         InvoiceListResponse(
             id=inv.id,
@@ -196,7 +166,7 @@ async def list_invoices(
             eta_uuid=inv.eta_uuid,
             created_at=inv.created_at,
         )
-        for inv in paginated
+        for inv in invoices
     ]
 
     return SuccessResponse(
@@ -218,10 +188,11 @@ async def list_invoices(
 )
 async def get_invoice(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
 ):
     """Get detailed invoice information including line items and ETA status."""
-    invoice = _invoices.get(invoice_id)
+    invoice = await invoice_repo.get_by_id(invoice_id)
 
     if not invoice or invoice.store_id != store.id:
         raise HTTPException(
@@ -241,11 +212,12 @@ async def get_invoice(
 )
 async def update_invoice(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
     request: UpdateInvoiceRequest,
 ):
     """Update a draft invoice. Only draft invoices can be modified."""
-    invoice = _invoices.get(invoice_id)
+    invoice = await invoice_repo.get_by_id(invoice_id)
 
     if not invoice or invoice.store_id != store.id:
         raise HTTPException(
@@ -259,7 +231,6 @@ async def update_invoice(
             detail=f"Cannot edit invoice with status: {invoice.status.value}",
         )
 
-    # Update buyer if provided
     if request.buyer:
         invoice.buyer = BuyerInfo(
             buyer_type=request.buyer.buyer_type,
@@ -275,7 +246,6 @@ async def update_invoice(
             email=request.buyer.email,
         )
 
-    # Update line items if provided
     if request.line_items is not None:
         invoice.line_items = []
         for item in request.line_items:
@@ -303,8 +273,9 @@ async def update_invoice(
         invoice.notes_ar = request.notes_ar
 
     invoice.touch()
+    updated = await invoice_repo.update(invoice)
 
-    response = _build_invoice_response(invoice)
+    response = _build_invoice_response(updated)
     return SuccessResponse(
         data=response,
         message="Invoice updated successfully",
@@ -319,6 +290,7 @@ async def update_invoice(
 )
 async def submit_invoice_to_eta(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
 ):
     """Submit invoice to Egyptian Tax Authority (ETA).
@@ -327,7 +299,7 @@ async def submit_invoice_to_eta(
     - If accepted: status becomes ACCEPTED, ETA UUID is assigned
     - If rejected: status becomes REJECTED with error message
     """
-    invoice = _invoices.get(invoice_id)
+    invoice = await invoice_repo.get_by_id(invoice_id)
 
     if not invoice or invoice.store_id != store.id:
         raise HTTPException(
@@ -341,14 +313,13 @@ async def submit_invoice_to_eta(
             detail=f"Cannot submit invoice with status: {invoice.status.value}",
         )
 
-    # Check if ETA is enabled
     if not settings.eta_enabled:
-        # Simulate acceptance for testing
         invoice.status = InvoiceStatus.ACCEPTED
         invoice.eta_uuid = f"simulated-{uuid4().hex[:12]}"
         invoice.eta_long_id = f"simulated-long-{uuid4().hex[:20]}"
         invoice.eta_status_code = "accepted"
         invoice.touch()
+        await invoice_repo.update(invoice)
 
         return SuccessResponse(
             data=SubmitInvoiceResponse(
@@ -363,7 +334,6 @@ async def submit_invoice_to_eta(
             message="Invoice accepted (ETA simulation mode)",
         )
 
-    # Submit to ETA (with optional R2 storage for QR code)
     eta_service = ETAInvoiceService()
     r2_service = None
     try:
@@ -380,7 +350,7 @@ async def submit_invoice_to_eta(
     updated_invoice = await eta_service.process_invoice_submission(
         invoice, storage_service=r2_service
     )
-    _invoices[invoice_id] = updated_invoice
+    await invoice_repo.update(updated_invoice)
 
     if updated_invoice.status == InvoiceStatus.ACCEPTED:
         return SuccessResponse(
@@ -416,10 +386,11 @@ async def submit_invoice_to_eta(
 )
 async def delete_invoice(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
 ):
     """Delete a draft invoice. Only draft invoices can be deleted."""
-    invoice = _invoices.get(invoice_id)
+    invoice = await invoice_repo.get_by_id(invoice_id)
 
     if not invoice or invoice.store_id != store.id:
         raise HTTPException(
@@ -433,11 +404,8 @@ async def delete_invoice(
             detail="Only draft invoices can be deleted",
         )
 
-    del _invoices[invoice_id]
+    await invoice_repo.delete(invoice_id)
     return None
-
-
-logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -453,6 +421,7 @@ logger = logging.getLogger(__name__)
 )
 async def download_invoice_pdf(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
     regenerate: bool = Query(False, description="Force PDF regeneration"),
 ):
@@ -462,7 +431,7 @@ async def download_invoice_pdf(
     The PDF is cached in Cloudflare R2 for subsequent downloads.
     Pass ?regenerate=true to force re-generation after invoice updates.
     """
-    invoice = _invoices.get(invoice_id)
+    invoice = await invoice_repo.get_by_id(invoice_id)
 
     if not invoice or invoice.store_id != store.id:
         raise HTTPException(
@@ -514,6 +483,7 @@ async def download_invoice_pdf(
             invoice.pdf_r2_key = uploaded.key
             invoice.pdf_url = uploaded.url
             invoice.touch()
+            await invoice_repo.update(invoice)
     except Exception:
         logger.warning(
             "pdf_r2_upload_failed",

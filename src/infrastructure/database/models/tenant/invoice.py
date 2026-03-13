@@ -49,12 +49,22 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
 
     # Type and status
     invoice_type: Mapped[InvoiceType] = mapped_column(
-        Enum(InvoiceType, name="invoicetype", schema="public"),
+        Enum(
+            InvoiceType,
+            name="invoicetype",
+            schema="public",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         default=InvoiceType.INVOICE,
         nullable=False,
     )
     status: Mapped[InvoiceStatus] = mapped_column(
-        Enum(InvoiceStatus, name="invoicestatus", schema="public"),
+        Enum(
+            InvoiceStatus,
+            name="invoicestatus",
+            schema="public",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         default=InvoiceStatus.DRAFT,
         nullable=False,
         index=True,
