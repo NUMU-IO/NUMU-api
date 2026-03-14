@@ -34,6 +34,7 @@ from src.core.exceptions import (
     ExternalServiceError,
     InvalidTokenError,
     PaymentError,
+    PlanLimitExceededError,
     TokenExpiredError,
     ValidationError,
 )
@@ -170,6 +171,23 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content=_error_body("AUTHORIZATION_ERROR", str(exc)),
+        )
+
+    @app.exception_handler(PlanLimitExceededError)
+    async def plan_limit_handler(request: Request, exc: PlanLimitExceededError):
+        return JSONResponse(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            content=_error_body(
+                "PLAN_LIMIT_EXCEEDED",
+                str(exc),
+                {
+                    "resource": exc.resource,
+                    "limit": exc.limit,
+                    "current": exc.current,
+                    "plan": exc.plan,
+                    "upgrade_to": exc.upgrade_to,
+                },
+            ),
         )
 
     @app.exception_handler(PaymentError)

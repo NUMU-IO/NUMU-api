@@ -13,6 +13,7 @@ from src.core.exceptions.base import (
     InvalidCredentialsError,
     InvalidTokenError,
     PaymentError,
+    PlanLimitExceededError,
     TokenExpiredError,
     ValidationError,
 )
@@ -31,5 +32,6 @@ __all__ = [
     "AccountLockedError",
     "InsufficientStockError",
     "PaymentError",
+    "PlanLimitExceededError",
     "ExternalServiceError",
 ]

@@ -26,6 +26,7 @@ from src.api.dependencies import (
     get_store_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.plan import require_product_limit
 from src.api.responses import SuccessResponse
 from src.api.utils.upload_validation import validate_csv_upload, validate_image_upload
 from src.api.v1.schemas import (
@@ -74,6 +75,7 @@ PRODUCT_SORT_FIELDS = {"name", "price", "created_at", "updated_at", "quantity"}
     status_code=status.HTTP_201_CREATED,
     summary="Create new product",
     operation_id="create_product",
+    dependencies=[Depends(require_product_limit())],
 )
 async def create_product(
     request: CreateProductRequest,

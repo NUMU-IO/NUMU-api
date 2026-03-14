@@ -16,6 +16,7 @@ from src.api.dependencies import (
     get_store_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.plan import require_order_limit
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateOrderRequest,
@@ -150,6 +151,7 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
     status_code=status.HTTP_201_CREATED,
     summary="Create new order",
     operation_id="create_order",
+    dependencies=[Depends(require_order_limit())],
 )
 async def create_order(
     request: CreateOrderRequest,

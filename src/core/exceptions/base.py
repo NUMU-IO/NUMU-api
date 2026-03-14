@@ -104,6 +104,29 @@ class BusinessRuleViolationError(DomainException):
         super().__init__(message, code="BUSINESS_RULE_VIOLATION")
 
 
+class PlanLimitExceededError(DomainException):
+    """Raised when an action would exceed the tenant's plan limits."""
+
+    def __init__(
+        self,
+        resource: str,
+        limit: int,
+        current: int,
+        plan: str,
+        upgrade_to: str | None = None,
+    ) -> None:
+        self.resource = resource
+        self.limit = limit
+        self.current = current
+        self.plan = plan
+        self.upgrade_to = upgrade_to
+        message = (
+            f"Plan limit reached: your {plan} plan allows {limit} {resource} "
+            f"(currently at {current}). Upgrade to continue."
+        )
+        super().__init__(message, code="PLAN_LIMIT_EXCEEDED")
+
+
 class ExternalServiceError(DomainException):
     """Raised when an external service fails."""
 

@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 
 from src.api.dependencies.auth import get_current_user_id
+from src.api.dependencies.plan import require_webhook_feature
 from src.api.dependencies.repositories import (
     get_store_repository,
     get_webhook_delivery_log_repository,
@@ -75,6 +76,7 @@ def _log_to_response(log: WebhookDeliveryLog) -> WebhookDeliveryLogResponse:
     response_model=SuccessResponse[WebhookSubscriptionCreatedResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Register a webhook endpoint",
+    dependencies=[Depends(require_webhook_feature())],
 )
 async def create_webhook_subscription(
     store_id: UUID,
