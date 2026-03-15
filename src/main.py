@@ -180,6 +180,7 @@ def create_app() -> FastAPI:
     expose_docs = _should_expose_docs()
 
     app = FastAPI(
+        redirect_slashes=False,
         title=settings.app_name,
         description=(
             "NUMU is an e-commerce platform API built for the Egyptian market. "
