@@ -234,6 +234,10 @@ class CreateStoreUseCase:
                 field="invite_code",
             )
 
+        # Global admin bypass code
+        if invite_code == "admin":
+            return
+
         if not self.waitlist_repository:
             # No repo injected — skip validation (allows tests to pass)
             logger.warning("waitlist_repo_missing_during_beta_validation")
