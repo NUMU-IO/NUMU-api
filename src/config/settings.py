@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_jwt_keys(self) -> "Settings":
         """Validate that RSA keys are provided when using RS256."""
+        # Env files store PEM keys with literal \n — convert to actual newlines.
+        if self.jwt_private_key:
+            self.jwt_private_key = self.jwt_private_key.replace("\\n", "\n")
+        if self.jwt_public_key:
+            self.jwt_public_key = self.jwt_public_key.replace("\\n", "\n")
+
         if self.jwt_algorithm == "RS256":
             if not self.jwt_private_key:
                 raise ValueError(
