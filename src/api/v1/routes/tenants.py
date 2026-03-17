@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import get_current_user_id, require_roles
-from src.api.dependencies.database import get_db_session
+from src.api.dependencies.database import get_db
 from src.api.v1.schemas.public.tenant import (
     CreateTenantRequest,
     TenantCreatedResponse,
@@ -41,7 +41,7 @@ router = APIRouter()
 async def create_tenant(
     request: CreateTenantRequest,
     current_user_id: Annotated[UUID, Depends(get_current_user_id)],
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TenantCreatedResponse:
     """
     Create a new tenant/store.
@@ -99,7 +99,7 @@ async def create_tenant(
 )
 async def check_subdomain_availability(
     subdomain: str,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Check if a subdomain is available."""
     # Ensure we're querying public schema
@@ -126,7 +126,7 @@ admin_router = APIRouter()
     operation_id="list_tenants",
 )
 async def list_tenants(
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
     skip: int = 0,
     limit: int = 100,
@@ -149,7 +149,7 @@ async def list_tenants(
 )
 async def get_tenant(
     tenant_id: UUID,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
 ) -> TenantResponse:
     """Get tenant by ID (admin only)."""
@@ -177,7 +177,7 @@ async def get_tenant(
 async def update_tenant(
     tenant_id: UUID,
     request: UpdateTenantRequest,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
 ) -> TenantResponse:
     """Update tenant settings (admin only)."""
@@ -216,7 +216,7 @@ async def update_tenant(
 )
 async def deactivate_tenant(
     tenant_id: UUID,
-    db: Annotated[AsyncSession, Depends(get_db_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
 ) -> None:
     """Deactivate a tenant (admin only)."""
