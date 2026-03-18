@@ -2,20 +2,24 @@
 
 URL: /stores/{store_id}/reconciliation
 Provides merchants with read-only visibility into daily reconciliation runs
-and any mismatches that involve their orders.
+and any mismatches that involve their orders.  Store owners can also trigger
+a reconciliation run for a specific date.
 """
 
+from datetime import date, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.core.entities.store import Store
 from src.infrastructure.database.models.public.reconciliation import (
     PaymentReconciliationRunModel,
     ReconciliationMismatchModel,
@@ -55,6 +59,16 @@ class MismatchSummary(BaseModel):
     notes: str | None
     resolved: bool
     created_at: str
+
+
+class TriggerReconciliationRequest(BaseModel):
+    target_date: date | None = None  # defaults to yesterday when omitted
+
+
+class TriggerReconciliationResponse(BaseModel):
+    run_id: str
+    status: str
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -147,4 +161,42 @@ async def list_run_mismatches(
             for m in mismatches
         ],
         message="Mismatches retrieved",
+    )
+
+
+@router.post(
+    "/{store_id}/reconciliation/runs/trigger",
+    response_model=SuccessResponse[TriggerReconciliationResponse],
+    summary="Trigger reconciliation for a date",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="store_trigger_reconciliation",
+)
+async def trigger_reconciliation(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: TriggerReconciliationRequest | None = None,
+):
+    """Trigger a reconciliation run for a given date (defaults to yesterday).
+
+    Only the store owner may invoke this endpoint.
+    """
+    from src.application.services.reconciliation_service import ReconciliationService
+
+    target_date = (
+        request.target_date
+        if request and request.target_date
+        else date.today() - timedelta(days=1)
+    )
+
+    svc = ReconciliationService(db)
+    run = await svc.run_for_date(target_date)
+    await db.commit()
+
+    return SuccessResponse(
+        data=TriggerReconciliationResponse(
+            run_id=str(run.id),
+            status=run.status,
+            message=f"Reconciliation completed: {run.mismatches_found} mismatches found",
+        ),
+        message="Reconciliation triggered successfully",
     )

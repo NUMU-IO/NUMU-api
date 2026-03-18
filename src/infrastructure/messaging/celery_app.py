@@ -32,6 +32,7 @@ celery_app.conf.update(
     # Task autodiscovery - adjust paths as needed
     imports=[
         "src.infrastructure.messaging.tasks",
+        "src.infrastructure.messaging.tasks.fraud_tasks",
     ],
     # Queue definitions
     task_queues=(

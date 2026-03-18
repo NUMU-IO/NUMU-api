@@ -152,8 +152,8 @@ class ReconciliationService:
 
         # --- 4. Orders with no matching transaction ---
         for order in paid_orders:
-            # Convert order.total (Decimal) to cents
-            order_cents = int(float(order.total) * 100) if order.total else 0
+            # order.total is already stored in cents (Integer column)
+            order_cents = order.total or 0
             expected_cents += order_cents
 
             linked_txns = txn_by_order.get(order.id, [])

@@ -12,7 +12,16 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Request,
+    Response,
+    status,
+)
 
 from src.api.dependencies.auth import get_current_customer
 from src.api.dependencies.repositories import (
@@ -72,6 +81,7 @@ def _generate_invoice_pdf(invoice, store_logo_url: str | None = None) -> bytes:
     operation_id="checkout",
 )
 async def checkout(
+    http_request: Request,
     response: Response,
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: CheckoutRequest,
@@ -106,6 +116,13 @@ async def checkout(
                 data=CheckoutResponse(**json.loads(cached)),
                 message="Order already created",
             )
+
+    # Extract client IP (Nginx sets X-Real-IP; fall back to direct connection)
+    client_ip: str | None = (
+        http_request.headers.get("X-Real-IP")
+        or http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or (http_request.client.host if http_request.client else None)
+    ) or None
 
     # Require email verification for account-based customers
     if current_customer.has_account and not current_customer.is_verified:
@@ -316,6 +333,7 @@ async def checkout(
         payment_method=request.payment_method,
         shipping_method=request.shipping_method,
         customer_notes=request.customer_notes,
+        metadata={"ip_address": client_ip} if client_ip else {},
     )
 
     created_order = await order_repo.create(order)
@@ -592,6 +610,43 @@ async def checkout(
                 )
     except Exception as e:
         logger.warning(f"Failed to dispatch first-order onboarding email: {e}")
+
+    # Dispatch async fraud check (fire-and-forget via Celery)
+    try:
+        from src.infrastructure.messaging.tasks.fraud_tasks import (
+            fraud_check_order_task,
+        )
+
+        fraud_check_order_task.delay(
+            order_id=str(created_order.id),
+            store_id=str(store_id),
+            tenant_id=str(store.tenant_id) if store.tenant_id else None,
+            order_number=created_order.order_number,
+            total_cents=created_order.total,
+            currency=currency,
+            payment_method=request.payment_method,
+            customer_name=current_customer.full_name,
+            customer_email=customer_email,
+            shipping_address={
+                "first_name": ship_addr.first_name,
+                "last_name": ship_addr.last_name,
+                "address_line1": ship_addr.address_line1,
+                "city": ship_addr.city,
+                "country": ship_addr.country,
+            },
+            billing_address={
+                "first_name": bill_addr.first_name,
+                "last_name": bill_addr.last_name,
+                "address_line1": bill_addr.address_line1,
+                "city": bill_addr.city,
+                "country": bill_addr.country,
+            }
+            if bill_addr
+            else None,
+            ip_address=client_ip,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch fraud check task: {e}")
 
     # Clear the customer's cart only after the entire checkout succeeds
     from src.api.v1.routes.storefront.cart import _carts

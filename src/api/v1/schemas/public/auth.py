@@ -14,7 +14,7 @@ class RegisterRequest(BaseModel):
                 "email": "yousef@numu.com",
                 "password": "SecureP@ss123",
                 "first_name": "Yousef",
-                "last_name": "Khalil",
+                "last_name": "Yahia",
                 "phone": "+201001234567",
             }
         }
@@ -59,8 +59,8 @@ class UserResponse(BaseModel):
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "yousef@numu.com",
                 "first_name": "Yousef",
-                "last_name": "Khalil",
-                "full_name": "Yousef Khalil",
+                "last_name": "Yahia",
+                "full_name": "Yousef Yahia",
                 "role": "merchant",
                 "status": "active",
                 "phone": "+201001234567",

@@ -26,6 +26,7 @@ services:
     volumes:
       - nginx_logs:/var/log/nginx
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
     depends_on:
       - api
     networks:
@@ -234,4 +235,6 @@ volumes:
   nginx_logs:
     driver: local
   api_logs:
+    driver: local
+  certbot_webroot:
     driver: local
