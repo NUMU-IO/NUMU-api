@@ -151,6 +151,8 @@ class ReconciliationService:
         actual_cents = 0
 
         # --- 4. Orders with no matching transaction ---
+        _COD_METHODS = {"cod", "cash_on_delivery", "cash"}
+
         for order in paid_orders:
             # order.total is already stored in cents (Integer column)
             order_cents = order.total or 0
@@ -158,6 +160,10 @@ class ReconciliationService:
 
             linked_txns = txn_by_order.get(order.id, [])
             if not linked_txns:
+                is_cod = (order.payment_method or "").lower() in _COD_METHODS
+                if is_cod:
+                    # COD: cash collected at delivery counts as actual
+                    actual_cents += order_cents
                 mismatches.append(
                     ReconciliationMismatch(
                         run_id=run.id,
@@ -165,9 +171,11 @@ class ReconciliationService:
                         order_id=order.id,
                         order_number=order.order_number,
                         expected_amount_cents=order_cents,
+                        actual_amount_cents=order_cents if is_cod else None,
+                        gateway=order.payment_method,
                         notes=(
-                            f"Order {order.order_number} is PAID but has no "
-                            f"matching payment transaction record"
+                            f"Order {order.order_number} — "
+                            f"{'COD (cash collected)' if is_cod else 'no matching payment transaction'}"
                         ),
                     )
                 )
