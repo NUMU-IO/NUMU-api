@@ -29,7 +29,12 @@ class WaitlistModel(Base, UUIDMixin, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     status: Mapped[WaitlistStatus] = mapped_column(
-        Enum(WaitlistStatus, name="waitliststatus", schema="public"),
+        Enum(
+            WaitlistStatus,
+            name="waitliststatus",
+            schema="public",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         default=WaitlistStatus.PENDING,
         nullable=False,
         index=True,

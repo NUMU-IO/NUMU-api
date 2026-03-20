@@ -59,6 +59,15 @@ class InviteWaitlistRequest(BaseModel):
     entry_id: UUID
 
 
+class DirectInviteRequest(BaseModel):
+    """Admin request to create a new entry and immediately invite them."""
+
+    email: EmailStr
+    name: SanitizedStr | None = Field(None, max_length=255)
+    company_name: SanitizedStr | None = Field(None, max_length=255)
+    notes: str | None = Field(None, max_length=500)
+
+
 class UpdatePriorityRequest(BaseModel):
     """Admin request to update priority score."""
 

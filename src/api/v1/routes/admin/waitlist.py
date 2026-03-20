@@ -17,11 +17,12 @@ from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.api.v1.schemas.public.waitlist import (
+    DirectInviteRequest,
     InviteWaitlistRequest,
     UpdatePriorityRequest,
     WaitlistEntryResponse,
 )
-from src.core.entities.waitlist import WaitlistStatus
+from src.core.entities.waitlist import WaitlistEntry, WaitlistStatus
 from src.infrastructure.repositories.waitlist_repository import WaitlistRepository
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,87 @@ async def invite_waitlist_entry(
     return SuccessResponse(
         data=_build_response(updated),
         message="Beta invite sent successfully",
+    )
+
+
+@router.post(
+    "/direct-invite",
+    response_model=SuccessResponse[WaitlistEntryResponse],
+    summary="Create entry and send beta invite directly",
+    operation_id="direct_invite",
+)
+async def direct_invite(
+    request: DirectInviteRequest,
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Create a new waitlist entry and immediately send a beta invite.
+
+    If the email already exists and is pending, invites the existing entry.
+    If already invited/converted, returns an error.
+    """
+    repo = WaitlistRepository(db)
+
+    # Check if email already exists
+    existing = await repo.get_by_email(request.email)
+    if existing:
+        if not existing.is_invitable:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"This email has already been {existing.status}",
+            )
+        entry = existing
+    else:
+        # Create new entry
+        import uuid as _uuid
+
+        referral_code = secrets.token_urlsafe(8)
+        entry = WaitlistEntry(
+            id=_uuid.uuid4(),
+            email=request.email,
+            name=request.name,
+            company_name=request.company_name,
+            notes=request.notes,
+            source="admin_direct",
+            referral_code=referral_code,
+        )
+        entry = await repo.create(entry)
+
+    # Generate invite code and mark as invited
+    invite_code = secrets.token_urlsafe(32)
+    entry.invite(invite_code)
+    updated = await repo.update(entry)
+    await db.commit()
+
+    # Send invite email
+    try:
+        from src.api.dependencies.services import get_email_service
+        from src.core.interfaces.services.email_service import EmailMessage
+        from src.infrastructure.external_services.resend.email_templates.beta_invite import (
+            beta_invite_html,
+        )
+
+        email_service = get_email_service()
+        await email_service.send_email(
+            EmailMessage(
+                to=updated.email,
+                subject="You're invited to NUMU Beta!",
+                html_content=beta_invite_html(
+                    name=updated.name, invite_code=invite_code
+                ),
+            )
+        )
+    except Exception:
+        logger.warning("beta_direct_invite_email_failed", exc_info=True)
+
+    logger.info(
+        "waitlist_direct_invited",
+        extra={"entry_id": str(updated.id), "email": updated.email},
+    )
+
+    return SuccessResponse(
+        data=_build_response(updated),
+        message="Beta invite created and sent",
     )
 
 

@@ -59,7 +59,7 @@ def beta_invite_html(name: str | None, invite_code: str) -> str:
 
         <!-- CTA Button -->
         <div style="text-align:center; margin:28px 0;">
-            <a href="https://numu.io/register?invite={invite_code}"
+            <a href="https://numueg.app/register?invite={invite_code}"
                style="display:inline-block; padding:14px 36px; background:#D4AF37; color:#fff; text-decoration:none; border-radius:6px; font-weight:700; font-size:15px;">
                 Create Your Store
             </a>
