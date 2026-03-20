@@ -1072,7 +1072,7 @@ async def upload_customization_asset(
     Returns the URL of the uploaded asset.
     """
     # Validate asset type
-    allowed_types = {"logo", "favicon", "hero_image"}
+    allowed_types = {"logo", "favicon", "hero_image", "profile_picture"}
     if asset_type not in allowed_types:
         raise HTTPException(
             status_code=400,
@@ -1108,13 +1108,11 @@ async def upload_customization_asset(
     )
     filename = f"customization/{store.id}/{asset_type}_{uuid.uuid4().hex[:8]}.{ext}"
 
-    # TODO: Upload to Cloudflare R2 or configured storage
-    # For now, return a placeholder URL pattern
-    # In production, use the CloudflareR2StorageService:
-    #   from src.infrastructure.external_services.storage import get_storage_service
-    #   storage = get_storage_service()
-    #   url = await storage.upload(filename, content, file.content_type)
-    url = f"/api/v1/assets/{filename}"
+    # Upload to configured storage (Cloudflare R2 / MinIO / local)
+    from src.api.dependencies.services import get_storage_service
+
+    storage = get_storage_service()
+    url = await storage.upload(filename, content, file.content_type or "image/png")
 
     return SuccessResponse(
         data={"url": url, "asset_type": asset_type, "filename": file.filename},
