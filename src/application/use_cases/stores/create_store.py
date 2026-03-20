@@ -139,8 +139,12 @@ class CreateStoreUseCase:
         """
         # Beta gate: require invite code when beta_mode is enabled
         beta_mode = getattr(settings, "beta_mode", False)
+        is_beta_invite = False
         if beta_mode:
             await self._validate_invite_code(invite_code)
+            if invite_code:
+                is_beta_invite = True
+                plan = "beta"
 
         # Validate and normalize subdomain
         subdomain = validate_subdomain(dto.subdomain)
@@ -182,17 +186,21 @@ class CreateStoreUseCase:
             subdomain=subdomain,
             owner_id=owner_id,
             plan=plan,
-            is_active=False,
+            is_active=is_beta_invite,
         )
 
         # Create store entity with tenant_id
+        # Beta-invited users are auto-approved
+        store_status = (
+            StoreStatus.ACTIVE if is_beta_invite else StoreStatus.PENDING_APPROVAL
+        )
         store = Store(
             name=dto.name,
             slug=slug,
             subdomain=subdomain,
             owner_id=owner_id,
             description=dto.description,
-            status=StoreStatus.PENDING_APPROVAL,
+            status=store_status,
             default_currency=currency,
             default_language=dto.default_language,
             contact_email=dto.contact_email,
