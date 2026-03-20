@@ -1110,9 +1110,16 @@ async def upload_customization_asset(
 
     # Upload to configured storage (Cloudflare R2 / MinIO / local)
     from src.api.dependencies.services import get_storage_service
+    from src.core.interfaces.services.storage_service import StorageBucket
 
     storage = get_storage_service()
-    url = await storage.upload(filename, content, file.content_type or "image/png")
+    result = await storage.upload_file(
+        file_content=content,
+        filename=filename,
+        content_type=file.content_type or "image/png",
+        bucket=StorageBucket.STORES,
+    )
+    url = result.url
 
     return SuccessResponse(
         data={"url": url, "asset_type": asset_type, "filename": file.filename},
