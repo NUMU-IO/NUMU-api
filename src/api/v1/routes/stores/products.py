@@ -263,7 +263,9 @@ async def list_products(
             product_type=product.product_type,
             status=product.status,
             price=str(product.price),
-            price_currency=product.price_currency,
+            price_currency=getattr(
+                product, "price_currency", store.default_currency or "EGP"
+            ),
             compare_at_price=str(product.compare_at_price)
             if product.compare_at_price
             else None,
