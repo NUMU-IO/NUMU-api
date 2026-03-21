@@ -718,8 +718,8 @@ async def update_profile(
                 is_verified=result.is_verified,
                 created_at=str(result.created_at),
                 updated_at=str(result.updated_at),
-                trial_ends_at=str(result.trial_ends_at)
-                if result.trial_ends_at
+                trial_ends_at=str(getattr(result, "trial_ends_at", None))
+                if getattr(result, "trial_ends_at", None)
                 else None,
             ),
             message="Profile updated successfully",
