@@ -75,6 +75,7 @@ class CreateCategoryUseCase:
             parent_id=dto.parent_id,
             position=dto.position,
             is_active=dto.is_active,
+            metadata=dto.extra_data or {},
         )
 
         created = await self.category_repository.create(category)

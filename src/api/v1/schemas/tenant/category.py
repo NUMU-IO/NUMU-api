@@ -1,5 +1,7 @@
 """Category Pydantic schemas for store management."""
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -19,6 +21,9 @@ class CreateCategoryRequest(BaseModel):
     parent_id: str | None = Field(None, description="Parent category UUID for nesting")
     position: int = Field(0, ge=0, description="Sort position (lower = first)")
     is_active: bool = Field(True, description="Whether the category is visible")
+    extra_data: dict[str, Any] | None = Field(
+        None, description="Extra metadata (e.g. name_ar, description_ar)"
+    )
 
 
 class UpdateCategoryRequest(BaseModel):
@@ -35,6 +40,9 @@ class UpdateCategoryRequest(BaseModel):
     parent_id: str | None = Field(None, description="Parent category UUID")
     position: int | None = Field(None, ge=0, description="Sort position")
     is_active: bool | None = Field(None, description="Whether the category is visible")
+    extra_data: dict[str, Any] | None = Field(
+        None, description="Extra metadata (e.g. name_ar, description_ar)"
+    )
 
 
 class CategoryResponse(BaseModel):
@@ -52,5 +60,8 @@ class CategoryResponse(BaseModel):
     position: int = Field(description="Sort position")
     is_active: bool = Field(description="Whether the category is visible")
     product_count: int = Field(description="Number of products in this category")
+    extra_data: dict[str, Any] | None = Field(
+        None, description="Extra metadata (e.g. name_ar, description_ar)"
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")

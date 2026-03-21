@@ -6,14 +6,16 @@ URL: /stores/{store_id}/categories
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
 
 from src.api.dependencies import (
     get_category_repository,
+    get_image_pipeline,
     get_store_repository,
     verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
+from src.api.utils.upload_validation import validate_image_upload
 from src.api.v1.schemas import (
     CategoryResponse,
     CreateCategoryRequest,
@@ -28,6 +30,8 @@ from src.application.use_cases.categories import (
     UpdateCategoryUseCase,
 )
 from src.core.entities.store import Store
+from src.core.interfaces.services.storage_service import StorageBucket
+from src.infrastructure.external_services.image import ImagePipeline
 from src.infrastructure.repositories import CategoryRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/categories")
@@ -46,6 +50,7 @@ def _category_response(result) -> CategoryResponse:
         position=result.position,
         is_active=result.is_active,
         product_count=result.product_count,
+        extra_data=result.metadata if result.metadata else None,
         created_at=str(result.created_at),
         updated_at=str(result.updated_at),
     )
@@ -78,6 +83,7 @@ async def create_category(
         parent_id=UUID(request.parent_id) if request.parent_id else None,
         position=request.position,
         is_active=request.is_active,
+        extra_data=request.extra_data,
     )
 
     result = await use_case.execute(dto=dto, store_id=store.id, user_id=store.owner_id)
@@ -161,6 +167,7 @@ async def update_category(
         parent_id=UUID(request.parent_id) if request.parent_id else None,
         position=request.position,
         is_active=request.is_active,
+        extra_data=request.extra_data,
     )
 
     result = await use_case.execute(
@@ -194,3 +201,54 @@ async def delete_category(
     await use_case.execute(category_id=category_id, user_id=store.owner_id)
 
     return None
+
+
+# =============================================================================
+# Category Image Upload
+# =============================================================================
+
+
+@router.post(
+    "/{category_id}/image",
+    response_model=SuccessResponse[CategoryResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Upload category image",
+    operation_id="upload_category_image",
+)
+async def upload_category_image(
+    category_id: Annotated[UUID, Path(description="Category ID")],
+    file: Annotated[UploadFile, File(description="Image file to upload")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    image_pipeline: Annotated[ImagePipeline, Depends(get_image_pipeline)],
+):
+    """Upload an image for a category.
+
+    Accepts JPEG, PNG, WebP images. Maximum file size: 5 MB.
+    The image is processed and the category's image_url is updated.
+    """
+    file_content = await validate_image_upload(file)
+
+    # Process and upload the image
+    result = await image_pipeline.process_and_upload(
+        file_data=file_content,
+        product_id=category_id,
+        original_filename=file.filename or "category-image",
+        bucket=StorageBucket.CATEGORIES,
+    )
+
+    # Update the category's image_url
+    use_case = UpdateCategoryUseCase(
+        category_repository=category_repo,
+        store_repository=store_repo,
+    )
+    dto = UpdateCategoryDTO(image_url=result.url)
+    updated = await use_case.execute(
+        category_id=category_id, dto=dto, user_id=store.owner_id
+    )
+
+    return SuccessResponse(
+        data=_category_response(updated),
+        message="Category image uploaded successfully",
+    )

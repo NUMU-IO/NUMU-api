@@ -267,9 +267,12 @@ class OrderRepository(IOrderRepository):
         fulfillment_status: FulfillmentStatus | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        customer_id: UUID | None = None,
     ) -> list[Order]:
         """Get all orders for a store with optional filters."""
         query = select(OrderModel).where(OrderModel.store_id == store_id)
+        if customer_id:
+            query = query.where(OrderModel.customer_id == customer_id)
         if status:
             query = query.where(OrderModel.status == status)
         if payment_status:
@@ -384,9 +387,12 @@ class OrderRepository(IOrderRepository):
         fulfillment_status: FulfillmentStatus | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        customer_id: UUID | None = None,
     ) -> int:
         """Get total count of orders for a store with optional filters."""
         query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
+        if customer_id:
+            query = query.where(OrderModel.customer_id == customer_id)
         if status:
             query = query.where(OrderModel.status == status)
         if payment_status:

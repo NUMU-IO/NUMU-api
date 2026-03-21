@@ -58,6 +58,7 @@ class CreateCategoryDTO(BaseDTO):
     parent_id: UUID | None = None
     position: int = 0
     is_active: bool = True
+    extra_data: dict[str, Any] | None = None
 
 
 @dataclass
@@ -71,3 +72,4 @@ class UpdateCategoryDTO(BaseDTO):
     parent_id: UUID | None = None
     position: int | None = None
     is_active: bool | None = None
+    extra_data: dict[str, Any] | None = None

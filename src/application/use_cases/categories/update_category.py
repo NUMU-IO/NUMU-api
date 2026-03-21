@@ -81,6 +81,8 @@ class UpdateCategoryUseCase:
             category.position = dto.position
         if dto.is_active is not None:
             category.is_active = dto.is_active
+        if dto.extra_data is not None:
+            category.update_metadata(dto.extra_data)
 
         category.touch()
         updated = await self.category_repository.update(category)

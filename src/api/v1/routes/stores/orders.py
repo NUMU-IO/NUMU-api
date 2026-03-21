@@ -264,6 +264,7 @@ async def list_orders(
         None, description="Filter orders until this date (ISO 8601)"
     ),
     search: str | None = Query(None),
+    customer_id: str | None = Query(None, description="Filter by customer ID"),
 ):
     """List orders for a store with optional filtering and pagination."""
     use_case = ListOrdersUseCase(
@@ -283,6 +284,7 @@ async def list_orders(
         date_from=date_from,
         date_to=date_to,
         search=search,
+        customer_id=UUID(customer_id) if customer_id else None,
     )
 
     orders = [_order_list_item_to_response(order) for order in result.orders]
