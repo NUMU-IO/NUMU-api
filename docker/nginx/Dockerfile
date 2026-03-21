@@ -62,6 +62,9 @@ COPY --from=builder /tmp/nginx-${NGINX_VERSION}/objs/ngx_http_brotli_static_modu
 # Install brotli runtime library (needed by the dynamic modules)
 RUN apk add --no-cache brotli-libs
 
+# Remove default server config that conflicts with our server blocks
+RUN rm -f /etc/nginx/conf.d/default.conf
+
 # Copy our custom Nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
