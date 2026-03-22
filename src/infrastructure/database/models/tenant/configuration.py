@@ -113,11 +113,21 @@ class ConfigurationRequest(Base, UUIDMixin, TenantMixin, TimestampMixin):
 
     # What needs to be configured
     service_type: Mapped[ServiceType] = mapped_column(
-        SQLEnum(ServiceType, name="service_type_enum", create_type=False),
+        SQLEnum(
+            ServiceType,
+            name="service_type_enum",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
     service_name: Mapped[ServiceName] = mapped_column(
-        SQLEnum(ServiceName, name="service_name_enum", create_type=False),
+        SQLEnum(
+            ServiceName,
+            name="service_name_enum",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
 
@@ -177,11 +187,21 @@ class ServiceCredential(Base, UUIDMixin, TenantMixin, TimestampMixin):
 
     # Service identification
     service_type: Mapped[ServiceType] = mapped_column(
-        SQLEnum(ServiceType, name="service_type_enum", create_type=False),
+        SQLEnum(
+            ServiceType,
+            name="service_type_enum",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
     service_name: Mapped[ServiceName] = mapped_column(
-        SQLEnum(ServiceName, name="service_name_enum", create_type=False),
+        SQLEnum(
+            ServiceName,
+            name="service_name_enum",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
 
@@ -251,11 +271,21 @@ class CredentialAuditLog(Base, UUIDMixin, TenantMixin):
 
     # Which service
     service_type: Mapped[ServiceType] = mapped_column(
-        SQLEnum(ServiceType, name="service_type_enum", create_type=False),
+        SQLEnum(
+            ServiceType,
+            name="service_type_enum",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
     service_name: Mapped[ServiceName] = mapped_column(
-        SQLEnum(ServiceName, name="service_name_enum", create_type=False),
+        SQLEnum(
+            ServiceName,
+            name="service_name_enum",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
 

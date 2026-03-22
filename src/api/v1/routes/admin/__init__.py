@@ -23,6 +23,9 @@ from src.api.v1.routes.admin.products import router as products_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.stores import router as stores_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
+from src.api.v1.routes.tenant.configuration.admin_routes import (
+    router as credentials_router,
+)
 
 router = APIRouter()
 
@@ -39,5 +42,8 @@ router.include_router(
 router.include_router(
     reconciliation_router, prefix="/reconciliation", tags=["Admin - Reconciliation"]
 )
+# Credentials router already has prefix="/admin/credentials" built-in,
+# so we include it at root "" to avoid /admin/admin/credentials
+router.include_router(credentials_router)
 
 __all__ = ["router"]
