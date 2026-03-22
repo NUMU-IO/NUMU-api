@@ -228,31 +228,48 @@ class KashierPaymentService(IPaymentService):
         payload: bytes,
         signature: str,
     ) -> dict | None:
-        """Verify Kashier webhook signature using HMAC SHA256."""
+        """Verify Kashier webhook signature using HMAC SHA256.
+
+        From Kashier docs:
+        1. Sort signatureKeys array alphabetically
+        2. Extract matching fields from data object
+        3. Create query string using those key-value pairs
+        4. Generate HMAC-SHA256 using Payment API key
+        5. Compare with x-kashier-signature header
+        """
         if not self._api_key:
             logger.error("kashier_webhook_no_api_key")
             return None
 
         try:
-            data = json.loads(payload)
+            raw = json.loads(payload)
         except (json.JSONDecodeError, ValueError):
             logger.warning("kashier_webhook_invalid_json")
             return None
 
-        # Reconstruct the query string in the exact field order
-        query_string = (
-            f"&paymentStatus={data.get('paymentStatus', '')}"
-            f"&cardDataToken={data.get('cardDataToken', '')}"
-            f"&maskedCard={data.get('maskedCard', '')}"
-            f"&merchantOrderId={data.get('merchantOrderId', '')}"
-            f"&orderId={data.get('orderId', '')}"
-            f"&cardBrand={data.get('cardBrand', '')}"
-            f"&orderReference={data.get('orderReference', '')}"
-            f"&transactionId={data.get('transactionId', '')}"
-            f"&amount={data.get('amount', '')}"
-            f"&currency={data.get('currency', '')}"
-        )
-        final_string = query_string[1:]
+        data = raw.get("data") or raw
+        signature_keys = raw.get("signatureKeys") or []
+
+        if signature_keys:
+            # Use signatureKeys from payload (new format)
+            sorted_keys = sorted(signature_keys)
+            parts = [f"{key}={data.get(key, '')}" for key in sorted_keys]
+            final_string = "&".join(parts)
+        else:
+            # Fallback: legacy hardcoded field order
+            parts = [
+                f"paymentStatus={data.get('paymentStatus', '')}",
+                f"cardDataToken={data.get('cardDataToken', '')}",
+                f"maskedCard={data.get('maskedCard', '')}",
+                f"merchantOrderId={data.get('merchantOrderId', '')}",
+                f"orderId={data.get('orderId', '')}",
+                f"cardBrand={data.get('cardBrand', '')}",
+                f"orderReference={data.get('orderReference', '')}",
+                f"transactionId={data.get('transactionId', '')}",
+                f"amount={data.get('amount', '')}",
+                f"currency={data.get('currency', '')}",
+            ]
+            final_string = "&".join(parts)
 
         calculated_sig = hmac.new(
             self._api_key.encode("utf-8"),
@@ -261,7 +278,7 @@ class KashierPaymentService(IPaymentService):
         ).hexdigest()
 
         if hmac.compare_digest(calculated_sig, signature):
-            return data
+            return raw
 
         logger.warning("kashier_webhook_signature_mismatch")
         return None
