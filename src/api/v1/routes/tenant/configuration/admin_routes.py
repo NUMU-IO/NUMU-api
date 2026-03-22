@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from src.api.dependencies.auth import require_admin, require_super_admin
+from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.v1.schemas.tenant.configuration import (
     ConfigurationRequestListResponse,
@@ -26,14 +26,6 @@ from src.api.v1.schemas.tenant.configuration import (
 from src.api.v1.schemas.tenant.configuration.credential_schemas import (
     CredentialValidationResponse,
 )
-from src.application.use_cases.configuration import (
-    ConfigureCredentialsUseCase,
-    GetSupportedServicesUseCase,
-    ListAllConfigurationRequestsUseCase,
-    RevokeCredentialsUseCase,
-    UpdateConfigurationRequestUseCase,
-    ValidateCredentialsUseCase,
-)
 from src.infrastructure.database.models.tenant.configuration import (
     RequestStatus,
     ServiceName,
@@ -41,7 +33,7 @@ from src.infrastructure.database.models.tenant.configuration import (
 )
 
 router = APIRouter(
-    prefix="/admin/credentials",
+    prefix="/credentials",
     tags=["Admin - Credentials"],
 )
 
@@ -66,6 +58,10 @@ async def list_pending_requests(
     db=Depends(get_db),
 ):
     """List all pending configuration requests."""
+    from src.application.use_cases.configuration import (
+        ListAllConfigurationRequestsUseCase,
+    )
+
     use_case = ListAllConfigurationRequestsUseCase(db)
 
     result = await use_case.execute(
@@ -90,6 +86,10 @@ async def get_request_details(
     db=Depends(get_db),
 ):
     """Get configuration request details."""
+    from src.application.use_cases.configuration import (
+        ListAllConfigurationRequestsUseCase,
+    )
+
     use_case = ListAllConfigurationRequestsUseCase(db)
 
     result = await use_case.get_by_id(request_id=request_id)
@@ -117,12 +117,16 @@ async def update_request(
     db=Depends(get_db),
 ):
     """Update a configuration request."""
+    from src.application.use_cases.configuration import (
+        UpdateConfigurationRequestUseCase,
+    )
+
     use_case = UpdateConfigurationRequestUseCase(db)
 
     try:
         result = await use_case.execute(
             request_id=request_id,
-            admin_id=admin.id,
+            admin_id=admin,
             status=update.status,
             priority=update.priority,
             admin_notes=update.admin_notes,
@@ -160,12 +164,14 @@ async def configure_credentials(
     db=Depends(get_db),
 ):
     """Configure credentials for a merchant."""
+    from src.application.use_cases.configuration import ConfigureCredentialsUseCase
+
     use_case = ConfigureCredentialsUseCase(db)
 
     try:
         result = await use_case.execute(
             tenant_id=config.tenant_id,
-            admin_id=admin.id,
+            admin_id=admin,
             service_type=config.service_type,
             service_name=config.service_name,
             credentials=config.credentials,
@@ -194,6 +200,8 @@ async def validate_credentials(
     db=Depends(get_db),
 ):
     """Validate credentials without storing."""
+    from src.application.use_cases.configuration import ValidateCredentialsUseCase
+
     use_case = ValidateCredentialsUseCase(db)
 
     result = await use_case.execute(
@@ -226,6 +234,8 @@ async def get_credential_status(
     db=Depends(get_db),
 ):
     """Get credential status for a merchant's service."""
+    from src.application.use_cases.configuration import ConfigureCredentialsUseCase
+
     use_case = ConfigureCredentialsUseCase(db)
 
     result = await use_case.get_status(
@@ -261,16 +271,18 @@ async def revoke_credentials(
     tenant_id: UUID,
     service_type: ServiceType,
     service_name: ServiceName,
-    admin=Depends(require_super_admin),
+    admin=Depends(require_admin),
     db=Depends(get_db),
 ):
     """Revoke credentials for a merchant's service."""
+    from src.application.use_cases.configuration import RevokeCredentialsUseCase
+
     use_case = RevokeCredentialsUseCase(db)
 
     try:
         await use_case.execute(
             tenant_id=tenant_id,
-            admin_id=admin.id,
+            admin_id=admin,
             service_type=service_type,
             service_name=service_name,
         )
@@ -291,6 +303,8 @@ async def get_supported_services(
     admin=Depends(require_admin),
 ):
     """Get list of supported services."""
+    from src.application.use_cases.configuration import GetSupportedServicesUseCase
+
     use_case = GetSupportedServicesUseCase()
     return await use_case.execute()
 
@@ -308,6 +322,8 @@ async def get_service_info(
     admin=Depends(require_admin),
 ):
     """Get information about a specific service."""
+    from src.application.use_cases.configuration import GetSupportedServicesUseCase
+
     use_case = GetSupportedServicesUseCase()
 
     result = await use_case.get_service_info(

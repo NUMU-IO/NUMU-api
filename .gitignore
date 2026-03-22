@@ -110,3 +110,6 @@ Pipfile.lock.claude/
 
 # Celery runtime files
 celerybeat-schedule*
+
+# HTTP test files
+app.http
