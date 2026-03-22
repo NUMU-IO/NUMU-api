@@ -48,8 +48,13 @@ class UpdateStoreUseCase:
             store.social_links = dto.social_links
         if dto.default_language is not None:
             store.default_language = dto.default_language
+        if dto.status is not None:
+            if dto.status == "active":
+                store.activate()
+            elif dto.status == "inactive":
+                store.deactivate()
         if dto.settings is not None:
-            store.settings = dto.settings
+            store.settings = {**(store.settings or {}), **dto.settings}
 
         # Save store
         updated_store = await self.store_repository.update(store)

@@ -62,6 +62,7 @@ def _build_store_response(store) -> StoreResponse:
         contact_phone=store.contact_phone,
         address=store.address,
         social_links=store.social_links,
+        settings=getattr(store, "settings", None) or {},
         theme_settings=store.theme_settings,
         created_at=str(store.created_at),
         updated_at=str(store.updated_at),
@@ -254,6 +255,7 @@ async def update_store(
         address=request.address,
         social_links=request.social_links,
         default_language=request.default_language,
+        status=request.status,
         settings=request.settings,
         theme_settings=request.theme_settings,
     )

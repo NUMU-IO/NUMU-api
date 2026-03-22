@@ -90,5 +90,6 @@ class UpdateStoreDTO(BaseDTO):
     contact_phone: str | None = None
     address: dict | None = None
     social_links: dict | None = None
+    status: str | None = None
     settings: dict | None = None
     theme_settings: dict | None = None

@@ -87,6 +87,11 @@ class UpdateStoreRequest(BaseModel):
     default_language: str | None = Field(
         None, pattern="^(en|ar)$", description="Default language: en or ar"
     )
+    status: str | None = Field(
+        None,
+        pattern="^(active|inactive)$",
+        description="Store status: active or inactive",
+    )
     settings: dict | None = Field(None, description="Store-level settings")
     theme_settings: dict | None = Field(None, description="Storefront theme settings")
 
@@ -139,6 +144,7 @@ class StoreResponse(BaseModel):
     contact_phone: str | None = Field(description="Public contact phone")
     address: dict = Field(description="Physical address object")
     social_links: dict = Field(description="Social media links")
+    settings: dict = Field(default_factory=dict, description="Store-level settings")
     theme_settings: dict = Field(description="Storefront theme configuration")
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
