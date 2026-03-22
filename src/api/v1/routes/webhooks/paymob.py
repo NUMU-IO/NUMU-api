@@ -7,6 +7,7 @@ Receives payment notifications from Paymob for:
 """
 
 import json
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -17,6 +18,9 @@ from src.config import settings
 from src.config.logging_config import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.database.connection import get_admin_db_session
+from src.infrastructure.database.models.tenant.payment_transaction import (
+    PaymentTransactionModel,
+)
 from src.infrastructure.external_services.paymob.payment_service import (
     PaymobPaymentService,
     get_merchant_paymob_credentials,
@@ -180,11 +184,49 @@ async def paymob_callback(
         )
         await order_repo.update(order)
 
+        # Create payment transaction record for reconciliation
+        source_data = obj.get("source_data", {})
+        tx = PaymentTransactionModel(
+            tenant_id=order.tenant_id,
+            store_id=order.store_id,
+            order_id=order.id,
+            channel="online",
+            gateway="paymob",
+            display_name=f"{source_data.get('sub_type', 'Card')} •••• {source_data.get('pan', '****')[-4:]}",
+            amount_cents=amount_cents,
+            currency=currency,
+            status="success",
+            gateway_transaction_id=str(transaction_id),
+            processing_completed_at=datetime.now(UTC),
+        )
+        db.add(tx)
+        await db.flush()
+        log.info("payment_transaction_created", tx_id=str(tx.id))
+
     else:
         error_msg = obj.get("data", {}).get("message", "Payment failed")
+        txn_response = obj.get("txn_response_code", "")
         log.warning("payment_failed", error_message=error_msg)
         order.mark_payment_failed(reason=error_msg)
         await order_repo.update(order)
+
+        # Record failed transaction too
+        tx = PaymentTransactionModel(
+            tenant_id=order.tenant_id,
+            store_id=order.store_id,
+            order_id=order.id,
+            channel="online",
+            gateway="paymob",
+            amount_cents=amount_cents,
+            currency=currency,
+            status="failed",
+            failure_reason=error_msg,
+            failure_code=txn_response,
+            gateway_transaction_id=str(transaction_id),
+            processing_completed_at=datetime.now(UTC),
+        )
+        db.add(tx)
+        await db.flush()
 
     # Always return 200 to acknowledge receipt
     return {"status": "received", "transaction_id": transaction_id}
