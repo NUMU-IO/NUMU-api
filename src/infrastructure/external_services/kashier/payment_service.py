@@ -107,13 +107,18 @@ class KashierPaymentService(IPaymentService):
             "allowedMethods": "card,wallet",
             "enable3DS": True,
             "display": "en",
+            "defaultMethod": "card",
+            "interactionSource": "ECOMMERCE",
             "serverWebhook": webhook_url,
             "merchantRedirect": redirect_url,
             "failureRedirect": True,
+            "maxFailureAttempts": 3,
+            "saveCard": "optional",
+            "customer": {
+                "reference": order_id,
+                "email": customer_email or "customer@example.com",
+            },
         }
-
-        if customer_email:
-            session_payload["customer"] = {"email": customer_email}
 
         # Determine auth headers — prefer secret_key, fall back to api_key
         headers = {
