@@ -30,10 +30,12 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationSocialLinks,
     CustomizationTheme,
     InvoiceSettingsResponse,
+    KashierCredentialsResponse,
     NotificationTemplate,
     PaymentMethodStatus,
     PaymentSettingsResponse,
     PaymobCredentialsResponse,
+    SaveKashierCredentialsRequest,
     SavePaymobCredentialsRequest,
     ShippingCarrierStatus,
     ShippingSettingsResponse,
@@ -524,6 +526,153 @@ async def delete_paymob_credentials(
     return SuccessResponse(
         data=PaymobCredentialsResponse(is_configured=False),
         message="Paymob credentials removed successfully",
+    )
+
+
+# ============ Kashier Credentials ============
+
+
+@router.put(
+    "/payment/kashier/credentials",
+    response_model=SuccessResponse[KashierCredentialsResponse],
+    summary="Save Kashier credentials",
+    operation_id="save_kashier_credentials",
+)
+async def save_kashier_credentials(
+    request: SaveKashierCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save or update Kashier payment gateway credentials for the store."""
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = await secrets.get_current_key_id()
+
+    credential_data = {
+        "merchant_id": request.merchant_id,
+        "api_key": request.api_key,
+    }
+
+    encrypted = await secrets.encrypt(credential_data, key_id)
+    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
+
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["kashier"] = {
+        "enabled": True,
+        "is_configured": True,
+        "last_configured": datetime.now(UTC).isoformat(),
+        "encrypted_credentials": encrypted_b64,
+        "encryption_key_id": key_id,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+    )
+
+    logger.info(f"Kashier credentials saved for store {store.id}")
+
+    return SuccessResponse(
+        data=KashierCredentialsResponse(
+            is_configured=True,
+            merchant_id=request.merchant_id,
+            api_key_masked=secrets.mask_credential(request.api_key),
+            last_configured=payment_settings["kashier"]["last_configured"],
+        ),
+        message="Kashier credentials saved successfully",
+    )
+
+
+@router.get(
+    "/payment/kashier/credentials",
+    response_model=SuccessResponse[KashierCredentialsResponse],
+    summary="Get Kashier credentials status",
+    operation_id="get_kashier_credentials",
+)
+async def get_kashier_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked Kashier credential status for the store."""
+    settings = store.settings or {}
+    kashier_settings = settings.get("payment", {}).get("kashier", {})
+
+    if not kashier_settings.get("encrypted_credentials"):
+        return SuccessResponse(
+            data=KashierCredentialsResponse(is_configured=False),
+            message="Kashier credentials not configured",
+        )
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = kashier_settings["encryption_key_id"]
+    encrypted = base64.b64decode(kashier_settings["encrypted_credentials"])
+
+    try:
+        creds = await secrets.decrypt(encrypted, key_id)
+    except Exception:
+        logger.error(f"Failed to decrypt Kashier credentials for store {store.id}")
+        return SuccessResponse(
+            data=KashierCredentialsResponse(
+                is_configured=True,
+                last_configured=kashier_settings.get("last_configured"),
+            ),
+            message="Credentials configured but could not be read. Please re-save.",
+        )
+
+    return SuccessResponse(
+        data=KashierCredentialsResponse(
+            is_configured=True,
+            merchant_id=creds["merchant_id"],
+            api_key_masked=secrets.mask_credential(creds["api_key"]),
+            last_configured=kashier_settings.get("last_configured"),
+        ),
+        message="Kashier credentials retrieved successfully",
+    )
+
+
+@router.delete(
+    "/payment/kashier/credentials",
+    response_model=SuccessResponse[KashierCredentialsResponse],
+    summary="Remove Kashier credentials",
+    operation_id="delete_kashier_credentials",
+)
+async def delete_kashier_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove Kashier credentials and disable Kashier payments."""
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["kashier"] = {
+        "enabled": False,
+        "is_configured": False,
+        "last_configured": None,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    logger.info(f"Kashier credentials removed for store {store.id}")
+
+    return SuccessResponse(
+        data=KashierCredentialsResponse(is_configured=False),
+        message="Kashier credentials removed successfully",
     )
 
 

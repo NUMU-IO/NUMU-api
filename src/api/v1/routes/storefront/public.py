@@ -994,6 +994,17 @@ async def get_store_payment_methods(
             "type": "fawry",
         })
 
+    # Kashier uses tenant credential system — check if configured
+    if payment_settings.get("kashier", {}).get("enabled") and payment_settings.get(
+        "kashier", {}
+    ).get("is_configured"):
+        methods.append({
+            "id": "kashier",
+            "label": "بطاقة بنكية",
+            "label_en": "Credit/Debit Card",
+            "type": "kashier",
+        })
+
     return SuccessResponse(
         data={"methods": methods},
         message="Payment methods retrieved",

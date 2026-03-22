@@ -57,6 +57,22 @@ class PaymobCredentialsResponse(BaseModel):
     last_configured: str | None = None
 
 
+class SaveKashierCredentialsRequest(BaseModel):
+    """Save Kashier gateway credentials for a store."""
+
+    merchant_id: str = Field(..., min_length=3, max_length=100)
+    api_key: str = Field(..., min_length=5, max_length=500)
+
+
+class KashierCredentialsResponse(BaseModel):
+    """Kashier credentials status (masked, never returns real keys)."""
+
+    is_configured: bool
+    merchant_id: str | None = None
+    api_key_masked: str | None = None
+    last_configured: str | None = None
+
+
 # Shipping Settings
 class ShippingCarrierStatus(BaseModel):
     """Individual shipping carrier status."""
