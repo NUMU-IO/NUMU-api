@@ -6,6 +6,7 @@ Creates an order from the submitted line items, calculates totals
 using live product prices, and optionally initiates payment.
 """
 
+import base64
 import json
 import logging
 from decimal import Decimal
@@ -404,8 +405,70 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
+    elif request.payment_method == "kashier":
+        # Kashier payment via store.settings encrypted credentials
+        try:
+            from src.infrastructure.external_services.kashier.payment_service import (
+                KashierPaymentService,
+            )
+            from src.infrastructure.external_services.secrets.secrets_manager import (
+                get_secrets_manager,
+            )
+
+            kashier_settings = (
+                (store.settings or {}).get("payment", {}).get("kashier", {})
+            )
+            if not kashier_settings.get("encrypted_credentials"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Kashier is not configured for this store.",
+                )
+
+            secrets_mgr = get_secrets_manager()
+            key_id = kashier_settings["encryption_key_id"]
+            encrypted = base64.b64decode(kashier_settings["encrypted_credentials"])
+            creds = await secrets_mgr.decrypt(encrypted, key_id)
+
+            kashier_service = KashierPaymentService(
+                mid=creds["merchant_id"],
+                api_key=creds["api_key"],
+            )
+
+            created_order.payment_id = str(created_order.id)
+            await order_repo.update(created_order)
+
+            customer_email_str = (
+                str(current_customer.email) if current_customer.email else None
+            )
+            intent = await kashier_service.create_payment_intent(
+                amount=created_order.total,
+                currency=currency,
+                customer_email=customer_email_str,
+                metadata={"order_id": str(created_order.id)},
+            )
+
+            payment_data = {
+                "provider": "kashier",
+                "type": "hash",
+                "mid": kashier_service._mid,
+                "hash": intent.client_secret,
+                "order_id": intent.id,
+                "amount": f"{created_order.total / 100:.2f}",
+                "currency": currency,
+                "mode": kashier_service._mode,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Kashier payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Online payment is not available for this store. Please choose another payment method.",
+            )
+
     elif request.payment_method and request.payment_method != "cod":
-        # Other payment providers (Kashier, etc.) via tenant credentials
+        # Other payment providers via tenant credentials
         try:
             from src.api.dependencies.payment import get_tenant_payment_service
             from src.core.interfaces.services.payment_service import PaymentProvider
