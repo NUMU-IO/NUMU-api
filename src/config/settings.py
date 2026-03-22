@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     session_secret_key: str = Field(
         default="dev-only-session-secret-change-in-prod-32chars"
     )
+    credential_encryption_key: str | None = None  # AES key for merchant credentials
     # Secure cookie settings (should be True in production with HTTPS)
     SECURE_COOKIES: bool = False
     SAMESITE_COOKIES: Literal["lax", "strict", "none"] = "lax"
@@ -283,6 +284,12 @@ class Settings(BaseSettings):
     fawry_base_url: str = (
         "https://atfawry.fawrystaging.com"  # Use production URL in prod
     )
+
+    # Kashier (Egyptian Payment Gateway)
+    kashier_mid: str | None = None  # Merchant ID (MID-xx-xx)
+    kashier_api_key: str | None = None  # API key (also used as HMAC secret)
+    kashier_mode: str = "test"  # "test" or "live"
+    kashier_currency: str = "EGP"  # Default currency
 
     # Cash on Delivery (COD)
     cod_enabled: bool = True

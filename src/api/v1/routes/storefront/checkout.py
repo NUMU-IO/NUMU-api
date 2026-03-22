@@ -345,12 +345,14 @@ async def checkout(
     ) + created_order.total
     await customer_repo.update(current_customer)
 
-    # Build payment URL / Paymob intention if applicable
+    # Build payment URL / payment data if applicable
     payment_url: str | None = None
+    payment_data: dict | None = None
     paymob_client_secret: str | None = None
     paymob_public_key: str | None = None
 
     if request.payment_method and request.payment_method.startswith("paymob"):
+        # Paymob payment initiation (per-merchant via store.settings)
         try:
             from src.infrastructure.external_services.paymob.payment_service import (
                 PaymobPaymentService,
@@ -401,6 +403,51 @@ async def checkout(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
+
+    elif request.payment_method and request.payment_method != "cod":
+        # Other payment providers (Kashier, etc.) via tenant credentials
+        try:
+            from src.api.dependencies.payment import get_tenant_payment_service
+            from src.core.interfaces.services.payment_service import PaymentProvider
+
+            payment_service = await get_tenant_payment_service(
+                provider=request.payment_method,
+                tenant_id=store.tenant_id,
+                session=order_repo.session,
+            )
+
+            created_order.payment_id = str(created_order.id)
+            await order_repo.update(created_order)
+
+            customer_email_str = (
+                str(current_customer.email) if current_customer.email else None
+            )
+            intent = await payment_service.create_payment_intent(
+                amount=created_order.total,
+                currency=currency,
+                customer_email=customer_email_str,
+                metadata={"order_id": str(created_order.id)},
+            )
+
+            if payment_service.provider == PaymentProvider.KASHIER:
+                payment_data = {
+                    "provider": "kashier",
+                    "type": "hash",
+                    "mid": payment_service._mid,
+                    "hash": intent.client_secret,
+                    "order_id": intent.id,
+                    "amount": f"{created_order.total / 100:.2f}",
+                    "currency": currency,
+                    "mode": payment_service._mode,
+                }
+            else:
+                payment_url = intent.client_secret
+
+        except Exception as e:
+            logger.warning(
+                f"Payment initiation failed for order {created_order.order_number}: {e}"
+            )
+            # Order is still created in PENDING state; merchant can retry
 
     logger.info(
         f"Checkout completed: order={created_order.order_number}, "
@@ -712,6 +759,7 @@ async def checkout(
         currency=created_order.currency,
         payment_status=created_order.payment_status.value,
         payment_url=payment_url,
+        payment_data=payment_data,
         paymob_client_secret=paymob_client_secret,
         paymob_public_key=paymob_public_key,
     )

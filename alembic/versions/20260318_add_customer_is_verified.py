@@ -18,11 +18,22 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "customers",
-        sa.Column("is_verified", sa.Boolean(), nullable=False, server_default="false"),
-        schema="public",
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema='public' AND table_name='customers' "
+            "AND column_name='is_verified'"
+        )
     )
+    if not result.fetchone():
+        op.add_column(
+            "customers",
+            sa.Column(
+                "is_verified", sa.Boolean(), nullable=False, server_default="false"
+            ),
+            schema="public",
+        )
 
 
 def downgrade() -> None:

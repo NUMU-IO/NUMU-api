@@ -18,11 +18,20 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "customers",
-        sa.Column("password_hash", sa.String(255), nullable=True),
-        schema="public",
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema='public' AND table_name='customers' "
+            "AND column_name='password_hash'"
+        )
     )
+    if not result.fetchone():
+        op.add_column(
+            "customers",
+            sa.Column("password_hash", sa.String(255), nullable=True),
+            schema="public",
+        )
 
 
 def downgrade() -> None:

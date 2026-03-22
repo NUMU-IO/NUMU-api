@@ -84,7 +84,8 @@ class ConfigureCredentialsUseCase:
         display_info = validator.get_display_info(credentials)
 
         # Step 3: Encrypt credentials
-        credentials_encrypted = self.secrets_manager.encrypt_credentials(credentials)
+        key_id = await self.secrets_manager.get_current_key_id()
+        credentials_encrypted = await self.secrets_manager.encrypt(credentials, key_id)
 
         # Step 4: Check for existing credentials
         existing_result = await self.db.execute(
@@ -100,6 +101,7 @@ class ConfigureCredentialsUseCase:
         if existing:
             # Update existing credentials
             existing.credentials_encrypted = credentials_encrypted
+            existing.encryption_key_id = key_id
             existing.is_validated = True
             existing.is_active = True
             existing.last_validated_at = now
@@ -116,6 +118,7 @@ class ConfigureCredentialsUseCase:
                 service_type=service_type,
                 service_name=service_name,
                 credentials_encrypted=credentials_encrypted,
+                encryption_key_id=key_id,
                 is_validated=True,
                 is_active=True,
                 last_validated_at=now,

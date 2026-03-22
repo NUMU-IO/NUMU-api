@@ -48,6 +48,10 @@ class CheckoutResponse(BaseModel):
         None,
         description="Redirect URL for payment gateway (null for COD)",
     )
+    payment_data: dict | None = Field(
+        None,
+        description="Provider-specific payment data for client-side rendering (e.g., Kashier hash)",
+    )
     paymob_client_secret: str | None = Field(
         None,
         description="Paymob client secret for Pixel Embedded checkout",

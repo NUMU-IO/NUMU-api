@@ -9,6 +9,7 @@ from src.api.dependencies.database import get_db
 from src.infrastructure.repositories import (
     CategoryRepository,
     CouponRepository,
+    CredentialRepository,
     CustomerAddressRepository,
     CustomerRepository,
     FeedbackRepository,
@@ -144,3 +145,10 @@ def get_webhook_delivery_log_repository(
 ) -> WebhookDeliveryLogRepository:
     """Get webhook delivery log repository dependency."""
     return WebhookDeliveryLogRepository(session)
+
+
+def get_credential_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> CredentialRepository:
+    """Get credential repository dependency."""
+    return CredentialRepository(session)
