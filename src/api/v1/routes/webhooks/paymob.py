@@ -242,13 +242,9 @@ async def paymob_callback_redirect(
                 )
                 await order_repo.update(internal_order)
 
-            # Build storefront URL
+            # Build storefront URL using store's subdomain
             subdomain = store.subdomain
-            if settings.debug:
-                # Local dev: redirect to localhost storefront
-                base_url = "http://localhost:8081"
-            else:
-                base_url = f"https://{subdomain}.numueg.app"
+            base_url = f"https://{subdomain}.numueg.app"
 
             if success:
                 redirect_url = f"{base_url}/order-confirmation?order_id={internal_order.id}&order_number={internal_order.order_number}&status=paid"
@@ -260,8 +256,7 @@ async def paymob_callback_redirect(
 
     # Fallback: no order found
     log.warning("payment_redirect_order_not_found")
-    fallback = "http://localhost:8081" if settings.debug else "https://numueg.app"
     if success:
-        return RedirectResponse(url=f"{fallback}/order-confirmation?status=paid")
+        return RedirectResponse(url="https://numueg.app/order-confirmation?status=paid")
     else:
-        return RedirectResponse(url=f"{fallback}/checkout?payment_failed=true")
+        return RedirectResponse(url="https://numueg.app/checkout?payment_failed=true")
