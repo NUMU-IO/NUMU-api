@@ -1,0 +1,164 @@
+### ============================================================
+### KASHIER PAYMENT INTEGRATION - E2E TEST
+### Run each request in order (top to bottom)
+### Server must be running on port 8001
+### ============================================================
+
+@baseUrl = http://localhost:8001/api/v1
+@storeId = 649f8f4d-06ac-441e-aeeb-55c1c6d3cfab
+@tenantId = 7a22dadf-ddaf-4a05-a12f-c8d9799ac4df
+@productId = 3243c54f-2fab-4f38-9c83-a896da491171
+
+### ─────────────────────────────────────────────
+### STEP 1: Login as Admin
+### ─────────────────────────────────────────────
+
+# @name adminLogin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "yousefmansourss290@gmail.com",
+  "password": "Yousef@ceo22434"
+}
+
+### ─────────────────────────────────────────────
+### STEP 2: Get CSRF Token
+### ─────────────────────────────────────────────
+
+# @name csrfToken
+GET {{baseUrl}}/auth/csrf-token
+
+### ─────────────────────────────────────────────
+### STEP 3: Configure Kashier Credentials for Merchant
+### (already done - skip if you ran test_kashier_e2e.py)
+### ─────────────────────────────────────────────
+
+# @name configureKashier
+POST {{baseUrl}}/admin/credentials/configure
+Content-Type: application/json
+X-CSRF-Token: {{csrfToken.response.body.$.data.csrf_token}}
+
+{
+  "tenant_id": "{{tenantId}}",
+  "service_type": "payment_gateway",
+  "service_name": "kashier",
+  "credentials": {
+    "mid": "MID-44217-177",
+    "api_key": "212774e4-c0cd-496b-925b-90b72ebf8595",
+    "mode": "test"
+  }
+}
+
+### ─────────────────────────────────────────────
+### STEP 4: Register a Test Customer on Storefront
+### ─────────────────────────────────────────────
+
+# @name registerCustomer
+POST {{baseUrl}}/storefront/store/{{storeId}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "kashier-test@example.com",
+  "password": "Test1234!",
+  "first_name": "Test",
+  "last_name": "Kashier"
+}
+
+### ─────────────────────────────────────────────
+### STEP 4b: (If already registered) Login as Customer
+### ─────────────────────────────────────────────
+
+# @name loginCustomer
+POST {{baseUrl}}/storefront/store/{{storeId}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "kashier-test@example.com",
+  "password": "Test1234!"
+}
+###
+
+GET http://localhost:8001/api/v1/auth/csrf-token
+
+### ─────────────────────────────────────────────
+### STEP 5: Checkout with Kashier Payment
+### Expected: payment_data with hash in response
+### ─────────────────────────────────────────────
+
+# @name checkout
+POST {{baseUrl}}/storefront/store/{{storeId}}/checkout
+Content-Type: application/json
+X-CSRF-Token: SOi-IjEWJM9icvmSBAdga96daMe64otkvYC3_PQBSB4
+
+{
+  "line_items": [
+    {
+      "product_id": "{{productId}}",
+      "quantity": 1
+    }
+  ],
+  "shipping_address": {
+    "first_name": "Test",
+    "last_name": "Kashier",
+    "address_line1": "123 Nile Street",
+    "city": "Cairo",
+    "state": "Cairo",
+    "postal_code": "11511",
+    "country": "EG",
+    "phone": "01012345678"
+  },
+  "payment_method": "kashier"
+}
+
+### ─────────────────────────────────────────────
+### STEP 5b: Open Kashier Payment Page
+###
+### After Step 5, take the payment_data from the response
+### and open this URL in your browser:
+###
+### https://payments.kashier.io/?mid=MID-44217-177&orderId=ORDER_ID&amount=AMOUNT&currency=EGP&hash=HASH&mode=test&merchantRedirect=http://localhost:8001/api/v1/webhooks/kashier/callback&allowedMethods=card,wallet
+###
+### Replace ORDER_ID, AMOUNT, HASH from the checkout response payment_data.
+### Use Kashier test card: 4242 4242 4242 4242, any future expiry, any CVV
+###
+### This will create a REAL test transaction in your Kashier dashboard!
+### ─────────────────────────────────────────────
+
+### ─────────────────────────────────────────────
+### STEP 6: Simulate Kashier Webhook (Manual)
+### Only needed if Kashier can't reach localhost
+### Replace ORDER_ID, AMOUNT, SIGNATURE below
+###
+### To compute signature, run:
+###   python compute_kashier_sig.py ORDER_ID AMOUNT
+### ─────────────────────────────────────────────
+
+POST {{baseUrl}}/webhooks/kashier/callback
+Content-Type: application/json
+x-kashier-signature: 65dc07b81a0deffae9e19e913a03401f2756ac22cf725c20086f96632d107024
+
+{
+  "paymentStatus": "SUCCESS",
+  "cardDataToken": "",
+  "maskedCard": "****4242",
+  "merchantOrderId": "254d085a-94e8-44d4-b5c8-c4de1f073762",
+  "orderId": "KSH-001",
+  "cardBrand": "Visa",
+  "orderReference": "ref-1",
+  "transactionId": "txn-002",
+  "amount": "99.99",
+  "currency": "EGP"
+}
+
+### ─────────────────────────────────────────────
+### STEP 7: Verify Order Status
+### ─────────────────────────────────────────────
+
+GET {{baseUrl}}/stores/{{storeId}}/orders/PASTE_ORDER_ID_HERE
+
+### ─────────────────────────────────────────────
+### BONUS: Check Credential Status
+### ─────────────────────────────────────────────
+
+GET {{baseUrl}}/admin/credentials/status/{{tenantId}}/payment_gateway/kashier
