@@ -893,6 +893,87 @@ make migrate
 
 ---
 
+## Per-Merchant Credential Support (Completed 2026-03-22)
+
+The Kashier integration now supports **per-merchant credentials** — each merchant can configure their own Kashier MID + API key, and payments flow through their own Kashier account.
+
+### How It Works
+
+**Admin configures merchant credentials:**
+1. Admin calls `POST /api/v1/admin/credentials/configure` with the merchant's Kashier MID + API key
+2. Credentials are validated via `KashierValidator`, encrypted (AES via Fernet), and stored in `service_credentials` table
+3. Credentials are keyed by `(tenant_id, PAYMENT_GATEWAY, kashier)`
+
+**Checkout flow (per-tenant):**
+1. Customer checks out with `payment_method: "kashier"`
+2. `get_tenant_payment_service()` loads the merchant's encrypted credentials from DB and decrypts them
+3. If no per-tenant credentials found, falls back to platform `.env` credentials
+4. `create_payment_intent()` generates HMAC hash using the merchant's own API key
+5. `CheckoutResponse` includes `payment_data` with `{provider, type, mid, hash, order_id, amount, currency, mode}`
+6. Frontend uses this data to render Kashier payment form or construct HPP URL
+
+**Webhook flow (per-tenant):**
+1. Kashier sends POST to `/api/v1/webhooks/kashier/callback`
+2. Payload is parsed (untrusted) to extract `merchantOrderId`
+3. Order lookup resolves `tenant_id`
+4. `CredentialRepository` loads and decrypts the merchant's Kashier API key
+5. Signature is verified with the merchant-specific key (falls back to env key)
+6. Order status updated only after successful verification
+
+### Files Created/Modified for Per-Merchant Support
+
+| File | Action |
+|------|--------|
+| `src/application/use_cases/configuration/configure_credentials.py` | **Fixed** 2 bugs: encrypt call + missing `encryption_key_id` |
+| `src/infrastructure/repositories/credential_repository.py` | **Created** — query + decrypt per-tenant credentials |
+| `src/api/dependencies/payment.py` | **Created** — tenant-aware payment factory with env fallback |
+| `src/api/v1/schemas/storefront/checkout.py` | **Edited** — added `payment_data: dict | None` to `CheckoutResponse` |
+| `src/api/v1/routes/storefront/checkout.py` | **Edited** — wired payment initiation at checkout |
+| `src/api/v1/routes/webhooks/kashier.py` | **Rewritten** — per-tenant credential resolution in webhook |
+| `.env` + `.env.example` | **Edited** — added `CREDENTIAL_ENCRYPTION_KEY` |
+| `src/config/settings.py` | **Edited** — added `credential_encryption_key` setting |
+
+### Credential Configuration Request Body
+
+```json
+{
+    "tenant_id": "uuid-of-the-merchant-tenant",
+    "service_type": "payment_gateway",
+    "service_name": "kashier",
+    "credentials": {
+        "mid": "MID-xxxx-xxxx",
+        "api_key": "merchant-kashier-api-key"
+    }
+}
+```
+
+### CheckoutResponse Example (Kashier)
+
+```json
+{
+    "data": {
+        "order_id": "uuid",
+        "order_number": "ORD-001",
+        "total": 10000,
+        "currency": "EGP",
+        "payment_status": "pending",
+        "payment_url": null,
+        "payment_data": {
+            "provider": "kashier",
+            "type": "hash",
+            "mid": "MID-xxxx-xxxx",
+            "hash": "hmac-sha256-hex-string",
+            "order_id": "uuid",
+            "amount": "100.00",
+            "currency": "EGP",
+            "mode": "test"
+        }
+    }
+}
+```
+
+---
+
 ## Architecture Compliance Checklist
 
 - [x] `IPaymentService` interface fully implemented (all 8 methods)
@@ -908,3 +989,10 @@ make migrate
 - [x] `hmac.compare_digest()` used for timing-safe comparison (never `==`)
 - [x] No card data logged or stored
 - [x] All amounts handled in cents internally, converted to pounds for Kashier API
+- [x] Per-merchant credentials loaded from DB, decrypted at payment time
+- [x] `ConfigureCredentialsUseCase` bugs fixed (encrypt call + key_id)
+- [x] `CredentialRepository` queries + decrypts per-tenant credentials
+- [x] Tenant-aware factory with env fallback for unconfigured merchants
+- [x] Checkout route wires payment initiation with `payment_data` response
+- [x] Webhook resolves tenant credentials before signature verification
+- [x] `CREDENTIAL_ENCRYPTION_KEY` added to env for credential encryption

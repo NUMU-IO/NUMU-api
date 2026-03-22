@@ -80,6 +80,9 @@ class TestKashierPaymentService:
     async def test_create_payment_intent_raises_without_credentials(self):
         """Should raise ValueError when MID or API key is missing."""
         service = KashierPaymentService(mid=None, api_key=None)
+        # Force None to bypass env var fallback
+        service._mid = None
+        service._api_key = None
         with pytest.raises(ValueError, match="Kashier MID and API key are required"):
             await service.create_payment_intent(amount=1000, currency="EGP")
 

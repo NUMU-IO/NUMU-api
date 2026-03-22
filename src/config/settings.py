@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     session_secret_key: str = Field(
         default="dev-only-session-secret-change-in-prod-32chars"
     )
+    credential_encryption_key: str | None = None  # AES key for merchant credentials
     # Secure cookie settings (should be True in production with HTTPS)
     SECURE_COOKIES: bool = False
     SAMESITE_COOKIES: Literal["lax", "strict", "none"] = "lax"
