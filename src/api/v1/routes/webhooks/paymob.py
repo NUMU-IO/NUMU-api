@@ -7,8 +7,10 @@ Receives payment notifications from Paymob for:
 """
 
 import json
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
@@ -33,21 +35,45 @@ _cache_service: RedisCacheService | None = (
 NONCE_TTL_SECONDS = 86_400  # 24 hours
 
 
+async def _resolve_order(order_repo, merchant_order_id, paymob_order_id):
+    """Try to find our internal order from Paymob callback data.
+
+    Lookup priority:
+    1. merchant_order_id as UUID (our order.id set via extras)
+    2. merchant_order_id as payment_id
+    3. paymob_order_id as payment_id
+    """
+    order = None
+
+    # Try merchant_order_id as our order UUID first
+    if merchant_order_id:
+        try:
+            uuid_val = UUID(merchant_order_id)
+            order = await order_repo.get_by_id(uuid_val)
+        except (ValueError, AttributeError):
+            pass
+
+        # Fall back to payment_id lookup
+        if not order:
+            order = await order_repo.get_by_payment_id_for_update(merchant_order_id)
+
+    # Fall back to Paymob order ID
+    if not order and paymob_order_id:
+        order = await order_repo.get_by_payment_id_for_update(str(paymob_order_id))
+
+    return order
+
+
 @router.post("/callback", operation_id="paymob_callback")
 async def paymob_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
     hmac: str = Header(None, alias="hmac"),
 ):
-    """Handle Paymob payment callback.
+    """Handle Paymob payment callback (POST).
 
     Paymob sends a POST request with payment transaction details.
     The HMAC header contains the signature for verification.
-
-    Events handled:
-    - Transaction approved (success=true)
-    - Transaction declined (success=false)
-    - Refund processed (is_refunded=true)
     """
     payload = await request.body()
     log = logger.bind(webhook="paymob")
@@ -91,15 +117,15 @@ async def paymob_callback(
     order_repo = OrderRepository(db)
     store_repo = StoreRepository(db)
 
-    # Resolve the internal order via merchant_order_id (our payment_id)
-    # or fall back to the Paymob order_id.
-    order = None
-    lookup_id = merchant_order_id or str(order_id) if order_id else None
-    if lookup_id:
-        order = await order_repo.get_by_payment_id_for_update(lookup_id)
+    # Resolve internal order
+    order = await _resolve_order(order_repo, merchant_order_id, order_id)
 
     if not order:
-        log.warning("webhook_order_not_found", lookup_id=lookup_id)
+        log.warning(
+            "webhook_order_not_found",
+            merchant_order_id=merchant_order_id,
+            paymob_order_id=order_id,
+        )
         return {"status": "received", "transaction_id": transaction_id}
 
     log = log.bind(order_id=str(order.id), order_number=order.order_number)
@@ -120,7 +146,6 @@ async def paymob_callback(
         except HTTPException:
             raise
         except Exception as e:
-            # Credentials not configured or decryption failed — skip verification in dev
             log.warning("webhook_hmac_resolution_failed", error=str(e))
             if not settings.debug:
                 raise HTTPException(
@@ -167,35 +192,57 @@ async def paymob_callback(
 
 @router.get("/callback", operation_id="paymob_callback_redirect")
 async def paymob_callback_redirect(
-    success: bool = False,
-    txn_response_code: str | None = None,
-    order: str | None = None,
-    merchant_order_id: str | None = None,
+    request: Request,
+    success: bool = Query(False),
+    merchant_order_id: str | None = Query(None),
+    order: str | None = Query(None),
+    db: AsyncSession = Depends(get_admin_db_session),
 ):
     """Handle Paymob redirect after payment.
 
-    After customer completes payment in iframe, they are redirected here.
-    This is for redirect handling, not webhook processing.
-
-    Query params from Paymob:
-    - success: Payment success status
-    - txn_response_code: Transaction response code
-    - order: Paymob order ID
-    - merchant_order_id: Your order ID
+    After customer completes payment, Paymob redirects here.
+    We look up the order's store to build the correct storefront URL,
+    then redirect the customer to the order confirmation page.
     """
     log = logger.bind(
         webhook="paymob_redirect",
         success=success,
         paymob_order_id=order,
         merchant_order_id=merchant_order_id,
-        response_code=txn_response_code,
     )
     log.info("payment_redirect_received")
 
-    # In production, redirect to frontend with status
-    # For now, return status info
-    return {
-        "success": success,
-        "order_id": merchant_order_id or order,
-        "message": "Payment completed" if success else "Payment failed",
-    }
+    # Try to resolve the order to find the store's subdomain
+    order_repo = OrderRepository(db)
+    store_repo = StoreRepository(db)
+
+    internal_order = await _resolve_order(order_repo, merchant_order_id, order)
+
+    if internal_order:
+        store = await store_repo.get_by_id(internal_order.store_id)
+        if store:
+            # Also mark as paid via GET redirect (backup for webhook)
+            if success and internal_order.payment_status.value == "pending":
+                await narrow_to_tenant(db, internal_order.tenant_id)
+                internal_order.mark_as_paid(
+                    payment_id=str(order or merchant_order_id),
+                    payment_method="paymob",
+                )
+                await order_repo.update(internal_order)
+
+            # Build storefront URL
+            subdomain = store.subdomain
+            base_url = f"https://{subdomain}.numueg.app"
+
+            if success:
+                redirect_url = f"{base_url}/order-confirmation?order_id={internal_order.id}&order_number={internal_order.order_number}&status=paid"
+            else:
+                redirect_url = f"{base_url}/checkout?payment_failed=true"
+
+            return RedirectResponse(url=redirect_url)
+
+    # Fallback: no order found, redirect to main site
+    if success:
+        return RedirectResponse(url="https://numueg.app?payment=success")
+    else:
+        return RedirectResponse(url="https://numueg.app?payment=failed")
