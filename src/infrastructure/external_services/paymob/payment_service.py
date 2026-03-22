@@ -147,13 +147,16 @@ class PaymobPaymentService(IPaymentService):
         }
         billing = {**default_billing, **billing_data}
 
+        our_order_id = metadata.get("order_id")
         payload = {
             "amount": amount,
             "currency": currency.upper(),
             "payment_methods": payment_methods,
             "billing_data": billing,
+            "merchant_order_id": our_order_id,
+            "special_reference": our_order_id,
             "extras": {
-                "merchant_order_id": metadata.get("order_id"),
+                "order_id": our_order_id,
             },
         }
 
