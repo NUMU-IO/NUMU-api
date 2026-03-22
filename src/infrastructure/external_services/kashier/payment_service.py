@@ -91,6 +91,12 @@ class KashierPaymentService(IPaymentService):
             "https://numueg.app/api/v1/webhooks/kashier/callback",
         )
 
+        # Build merchant redirect URL
+        redirect_url = metadata.get(
+            "redirect_url",
+            f"https://numueg.app/api/v1/webhooks/kashier/redirect?order_id={order_id}",
+        )
+
         session_payload = {
             "amount": amount_str,
             "currency": currency,
@@ -101,6 +107,8 @@ class KashierPaymentService(IPaymentService):
             "enable3DS": True,
             "display": "en",
             "serverWebhook": webhook_url,
+            "merchantRedirect": redirect_url,
+            "failureRedirect": True,
         }
 
         if customer_email:
