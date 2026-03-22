@@ -127,7 +127,8 @@ class CategoryRepository(ICategoryRepository):
         if not include_inactive:
             query = query.where(CategoryModel.is_active.is_(True))
         query = (
-            query.order_by(CategoryModel.position, CategoryModel.name)
+            query
+            .order_by(CategoryModel.position, CategoryModel.name)
             .offset(skip)
             .limit(limit)
         )

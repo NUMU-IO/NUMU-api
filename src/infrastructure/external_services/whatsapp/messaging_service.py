@@ -96,7 +96,8 @@ class WhatsAppMessagingService(IMessagingService):
         """
         # Remove common separators and prefixes
         cleaned = (
-            phone.replace("+", "")
+            phone
+            .replace("+", "")
             .replace(" ", "")
             .replace("-", "")
             .replace("(", "")

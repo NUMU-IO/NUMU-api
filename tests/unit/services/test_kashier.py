@@ -55,9 +55,7 @@ class TestKashierPaymentService:
     @pytest.mark.asyncio
     async def test_create_payment_intent_without_order_id_generates_uuid(self):
         """When no order_id in metadata, a UUID is generated."""
-        intent = await self.service.create_payment_intent(
-            amount=5000, currency="EGP"
-        )
+        intent = await self.service.create_payment_intent(amount=5000, currency="EGP")
         assert intent.id  # Should be a generated UUID string
         assert intent.client_secret  # Should be a valid hex hash
         assert len(intent.client_secret) == 64  # SHA256 hex length
@@ -152,9 +150,7 @@ class TestKashierPaymentService:
 
     def test_verify_webhook_malformed_json(self):
         """Malformed JSON payload should return None."""
-        result = self.service.verify_webhook_signature(
-            b"not valid json", "any_sig"
-        )
+        result = self.service.verify_webhook_signature(b"not valid json", "any_sig")
         assert result is None
 
     def test_verify_webhook_missing_fields_uses_empty_string(self):

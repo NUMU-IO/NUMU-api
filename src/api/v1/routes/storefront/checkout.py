@@ -445,8 +445,7 @@ async def checkout(
 
         except Exception as e:
             logger.warning(
-                f"Payment initiation failed for order "
-                f"{created_order.order_number}: {e}"
+                f"Payment initiation failed for order {created_order.order_number}: {e}"
             )
             # Order is still created in PENDING state; merchant can retry
 
