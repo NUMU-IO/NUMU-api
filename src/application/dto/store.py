@@ -29,6 +29,7 @@ class StoreDTO(BaseDTO):
     contact_phone: str | None
     address: dict
     social_links: dict
+    settings: dict
     theme_settings: dict
     created_at: datetime
     updated_at: datetime
@@ -54,6 +55,7 @@ class StoreDTO(BaseDTO):
             contact_phone=entity.contact_phone,
             address=entity.address,
             social_links=entity.social_links,
+            settings=entity.settings or {},
             theme_settings=entity.theme_settings,
             created_at=entity.created_at,
             updated_at=entity.updated_at,

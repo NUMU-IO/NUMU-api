@@ -83,7 +83,17 @@ class SecretsManager:
         Raises:
             KeyNotFoundError: If no master key is configured.
         """
-        self._master_key = master_key or os.environ.get("CREDENTIAL_ENCRYPTION_KEY")
+        if not master_key:
+            # Try os.environ first, then fall back to pydantic settings
+            master_key = os.environ.get("CREDENTIAL_ENCRYPTION_KEY")
+        if not master_key:
+            try:
+                from src.config import settings as app_settings
+
+                master_key = getattr(app_settings, "credential_encryption_key", None)
+            except Exception:
+                pass
+        self._master_key = master_key
 
         if not self._master_key:
             raise KeyNotFoundError(

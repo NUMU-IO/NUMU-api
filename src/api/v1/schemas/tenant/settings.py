@@ -35,6 +35,28 @@ class UpdatePaymentSettingsRequest(BaseModel):
     bank_transfer_enabled: bool | None = None
 
 
+class SavePaymobCredentialsRequest(BaseModel):
+    """Save Paymob gateway credentials for a store."""
+
+    secret_key: str = Field(..., min_length=10, max_length=500)
+    public_key: str = Field(..., min_length=10, max_length=500)
+    hmac_secret: str = Field(..., min_length=10, max_length=500)
+    card_integration_id: str = Field(..., min_length=1, max_length=50)
+    wallet_integration_id: str | None = Field(None, max_length=50)
+
+
+class PaymobCredentialsResponse(BaseModel):
+    """Paymob credentials status (masked, never returns real keys)."""
+
+    is_configured: bool
+    public_key_masked: str | None = None
+    secret_key_masked: str | None = None
+    hmac_secret_masked: str | None = None
+    card_integration_id: str | None = None
+    wallet_integration_id: str | None = None
+    last_configured: str | None = None
+
+
 # Shipping Settings
 class ShippingCarrierStatus(BaseModel):
     """Individual shipping carrier status."""
