@@ -1,5 +1,7 @@
 """Store settings routes."""
 
+import base64
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -31,6 +33,8 @@ from src.api.v1.schemas.tenant.settings import (
     NotificationTemplate,
     PaymentMethodStatus,
     PaymentSettingsResponse,
+    PaymobCredentialsResponse,
+    SavePaymobCredentialsRequest,
     ShippingCarrierStatus,
     ShippingSettingsResponse,
     ShippingZone,
@@ -359,6 +363,167 @@ async def update_payment_settings(
     return SuccessResponse(
         data=_build_payment_response(payment_settings),
         message="Payment settings updated successfully",
+    )
+
+
+# ============ Paymob Credentials ============
+
+logger = logging.getLogger(__name__)
+
+
+@router.put(
+    "/payment/paymob/credentials",
+    response_model=SuccessResponse[PaymobCredentialsResponse],
+    summary="Save Paymob credentials",
+    operation_id="save_paymob_credentials",
+)
+async def save_paymob_credentials(
+    request: SavePaymobCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save or update Paymob payment gateway credentials for the store.
+
+    Credentials are encrypted at rest using AES-128 (Fernet).
+    """
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = await secrets.get_current_key_id()
+
+    credential_data = {
+        "secret_key": request.secret_key,
+        "public_key": request.public_key,
+        "hmac_secret": request.hmac_secret,
+        "card_integration_id": request.card_integration_id,
+        "wallet_integration_id": request.wallet_integration_id,
+    }
+
+    encrypted = await secrets.encrypt(credential_data, key_id)
+    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
+
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["paymob"] = {
+        "enabled": True,
+        "is_configured": True,
+        "last_configured": datetime.now(UTC).isoformat(),
+        "encrypted_credentials": encrypted_b64,
+        "encryption_key_id": key_id,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+    )
+
+    logger.info(f"Paymob credentials saved for store {store.id}")
+
+    return SuccessResponse(
+        data=PaymobCredentialsResponse(
+            is_configured=True,
+            public_key_masked=secrets.mask_credential(request.public_key),
+            secret_key_masked=secrets.mask_credential(request.secret_key),
+            hmac_secret_masked=secrets.mask_credential(request.hmac_secret),
+            card_integration_id=request.card_integration_id,
+            wallet_integration_id=request.wallet_integration_id,
+            last_configured=payment_settings["paymob"]["last_configured"],
+        ),
+        message="Paymob credentials saved successfully",
+    )
+
+
+@router.get(
+    "/payment/paymob/credentials",
+    response_model=SuccessResponse[PaymobCredentialsResponse],
+    summary="Get Paymob credentials status",
+    operation_id="get_paymob_credentials",
+)
+async def get_paymob_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked Paymob credential status for the store."""
+    settings = store.settings or {}
+    paymob_settings = settings.get("payment", {}).get("paymob", {})
+
+    if not paymob_settings.get("encrypted_credentials"):
+        return SuccessResponse(
+            data=PaymobCredentialsResponse(is_configured=False),
+            message="Paymob credentials not configured",
+        )
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = paymob_settings["encryption_key_id"]
+    encrypted = base64.b64decode(paymob_settings["encrypted_credentials"])
+
+    try:
+        creds = await secrets.decrypt(encrypted, key_id)
+    except Exception:
+        logger.error(f"Failed to decrypt Paymob credentials for store {store.id}")
+        return SuccessResponse(
+            data=PaymobCredentialsResponse(
+                is_configured=True,
+                last_configured=paymob_settings.get("last_configured"),
+            ),
+            message="Credentials configured but could not be read. Please re-save.",
+        )
+
+    return SuccessResponse(
+        data=PaymobCredentialsResponse(
+            is_configured=True,
+            public_key_masked=secrets.mask_credential(creds["public_key"]),
+            secret_key_masked=secrets.mask_credential(creds["secret_key"]),
+            hmac_secret_masked=secrets.mask_credential(creds["hmac_secret"]),
+            card_integration_id=creds.get("card_integration_id"),
+            wallet_integration_id=creds.get("wallet_integration_id"),
+            last_configured=paymob_settings.get("last_configured"),
+        ),
+        message="Paymob credentials retrieved successfully",
+    )
+
+
+@router.delete(
+    "/payment/paymob/credentials",
+    response_model=SuccessResponse[PaymobCredentialsResponse],
+    summary="Remove Paymob credentials",
+    operation_id="delete_paymob_credentials",
+)
+async def delete_paymob_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove Paymob credentials and disable Paymob payments."""
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["paymob"] = {
+        "enabled": False,
+        "is_configured": False,
+        "last_configured": None,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    logger.info(f"Paymob credentials removed for store {store.id}")
+
+    return SuccessResponse(
+        data=PaymobCredentialsResponse(is_configured=False),
+        message="Paymob credentials removed successfully",
     )
 
 

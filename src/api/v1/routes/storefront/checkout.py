@@ -348,8 +348,64 @@ async def checkout(
     # Build payment URL / payment data if applicable
     payment_url: str | None = None
     payment_data: dict | None = None
+    paymob_client_secret: str | None = None
+    paymob_public_key: str | None = None
 
-    if request.payment_method and request.payment_method != "cod":
+    if request.payment_method and request.payment_method.startswith("paymob"):
+        # Paymob payment initiation (per-merchant via store.settings)
+        try:
+            from src.infrastructure.external_services.paymob.payment_service import (
+                PaymobPaymentService,
+                get_merchant_paymob_credentials,
+            )
+
+            credentials = await get_merchant_paymob_credentials(store.settings)
+            paymob_service = PaymobPaymentService(
+                secret_key=credentials["secret_key"],
+                public_key=credentials["public_key"],
+                hmac_secret=credentials["hmac_secret"],
+                card_integration_id=credentials.get("card_integration_id"),
+                wallet_integration_id=credentials.get("wallet_integration_id"),
+            )
+
+            customer_email_str = (
+                str(current_customer.email) if current_customer.email else None
+            )
+            ship_addr = request.shipping_address
+
+            intent = await paymob_service.create_payment_intent(
+                amount=total,
+                currency=currency,
+                customer_email=customer_email_str,
+                metadata={
+                    "order_id": str(created_order.id),
+                    "billing_data": {
+                        "first_name": ship_addr.first_name or "Customer",
+                        "last_name": ship_addr.last_name or "Customer",
+                        "email": customer_email_str or "customer@example.com",
+                        "phone_number": ship_addr.phone or "+201000000000",
+                        "city": ship_addr.city or "NA",
+                        "country": ship_addr.country or "EG",
+                        "street": ship_addr.address_line1 or "NA",
+                    },
+                },
+            )
+
+            created_order.payment_id = intent.id
+            await order_repo.update(created_order)
+
+            paymob_client_secret = intent.client_secret
+            paymob_public_key = credentials["public_key"]
+
+        except Exception as e:
+            logger.error(f"Paymob payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Online payment is not available for this store. Please choose another payment method.",
+            )
+
+    elif request.payment_method and request.payment_method != "cod":
+        # Other payment providers (Kashier, etc.) via tenant credentials
         try:
             from src.api.dependencies.payment import get_tenant_payment_service
             from src.core.interfaces.services.payment_service import PaymentProvider
@@ -360,7 +416,6 @@ async def checkout(
                 session=order_repo.session,
             )
 
-            # Set payment_id so the webhook can find this order
             created_order.payment_id = str(created_order.id)
             await order_repo.update(created_order)
 
@@ -386,7 +441,6 @@ async def checkout(
                     "mode": payment_service._mode,
                 }
             else:
-                # For redirect-based providers (Paymob, etc.)
                 payment_url = intent.client_secret
 
         except Exception as e:
@@ -707,6 +761,8 @@ async def checkout(
         payment_status=created_order.payment_status.value,
         payment_url=payment_url,
         payment_data=payment_data,
+        paymob_client_secret=paymob_client_secret,
+        paymob_public_key=paymob_public_key,
     )
 
     # ── Cache response for idempotency ───────────────────────────────

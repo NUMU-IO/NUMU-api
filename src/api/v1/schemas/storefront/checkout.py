@@ -52,6 +52,14 @@ class CheckoutResponse(BaseModel):
         None,
         description="Provider-specific payment data for client-side rendering (e.g., Kashier hash)",
     )
+    paymob_client_secret: str | None = Field(
+        None,
+        description="Paymob client secret for Pixel Embedded checkout",
+    )
+    paymob_public_key: str | None = Field(
+        None,
+        description="Paymob public key for Pixel Embedded checkout",
+    )
 
     class Config:
         from_attributes = True
