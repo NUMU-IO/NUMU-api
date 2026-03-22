@@ -196,6 +196,7 @@ async def paymob_callback_redirect(
     success: bool = Query(False),
     merchant_order_id: str | None = Query(None),
     order: str | None = Query(None),
+    id: str | None = Query(None),
     db: AsyncSession = Depends(get_admin_db_session),
 ):
     """Handle Paymob redirect after payment.
@@ -203,20 +204,31 @@ async def paymob_callback_redirect(
     After customer completes payment, Paymob redirects here.
     We look up the order's store to build the correct storefront URL,
     then redirect the customer to the order confirmation page.
+
+    Paymob sends: id (transaction ID), order (Paymob order ID),
+    merchant_order_id (our order UUID, may be null in GET).
+    The POST webhook updates payment_id to the transaction ID,
+    so we can look up by id param.
     """
     log = logger.bind(
         webhook="paymob_redirect",
         success=success,
         paymob_order_id=order,
         merchant_order_id=merchant_order_id,
+        transaction_id=id,
     )
     log.info("payment_redirect_received")
 
-    # Try to resolve the order to find the store's subdomain
     order_repo = OrderRepository(db)
     store_repo = StoreRepository(db)
 
+    # Try multiple lookup strategies:
+    # 1. merchant_order_id (our UUID) — may be null in GET redirect
+    # 2. id (transaction ID) — POST webhook stores this as payment_id
+    # 3. order (Paymob order ID)
     internal_order = await _resolve_order(order_repo, merchant_order_id, order)
+    if not internal_order and id:
+        internal_order = await _resolve_order(order_repo, None, id)
 
     if internal_order:
         store = await store_repo.get_by_id(internal_order.store_id)
