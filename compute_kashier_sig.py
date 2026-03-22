@@ -60,8 +60,10 @@ if __name__ == "__main__":
     if len(sys.argv) >= 4:
         hash_value = sys.argv[3]
         url = generate_payment_url(order_id, amount, hash_value)
-        print(f"Payment URL (open in browser):")
+        print("Payment URL (open in browser):")
         print(url)
     else:
         print("To generate payment URL, also pass the hash from checkout response:")
-        print(f"  python compute_kashier_sig.py {order_id} {amount} <hash_from_payment_data>")
+        print(
+            f"  python compute_kashier_sig.py {order_id} {amount} <hash_from_payment_data>"
+        )

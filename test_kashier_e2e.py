@@ -3,7 +3,6 @@
 import json
 import urllib.request
 
-
 BASE = "http://localhost:8001/api/v1"
 
 
@@ -14,9 +13,10 @@ def main():
         f"{BASE}/auth/login",
         method="POST",
         headers={"Content-Type": "application/json"},
-        data=json.dumps(
-            {"email": "yousefmansourss290@gmail.com", "password": "Yousef@ceo22434"}
-        ).encode(),
+        data=json.dumps({
+            "email": "yousefmansourss290@gmail.com",
+            "password": "Yousef@ceo22434",
+        }).encode(),
     )
     res = urllib.request.urlopen(req)
     cookies = res.headers.get_all("Set-Cookie")
