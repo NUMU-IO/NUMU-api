@@ -1,19 +1,19 @@
 """Kashier payment gateway service for Egypt.
 
-Kashier uses a hash-based approach where the backend generates
-an HMAC SHA256 hash, and the frontend uses it to render the
-Kashier payment form or construct the HPP URL.
+Uses the Payment Sessions API (v3) to create server-side sessions
+that render as embedded iframes on the storefront.
 
-Base URL: https://payments.kashier.io
+API Docs: https://developers.kashier.io/payment/payment-sessions
 """
 
 import hashlib
 import hmac
 import json
-import uuid
+import logging
+
+import httpx
 
 from src.config import settings
-from src.config.logging_config import get_logger
 from src.core.interfaces.services.payment_service import (
     IPaymentService,
     PaymentIntent,
@@ -22,34 +22,42 @@ from src.core.interfaces.services.payment_service import (
     RefundResult,
 )
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
+
+KASHIER_API_BASE = "https://api.kashier.io"
+KASHIER_TEST_API_BASE = "https://test-api.kashier.io"
 
 
 class KashierPaymentService(IPaymentService):
-    """Kashier payment service implementation.
+    """Kashier payment service using the Payment Sessions API.
 
-    Kashier uses a client-side hash-based approach where the backend
-    generates an HMAC SHA256 hash that is passed to the frontend for
-    rendering the payment form via the Kashier JS SDK or HPP URL.
+    Flow:
+    1. Backend creates a payment session via POST /v3/payment/sessions
+    2. Response includes sessionUrl for iframe embedding
+    3. Frontend renders iframe with sessionUrl
+    4. Customer pays → Kashier sends webhook to serverWebhook URL
     """
-
-    PAYMENTS_BASE_URL = "https://payments.kashier.io"
 
     def __init__(
         self,
         mid: str | None = None,
         api_key: str | None = None,
+        secret_key: str | None = None,
         mode: str | None = None,
         currency: str | None = None,
     ):
         self._mid = mid or settings.kashier_mid
         self._api_key = api_key or settings.kashier_api_key
-        self._mode = mode or settings.kashier_mode
-        self._currency = currency or settings.kashier_currency
+        self._secret_key = secret_key
+        self._mode = mode or settings.kashier_mode or "test"
+        self._currency = currency or settings.kashier_currency or "EGP"
 
     @property
     def provider(self) -> PaymentProvider:
         return PaymentProvider.KASHIER
+
+    def _get_api_base(self) -> str:
+        return KASHIER_TEST_API_BASE if self._mode == "test" else KASHIER_API_BASE
 
     async def create_payment_intent(
         self,
@@ -58,48 +66,89 @@ class KashierPaymentService(IPaymentService):
         customer_email: str | None = None,
         metadata: dict | None = None,
     ) -> PaymentIntent:
-        """Generate Kashier payment hash for frontend form rendering.
-
-        The hash is computed as:
-            path = "/?payment={mid}.{order_id}.{amount}.{currency}"
-            hash = HMAC-SHA256(api_key, path)
+        """Create a Kashier payment session.
 
         Args:
             amount: Amount in cents (converted to pounds for Kashier).
             currency: Currency code (default EGP).
-            customer_email: Optional customer email.
-            metadata: Must contain 'order_id' key for merchant order reference.
+            customer_email: Customer email for receipts.
+            metadata: Must contain 'order_id' and optionally 'webhook_url'.
 
         Returns:
-            PaymentIntent with client_secret containing the HMAC hash.
+            PaymentIntent where client_secret = sessionUrl for iframe.
         """
-        if not self._mid or not self._api_key:
-            raise ValueError("Kashier MID and API key are required")
+        if not self._api_key:
+            raise ValueError("Kashier API key is required")
 
-        order_id = (metadata or {}).get("order_id", str(uuid.uuid4()))
-        # Kashier expects amount in pounds (not cents)
-        amount_pounds = f"{amount / 100:.2f}"
-        currency = currency or self._currency or "EGP"
+        metadata = metadata or {}
+        order_id = metadata.get("order_id", "")
+        amount_str = f"{amount / 100:.2f}"
+        currency = currency or self._currency
 
-        # Generate HMAC SHA256 hash
-        path = f"/?payment={self._mid}.{order_id}.{amount_pounds}.{currency}"
-        hash_value = hmac.new(
-            self._api_key.encode("utf-8"),
-            path.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+        # Build webhook URL
+        webhook_url = metadata.get(
+            "webhook_url",
+            "https://numueg.app/api/v1/webhooks/kashier/callback",
+        )
+
+        session_payload = {
+            "amount": amount_str,
+            "currency": currency,
+            "paymentType": "credit",
+            "order": order_id,
+            "type": "one-time",
+            "allowedMethods": "card,wallet",
+            "enable3DS": True,
+            "display": "en",
+            "serverWebhook": webhook_url,
+        }
+
+        if customer_email:
+            session_payload["customer"] = {"email": customer_email}
+
+        # Determine auth headers — prefer secret_key, fall back to api_key
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": self._api_key,
+        }
+        if self._secret_key:
+            headers["Authorization"] = self._secret_key
+
+        api_base = self._get_api_base()
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{api_base}/v3/payment/sessions",
+                json=session_payload,
+                headers=headers,
+                timeout=30.0,
+            )
+
+            if response.status_code not in (200, 201):
+                logger.error(f"Kashier session creation failed: {response.text}")
+                raise ValueError(
+                    f"Failed to create Kashier payment session: {response.text}"
+                )
+
+            data = response.json()
+
+        session_id = data.get("_id", "")
+        session_url = data.get("sessionUrl", "")
+
+        if not session_url:
+            # Build it manually if not returned
+            mode_param = "test" if self._mode == "test" else "live"
+            session_url = (
+                f"https://payments.kashier.io/session/{session_id}?mode={mode_param}"
+            )
 
         logger.info(
-            "kashier_payment_intent_created",
-            order_id=order_id,
-            amount_cents=amount,
-            currency=currency,
-            mode=self._mode,
+            f"Kashier session created: session_id={session_id}, order={order_id}"
         )
 
         return PaymentIntent(
-            id=order_id,
-            client_secret=hash_value,
+            id=session_id,
+            client_secret=session_url,  # sessionUrl for iframe
             amount=amount,
             currency=currency,
             status="pending",
@@ -107,23 +156,39 @@ class KashierPaymentService(IPaymentService):
         )
 
     async def confirm_payment(self, payment_intent_id: str) -> PaymentResult:
-        """Not applicable — payment confirmation happens via webhook."""
-        return PaymentResult(
-            success=False,
-            error_message="Kashier payments are confirmed via webhook callback",
-            error_code="NOT_APPLICABLE",
-        )
+        """Check session payment status."""
+        if not self._api_key:
+            return PaymentResult(success=False, error_message="API key not configured")
+
+        api_base = self._get_api_base()
+        headers = {"api-key": self._api_key}
+        if self._secret_key:
+            headers["Authorization"] = self._secret_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{api_base}/v3/payment/sessions/{payment_intent_id}/payment",
+                headers=headers,
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                return PaymentResult(
+                    success=False, error_message="Failed to check payment status"
+                )
+
+            data = response.json()
+            status = data.get("paymentStatus", "")
+            return PaymentResult(
+                success=status == "SUCCESS",
+                payment_id=payment_intent_id,
+                error_message=None if status == "SUCCESS" else f"Status: {status}",
+            )
 
     async def capture_payment(self, payment_intent_id: str) -> PaymentResult:
-        """Not applicable — no separate capture step."""
-        return PaymentResult(
-            success=False,
-            error_message="Kashier does not support separate capture",
-            error_code="NOT_SUPPORTED",
-        )
+        return await self.confirm_payment(payment_intent_id)
 
     async def cancel_payment(self, payment_intent_id: str) -> PaymentResult:
-        """Not applicable — no server-side cancel API."""
         return PaymentResult(
             success=False,
             error_message="Kashier does not support server-side cancellation",
@@ -135,41 +200,21 @@ class KashierPaymentService(IPaymentService):
         payment_id: str,
         amount: int | None = None,
     ) -> RefundResult:
-        """Refund via Kashier.
-
-        Kashier refunds are currently processed via the merchant dashboard.
-        """
         return RefundResult(
             success=False,
             error_message="Kashier refunds must be processed via the merchant dashboard",
         )
 
     async def get_payment_status(self, payment_id: str) -> str:
-        """Get payment status."""
-        return "unknown"
+        result = await self.confirm_payment(payment_id)
+        return "paid" if result.success else "pending"
 
     def verify_webhook_signature(
         self,
         payload: bytes,
         signature: str,
     ) -> dict | None:
-        """Verify Kashier webhook signature using HMAC SHA256.
-
-        Kashier webhook signature is computed by concatenating specific
-        fields from the payload into a query string (without leading &),
-        then computing HMAC SHA256 with the API_KEY.
-
-        Fields (in order):
-            paymentStatus, cardDataToken, maskedCard, merchantOrderId,
-            orderId, cardBrand, orderReference, transactionId, amount, currency
-
-        Args:
-            payload: Raw request body bytes.
-            signature: The signature header value from Kashier.
-
-        Returns:
-            Parsed payload dict if signature is valid, None if invalid.
-        """
+        """Verify Kashier webhook signature using HMAC SHA256."""
         if not self._api_key:
             logger.error("kashier_webhook_no_api_key")
             return None
@@ -193,7 +238,6 @@ class KashierPaymentService(IPaymentService):
             f"&amount={data.get('amount', '')}"
             f"&currency={data.get('currency', '')}"
         )
-        # Remove leading '&'
         final_string = query_string[1:]
 
         calculated_sig = hmac.new(
@@ -203,14 +247,7 @@ class KashierPaymentService(IPaymentService):
         ).hexdigest()
 
         if hmac.compare_digest(calculated_sig, signature):
-            logger.info(
-                "kashier_webhook_signature_valid",
-                order_id=data.get("merchantOrderId"),
-            )
             return data
 
-        logger.warning(
-            "kashier_webhook_signature_mismatch",
-            order_id=data.get("merchantOrderId"),
-        )
+        logger.warning("kashier_webhook_signature_mismatch")
         return None

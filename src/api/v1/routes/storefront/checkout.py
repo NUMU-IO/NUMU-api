@@ -432,6 +432,7 @@ async def checkout(
             kashier_service = KashierPaymentService(
                 mid=creds["merchant_id"],
                 api_key=creds["api_key"],
+                secret_key=creds.get("secret_key"),
             )
 
             created_order.payment_id = str(created_order.id)
@@ -447,15 +448,14 @@ async def checkout(
                 metadata={"order_id": str(created_order.id)},
             )
 
+            # Session-based: client_secret contains the sessionUrl for iframe
             payment_data = {
                 "provider": "kashier",
-                "type": "hash",
-                "mid": kashier_service._mid,
-                "hash": intent.client_secret,
+                "type": "session",
+                "session_url": intent.client_secret,
                 "order_id": intent.id,
                 "amount": f"{created_order.total / 100:.2f}",
                 "currency": currency,
-                "mode": kashier_service._mode,
             }
 
         except HTTPException:

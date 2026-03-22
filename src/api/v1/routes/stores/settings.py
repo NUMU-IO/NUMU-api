@@ -557,6 +557,7 @@ async def save_kashier_credentials(
     credential_data = {
         "merchant_id": request.merchant_id,
         "api_key": request.api_key,
+        "secret_key": request.secret_key,
     }
 
     encrypted = await secrets.encrypt(credential_data, key_id)

@@ -62,6 +62,7 @@ class SaveKashierCredentialsRequest(BaseModel):
 
     merchant_id: str = Field(..., min_length=3, max_length=100)
     api_key: str = Field(..., min_length=5, max_length=500)
+    secret_key: str | None = Field(None, max_length=500)
 
 
 class KashierCredentialsResponse(BaseModel):
