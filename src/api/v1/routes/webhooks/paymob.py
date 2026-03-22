@@ -15,15 +15,17 @@ from src.config import settings
 from src.config.logging_config import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.database.connection import get_admin_db_session
-from src.infrastructure.external_services.paymob import PaymobPaymentService
+from src.infrastructure.external_services.paymob.payment_service import (
+    PaymobPaymentService,
+    get_merchant_paymob_credentials,
+)
 from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.tenancy.rls import narrow_to_tenant
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Initialize services once at module level to reuse connections
-paymob_service = PaymobPaymentService()
 _cache_service: RedisCacheService | None = (
     RedisCacheService() if settings.redis_host else None
 )
@@ -50,20 +52,8 @@ async def paymob_callback(
     payload = await request.body()
     log = logger.bind(webhook="paymob")
 
-    # Verify signature
-    if settings.paymob_hmac_secret:
-        verified_data = paymob_service.verify_webhook_signature(payload, hmac or "")
-        if not verified_data:
-            log.warning("webhook_signature_invalid")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook signature",
-            )
-        data = verified_data
-    else:
-        # In development, accept without verification
-        data = json.loads(payload)
-        log.warning("webhook_no_signature_verification", mode="development")
+    # Parse payload first to resolve the merchant
+    data = json.loads(payload)
 
     # Extract transaction details
     obj = data.get("obj", {})
@@ -99,6 +89,7 @@ async def paymob_callback(
             return {"status": "duplicate", "transaction_id": transaction_id}
 
     order_repo = OrderRepository(db)
+    store_repo = StoreRepository(db)
 
     # Resolve the internal order via merchant_order_id (our payment_id)
     # or fall back to the Paymob order_id.
@@ -112,6 +103,32 @@ async def paymob_callback(
         return {"status": "received", "transaction_id": transaction_id}
 
     log = log.bind(order_id=str(order.id), order_number=order.order_number)
+
+    # ── Per-merchant HMAC verification ────────────────────────────────
+    store = await store_repo.get_by_id(order.store_id)
+    if store:
+        try:
+            creds = await get_merchant_paymob_credentials(store.settings)
+            service = PaymobPaymentService(hmac_secret=creds["hmac_secret"])
+            verified_data = service.verify_webhook_signature(payload, hmac or "")
+            if not verified_data:
+                log.warning("webhook_signature_invalid")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid webhook signature",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Credentials not configured or decryption failed — skip verification in dev
+            log.warning("webhook_hmac_resolution_failed", error=str(e))
+            if not settings.debug:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Could not verify webhook signature",
+                )
+    else:
+        log.warning("webhook_store_not_found", store_id=str(order.store_id))
 
     # Narrow RLS from bypass → tenant-scoped for all subsequent writes
     await narrow_to_tenant(db, order.tenant_id)

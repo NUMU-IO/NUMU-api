@@ -48,6 +48,14 @@ class CheckoutResponse(BaseModel):
         None,
         description="Redirect URL for payment gateway (null for COD)",
     )
+    paymob_client_secret: str | None = Field(
+        None,
+        description="Paymob client secret for Pixel Embedded checkout",
+    )
+    paymob_public_key: str | None = Field(
+        None,
+        description="Paymob public key for Pixel Embedded checkout",
+    )
 
     class Config:
         from_attributes = True

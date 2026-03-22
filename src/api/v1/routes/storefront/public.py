@@ -935,3 +935,66 @@ async def resend_customer_verification(
         data={"message": "Verification email sent"},
         message="Verification email sent",
     )
+
+
+# ============================================================================
+# Payment Methods
+# ============================================================================
+
+
+@router.get(
+    "/payment-methods",
+    response_model=SuccessResponse[dict],
+    summary="Get available payment methods for this store",
+    operation_id="get_store_payment_methods",
+)
+async def get_store_payment_methods(
+    store_id: UUID = Path(...),
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)] = ...,
+):
+    """Return enabled + configured payment methods for the storefront."""
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    payment_settings = (store.settings or {}).get("payment", {})
+
+    methods = []
+    if payment_settings.get("cod", {}).get("enabled"):
+        methods.append({
+            "id": "cod",
+            "label": "الدفع عند الاستلام",
+            "label_en": "Cash on Delivery",
+            "type": "cod",
+        })
+    if payment_settings.get("paymob", {}).get("enabled") and payment_settings.get(
+        "paymob", {}
+    ).get("is_configured"):
+        methods.append({
+            "id": "paymob_card",
+            "label": "بطاقة بنكية",
+            "label_en": "Credit/Debit Card",
+            "type": "paymob",
+        })
+        # Add wallet if configured
+        if payment_settings.get("paymob", {}).get("encrypted_credentials"):
+            methods.append({
+                "id": "paymob_wallet",
+                "label": "محفظة إلكترونية",
+                "label_en": "Mobile Wallet",
+                "type": "paymob",
+            })
+    if payment_settings.get("fawry", {}).get("enabled") and payment_settings.get(
+        "fawry", {}
+    ).get("is_configured"):
+        methods.append({
+            "id": "fawry",
+            "label": "فوري",
+            "label_en": "Fawry",
+            "type": "fawry",
+        })
+
+    return SuccessResponse(
+        data={"methods": methods},
+        message="Payment methods retrieved",
+    )

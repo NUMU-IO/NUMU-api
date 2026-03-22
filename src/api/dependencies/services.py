@@ -51,6 +51,9 @@ def get_payment_service_for_provider(provider: str):
 
     Used by the refund system to resolve the correct payment
     service based on the order's original payment method.
+
+    For Paymob, use get_paymob_service_for_store() instead
+    to get a store-specific instance with merchant credentials.
     """
 
     match provider:
@@ -74,6 +77,30 @@ def get_payment_service_for_provider(provider: str):
             return CODPaymentService()
         case _:
             raise ValueError(f"Unknown payment provider: {provider}")
+
+
+async def get_paymob_service_for_store(store_settings: dict):
+    """Get a PaymobPaymentService configured with a store's credentials.
+
+    Args:
+        store_settings: The store.settings dict containing encrypted credentials.
+
+    Returns:
+        PaymobPaymentService configured with the merchant's own keys.
+    """
+    from src.infrastructure.external_services.paymob.payment_service import (
+        PaymobPaymentService,
+        get_merchant_paymob_credentials,
+    )
+
+    creds = await get_merchant_paymob_credentials(store_settings)
+    return PaymobPaymentService(
+        secret_key=creds["secret_key"],
+        public_key=creds["public_key"],
+        hmac_secret=creds["hmac_secret"],
+        card_integration_id=creds.get("card_integration_id"),
+        wallet_integration_id=creds.get("wallet_integration_id"),
+    )
 
 
 def _get_storage():
