@@ -140,8 +140,7 @@ class WaitlistRepository:
             query = query.where(WaitlistModel.status == status)
 
         query = (
-            query
-            .order_by(
+            query.order_by(
                 WaitlistModel.priority_score.desc(),
                 WaitlistModel.created_at.asc(),
             )

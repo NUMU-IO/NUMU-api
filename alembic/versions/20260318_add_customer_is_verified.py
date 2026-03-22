@@ -29,7 +29,9 @@ def upgrade() -> None:
     if not result.fetchone():
         op.add_column(
             "customers",
-            sa.Column("is_verified", sa.Boolean(), nullable=False, server_default="false"),
+            sa.Column(
+                "is_verified", sa.Boolean(), nullable=False, server_default="false"
+            ),
             schema="public",
         )
 
