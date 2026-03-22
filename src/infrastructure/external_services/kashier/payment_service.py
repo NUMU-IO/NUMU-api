@@ -98,6 +98,7 @@ class KashierPaymentService(IPaymentService):
         )
 
         session_payload = {
+            "merchantId": self._mid,
             "amount": amount_str,
             "currency": currency,
             "paymentType": "credit",
