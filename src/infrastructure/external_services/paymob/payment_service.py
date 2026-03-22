@@ -325,29 +325,37 @@ class PaymobPaymentService(IPaymentService):
 
             data = json.loads(payload)
 
+            def _str(val):
+                """Convert value to string matching Paymob's format.
+                Booleans must be lowercase (true/false), not Python's True/False.
+                """
+                if isinstance(val, bool):
+                    return "true" if val else "false"
+                return str(val) if val is not None else ""
+
             # Paymob HMAC is calculated from specific fields in this order
             obj = data.get("obj", {})
             concatenated = "".join([
-                str(obj.get("amount_cents", "")),
-                str(obj.get("created_at", "")),
-                str(obj.get("currency", "")),
-                str(obj.get("error_occured", "")),
-                str(obj.get("has_parent_transaction", "")),
-                str(obj.get("id", "")),
-                str(obj.get("integration_id", "")),
-                str(obj.get("is_3d_secure", "")),
-                str(obj.get("is_auth", "")),
-                str(obj.get("is_capture", "")),
-                str(obj.get("is_refunded", "")),
-                str(obj.get("is_standalone_payment", "")),
-                str(obj.get("is_voided", "")),
-                str(obj.get("order", {}).get("id", "")),
-                str(obj.get("owner", "")),
-                str(obj.get("pending", "")),
-                str(obj.get("source_data", {}).get("pan", "")),
-                str(obj.get("source_data", {}).get("sub_type", "")),
-                str(obj.get("source_data", {}).get("type", "")),
-                str(obj.get("success", "")),
+                _str(obj.get("amount_cents", "")),
+                _str(obj.get("created_at", "")),
+                _str(obj.get("currency", "")),
+                _str(obj.get("error_occured", "")),
+                _str(obj.get("has_parent_transaction", "")),
+                _str(obj.get("id", "")),
+                _str(obj.get("integration_id", "")),
+                _str(obj.get("is_3d_secure", "")),
+                _str(obj.get("is_auth", "")),
+                _str(obj.get("is_capture", "")),
+                _str(obj.get("is_refunded", "")),
+                _str(obj.get("is_standalone_payment", "")),
+                _str(obj.get("is_voided", "")),
+                _str(obj.get("order", {}).get("id", "")),
+                _str(obj.get("owner", "")),
+                _str(obj.get("pending", "")),
+                _str(obj.get("source_data", {}).get("pan", "")),
+                _str(obj.get("source_data", {}).get("sub_type", "")),
+                _str(obj.get("source_data", {}).get("type", "")),
+                _str(obj.get("success", "")),
             ])
 
             expected_signature = hmac.new(
