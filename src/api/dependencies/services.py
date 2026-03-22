@@ -72,6 +72,12 @@ def get_payment_service_for_provider(provider: str):
             from src.infrastructure.external_services.cod import CODPaymentService
 
             return CODPaymentService()
+        case "kashier":
+            from src.infrastructure.external_services.kashier import (
+                KashierPaymentService,
+            )
+
+            return KashierPaymentService()
         case _:
             raise ValueError(f"Unknown payment provider: {provider}")
 

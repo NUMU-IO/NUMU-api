@@ -59,6 +59,7 @@ class ServiceName(StrEnum):
     BANK_TRANSFER = "bank_transfer"
     STRIPE = "stripe"
     TAP = "tap"
+    KASHIER = "kashier"
 
     # Shipping Carriers
     ARAMEX = "aramex"

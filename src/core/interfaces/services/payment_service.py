@@ -15,6 +15,7 @@ class PaymentProvider(StrEnum):
     COD = "cod"  # Cash on Delivery
     PAYMOB = "paymob"  # Paymob gateway (cards, wallets)
     FAWRY = "fawry"  # Fawry retail pay points
+    KASHIER = "kashier"  # Kashier payment gateway
 
 
 class PaymentMethod(StrEnum):

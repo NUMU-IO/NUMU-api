@@ -16,6 +16,7 @@ from .communication_validators import (
 )
 from .payment_validators import (
     FawryValidator,
+    KashierValidator,
     PaymobValidator,
     StripeValidator,
     TapValidator,
@@ -57,6 +58,7 @@ class GatewayValidatorFactory:
             ServiceName.VODAFONE_CASH: VodafoneCashValidator,
             ServiceName.STRIPE: StripeValidator,
             ServiceName.TAP: TapValidator,
+            ServiceName.KASHIER: KashierValidator,
         },
         ServiceType.SHIPPING_CARRIER: {
             ServiceName.ARAMEX: AramexValidator,

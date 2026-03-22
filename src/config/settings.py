@@ -281,6 +281,12 @@ class Settings(BaseSettings):
         "https://atfawry.fawrystaging.com"  # Use production URL in prod
     )
 
+    # Kashier (Egyptian Payment Gateway)
+    kashier_mid: str | None = None  # Merchant ID (MID-xx-xx)
+    kashier_api_key: str | None = None  # API key (also used as HMAC secret)
+    kashier_mode: str = "test"  # "test" or "live"
+    kashier_currency: str = "EGP"  # Default currency
+
     # Cash on Delivery (COD)
     cod_enabled: bool = True
     cod_fee_percentage: float = 0.0  # Optional COD fee (0-100)

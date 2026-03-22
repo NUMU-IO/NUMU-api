@@ -443,3 +443,78 @@ class TapValidator(GatewayValidator):
                 message=f"Failed to validate Tap credentials: {str(e)}",
                 error_code="VALIDATION_ERROR",
             )
+
+
+class KashierValidator(GatewayValidator):
+    """Validator for Kashier payment gateway credentials.
+
+    Kashier is an Egyptian payment gateway supporting:
+    - Card payments
+    - Mobile wallets
+    - Bank installments
+
+    Required credentials:
+    - mid: Kashier Merchant ID (MID-xx-xx)
+    - api_key: API key (also used as HMAC secret)
+
+    Optional credentials:
+    - mode: "test" or "live" (defaults to "test")
+    """
+
+    @property
+    def service_name(self) -> str:
+        return "kashier"
+
+    @property
+    def required_fields(self) -> list[str]:
+        return ["mid", "api_key"]
+
+    @property
+    def optional_fields(self) -> list[str]:
+        return ["mode"]
+
+    async def validate(self, credentials: dict[str, Any]) -> ValidationResult:
+        """Validate Kashier credentials.
+
+        Validates by checking the MID format and verifying
+        the API key can produce a valid HMAC hash.
+        """
+        structure_result = self.validate_structure(credentials)
+        if not structure_result.is_valid:
+            return structure_result
+
+        mid = credentials["mid"]
+        api_key = credentials["api_key"]
+        mode = credentials.get("mode", "test")
+
+        # Validate MID format (MID-xxxx-xxxx)
+        if not mid.startswith("MID-"):
+            return ValidationResult.failure(
+                message="Kashier Merchant ID must start with 'MID-'",
+                error_code="INVALID_MID_FORMAT",
+            )
+
+        # Verify the API key can produce a valid HMAC hash
+        try:
+            import hashlib
+            import hmac as hmac_module
+
+            test_path = f"/?payment={mid}.test_order.100.00.EGP"
+            hmac_module.new(
+                api_key.encode("utf-8"),
+                test_path.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+        except Exception as e:
+            return ValidationResult.failure(
+                message=f"Invalid Kashier API key format: {str(e)}",
+                error_code="INVALID_API_KEY",
+            )
+
+        return ValidationResult.success(
+            message="Kashier credentials validated successfully",
+            details={
+                "mid": mid,
+                "mode": mode,
+            },
+        )
