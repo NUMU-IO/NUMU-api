@@ -201,6 +201,19 @@ async def paymob_callback(
         await db.flush()
         log.info("payment_transaction_created", tx_id=str(tx.id))
 
+        # Generate invoice now that payment is confirmed
+        from src.api.v1.routes.webhooks._invoice_helper import (
+            generate_invoice_for_paid_order,
+        )
+
+        await generate_invoice_for_paid_order(
+            db=db,
+            order_id=order.id,
+            store_id=order.store_id,
+            tenant_id=order.tenant_id,
+            customer_email=None,  # email already sent during checkout
+        )
+
     else:
         error_msg = obj.get("data", {}).get("message", "Payment failed")
         txn_response = obj.get("txn_response_code", "")

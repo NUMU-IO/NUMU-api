@@ -310,6 +310,7 @@ class InvoiceListResponse(BaseModel):
     total: int
     total_formatted: str | None = None
     eta_uuid: str | None
+    order_id: UUID | None = None
     created_at: datetime
 
 

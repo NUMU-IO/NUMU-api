@@ -215,6 +215,18 @@ async def kashier_callback(
         await db.flush()
         log.info("payment_transaction_created", tx_id=str(tx.id))
 
+        # Generate invoice now that payment is confirmed
+        from src.api.v1.routes.webhooks._invoice_helper import (
+            generate_invoice_for_paid_order,
+        )
+
+        await generate_invoice_for_paid_order(
+            db=db,
+            order_id=order.id,
+            store_id=order.store_id,
+            tenant_id=order.tenant_id,
+        )
+
     elif status_upper == "FAILED":
         error_msg = data.get("error", {}).get("message", "Payment failed")
         log.warning("payment_failed", error_message=error_msg)
