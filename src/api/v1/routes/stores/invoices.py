@@ -164,6 +164,7 @@ async def list_invoices(
             total=inv.total,
             total_formatted=_format_currency(inv.total, inv.currency),
             eta_uuid=inv.eta_uuid,
+            order_id=inv.order_id,
             created_at=inv.created_at,
         )
         for inv in invoices

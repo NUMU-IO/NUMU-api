@@ -584,7 +584,11 @@ async def checkout(
         logger.warning(f"Failed to dispatch WhatsApp notification: {e}")
 
     # Dispatch async invoice generation + email to customer
-    if customer_email:
+    # Only generate invoice immediately for COD orders (paid on delivery).
+    # For online payments (paymob, kashier), invoice is generated after
+    # payment confirmation via webhook.
+    is_cod = not request.payment_method or request.payment_method == "cod"
+    if customer_email and is_cod:
         try:
             import asyncio
             from uuid import uuid4
