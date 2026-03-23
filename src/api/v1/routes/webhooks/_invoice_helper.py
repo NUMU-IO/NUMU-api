@@ -5,6 +5,7 @@ Called after a successful payment to generate the invoice, PDF, and email.
 
 import asyncio
 import logging
+from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,25 +106,28 @@ async def generate_invoice_for_paid_order(
             },
         )
 
-        # Build line items (can be list of dicts or Pydantic models)
+        # Build line items using Invoice.create_line_item factory
         line_items = []
         for li in order.line_items or []:
             if isinstance(li, dict):
-                unit_price = li.get("unit_price", 0)
-                quantity = li.get("quantity", 1)
+                unit_price_cents = li.get("unit_price", 0)
+                qty = li.get("quantity", 1)
                 desc = li.get("product_name", "Product")
+                sku = li.get("sku") or li.get("product_id", "ITEM")
             else:
-                unit_price = getattr(li, "unit_price", 0)
-                quantity = getattr(li, "quantity", 1)
+                unit_price_cents = getattr(li, "unit_price", 0)
+                qty = getattr(li, "quantity", 1)
                 desc = getattr(li, "product_name", "Product")
-            line_items.append({
-                "description": desc,
-                "quantity": quantity,
-                "unit_price": unit_price,
-                "total": unit_price * quantity,
-                "vat_rate": 0.14,
-                "vat_amount": int(unit_price * quantity * 0.14),
-            })
+                sku = getattr(li, "sku", None) or getattr(li, "product_id", "ITEM")
+
+            line_item = Invoice.create_line_item(
+                description=str(desc),
+                item_code=str(sku),
+                quantity=Decimal(str(qty)),
+                unit_price=Decimal(str(unit_price_cents)) / Decimal("100"),
+                vat_rate=Decimal("14"),
+            )
+            line_items.append(line_item)
 
         invoice_number = await invoice_repo.get_next_invoice_number(store_id)
 
