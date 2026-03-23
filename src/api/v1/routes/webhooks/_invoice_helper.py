@@ -67,26 +67,57 @@ async def generate_invoice_for_paid_order(
             },
         )
 
-        # Build buyer info from shipping address
-        ship_addr = order.shipping_address or {}
+        # Build buyer info from shipping address (can be Pydantic model or dict)
+        ship_addr = order.shipping_address
+        if ship_addr and hasattr(ship_addr, "first_name"):
+            buyer_name = (
+                f"{ship_addr.first_name} {ship_addr.last_name}".strip() or "Customer"
+            )
+            buyer_phone = getattr(ship_addr, "phone", "") or ""
+            buyer_city = getattr(ship_addr, "city", "") or ""
+            buyer_street = getattr(ship_addr, "address_line1", "") or ""
+            buyer_country = getattr(ship_addr, "country", "EG") or "EG"
+        elif isinstance(ship_addr, dict):
+            buyer_name = (
+                f"{ship_addr.get('first_name', '')} {ship_addr.get('last_name', '')}".strip()
+                or "Customer"
+            )
+            buyer_phone = ship_addr.get("phone", "")
+            buyer_city = ship_addr.get("city", "")
+            buyer_street = ship_addr.get("address_line1", "")
+            buyer_country = ship_addr.get("country", "EG")
+        else:
+            buyer_name, buyer_phone, buyer_city, buyer_street, buyer_country = (
+                "Customer",
+                "",
+                "",
+                "",
+                "EG",
+            )
+
         buyer = BuyerInfo(
-            name=f"{ship_addr.get('first_name', '')} {ship_addr.get('last_name', '')}".strip()
-            or "Customer",
-            phone=ship_addr.get("phone", ""),
+            name=buyer_name,
+            phone=buyer_phone,
             address={
-                "city": ship_addr.get("city", ""),
-                "street": ship_addr.get("address_line1", ""),
-                "country": ship_addr.get("country", "EG"),
+                "city": buyer_city,
+                "street": buyer_street,
+                "country": buyer_country,
             },
         )
 
-        # Build line items
+        # Build line items (can be list of dicts or Pydantic models)
         line_items = []
         for li in order.line_items or []:
-            unit_price = li.get("unit_price", 0)
-            quantity = li.get("quantity", 1)
+            if isinstance(li, dict):
+                unit_price = li.get("unit_price", 0)
+                quantity = li.get("quantity", 1)
+                desc = li.get("product_name", "Product")
+            else:
+                unit_price = getattr(li, "unit_price", 0)
+                quantity = getattr(li, "quantity", 1)
+                desc = getattr(li, "product_name", "Product")
             line_items.append({
-                "description": li.get("product_name", "Product"),
+                "description": desc,
                 "quantity": quantity,
                 "unit_price": unit_price,
                 "total": unit_price * quantity,
