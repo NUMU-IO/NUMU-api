@@ -934,6 +934,7 @@ async def get_bosta_service_for_store(store_settings: dict) -> BostaShippingServ
             api_key=creds["api_key"],
             business_id=creds["business_id"],
             webhook_secret=creds.get("webhook_secret"),
+            base_url=settings.bosta_base_url,  # Use server-configured URL (prod/staging)
         )
     # Fallback to global settings
     return BostaShippingService()
