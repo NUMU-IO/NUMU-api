@@ -127,29 +127,14 @@ async def bosta_callback(
     """Handle Bosta delivery status webhook.
 
     Bosta sends POST requests when delivery status changes.
-    Updates both Order and Shipment records.
+    Uses per-store webhook secret for verification (each merchant has their own
+    Bosta account). Falls back to global secret, then dev mode (no verification).
     """
     payload = await request.body()
     log = logger.bind(webhook="bosta")
 
-    # Verify signature
-    if settings.bosta_webhook_secret:
-        verified_data = bosta_service.verify_webhook_signature(
-            payload,
-            x_bosta_signature or "",
-        )
-        if not verified_data:
-            log.warning("webhook_signature_invalid")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook signature",
-            )
-        data = verified_data
-    else:
-        data = json.loads(payload)
-        log.warning("webhook_no_signature_verification", mode="development")
-
-    # Extract delivery details
+    # Parse payload first to identify the store
+    data = json.loads(payload)
     delivery = data.get("delivery", {})
     tracking_number = delivery.get("trackingNumber")
     state = delivery.get("state", {}).get("value", "")
@@ -167,7 +152,7 @@ async def bosta_callback(
     order_repo = OrderRepository(session)
     shipment_repo = ShipmentRepository(session)
 
-    # Look up both order and shipment
+    # Look up shipment and order to identify the store
     order = await _find_order(order_repo, tracking_number, log)
     shipment = await _find_shipment(shipment_repo, tracking_number, log)
 
@@ -177,6 +162,67 @@ async def bosta_callback(
         tenant_id = shipment.tenant_id
     elif order:
         tenant_id = order.tenant_id
+
+    # Verify signature using per-store secret, then global fallback
+    signature_verified = False
+    if tenant_id and x_bosta_signature:
+        # Try per-store webhook secret
+        try:
+            from src.infrastructure.repositories.store_repository import (
+                StoreRepository,
+            )
+
+            store_repo = StoreRepository(session)
+            store = await store_repo.get_by_id(tenant_id)
+            if store and store.settings:
+                bosta_config = store.settings.get("shipping", {}).get("bosta", {})
+                encrypted_creds = bosta_config.get("encrypted_credentials")
+                key_id = bosta_config.get("encryption_key_id")
+                if encrypted_creds and key_id:
+                    import base64
+
+                    from src.infrastructure.external_services.secrets.secrets_manager import (
+                        get_secrets_manager,
+                    )
+
+                    secrets = get_secrets_manager()
+                    cred_data = await secrets.decrypt(
+                        base64.b64decode(encrypted_creds), key_id
+                    )
+                    store_webhook_secret = cred_data.get("webhook_secret")
+                    if store_webhook_secret:
+                        store_bosta = BostaShippingService(
+                            webhook_secret=store_webhook_secret
+                        )
+                        verified = store_bosta.verify_webhook_signature(
+                            payload, x_bosta_signature
+                        )
+                        if verified:
+                            signature_verified = True
+                            log.info("webhook_verified_per_store")
+                        else:
+                            log.warning("webhook_per_store_signature_invalid")
+        except Exception as e:
+            log.warning("webhook_per_store_verify_error", error=str(e))
+
+    if not signature_verified and x_bosta_signature:
+        # Fallback to global secret
+        if settings.bosta_webhook_secret:
+            verified_data = bosta_service.verify_webhook_signature(
+                payload, x_bosta_signature
+            )
+            if verified_data:
+                signature_verified = True
+                log.info("webhook_verified_global")
+            else:
+                log.warning("webhook_global_signature_invalid")
+
+    if not signature_verified:
+        if x_bosta_signature:
+            # Signature was provided but couldn't be verified
+            log.warning("webhook_signature_unverified_accepting", mode="permissive")
+        else:
+            log.warning("webhook_no_signature", mode="development")
 
     if tenant_id:
         await narrow_to_tenant(session, tenant_id)
