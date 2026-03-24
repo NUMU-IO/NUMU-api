@@ -189,11 +189,30 @@ async def kashier_callback(
 
     if status_upper == "SUCCESS":
         log.info("payment_success")
+        old_status = (
+            order.status.value if hasattr(order.status, "value") else str(order.status)
+        )
         order.mark_as_paid(
             payment_id=str(transaction_id or fields["kashier_order_id"] or ""),
             payment_method="kashier",
         )
         await order_repo.update(order)
+
+        # Fire OrderStatusChangedEvent so shipment auto-creation triggers
+        try:
+            from src.core.events.base import EventBus
+            from src.core.events.order_events import OrderStatusChangedEvent
+
+            event = OrderStatusChangedEvent(
+                order_id=order.id,
+                store_id=order.store_id,
+                old_status=old_status,
+                new_status="processing",
+            )
+            await EventBus.dispatch(event)
+            log.info("order_status_event_dispatched", new_status="processing")
+        except Exception as e:
+            log.warning("order_status_event_failed", error=str(e))
 
         # Create transaction record for reconciliation
         tx = PaymentTransactionModel(
