@@ -71,4 +71,12 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.daily_payment_reconciliation",
         "schedule": crontab(hour=2, minute=0),  # Every day at 02:00 UTC
     },
+    "sync-shipment-statuses": {
+        "task": "tasks.sync_shipment_statuses",
+        "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    "daily-cod-reconciliation": {
+        "task": "tasks.daily_cod_reconciliation",
+        "schedule": crontab(hour=3, minute=30),  # 03:30 UTC (after payment recon)
+    },
 }

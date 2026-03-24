@@ -13,6 +13,7 @@ from src.infrastructure.repositories.onboarding_repository import OnboardingRepo
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
 from src.infrastructure.repositories.refund_repository import RefundRepository
+from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.two_factor_repository import TwoFactorRepository
 from src.infrastructure.repositories.user_repository import UserRepository
@@ -40,6 +41,7 @@ __all__ = [
     "OrderRepository",
     "RedisCartRepository",
     "RefundRepository",
+    "ShipmentRepository",
     "WaitlistRepository",
     "TwoFactorRepository",
     "WebhookSubscriptionRepository",
