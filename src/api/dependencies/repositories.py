@@ -19,6 +19,7 @@ from src.infrastructure.repositories import (
     OrderRepository,
     ProductRepository,
     RefundRepository,
+    ShipmentRepository,
     StoreRepository,
     TwoFactorRepository,
     UserRepository,
@@ -145,6 +146,13 @@ def get_webhook_delivery_log_repository(
 ) -> WebhookDeliveryLogRepository:
     """Get webhook delivery log repository dependency."""
     return WebhookDeliveryLogRepository(session)
+
+
+def get_shipment_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ShipmentRepository:
+    """Get shipment repository dependency."""
+    return ShipmentRepository(session)
 
 
 def get_credential_repository(

@@ -33,6 +33,7 @@ from src.infrastructure.database.models.tenant.refund import RefundModel
 from src.infrastructure.database.models.tenant.risk_assessment import (
     RiskAssessmentModel,
 )
+from src.infrastructure.database.models.tenant.shipment import ShipmentModel
 from src.infrastructure.database.models.tenant.shopify_app_settings import (
     ShopifyAppSettingsModel,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "AuditAction",
     "ProductModel",
     "RefundModel",
+    "ShipmentModel",
     "StoreModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",

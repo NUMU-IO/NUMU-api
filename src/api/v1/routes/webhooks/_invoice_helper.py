@@ -106,29 +106,6 @@ async def generate_invoice_for_paid_order(
             },
         )
 
-        # Build line items using Invoice.create_line_item factory
-        line_items = []
-        for li in order.line_items or []:
-            if isinstance(li, dict):
-                unit_price_cents = li.get("unit_price", 0)
-                qty = li.get("quantity", 1)
-                desc = li.get("product_name", "Product")
-                sku = li.get("sku") or li.get("product_id", "ITEM")
-            else:
-                unit_price_cents = getattr(li, "unit_price", 0)
-                qty = getattr(li, "quantity", 1)
-                desc = getattr(li, "product_name", "Product")
-                sku = getattr(li, "sku", None) or getattr(li, "product_id", "ITEM")
-
-            line_item = Invoice.create_line_item(
-                description=str(desc),
-                item_code=str(sku),
-                quantity=Decimal(str(qty)),
-                unit_price=Decimal(str(unit_price_cents)) / Decimal("100"),
-                vat_rate=Decimal("14"),
-            )
-            line_items.append(line_item)
-
         invoice_number = await invoice_repo.get_next_invoice_number(store_id)
 
         # Simulate ETA QR
@@ -141,17 +118,32 @@ async def generate_invoice_for_paid_order(
             invoice_number=invoice_number,
             invoice_type="I",
             status=InvoiceStatus.ACCEPTED,
-            seller=seller.model_dump()
-            if hasattr(seller, "model_dump")
-            else seller.__dict__,
-            buyer=buyer.model_dump()
-            if hasattr(buyer, "model_dump")
-            else buyer.__dict__,
-            line_items=line_items,
-            total_amount=order.total,
+            seller=seller,
+            buyer=buyer,
             currency=order.currency or "EGP",
             eta_uuid=eta_uuid,
         )
+
+        # Add line items using Invoice.add_line_item() for proper calculation
+        for li in order.line_items or []:
+            if isinstance(li, dict):
+                unit_price_cents = li.get("unit_price", 0)
+                qty = li.get("quantity", 1)
+                desc = li.get("product_name", "Product")
+                sku = li.get("sku") or li.get("product_id", "ITEM")
+            else:
+                unit_price_cents = getattr(li, "unit_price", 0)
+                qty = getattr(li, "quantity", 1)
+                desc = getattr(li, "product_name", "Product")
+                sku = getattr(li, "sku", None) or getattr(li, "product_id", "ITEM")
+
+            invoice.add_line_item(
+                description=str(desc),
+                item_code=str(sku),
+                quantity=Decimal(str(qty)),
+                unit_price=Decimal(str(unit_price_cents)) / Decimal("100"),
+                vat_rate=Decimal("14"),
+            )
 
         created_inv = await invoice_repo.create(invoice)
         logger.info(
@@ -175,7 +167,7 @@ async def generate_invoice_for_paid_order(
                         "buyer": buyer.__dict__
                         if hasattr(buyer, "__dict__")
                         else buyer,
-                        "line_items": line_items,
+                        "line_items": order.line_items or [],
                         "total_amount": order.total,
                         "currency": order.currency or "EGP",
                         "eta_uuid": eta_uuid,
