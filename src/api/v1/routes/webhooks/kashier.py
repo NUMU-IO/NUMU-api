@@ -203,10 +203,18 @@ async def kashier_callback(
             from src.core.events.base import EventBus
             from src.core.events.order_events import OrderStatusChangedEvent
 
+            sr = StoreRepository(db)
+            store = await sr.get_by_id(order.store_id)
             event = OrderStatusChangedEvent(
                 order_id=order.id,
+                order_number=order.order_number,
                 store_id=order.store_id,
-                old_status=old_status,
+                store_name=store.name if store else "",
+                customer_id=order.customer_id,
+                customer_name=order.shipping_address.full_name
+                if order.shipping_address
+                else None,
+                previous_status=old_status,
                 new_status="processing",
             )
             await EventBus.dispatch(event)
