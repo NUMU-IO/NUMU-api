@@ -200,8 +200,8 @@ async def kashier_callback(
 
         # Fire OrderStatusChangedEvent so shipment auto-creation triggers
         try:
-            from src.core.events.base import EventBus
             from src.core.events.order_events import OrderStatusChangedEvent
+            from src.infrastructure.events.setup import get_event_bus
 
             sr = StoreRepository(db)
             store = await sr.get_by_id(order.store_id)
@@ -217,7 +217,7 @@ async def kashier_callback(
                 previous_status=old_status,
                 new_status="processing",
             )
-            await EventBus.dispatch(event)
+            get_event_bus().publish(event)
             log.info("order_status_event_dispatched", new_status="processing")
         except Exception as e:
             log.warning("order_status_event_failed", error=str(e))
