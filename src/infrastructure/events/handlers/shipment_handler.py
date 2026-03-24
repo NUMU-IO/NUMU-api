@@ -118,10 +118,33 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
                     order_reference=order.order_number,
                 )
             except Exception as e:
-                log.error("auto_shipment_bosta_failed", error=str(e))
-                # Record failure in order metadata but don't block
+                error_msg = str(e)
+                log.error("auto_shipment_bosta_failed", error=error_msg)
+
+                # Save failed shipment record so merchant can see it and retry
+                failed_shipment = Shipment(
+                    store_id=store.id,
+                    tenant_id=store.tenant_id,
+                    order_id=order.id,
+                    carrier="bosta",
+                    status=ShipmentStatus.FAILED,
+                    shipping_method="standard",
+                    shipping_cost=order.shipping_cost,
+                    cod_amount=cod_amount,
+                    status_history=[
+                        {
+                            "from": "pending",
+                            "to": "failed",
+                            "description": f"Auto-create failed: {error_msg[:200]}",
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+                    ],
+                )
+                await shipment_repo.create(failed_shipment)
+
+                # Also record in order metadata
                 order.metadata.setdefault("shipment_errors", []).append({
-                    "error": str(e),
+                    "error": error_msg,
                     "timestamp": datetime.now(UTC).isoformat(),
                 })
                 await order_repo.update(order)
