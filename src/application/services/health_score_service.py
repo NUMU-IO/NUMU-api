@@ -211,16 +211,29 @@ async def calculate_store_health_score(
 
     # === 3. Order Completion Rate ===
     # Orders that reached DELIVERED / total orders (excluding very recent)
-    # Note: OrderStatus DB enum uses UPPERCASE member names
+    # Cast status to text to bypass SQLAlchemy Enum type mapping issues
+    from sqlalchemy import String as SAString
+    from sqlalchemy import cast
+
+    status_text = cast(OrderModel.status, SAString)
     order_stats = await session.execute(
         select(
             func.count().label("total"),
-            func.sum(case((OrderModel.status.in_(["DELIVERED"]), 1), else_=0)).label(
-                "completed"
-            ),
+            func.sum(
+                case((status_text.in_(["DELIVERED", "delivered"]), 1), else_=0)
+            ).label("completed"),
             func.sum(
                 case(
-                    (OrderModel.status.in_(["CANCELLED", "payment_failed"]), 1), else_=0
+                    (
+                        status_text.in_([
+                            "CANCELLED",
+                            "cancelled",
+                            "payment_failed",
+                            "PAYMENT_FAILED",
+                        ]),
+                        1,
+                    ),
+                    else_=0,
                 )
             ).label("cancelled"),
         ).where(
@@ -241,13 +254,13 @@ async def calculate_store_health_score(
 
     # === 4. Return Rate ===
     # Refunds / total completed orders
-    # Note: RefundStatus DB enum uses UPPERCASE member names
+    refund_status_text = cast(RefundModel.status, SAString)
     refund_stats = await session.execute(
         select(func.count().label("total_refunds")).where(
             and_(
                 RefundModel.store_id == store_id,
                 RefundModel.created_at >= period_start,
-                RefundModel.status.in_(["APPROVED", "COMPLETED", "PROCESSING"]),
+                refund_status_text.in_(["APPROVED", "COMPLETED", "PROCESSING"]),
             )
         )
     )
