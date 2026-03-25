@@ -22,6 +22,7 @@ from src.infrastructure.repositories import (
     ShipmentRepository,
     StoreRepository,
     TwoFactorRepository,
+    UpsellRuleRepository,
     UserRepository,
     WaitlistRepository,
     WebhookDeliveryLogRepository,
@@ -160,6 +161,13 @@ def get_credential_repository(
 ) -> CredentialRepository:
     """Get credential repository dependency."""
     return CredentialRepository(session)
+
+
+def get_upsell_rule_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> UpsellRuleRepository:
+    """Get upsell rule repository dependency."""
+    return UpsellRuleRepository(session)
 
 
 def get_cart_repository():

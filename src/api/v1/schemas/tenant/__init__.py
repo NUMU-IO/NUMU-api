@@ -67,6 +67,12 @@ from src.api.v1.schemas.tenant.store import (
     StoreResponse,
     UpdateStoreRequest,
 )
+from src.api.v1.schemas.tenant.upsell import (
+    CreateUpsellRuleRequest,
+    UpdateUpsellRuleRequest,
+    UpsellOfferResponse,
+    UpsellRuleResponse,
+)
 
 __all__ = [
     # Common
@@ -122,6 +128,11 @@ __all__ = [
     "UpdateOrderRequest",
     "UpdateOrderStatusRequest",
     # Refund
+    # Upsell
+    "CreateUpsellRuleRequest",
+    "UpdateUpsellRuleRequest",
+    "UpsellRuleResponse",
+    "UpsellOfferResponse",
     "CreateRefundRequest",
     "RefundListItemResponse",
     "RefundResponse",
