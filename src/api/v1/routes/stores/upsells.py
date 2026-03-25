@@ -53,7 +53,7 @@ def _rule_response(rule) -> UpsellRuleResponse:
 
 
 @router.post(
-    "/",
+    "",
     response_model=SuccessResponse[UpsellRuleResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create upsell rule",
@@ -93,7 +93,7 @@ async def create_upsell_rule(
 
 
 @router.get(
-    "/",
+    "",
     response_model=SuccessResponse[list[UpsellRuleResponse]],
     summary="List upsell rules",
     operation_id="list_upsell_rules",
