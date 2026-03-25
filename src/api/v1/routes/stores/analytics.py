@@ -23,6 +23,7 @@ from src.core.entities.store import Store
 from src.infrastructure.repositories import (
     CustomerRepository,
     OrderRepository,
+    StoreRepository,
 )
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 
@@ -564,7 +565,11 @@ async def get_health_score(
         False, description="Calculate live instead of using cached score"
     ),
 ):
-    """Get the merchant health score (cached daily or live calculation)."""
+    """Get the merchant health score (cached daily or live calculation).
+
+    On first call (no cache), calculates live and persists in store.settings
+    so subsequent calls are instant. Celery refreshes the cache daily.
+    """
     # Try cached score first (from daily Celery task)
     if not live and store.settings:
         cached = store.settings.get("health_score")
@@ -574,12 +579,23 @@ async def get_health_score(
                 message="Health score retrieved (cached)",
             )
 
-    # Live calculation
+    # Live calculation (first visit or explicit live=true)
+
     score_data = await calculate_store_health_score(
         session=order_repo.session,
         store_id=store.id,
         days=30,
     )
+
+    # Cache the result in store.settings for next time
+    try:
+        store_repo = StoreRepository(order_repo.session)
+        current_settings = dict(store.settings) if store.settings else {}
+        current_settings["health_score"] = score_data
+        store.settings = current_settings
+        await store_repo.update(store)
+    except Exception:
+        pass  # Non-critical — score still returned even if caching fails
 
     return SuccessResponse(
         data=HealthScoreResponse(**score_data),

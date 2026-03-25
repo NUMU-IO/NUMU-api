@@ -220,7 +220,7 @@ async def calculate_store_health_score(
             ),
             func.sum(
                 case(
-                    (OrderModel.status.in_(["CANCELLED", "PAYMENT_FAILED"]), 1), else_=0
+                    (OrderModel.status.in_(["CANCELLED", "payment_failed"]), 1), else_=0
                 )
             ).label("cancelled"),
         ).where(
