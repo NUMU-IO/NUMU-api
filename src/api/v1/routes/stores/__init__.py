@@ -13,6 +13,7 @@ Provides REST endpoints for store CRUD operations and nested resources:
 - /stores/{store_id}/categories - Category management
 - /stores/{store_id}/onboarding - Merchant onboarding progress
 - /stores/{store_id}/webhooks - Outgoing webhook subscriptions
+- /stores/{store_id}/upsells - Post-purchase upsell rules
 """
 
 from fastapi import APIRouter
@@ -37,6 +38,7 @@ from src.api.v1.routes.stores import refunds as refunds_module
 from src.api.v1.routes.stores import settings as settings_module
 from src.api.v1.routes.stores import shipments as shipments_module
 from src.api.v1.routes.stores import stores as stores_module
+from src.api.v1.routes.stores import upsells as upsells_module
 from src.api.v1.routes.stores import webhooks as webhooks_module
 
 # Create main stores router - this will be mounted at /stores in the main router
@@ -65,5 +67,6 @@ router.include_router(reconciliation_module.router, tags=["Store Reconciliation"
 router.include_router(shipments_module.router, tags=["Store Shipments"])
 router.include_router(payments_module.router, tags=["Store Payments"])
 router.include_router(plan_module.router, tags=["Store Plan"])
+router.include_router(upsells_module.router, tags=["Store Upsells"])
 
 __all__ = ["router"]

@@ -41,6 +41,7 @@ from src.infrastructure.database.models.tenant.shopify_installation import (
     ShopifyInstallationModel,
 )
 from src.infrastructure.database.models.tenant.store import StoreModel
+from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
 from src.infrastructure.database.models.tenant.webhook import (
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
@@ -71,6 +72,7 @@ __all__ = [
     "AuditAction",
     "ProductModel",
     "RefundModel",
+    "UpsellRuleModel",
     "ShipmentModel",
     "StoreModel",
     "WebhookSubscriptionModel",

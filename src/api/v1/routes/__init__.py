@@ -67,6 +67,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     storefront_lookup_router,
 )
+from src.api.v1.routes.storefront import (
+    upsell_router as storefront_upsell_router,
+)
 
 # Store management routes (for store owners)
 from src.api.v1.routes.stores import router as stores_router
@@ -148,6 +151,11 @@ api_router.include_router(
     tags=["Storefront - Coupons"],
 )
 
+# Storefront - upsell offers (public, scoped to store)
+api_router.include_router(
+    storefront_upsell_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Upsells"],
 # Storefront - COD OTP verification (authenticated customer, scoped to store)
 api_router.include_router(
     storefront_otp_router,
