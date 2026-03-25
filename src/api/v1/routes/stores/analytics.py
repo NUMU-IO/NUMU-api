@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from src.api.dependencies import (
     get_customer_repository,
     get_order_repository,
+    get_shipment_repository,
     verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
@@ -22,6 +23,7 @@ from src.infrastructure.repositories import (
     CustomerRepository,
     OrderRepository,
 )
+from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 
 router = APIRouter(prefix="/{store_id}/analytics")
 
@@ -401,4 +403,126 @@ async def get_conversion_stats(
             cart_abandonment_rate=cart_abandonment_rate,
         ),
         message="Conversion stats retrieved successfully",
+    )
+
+
+class TrafficSourceResponse(BaseModel):
+    """Traffic source attribution from UTM parameters."""
+
+    source: str
+    orders: int
+    revenue: int  # cents
+    percentage: float
+
+
+@router.get(
+    "/traffic-sources",
+    response_model=SuccessResponse[list[TrafficSourceResponse]],
+    summary="Get orders by traffic source",
+    operation_id="get_traffic_sources",
+)
+async def get_traffic_sources(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    days: int = Query(30, ge=1, le=365),
+):
+    """Get order attribution by UTM source."""
+    now = datetime.now(UTC)
+    period_start = now - timedelta(days=days)
+
+    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=5000)
+
+    source_data: dict[str, dict] = {}
+    total_revenue = 0
+
+    for order in orders:
+        source = order.utm_source or "direct"
+        if source not in source_data:
+            source_data[source] = {"orders": 0, "revenue": 0}
+        source_data[source]["orders"] += 1
+        source_data[source]["revenue"] += order.total
+        total_revenue += order.total
+
+    sorted_sources = sorted(
+        source_data.items(),
+        key=lambda x: x[1]["revenue"],
+        reverse=True,
+    )
+
+    result = []
+    for source, data in sorted_sources:
+        percentage = (data["revenue"] / total_revenue * 100) if total_revenue > 0 else 0
+        result.append(
+            TrafficSourceResponse(
+                source=source,
+                orders=data["orders"],
+                revenue=data["revenue"],
+                percentage=round(percentage, 1),
+            )
+        )
+
+    return SuccessResponse(
+        data=result,
+        message="Traffic sources retrieved successfully",
+    )
+
+
+class CodRejectionLocationResponse(BaseModel):
+    """COD rejection stats for a single location."""
+
+    location: str
+    rejected: int
+    total: int
+    rate: float
+
+
+class CodRejectionStatsResponse(BaseModel):
+    """COD rejection statistics."""
+
+    total_cod_shipments: int
+    delivered_count: int
+    rejected_count: int
+    returned_count: int
+    rejection_rate: float  # percentage
+    total_cod_amount: int  # cents
+    rejected_amount: int  # cents
+    by_location: list[CodRejectionLocationResponse]
+
+
+@router.get(
+    "/cod-rejections",
+    response_model=SuccessResponse[CodRejectionStatsResponse],
+    summary="Get COD rejection statistics",
+    operation_id="get_cod_rejection_stats",
+)
+async def get_cod_rejection_stats(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
+    days: int = Query(30, ge=1, le=365),
+):
+    """Get COD rejection rate and breakdown by location."""
+    now = datetime.now(UTC)
+    period_start = now - timedelta(days=days)
+
+    stats = await shipment_repo.get_cod_stats_by_store(store.id, period_start, now)
+    locations = await shipment_repo.get_cod_rejection_by_location(
+        store.id, period_start, now
+    )
+
+    total = stats["total"]
+    rejected = stats["failed"] + stats["returned"]
+    rejection_rate = round((rejected / total) * 100, 1) if total > 0 else 0.0
+
+    return SuccessResponse(
+        data=CodRejectionStatsResponse(
+            total_cod_shipments=total,
+            delivered_count=stats["delivered"],
+            rejected_count=rejected,
+            returned_count=stats["returned"],
+            rejection_rate=rejection_rate,
+            total_cod_amount=stats["total_cod_amount"],
+            rejected_amount=stats["rejected_amount"],
+            by_location=[CodRejectionLocationResponse(**loc) for loc in locations],
+        ),
+        message="COD rejection stats retrieved successfully",
     )

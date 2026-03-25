@@ -90,10 +90,11 @@ async def _create_shipment_for_order(
     store: Store,
     order_repo: OrderRepository,
     shipment_repo: ShipmentRepository,
+    carrier: str = "bosta",
     shipping_method: str = "standard",
     notes: str | None = None,
 ) -> Shipment:
-    """Core logic for creating a Bosta shipment for an order."""
+    """Core logic for creating a shipment for an order via the selected carrier."""
     from src.core.interfaces.services.shipping_service import Parcel, ShippingAddress
 
     order = await order_repo.get_by_id(order_id)
@@ -113,9 +114,24 @@ async def _create_shipment_for_order(
             detail=f"Order {order_id} already has an active shipment",
         )
 
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
+    # Select carrier service
+    if carrier == "mylerz":
+        from src.infrastructure.external_services.mylerz import (
+            get_mylerz_service_for_store,
+        )
 
-    # Map order address to Bosta address
+        shipping_service = await get_mylerz_service_for_store(store.settings or {})
+    elif carrier == "jt":
+        from src.infrastructure.external_services.jt import (
+            get_jt_service_for_store,
+        )
+
+        shipping_service = await get_jt_service_for_store(store.settings or {})
+    else:
+        carrier = "bosta"  # Normalize to bosta as default
+        shipping_service = await get_bosta_service_for_store(store.settings or {})
+
+    # Map order address to shipping address
     addr = order.shipping_address
     to_address = ShippingAddress(
         name=f"{addr.first_name} {addr.last_name}",
@@ -145,8 +161,8 @@ async def _create_shipment_for_order(
     ):
         cod_amount = order.total
 
-    rate_id = f"bosta_{shipping_method}"
-    label = await bosta_service.create_shipment(
+    rate_id = f"{carrier}_{shipping_method}"
+    label = await shipping_service.create_shipment(
         from_address=from_address,
         to_address=to_address,
         parcel=parcel,
@@ -156,15 +172,26 @@ async def _create_shipment_for_order(
         notes=notes,
     )
 
+    # Build tracking URL based on carrier
+    tracking_url_map = {
+        "bosta": f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}",
+        "mylerz": f"https://mylerz.com/track/{label.tracking_number}",
+        "jt": f"https://www.jtexpress-eg.com/trajectoryQuery?waybillNo={label.tracking_number}",
+    }
+    tracking_url = tracking_url_map.get(
+        carrier,
+        f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}",
+    )
+
     # Create shipment entity
     shipment = Shipment(
         store_id=store.id,
         tenant_id=store.tenant_id,
         order_id=order.id,
-        carrier="bosta",
+        carrier=carrier,
         carrier_shipment_id=label.tracking_number,
         tracking_number=label.tracking_number,
-        tracking_url=f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}",
+        tracking_url=tracking_url,
         awb_url=label.label_url,
         status=ShipmentStatus.CREATED,
         shipping_method=shipping_method,
@@ -175,7 +202,7 @@ async def _create_shipment_for_order(
             {
                 "from": "pending",
                 "to": "created",
-                "description": "Shipment created via Bosta API",
+                "description": f"Shipment created via {carrier} API",
                 "timestamp": datetime.utcnow().isoformat(),
             }
         ],
@@ -185,10 +212,8 @@ async def _create_shipment_for_order(
 
     # Update order tracking fields
     order.tracking_number = label.tracking_number
-    order.tracking_url = (
-        f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}"
-    )
-    order.shipping_method = f"bosta_{shipping_method}"
+    order.tracking_url = tracking_url
+    order.shipping_method = f"{carrier}_{shipping_method}"
     await order_repo.update(order)
 
     return created
@@ -210,12 +235,13 @@ async def create_shipment(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
 ):
-    """Create a Bosta shipment for an order."""
+    """Create a shipment for an order via the selected carrier."""
     shipment = await _create_shipment_for_order(
         order_id=request.order_id,
         store=store,
         order_repo=order_repo,
         shipment_repo=shipment_repo,
+        carrier=request.carrier,
         shipping_method=request.shipping_method,
         notes=request.notes,
     )

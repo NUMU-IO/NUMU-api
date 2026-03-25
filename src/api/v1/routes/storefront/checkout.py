@@ -335,6 +335,9 @@ async def checkout(
         shipping_method=request.shipping_method,
         customer_notes=request.customer_notes,
         metadata={"ip_address": client_ip} if client_ip else {},
+        utm_source=request.utm_source,
+        utm_medium=request.utm_medium,
+        utm_campaign=request.utm_campaign,
     )
 
     created_order = await order_repo.create(order)

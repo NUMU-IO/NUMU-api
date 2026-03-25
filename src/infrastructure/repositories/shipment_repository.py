@@ -357,6 +357,117 @@ class ShipmentRepository(IShipmentRepository):
             "delivered_not_collected": row.delivered_not_collected,
         }
 
+    async def get_cod_stats_by_store(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict:
+        """Get COD shipment statistics for rejection tracking."""
+        from sqlalchemy import and_
+
+        query = select(
+            func.count().label("total"),
+            func.sum(case((ShipmentModel.status == "delivered", 1), else_=0)).label(
+                "delivered"
+            ),
+            func.sum(case((ShipmentModel.status == "failed", 1), else_=0)).label(
+                "failed"
+            ),
+            func.sum(case((ShipmentModel.status == "returned", 1), else_=0)).label(
+                "returned"
+            ),
+            func.sum(ShipmentModel.cod_amount).label("total_cod_amount"),
+            func.sum(
+                case(
+                    (
+                        ShipmentModel.status.in_(["failed", "returned"]),
+                        ShipmentModel.cod_amount,
+                    ),
+                    else_=0,
+                )
+            ).label("rejected_amount"),
+        ).where(
+            and_(
+                ShipmentModel.store_id == store_id,
+                ShipmentModel.cod_amount > 0,
+                ShipmentModel.created_at >= date_from,
+                ShipmentModel.created_at <= date_to,
+            )
+        )
+
+        result = await self.session.execute(self._tenant_filter(query))
+        row = result.one()
+
+        return {
+            "total": row.total or 0,
+            "delivered": row.delivered or 0,
+            "failed": row.failed or 0,
+            "returned": row.returned or 0,
+            "total_cod_amount": row.total_cod_amount or 0,
+            "rejected_amount": row.rejected_amount or 0,
+        }
+
+    async def get_cod_rejection_by_location(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """Get COD rejection breakdown by shipping location."""
+        from sqlalchemy import and_, text
+
+        from src.infrastructure.database.models.tenant.order import OrderModel
+
+        location_expr = func.coalesce(
+            OrderModel.shipping_address["city"].astext,
+            OrderModel.shipping_address["state"].astext,
+            "Unknown",
+        ).label("location")
+
+        query = (
+            select(
+                location_expr,
+                func.count().label("total"),
+                func.sum(
+                    case(
+                        (
+                            ShipmentModel.status.in_(["failed", "returned"]),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("rejected"),
+            )
+            .join(OrderModel, ShipmentModel.order_id == OrderModel.id)
+            .where(
+                and_(
+                    ShipmentModel.store_id == store_id,
+                    ShipmentModel.cod_amount > 0,
+                    ShipmentModel.created_at >= date_from,
+                    ShipmentModel.created_at <= date_to,
+                )
+            )
+            .group_by(text("location"))
+            .order_by(func.count().desc())
+        )
+
+        result = await self.session.execute(self._tenant_filter(query))
+        rows = result.all()
+
+        locations = []
+        for row in rows:
+            total = row.total or 0
+            rejected = row.rejected or 0
+            rate = round((rejected / total) * 100, 1) if total > 0 else 0.0
+            locations.append({
+                "location": row.location,
+                "total": total,
+                "rejected": rejected,
+                "rate": rate,
+            })
+        return locations
+
     async def get_active_shipments(
         self, store_id: UUID | None = None
     ) -> list[Shipment]:
