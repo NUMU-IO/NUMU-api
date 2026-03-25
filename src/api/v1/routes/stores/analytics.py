@@ -564,6 +564,7 @@ async def get_health_score(
     live: bool = Query(
         False, description="Calculate live instead of using cached score"
     ),
+    lang: str = Query("ar", description="Language for recommendations: ar or en"),
 ):
     """Get the merchant health score (cached daily or live calculation).
 
@@ -585,6 +586,7 @@ async def get_health_score(
         session=order_repo.session,
         store_id=store.id,
         days=30,
+        lang=lang if lang in ("ar", "en") else "ar",
     )
 
     # Cache the result in store.settings for next time

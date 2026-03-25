@@ -120,6 +120,7 @@ async def calculate_store_health_score(
     session: AsyncSession,
     store_id: UUID,
     days: int = 30,
+    lang: str = "ar",
 ) -> dict:
     """Calculate health score for a store over the given period.
 
@@ -317,32 +318,46 @@ async def calculate_store_health_score(
         grade = "F"
 
     # === Recommendations ===
+    _recs = {
+        "delivery": {
+            "ar": "معدل التوصيل الناجح منخفض — تأكد من صحة عناوين العملاء قبل الشحن",
+            "en": "Low delivery success rate — verify customer addresses before shipping",
+        },
+        "cod": {
+            "ar": "معدل رفض الدفع عند الاستلام مرتفع — فعّل تأكيد الطلب عبر OTP",
+            "en": "High COD rejection rate — enable order confirmation via OTP",
+        },
+        "completion": {
+            "ar": "معدل إتمام الطلبات منخفض — تابع الطلبات المعلقة وسرّع التجهيز",
+            "en": "Low order completion rate — follow up on pending orders and speed up fulfillment",
+        },
+        "returns": {
+            "ar": "معدل الإرجاع مرتفع — راجع وصف المنتجات وجودة الصور",
+            "en": "High return rate — review product descriptions and image quality",
+        },
+        "speed": {
+            "ar": "سرعة التجهيز بطيئة — حاول شحن الطلبات خلال 24 ساعة",
+            "en": "Slow fulfillment speed — try to ship orders within 24 hours",
+        },
+        "great": {
+            "ar": "أداء متجرك ممتاز! استمر على هذا المستوى 🎉",
+            "en": "Your store is performing great! Keep it up 🎉",
+        },
+    }
     recommendations = []
     if sub_scores["delivery_success"] < 60:
-        recommendations.append(
-            "\u0645\u0639\u062f\u0644 \u0627\u0644\u062a\u0648\u0635\u064a\u0644 \u0627\u0644\u0646\u0627\u062c\u062d \u0645\u0646\u062e\u0641\u0636 \u2014 \u062a\u0623\u0643\u062f \u0645\u0646 \u0635\u062d\u0629 \u0639\u0646\u0627\u0648\u064a\u0646 \u0627\u0644\u0639\u0645\u0644\u0627\u0621 \u0642\u0628\u0644 \u0627\u0644\u0634\u062d\u0646"
-        )
+        recommendations.append(_recs["delivery"][lang])
     if sub_scores["cod_acceptance"] < 60:
-        recommendations.append(
-            "\u0645\u0639\u062f\u0644 \u0631\u0641\u0636 \u0627\u0644\u062f\u0641\u0639 \u0639\u0646\u062f \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645 \u0645\u0631\u062a\u0641\u0639 \u2014 \u0641\u0639\u0651\u0644 \u062a\u0623\u0643\u064a\u062f \u0627\u0644\u0637\u0644\u0628 \u0639\u0628\u0631 OTP"
-        )
+        recommendations.append(_recs["cod"][lang])
     if sub_scores["order_completion"] < 60:
-        recommendations.append(
-            "\u0645\u0639\u062f\u0644 \u0625\u062a\u0645\u0627\u0645 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0645\u0646\u062e\u0641\u0636 \u2014 \u062a\u0627\u0628\u0639 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0627\u0644\u0645\u0639\u0644\u0642\u0629 \u0648\u0633\u0631\u0651\u0639 \u0627\u0644\u062a\u062c\u0647\u064a\u0632"
-        )
+        recommendations.append(_recs["completion"][lang])
     if sub_scores["low_return"] < 50:
-        recommendations.append(
-            "\u0645\u0639\u062f\u0644 \u0627\u0644\u0625\u0631\u062c\u0627\u0639 \u0645\u0631\u062a\u0641\u0639 \u2014 \u0631\u0627\u062c\u0639 \u0648\u0635\u0641 \u0627\u0644\u0645\u0646\u062a\u062c\u0627\u062a \u0648\u062c\u0648\u062f\u0629 \u0627\u0644\u0635\u0648\u0631"
-        )
+        recommendations.append(_recs["returns"][lang])
     if sub_scores["response_time"] < 50:
-        recommendations.append(
-            "\u0633\u0631\u0639\u0629 \u0627\u0644\u062a\u062c\u0647\u064a\u0632 \u0628\u0637\u064a\u0626\u0629 \u2014 \u062d\u0627\u0648\u0644 \u0634\u062d\u0646 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u062e\u0644\u0627\u0644 24 \u0633\u0627\u0639\u0629"
-        )
+        recommendations.append(_recs["speed"][lang])
 
     if not recommendations and final_score >= 80:
-        recommendations.append(
-            "\u0623\u062f\u0627\u0621 \u0645\u062a\u062c\u0631\u0643 \u0645\u0645\u062a\u0627\u0632! \u0627\u0633\u062a\u0645\u0631 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \ud83c\udf89"
-        )
+        recommendations.append(_recs["great"][lang])
 
     return {
         "score": final_score,
