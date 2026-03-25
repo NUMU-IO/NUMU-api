@@ -10,6 +10,9 @@ class CreateShipmentRequest(BaseModel):
     """Create a shipment for an order."""
 
     order_id: UUID
+    carrier: str = Field(
+        default="bosta", description="Shipping carrier: bosta, mylerz, jt"
+    )
     shipping_method: str = "standard"
     notes: str | None = None
 

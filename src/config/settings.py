@@ -305,6 +305,18 @@ class Settings(BaseSettings):
     bosta_base_url: str = "https://app.bosta.co/api/v2"
     bosta_webhook_secret: str | None = None
 
+    # Mylerz Shipping (Egyptian Courier)
+    mylerz_api_key: str | None = None
+    mylerz_merchant_id: str | None = None
+    mylerz_base_url: str = "https://api.mylerz.com/api"
+    mylerz_webhook_secret: str | None = None
+
+    # J&T Express Shipping (Egyptian Courier)
+    jt_api_key: str | None = None
+    jt_customer_code: str | None = None
+    jt_base_url: str = "https://openapi.jtexpress-eg.com/api"
+    jt_webhook_secret: str | None = None
+
     # WhatsApp Business API
     whatsapp_access_token: str | None = None
     whatsapp_phone_number_id: str | None = None

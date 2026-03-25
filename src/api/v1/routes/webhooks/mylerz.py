@@ -1,6 +1,6 @@
-"""Bosta webhook handler.
+"""Mylerz webhook handler.
 
-Receives delivery status updates from Bosta:
+Receives delivery status updates from Mylerz:
 - Picked up
 - In transit
 - Out for delivery
@@ -23,7 +23,7 @@ from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.infrastructure.database.connection import get_admin_db_session
-from src.infrastructure.external_services.bosta import BostaShippingService
+from src.infrastructure.external_services.mylerz import MylerzShippingService
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 from src.infrastructure.tenancy.rls import narrow_to_tenant
@@ -32,19 +32,17 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # Initialize service (global fallback)
-bosta_service = BostaShippingService()
+mylerz_service = MylerzShippingService()
 
-# Map Bosta states to ShipmentStatus
-BOSTA_STATE_MAP = {
-    "PENDING_PICKUP": ShipmentStatus.CREATED,
+# Map Mylerz states to ShipmentStatus
+MYLERZ_STATE_MAP = {
     "PICKED_UP": ShipmentStatus.PICKED_UP,
-    "IN_WAREHOUSE": ShipmentStatus.IN_TRANSIT,
     "IN_TRANSIT": ShipmentStatus.IN_TRANSIT,
     "OUT_FOR_DELIVERY": ShipmentStatus.OUT_FOR_DELIVERY,
     "DELIVERED": ShipmentStatus.DELIVERED,
     "RETURNED": ShipmentStatus.RETURNED,
+    "FAILED": ShipmentStatus.FAILED,
     "CANCELLED": ShipmentStatus.CANCELLED,
-    "DELIVERY_FAILED": ShipmentStatus.FAILED,
 }
 
 
@@ -79,15 +77,15 @@ async def _find_shipment(repo: ShipmentRepository, tracking_number: str, log):
 
 
 async def _update_shipment_status(shipment, shipment_repo, state: str, log, **kwargs):
-    """Update shipment record based on Bosta state."""
+    """Update shipment record based on Mylerz state."""
     if not shipment:
         return
 
-    new_status = BOSTA_STATE_MAP.get(state)
+    new_status = MYLERZ_STATE_MAP.get(state)
     if not new_status:
         return
 
-    description = kwargs.get("description", f"Bosta state: {state}")
+    description = kwargs.get("description", f"Mylerz state: {state}")
 
     if state == "DELIVERED":
         cod_amount = kwargs.get("cod_amount")
@@ -97,7 +95,7 @@ async def _update_shipment_status(shipment, shipment_repo, state: str, log, **kw
         )
     elif state == "PICKED_UP":
         shipment.mark_picked_up()
-    elif state == "DELIVERY_FAILED":
+    elif state == "FAILED":
         shipment.mark_failed(kwargs.get("failure_reason", ""))
     elif state == "RETURNED":
         shipment.mark_returned()
@@ -105,7 +103,7 @@ async def _update_shipment_status(shipment, shipment_repo, state: str, log, **kw
         shipment.mark_cancelled("Cancelled by carrier")
     elif state == "OUT_FOR_DELIVERY":
         shipment.update_status(ShipmentStatus.OUT_FOR_DELIVERY, "Out for delivery")
-    elif state in ("IN_WAREHOUSE", "IN_TRANSIT"):
+    elif state == "IN_TRANSIT":
         shipment.update_status(ShipmentStatus.IN_TRANSIT, description)
     else:
         shipment.update_status(new_status, description)
@@ -118,33 +116,34 @@ async def _update_shipment_status(shipment, shipment_repo, state: str, log, **kw
     )
 
 
-@router.post("/callback", operation_id="bosta_callback")
-async def bosta_callback(
+@router.post("/callback", operation_id="mylerz_callback")
+async def mylerz_callback(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_admin_db_session)],
-    x_bosta_signature: str = Header(None, alias="x-bosta-signature"),
+    x_mylerz_signature: str = Header(None, alias="x-mylerz-signature"),
 ):
-    """Handle Bosta delivery status webhook.
+    """Handle Mylerz delivery status webhook.
 
-    Bosta sends POST requests when delivery status changes.
+    Mylerz sends POST requests when delivery status changes.
     Uses per-store webhook secret for verification (each merchant has their own
-    Bosta account). Falls back to global secret, then dev mode (no verification).
+    Mylerz account). Falls back to global secret, then dev mode (no verification).
     """
     payload = await request.body()
-    log = logger.bind(webhook="bosta")
+    log = logger.bind(webhook="mylerz")
 
-    # Parse payload first to identify the store
+    # Parse payload to identify the shipment
     data = json.loads(payload)
-    delivery = data.get("delivery", {})
-    tracking_number = delivery.get("trackingNumber")
-    state = delivery.get("state", {}).get("value", "")
-    business_reference = delivery.get("businessReference")
-    cod_amount = delivery.get("cod", {}).get("amount")
+    tracking_number = (
+        data.get("Barcode") or data.get("barcode") or data.get("tracking_number", "")
+    )
+    state = data.get("Status") or data.get("status", "")
+    cod_amount = data.get("CODAmount") or data.get("cod_amount")
+    reference = data.get("Reference") or data.get("reference", "")
 
     log = log.bind(
         tracking_number=tracking_number,
         state=state,
-        business_reference=business_reference,
+        reference=reference,
         cod_amount=cod_amount,
     )
     log.info("webhook_received")
@@ -165,8 +164,7 @@ async def bosta_callback(
 
     # Verify signature using per-store secret, then global fallback
     signature_verified = False
-    if tenant_id and x_bosta_signature:
-        # Try per-store webhook secret
+    if tenant_id and x_mylerz_signature:
         try:
             from src.infrastructure.repositories.store_repository import (
                 StoreRepository,
@@ -175,9 +173,9 @@ async def bosta_callback(
             store_repo = StoreRepository(session)
             store = await store_repo.get_by_id(tenant_id)
             if store and store.settings:
-                bosta_config = store.settings.get("shipping", {}).get("bosta", {})
-                encrypted_creds = bosta_config.get("encrypted_credentials")
-                key_id = bosta_config.get("encryption_key_id")
+                mylerz_config = store.settings.get("shipping", {}).get("mylerz", {})
+                encrypted_creds = mylerz_config.get("encrypted_credentials")
+                key_id = mylerz_config.get("encryption_key_id")
                 if encrypted_creds and key_id:
                     import base64
 
@@ -191,11 +189,11 @@ async def bosta_callback(
                     )
                     store_webhook_secret = cred_data.get("webhook_secret")
                     if store_webhook_secret:
-                        store_bosta = BostaShippingService(
+                        store_mylerz = MylerzShippingService(
                             webhook_secret=store_webhook_secret
                         )
-                        verified = store_bosta.verify_webhook_signature(
-                            payload, x_bosta_signature
+                        verified = store_mylerz.verify_webhook_signature(
+                            payload, x_mylerz_signature
                         )
                         if verified:
                             signature_verified = True
@@ -205,11 +203,10 @@ async def bosta_callback(
         except Exception as e:
             log.warning("webhook_per_store_verify_error", error=str(e))
 
-    if not signature_verified and x_bosta_signature:
-        # Fallback to global secret
-        if settings.bosta_webhook_secret:
-            verified_data = bosta_service.verify_webhook_signature(
-                payload, x_bosta_signature
+    if not signature_verified and x_mylerz_signature:
+        if settings.mylerz_webhook_secret:
+            verified_data = mylerz_service.verify_webhook_signature(
+                payload, x_mylerz_signature
             )
             if verified_data:
                 signature_verified = True
@@ -218,8 +215,7 @@ async def bosta_callback(
                 log.warning("webhook_global_signature_invalid")
 
     if not signature_verified:
-        if x_bosta_signature:
-            # Signature was provided but couldn't be verified
+        if x_mylerz_signature:
             log.warning("webhook_signature_unverified_accepting", mode="permissive")
         else:
             log.warning("webhook_no_signature", mode="development")
@@ -238,11 +234,11 @@ async def bosta_callback(
 
                 if cod_amount and not order.is_paid:
                     order.mark_as_paid(
-                        payment_id=f"cod-bosta-{tracking_number}",
+                        payment_id=f"cod-mylerz-{tracking_number}",
                         payment_method="cod",
                     )
                     order.metadata["cod_amount"] = cod_amount
-                    order.metadata["cod_collected_via"] = "bosta_webhook"
+                    order.metadata["cod_collected_via"] = "mylerz_webhook"
                     order.metadata["cod_tracking_number"] = tracking_number
                     log.info("cod_collected", amount=cod_amount, order_id=str(order.id))
 
@@ -289,13 +285,13 @@ async def bosta_callback(
         if order:
             try:
                 if order.can_be_cancelled:
-                    order.cancel(reason="Returned by carrier (Bosta)")
+                    order.cancel(reason="Returned by carrier (Mylerz)")
                 elif order.status == OrderStatus.SHIPPED:
                     order.status = OrderStatus.CANCELLED
                     order.metadata.setdefault("status_history", []).append({
                         "from": OrderStatus.SHIPPED.value,
                         "to": OrderStatus.CANCELLED.value,
-                        "reason": "Returned by carrier (Bosta)",
+                        "reason": "Returned by carrier (Mylerz)",
                     })
                     order.touch()
                 await order_repo.update(order)
@@ -303,7 +299,6 @@ async def bosta_callback(
             except Exception as e:
                 log.error("return_order_update_failed", error=str(e))
 
-        # Track COD rejection for returned COD shipments
         if shipment and shipment.cod_amount and shipment.cod_amount > 0:
             if shipment.metadata is None:
                 shipment.metadata = {}
@@ -333,7 +328,7 @@ async def bosta_callback(
             log.error("ofd_commit_failed", error=str(e))
             await session.rollback()
 
-    elif state in ("IN_WAREHOUSE", "IN_TRANSIT"):
+    elif state == "IN_TRANSIT":
         log.info("delivery_in_transit")
         await _update_shipment_status(shipment, shipment_repo, state, log)
         try:
@@ -342,8 +337,10 @@ async def bosta_callback(
             log.error("transit_commit_failed", error=str(e))
             await session.rollback()
 
-    elif state == "DELIVERY_FAILED":
-        failure_reason = delivery.get("failedAttempt", {}).get("reason", "Unknown")
+    elif state == "FAILED":
+        failure_reason = data.get("FailureReason") or data.get(
+            "failure_reason", "Unknown"
+        )
         log.warning("delivery_failed", failure_reason=failure_reason)
         if order:
             try:
@@ -358,7 +355,6 @@ async def bosta_callback(
             except Exception as e:
                 log.error("failure_order_update_failed", error=str(e))
 
-        # Track COD rejection in shipment extra_data
         if shipment and shipment.cod_amount and shipment.cod_amount > 0:
             if shipment.metadata is None:
                 shipment.metadata = {}
@@ -387,9 +383,9 @@ async def bosta_callback(
         if order:
             try:
                 if order.can_be_cancelled:
-                    order.cancel(reason="Cancelled via Bosta")
+                    order.cancel(reason="Cancelled via Mylerz")
                     await order_repo.update(order)
-                    log.info("order_cancelled_bosta", order_id=str(order.id))
+                    log.info("order_cancelled_mylerz", order_id=str(order.id))
             except Exception as e:
                 log.error("cancel_order_update_failed", error=str(e))
 
@@ -403,7 +399,6 @@ async def bosta_callback(
 
     else:
         log.debug("delivery_state_update", state=state)
-        # Try to update shipment for any unknown state too
         await _update_shipment_status(
             shipment, shipment_repo, state, log, description=f"Unknown state: {state}"
         )
@@ -419,16 +414,16 @@ async def bosta_callback(
     }
 
 
-@router.get("/track/{tracking_number}", operation_id="track_bosta_delivery")
-async def track_bosta_delivery(tracking_number: str):
-    """Get Bosta delivery tracking information.
+@router.get("/track/{tracking_number}", operation_id="track_mylerz_delivery")
+async def track_mylerz_delivery(tracking_number: str):
+    """Get Mylerz delivery tracking information.
 
     Public endpoint for customers to check delivery status.
     """
     log = logger.bind(tracking_number=tracking_number)
 
     try:
-        tracking = await bosta_service.track_shipment("Bosta", tracking_number)
+        tracking = await mylerz_service.track_shipment("Mylerz", tracking_number)
         log.info("tracking_retrieved", status=tracking.status)
         return {
             "tracking_number": tracking.tracking_number,
@@ -441,7 +436,9 @@ async def track_bosta_delivery(tracking_number: str):
                     "status": event.status,
                     "description": event.description,
                     "location": event.location,
-                    "timestamp": event.timestamp.isoformat(),
+                    "timestamp": event.timestamp.isoformat()
+                    if hasattr(event.timestamp, "isoformat")
+                    else str(event.timestamp),
                 }
                 for event in tracking.events
             ],
