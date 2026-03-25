@@ -830,9 +830,10 @@ async def checkout(
         logger.warning(f"Failed to dispatch fraud check task: {e}")
 
     # Clear the customer's cart only after the entire checkout succeeds
-    from src.api.v1.routes.storefront.cart import _carts
+    from src.infrastructure.repositories.cart_repository import RedisCartRepository
 
-    _carts.pop(current_customer.id, None)
+    _checkout_cart_repo = RedisCartRepository()
+    await _checkout_cart_repo.delete_by_customer_id(current_customer.id, store_id)
 
     # Clear OTP verified flag (one-time use per checkout)
     if is_cod and _cache_service:
