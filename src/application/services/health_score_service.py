@@ -242,7 +242,7 @@ async def calculate_store_health_score(
                 OrderModel.store_id == store_id,
                 OrderModel.created_at >= period_start,
                 OrderModel.created_at
-                <= now - timedelta(days=3),  # Exclude last 3 days (still in progress)
+                <= now - timedelta(days=1),  # Exclude last day (still in progress)
             )
         )
     )
