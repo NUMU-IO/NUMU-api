@@ -160,3 +160,10 @@ def get_credential_repository(
 ) -> CredentialRepository:
     """Get credential repository dependency."""
     return CredentialRepository(session)
+
+
+def get_cart_repository():
+    """Get Redis cart repository (no DB session needed)."""
+    from src.infrastructure.repositories.cart_repository import RedisCartRepository
+
+    return RedisCartRepository()

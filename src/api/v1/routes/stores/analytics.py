@@ -17,6 +17,7 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
+from src.application.services.health_score_service import calculate_store_health_score
 from src.core.entities.order import PaymentStatus
 from src.core.entities.store import Store
 from src.infrastructure.repositories import (
@@ -525,4 +526,62 @@ async def get_cod_rejection_stats(
             by_location=[CodRejectionLocationResponse(**loc) for loc in locations],
         ),
         message="COD rejection stats retrieved successfully",
+    )
+
+
+# ── Health Score ──
+
+
+class HealthScoreMetrics(BaseModel):
+    delivery_success_rate: float
+    cod_acceptance_rate: float
+    order_completion_rate: float
+    return_rate: float
+    avg_response_hours: float
+
+
+class HealthScoreResponse(BaseModel):
+    score: int
+    grade: str
+    metrics: HealthScoreMetrics
+    sub_scores: dict[str, int]
+    recommendations: list[str]
+    orders_analyzed: int
+    shipments_analyzed: int
+    calculated_at: str | None
+
+
+@router.get(
+    "/health-score",
+    response_model=SuccessResponse[HealthScoreResponse],
+    summary="Get merchant health score",
+    operation_id="get_health_score",
+)
+async def get_health_score(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    live: bool = Query(
+        False, description="Calculate live instead of using cached score"
+    ),
+):
+    """Get the merchant health score (cached daily or live calculation)."""
+    # Try cached score first (from daily Celery task)
+    if not live and store.settings:
+        cached = store.settings.get("health_score")
+        if cached:
+            return SuccessResponse(
+                data=HealthScoreResponse(**cached),
+                message="Health score retrieved (cached)",
+            )
+
+    # Live calculation
+    score_data = await calculate_store_health_score(
+        session=order_repo.session,
+        store_id=store.id,
+        days=30,
+    )
+
+    return SuccessResponse(
+        data=HealthScoreResponse(**score_data),
+        message="Health score calculated",
     )
