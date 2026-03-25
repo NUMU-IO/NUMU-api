@@ -45,9 +45,10 @@ class Settings(BaseSettings):
     postgres_password: str = "postgres"
     postgres_db: str = "numu"
 
-    # Connection pool
-    db_pool_size: int = 10  # Persistent connections maintained in pool
-    db_max_overflow: int = 20  # Extra connections allowed beyond pool_size
+    # Connection pool (total max = pool_size + max_overflow PER PROCESS)
+    # API + Celery + admin each have their own pool — keep under Postgres max_connections
+    db_pool_size: int = 5  # Persistent connections maintained in pool
+    db_max_overflow: int = 10  # Extra connections allowed beyond pool_size
     db_pool_timeout: int = 30  # Seconds to wait for a connection before error
     db_pool_recycle: int = 1800  # Recycle connections older than 30 minutes
 
