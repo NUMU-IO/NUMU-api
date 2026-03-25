@@ -156,6 +156,8 @@ api_router.include_router(
     storefront_upsell_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Upsells"],
+)
+
 # Storefront - COD OTP verification (authenticated customer, scoped to store)
 api_router.include_router(
     storefront_otp_router,
