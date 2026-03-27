@@ -9,8 +9,8 @@ Alters:
   - risk_assessments: add score_type, scored_at
   - shopify_app_settings: add whatsapp_template_id, whatsapp_nudge_enabled
 
-Revision ID: a1b2c3d4e5f6
-Revises: (head)
+Revision ID: 851effd425a2
+Revises: 4a8ec78130c6
 Create Date: 2026-03-27
 """
 
@@ -19,8 +19,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "a1b2c3d4e5f6"
-down_revision = None  # Set to latest existing revision when running
+revision = "851effd425a2"
+down_revision = "4a8ec78130c6"
 branch_labels = None
 depends_on = None
 
