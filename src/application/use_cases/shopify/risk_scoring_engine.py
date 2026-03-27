@@ -190,7 +190,51 @@ def _score_phone_validation(phone: str | None) -> RiskFactor:
     )
 
 
-# ── main entry point ────────────────────────────────────────
+# ── main entry points ───────────────────────────────────────
+
+
+def score_order_fast(
+    *,
+    total_cents: int,
+    avg_order_cents: int = 80_000,
+    network_score: int = 55,
+    network_label: str = "new_to_network",
+) -> RiskResult:
+    """Compute a synchronous 2-factor fast risk score (<200ms).
+
+    Uses only:
+    - ``network_reputation`` — cross-merchant buyer reputation score.
+      Phase 2: always the elevated baseline (55, "new_to_network").
+      Phase 3 will replace this with the actual HMAC-hashed phone lookup.
+    - ``order_value`` — order total vs the store's rolling Redis average.
+
+    Returns a RiskResult with ``score_type`` implied as ``"preliminary"``.
+    The Celery task will upgrade to a full 5-factor ``"final"`` score.
+    """
+    network_factor = RiskFactor(
+        factor="network_reputation",
+        score=float(network_score),
+        weight=0.60,
+        reason=f"Network reputation: {network_label} — baseline score applied",
+    )
+    raw_value_factor = _score_order_value(total_cents, avg_order_cents)
+    value_factor = RiskFactor(
+        factor=raw_value_factor.factor,
+        score=raw_value_factor.score,
+        weight=0.40,
+        reason=raw_value_factor.reason,
+    )
+
+    factors = [network_factor, value_factor]
+    weighted_score = sum(f.score * f.weight for f in factors)
+    risk_score = int(_clamp(weighted_score))
+
+    return RiskResult(
+        risk_score=risk_score,
+        risk_level=_risk_level(risk_score),
+        suggested_action=_suggested_action(risk_score),
+        factors=factors,
+    )
 
 
 def score_order(

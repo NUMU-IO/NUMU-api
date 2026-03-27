@@ -19,6 +19,9 @@ from src.infrastructure.messaging.tasks.onboarding_email_tasks import (  # noqa:
 from src.infrastructure.messaging.tasks.reconciliation_tasks import (  # noqa: F401
     daily_payment_reconciliation,
 )
+from src.infrastructure.messaging.tasks.risk_scoring_tasks import (  # noqa: F401
+    compute_full_risk_score,
+)
 from src.infrastructure.messaging.tasks.slack_tasks import (  # noqa: F401
     process_slack_alert_queue,
     send_fraud_alert_task,
