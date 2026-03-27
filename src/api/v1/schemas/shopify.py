@@ -73,9 +73,11 @@ class RiskOrderResponse(BaseModel):
     payment_method: str | None = None
     risk_score: int = 0
     risk_level: str = "low"
+    score_type: str = "preliminary"
     suggested_action: str | None = None
     action_taken: str | None = None
     factors: list[RiskFactorSchema] = Field(default_factory=list)
+    scored_at: datetime | None = None
     created_at: datetime | None = None
 
 

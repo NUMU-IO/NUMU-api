@@ -1,4 +1,4 @@
-"""Shopify-related repositories — installations, risk, payments, automation, settings."""
+"""Shopify-related repositories — installations, risk, payments, automation, settings, network reputation."""
 
 from __future__ import annotations
 
@@ -7,11 +7,21 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import case, delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.models.tenant.automation_log import AutomationLogModel
 from src.infrastructure.database.models.tenant.automation_rule import (
     AutomationRuleModel,
+)
+from src.infrastructure.database.models.tenant.network_contribution_log import (
+    NetworkContributionLogModel,
+)
+from src.infrastructure.database.models.tenant.network_reputation import (
+    NetworkReputationModel,
+)
+from src.infrastructure.database.models.tenant.payment_link_session import (
+    PaymentLinkSessionModel,
 )
 from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
@@ -95,9 +105,90 @@ class ShopifyInstallationRepository:
         )
 
     async def delete_store_data(self, store_id: UUID) -> dict[str, int]:
-        """GDPR shop/redact — delete ALL data for a store."""
+        """GDPR shop/redact — delete ALL identifiable data for a store.
+
+        Network reputation aggregates are kept but their counts are
+        decremented using the network_contribution_log, per the
+        constitution's data retention rule.
+        """
         counts: dict[str, int] = {}
+
+        # 1) Decrement network_reputation aggregates using contribution log
+        contrib_rows = await self.session.execute(
+            select(
+                NetworkContributionLogModel.phone_hash,
+                NetworkContributionLogModel.event_type,
+                func.count().label("cnt"),
+            )
+            .where(NetworkContributionLogModel.store_id == store_id)
+            .group_by(
+                NetworkContributionLogModel.phone_hash,
+                NetworkContributionLogModel.event_type,
+            )
+        )
+        decremented = 0
+        for row in contrib_rows.all():
+            phone_hash = row.phone_hash
+            event_type = row.event_type
+            cnt = row.cnt
+
+            col_map = {
+                "order": "total_network_orders",
+                "rto": "total_network_rtos",
+                "delivery": "total_successful_deliveries",
+                "refund": "total_refunds",
+            }
+            col_name = col_map.get(event_type)
+            if not col_name:
+                continue
+
+            col = getattr(NetworkReputationModel, col_name)
+            await self.session.execute(
+                update(NetworkReputationModel)
+                .where(NetworkReputationModel.phone_hash == phone_hash)
+                .values(**{col_name: func.greatest(col - cnt, 0)})
+            )
+            decremented += cnt
+
+        # Decrement contributing_store_count for each distinct phone_hash
+        distinct_hashes = await self.session.execute(
+            select(NetworkContributionLogModel.phone_hash)
+            .where(NetworkContributionLogModel.store_id == store_id)
+            .distinct()
+        )
+        for (phone_hash,) in distinct_hashes.all():
+            await self.session.execute(
+                update(NetworkReputationModel)
+                .where(NetworkReputationModel.phone_hash == phone_hash)
+                .values(
+                    contributing_store_count=func.greatest(
+                        NetworkReputationModel.contributing_store_count - 1, 0
+                    )
+                )
+            )
+
+        # Delete network_reputation records that have reached zero across all counters
+        await self.session.execute(
+            delete(NetworkReputationModel).where(
+                NetworkReputationModel.total_network_orders <= 0,
+                NetworkReputationModel.total_network_rtos <= 0,
+                NetworkReputationModel.total_successful_deliveries <= 0,
+                NetworkReputationModel.total_refunds <= 0,
+            )
+        )
+        counts["network_contributions_decremented"] = decremented
+
+        # 2) Delete the contribution log entries for this store
+        r = await self.session.execute(
+            delete(NetworkContributionLogModel).where(
+                NetworkContributionLogModel.store_id == store_id
+            )
+        )
+        counts["contribution_logs"] = r.rowcount or 0
+
+        # 3) Delete all store-scoped data
         for label, model_cls in [
+            ("payment_link_sessions", PaymentLinkSessionModel),
             ("risk_assessments", RiskAssessmentModel),
             ("payment_transactions", PaymentTransactionModel),
             ("automation_logs", AutomationLogModel),
@@ -108,7 +199,8 @@ class ShopifyInstallationRepository:
                 delete(model_cls).where(model_cls.store_id == store_id)  # type: ignore[attr-defined]
             )
             counts[label] = r.rowcount or 0
-        # Finally remove the installation itself
+
+        # 4) Finally remove the installation itself
         r = await self.session.execute(
             delete(ShopifyInstallationModel).where(
                 ShopifyInstallationModel.store_id == store_id
@@ -416,5 +508,162 @@ class ShopifyAppSettingsRepository:
         for k, v in updates.items():
             if v is not None:
                 setattr(model, k, v)
+        await self.session.flush()
+        return model
+
+
+# ---------------------------------------------------------------------------
+# NetworkReputationRepository
+# ---------------------------------------------------------------------------
+
+
+class NetworkReputationRepository:
+    """Read/write for network_reputation + network_contribution_log tables."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_phone_hash(self, phone_hash: str) -> NetworkReputationModel | None:
+        result = await self.session.execute(
+            select(NetworkReputationModel).where(
+                NetworkReputationModel.phone_hash == phone_hash
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert_order(
+        self, *, phone_hash: str, store_id: UUID
+    ) -> NetworkReputationModel:
+        """Record a new order event for a phone hash."""
+        stmt = (
+            pg_insert(NetworkReputationModel)
+            .values(
+                phone_hash=phone_hash,
+                total_network_orders=1,
+                contributing_store_count=1,
+                last_order_at=func.now(),
+            )
+            .on_conflict_do_update(
+                index_elements=["phone_hash"],
+                set_={
+                    "total_network_orders": (
+                        NetworkReputationModel.total_network_orders + 1
+                    ),
+                    "last_order_at": func.now(),
+                },
+            )
+            .returning(NetworkReputationModel)
+        )
+        result = await self.session.execute(stmt)
+        model = result.scalar_one()
+
+        # Append contribution log (append-only ledger)
+        self.session.add(
+            NetworkContributionLogModel(
+                store_id=store_id,
+                phone_hash=phone_hash,
+                event_type="order",
+            )
+        )
+        await self.session.flush()
+        return model
+
+    async def record_event(
+        self,
+        *,
+        phone_hash: str,
+        store_id: UUID,
+        event_type: str,
+    ) -> None:
+        """Record an rto, delivery, or refund event."""
+        col_map = {
+            "rto": "total_network_rtos",
+            "delivery": "total_successful_deliveries",
+            "refund": "total_refunds",
+        }
+        col_name = col_map.get(event_type)
+        if not col_name:
+            logger.warning("Unknown network event type: %s", event_type)
+            return
+
+        timestamp_map = {
+            "rto": {"last_rto_at": func.now()},
+        }
+        extra_values = timestamp_map.get(event_type, {})
+
+        await self.session.execute(
+            update(NetworkReputationModel)
+            .where(NetworkReputationModel.phone_hash == phone_hash)
+            .values(
+                **{col_name: getattr(NetworkReputationModel, col_name) + 1},
+                **extra_values,
+            )
+        )
+
+        # Append contribution log
+        self.session.add(
+            NetworkContributionLogModel(
+                store_id=store_id,
+                phone_hash=phone_hash,
+                event_type=event_type,
+            )
+        )
+        await self.session.flush()
+
+    async def update_store_count(self, phone_hash: str) -> None:
+        """Recompute contributing_store_count from the contribution log."""
+        result = await self.session.execute(
+            select(
+                func.count(func.distinct(NetworkContributionLogModel.store_id))
+            ).where(NetworkContributionLogModel.phone_hash == phone_hash)
+        )
+        count = result.scalar_one() or 0
+        await self.session.execute(
+            update(NetworkReputationModel)
+            .where(NetworkReputationModel.phone_hash == phone_hash)
+            .values(contributing_store_count=count)
+        )
+
+
+# ---------------------------------------------------------------------------
+# PaymentLinkSessionRepository
+# ---------------------------------------------------------------------------
+
+
+class PaymentLinkSessionRepository:
+    """CRUD for payment_link_sessions table."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create(self, **kwargs) -> PaymentLinkSessionModel:
+        model = PaymentLinkSessionModel(**kwargs)
+        self.session.add(model)
+        await self.session.flush()
+        return model
+
+    async def get_by_id(self, session_id: UUID) -> PaymentLinkSessionModel | None:
+        result = await self.session.execute(
+            select(PaymentLinkSessionModel).where(
+                PaymentLinkSessionModel.id == session_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_completed(
+        self,
+        session_id: UUID,
+        *,
+        gateway_used: str,
+        gateway_transaction_id: str,
+    ) -> PaymentLinkSessionModel | None:
+        model = await self.get_by_id(session_id)
+        if not model:
+            return None
+        model.status = "completed"
+        model.gateway_used = gateway_used
+        model.gateway_transaction_id = gateway_transaction_id
+        model.completed_at = func.now()
+        self.session.add(model)
         await self.session.flush()
         return model
