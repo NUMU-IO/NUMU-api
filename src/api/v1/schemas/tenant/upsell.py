@@ -173,3 +173,19 @@ class UpsellOfferResponse(BaseModel):
     original_price: int = Field(description="Original price in cents")
     headline: str = Field(description="Headline text (locale-appropriate)")
     description: str | None = Field(description="Description text")
+
+
+class AcceptUpsellRequest(BaseModel):
+    """Request body for accepting a post-purchase upsell offer."""
+
+    order_id: str = Field(..., description="The order to add the upsell product to")
+    rule_id: str = Field(..., description="The upsell rule that was offered")
+
+
+class AcceptUpsellResponse(BaseModel):
+    """Response after successfully accepting an upsell."""
+
+    order_id: str
+    product_name: str
+    discounted_price: int
+    new_total: int

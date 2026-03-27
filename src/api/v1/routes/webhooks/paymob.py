@@ -228,6 +228,27 @@ async def paymob_callback(
         await db.flush()
         log.info("payment_transaction_created", tx_id=str(tx.id))
 
+        # Save card token for one-click upsell charges
+        paymob_token = obj.get("token")
+        if paymob_token and order.customer_id:
+            from src.infrastructure.database.models.tenant.saved_payment_method import (
+                SavedPaymentMethodModel,
+            )
+
+            saved = SavedPaymentMethodModel(
+                customer_id=order.customer_id,
+                store_id=order.store_id,
+                order_id=order.id,
+                gateway="paymob",
+                card_token=str(paymob_token),
+                display_name=f"{source_data.get('sub_type', 'Card')} •••• {source_data.get('pan', '****')[-4:]}",
+                card_brand=source_data.get("sub_type") or None,
+                last_four=source_data.get("pan", "")[-4:] or None,
+            )
+            db.add(saved)
+            await db.flush()
+            log.info("card_token_saved", saved_id=str(saved.id))
+
         # Generate invoice now that payment is confirmed
         from src.api.v1.routes.webhooks._invoice_helper import (
             generate_invoice_for_paid_order,
