@@ -22,6 +22,8 @@ from src.infrastructure.database.models import (  # noqa: F401
     FeedbackModel,
     OrderModel,
     ProductModel,
+    SocialConnectionModel,
+    SocialPostModel,
     StoreModel,
     StoreOnboardingModel,
     TenantModel,
