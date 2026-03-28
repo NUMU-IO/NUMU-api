@@ -11,6 +11,12 @@ from fastapi import APIRouter
 from src.api.v1.routes.shopify.auth import router as auth_router
 from src.api.v1.routes.shopify.automation import router as automation_router
 from src.api.v1.routes.shopify.dashboard import router as dashboard_router
+from src.api.v1.routes.shopify.payment_links import (
+    router_internal as payment_links_internal_router,
+)
+from src.api.v1.routes.shopify.payment_links import (
+    router_public as payment_links_public_router,
+)
 from src.api.v1.routes.shopify.payments import router as payments_router
 from src.api.v1.routes.shopify.risk import router as risk_router
 from src.api.v1.routes.shopify.settings import router as settings_router
@@ -25,5 +31,10 @@ router.include_router(risk_router, tags=["Shopify - Risk"])
 router.include_router(payments_router, tags=["Shopify - Payments"])
 router.include_router(automation_router, tags=["Shopify - Automation"])
 router.include_router(settings_router, tags=["Shopify - Settings"])
+router.include_router(payment_links_internal_router, tags=["Shopify - Payment Links"])
+# Public payment link endpoints (no auth required — customer-facing)
+router.include_router(
+    payment_links_public_router, tags=["Shopify - Payment Links (Public)"]
+)
 
 __all__ = ["router"]

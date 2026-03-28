@@ -304,6 +304,12 @@ def compute_full_risk_score(
                         risk_score=full_result.risk_score,
                         risk_level=full_result.risk_level,
                         score_type="final",
+                        store_id=store_id,
+                        order_number=order_number_for_log,
+                        total_cents=total_cents,
+                        currency="EGP",
+                        customer_phone=phone or "",
+                        customer_name=assessment.customer_name if assessment else "",
                     )
 
                     # Log and bump triggered count

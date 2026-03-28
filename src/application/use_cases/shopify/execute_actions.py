@@ -38,6 +38,12 @@ async def execute_actions(
     risk_score: int = 0,
     risk_level: str = "low",
     score_type: str = "preliminary",
+    store_id: str = "",
+    order_number: str = "",
+    total_cents: int = 0,
+    currency: str = "EGP",
+    customer_phone: str = "",
+    customer_name: str = "",
 ) -> list[ActionResult]:
     """Execute a list of resolved actions against Shopify.
 
@@ -57,6 +63,18 @@ async def execute_actions(
         Current risk level (for tag).
     score_type:
         ``"preliminary"`` or ``"final"``.
+    store_id:
+        UUID string of the store (for payment link creation).
+    order_number:
+        Shopify order number (for WhatsApp message).
+    total_cents:
+        Order total in cents (for payment link amount).
+    currency:
+        Currency code (for payment link).
+    customer_phone:
+        Customer phone number (for WhatsApp dispatch).
+    customer_name:
+        Customer name (for WhatsApp message).
 
     Returns
     -------
@@ -79,6 +97,12 @@ async def execute_actions(
             risk_score=risk_score,
             risk_level=risk_level,
             score_type=score_type,
+            store_id=store_id,
+            order_number=order_number,
+            total_cents=total_cents,
+            currency=currency,
+            customer_phone=customer_phone,
+            customer_name=customer_name,
         )
         results.append(result)
 
@@ -95,6 +119,12 @@ async def _dispatch_action(
     risk_score: int,
     risk_level: str,
     score_type: str,
+    store_id: str = "",
+    order_number: str = "",
+    total_cents: int = 0,
+    currency: str = "EGP",
+    customer_phone: str = "",
+    customer_name: str = "",
 ) -> ActionResult:
     """Dispatch a single action to the Shopify API."""
     t = action.action_type
@@ -139,12 +169,33 @@ async def _dispatch_action(
         return ActionResult(t, ok_cancel, f"score={risk_score}")
 
     if t == "whatsapp_confirm":
-        # Phase 5: WhatsApp nudge — placeholder logging
-        logger.info(
-            "whatsapp_confirm action queued for order %s (Phase 5 implementation)",
-            shopify_order_id,
-        )
-        return ActionResult(t, True, "queued_for_phase_5")
+        if not store_id or not total_cents:
+            logger.warning("whatsapp_confirm missing store_id or total_cents")
+            return ActionResult(t, False, "missing_context")
+
+        try:
+            from src.infrastructure.messaging.tasks.whatsapp_nudge_task import (
+                send_whatsapp_nudge,
+            )
+
+            send_whatsapp_nudge.delay(
+                store_id=store_id,
+                shopify_order_id=shopify_order_id,
+                amount_cents=total_cents,
+                currency=currency,
+                customer_phone=customer_phone,
+                customer_name=customer_name,
+                order_number=order_number,
+            )
+            logger.info(
+                "WhatsApp nudge enqueued for order %s (store %s)",
+                shopify_order_id,
+                store_id,
+            )
+            return ActionResult(t, True, "celery_task_enqueued")
+        except Exception as exc:
+            logger.error("Failed to enqueue WhatsApp nudge: %s", exc)
+            return ActionResult(t, False, f"enqueue_failed: {exc}")
 
     if t == "add_note":
         note_text = action.params.get("text", action.params.get("note", ""))

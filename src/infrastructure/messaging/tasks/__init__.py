@@ -31,3 +31,6 @@ from src.infrastructure.messaging.tasks.slack_tasks import (  # noqa: F401
 from src.infrastructure.messaging.tasks.webhook_tasks import (  # noqa: F401
     retry_pending_webhook_deliveries,
 )
+from src.infrastructure.messaging.tasks.whatsapp_nudge_task import (  # noqa: F401
+    send_whatsapp_nudge,
+)

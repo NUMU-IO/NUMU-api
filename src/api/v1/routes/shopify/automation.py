@@ -50,8 +50,8 @@ TEMPLATES: dict[str, dict] = {
     },
     "trusted_customer": {
         "name": "Trusted Customer Fast-Track",
-        "description": "Auto-approve orders from customers with 3+ successful orders",
-        "trigger_event": "order.created",
+        "description": "Auto-approve orders from customers with 3+ successful orders (fires on final score)",
+        "trigger_event": "risk_scored",
         "conditions": {"min_previous_orders": 3, "previous_cancel_rate_lt": 0.1},
         "actions": [{"type": "auto_approve"}],
         "priority": 5,
