@@ -34,6 +34,8 @@ from src.infrastructure.database.models.tenant import (
     ShipmentModel,
     ShopifyAppSettingsModel,
     ShopifyInstallationModel,
+    SocialConnectionModel,
+    SocialPostModel,
     StoreModel,
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
@@ -68,6 +70,8 @@ __all__ = [
     "RiskAssessmentModel",
     "ShopifyAppSettingsModel",
     "ShopifyInstallationModel",
+    "SocialConnectionModel",
+    "SocialPostModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",
 ]

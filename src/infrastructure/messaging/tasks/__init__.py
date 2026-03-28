@@ -36,6 +36,9 @@ from src.infrastructure.messaging.tasks.slack_tasks import (  # noqa: F401
     send_payment_alert_task,
     send_slack_alert_task,
 )
+from src.infrastructure.messaging.tasks.social_tasks import (  # noqa: F401
+    import_social_posts_task,
+)
 from src.infrastructure.messaging.tasks.webhook_tasks import (  # noqa: F401
     retry_pending_webhook_deliveries,
 )

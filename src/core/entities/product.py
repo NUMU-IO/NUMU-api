@@ -56,6 +56,8 @@ class Product(BaseEntity):
     metadata: dict[str, Any] = Field(default_factory=dict)
     compare_at_price: Money | None = None
     cost_price: Money | None = None
+    seo_title: str | None = None
+    seo_description: str | None = None
 
     @field_validator("compare_at_price", "cost_price", mode="before")
     @classmethod

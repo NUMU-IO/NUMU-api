@@ -35,6 +35,7 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.fraud_tasks",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
+        "src.infrastructure.messaging.tasks.social_tasks",
     ],
     # Queue definitions
     task_queues=(

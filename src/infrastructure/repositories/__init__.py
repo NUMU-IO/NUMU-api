@@ -14,6 +14,10 @@ from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
 from src.infrastructure.repositories.refund_repository import RefundRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
+from src.infrastructure.repositories.social_connection_repository import (
+    SocialConnectionRepository,
+)
+from src.infrastructure.repositories.social_post_repository import SocialPostRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.two_factor_repository import TwoFactorRepository
 from src.infrastructure.repositories.upsell_rule_repository import UpsellRuleRepository
@@ -43,6 +47,8 @@ __all__ = [
     "RedisCartRepository",
     "RefundRepository",
     "ShipmentRepository",
+    "SocialConnectionRepository",
+    "SocialPostRepository",
     "WaitlistRepository",
     "TwoFactorRepository",
     "UpsellRuleRepository",

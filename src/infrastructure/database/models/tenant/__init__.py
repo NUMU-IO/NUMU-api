@@ -40,6 +40,10 @@ from src.infrastructure.database.models.tenant.shopify_app_settings import (
 from src.infrastructure.database.models.tenant.shopify_installation import (
     ShopifyInstallationModel,
 )
+from src.infrastructure.database.models.tenant.social_connection import (
+    SocialConnectionModel,
+)
+from src.infrastructure.database.models.tenant.social_post import SocialPostModel
 from src.infrastructure.database.models.tenant.store import StoreModel
 from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
 from src.infrastructure.database.models.tenant.webhook import (
@@ -75,6 +79,8 @@ __all__ = [
     "UpsellRuleModel",
     "ShipmentModel",
     "StoreModel",
+    "SocialConnectionModel",
+    "SocialPostModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",
 ]

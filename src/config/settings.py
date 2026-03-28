@@ -217,6 +217,11 @@ class Settings(BaseSettings):
     tap_secret_key: str | None = None
     tap_publishable_key: str | None = None
 
+    # Meta (Facebook/Instagram) Graph API
+    meta_app_id: str | None = None
+    meta_app_secret: str | None = None
+    meta_graph_api_version: str = "v19.0"
+
     # OpenAI
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
