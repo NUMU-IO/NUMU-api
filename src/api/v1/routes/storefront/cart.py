@@ -2,9 +2,8 @@
 
 URL: /storefront/me/cart
 
-Server-side cart backed by an in-memory store keyed by customer ID.
-In production, swap the storage backend to Redis for persistence
-across restarts and horizontal scaling.
+Server-side cart backed by Redis for persistence across restarts
+and horizontal scaling.
 """
 
 import logging
@@ -22,26 +21,84 @@ from src.api.v1.schemas.storefront.cart import (
     CartResponse,
     UpdateCartItemRequest,
 )
+from src.core.entities.cart import Cart
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
+from src.core.value_objects.cart_item import CartItem
 from src.infrastructure.repositories import ProductRepository
+from src.infrastructure.repositories.cart_repository import RedisCartRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
-# In-memory cart store  (keyed by customer UUID)
-# Replace with Redis-backed implementation for production.
+# Redis-backed cart repository
 # ---------------------------------------------------------------------------
-_carts: dict[UUID, list[dict]] = {}
+_cart_repo = RedisCartRepository()
 
 
-def _get_cart(customer_id: UUID) -> list[dict]:
-    """Return the mutable cart list for a customer, creating if needed."""
-    if customer_id not in _carts:
-        _carts[customer_id] = []
-    return _carts[customer_id]
+async def _get_or_create_cart(customer_id: UUID, store_id: UUID) -> Cart:
+    """Return the customer's cart from Redis, creating a new one if needed."""
+    cart = await _cart_repo.get_by_customer_id(customer_id, store_id)
+    if cart is None:
+        cart = Cart(
+            id=uuid4(),
+            session_id=str(uuid4()),
+            store_id=store_id,
+            customer_id=customer_id,
+            currency="EGP",
+        )
+    return cart
+
+
+async def _build_cart_response(
+    cart: Cart,
+    product_repo: ProductRepository,
+) -> SuccessResponse[CartResponse]:
+    """Build a CartResponse from a Cart entity, resolving live product data."""
+    items: list[CartItemResponse] = []
+    subtotal = 0
+
+    for cart_item in cart.items:
+        product = await product_repo.get_by_id(cart_item.product_id)
+        if not product or product.status != ProductStatus.ACTIVE:
+            continue
+        unit_price = product.price.cents
+        total_price = unit_price * cart_item.quantity
+        subtotal += total_price
+        items.append(
+            CartItemResponse(
+                id=cart_item.item_key,
+                product_id=str(product.id),
+                product_name=product.name,
+                variant_id=str(cart_item.variant_id) if cart_item.variant_id else None,
+                variant_name=cart_item.variant_name,
+                sku=product.sku,
+                quantity=cart_item.quantity,
+                unit_price=unit_price,
+                total_price=total_price,
+                image_url=product.images[0] if product.images else None,
+                in_stock=product.is_in_stock,
+            )
+        )
+
+    currency = "EGP"
+    if items and cart.items:
+        product = await product_repo.get_by_id(cart.items[0].product_id)
+        if product:
+            currency = product.price.currency.value
+
+    return SuccessResponse(
+        data=CartResponse(
+            items=items,
+            item_count=len(items),
+            total_quantity=sum(i.quantity for i in items),
+            subtotal=subtotal,
+            currency=currency,
+        ),
+        message="Cart retrieved successfully",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -60,49 +117,8 @@ async def get_cart(
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Return the current customer's cart with live product data."""
-    raw_items = _get_cart(current_customer.id)
-    items: list[CartItemResponse] = []
-    subtotal = 0
-
-    for entry in raw_items:
-        product = await product_repo.get_by_id(UUID(entry["product_id"]))
-        if not product or product.status != ProductStatus.ACTIVE:
-            continue
-        unit_price = product.price.cents
-        total_price = unit_price * entry["quantity"]
-        subtotal += total_price
-        items.append(
-            CartItemResponse(
-                id=entry["id"],
-                product_id=str(product.id),
-                product_name=product.name,
-                variant_id=entry.get("variant_id"),
-                variant_name=None,
-                sku=product.sku,
-                quantity=entry["quantity"],
-                unit_price=unit_price,
-                total_price=total_price,
-                image_url=product.images[0] if product.images else None,
-                in_stock=product.is_in_stock,
-            )
-        )
-
-    currency = "EGP"
-    if items:
-        product = await product_repo.get_by_id(UUID(raw_items[0]["product_id"]))
-        if product:
-            currency = product.price.currency.value
-
-    return SuccessResponse(
-        data=CartResponse(
-            items=items,
-            item_count=len(items),
-            total_quantity=sum(i.quantity for i in items),
-            subtotal=subtotal,
-            currency=currency,
-        ),
-        message="Cart retrieved successfully",
-    )
+    cart = await _get_or_create_cart(current_customer.id, current_customer.store_id)
+    return await _build_cart_response(cart, product_repo)
 
 
 @router.post(
@@ -145,27 +161,21 @@ async def add_cart_item(
             detail="Product is out of stock",
         )
 
-    cart = _get_cart(current_customer.id)
-    variant_str = str(request.variant_id) if request.variant_id else None
+    cart = await _get_or_create_cart(current_customer.id, current_customer.store_id)
 
-    # Check for existing entry with same product + variant
-    for entry in cart:
-        if (
-            entry["product_id"] == str(request.product_id)
-            and entry.get("variant_id") == variant_str
-        ):
-            entry["quantity"] += request.quantity
-            break
-    else:
-        cart.append({
-            "id": str(uuid4()),
-            "product_id": str(request.product_id),
-            "variant_id": variant_str,
-            "quantity": request.quantity,
-        })
+    new_item = CartItem(
+        product_id=request.product_id,
+        product_name=product.name,
+        variant_id=request.variant_id,
+        quantity=request.quantity,
+        unit_price=product.price.cents,
+        sku=product.sku,
+        image_url=product.images[0] if product.images else None,
+    )
+    cart.add_item(new_item)
+    await _cart_repo.save(cart)
 
-    # Return refreshed cart
-    return await get_cart(current_customer, product_repo)
+    return await _build_cart_response(cart, product_repo)
 
 
 @router.patch(
@@ -175,23 +185,32 @@ async def add_cart_item(
     operation_id="update_cart_item",
 )
 async def update_cart_item(
-    item_id: Annotated[str, Path(description="Cart item ID")],
+    item_id: Annotated[
+        str, Path(description="Cart item ID (product_id or product_id:variant_id)")
+    ],
     request: UpdateCartItemRequest,
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Update the quantity of a cart item."""
-    cart = _get_cart(current_customer.id)
+    cart = await _get_or_create_cart(current_customer.id, current_customer.store_id)
 
-    for entry in cart:
-        if entry["id"] == item_id:
-            entry["quantity"] = request.quantity
-            return await get_cart(current_customer, product_repo)
+    # Parse item_id to extract product_id and optional variant_id
+    parts = item_id.split(":")
+    product_id = UUID(parts[0])
+    variant_id = UUID(parts[1]) if len(parts) > 1 else None
 
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Cart item not found",
-    )
+    existing = cart.get_item(product_id, variant_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cart item not found",
+        )
+
+    cart.update_item_quantity(product_id, request.quantity, variant_id)
+    await _cart_repo.save(cart)
+
+    return await _build_cart_response(cart, product_repo)
 
 
 @router.delete(
@@ -201,22 +220,31 @@ async def update_cart_item(
     operation_id="remove_cart_item",
 )
 async def remove_cart_item(
-    item_id: Annotated[str, Path(description="Cart item ID")],
+    item_id: Annotated[
+        str, Path(description="Cart item ID (product_id or product_id:variant_id)")
+    ],
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Remove a single item from the cart."""
-    cart = _get_cart(current_customer.id)
-    original_len = len(cart)
-    _carts[current_customer.id] = [e for e in cart if e["id"] != item_id]
+    cart = await _get_or_create_cart(current_customer.id, current_customer.store_id)
 
-    if len(_carts[current_customer.id]) == original_len:
+    # Parse item_id to extract product_id and optional variant_id
+    parts = item_id.split(":")
+    product_id = UUID(parts[0])
+    variant_id = UUID(parts[1]) if len(parts) > 1 else None
+
+    existing = cart.get_item(product_id, variant_id)
+    if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cart item not found",
         )
 
-    return await get_cart(current_customer, product_repo)
+    cart.remove_item(product_id, variant_id)
+    await _cart_repo.save(cart)
+
+    return await _build_cart_response(cart, product_repo)
 
 
 @router.delete(
@@ -230,7 +258,9 @@ async def clear_cart(
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Remove all items from the customer's cart."""
-    _carts[current_customer.id] = []
+    await _cart_repo.delete_by_customer_id(
+        current_customer.id, current_customer.store_id
+    )
     return SuccessResponse(
         data=CartResponse(
             items=[],

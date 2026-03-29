@@ -42,13 +42,19 @@ from src.infrastructure.database.models.tenant.refund import RefundModel
 from src.infrastructure.database.models.tenant.risk_assessment import (
     RiskAssessmentModel,
 )
+from src.infrastructure.database.models.tenant.shipment import ShipmentModel
 from src.infrastructure.database.models.tenant.shopify_app_settings import (
     ShopifyAppSettingsModel,
 )
 from src.infrastructure.database.models.tenant.shopify_installation import (
     ShopifyInstallationModel,
 )
+from src.infrastructure.database.models.tenant.social_connection import (
+    SocialConnectionModel,
+)
+from src.infrastructure.database.models.tenant.social_post import SocialPostModel
 from src.infrastructure.database.models.tenant.store import StoreModel
+from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
 from src.infrastructure.database.models.tenant.webhook import (
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
@@ -82,7 +88,11 @@ __all__ = [
     "AuditAction",
     "ProductModel",
     "RefundModel",
+    "UpsellRuleModel",
+    "ShipmentModel",
     "StoreModel",
+    "SocialConnectionModel",
+    "SocialPostModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",
 ]

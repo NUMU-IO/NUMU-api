@@ -16,6 +16,21 @@ class ProductDescription:
 
 
 @dataclass
+class BilingualProductDescription:
+    """AI-generated bilingual product description."""
+
+    short_description_en: str
+    long_description_en: str
+    short_description_ar: str
+    long_description_ar: str
+    seo_title_en: str
+    seo_title_ar: str
+    seo_description_en: str
+    seo_description_ar: str
+    tags: list[str]
+
+
+@dataclass
 class ChatMessage:
     """Chat message for AI conversation."""
 
@@ -82,4 +97,17 @@ class IAIService(ABC):
         source_language: str = "auto",
     ) -> str:
         """Translate text to target language."""
+        ...
+
+    @abstractmethod
+    async def generate_bilingual_description(
+        self,
+        product_name: str,
+        product_name_ar: str | None = None,
+        category: str | None = None,
+        image_url: str | None = None,
+        attributes: dict | None = None,
+        tone: str = "professional",
+    ) -> BilingualProductDescription:
+        """Generate bilingual (AR/EN) SEO-optimized product descriptions."""
         ...

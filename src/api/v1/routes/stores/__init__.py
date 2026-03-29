@@ -13,10 +13,14 @@ Provides REST endpoints for store CRUD operations and nested resources:
 - /stores/{store_id}/categories - Category management
 - /stores/{store_id}/onboarding - Merchant onboarding progress
 - /stores/{store_id}/webhooks - Outgoing webhook subscriptions
+- /stores/{store_id}/upsells - Post-purchase upsell rules
+- /stores/{store_id}/social - Social media import
+- /stores/{store_id}/ai - AI description generator
 """
 
 from fastapi import APIRouter
 
+from src.api.v1.routes.stores import ai as ai_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import coupons as coupons_module
@@ -29,12 +33,16 @@ from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import orders as orders_module
 
 # Import all routers
+from src.api.v1.routes.stores import payments as payments_module
 from src.api.v1.routes.stores import plan as plan_module
 from src.api.v1.routes.stores import products as products_module
 from src.api.v1.routes.stores import reconciliation as reconciliation_module
 from src.api.v1.routes.stores import refunds as refunds_module
 from src.api.v1.routes.stores import settings as settings_module
+from src.api.v1.routes.stores import shipments as shipments_module
+from src.api.v1.routes.stores import social as social_module
 from src.api.v1.routes.stores import stores as stores_module
+from src.api.v1.routes.stores import upsells as upsells_module
 from src.api.v1.routes.stores import webhooks as webhooks_module
 
 # Create main stores router - this will be mounted at /stores in the main router
@@ -60,6 +68,11 @@ router.include_router(feedback_module.router, tags=["Store Feedback"])
 router.include_router(refunds_module.router, tags=["Store Refunds"])
 router.include_router(webhooks_module.router, tags=["Store Webhooks"])
 router.include_router(reconciliation_module.router, tags=["Store Reconciliation"])
+router.include_router(shipments_module.router, tags=["Store Shipments"])
+router.include_router(payments_module.router, tags=["Store Payments"])
 router.include_router(plan_module.router, tags=["Store Plan"])
+router.include_router(upsells_module.router, tags=["Store Upsells"])
+router.include_router(social_module.router, tags=["Store Social Import"])
+router.include_router(ai_module.router, tags=["Store AI"])
 
 __all__ = ["router"]

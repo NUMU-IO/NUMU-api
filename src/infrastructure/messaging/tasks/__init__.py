@@ -1,4 +1,11 @@
+from src.infrastructure.messaging.tasks.abandoned_cart_tasks import (  # noqa: F401
+    detect_abandoned_carts_task,
+    send_abandoned_cart_notification_task,
+)
 from src.infrastructure.messaging.tasks.backup_task import backup_database  # noqa: F401
+from src.infrastructure.messaging.tasks.health_score_tasks import (  # noqa: F401
+    calculate_health_scores_task,
+)
 from src.infrastructure.messaging.tasks.image_tasks import (  # noqa: F401
     process_bulk_product_images_task,
     process_product_image_task,
@@ -19,11 +26,18 @@ from src.infrastructure.messaging.tasks.onboarding_email_tasks import (  # noqa:
 from src.infrastructure.messaging.tasks.reconciliation_tasks import (  # noqa: F401
     daily_payment_reconciliation,
 )
+from src.infrastructure.messaging.tasks.shipment_tasks import (  # noqa: F401
+    daily_cod_reconciliation,
+    sync_shipment_statuses,
+)
 from src.infrastructure.messaging.tasks.slack_tasks import (  # noqa: F401
     process_slack_alert_queue,
     send_fraud_alert_task,
     send_payment_alert_task,
     send_slack_alert_task,
+)
+from src.infrastructure.messaging.tasks.social_tasks import (  # noqa: F401
+    import_social_posts_task,
 )
 from src.infrastructure.messaging.tasks.webhook_tasks import (  # noqa: F401
     retry_pending_webhook_deliveries,

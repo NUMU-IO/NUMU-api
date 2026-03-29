@@ -30,6 +30,10 @@ class CheckoutRequest(BaseModel):
     shipping_method: str | None = None
     customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
+    # UTM attribution (captured from URL on storefront)
+    utm_source: str | None = Field(None, max_length=200)
+    utm_medium: str | None = Field(None, max_length=200)
+    utm_campaign: str | None = Field(None, max_length=200)
 
 
 class CheckoutResponse(BaseModel):

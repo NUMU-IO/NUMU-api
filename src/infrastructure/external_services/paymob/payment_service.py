@@ -373,3 +373,99 @@ class PaymobPaymentService(IPaymentService):
         except Exception as e:
             logger.error(f"Paymob webhook verification error: {e}")
             return None
+
+    async def charge_saved_token(
+        self,
+        card_token: str,
+        amount: int,
+        currency: str,
+        order_id: str,
+    ) -> PaymentResult:
+        """Charge a saved card token for one-click upsell payments.
+
+        Uses Paymob's tokenized payment flow via the Intention API.
+        """
+        if not self.secret_key:
+            return PaymentResult(
+                success=False, error_message="Paymob secret key not configured"
+            )
+
+        intention_payload = {
+            "amount": amount,
+            "currency": currency or "EGP",
+            "payment_methods": [self.card_integration_id]
+            if self.card_integration_id
+            else [],
+            "billing_data": {
+                "first_name": "Upsell",
+                "last_name": "Customer",
+                "email": "upsell@numu.store",
+                "phone_number": "01000000000",
+            },
+            "extras": {
+                "ee": 0,
+            },
+            "special_reference": f"upsell-{order_id}",
+            "notification_url": "https://numueg.app/api/v1/webhooks/paymob/callback",
+            "redirection_url": "https://numueg.app/api/v1/webhooks/paymob/callback",
+        }
+
+        headers = {
+            "Authorization": f"Token {self.secret_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                # Step 1: Create intention
+                response = await client.post(
+                    PAYMOB_INTENTION_API_BASE,
+                    json=intention_payload,
+                    headers=headers,
+                    timeout=30.0,
+                )
+
+                if response.status_code not in (200, 201):
+                    return PaymentResult(
+                        success=False,
+                        error_message=f"Intention failed: {response.text}",
+                    )
+
+                intention = response.json()
+                client_secret = intention.get("client_secret")
+
+                # Step 2: Pay with token
+                pay_payload = {
+                    "source": {
+                        "identifier": card_token,
+                        "subtype": "TOKEN",
+                    },
+                    "payment_token": client_secret,
+                }
+
+                pay_response = await client.post(
+                    f"{PAYMOB_API_BASE}/acceptance/payments/pay",
+                    json=pay_payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30.0,
+                )
+
+                if pay_response.status_code not in (200, 201):
+                    return PaymentResult(
+                        success=False,
+                        error_message=f"Token pay failed: {pay_response.text}",
+                    )
+
+                pay_data = pay_response.json()
+                is_success = pay_data.get("success", False)
+
+                return PaymentResult(
+                    success=is_success,
+                    payment_id=str(pay_data.get("id", "")),
+                    error_message=None
+                    if is_success
+                    else pay_data.get("data", {}).get("message", "Payment failed"),
+                )
+        except Exception as e:
+            logger.error(f"Paymob token charge exception: {e}")
+            return PaymentResult(success=False, error_message=str(e))

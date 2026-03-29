@@ -19,8 +19,10 @@ from src.infrastructure.repositories import (
     OrderRepository,
     ProductRepository,
     RefundRepository,
+    ShipmentRepository,
     StoreRepository,
     TwoFactorRepository,
+    UpsellRuleRepository,
     UserRepository,
     WaitlistRepository,
     WebhookDeliveryLogRepository,
@@ -147,8 +149,29 @@ def get_webhook_delivery_log_repository(
     return WebhookDeliveryLogRepository(session)
 
 
+def get_shipment_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ShipmentRepository:
+    """Get shipment repository dependency."""
+    return ShipmentRepository(session)
+
+
 def get_credential_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> CredentialRepository:
     """Get credential repository dependency."""
     return CredentialRepository(session)
+
+
+def get_upsell_rule_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> UpsellRuleRepository:
+    """Get upsell rule repository dependency."""
+    return UpsellRuleRepository(session)
+
+
+def get_cart_repository():
+    """Get Redis cart repository (no DB session needed)."""
+    from src.infrastructure.repositories.cart_repository import RedisCartRepository
+
+    return RedisCartRepository()
