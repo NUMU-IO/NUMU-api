@@ -28,6 +28,10 @@ from src.infrastructure.messaging.tasks.slack_tasks import (  # noqa: F401
     send_payment_alert_task,
     send_slack_alert_task,
 )
+from src.infrastructure.messaging.tasks.trust_network_maintenance import (  # noqa: F401
+    cleanup_expired_payment_links,
+    retry_stuck_preliminary_scores,
+)
 from src.infrastructure.messaging.tasks.webhook_tasks import (  # noqa: F401
     retry_pending_webhook_deliveries,
 )

@@ -246,7 +246,8 @@ def compute_network_score(
         _NEW_TO_NETWORK_BASELINE * (1 - confidence_factor)
         + raw_score * confidence_factor
     )
-    dampened_score = int(_clamp(dampened_score))
+    # Explicit hard clamp — guarantees 0 <= score <= 100 under all inputs
+    dampened_score = max(0, min(100, dampened_score))
 
     # Confidence level
     if total_orders >= 10:

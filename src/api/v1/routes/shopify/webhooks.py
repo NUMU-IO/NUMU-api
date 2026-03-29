@@ -78,6 +78,10 @@ async def _get_and_update_store_avg(store_id: UUID, total_cents: int) -> int:
     Uses an Exponential Moving Average (EMA) so recent orders matter more.
     Falls back to the hardcoded default if Redis is unavailable.
     Returns the *previous* average (used for the fast score of this order).
+
+    Circuit-breaker: if Redis read fails, return the fallback but do NOT
+    update the EMA — this prevents a stale fallback value from poisoning
+    the average when Redis comes back up.
     """
     try:
         from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -85,7 +89,14 @@ async def _get_and_update_store_avg(store_id: UUID, total_cents: int) -> int:
         cache = RedisCacheService()
         key = _STORE_AVG_KEY.format(store_id=store_id)
         cached = await cache.get(key)
-        prev_avg = int(cached) if cached is not None else _STORE_AVG_DEFAULT
+
+        if cached is None:
+            # First order or key expired — seed with this order's value
+            await cache.set(key, total_cents, expire=_STORE_AVG_TTL)
+            await cache.close()
+            return _STORE_AVG_DEFAULT
+
+        prev_avg = int(cached)
         new_avg = int(
             prev_avg * (1 - _STORE_AVG_ALPHA) + total_cents * _STORE_AVG_ALPHA
         )
@@ -93,6 +104,9 @@ async def _get_and_update_store_avg(store_id: UUID, total_cents: int) -> int:
         await cache.close()
         return prev_avg
     except Exception as exc:
+        # Circuit-breaker: return fallback WITHOUT writing to Redis.
+        # This avoids poisoning the EMA with _STORE_AVG_DEFAULT when
+        # Redis recovers — the real EMA value is preserved on disk.
         logger.warning("Redis store-avg lookup failed (store %s): %s", store_id, exc)
         return _STORE_AVG_DEFAULT
 

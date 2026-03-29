@@ -110,8 +110,16 @@ class ShopifyInstallationRepository:
         Network reputation aggregates are kept but their counts are
         decremented using the network_contribution_log, per the
         constitution's data retention rule.
+
+        Uses a PostgreSQL advisory lock keyed on the store_id to prevent
+        race conditions if a new order arrives during the deletion window.
         """
         counts: dict[str, int] = {}
+
+        # Acquire advisory lock scoped to this transaction to serialize
+        # concurrent GDPR deletions and order writes for the same store.
+        lock_key = abs(hash(str(store_id))) % (2**31)
+        await self.session.execute(select(func.pg_advisory_xact_lock(lock_key)))
 
         # 1) Decrement network_reputation aggregates using contribution log
         contrib_rows = await self.session.execute(
