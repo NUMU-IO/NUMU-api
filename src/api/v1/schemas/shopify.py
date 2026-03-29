@@ -47,6 +47,11 @@ class DashboardOverviewResponse(BaseModel):
     total_cod_orders: int = 0
     total_revenue_cents: int = 0
     period_days: int = 30
+    # COD-to-Prepaid conversion metrics
+    conversion_links_sent: int = 0
+    conversion_links_completed: int = 0
+    conversion_rate: float = 0.0
+    conversion_revenue_cents: int = 0
 
 
 # ---------------------------------------------------------------------------

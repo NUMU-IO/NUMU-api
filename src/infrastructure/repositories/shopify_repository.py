@@ -270,6 +270,63 @@ class RiskAssessmentRepository:
         )
         return result.scalar_one() or 0
 
+    async def aggregate_dashboard(self, store_id: UUID, *, days: int = 30) -> dict:
+        """Aggregate dashboard metrics via SQL — no in-memory loading."""
+        since = datetime.utcnow() - timedelta(days=days)
+
+        # Total scored orders
+        total_result = await self.session.execute(
+            select(func.count()).where(
+                RiskAssessmentModel.store_id == store_id,
+                RiskAssessmentModel.created_at >= since,
+            )
+        )
+        total_orders = total_result.scalar_one() or 0
+
+        # High risk count
+        high_risk_result = await self.session.execute(
+            select(func.count()).where(
+                RiskAssessmentModel.store_id == store_id,
+                RiskAssessmentModel.risk_score >= 60,
+                RiskAssessmentModel.created_at >= since,
+            )
+        )
+        high_risk = high_risk_result.scalar_one() or 0
+
+        # Revenue protected (held or cancelled high-risk orders)
+        protected_result = await self.session.execute(
+            select(func.coalesce(func.sum(RiskAssessmentModel.total_cents), 0)).where(
+                RiskAssessmentModel.store_id == store_id,
+                RiskAssessmentModel.action_taken.in_([
+                    "held_for_review",
+                    "auto_cancelled",
+                    "cancelled",
+                    "cancel",
+                ]),
+                RiskAssessmentModel.risk_score >= 60,
+                RiskAssessmentModel.created_at >= since,
+            )
+        )
+        revenue_protected = protected_result.scalar_one() or 0
+
+        # Payment recovery (auto-approved medium-risk)
+        recovery_result = await self.session.execute(
+            select(func.coalesce(func.sum(RiskAssessmentModel.total_cents), 0)).where(
+                RiskAssessmentModel.store_id == store_id,
+                RiskAssessmentModel.action_taken == "auto_approved",
+                RiskAssessmentModel.risk_score >= 30,
+                RiskAssessmentModel.created_at >= since,
+            )
+        )
+        payment_recovery = recovery_result.scalar_one() or 0
+
+        return {
+            "total_orders": total_orders,
+            "high_risk_orders_count": high_risk,
+            "revenue_protected_cents": revenue_protected,
+            "payment_recovery_cents": payment_recovery,
+        }
+
     async def delete_by_customer_email(self, store_id: UUID, email: str) -> int:
         """GDPR customers/redact — remove all risk assessments for a customer."""
         result = await self.session.execute(
@@ -701,3 +758,38 @@ class PaymentLinkSessionRepository:
         self.session.add(model)
         await self.session.flush()
         return model
+
+    async def aggregate_conversions(self, store_id: UUID, *, days: int = 30) -> dict:
+        """Aggregate COD-to-Prepaid conversion metrics."""
+        since = datetime.utcnow() - timedelta(days=days)
+
+        total_result = await self.session.execute(
+            select(func.count()).where(
+                PaymentLinkSessionModel.store_id == store_id,
+                PaymentLinkSessionModel.created_at >= since,
+            )
+        )
+        total_sent = total_result.scalar_one() or 0
+
+        completed_result = await self.session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.sum(PaymentLinkSessionModel.amount_cents), 0),
+            ).where(
+                PaymentLinkSessionModel.store_id == store_id,
+                PaymentLinkSessionModel.status == "completed",
+                PaymentLinkSessionModel.created_at >= since,
+            )
+        )
+        row = completed_result.one()
+        completed = row[0] or 0
+        revenue = row[1] or 0
+
+        return {
+            "links_sent": total_sent,
+            "links_completed": completed,
+            "conversion_rate": round(
+                (completed / total_sent * 100) if total_sent else 0.0, 1
+            ),
+            "conversion_revenue_cents": revenue,
+        }
