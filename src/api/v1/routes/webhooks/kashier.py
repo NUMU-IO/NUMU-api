@@ -71,6 +71,7 @@ def _extract_webhook_fields(raw: dict) -> dict:
         "currency": data.get("currency") or "EGP",
         "card_brand": data.get("cardBrand") or "",
         "masked_card": data.get("maskedCard") or "",
+        "card_token": data.get("cardDataToken") or "",
         "signature_keys": raw.get("signatureKeys") or [],
     }
 
@@ -189,11 +190,38 @@ async def kashier_callback(
 
     if status_upper == "SUCCESS":
         log.info("payment_success")
+        old_status = (
+            order.status.value if hasattr(order.status, "value") else str(order.status)
+        )
         order.mark_as_paid(
             payment_id=str(transaction_id or fields["kashier_order_id"] or ""),
             payment_method="kashier",
         )
         await order_repo.update(order)
+
+        # Fire OrderStatusChangedEvent so shipment auto-creation triggers
+        try:
+            from src.core.events.order_events import OrderStatusChangedEvent
+            from src.infrastructure.events.setup import get_event_bus
+
+            sr = StoreRepository(db)
+            store = await sr.get_by_id(order.store_id)
+            event = OrderStatusChangedEvent(
+                order_id=order.id,
+                order_number=order.order_number,
+                store_id=order.store_id,
+                store_name=store.name if store else "",
+                customer_id=order.customer_id,
+                customer_name=order.shipping_address.full_name
+                if order.shipping_address
+                else None,
+                previous_status=old_status,
+                new_status="processing",
+            )
+            get_event_bus().publish(event)
+            log.info("order_status_event_dispatched", new_status="processing")
+        except Exception as e:
+            log.warning("order_status_event_failed", error=str(e))
 
         # Create transaction record for reconciliation
         tx = PaymentTransactionModel(
@@ -214,6 +242,29 @@ async def kashier_callback(
         db.add(tx)
         await db.flush()
         log.info("payment_transaction_created", tx_id=str(tx.id))
+
+        # Save card token for one-click upsell charges
+        card_token = fields.get("card_token")
+        if card_token and order.customer_id:
+            from src.infrastructure.database.models.tenant.saved_payment_method import (
+                SavedPaymentMethodModel,
+            )
+
+            saved = SavedPaymentMethodModel(
+                customer_id=order.customer_id,
+                store_id=order.store_id,
+                order_id=order.id,
+                gateway="kashier",
+                card_token=card_token,
+                display_name=f"{fields['card_brand']} •••• {fields['masked_card'][-4:]}"
+                if fields["masked_card"]
+                else "Card",
+                card_brand=fields["card_brand"] or None,
+                last_four=fields["masked_card"][-4:] if fields["masked_card"] else None,
+            )
+            db.add(saved)
+            await db.flush()
+            log.info("card_token_saved", saved_id=str(saved.id))
 
         # Generate invoice now that payment is confirmed
         from src.api.v1.routes.webhooks._invoice_helper import (

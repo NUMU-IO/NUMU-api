@@ -7,6 +7,7 @@ for shipment creation, tracking, and rate calculation.
 API Documentation: https://developers.bosta.co/
 """
 
+import base64
 import hashlib
 import hmac
 import logging
@@ -509,6 +510,355 @@ class BostaShippingService(IShippingService):
             logger.warning(f"Bosta return request failed: {response.text}")
             return None
 
+    # ── Delivery CRUD ──────────────────────────────────────────────
+
+    async def get_delivery(self, delivery_id: str) -> dict:
+        """Get full delivery details from Bosta.
+
+        Args:
+            delivery_id: Bosta delivery ID or tracking number
+
+        Returns:
+            Delivery details dict
+        """
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/deliveries/{delivery_id}",
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta get delivery failed: {response.text}")
+                raise ValueError(f"Failed to get delivery: {response.text}")
+
+            data = response.json()
+            return data.get("data", data)
+
+    async def list_deliveries(
+        self,
+        page: int = 0,
+        limit: int = 50,
+    ) -> dict:
+        """List all deliveries from Bosta with pagination.
+
+        Returns:
+            dict with 'deliveries' list and pagination info
+        """
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/deliveries",
+                headers=self._get_headers(),
+                params={"pageNumber": page, "pageLimit": limit},
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta list deliveries failed: {response.text}")
+                raise ValueError(f"Failed to list deliveries: {response.text}")
+
+            return response.json()
+
+    async def update_delivery(
+        self,
+        delivery_id: str,
+        *,
+        receiver: dict | None = None,
+        drop_off_address: dict | None = None,
+        cod: float | None = None,
+        business_reference: str | None = None,
+        notes: str | None = None,
+        webhook_url: str | None = None,
+    ) -> dict:
+        """Update an existing delivery on Bosta.
+
+        Args:
+            delivery_id: Bosta delivery ID or tracking number
+            receiver: Updated receiver info {firstName, lastName, phone, email}
+            drop_off_address: Updated address {city, district, firstLine, ...}
+            cod: Updated COD amount in EGP (not cents)
+            business_reference: Updated reference string
+            notes: Updated delivery notes
+            webhook_url: Webhook URL for this specific delivery
+
+        Returns:
+            Updated delivery details dict
+        """
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        payload: dict[str, Any] = {}
+        if receiver:
+            payload["receiver"] = receiver
+        if drop_off_address:
+            payload["dropOffAddress"] = drop_off_address
+        if cod is not None:
+            payload["cod"] = cod
+        if business_reference is not None:
+            payload["businessReference"] = business_reference
+        if notes is not None:
+            payload["notes"] = notes
+        if webhook_url is not None:
+            payload["webhookUrl"] = webhook_url
+
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{self.base_url}/deliveries/{delivery_id}",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=30.0,
+            )
+
+            if response.status_code not in (200, 201):
+                logger.error(f"Bosta update delivery failed: {response.text}")
+                raise ValueError(f"Failed to update delivery: {response.text}")
+
+            data = response.json()
+            return data.get("data", data)
+
+    async def print_awb(self, delivery_id: str) -> bytes:
+        """Get the Air Waybill (AWB) PDF for a delivery.
+
+        Args:
+            delivery_id: Bosta delivery ID
+
+        Returns:
+            AWB PDF bytes
+        """
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/deliveries/{delivery_id}/awb",
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta AWB print failed: {response.text}")
+                raise ValueError("Failed to print AWB")
+
+            return response.content
+
+    # ── Pickup Management ─────────────────────────────────────────
+
+    async def create_pickup(
+        self,
+        business_location_id: str,
+        scheduled_date: str,
+        scheduled_time_slot: str,
+        contact_person: dict | None = None,
+        notes: str | None = None,
+    ) -> dict:
+        """Schedule a pickup from a business location.
+
+        Args:
+            business_location_id: ID of the pickup location
+            scheduled_date: Date string (YYYY-MM-DD)
+            scheduled_time_slot: Time slot (e.g., "10:00 to 13:00")
+            contact_person: {name, phone, email}
+            notes: Pickup notes
+
+        Returns:
+            Created pickup dict with ID
+        """
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        payload: dict[str, Any] = {
+            "businessLocationId": business_location_id,
+            "scheduledDate": scheduled_date,
+            "scheduledTimeSlot": scheduled_time_slot,
+        }
+        if contact_person:
+            payload["contactPerson"] = contact_person
+        if notes:
+            payload["notes"] = notes
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/pickups",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=30.0,
+            )
+
+            if response.status_code not in (200, 201):
+                logger.error(f"Bosta create pickup failed: {response.text}")
+                raise ValueError(f"Failed to create pickup: {response.text}")
+
+            data = response.json()
+            return data.get("data", data)
+
+    async def list_pickups(self, page: int = 0, limit: int = 50) -> dict:
+        """List all pickups with pagination."""
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/pickups",
+                headers=self._get_headers(),
+                params={"pageNumber": page, "pageLimit": limit},
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta list pickups failed: {response.text}")
+                raise ValueError(f"Failed to list pickups: {response.text}")
+
+            return response.json()
+
+    async def get_pickup(self, pickup_id: str) -> dict:
+        """Get pickup details by ID."""
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/pickups/{pickup_id}",
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta get pickup failed: {response.text}")
+                raise ValueError(f"Failed to get pickup: {response.text}")
+
+            data = response.json()
+            return data.get("data", data)
+
+    async def update_pickup(
+        self,
+        pickup_id: str,
+        *,
+        scheduled_date: str | None = None,
+        scheduled_time_slot: str | None = None,
+        contact_person: dict | None = None,
+        notes: str | None = None,
+    ) -> dict:
+        """Update a scheduled pickup."""
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        payload: dict[str, Any] = {}
+        if scheduled_date:
+            payload["scheduledDate"] = scheduled_date
+        if scheduled_time_slot:
+            payload["scheduledTimeSlot"] = scheduled_time_slot
+        if contact_person:
+            payload["contactPerson"] = contact_person
+        if notes is not None:
+            payload["notes"] = notes
+
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{self.base_url}/pickups/{pickup_id}",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=30.0,
+            )
+
+            if response.status_code not in (200, 201):
+                logger.error(f"Bosta update pickup failed: {response.text}")
+                raise ValueError(f"Failed to update pickup: {response.text}")
+
+            data = response.json()
+            return data.get("data", data)
+
+    async def delete_pickup(self, pickup_id: str) -> bool:
+        """Delete/cancel a scheduled pickup."""
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{self.base_url}/pickups/{pickup_id}",
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+
+            if response.status_code in (200, 204):
+                return True
+
+            logger.warning(f"Bosta delete pickup failed: {response.text}")
+            return False
+
+    async def get_pickup_locations(self) -> list[dict]:
+        """Get business pickup locations configured in Bosta dashboard."""
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/pickups/business-locations",
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta pickup locations failed: {response.text}")
+                raise ValueError("Failed to get pickup locations")
+
+            data = response.json()
+            return (
+                data.get("data", data) if isinstance(data.get("data"), list) else [data]
+            )
+
+    # ── Cities & Zones ────────────────────────────────────────────
+
+    async def get_cities(self) -> list[dict]:
+        """Get all cities available for delivery from Bosta API."""
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/cities",
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta get cities failed: {response.text}")
+                raise ValueError("Failed to get cities")
+
+            data = response.json()
+            return data.get("data", data) if isinstance(data.get("data"), list) else []
+
+    async def get_city_zones(self, city_id: str) -> list[dict]:
+        """Get zones within a specific city.
+
+        Args:
+            city_id: Bosta city ID
+
+        Returns:
+            List of zone dicts
+        """
+        if not self.api_key:
+            raise ValueError("Bosta API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/cities/{city_id}/zones",
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Bosta get zones failed: {response.text}")
+                raise ValueError("Failed to get city zones")
+
+            data = response.json()
+            return data.get("data", data) if isinstance(data.get("data"), list) else []
+
     def verify_webhook_signature(
         self,
         payload: bytes,
@@ -545,3 +895,46 @@ class BostaShippingService(IShippingService):
         except Exception as e:
             logger.error(f"Bosta webhook verification error: {e}")
             return None
+
+
+async def get_merchant_bosta_credentials(store_settings: dict) -> dict | None:
+    """Decrypt and return a merchant's Bosta credentials from store settings.
+
+    Returns:
+        dict with keys: api_key, business_id, webhook_secret, or None if not configured.
+    """
+    bosta_settings = (store_settings or {}).get("shipping", {}).get("bosta", {})
+
+    if not bosta_settings.get("encrypted_credentials"):
+        return None
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets_manager = get_secrets_manager()
+    key_id = bosta_settings["encryption_key_id"]
+    encrypted = base64.b64decode(bosta_settings["encrypted_credentials"])
+
+    try:
+        return await secrets_manager.decrypt(encrypted, key_id)
+    except Exception as e:
+        logger.error(f"Failed to decrypt Bosta credentials: {e}")
+        return None
+
+
+async def get_bosta_service_for_store(store_settings: dict) -> BostaShippingService:
+    """Get a BostaShippingService configured with per-store credentials.
+
+    Falls back to global env vars if no per-store credentials are configured.
+    """
+    creds = await get_merchant_bosta_credentials(store_settings)
+    if creds:
+        return BostaShippingService(
+            api_key=creds["api_key"],
+            business_id=creds["business_id"],
+            webhook_secret=creds.get("webhook_secret"),
+            base_url=settings.bosta_base_url,  # Use server-configured URL (prod/staging)
+        )
+    # Fallback to global settings
+    return BostaShippingService()

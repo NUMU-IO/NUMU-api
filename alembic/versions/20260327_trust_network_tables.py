@@ -64,6 +64,7 @@ def upgrade() -> None:
         ),
         sa.Column("last_order_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_rto_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("anonymized_at", sa.DateTime(timezone=True), nullable=True),
         schema="public",
     )
 

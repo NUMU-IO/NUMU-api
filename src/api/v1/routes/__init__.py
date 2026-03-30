@@ -56,6 +56,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
 )
+from src.api.v1.routes.storefront import (
+    otp_router as storefront_otp_router,
+)
 
 # Storefront routes (customer-facing)
 from src.api.v1.routes.storefront import (
@@ -63,6 +66,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     storefront_lookup_router,
+)
+from src.api.v1.routes.storefront import (
+    upsell_router as storefront_upsell_router,
 )
 
 # Store management routes (for store owners)
@@ -143,6 +149,20 @@ api_router.include_router(
     storefront_coupon_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Coupons"],
+)
+
+# Storefront - upsell offers (public, scoped to store)
+api_router.include_router(
+    storefront_upsell_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Upsells"],
+)
+
+# Storefront - COD OTP verification (authenticated customer, scoped to store)
+api_router.include_router(
+    storefront_otp_router,
+    prefix="/storefront/store/{store_id}/checkout",
+    tags=["Storefront - Checkout"],
 )
 
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)

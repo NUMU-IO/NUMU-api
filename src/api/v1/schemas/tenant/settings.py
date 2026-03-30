@@ -132,6 +132,26 @@ class UpdateShippingZoneRequest(BaseModel):
     estimated_days: str | None = Field(None, min_length=1, max_length=50)
 
 
+# Bosta Shipping Credentials
+class SaveBostaCredentialsRequest(BaseModel):
+    """Save Bosta shipping credentials for a store."""
+
+    api_key: str = Field(..., min_length=10, max_length=500)
+    business_id: str = Field(..., min_length=3, max_length=100)
+    webhook_secret: str | None = Field(None, max_length=500)
+    auto_create_shipment: bool = False
+
+
+class BostaCredentialsResponse(BaseModel):
+    """Bosta credentials status (masked, never returns real keys)."""
+
+    is_configured: bool
+    api_key_masked: str | None = None
+    business_id: str | None = None
+    auto_create_shipment: bool = False
+    last_configured: str | None = None
+
+
 # WhatsApp Settings
 class NotificationTemplate(BaseModel):
     """Notification template configuration."""

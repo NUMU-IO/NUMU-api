@@ -167,14 +167,19 @@ class ShopifyInstallationRepository:
                 )
             )
 
-        # Delete network_reputation records that have reached zero across all counters
+        # Anonymize network_reputation records that have reached zero across
+        # all counters instead of deleting them — preserves historical
+        # analytics data while removing any merchant-attributable signal.
         await self.session.execute(
-            delete(NetworkReputationModel).where(
+            update(NetworkReputationModel)
+            .where(
                 NetworkReputationModel.total_network_orders <= 0,
                 NetworkReputationModel.total_network_rtos <= 0,
                 NetworkReputationModel.total_successful_deliveries <= 0,
                 NetworkReputationModel.total_refunds <= 0,
+                NetworkReputationModel.anonymized_at.is_(None),
             )
+            .values(anonymized_at=func.now())
         )
         counts["network_contributions_decremented"] = decremented
 
