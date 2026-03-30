@@ -25,7 +25,12 @@ from src.api.dependencies.shopify import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.shopify import WebhookProcessRequest
-from src.application.use_cases.shopify.risk_scoring_engine import score_order_fast
+from src.application.use_cases.shopify.phone_hash import normalize_and_hash
+from src.application.use_cases.shopify.risk_scoring_engine import (
+    compute_network_score,
+    score_order_fast,
+)
+from src.config.settings import get_settings
 from src.infrastructure.messaging.tasks.risk_scoring_tasks import (
     compute_full_risk_score,
 )
@@ -87,12 +92,137 @@ async def _get_and_update_store_avg(store_id: UUID, total_cents: int) -> int:
         return _STORE_AVG_DEFAULT
 
 
+_NET_SCORE_CACHE_KEY = "shopify:net_score:{phone_hash}"
+_NET_SCORE_CACHE_TTL = 3600  # 1 hour
+
+
+async def _lookup_network_score(
+    phone_hash: str | None,
+    network_repo: NetworkReputationRepository,
+) -> tuple[int, str]:
+    """Look up network reputation: Redis cache → DB fallback → baseline.
+
+    Returns ``(score, label)``.  Never raises — returns the baseline (55)
+    on any failure.
+    """
+    if not phone_hash:
+        return 55, "new_to_network"
+
+    # 1. Try Redis cache
+    try:
+        from src.infrastructure.cache.redis_cache import RedisCacheService
+
+        cache = RedisCacheService()
+        key = _NET_SCORE_CACHE_KEY.format(phone_hash=phone_hash)
+        cached = await cache.get(key)
+        await cache.close()
+        if cached is not None and isinstance(cached, dict):
+            return cached.get("score", 55), cached.get("label", "new_to_network")
+    except Exception as exc:
+        logger.warning("Redis network score cache lookup failed: %s", exc)
+
+    # 2. Fallback to DB
+    try:
+        rep = await network_repo.get_by_phone_hash(phone_hash)
+        if rep is None:
+            return 55, "new_to_network"
+
+        score, _confidence, label = compute_network_score(
+            total_orders=rep.total_network_orders,
+            total_rtos=rep.total_network_rtos,
+            total_deliveries=rep.total_successful_deliveries,
+            total_refunds=rep.total_refunds,
+            contributing_store_count=rep.contributing_store_count,
+        )
+
+        # Cache the result in Redis for future lookups
+        try:
+            cache = RedisCacheService()
+            key = _NET_SCORE_CACHE_KEY.format(phone_hash=phone_hash)
+            await cache.set(
+                key,
+                {"score": score, "label": label},
+                expire=_NET_SCORE_CACHE_TTL,
+            )
+            await cache.close()
+        except Exception:
+            pass  # Non-fatal — DB result is authoritative
+
+        return score, label
+    except Exception as exc:
+        logger.warning("DB network score lookup failed: %s", exc)
+        return 55, "new_to_network"
+
+
+def _extract_phone_hash(payload: dict) -> str | None:
+    """Extract phone from a Shopify order payload, normalize, and hash.
+
+    Returns the 64-char hex HMAC-SHA256 digest, or ``None`` if the phone
+    is missing or cannot be normalized to E.164.
+    """
+    customer = payload.get("customer") or {}
+    shipping_address = payload.get("shipping_address") or {}
+    phone = customer.get("phone") or shipping_address.get("phone") or ""
+    if not phone:
+        return None
+
+    salt = get_settings().platform_secret_salt
+    if not salt:
+        logger.error(
+            "PLATFORM_SECRET_SALT is not configured — cannot hash phone numbers"
+        )
+        return None
+
+    return normalize_and_hash(phone, salt)
+
+
+async def _write_network_event(
+    *,
+    phone_hash: str | None,
+    store_id: UUID,
+    event_type: str,
+    network_repo: NetworkReputationRepository,
+) -> None:
+    """Write a network reputation event and update store count.
+
+    Handles ``order``, ``rto`` (cancellation), ``delivery``, and ``refund``.
+    Invalidates the Redis cache for this phone hash after writing.
+    """
+    if not phone_hash:
+        return
+
+    if event_type == "order":
+        await network_repo.upsert_order(phone_hash=phone_hash, store_id=store_id)
+    else:
+        await network_repo.record_event(
+            phone_hash=phone_hash,
+            store_id=store_id,
+            event_type=event_type,
+        )
+
+    # Update contributing store count and recompute cached score
+    await network_repo.update_store_count(phone_hash)
+    await network_repo.recompute_cached_score(phone_hash)
+
+    # Invalidate Redis cache so the next lookup gets fresh data
+    try:
+        from src.infrastructure.cache.redis_cache import RedisCacheService
+
+        cache = RedisCacheService()
+        key = _NET_SCORE_CACHE_KEY.format(phone_hash=phone_hash)
+        await cache.delete(key)
+        await cache.close()
+    except Exception:
+        pass  # Non-fatal
+
+
 async def _handle_order_created(
     store_id: UUID,
     payload: dict,
     risk_repo: RiskAssessmentRepository,
     settings_repo: ShopifyAppSettingsRepository,
     automation_repo: AutomationRepository,
+    network_repo: NetworkReputationRepository,
 ) -> dict:
     """Score a new order for risk and apply automation rules.
 
@@ -140,7 +270,21 @@ async def _handle_order_created(
         or None
     )
 
-    # ── 1. Fast score (synchronous, <200ms) ─────────────────────────────────
+    # ── 1. Network reputation lookup + write ────────────────────────────────
+    phone_hash = _extract_phone_hash(payload)
+
+    # Read BEFORE write so the current order doesn't inflate the score
+    network_score, network_label = await _lookup_network_score(phone_hash, network_repo)
+
+    # Write the "order" event to network reputation
+    await _write_network_event(
+        phone_hash=phone_hash,
+        store_id=store_id,
+        event_type="order",
+        network_repo=network_repo,
+    )
+
+    # ── 2. Fast score (synchronous, <200ms) ─────────────────────────────────
     # Get store rolling average BEFORE updating it so this order is scored
     # against the *previous* average.
     avg_order_cents = await _get_and_update_store_avg(store_id, total_cents)
@@ -148,13 +292,11 @@ async def _handle_order_created(
     fast_result = score_order_fast(
         total_cents=total_cents,
         avg_order_cents=avg_order_cents,
-        # Phase 3 will supply the real network score from the hashed phone lookup.
-        # For now every buyer is "new_to_network" at the elevated baseline (55).
-        network_score=55,
-        network_label="new_to_network",
+        network_score=network_score,
+        network_label=network_label,
     )
 
-    # ── 2. Persist preliminary assessment ───────────────────────────────────
+    # ── 3. Persist preliminary assessment ───────────────────────────────────
     model = await risk_repo.create(
         store_id=store_id,
         order_id=order_id,
@@ -175,7 +317,7 @@ async def _handle_order_created(
         ],
     )
 
-    # ── 3. Enqueue full 5-factor Celery task (async, <10s) ──────────────────
+    # ── 4. Enqueue full 5-factor Celery task (async, <10s) ──────────────────
     try:
         compute_full_risk_score.delay(
             assessment_id=str(model.id),
@@ -196,21 +338,26 @@ async def _handle_order_created(
             exc,
         )
 
-    # ── 4. Apply threshold-based auto-action on the preliminary score ────────
+    # ── 5. Apply threshold-based auto-action on the preliminary score ────────
+    # SAFETY: auto-cancel must ONLY fire on score_type="final" (Option A).
+    # Auto-cancelling on a preliminary score that later resolves to low risk
+    # destroys legitimate orders.  Auto-approve and auto-hold are safe on
+    # preliminary because they are reversible.
     action_taken = None
     if settings.cod_risk_scoring_enabled:
         score = fast_result.risk_score
         if score <= settings.auto_approve_threshold:
             action_taken = "auto_approved"
         elif score >= settings.auto_cancel_threshold:
-            action_taken = "auto_cancelled"
+            # DO NOT auto-cancel on preliminary — defer to Celery final score
+            action_taken = None
         elif score >= settings.auto_hold_threshold:
             action_taken = "held_for_review"
 
         if action_taken:
             await risk_repo.update_action(model.id, action_taken)
 
-    # ── 5. Run automation rules ──────────────────────────────────────────────
+    # ── 6. Run automation rules ──────────────────────────────────────────────
     rules = await automation_repo.list_rules(store_id)
     for rule in rules:
         if not rule.is_active:
@@ -324,10 +471,24 @@ async def process_webhook(
             risk_repo=risk_repo,
             settings_repo=settings_repo,
             automation_repo=automation_repo,
+            network_repo=network_repo,
         )
     elif topic in ("orders/cancelled", "orders/fulfilled", "refunds/create"):
-        # Network reputation events — placeholder until Phase 3
-        result = {"acknowledged": True, "topic": topic}
+        # Network reputation write path — record cancellation/delivery/refund
+        phone_hash = _extract_phone_hash(body.payload)
+        event_map = {
+            "orders/cancelled": "rto",
+            "orders/fulfilled": "delivery",
+            "refunds/create": "refund",
+        }
+        event_type = event_map[topic]
+        await _write_network_event(
+            phone_hash=phone_hash,
+            store_id=store_id,
+            event_type=event_type,
+            network_repo=network_repo,
+        )
+        result = {"acknowledged": True, "topic": topic, "event_recorded": event_type}
     elif topic in ("orders/paid", "orders/partially_paid", "payment_failed"):
         result = await _handle_payment_event(
             store_id=store_id,

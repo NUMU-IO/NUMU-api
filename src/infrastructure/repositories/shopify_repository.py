@@ -629,6 +629,29 @@ class NetworkReputationRepository:
             .values(contributing_store_count=count)
         )
 
+    async def recompute_cached_score(self, phone_hash: str) -> None:
+        """Recompute and persist the cached network_risk_score and confidence_level."""
+        from src.application.use_cases.shopify.risk_scoring_engine import (
+            compute_network_score,
+        )
+
+        rep = await self.get_by_phone_hash(phone_hash)
+        if rep is None:
+            return
+
+        score, confidence, _label = compute_network_score(
+            total_orders=rep.total_network_orders,
+            total_rtos=rep.total_network_rtos,
+            total_deliveries=rep.total_successful_deliveries,
+            total_refunds=rep.total_refunds,
+            contributing_store_count=rep.contributing_store_count,
+        )
+        await self.session.execute(
+            update(NetworkReputationModel)
+            .where(NetworkReputationModel.phone_hash == phone_hash)
+            .values(network_risk_score=score, confidence_level=confidence)
+        )
+
 
 # ---------------------------------------------------------------------------
 # PaymentLinkSessionRepository

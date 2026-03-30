@@ -82,13 +82,49 @@ def compute_full_risk_score(
     async def _run() -> dict:
         from datetime import datetime
 
-        from sqlalchemy import text, update
+        from sqlalchemy import select, text, update
 
-        from src.application.use_cases.shopify.risk_scoring_engine import score_order
+        from src.application.use_cases.shopify.phone_hash import normalize_and_hash
+        from src.application.use_cases.shopify.risk_scoring_engine import (
+            compute_network_score,
+            score_order,
+        )
+        from src.config.settings import get_settings
         from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.database.models.tenant.network_reputation import (
+            NetworkReputationModel,
+        )
         from src.infrastructure.database.models.tenant.risk_assessment import (
             RiskAssessmentModel,
         )
+        from src.infrastructure.database.models.tenant.shopify_app_settings import (
+            ShopifyAppSettingsModel,
+        )
+
+        # Look up network reputation for this phone number
+        net_score = 55
+        net_label = "new_to_network"
+        if phone:
+            salt = get_settings().platform_secret_salt
+            if salt:
+                phone_hash = normalize_and_hash(phone, salt)
+                if phone_hash:
+                    async with AsyncSessionLocal() as lookup_session:
+                        await lookup_session.execute(text("SET search_path TO public"))
+                        result = await lookup_session.execute(
+                            select(NetworkReputationModel).where(
+                                NetworkReputationModel.phone_hash == phone_hash
+                            )
+                        )
+                        rep = result.scalar_one_or_none()
+                        if rep is not None:
+                            net_score, _conf, net_label = compute_network_score(
+                                total_orders=rep.total_network_orders,
+                                total_rtos=rep.total_network_rtos,
+                                total_deliveries=rep.total_successful_deliveries,
+                                total_refunds=rep.total_refunds,
+                                contributing_store_count=rep.contributing_store_count,
+                            )
 
         full_result = score_order(
             total_cents=total_cents,
@@ -98,6 +134,8 @@ def compute_full_risk_score(
             address=address,
             phone=phone,
             avg_order_cents=avg_order_cents,
+            network_score=net_score,
+            network_label=net_label,
         )
 
         factors_json = [
@@ -124,6 +162,35 @@ def compute_full_risk_score(
                     scored_at=datetime.now(UTC),
                 )
             )
+
+            # Auto-cancel safety gate: now that score_type="final", apply
+            # the auto-cancel threshold if the score warrants it.
+            # Auto-cancel is deliberately deferred from the preliminary
+            # score to avoid destroying legitimate orders.
+            sid = UUID(store_id)
+            settings_row = await session.execute(
+                select(ShopifyAppSettingsModel).where(
+                    ShopifyAppSettingsModel.store_id == sid
+                )
+            )
+            settings = settings_row.scalar_one_or_none()
+            if (
+                settings
+                and settings.cod_risk_scoring_enabled
+                and full_result.risk_score >= settings.auto_cancel_threshold
+            ):
+                await session.execute(
+                    update(RiskAssessmentModel)
+                    .where(RiskAssessmentModel.id == UUID(assessment_id))
+                    .values(action_taken="auto_cancelled")
+                )
+                logger.info(
+                    "Auto-cancel applied on final score: assessment=%s score=%d threshold=%d",
+                    assessment_id,
+                    full_result.risk_score,
+                    settings.auto_cancel_threshold,
+                )
+
             await session.commit()
 
         logger.info(
