@@ -90,3 +90,23 @@ def normalize_and_hash(phone: str, salt: str) -> str | None:
     if e164 is None:
         return None
     return hash_phone(e164, salt)
+
+
+def normalize_and_hash_dual(
+    phone: str, salt: str, old_salt: str | None = None
+) -> tuple[str | None, str | None]:
+    """Hash with current salt, and optionally with old salt for rotation.
+
+    During salt rotation, callers should write events under BOTH hashes
+    to maintain continuity.  Once the rotation window closes, old_salt
+    lookups can be dropped.
+
+    Returns ``(current_hash, old_hash)`` — old_hash is ``None`` if
+    ``old_salt`` is not provided.
+    """
+    e164 = normalize_phone_e164(phone)
+    if e164 is None:
+        return None, None
+    current = hash_phone(e164, salt)
+    old = hash_phone(e164, old_salt) if old_salt else None
+    return current, old

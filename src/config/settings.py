@@ -280,6 +280,15 @@ class Settings(BaseSettings):
             "PLATFORM_SECRET_SALT",
         ),
     )
+    # Previous salt for rotation — set this to the OLD salt value when
+    # rotating, so lookups check both hashes during the transition window.
+    platform_secret_salt_old: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "platform_secret_salt_old",
+            "PLATFORM_SECRET_SALT_OLD",
+        ),
+    )
 
     # =========================================================================
     # Egyptian Market Integrations

@@ -29,9 +29,10 @@ _API_VERSION = "2024-10"
 
 
 class _TokenBucket:
-    """Simple async token-bucket rate limiter.
+    """Async token-bucket rate limiter with ceiling and last-access tracking.
 
     Allows ``burst`` immediate requests then refills at ``rate`` tokens/second.
+    Tokens are capped at ``burst`` (never accumulate beyond it).
     """
 
     def __init__(self, rate: float = 1.0, burst: int = 2) -> None:
@@ -39,14 +40,21 @@ class _TokenBucket:
         self._burst = burst
         self._tokens = float(burst)
         self._last_refill = time.monotonic()
+        self._last_access = time.monotonic()
         self._lock = asyncio.Lock()
+
+    @property
+    def last_access(self) -> float:
+        return self._last_access
 
     async def acquire(self) -> None:
         async with self._lock:
             now = time.monotonic()
             elapsed = now - self._last_refill
+            # Cap tokens at burst ceiling — never accumulate infinitely
             self._tokens = min(self._burst, self._tokens + elapsed * self._rate)
             self._last_refill = now
+            self._last_access = now
 
             if self._tokens >= 1.0:
                 self._tokens -= 1.0
@@ -61,9 +69,23 @@ class _TokenBucket:
 
 # Per-shop rate limiters (keyed by shop_domain)
 _rate_limiters: dict[str, _TokenBucket] = {}
+_LIMITER_TTL_SECONDS = 3600  # Evict after 1 hour of inactivity
+_MAX_LIMITERS = 1000  # Hard cap on tracked shops
 
 
 def _get_limiter(shop_domain: str) -> _TokenBucket:
+    now = time.monotonic()
+
+    # Lazy cleanup: evict stale entries when we exceed the cap
+    if len(_rate_limiters) >= _MAX_LIMITERS:
+        stale = [
+            k
+            for k, v in _rate_limiters.items()
+            if now - v.last_access > _LIMITER_TTL_SECONDS
+        ]
+        for k in stale:
+            del _rate_limiters[k]
+
     if shop_domain not in _rate_limiters:
         _rate_limiters[shop_domain] = _TokenBucket(rate=1.0, burst=2)
     return _rate_limiters[shop_domain]

@@ -35,6 +35,7 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.fraud_tasks",
         "src.infrastructure.messaging.tasks.risk_scoring_tasks",
         "src.infrastructure.messaging.tasks.whatsapp_nudge_task",
+        "src.infrastructure.messaging.tasks.trust_network_maintenance",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
         "src.infrastructure.messaging.tasks.social_tasks",
@@ -91,5 +92,16 @@ celery_app.conf.beat_schedule = {
     "daily-health-score-calculation": {
         "task": "tasks.calculate_health_scores",
         "schedule": crontab(hour=4, minute=0),  # Daily at 4 AM UTC
+    },
+    # Trust Network maintenance
+    "retry-stuck-preliminary-scores": {
+        "task": "tasks.retry_stuck_preliminary_scores",
+        "schedule": 300.0,  # Every 5 minutes
+        "kwargs": {"max_age_minutes": 5, "batch_size": 50},
+    },
+    "cleanup-expired-payment-links": {
+        "task": "tasks.cleanup_expired_payment_links",
+        "schedule": crontab(hour=4, minute=0),  # Daily at 04:00 UTC
+        "kwargs": {"expired_hours": 48},
     },
 }

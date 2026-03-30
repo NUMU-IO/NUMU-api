@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query
 
 from src.api.dependencies.shopify import (
+    get_payment_link_session_repo,
     get_payment_transaction_repo,
     get_risk_assessment_repo,
     verify_internal_key,
@@ -15,6 +16,7 @@ from src.api.dependencies.shopify import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.shopify import DashboardOverviewResponse
 from src.infrastructure.repositories.shopify_repository import (
+    PaymentLinkSessionRepository,
     PaymentTransactionRepository,
     RiskAssessmentRepository,
 )
@@ -34,11 +36,14 @@ async def dashboard_overview(
     pt_repo: Annotated[
         PaymentTransactionRepository, Depends(get_payment_transaction_repo)
     ],
+    pls_repo: Annotated[
+        PaymentLinkSessionRepository, Depends(get_payment_link_session_repo)
+    ],
     days: int = Query(30, ge=1, le=365),
 ):
     """Aggregate dashboard stats for the Shopify app home screen."""
-    # High-risk orders count
-    high_risk_count = await risk_repo.count_high_risk(store_id, days=days)
+    # Risk metrics via SQL aggregation (no in-memory loading)
+    risk_stats = await risk_repo.aggregate_dashboard(store_id, days=days)
 
     # Payment channel aggregates for totals
     channels = await pt_repo.aggregate_channels(store_id, days=days)
@@ -62,28 +67,22 @@ async def dashboard_overview(
 
     cod_success_rate = round((cod_success / cod_total * 100) if cod_total else 0.0, 1)
 
-    # Revenue protected = sum of high-risk orders that were cancelled
-    risk_orders = await risk_repo.list_by_store(store_id, limit=500)
-    revenue_protected = sum(
-        r.total_cents
-        for r in risk_orders
-        if r.action_taken in ("cancel", "hold") and r.risk_score >= 60
-    )
-    payment_recovery = sum(
-        r.total_cents
-        for r in risk_orders
-        if r.action_taken == "auto_approve" and r.risk_score >= 30
-    )
+    # COD-to-Prepaid conversion metrics
+    conversion = await pls_repo.aggregate_conversions(store_id, days=days)
 
     return SuccessResponse(
         data=DashboardOverviewResponse(
             cod_success_rate=cod_success_rate,
-            revenue_protected_cents=revenue_protected,
-            high_risk_orders_count=high_risk_count,
-            payment_recovery_cents=payment_recovery,
-            total_orders=total_orders,
+            revenue_protected_cents=risk_stats["revenue_protected_cents"],
+            high_risk_orders_count=risk_stats["high_risk_orders_count"],
+            payment_recovery_cents=risk_stats["payment_recovery_cents"],
+            total_orders=total_orders or risk_stats["total_orders"],
             total_cod_orders=total_cod_orders,
             total_revenue_cents=total_revenue,
             period_days=days,
+            conversion_links_sent=conversion["links_sent"],
+            conversion_links_completed=conversion["links_completed"],
+            conversion_rate=conversion["conversion_rate"],
+            conversion_revenue_cents=conversion["conversion_revenue_cents"],
         ),
     )

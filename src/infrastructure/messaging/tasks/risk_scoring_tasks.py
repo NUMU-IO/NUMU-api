@@ -227,16 +227,40 @@ def compute_full_risk_score(
             )
 
             # ── 5. Threshold-based auto-cancel (final score only) ──────────
+            # Also enforces the 30-day installation safety gate.
             settings_row = await session.execute(
                 select(ShopifyAppSettingsModel).where(
                     ShopifyAppSettingsModel.store_id == sid
                 )
             )
             settings = settings_row.scalar_one_or_none()
+
+            # Check 30-day installation gate before auto-cancelling
+            cancel_allowed = True
+            install_row = await session.execute(
+                select(ShopifyInstallationModel).where(
+                    ShopifyInstallationModel.store_id == sid,
+                    ShopifyInstallationModel.is_active.is_(True),
+                )
+            )
+            installation = install_row.scalar_one_or_none()
+            if installation and installation.installed_at:
+                installed = installation.installed_at
+                if not installed.tzinfo:
+                    installed = installed.replace(tzinfo=UTC)
+                days_since = (datetime.now(UTC) - installed).days
+                if days_since < 30:
+                    cancel_allowed = False
+                    logger.info(
+                        "Auto-cancel blocked: installation %d days old (requires 30+)",
+                        days_since,
+                    )
+
             if (
                 settings
                 and settings.cod_risk_scoring_enabled
                 and full_result.risk_score >= settings.auto_cancel_threshold
+                and cancel_allowed
             ):
                 await session.execute(
                     update(RiskAssessmentModel)
