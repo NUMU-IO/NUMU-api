@@ -29,6 +29,7 @@ class MessageType(StrEnum):
     WELCOME = "welcome"
     PASSWORD_RESET = "password_reset"
     CUSTOM = "custom"
+    ABANDONED_CART = "abandoned_cart"
 
 
 class MessageStatus(StrEnum):
@@ -216,6 +217,38 @@ EGYPTIAN_TEMPLATES = {
                 {
                     "type": "body",
                     "parameters": ["customer_name", "amount", "order_number"],
+                },
+            ],
+        ),
+    },
+    MessageType.ABANDONED_CART: {
+        "en": MessageTemplate(
+            type=MessageType.ABANDONED_CART,
+            name="abandoned_cart_en",
+            language="en",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "cart_value",
+                        "store_name",
+                    ],
+                },
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.ABANDONED_CART,
+            name="abandoned_cart_ar",
+            language="ar",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "cart_value",
+                        "store_name",
+                    ],
                 },
             ],
         ),

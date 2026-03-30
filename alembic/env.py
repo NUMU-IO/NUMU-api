@@ -31,6 +31,8 @@ from src.infrastructure.database.models import (  # noqa: F401
     RiskAssessmentModel,
     ShopifyAppSettingsModel,
     ShopifyInstallationModel,
+    SocialConnectionModel,
+    SocialPostModel,
     StoreModel,
     StoreOnboardingModel,
     TenantModel,

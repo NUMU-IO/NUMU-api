@@ -36,6 +36,9 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.risk_scoring_tasks",
         "src.infrastructure.messaging.tasks.whatsapp_nudge_task",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
+        "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
+        "src.infrastructure.messaging.tasks.health_score_tasks",
+        "src.infrastructure.messaging.tasks.social_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -73,6 +76,22 @@ celery_app.conf.beat_schedule = {
     "daily-payment-reconciliation": {
         "task": "tasks.daily_payment_reconciliation",
         "schedule": crontab(hour=2, minute=0),  # Every day at 02:00 UTC
+    },
+    "sync-shipment-statuses": {
+        "task": "tasks.sync_shipment_statuses",
+        "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    "daily-cod-reconciliation": {
+        "task": "tasks.daily_cod_reconciliation",
+        "schedule": crontab(hour=3, minute=30),  # 03:30 UTC (after payment recon)
+    },
+    "detect-abandoned-carts": {
+        "task": "tasks.detect_abandoned_carts",
+        "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    "daily-health-score-calculation": {
+        "task": "tasks.calculate_health_scores",
+        "schedule": crontab(hour=4, minute=0),  # Daily at 4 AM UTC
     },
     # Trust Network maintenance
     "retry-stuck-preliminary-scores": {

@@ -18,6 +18,9 @@ from src.infrastructure.events.handlers.activity_log_handler import handle_activ
 from src.infrastructure.events.handlers.email_notification_handler import (
     handle_email_notification,
 )
+from src.infrastructure.events.handlers.shipment_handler import (
+    handle_order_status_for_shipment,
+)
 from src.infrastructure.events.handlers.webhook_handler import (
     handle_webhook_order_created,
     handle_webhook_order_paid,
@@ -47,6 +50,9 @@ def create_event_bus() -> EventBus:
     bus.subscribe(OrderStatusChangedEvent, handle_whatsapp_notification)
     bus.subscribe(OrderStatusChangedEvent, handle_activity_log)
     bus.subscribe(OrderStatusChangedEvent, handle_webhook_order_status_changed)
+
+    # Auto-create shipment on order confirmation
+    bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_shipment)
 
     # Order lifecycle webhooks
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)

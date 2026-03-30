@@ -72,3 +72,7 @@ class NetworkReputationModel(Base, UUIDMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    anonymized_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )

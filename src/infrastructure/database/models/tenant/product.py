@@ -74,6 +74,10 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         ARRAY(String), nullable=True, default=list
     )
 
+    # SEO
+    seo_title: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
     # Additional data
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
