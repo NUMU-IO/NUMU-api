@@ -162,7 +162,7 @@ class AutomationRuleUpdateRequest(BaseModel):
 
 
 class CreateFromTemplateRequest(BaseModel):
-    template: str = Field(..., max_length=100)
+    template_id: str = Field(..., max_length=100)
 
 
 class AutomationLogResponse(BaseModel):

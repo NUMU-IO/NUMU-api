@@ -82,8 +82,14 @@ def compute_full_risk_score(
     async def _run() -> dict:
         from datetime import datetime
 
+        from sqlalchemy import func as sa_func
         from sqlalchemy import select, text, update
 
+        from src.application.use_cases.shopify.automation_engine import (
+            OrderContext,
+            evaluate_rules,
+        )
+        from src.application.use_cases.shopify.execute_actions import execute_actions
         from src.application.use_cases.shopify.phone_hash import normalize_and_hash
         from src.application.use_cases.shopify.risk_scoring_engine import (
             compute_network_score,
@@ -91,6 +97,12 @@ def compute_full_risk_score(
         )
         from src.config.settings import get_settings
         from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.database.models.tenant.automation_log import (
+            AutomationLogModel,
+        )
+        from src.infrastructure.database.models.tenant.automation_rule import (
+            AutomationRuleModel,
+        )
         from src.infrastructure.database.models.tenant.network_reputation import (
             NetworkReputationModel,
         )
@@ -100,8 +112,13 @@ def compute_full_risk_score(
         from src.infrastructure.database.models.tenant.shopify_app_settings import (
             ShopifyAppSettingsModel,
         )
+        from src.infrastructure.database.models.tenant.shopify_installation import (
+            ShopifyInstallationModel,
+        )
 
-        # Look up network reputation for this phone number
+        sid = UUID(store_id)
+
+        # ── 1. Look up network reputation for this phone number ────────────
         net_score = 55
         net_label = "new_to_network"
         if phone:
@@ -126,11 +143,56 @@ def compute_full_risk_score(
                                 contributing_store_count=rep.contributing_store_count,
                             )
 
+        # ── 2. Enrich customer_cancellation_rate from store history ────────
+        enriched_cancel_rate = customer_cancellation_rate
+        async with AsyncSessionLocal() as enrich_session:
+            await enrich_session.execute(text("SET search_path TO public"))
+            # Read the current assessment to get customer_email
+            assess_row = await enrich_session.execute(
+                select(RiskAssessmentModel).where(
+                    RiskAssessmentModel.id == UUID(assessment_id)
+                )
+            )
+            assessment = assess_row.scalar_one_or_none()
+            if assessment and assessment.customer_email:
+                # Count total orders and cancellations for this customer in this store
+                total_row = await enrich_session.execute(
+                    select(sa_func.count()).where(
+                        RiskAssessmentModel.store_id == sid,
+                        RiskAssessmentModel.customer_email == assessment.customer_email,
+                    )
+                )
+                total_count = total_row.scalar_one() or 0
+
+                cancel_row = await enrich_session.execute(
+                    select(sa_func.count()).where(
+                        RiskAssessmentModel.store_id == sid,
+                        RiskAssessmentModel.customer_email == assessment.customer_email,
+                        RiskAssessmentModel.action_taken.in_([
+                            "auto_cancelled",
+                            "cancelled",
+                            "manual_cancelled",
+                        ]),
+                    )
+                )
+                cancel_count = cancel_row.scalar_one() or 0
+
+                if total_count > 0:
+                    enriched_cancel_rate = cancel_count / total_count
+                    logger.info(
+                        "Enriched cancellation rate for %s: %d/%d = %.2f",
+                        assessment.customer_email,
+                        cancel_count,
+                        total_count,
+                        enriched_cancel_rate,
+                    )
+
+        # ── 3. Compute full 5-factor score ─────────────────────────────────
         full_result = score_order(
             total_cents=total_cents,
             payment_method=payment_method,
             customer_total_orders=customer_total_orders,
-            customer_cancellation_rate=customer_cancellation_rate,
+            customer_cancellation_rate=enriched_cancel_rate,
             address=address,
             phone=phone,
             avg_order_cents=avg_order_cents,
@@ -148,6 +210,7 @@ def compute_full_risk_score(
             for f in full_result.factors
         ]
 
+        # ── 4. Persist final score ─────────────────────────────────────────
         async with AsyncSessionLocal() as session:
             await session.execute(text("SET search_path TO public"))
             await session.execute(
@@ -163,11 +226,7 @@ def compute_full_risk_score(
                 )
             )
 
-            # Auto-cancel safety gate: now that score_type="final", apply
-            # the auto-cancel threshold if the score warrants it.
-            # Auto-cancel is deliberately deferred from the preliminary
-            # score to avoid destroying legitimate orders.
-            sid = UUID(store_id)
+            # ── 5. Threshold-based auto-cancel (final score only) ──────────
             settings_row = await session.execute(
                 select(ShopifyAppSettingsModel).where(
                     ShopifyAppSettingsModel.store_id == sid
@@ -190,6 +249,115 @@ def compute_full_risk_score(
                     full_result.risk_score,
                     settings.auto_cancel_threshold,
                 )
+
+            # ── 6. Run automation rules (risk_scored trigger) ──────────────
+            rules_result = await session.execute(
+                select(AutomationRuleModel)
+                .where(
+                    AutomationRuleModel.store_id == sid,
+                    AutomationRuleModel.is_active.is_(True),
+                    AutomationRuleModel.trigger_event == "risk_scored",
+                )
+                .order_by(
+                    AutomationRuleModel.priority.desc(),
+                    AutomationRuleModel.created_at,
+                )
+            )
+            risk_scored_rules = list(rules_result.scalars().all())
+
+            if risk_scored_rules:
+                install_row = await session.execute(
+                    select(ShopifyInstallationModel).where(
+                        ShopifyInstallationModel.store_id == sid,
+                        ShopifyInstallationModel.is_active.is_(True),
+                    )
+                )
+                installation = install_row.scalar_one_or_none()
+
+                ctx = OrderContext(
+                    risk_score=full_result.risk_score,
+                    risk_level=full_result.risk_level,
+                    score_type="final",
+                    payment_method=payment_method or "unknown",
+                    total_cents=total_cents,
+                    customer_total_orders=customer_total_orders,
+                    customer_cancellation_rate=enriched_cancel_rate,
+                    installed_at=installation.installed_at if installation else None,
+                )
+                resolved = evaluate_rules(
+                    risk_scored_rules, ctx, trigger_event="risk_scored"
+                )
+
+                if resolved and installation:
+                    # Get assessment details for logging
+                    order_id_for_log = ""
+                    order_number_for_log = ""
+                    if assessment:
+                        order_id_for_log = str(assessment.shopify_order_id or "")
+                        order_number_for_log = str(assessment.order_number or "")
+
+                    action_results = await execute_actions(
+                        actions=resolved,
+                        shop_domain=installation.shopify_domain,
+                        access_token=installation.access_token_encrypted,
+                        shopify_order_id=order_id_for_log,
+                        risk_score=full_result.risk_score,
+                        risk_level=full_result.risk_level,
+                        score_type="final",
+                    )
+
+                    # Log and bump triggered count
+                    logged_rule_ids = set()
+                    for ra in resolved:
+                        if ra.source_rule_id not in logged_rule_ids:
+                            logged_rule_ids.add(ra.source_rule_id)
+                            rule_actions = [
+                                a
+                                for a in resolved
+                                if a.source_rule_id == ra.source_rule_id
+                            ]
+                            rule_results = [
+                                r
+                                for r, a in zip(action_results, resolved)
+                                if a.source_rule_id == ra.source_rule_id
+                            ]
+                            all_ok = all(r.success for r in rule_results)
+                            any_ok = any(r.success for r in rule_results)
+                            log_status = (
+                                "success"
+                                if all_ok
+                                else "partial_failure"
+                                if any_ok
+                                else "failed"
+                            )
+                            log = AutomationLogModel(
+                                store_id=sid,
+                                rule_id=ra.source_rule_id,
+                                rule_name=ra.source_rule_name,
+                                order_id=order_id_for_log or None,
+                                order_number=order_number_for_log or None,
+                                trigger_event="risk_scored",
+                                actions_executed=[
+                                    {"type": a.action_type, **a.params}
+                                    for a in rule_actions
+                                ],
+                                status=log_status,
+                            )
+                            session.add(log)
+
+                            # Bump times_triggered
+                            await session.execute(
+                                update(AutomationRuleModel)
+                                .where(
+                                    AutomationRuleModel.id == UUID(ra.source_rule_id)
+                                )
+                                .values(
+                                    times_triggered=(
+                                        AutomationRuleModel.times_triggered + 1
+                                    ),
+                                    last_triggered_at=sa_func.now(),
+                                )
+                            )
 
             await session.commit()
 

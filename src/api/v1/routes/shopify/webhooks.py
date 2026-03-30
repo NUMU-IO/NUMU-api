@@ -25,6 +25,11 @@ from src.api.dependencies.shopify import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.shopify import WebhookProcessRequest
+from src.application.use_cases.shopify.automation_engine import (
+    OrderContext,
+    evaluate_rules,
+)
+from src.application.use_cases.shopify.execute_actions import execute_actions
 from src.application.use_cases.shopify.phone_hash import normalize_and_hash
 from src.application.use_cases.shopify.risk_scoring_engine import (
     compute_network_score,
@@ -223,6 +228,7 @@ async def _handle_order_created(
     settings_repo: ShopifyAppSettingsRepository,
     automation_repo: AutomationRepository,
     network_repo: NetworkReputationRepository,
+    install_repo: ShopifyInstallationRepository,
 ) -> dict:
     """Score a new order for risk and apply automation rules.
 
@@ -340,9 +346,8 @@ async def _handle_order_created(
 
     # ── 5. Apply threshold-based auto-action on the preliminary score ────────
     # SAFETY: auto-cancel must ONLY fire on score_type="final" (Option A).
-    # Auto-cancelling on a preliminary score that later resolves to low risk
-    # destroys legitimate orders.  Auto-approve and auto-hold are safe on
-    # preliminary because they are reversible.
+    # Auto-approve and auto-hold are safe on preliminary because they are
+    # reversible.
     action_taken = None
     if settings.cod_risk_scoring_enabled:
         score = fast_result.risk_score
@@ -357,41 +362,70 @@ async def _handle_order_created(
         if action_taken:
             await risk_repo.update_action(model.id, action_taken)
 
-    # ── 6. Run automation rules ──────────────────────────────────────────────
+    # ── 6. Run automation rules (order.created trigger) ─────────────────────
+    installation = await install_repo.get_by_store_id(store_id)
+
     rules = await automation_repo.list_rules(store_id)
-    for rule in rules:
-        if not rule.is_active:
-            continue
-        if rule.trigger_event != "order.created":
-            continue
+    ctx = OrderContext(
+        risk_score=fast_result.risk_score,
+        risk_level=fast_result.risk_level,
+        score_type="preliminary",
+        payment_method=payment_method,
+        total_cents=total_cents,
+        customer_total_orders=orders_count,
+        installed_at=installation.installed_at if installation else None,
+    )
+    resolved_actions = evaluate_rules(rules, ctx, trigger_event="order.created")
 
-        conditions = rule.conditions or {}
-        match = True
-        if (
-            "payment_method" in conditions
-            and conditions["payment_method"] != payment_method
-        ):
-            match = False
-        if (
-            "amount_gte_cents" in conditions
-            and total_cents < conditions["amount_gte_cents"]
-        ):
-            match = False
-        if "min_previous_orders" in conditions:
-            if orders_count < conditions["min_previous_orders"]:
-                match = False
-
-        if match:
-            await automation_repo.create_log(
-                store_id=store_id,
-                rule_id=rule.id,
-                rule_name=rule.name,
-                order_id=order_id,
-                order_number=order_number,
-                trigger_event="order.created",
-                actions_executed=rule.actions,
-                status="executed",
-            )
+    if resolved_actions and installation:
+        action_results = await execute_actions(
+            actions=resolved_actions,
+            shop_domain=installation.shopify_domain,
+            access_token=installation.access_token_encrypted,
+            shopify_order_id=order_id,
+            risk_score=fast_result.risk_score,
+            risk_level=fast_result.risk_level,
+            score_type="preliminary",
+        )
+        # Log each triggered rule
+        logged_rule_ids = set()
+        for ra in resolved_actions:
+            if ra.source_rule_id not in logged_rule_ids:
+                logged_rule_ids.add(ra.source_rule_id)
+                rule_actions = [
+                    a for a in resolved_actions if a.source_rule_id == ra.source_rule_id
+                ]
+                rule_results = [
+                    r
+                    for r, a in zip(action_results, resolved_actions)
+                    if a.source_rule_id == ra.source_rule_id
+                ]
+                all_ok = all(r.success for r in rule_results)
+                any_ok = any(r.success for r in rule_results)
+                log_status = (
+                    "success" if all_ok else "partial_failure" if any_ok else "failed"
+                )
+                await automation_repo.create_log(
+                    store_id=store_id,
+                    rule_id=ra.source_rule_id,
+                    rule_name=ra.source_rule_name,
+                    order_id=order_id,
+                    order_number=order_number,
+                    trigger_event="order.created",
+                    actions_executed=[
+                        {"type": a.action_type, **a.params} for a in rule_actions
+                    ],
+                    status=log_status,
+                )
+        # Bump times_triggered on matched rules
+        for ra in resolved_actions:
+            await automation_repo.increment_triggered(ra.source_rule_id)
+    elif resolved_actions:
+        # Rules matched but no installation — log without executing
+        logger.warning(
+            "Automation rules matched but no active installation for store %s",
+            store_id,
+        )
 
     return {
         "risk_score": fast_result.risk_score,
@@ -472,6 +506,7 @@ async def process_webhook(
             settings_repo=settings_repo,
             automation_repo=automation_repo,
             network_repo=network_repo,
+            install_repo=install_repo,
         )
     elif topic in ("orders/cancelled", "orders/fulfilled", "refunds/create"):
         # Network reputation write path — record cancellation/delivery/refund

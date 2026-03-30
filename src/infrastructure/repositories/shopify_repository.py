@@ -449,6 +449,17 @@ class AutomationRepository:
         )
         return (result.rowcount or 0) > 0
 
+    async def increment_triggered(self, rule_id: UUID | str) -> None:
+        """Bump ``times_triggered`` and set ``last_triggered_at``."""
+        await self.session.execute(
+            update(AutomationRuleModel)
+            .where(AutomationRuleModel.id == UUID(str(rule_id)))
+            .values(
+                times_triggered=AutomationRuleModel.times_triggered + 1,
+                last_triggered_at=func.now(),
+            )
+        )
+
     # --- logs ---
 
     async def list_logs(
