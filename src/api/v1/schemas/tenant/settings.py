@@ -74,6 +74,22 @@ class KashierCredentialsResponse(BaseModel):
     last_configured: str | None = None
 
 
+class SaveFawryCredentialsRequest(BaseModel):
+    """Save Fawry gateway credentials for a store."""
+
+    merchant_code: str = Field(..., min_length=3, max_length=100)
+    security_key: str = Field(..., min_length=10, max_length=500)
+
+
+class FawryCredentialsResponse(BaseModel):
+    """Fawry credentials status (masked, never returns real keys)."""
+
+    is_configured: bool
+    merchant_code: str | None = None
+    security_key_masked: str | None = None
+    last_configured: str | None = None
+
+
 # Shipping Settings
 class ShippingCarrierStatus(BaseModel):
     """Individual shipping carrier status."""

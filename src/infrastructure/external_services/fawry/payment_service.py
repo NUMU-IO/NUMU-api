@@ -9,6 +9,7 @@ retail locations. Customers can pay using:
 API Documentation: https://developer.fawrystaging.com/
 """
 
+import base64
 import hashlib
 import logging
 from datetime import datetime, timedelta
@@ -28,6 +29,40 @@ from src.core.interfaces.services.payment_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def get_merchant_fawry_credentials(store_settings: dict) -> dict:
+    """Decrypt and return a merchant's Fawry credentials from store settings.
+
+    Returns:
+        dict with keys: merchant_code, security_key
+
+    Raises:
+        PaymentError: If credentials are not configured or decryption fails.
+    """
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    fawry_settings = (store_settings or {}).get("payment", {}).get("fawry", {})
+
+    if not fawry_settings.get("encrypted_credentials"):
+        raise PaymentError(
+            "Fawry credentials not configured for this store. "
+            "Please configure payment gateway in store settings."
+        )
+
+    secrets_manager = get_secrets_manager()
+    key_id = fawry_settings["encryption_key_id"]
+    encrypted = base64.b64decode(fawry_settings["encrypted_credentials"])
+
+    try:
+        return await secrets_manager.decrypt(encrypted, key_id)
+    except Exception as e:
+        logger.error(f"Failed to decrypt Fawry credentials: {e}")
+        raise PaymentError(
+            "Failed to read payment credentials. Please re-save them."
+        ) from e
 
 
 class FawryPaymentService(IPaymentService):
