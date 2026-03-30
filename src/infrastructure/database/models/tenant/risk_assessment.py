@@ -71,6 +71,11 @@ class RiskAssessmentModel(Base, UUIDMixin, TimestampMixin):
         String(20),
         nullable=False,
     )
+    score_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="'preliminary'",
+    )
     suggested_action: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
@@ -91,4 +96,8 @@ class RiskAssessmentModel(Base, UUIDMixin, TimestampMixin):
         JSONB,
         nullable=False,
         server_default="'[]'",
+    )
+    scored_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )

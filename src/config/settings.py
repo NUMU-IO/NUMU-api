@@ -270,6 +270,17 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Secret salt for HMAC-SHA256 hashing of phone numbers in the
+    # network_reputation table.  Must be a 256-bit (32-byte) hex string.
+    # NEVER store in code or database — env-only.
+    platform_secret_salt: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "platform_secret_salt",
+            "PLATFORM_SECRET_SALT",
+        ),
+    )
+
     # =========================================================================
     # Egyptian Market Integrations
     # =========================================================================

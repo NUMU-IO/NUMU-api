@@ -24,7 +24,16 @@ from src.infrastructure.database.models.tenant.coupon import CouponModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
+from src.infrastructure.database.models.tenant.network_contribution_log import (
+    NetworkContributionLogModel,
+)
+from src.infrastructure.database.models.tenant.network_reputation import (
+    NetworkReputationModel,
+)
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.payment_link_session import (
+    PaymentLinkSessionModel,
+)
 from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
 )
@@ -60,7 +69,10 @@ __all__ = [
     "CustomerModel",
     "InvoiceModel",
     "MessageLogModel",
+    "NetworkContributionLogModel",
+    "NetworkReputationModel",
     "OrderModel",
+    "PaymentLinkSessionModel",
     "PaymentTransactionModel",
     "RiskAssessmentModel",
     "ShopifyAppSettingsModel",

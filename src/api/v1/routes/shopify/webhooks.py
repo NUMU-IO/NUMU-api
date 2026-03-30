@@ -1,4 +1,10 @@
-"""Shopify webhook ingestion endpoint."""
+"""Shopify webhook ingestion endpoint.
+
+Shopify HMAC-SHA256 verification is handled by the Remix frontend app
+(``authenticate.webhook(request)``).  The backend is protected by the
+``X-Internal-Key`` header (constant-time comparison in
+``verify_internal_key``).
+"""
 
 from __future__ import annotations
 
@@ -10,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.dependencies.shopify import (
     get_automation_repo,
+    get_network_reputation_repo,
     get_payment_transaction_repo,
     get_risk_assessment_repo,
     get_shopify_installation_repo,
@@ -21,6 +28,7 @@ from src.api.v1.schemas.shopify import WebhookProcessRequest
 from src.application.use_cases.shopify.risk_scoring_engine import score_order
 from src.infrastructure.repositories.shopify_repository import (
     AutomationRepository,
+    NetworkReputationRepository,
     PaymentTransactionRepository,
     RiskAssessmentRepository,
     ShopifyAppSettingsRepository,
@@ -236,6 +244,9 @@ async def process_webhook(
     settings_repo: Annotated[
         ShopifyAppSettingsRepository, Depends(get_shopify_settings_repo)
     ],
+    network_repo: Annotated[
+        NetworkReputationRepository, Depends(get_network_reputation_repo)
+    ],
 ):
     store_id = await _resolve_store_id(body.shop_domain, install_repo)
     topic = body.topic
@@ -252,6 +263,9 @@ async def process_webhook(
             settings_repo=settings_repo,
             automation_repo=automation_repo,
         )
+    elif topic in ("orders/cancelled", "orders/fulfilled", "refunds/create"):
+        # Network reputation events — placeholder until Phase 3
+        result = {"acknowledged": True, "topic": topic}
     elif topic in ("orders/paid", "orders/partially_paid", "payment_failed"):
         result = await _handle_payment_event(
             store_id=store_id,
@@ -262,8 +276,15 @@ async def process_webhook(
     elif topic == "app/uninstalled":
         await install_repo.mark_uninstalled(body.shop_domain)
         result = {"uninstalled": True}
+    elif topic == "app/scopes_update":
+        # Mandatory Shopify webhook — update stored scopes
+        installation = await install_repo.get_by_domain(body.shop_domain)
+        if installation:
+            installation.scopes = body.payload.get("scopes", [])
+        result = {"scopes_updated": True}
     elif topic == "shop/redact":
         # GDPR: Merchant uninstalled 48 h ago — delete ALL store data
+        # Network contribution rollback is handled inside delete_store_data
         counts = await install_repo.delete_store_data(store_id)
         logger.info("GDPR shop/redact for %s: deleted %s", body.shop_domain, counts)
         result = {"redacted": True, "deleted": counts}

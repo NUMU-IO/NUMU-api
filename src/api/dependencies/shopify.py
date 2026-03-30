@@ -15,6 +15,8 @@ from src.api.dependencies.database import get_db
 from src.config.settings import get_settings
 from src.infrastructure.repositories.shopify_repository import (
     AutomationRepository,
+    NetworkReputationRepository,
+    PaymentLinkSessionRepository,
     PaymentTransactionRepository,
     RiskAssessmentRepository,
     ShopifyAppSettingsRepository,
@@ -73,3 +75,15 @@ def get_shopify_settings_repo(
     session: AsyncSession = Depends(get_db),
 ) -> ShopifyAppSettingsRepository:
     return ShopifyAppSettingsRepository(session)
+
+
+def get_network_reputation_repo(
+    session: AsyncSession = Depends(get_db),
+) -> NetworkReputationRepository:
+    return NetworkReputationRepository(session)
+
+
+def get_payment_link_session_repo(
+    session: AsyncSession = Depends(get_db),
+) -> PaymentLinkSessionRepository:
+    return PaymentLinkSessionRepository(session)

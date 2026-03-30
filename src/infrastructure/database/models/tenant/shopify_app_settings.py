@@ -2,7 +2,7 @@
 
 from uuid import UUID as PyUUID
 
-from sqlalchemy import Boolean, Integer
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,6 +53,15 @@ class ShopifyAppSettingsModel(Base, UUIDMixin, TimestampMixin):
         server_default="false",
     )
     whatsapp_connected: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
+    whatsapp_template_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    whatsapp_nudge_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         server_default="false",
