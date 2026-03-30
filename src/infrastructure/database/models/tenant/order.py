@@ -94,6 +94,15 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Extra Data
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
+    # UTM attribution tracking
+    utm_source: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, index=True
+    )
+    utm_medium: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    utm_campaign: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, index=True
+    )
+
     # Optimistic locking — auto-incremented by SQLAlchemy on every UPDATE
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"

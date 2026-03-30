@@ -45,9 +45,10 @@ class Settings(BaseSettings):
     postgres_password: str = "postgres"
     postgres_db: str = "numu"
 
-    # Connection pool
-    db_pool_size: int = 10  # Persistent connections maintained in pool
-    db_max_overflow: int = 20  # Extra connections allowed beyond pool_size
+    # Connection pool (total max = pool_size + max_overflow PER PROCESS)
+    # API + Celery + admin each have their own pool — keep under Postgres max_connections
+    db_pool_size: int = 5  # Persistent connections maintained in pool
+    db_max_overflow: int = 10  # Extra connections allowed beyond pool_size
     db_pool_timeout: int = 30  # Seconds to wait for a connection before error
     db_pool_recycle: int = 1800  # Recycle connections older than 30 minutes
 
@@ -216,6 +217,11 @@ class Settings(BaseSettings):
     tap_secret_key: str | None = None
     tap_publishable_key: str | None = None
 
+    # Meta (Facebook/Instagram) Graph API
+    meta_app_id: str | None = None
+    meta_app_secret: str | None = None
+    meta_graph_api_version: str = "v19.0"
+
     # OpenAI
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
@@ -314,6 +320,18 @@ class Settings(BaseSettings):
     bosta_business_id: str | None = None
     bosta_base_url: str = "https://app.bosta.co/api/v2"
     bosta_webhook_secret: str | None = None
+
+    # Mylerz Shipping (Egyptian Courier)
+    mylerz_api_key: str | None = None
+    mylerz_merchant_id: str | None = None
+    mylerz_base_url: str = "https://api.mylerz.com/api"
+    mylerz_webhook_secret: str | None = None
+
+    # J&T Express Shipping (Egyptian Courier)
+    jt_api_key: str | None = None
+    jt_customer_code: str | None = None
+    jt_base_url: str = "https://openapi.jtexpress-eg.com/api"
+    jt_webhook_secret: str | None = None
 
     # WhatsApp Business API
     whatsapp_access_token: str | None = None

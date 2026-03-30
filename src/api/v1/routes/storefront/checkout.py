@@ -132,6 +132,19 @@ async def checkout(
             detail="Please verify your email address before placing orders.",
         )
 
+    # Require OTP verification for COD orders
+    is_cod = not request.payment_method or request.payment_method == "cod"
+    if is_cod and _cache_service:
+        from src.api.v1.routes.storefront.otp import _otp_verified_key
+
+        verified_key = _otp_verified_key(store_id, current_customer.id)
+        is_verified = await _cache_service.exists(verified_key)
+        if not is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="يرجى تأكيد رقم الموبايل أولاً لإتمام طلب الدفع عند الاستلام.",
+            )
+
     # Verify the customer belongs to this store
     if current_customer.store_id != store_id:
         raise HTTPException(
@@ -335,6 +348,9 @@ async def checkout(
         shipping_method=request.shipping_method,
         customer_notes=request.customer_notes,
         metadata={"ip_address": client_ip} if client_ip else {},
+        utm_source=request.utm_source,
+        utm_medium=request.utm_medium,
+        utm_campaign=request.utm_campaign,
     )
 
     created_order = await order_repo.create(order)
@@ -587,7 +603,6 @@ async def checkout(
     # Only generate invoice immediately for COD orders (paid on delivery).
     # For online payments (paymob, kashier), invoice is generated after
     # payment confirmation via webhook.
-    is_cod = not request.payment_method or request.payment_method == "cod"
     if customer_email and is_cod:
         try:
             import asyncio
@@ -815,9 +830,16 @@ async def checkout(
         logger.warning(f"Failed to dispatch fraud check task: {e}")
 
     # Clear the customer's cart only after the entire checkout succeeds
-    from src.api.v1.routes.storefront.cart import _carts
+    from src.infrastructure.repositories.cart_repository import RedisCartRepository
 
-    _carts.pop(current_customer.id, None)
+    _checkout_cart_repo = RedisCartRepository()
+    await _checkout_cart_repo.delete_by_customer_id(current_customer.id, store_id)
+
+    # Clear OTP verified flag (one-time use per checkout)
+    if is_cod and _cache_service:
+        from src.api.v1.routes.storefront.otp import _otp_verified_key
+
+        await _cache_service.delete(_otp_verified_key(store_id, current_customer.id))
 
     checkout_response = CheckoutResponse(
         order_id=str(created_order.id),

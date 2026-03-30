@@ -282,3 +282,74 @@ class KashierPaymentService(IPaymentService):
 
         logger.warning("kashier_webhook_signature_mismatch")
         return None
+
+    async def charge_saved_token(
+        self,
+        card_token: str,
+        amount: int,
+        currency: str,
+        order_id: str,
+    ) -> PaymentResult:
+        """Charge a saved card token for one-click upsell payments.
+
+        Args:
+            card_token: The cardDataToken from a previous payment
+            amount: Amount in cents
+            currency: Currency code (EGP)
+            order_id: Our internal order ID for reference
+        """
+        if not self._api_key:
+            return PaymentResult(
+                success=False, error_message="Kashier API key not configured"
+            )
+
+        amount_str = f"{amount / 100:.2f}"
+        api_base = self._get_api_base()
+
+        charge_payload = {
+            "merchantId": self._mid,
+            "orderId": f"upsell-{order_id}",
+            "amount": amount_str,
+            "currency": currency or self._currency,
+            "cardToken": card_token,
+            "type": "one-time",
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": self._api_key,
+        }
+        if self._secret_key:
+            headers["Authorization"] = self._secret_key
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{api_base}/v3/payment/charge",
+                    json=charge_payload,
+                    headers=headers,
+                    timeout=30.0,
+                )
+
+                if response.status_code not in (200, 201):
+                    logger.error(f"Kashier token charge failed: {response.text}")
+                    return PaymentResult(
+                        success=False,
+                        error_message=f"Token charge failed: {response.text}",
+                    )
+
+                data = response.json()
+                payment_status = (
+                    data.get("status") or data.get("paymentStatus") or ""
+                ).upper()
+
+                return PaymentResult(
+                    success=payment_status == "SUCCESS",
+                    payment_id=data.get("transactionId") or data.get("orderId"),
+                    error_message=None
+                    if payment_status == "SUCCESS"
+                    else f"Status: {payment_status}",
+                )
+        except Exception as e:
+            logger.error(f"Kashier token charge exception: {e}")
+            return PaymentResult(success=False, error_message=str(e))

@@ -16,6 +16,7 @@ from src.api.dependencies import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
+    BostaCredentialsResponse,
     CreateShippingZoneRequest,
     CustomizationFooter,
     CustomizationHeader,
@@ -35,6 +36,7 @@ from src.api.v1.schemas.tenant.settings import (
     PaymentMethodStatus,
     PaymentSettingsResponse,
     PaymobCredentialsResponse,
+    SaveBostaCredentialsRequest,
     SaveKashierCredentialsRequest,
     SavePaymobCredentialsRequest,
     ShippingCarrierStatus,
@@ -882,6 +884,160 @@ async def delete_shipping_zone(
     await store_repo.update(store)
 
     return None
+
+
+# ============ Bosta Shipping Credentials ============
+
+
+@router.put(
+    "/shipping/bosta/credentials",
+    response_model=SuccessResponse[BostaCredentialsResponse],
+    summary="Save Bosta credentials",
+    operation_id="save_bosta_credentials",
+)
+async def save_bosta_credentials(
+    request: SaveBostaCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save or update Bosta shipping credentials for the store.
+
+    Credentials are encrypted at rest using AES-128 (Fernet).
+    """
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = await secrets.get_current_key_id()
+
+    credential_data = {
+        "api_key": request.api_key,
+        "business_id": request.business_id,
+        "webhook_secret": request.webhook_secret,
+    }
+
+    encrypted = await secrets.encrypt(credential_data, key_id)
+    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
+
+    settings = store.settings or {}
+    shipping_settings = settings.get("shipping", _get_default_shipping_settings())
+
+    shipping_settings["bosta"] = {
+        "enabled": True,
+        "is_configured": True,
+        "last_configured": datetime.now(UTC).isoformat(),
+        "encrypted_credentials": encrypted_b64,
+        "encryption_key_id": key_id,
+        "auto_create_shipment": request.auto_create_shipment,
+    }
+
+    settings["shipping"] = shipping_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
+    )
+
+    logger.info(f"Bosta credentials saved for store {store.id}")
+
+    return SuccessResponse(
+        data=BostaCredentialsResponse(
+            is_configured=True,
+            api_key_masked=secrets.mask_credential(request.api_key),
+            business_id=request.business_id,
+            auto_create_shipment=request.auto_create_shipment,
+            last_configured=shipping_settings["bosta"]["last_configured"],
+        ),
+        message="Bosta credentials saved successfully",
+    )
+
+
+@router.get(
+    "/shipping/bosta/credentials",
+    response_model=SuccessResponse[BostaCredentialsResponse],
+    summary="Get Bosta credentials status",
+    operation_id="get_bosta_credentials",
+)
+async def get_bosta_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked Bosta credential status for the store."""
+    settings = store.settings or {}
+    bosta_settings = settings.get("shipping", {}).get("bosta", {})
+
+    if not bosta_settings.get("encrypted_credentials"):
+        return SuccessResponse(
+            data=BostaCredentialsResponse(is_configured=False),
+            message="Bosta credentials not configured",
+        )
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = bosta_settings["encryption_key_id"]
+    encrypted = base64.b64decode(bosta_settings["encrypted_credentials"])
+
+    try:
+        creds = await secrets.decrypt(encrypted, key_id)
+    except Exception:
+        logger.error(f"Failed to decrypt Bosta credentials for store {store.id}")
+        return SuccessResponse(
+            data=BostaCredentialsResponse(
+                is_configured=True,
+                last_configured=bosta_settings.get("last_configured"),
+            ),
+            message="Credentials configured but could not be read. Please re-save.",
+        )
+
+    return SuccessResponse(
+        data=BostaCredentialsResponse(
+            is_configured=True,
+            api_key_masked=secrets.mask_credential(creds["api_key"]),
+            business_id=creds["business_id"],
+            auto_create_shipment=bosta_settings.get("auto_create_shipment", False),
+            last_configured=bosta_settings.get("last_configured"),
+        ),
+        message="Bosta credentials retrieved successfully",
+    )
+
+
+@router.delete(
+    "/shipping/bosta/credentials",
+    response_model=SuccessResponse[BostaCredentialsResponse],
+    summary="Remove Bosta credentials",
+    operation_id="delete_bosta_credentials",
+)
+async def delete_bosta_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove Bosta credentials and disable Bosta shipping."""
+    settings = store.settings or {}
+    shipping_settings = settings.get("shipping", _get_default_shipping_settings())
+
+    shipping_settings["bosta"] = {
+        "enabled": False,
+        "is_configured": False,
+        "last_configured": None,
+    }
+
+    settings["shipping"] = shipping_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    logger.info(f"Bosta credentials removed for store {store.id}")
+
+    return SuccessResponse(
+        data=BostaCredentialsResponse(is_configured=False),
+        message="Bosta credentials removed successfully",
+    )
 
 
 # ============ Invoice / Tax Settings ============

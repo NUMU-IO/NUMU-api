@@ -62,6 +62,8 @@ class ProductRepository(IProductRepository):
             tags=model.tags or [],
             attributes=model.attributes,
             metadata=model.extra_data or {},
+            seo_title=model.seo_title,
+            seo_description=model.seo_description,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -94,6 +96,8 @@ class ProductRepository(IProductRepository):
             tags=entity.tags,
             attributes=entity.attributes,
             extra_data=entity.metadata,
+            seo_title=entity.seo_title,
+            seo_description=entity.seo_description,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -151,6 +155,8 @@ class ProductRepository(IProductRepository):
             model.tags = entity.tags
             model.attributes = entity.attributes
             model.extra_data = entity.metadata
+            model.seo_title = entity.seo_title
+            model.seo_description = entity.seo_description
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)

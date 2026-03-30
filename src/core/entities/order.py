@@ -184,6 +184,10 @@ class Order(BaseEntity):
     coupon_id: UUID | None = None
     customer_notes: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # UTM attribution tracking
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
     version: int = 1  # optimistic locking
     cancelled_at: datetime | None = None
     paid_at: datetime | None = None
