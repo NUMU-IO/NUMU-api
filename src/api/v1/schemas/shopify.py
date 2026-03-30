@@ -212,6 +212,60 @@ class ConnectPaymobRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Payment Links
+# ---------------------------------------------------------------------------
+
+
+class CreatePaymentLinkRequest(BaseModel):
+    shopify_order_id: str
+    amount_cents: int = Field(..., gt=0)
+    currency: str = Field(default="EGP", max_length=3)
+    customer_phone: str | None = None
+    customer_name: str | None = None
+
+
+class PaymentLinkResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    store_id: str
+    shopify_order_id: str | None = None
+    amount_cents: int
+    currency: str = "EGP"
+    status: str = "pending"
+    available_gateways: list[str] = Field(default_factory=list)
+    merchant_branding: dict | None = None
+    payment_url: str = ""
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class PaymentLinkPublicResponse(BaseModel):
+    """Public response for the payment page — no internal IDs exposed."""
+
+    session_id: str
+    amount_cents: int
+    currency: str = "EGP"
+    status: str = "pending"
+    available_gateways: list[str] = Field(default_factory=list)
+    merchant_branding: dict | None = None
+    store_name: str = ""
+    order_number: str = ""
+    expires_at: datetime | None = None
+    is_expired: bool = False
+
+
+class CompletePaymentRequest(BaseModel):
+    gateway_used: str = Field(..., max_length=50)
+    gateway_transaction_id: str = Field(..., max_length=255)
+
+
+class CompletePaymentResponse(BaseModel):
+    status: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
 # Webhooks
 # ---------------------------------------------------------------------------
 

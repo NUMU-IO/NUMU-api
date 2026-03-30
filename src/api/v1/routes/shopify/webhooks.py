@@ -386,6 +386,12 @@ async def _handle_order_created(
             risk_score=fast_result.risk_score,
             risk_level=fast_result.risk_level,
             score_type="preliminary",
+            store_id=str(store_id),
+            order_number=order_number,
+            total_cents=total_cents,
+            currency=currency,
+            customer_phone=phone,
+            customer_name=customer_name,
         )
         # Log each triggered rule
         logged_rule_ids = set()
