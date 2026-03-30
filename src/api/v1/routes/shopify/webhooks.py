@@ -25,7 +25,10 @@ from src.api.dependencies.shopify import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.shopify import WebhookProcessRequest
-from src.application.use_cases.shopify.risk_scoring_engine import score_order
+from src.application.use_cases.shopify.risk_scoring_engine import score_order_fast
+from src.infrastructure.messaging.tasks.risk_scoring_tasks import (
+    compute_full_risk_score,
+)
 from src.infrastructure.repositories.shopify_repository import (
     AutomationRepository,
     NetworkReputationRepository,
@@ -53,6 +56,37 @@ async def _resolve_store_id(
     return entity.id
 
 
+_STORE_AVG_KEY = "shopify:store:{store_id}:avg_order_cents"
+_STORE_AVG_TTL = 30 * 24 * 3600  # 30 days
+_STORE_AVG_ALPHA = 0.10  # EMA weight for the new observation
+_STORE_AVG_DEFAULT = 80_000  # 800 EGP fallback
+
+
+async def _get_and_update_store_avg(store_id: UUID, total_cents: int) -> int:
+    """Read the store's rolling average order value from Redis and update it.
+
+    Uses an Exponential Moving Average (EMA) so recent orders matter more.
+    Falls back to the hardcoded default if Redis is unavailable.
+    Returns the *previous* average (used for the fast score of this order).
+    """
+    try:
+        from src.infrastructure.cache.redis_cache import RedisCacheService
+
+        cache = RedisCacheService()
+        key = _STORE_AVG_KEY.format(store_id=store_id)
+        cached = await cache.get(key)
+        prev_avg = int(cached) if cached is not None else _STORE_AVG_DEFAULT
+        new_avg = int(
+            prev_avg * (1 - _STORE_AVG_ALPHA) + total_cents * _STORE_AVG_ALPHA
+        )
+        await cache.set(key, new_avg, expire=_STORE_AVG_TTL)
+        await cache.close()
+        return prev_avg
+    except Exception as exc:
+        logger.warning("Redis store-avg lookup failed (store %s): %s", store_id, exc)
+        return _STORE_AVG_DEFAULT
+
+
 async def _handle_order_created(
     store_id: UUID,
     payload: dict,
@@ -60,7 +94,15 @@ async def _handle_order_created(
     settings_repo: ShopifyAppSettingsRepository,
     automation_repo: AutomationRepository,
 ) -> dict:
-    """Score a new order for risk and apply automation rules."""
+    """Score a new order for risk and apply automation rules.
+
+    Scoring is split into two layers:
+    - **Sync fast score** (2 factors, <200ms): ``network_reputation`` baseline
+      + ``order_value`` vs store Redis average.  Persisted immediately as
+      ``score_type="preliminary"``.
+    - **Async full score** (5 factors, <10s): Celery task ``compute_full_risk_score``
+      upgrades the record to ``score_type="final"`` once complete.
+    """
     settings = await settings_repo.get_or_create(store_id)
 
     order_id = str(payload.get("id", ""))
@@ -81,63 +123,83 @@ async def _handle_order_created(
     except (ValueError, TypeError):
         total_cents = 0
 
-    # Build order data dict for risk scoring engine
-    order_data = {
-        "customer_email": customer.get("email", ""),
-        "customer_name": f"{customer.get('first_name', '')} {customer.get('last_name', '')}".strip(),
-        "total_cents": total_cents,
-        "currency": currency,
-        "payment_method": payment_method,
-        "phone": customer.get("phone")
-        or (payload.get("shipping_address") or {}).get("phone", ""),
-        "shipping_address": payload.get("shipping_address") or {},
-        "orders_count": customer.get("orders_count", 0),
-        "cancel_rate": 0.0,  # Would need historical lookup
-    }
+    shipping_address = payload.get("shipping_address") or {}
+    phone = customer.get("phone") or shipping_address.get("phone", "")
+    customer_name = (
+        f"{customer.get('first_name', '')} {customer.get('last_name', '')}".strip()
+    )
+    customer_email = customer.get("email", "")
+    orders_count = customer.get("orders_count", 0)
 
-    # Score
-    address_parts = order_data["shipping_address"]
     address_str = (
         ", ".join(
-            str(address_parts.get(k, ""))
+            str(shipping_address.get(k, ""))
             for k in ("address1", "city", "province", "country")
-            if address_parts.get(k)
+            if shipping_address.get(k)
         )
         or None
     )
-    risk_result = score_order(
-        total_cents=order_data["total_cents"],
-        payment_method=order_data["payment_method"],
-        customer_total_orders=order_data.get("orders_count", 0),
-        customer_cancellation_rate=order_data.get("cancel_rate"),
-        address=address_str,
-        phone=order_data.get("phone") or None,
+
+    # ── 1. Fast score (synchronous, <200ms) ─────────────────────────────────
+    # Get store rolling average BEFORE updating it so this order is scored
+    # against the *previous* average.
+    avg_order_cents = await _get_and_update_store_avg(store_id, total_cents)
+
+    fast_result = score_order_fast(
+        total_cents=total_cents,
+        avg_order_cents=avg_order_cents,
+        # Phase 3 will supply the real network score from the hashed phone lookup.
+        # For now every buyer is "new_to_network" at the elevated baseline (55).
+        network_score=55,
+        network_label="new_to_network",
     )
 
-    # Persist risk assessment
+    # ── 2. Persist preliminary assessment ───────────────────────────────────
     model = await risk_repo.create(
         store_id=store_id,
         order_id=order_id,
         shopify_order_id=order_id,
         order_number=order_number,
-        customer_name=order_data["customer_name"],
-        customer_email=order_data["customer_email"],
+        customer_name=customer_name,
+        customer_email=customer_email,
         total_cents=total_cents,
         currency=currency,
         payment_method=payment_method,
-        risk_score=risk_result.risk_score,
-        risk_level=risk_result.risk_level,
-        suggested_action=risk_result.suggested_action,
+        risk_score=fast_result.risk_score,
+        risk_level=fast_result.risk_level,
+        suggested_action=fast_result.suggested_action,
+        score_type="preliminary",
         factors=[
             {"name": f.factor, "score": f.score, "weight": f.weight, "detail": f.reason}
-            for f in risk_result.factors
+            for f in fast_result.factors
         ],
     )
 
-    # Auto-apply action based on settings thresholds
+    # ── 3. Enqueue full 5-factor Celery task (async, <10s) ──────────────────
+    try:
+        compute_full_risk_score.delay(
+            assessment_id=str(model.id),
+            store_id=str(store_id),
+            total_cents=total_cents,
+            payment_method=payment_method,
+            customer_total_orders=orders_count,
+            customer_cancellation_rate=None,  # Phase 3: enrich from store history
+            address=address_str,
+            phone=phone or None,
+            avg_order_cents=avg_order_cents,
+        )
+    except Exception as exc:
+        # Celery unavailable → preliminary score stays operative, never crash
+        logger.error(
+            "Failed to enqueue full risk score task for assessment %s: %s",
+            model.id,
+            exc,
+        )
+
+    # ── 4. Apply threshold-based auto-action on the preliminary score ────────
     action_taken = None
     if settings.cod_risk_scoring_enabled:
-        score = risk_result.risk_score
+        score = fast_result.risk_score
         if score <= settings.auto_approve_threshold:
             action_taken = "auto_approved"
         elif score >= settings.auto_cancel_threshold:
@@ -148,7 +210,7 @@ async def _handle_order_created(
         if action_taken:
             await risk_repo.update_action(model.id, action_taken)
 
-    # Run automation rules
+    # ── 5. Run automation rules ──────────────────────────────────────────────
     rules = await automation_repo.list_rules(store_id)
     for rule in rules:
         if not rule.is_active:
@@ -157,7 +219,6 @@ async def _handle_order_created(
             continue
 
         conditions = rule.conditions or {}
-        # Simple condition matching
         match = True
         if (
             "payment_method" in conditions
@@ -170,7 +231,7 @@ async def _handle_order_created(
         ):
             match = False
         if "min_previous_orders" in conditions:
-            if order_data.get("orders_count", 0) < conditions["min_previous_orders"]:
+            if orders_count < conditions["min_previous_orders"]:
                 match = False
 
         if match:
@@ -186,8 +247,9 @@ async def _handle_order_created(
             )
 
     return {
-        "risk_score": risk_result.risk_score,
-        "risk_level": risk_result.risk_level,
+        "risk_score": fast_result.risk_score,
+        "risk_level": fast_result.risk_level,
+        "score_type": "preliminary",
         "action_taken": action_taken,
     }
 

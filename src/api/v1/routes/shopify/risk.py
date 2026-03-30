@@ -45,9 +45,11 @@ async def list_risk_orders(
             payment_method=m.payment_method,
             risk_score=m.risk_score,
             risk_level=m.risk_level,
+            score_type=m.score_type,
             suggested_action=m.suggested_action,
             action_taken=m.action_taken,
             factors=m.factors or [],
+            scored_at=m.scored_at,
             created_at=m.created_at,
         )
         for m in models
@@ -85,9 +87,11 @@ async def take_risk_action(
             payment_method=model.payment_method,
             risk_score=model.risk_score,
             risk_level=model.risk_level,
+            score_type=model.score_type,
             suggested_action=model.suggested_action,
             action_taken=model.action_taken,
             factors=model.factors or [],
+            scored_at=model.scored_at,
             created_at=model.created_at,
         ),
         message=f"Action '{request.action}' recorded",
