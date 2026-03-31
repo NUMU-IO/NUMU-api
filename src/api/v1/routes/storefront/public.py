@@ -21,6 +21,7 @@ from fastapi import (
     Response,
     status,
 )
+from pydantic import BaseModel, Field
 
 from src.api.dependencies import (
     CursorParams,
@@ -166,6 +167,27 @@ AVAILABLE_THEMES = [
         "nameAr": "فخامة مينيمال",
         "layout": "luxury-minimal",
         "description": "Ultra-clean luxury minimalist theme with refined typography and understated elegance",
+    },
+    {
+        "id": "empire",
+        "name": "Empire",
+        "nameAr": "إمباير",
+        "layout": "empire",
+        "description": "Premium editorial e-commerce with monochromatic palette and content-first design",
+    },
+    {
+        "id": "kick-game",
+        "name": "Kick Game",
+        "nameAr": "كيك جيم",
+        "layout": "kick-game",
+        "description": "Warm minimalist luxury streetwear — cream backgrounds, dense editorial grid, sneakers-as-art",
+    },
+    {
+        "id": "street",
+        "name": "Street Vibes",
+        "nameAr": "ستريت",
+        "layout": "street",
+        "description": "Bold urban streetwear — vibrant yellow, topographic lines, chunky type",
     },
 ]
 
@@ -723,6 +745,139 @@ async def login_customer(
         data=CustomerAuthResponse(customer=_customer_response(result.customer)),
         message="Login successful",
     )
+
+
+# ============================================================================
+# Customer Password Reset
+# ============================================================================
+
+
+class CustomerForgotPasswordRequest(BaseModel):
+    email: str = Field(..., max_length=254)
+
+
+class CustomerResetPasswordRequest(BaseModel):
+    email: str = Field(..., max_length=254)
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=12, max_length=128)
+
+
+@router.post(
+    "/auth/forgot-password",
+    response_model=SuccessResponse,
+    summary="Request customer password reset",
+    operation_id="customer_forgot_password",
+)
+async def customer_forgot_password(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    request: CustomerForgotPasswordRequest,
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+):
+    """Send a 6-digit password reset code to the customer's email."""
+    import random
+
+    from src.core.value_objects.email import Email as EmailVO
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+
+    # Always return success to prevent email enumeration
+    try:
+        email_vo = EmailVO(request.email)
+    except Exception:
+        return SuccessResponse(
+            data=None, message="If the email exists, a reset code has been sent"
+        )
+
+    customer = await customer_repo.get_by_email(store_id, email_vo)
+    if customer and customer.has_account:
+        code = f"{random.randint(0, 999999):06d}"
+        cache = RedisCacheService()
+        await cache.set(
+            f"customer_password_reset:{store_id}:{request.email}",
+            code,
+            expire=900,  # 15 minutes
+        )
+        try:
+            from src.core.interfaces.services.email_service import EmailMessage
+
+            email_service = ResendEmailService()
+            await email_service.send_email(
+                EmailMessage(
+                    to=request.email,
+                    subject="كود استعادة كلمة المرور",
+                    html_content=f"""
+                <div dir="rtl" style="font-family: sans-serif; padding: 20px;">
+                    <h2>استعادة كلمة المرور</h2>
+                    <p>كود التحقق الخاص بك:</p>
+                    <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; padding: 16px; background: #f5f5f5; text-align: center; border-radius: 8px;">
+                        {code}
+                    </div>
+                    <p style="color: #666; font-size: 14px; margin-top: 16px;">
+                        الكود صالح لمدة ١٥ دقيقة. لو مطلبتش الكود ده، تجاهل الرسالة دي.
+                    </p>
+                </div>
+                """,
+                )
+            )
+        except Exception:
+            pass  # Silently fail to prevent info leak
+
+    return SuccessResponse(
+        data=None, message="If the email exists, a reset code has been sent"
+    )
+
+
+@router.post(
+    "/auth/reset-password",
+    response_model=SuccessResponse,
+    summary="Reset customer password with code",
+    operation_id="customer_reset_password",
+)
+async def customer_reset_password(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    request: CustomerResetPasswordRequest,
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    password_service: Annotated[PasswordService, Depends(get_password_service)],
+):
+    """Verify reset code and update customer password."""
+    from src.core.value_objects.email import Email as EmailVO
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    cache = RedisCacheService()
+    cache_key = f"customer_password_reset:{store_id}:{request.email}"
+    stored_code = await cache.get(cache_key)
+
+    if not stored_code or stored_code != request.code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="كود التحقق غير صحيح أو منتهي الصلاحية",
+        )
+
+    try:
+        email_vo = EmailVO(request.email)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email address",
+        )
+
+    customer = await customer_repo.get_by_email(store_id, email_vo)
+    if not customer or not customer.has_account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="كود التحقق غير صحيح أو منتهي الصلاحية",
+        )
+
+    hashed = password_service.hash_password(request.new_password)
+    customer.update_password(hashed)
+    await customer_repo.update(customer)
+
+    # Clean up the reset code
+    await cache.delete(cache_key)
+
+    return SuccessResponse(data=None, message="Password has been reset successfully")
 
 
 # ============================================================================
