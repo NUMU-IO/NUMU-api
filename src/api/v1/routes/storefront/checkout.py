@@ -24,7 +24,7 @@ from fastapi import (
     status,
 )
 
-from src.api.dependencies.auth import get_current_customer
+from src.api.dependencies.auth import get_optional_customer
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_customer_repository,
@@ -86,7 +86,7 @@ async def checkout(
     response: Response,
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: CheckoutRequest,
-    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    optional_customer: Annotated[Customer | None, Depends(get_optional_customer)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
@@ -101,6 +101,45 @@ async def checkout(
     3. Creates an Order in PENDING status.
     4. Returns an optional payment_url when the payment method requires redirect.
     """
+    # ── Resolve or create customer ──────────────────────────────────────
+    current_customer = optional_customer
+    is_guest = current_customer is None
+
+    if is_guest:
+        # Guest checkout: require email from request
+        guest_email = request.guest_email
+        if not guest_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is required for guest checkout.",
+            )
+        from src.core.value_objects.email import Email as EmailVO
+
+        try:
+            email_vo = EmailVO(guest_email)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid email address.",
+            )
+
+        # Re-use existing customer record if same email+store, else create
+        existing = await customer_repo.get_by_email(store_id, email_vo)
+        if existing:
+            current_customer = existing
+        else:
+            addr = request.shipping_address
+            current_customer = Customer(
+                store_id=store_id,
+                email=email_vo,
+                first_name=addr.first_name or "Guest",
+                last_name=addr.last_name or "",
+                phone=None,
+                is_verified=False,
+                metadata={"guest": True},
+            )
+            current_customer = await customer_repo.create(current_customer)
+
     # ── Idempotency check ──────────────────────────────────────────────
     if idempotency_key and _cache_service:
         cache_key = (
@@ -125,16 +164,20 @@ async def checkout(
         or (http_request.client.host if http_request.client else None)
     ) or None
 
-    # Require email verification for account-based customers
-    if current_customer.has_account and not current_customer.is_verified:
+    # Require email verification for registered (non-guest) customers
+    if (
+        not is_guest
+        and current_customer.has_account
+        and not current_customer.is_verified
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please verify your email address before placing orders.",
         )
 
-    # Require OTP verification for COD orders
+    # Require OTP verification for COD orders (skip for guests)
     is_cod = not request.payment_method or request.payment_method == "cod"
-    if is_cod and _cache_service:
+    if not is_guest and is_cod and _cache_service:
         from src.api.v1.routes.storefront.otp import _otp_verified_key
 
         verified_key = _otp_verified_key(store_id, current_customer.id)

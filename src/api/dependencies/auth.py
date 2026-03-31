@@ -152,6 +152,21 @@ async def get_current_customer(
     return customer
 
 
+async def get_optional_customer(
+    request: Request,
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+) -> Customer | None:
+    """Get current customer if authenticated, else None (for guest checkout)."""
+    token = request.cookies.get("customer_access_token")
+    if not token:
+        return None
+    try:
+        payload = token_service.verify_customer_token(token)
+    except (TokenExpiredError, InvalidTokenError):
+        return None
+    return await customer_repo.get_by_id(payload.customer_id)
+
+
 async def get_current_store(
     store_id: UUID,
     user_id: Annotated[UUID, Depends(require_store_owner)],

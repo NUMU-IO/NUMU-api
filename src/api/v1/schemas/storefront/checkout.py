@@ -27,6 +27,10 @@ class CheckoutRequest(BaseModel):
     shipping_address: OrderAddressRequest
     billing_address: OrderAddressRequest | None = None
     payment_method: str | None = Field(None, description="e.g. paymob_card, cod")
+    # Guest checkout fields (used when not authenticated)
+    guest_email: str | None = Field(
+        None, max_length=254, description="Email for guest checkout"
+    )
     shipping_method: str | None = None
     customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
