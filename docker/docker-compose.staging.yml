@@ -28,6 +28,8 @@ services:
       - nginx_logs:/var/log/nginx
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
+      - /opt/numu/merchant-hub:/var/www/merchant-hub:ro
+      - /opt/numu/landing-page:/var/www/landing-page:ro
     depends_on:
       - api
     networks:
