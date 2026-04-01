@@ -189,6 +189,13 @@ AVAILABLE_THEMES = [
         "layout": "street",
         "description": "Bold urban streetwear — vibrant yellow, topographic lines, chunky type",
     },
+    {
+        "id": "rabbitsocks",
+        "name": "RabbitSocks",
+        "nameAr": "رابيت سوكس",
+        "layout": "rabbitsocks",
+        "description": "Luxury minimalism — quiet luxury aesthetic with serif italic headlines, generous whitespace, and editorial photography",
+    },
 ]
 
 
