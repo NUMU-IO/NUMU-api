@@ -11,6 +11,7 @@ from src.infrastructure.repositories.invoice_repository import InvoiceRepository
 from src.infrastructure.repositories.message_log_repository import MessageLogRepository
 from src.infrastructure.repositories.onboarding_repository import OnboardingRepository
 from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.repositories.page_view_repository import PageViewRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
 from src.infrastructure.repositories.refund_repository import RefundRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
@@ -44,6 +45,7 @@ __all__ = [
     "MessageLogRepository",
     "OnboardingRepository",
     "OrderRepository",
+    "PageViewRepository",
     "RedisCartRepository",
     "RefundRepository",
     "ShipmentRepository",

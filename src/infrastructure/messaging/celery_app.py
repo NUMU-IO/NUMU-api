@@ -104,4 +104,13 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=4, minute=0),  # Daily at 04:00 UTC
         "kwargs": {"expired_hours": 48},
     },
+    # Onboarding nudge emails
+    "send-inactive-merchant-nudges": {
+        "task": "tasks.send_inactive_merchant_nudges",
+        "schedule": crontab(hour=9, minute=0),  # Daily at 09:00 UTC (11 AM Cairo)
+    },
+    "send-trial-expiry-warnings": {
+        "task": "tasks.send_trial_expiry_warnings",
+        "schedule": crontab(hour=8, minute=0),  # Daily at 08:00 UTC (10 AM Cairo)
+    },
 }

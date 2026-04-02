@@ -15,6 +15,7 @@ from src.api.dependencies import (
     get_store_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.repositories import get_page_view_repository
 from src.api.responses import SuccessResponse
 from src.application.use_cases.stores import GetDashboardStatsUseCase
 from src.core.entities.store import Store
@@ -24,6 +25,7 @@ from src.infrastructure.repositories import (
     ProductRepository,
     StoreRepository,
 )
+from src.infrastructure.repositories.page_view_repository import PageViewRepository
 
 router = APIRouter(prefix="/{store_id}/dashboard")
 
@@ -65,6 +67,7 @@ class RevenueDataPointResponse(BaseModel):
     date: str
     revenue: int
     orders: int
+    visits: int = 0
 
 
 class DashboardTopProductResponse(BaseModel):
@@ -141,6 +144,7 @@ async def get_revenue_chart(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
     days: int = Query(30, ge=1, le=365, description="Number of days for the chart"),
 ):
     """Get revenue data for chart visualization."""
@@ -155,6 +159,7 @@ async def get_revenue_chart(
         store_id=store.id,
         user_id=store.owner_id,
         days=days,
+        page_view_repository=pv_repo,
     )
 
     return SuccessResponse(
@@ -163,6 +168,7 @@ async def get_revenue_chart(
                 date=point.date,
                 revenue=point.revenue,
                 orders=point.orders,
+                visits=point.visits,
             )
             for point in result
         ],

@@ -51,6 +51,7 @@ class RevenueDataPoint:
     date: str
     revenue: int
     orders: int
+    visits: int = 0
 
 
 @dataclass
@@ -184,6 +185,7 @@ class GetDashboardStatsUseCase:
         store_id: UUID,
         user_id: UUID,
         days: int = 30,
+        page_view_repository=None,
     ) -> list[RevenueDataPoint]:
         """Get revenue data for chart visualization."""
         # Verify permissions
@@ -197,6 +199,16 @@ class GetDashboardStatsUseCase:
             )
 
         now = datetime.now(UTC)
+        period_start = now - timedelta(days=days)
+
+        # Pre-fetch daily visits in one query if repo available
+        daily_visits_map: dict[str, int] = {}
+        if page_view_repository:
+            daily_visits = await page_view_repository.get_daily_visits(
+                store_id, period_start, now
+            )
+            daily_visits_map = dict(daily_visits)
+
         data_points = []
 
         # Get daily data for the period
@@ -213,11 +225,13 @@ class GetDashboardStatsUseCase:
                 store_id, day_start, day_end
             )
 
+            date_key = day_start.strftime("%Y-%m-%d")
             data_points.append(
                 RevenueDataPoint(
-                    date=day_start.strftime("%Y-%m-%d"),
+                    date=date_key,
                     revenue=revenue,
                     orders=len(orders),
+                    visits=daily_visits_map.get(date_key, 0),
                 )
             )
 

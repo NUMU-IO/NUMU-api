@@ -126,6 +126,30 @@ async def join_waitlist(
     )
 
 
+@router.get(
+    "/waitlist/stats",
+    summary="Public waitlist stats for social proof",
+    operation_id="waitlist_stats",
+)
+async def waitlist_stats(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return aggregate waitlist stats (no PII). No auth required."""
+    from src.core.entities.waitlist import WaitlistStatus
+
+    repo = WaitlistRepository(db)
+    total = await repo.count()
+    converted = await repo.count(status=WaitlistStatus.CONVERTED)
+
+    return SuccessResponse(
+        data={
+            "total_signups": total,
+            "stores_launched": converted,
+        },
+        message="Waitlist stats",
+    )
+
+
 def _welcome_email_html(name: str | None, referral_code: str) -> str:
     """Render the waitlist welcome email."""
     greeting = f"Hi {name}," if name else "Hi there,"

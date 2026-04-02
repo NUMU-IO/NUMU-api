@@ -15,6 +15,8 @@ class OnboardingStepKey(StrEnum):
 
     CREATE_STORE = "create_store"
     ADD_PRODUCT = "add_product"
+    SET_IDENTITY = "set_identity"
+    CONFIRM_SUPPORT = "confirm_support"
     CONFIGURE_PAYMENT = "configure_payment"
     ADD_SHIPPING = "add_shipping"
     FIRST_ORDER = "first_order"

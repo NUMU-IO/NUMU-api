@@ -16,6 +16,7 @@ from src.api.dependencies import (
     get_shipment_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.repositories import get_page_view_repository
 from src.api.responses import SuccessResponse
 from src.application.services.health_score_service import calculate_store_health_score
 from src.core.entities.order import PaymentStatus
@@ -25,6 +26,7 @@ from src.infrastructure.repositories import (
     OrderRepository,
     StoreRepository,
 )
+from src.infrastructure.repositories.page_view_repository import PageViewRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 
 router = APIRouter(prefix="/{store_id}/analytics")
@@ -377,6 +379,7 @@ async def get_customer_analytics(
 async def get_conversion_stats(
     store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
     """Get conversion statistics for the store."""
@@ -386,20 +389,15 @@ async def get_conversion_stats(
     orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
     total_orders = len(orders)
 
-    # These would typically come from analytics/tracking integration
-    # For now, we estimate based on orders
-    estimated_visitors = total_orders * 30  # Rough estimate: 3.3% conversion
-    conversion_rate = (
-        (total_orders / estimated_visitors * 100) if estimated_visitors > 0 else 0
-    )
+    total_visitors = await pv_repo.count_unique_visitors(store.id, period_start, now)
+    conversion_rate = (total_orders / total_visitors * 100) if total_visitors > 0 else 0
 
     # Cart abandonment - would need cart tracking
-    # Estimate: industry average is ~70%
     cart_abandonment_rate = 70.0
 
     return SuccessResponse(
         data=ConversionStatsResponse(
-            total_visitors=estimated_visitors,
+            total_visitors=total_visitors,
             total_orders=total_orders,
             conversion_rate=round(conversion_rate, 2),
             cart_abandonment_rate=cart_abandonment_rate,

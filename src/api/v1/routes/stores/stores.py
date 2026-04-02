@@ -13,6 +13,7 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
+from src.api.dependencies.repositories import get_onboarding_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateStoreRequest,
@@ -241,9 +242,15 @@ async def update_store(
     request: UpdateStoreRequest,
     store: Annotated[Store, Depends(verify_store_ownership)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
 ):
     """Update store details."""
-    use_case = UpdateStoreUseCase(store_repository=store_repo)
+    use_case = UpdateStoreUseCase(
+        store_repository=store_repo,
+        onboarding_repository=onboarding_repo,
+    )
 
     dto = UpdateStoreDTO(
         name=request.name,
