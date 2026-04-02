@@ -1,6 +1,6 @@
 """add_page_views_table
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: 1a92a389c29b
 Revises: 0c1c1d87f317
 Create Date: 2026-04-01 17:09:50.523182
 
@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
+revision: str = "1a92a389c29b"
 down_revision: str | None = "0c1c1d87f317"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
