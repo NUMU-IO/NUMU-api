@@ -4,14 +4,22 @@ from uuid import UUID
 
 from src.application.dto.store import StoreDTO, UpdateStoreDTO
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
+from src.core.interfaces.repositories.onboarding_repository import (
+    IOnboardingRepository,
+)
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 
 
 class UpdateStoreUseCase:
     """Use case for updating a store."""
 
-    def __init__(self, store_repository: IStoreRepository) -> None:
+    def __init__(
+        self,
+        store_repository: IStoreRepository,
+        onboarding_repository: IOnboardingRepository | None = None,
+    ) -> None:
         self.store_repository = store_repository
+        self.onboarding_repository = onboarding_repository
 
     async def execute(
         self,
@@ -58,5 +66,25 @@ class UpdateStoreUseCase:
 
         # Save store
         updated_store = await self.store_repository.update(store)
+
+        # Auto-complete onboarding steps based on updated fields
+        if self.onboarding_repository:
+            from src.application.use_cases.onboarding.auto_complete import (
+                try_complete_onboarding_step,
+            )
+            from src.core.entities.onboarding import OnboardingStepKey
+
+            if updated_store.logo_url and updated_store.description:
+                await try_complete_onboarding_step(
+                    self.onboarding_repository,
+                    store_id,
+                    OnboardingStepKey.SET_IDENTITY,
+                )
+            if updated_store.contact_phone:
+                await try_complete_onboarding_step(
+                    self.onboarding_repository,
+                    store_id,
+                    OnboardingStepKey.CONFIRM_SUPPORT,
+                )
 
         return StoreDTO.from_entity(updated_store)
