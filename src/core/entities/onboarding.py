@@ -149,6 +149,12 @@ class StoreOnboarding(BaseEntity):
         self.dismissed_at = datetime.now(UTC)
         self.touch()
 
+    def undismiss(self) -> None:
+        """Restore a previously dismissed onboarding."""
+        self.is_dismissed = False
+        self.dismissed_at = None
+        self.touch()
+
     def _check_overall_completion(self) -> None:
         """Mark overall onboarding complete if all steps are done."""
         if self.completion_percentage == 100 and not self.is_completed:

@@ -16,12 +16,16 @@ from src.application.use_cases.onboarding.get_onboarding import (
 from src.application.use_cases.onboarding.skip_step import (
     SkipOnboardingStepUseCase,
 )
+from src.application.use_cases.onboarding.undismiss_onboarding import (
+    UndismissOnboardingUseCase,
+)
 
 __all__ = [
     "GetOnboardingUseCase",
     "CompleteOnboardingStepUseCase",
     "SkipOnboardingStepUseCase",
     "DismissOnboardingUseCase",
+    "UndismissOnboardingUseCase",
     "init_onboarding_for_store",
     "try_complete_onboarding_step",
 ]

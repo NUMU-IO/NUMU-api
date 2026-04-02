@@ -5,6 +5,7 @@ Provides REST endpoints for merchant onboarding progress:
 - POST /{store_id}/onboarding/complete/{step} - Complete a step
 - POST /{store_id}/onboarding/skip/{step}     - Skip a step
 - POST /{store_id}/onboarding/dismiss         - Dismiss onboarding
+- POST /{store_id}/onboarding/undismiss       - Restore dismissed onboarding
 - POST /{store_id}/onboarding/configure       - Auto-configure from wizard
 """
 
@@ -27,6 +28,7 @@ from src.application.use_cases.onboarding import (
     DismissOnboardingUseCase,
     GetOnboardingUseCase,
     SkipOnboardingStepUseCase,
+    UndismissOnboardingUseCase,
 )
 from src.application.use_cases.onboarding.auto_complete import (
     try_complete_onboarding_step,
@@ -207,6 +209,33 @@ async def dismiss_onboarding(
     return SuccessResponse(
         data=_build_onboarding_response(result),
         message="Onboarding dismissed",
+    )
+
+
+@router.post(
+    "/undismiss",
+    response_model=SuccessResponse[OnboardingResponse],
+    summary="Restore dismissed onboarding",
+    operation_id="undismiss_onboarding",
+)
+async def undismiss_onboarding(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Restore a previously dismissed onboarding so it shows again."""
+    use_case = UndismissOnboardingUseCase(
+        onboarding_repository=onboarding_repo,
+        store_repository=store_repo,
+    )
+
+    result = await use_case.execute(store_id=store.id, user_id=store.owner_id)
+
+    return SuccessResponse(
+        data=_build_onboarding_response(result),
+        message="Onboarding restored",
     )
 
 
