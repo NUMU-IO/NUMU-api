@@ -26,6 +26,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "bcrypt>=4.0.0,<4.1.0",  # Pin to avoid passlib compatibility issue
     "pyotp>=2.9.0",
+    "google-auth>=2.25.0",  # Google OAuth ID token verification
 
     # External Services
     "stripe>=7.10.0",

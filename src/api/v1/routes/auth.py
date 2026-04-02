@@ -261,6 +261,72 @@ async def register(
 
 
 # ---------------------------------------------------------------------------
+# Google OAuth
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/google",
+    response_model=SuccessResponse[AuthResponse],
+    summary="Sign in with Google",
+    operation_id="google_oauth",
+)
+async def google_oauth(
+    request: Request,
+    response: Response,
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+):
+    """Authenticate or register a user via Google ID token.
+
+    Expects JSON body: { "id_token": "..." }
+    If the user doesn't exist, creates a new auto-verified account.
+    If the user exists (by Google ID or email), logs them in.
+    """
+    from src.application.use_cases.auth.google_oauth import GoogleOAuthUseCase
+
+    body = await request.json()
+    id_token_str = body.get("id_token")
+    if not id_token_str:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="id_token is required",
+        )
+
+    use_case = GoogleOAuthUseCase(
+        user_repository=user_repo,
+        token_service=token_service,
+    )
+
+    try:
+        result = await use_case.execute(id_token_str)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        ) from e
+
+    # Set auth cookies
+    set_auth_cookies(
+        response,
+        result.tokens.access_token,
+        result.tokens.refresh_token,
+    )
+
+    return SuccessResponse(
+        data=AuthResponse(
+            user=_user_response(result.user),
+            tokens=TokenResponse(
+                access_token=result.tokens.access_token,
+                refresh_token=result.tokens.refresh_token,
+                token_type="bearer",
+            ),
+        ),
+        message="Google authentication successful",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Verify Email
 # ---------------------------------------------------------------------------
 

@@ -49,6 +49,8 @@ class User(BaseEntity):
     email_verified_at: datetime | None = None
     last_login_at: datetime | None = None
     trial_ends_at: datetime | None = None
+    auth_provider: str | None = None  # "google", None = email/password
+    google_id: str | None = None  # Google sub claim
 
     @property
     def full_name(self) -> str:

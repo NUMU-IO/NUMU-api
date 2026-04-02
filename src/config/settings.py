@@ -231,6 +231,9 @@ class Settings(BaseSettings):
     email_from_address: str = "noreply@numu.com"
     email_from_name: str = "numu"
 
+    # Google OAuth
+    google_oauth_client_id: str | None = None
+
     # S3-compatible Object Storage (MinIO / Cloudflare R2 / AWS S3)
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None

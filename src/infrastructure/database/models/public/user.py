@@ -56,6 +56,12 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    auth_provider: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default=None
+    )
+    google_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True, index=True
+    )
 
     # Relationships
     owned_tenants = relationship("TenantModel", back_populates="owner", lazy="selectin")
