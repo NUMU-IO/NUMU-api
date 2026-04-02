@@ -178,6 +178,17 @@ def get_page_view_repository(
     return PageViewRepository(session)
 
 
+def get_analytics_rollup_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get analytics rollup repository dependency."""
+    from src.infrastructure.repositories.analytics_rollup_repository import (
+        AnalyticsRollupRepository,
+    )
+
+    return AnalyticsRollupRepository(session)
+
+
 def get_cart_repository():
     """Get Redis cart repository (no DB session needed)."""
     from src.infrastructure.repositories.cart_repository import RedisCartRepository

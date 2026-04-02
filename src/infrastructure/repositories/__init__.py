@@ -1,6 +1,9 @@
 """Repository implementations module."""
 
 from src.infrastructure.repositories.address_repository import CustomerAddressRepository
+from src.infrastructure.repositories.analytics_rollup_repository import (
+    AnalyticsRollupRepository,
+)
 from src.infrastructure.repositories.cart_repository import RedisCartRepository
 from src.infrastructure.repositories.category_repository import CategoryRepository
 from src.infrastructure.repositories.coupon_repository import CouponRepository
@@ -32,6 +35,7 @@ from src.infrastructure.repositories.webhook_subscription_repository import (
 )
 
 __all__ = [
+    "AnalyticsRollupRepository",
     "UserRepository",
     "StoreRepository",
     "ProductRepository",

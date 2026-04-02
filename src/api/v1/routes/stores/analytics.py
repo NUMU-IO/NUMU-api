@@ -3,7 +3,7 @@
 URL: /stores/{store_id}/analytics
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -16,12 +16,16 @@ from src.api.dependencies import (
     get_shipment_repository,
     verify_store_ownership,
 )
-from src.api.dependencies.repositories import get_page_view_repository
+from src.api.dependencies.repositories import (
+    get_analytics_rollup_repository,
+    get_page_view_repository,
+)
 from src.api.responses import SuccessResponse
 from src.application.services.health_score_service import calculate_store_health_score
 from src.core.entities.order import PaymentStatus
 from src.core.entities.store import Store
 from src.infrastructure.repositories import (
+    AnalyticsRollupRepository,
     CustomerRepository,
     OrderRepository,
     StoreRepository,
@@ -97,29 +101,41 @@ class ConversionStatsResponse(BaseModel):
 )
 async def get_sales_overview(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    rollup_repo: Annotated[
+        AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
+    ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     days: int = Query(30, ge=1, le=365, description="Number of days"),
 ):
-    """Get sales overview for the store."""
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    """Get sales overview for the store (uses pre-aggregated rollup data)."""
+    today = date.today()
+    period_start = today - timedelta(days=days)
     previous_period_start = period_start - timedelta(days=days)
 
-    # Current period
-    current_revenue = await order_repo.get_revenue_by_date_range(
-        store.id, period_start, now
-    )
-    current_orders = await order_repo.count_by_store(
-        store.id, date_from=period_start, date_to=now
-    )
-
-    # Previous period for comparison
-    previous_revenue = await order_repo.get_revenue_by_date_range(
+    # Try rollup table first
+    current = await rollup_repo.get_aggregated(store.id, period_start, today)
+    previous = await rollup_repo.get_aggregated(
         store.id, previous_period_start, period_start
     )
-    previous_orders = await order_repo.count_by_store(
-        store.id, date_from=previous_period_start, date_to=period_start
-    )
+
+    current_revenue = current["total_revenue_cents"]
+    current_orders = current["total_orders"]
+    previous_revenue = previous["total_revenue_cents"]
+    previous_orders = previous["total_orders"]
+
+    # If rollup is empty, fall back to raw query (first run / no rollup yet)
+    if current_revenue == 0 and current_orders == 0:
+        now = datetime.now(UTC)
+        ps = now - timedelta(days=days)
+        pps = ps - timedelta(days=days)
+        current_revenue = await order_repo.get_revenue_by_date_range(store.id, ps, now)
+        current_orders = await order_repo.count_by_store(
+            store.id, date_from=ps, date_to=now
+        )
+        previous_revenue = await order_repo.get_revenue_by_date_range(store.id, pps, ps)
+        previous_orders = await order_repo.count_by_store(
+            store.id, date_from=pps, date_to=ps
+        )
 
     # Calculate changes
     if previous_revenue > 0:
@@ -132,7 +148,6 @@ async def get_sales_overview(
     else:
         orders_change = 100.0 if current_orders > 0 else 0.0
 
-    # Average order value
     avg_order_value = current_revenue // current_orders if current_orders > 0 else 0
 
     return SuccessResponse(
@@ -156,29 +171,53 @@ async def get_sales_overview(
 )
 async def get_sales_chart(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    rollup_repo: Annotated[
+        AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
+    ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     days: int = Query(30, ge=1, le=365, description="Number of days"),
 ):
-    """Get sales data for chart visualization."""
-    now = datetime.now(UTC)
-    data_points = []
+    """Get sales data for chart visualization (single query via rollup)."""
+    today = date.today()
+    date_from = today - timedelta(days=days)
 
-    for i in range(days - 1, -1, -1):
-        day_end = now - timedelta(days=i)
-        day_start = day_end - timedelta(days=1)
+    # Single query on rollup table instead of N individual queries
+    rollups = await rollup_repo.get_range(store.id, date_from, today)
 
-        revenue = await order_repo.get_revenue_by_date_range(
-            store.id, day_start, day_end
-        )
-        orders = await order_repo.get_by_date_range(store.id, day_start, day_end)
-
-        data_points.append(
-            SalesDataPointResponse(
-                date=day_start.strftime("%b %d"),
-                sales=revenue,
-                orders=len(orders),
+    if rollups:
+        # Build a date->rollup lookup for gap filling
+        rollup_map = {r.rollup_date: r for r in rollups}
+        data_points = []
+        for i in range(days):
+            d = date_from + timedelta(days=i)
+            r = rollup_map.get(d)
+            data_points.append(
+                SalesDataPointResponse(
+                    date=d.strftime("%b %d"),
+                    sales=r.total_revenue_cents if r else 0,
+                    orders=r.total_orders if r else 0,
+                )
             )
-        )
+    else:
+        # Fallback to raw query if rollup table is empty (first run)
+        now = datetime.now(UTC)
+        data_points = []
+        for i in range(days - 1, -1, -1):
+            day_end = now - timedelta(days=i)
+            day_start = day_end - timedelta(days=1)
+            revenue = await order_repo.get_revenue_by_date_range(
+                store.id, day_start, day_end
+            )
+            order_count = await order_repo.count_by_store(
+                store.id, date_from=day_start, date_to=day_end
+            )
+            data_points.append(
+                SalesDataPointResponse(
+                    date=day_start.strftime("%b %d"),
+                    sales=revenue,
+                    orders=order_count,
+                )
+            )
 
     return SuccessResponse(
         data=data_points,
@@ -194,46 +233,73 @@ async def get_sales_chart(
 )
 async def get_analytics_top_products(
     store: Annotated[Store, Depends(verify_store_ownership)],
+    rollup_repo: Annotated[
+        AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
+    ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(5, ge=1, le=20),
 ):
-    """Get top selling products for the store."""
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    """Get top selling products (merges pre-aggregated rollup data)."""
+    today = date.today()
+    date_from = today - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
+    rollups = await rollup_repo.get_range(store.id, date_from, today)
 
-    # Aggregate by product
-    product_sales: dict[UUID, dict] = {}
-    total_revenue = 0
+    if rollups:
+        # Merge top_products_json across rollup days
+        merged: dict[str, dict] = {}
+        for r in rollups:
+            for item in r.top_products_json or []:
+                pid = str(item.get("product_id", ""))
+                if not pid:
+                    continue
+                if pid not in merged:
+                    merged[pid] = {
+                        "id": pid,
+                        "name": item.get("name", ""),
+                        "sku": item.get("sku"),
+                        "quantity": 0,
+                        "revenue": 0,
+                    }
+                merged[pid]["quantity"] += item.get("quantity", 0)
+                merged[pid]["revenue"] += item.get("revenue", 0)
 
-    for order in orders:
-        if order.payment_status not in [
-            PaymentStatus.PAID,
-            PaymentStatus.PARTIALLY_REFUNDED,
-        ]:
-            continue
-
-        for item in order.line_items:
-            if item.product_id not in product_sales:
-                product_sales[item.product_id] = {
-                    "id": item.product_id,
-                    "name": item.product_name,
-                    "sku": item.sku,
-                    "quantity": 0,
-                    "revenue": 0,
-                }
-            product_sales[item.product_id]["quantity"] += item.quantity
-            product_sales[item.product_id]["revenue"] += item.total_price
-            total_revenue += item.total_price
-
-    # Sort and take top N
-    sorted_products = sorted(
-        product_sales.values(),
-        key=lambda x: x["revenue"],
-        reverse=True,
-    )[:limit]
+        sorted_products = sorted(
+            merged.values(), key=lambda x: x["revenue"], reverse=True
+        )[:limit]
+        total_revenue = sum(p["revenue"] for p in merged.values())
+    else:
+        # Fallback to raw query
+        now = datetime.now(UTC)
+        period_start = now - timedelta(days=days)
+        orders = await order_repo.get_by_date_range(
+            store.id, period_start, now, limit=1000
+        )
+        product_sales: dict[str, dict] = {}
+        total_revenue = 0
+        for order in orders:
+            if order.payment_status not in [
+                PaymentStatus.PAID,
+                PaymentStatus.PARTIALLY_REFUNDED,
+            ]:
+                continue
+            for item in order.line_items:
+                pid = str(item.product_id)
+                if pid not in product_sales:
+                    product_sales[pid] = {
+                        "id": pid,
+                        "name": item.product_name,
+                        "sku": item.sku,
+                        "quantity": 0,
+                        "revenue": 0,
+                    }
+                product_sales[pid]["quantity"] += item.quantity
+                product_sales[pid]["revenue"] += item.total_price
+                total_revenue += item.total_price
+        sorted_products = sorted(
+            product_sales.values(), key=lambda x: x["revenue"], reverse=True
+        )[:limit]
 
     result = []
     for p in sorted_products:
