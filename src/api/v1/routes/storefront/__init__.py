@@ -23,6 +23,7 @@ from src.api.v1.routes.storefront.public import (
     lookup_router as storefront_lookup_router,
 )
 from src.api.v1.routes.storefront.public import router as public_router
+from src.api.v1.routes.storefront.tracking import router as tracking_router
 from src.api.v1.routes.storefront.upsell import router as upsell_router
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "coupon_router",
     "upsell_router",
     "otp_router",
+    "tracking_router",
 ]

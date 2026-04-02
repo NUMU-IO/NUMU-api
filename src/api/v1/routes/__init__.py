@@ -68,6 +68,9 @@ from src.api.v1.routes.storefront import (
     storefront_lookup_router,
 )
 from src.api.v1.routes.storefront import (
+    tracking_router as storefront_tracking_router,
+)
+from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
 )
 
@@ -156,6 +159,13 @@ api_router.include_router(
     storefront_upsell_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Upsells"],
+)
+
+# Storefront - page view tracking (public, scoped to store)
+api_router.include_router(
+    storefront_tracking_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Tracking"],
 )
 
 # Storefront - COD OTP verification (authenticated customer, scoped to store)

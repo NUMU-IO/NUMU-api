@@ -17,6 +17,7 @@ from src.infrastructure.repositories import (
     MessageLogRepository,
     OnboardingRepository,
     OrderRepository,
+    PageViewRepository,
     ProductRepository,
     RefundRepository,
     ShipmentRepository,
@@ -168,6 +169,13 @@ def get_upsell_rule_repository(
 ) -> UpsellRuleRepository:
     """Get upsell rule repository dependency."""
     return UpsellRuleRepository(session)
+
+
+def get_page_view_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PageViewRepository:
+    """Get page view repository dependency."""
+    return PageViewRepository(session)
 
 
 def get_cart_repository():

@@ -31,6 +31,7 @@ from src.infrastructure.database.models.tenant.network_reputation import (
     NetworkReputationModel,
 )
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.page_view import PageViewModel
 from src.infrastructure.database.models.tenant.payment_link_session import (
     PaymentLinkSessionModel,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "NetworkContributionLogModel",
     "NetworkReputationModel",
     "OrderModel",
+    "PageViewModel",
     "PaymentLinkSessionModel",
     "PaymentTransactionModel",
     "RiskAssessmentModel",
