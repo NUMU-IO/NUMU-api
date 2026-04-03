@@ -126,7 +126,7 @@ jobs:
 
             echo "==> Stopping app containers to free memory for pull..."
             export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
-            docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml stop api celery-worker celery-beat nginx || true
+            docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml stop api celery-worker celery-beat nginx || true
 
             echo "==> Pruning unused Docker resources..."
             docker system prune -f --volumes=false
@@ -135,16 +135,16 @@ jobs:
             docker pull "${NUMU_API_IMAGE}"
 
             echo "==> Starting services..."
-            docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml up -d --remove-orphans
+            docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml up -d --remove-orphans
 
             echo "==> Running database migrations..."
-            docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml exec -T api alembic upgrade head
+            docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml exec -T api alembic upgrade head
 
             echo "==> Verifying health..."
             sleep 15
             curl -sf http://localhost:80/api/v1/health | grep -q '"success":true' || {
               echo "ERROR: Health check failed — dumping recent API logs:"
-              docker compose --env-file /opt/numu/NUMU-api/.env.staging -f docker/docker-compose.staging.yml logs --tail=80 api
+              docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml logs --tail=80 api
               exit 1
             }
 
