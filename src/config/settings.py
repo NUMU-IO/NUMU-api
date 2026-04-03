@@ -297,9 +297,6 @@ class Settings(BaseSettings):
     # Egyptian Market Integrations
     # =========================================================================
 
-    # Credential encryption (for payment gateway keys stored in DB)
-    credential_encryption_key: str | None = None
-
     # Paymob (Egyptian Payment Gateway)
     paymob_api_key: str | None = None
     paymob_integration_id: str | None = None  # Card payments integration
