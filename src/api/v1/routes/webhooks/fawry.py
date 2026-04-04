@@ -13,6 +13,13 @@ Agent collaboration:
 - Inventory Agent: stock release on expiry
 - Messaging Agent: WhatsApp notifications on cancellation
 - Audit Agent: event logging for every status change
+
+Multi-tenant flow:
+1. Parse payload → extract merchantRefNum
+2. Resolve order by payment_id → fetch associated store
+3. Decrypt store's Fawry security_key
+4. Verify x-fawry-signature using the merchant's specific key
+5. Process payment status via FawryWebhookService
 """
 
 import json
@@ -26,15 +33,18 @@ from src.config.logging_config import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.fawry import FawryPaymentService
+from src.infrastructure.external_services.fawry.payment_service import (
+    get_merchant_fawry_credentials,
+)
 from src.infrastructure.external_services.whatsapp.messaging_service import (
     WhatsAppMessagingService,
 )
+from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.repositories.store_repository import StoreRepository
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Initialize services once at module level to reuse connections
-fawry_service = FawryPaymentService()
 _cache_service: RedisCacheService | None = (
     RedisCacheService() if settings.redis_host else None
 )
@@ -59,6 +69,10 @@ async def fawry_callback(
     Tenant isolation is enforced at the application level via explicit
     tenant_id filters on every write query.
 
+    Multi-tenant: resolves the order from merchantRefNum, fetches the
+    associated store's Fawry credentials, and verifies the signature
+    using the merchant's specific security key.
+
     Payment statuses:
     - NEW: Reference created (initial)
     - PAID: Payment received
@@ -69,23 +83,8 @@ async def fawry_callback(
     payload = await request.body()
     log = logger.bind(webhook="fawry")
 
-    # ── Security Agent: signature verification ──────────────────────
-    if settings.fawry_security_key:
-        verified_data = fawry_service.verify_webhook_signature(
-            payload,
-            x_fawry_signature or "",
-        )
-        if not verified_data:
-            log.warning("webhook_signature_invalid")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook signature",
-            )
-        data = verified_data
-    else:
-        # In development, accept without verification
-        data = json.loads(payload)
-        log.warning("webhook_no_signature_verification", mode="development")
+    # ── Parse payload first to resolve the merchant ──────────────────
+    data = json.loads(payload)
 
     # Extract notification details
     reference_number = data.get("referenceNumber")
@@ -103,6 +102,58 @@ async def fawry_callback(
         payment_method=payment_method,
     )
     log.info("webhook_received")
+
+    # ── Per-merchant signature verification ──────────────────────────
+    # Resolve the order → store → decrypt store's Fawry security key
+    order_repo = OrderRepository(db)
+    store_repo = StoreRepository(db)
+
+    order = None
+    if merchant_ref_number:
+        order = await order_repo.get_by_payment_id_for_update(merchant_ref_number)
+
+    if order:
+        store = await store_repo.get_by_id(order.store_id)
+        if store:
+            try:
+                creds = await get_merchant_fawry_credentials(store.settings)
+                fawry_service = FawryPaymentService(
+                    merchant_code=creds["merchant_code"],
+                    security_key=creds["security_key"],
+                )
+                verified_data = fawry_service.verify_webhook_signature(
+                    payload, x_fawry_signature or ""
+                )
+                if not verified_data:
+                    log.warning("webhook_signature_invalid")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid webhook signature",
+                    )
+                data = verified_data
+            except HTTPException:
+                raise
+            except Exception as e:
+                log.warning("webhook_fawry_creds_resolution_failed", error=str(e))
+                if not settings.debug:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Could not verify webhook signature",
+                    )
+        else:
+            log.warning("webhook_store_not_found", store_id=str(order.store_id))
+    else:
+        # Order not found — cannot resolve merchant credentials.
+        # In development, continue without verification for debugging.
+        if not settings.debug:
+            log.warning(
+                "webhook_order_not_found_for_signature", ref=merchant_ref_number
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Cannot verify webhook: order not found",
+            )
+        log.warning("webhook_no_signature_verification", mode="development")
 
     # ── Build service (reuses module-level cache/messaging singletons) ──
     webhook_service = FawryWebhookService(
@@ -174,19 +225,41 @@ async def fawry_callback(
 @router.get("/verify", operation_id="fawry_verify_payment")
 async def fawry_verify_payment(
     merchant_ref_number: str,
+    store_id: str,
+    db: AsyncSession = Depends(get_admin_db_session),
 ):
     """Verify Fawry payment status.
 
     Endpoint for frontend to check if Fawry payment was completed.
     Useful when customer pays and returns to the site.
 
+    Uses the store's own Fawry credentials to query payment status.
+
     Args:
         merchant_ref_number: Your order reference
+        store_id: Store ID to resolve credentials
 
     Returns:
         Payment status details
     """
+    from uuid import UUID
+
+    store_repo = StoreRepository(db)
+
     try:
+        store = await store_repo.get_by_id(UUID(store_id))
+        if not store:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found",
+            )
+
+        creds = await get_merchant_fawry_credentials(store.settings)
+        fawry_service = FawryPaymentService(
+            merchant_code=creds["merchant_code"],
+            security_key=creds["security_key"],
+        )
+
         status_data = await fawry_service.get_payment_status_details(
             merchant_ref_number
         )
@@ -197,6 +270,8 @@ async def fawry_verify_payment(
             "payment_amount": status_data.get("paymentAmount"),
             "payment_method": status_data.get("paymentMethod"),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("fawry_status_check_failed", error=str(e))
         raise HTTPException(

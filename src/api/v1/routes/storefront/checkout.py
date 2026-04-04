@@ -568,6 +568,73 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
+    elif request.payment_method == "fawry":
+        # Fawry payment via store.settings encrypted credentials
+        try:
+            from src.infrastructure.external_services.fawry.payment_service import (
+                FawryPaymentService,
+                get_merchant_fawry_credentials,
+            )
+
+            credentials = await get_merchant_fawry_credentials(store.settings)
+            fawry_service = FawryPaymentService(
+                merchant_code=credentials["merchant_code"],
+                security_key=credentials["security_key"],
+            )
+
+            # Set payment_id to order ID so the webhook can resolve it
+            created_order.payment_id = str(created_order.id)
+            await order_repo.update(created_order)
+
+            customer_email_str = (
+                str(current_customer.email) if current_customer.email else None
+            )
+            customer_phone = (
+                str(current_customer.phone) if current_customer.phone else None
+            )
+
+            intent = await fawry_service.create_payment_intent(
+                amount=created_order.total,
+                currency=currency,
+                customer_email=customer_email_str,
+                metadata={
+                    "order_id": str(created_order.id),
+                    "merchant_ref_number": str(created_order.id),
+                    "customer_mobile": customer_phone,
+                    "customer_name": current_customer.full_name,
+                    "description": f"Order {created_order.order_number}",
+                    "items": [
+                        {
+                            "id": str(li.product_id),
+                            "name": li.product_name,
+                            "price": li.unit_price / 100,
+                            "quantity": li.quantity,
+                        }
+                        for li in order_line_items
+                    ],
+                },
+            )
+
+            # Fawry returns a reference number and payment URL
+            payment_data = {
+                "provider": "fawry",
+                "type": "reference",
+                "reference_number": intent.id,
+                "payment_url": fawry_service.get_payment_url(intent.id),
+                "order_id": str(created_order.id),
+                "amount": f"{created_order.total / 100:.2f}",
+                "currency": currency,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Fawry payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Fawry payment is not available for this store. Please choose another payment method.",
+            )
+
     elif request.payment_method and request.payment_method != "cod":
         # Other payment providers via tenant credentials
         try:
