@@ -67,6 +67,10 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE public.funnel_events ENABLE ROW LEVEL SECURITY;
+        """
+    )
+    op.execute(
+        """
         CREATE POLICY funnel_events_tenant_isolation ON public.funnel_events
             USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
         """

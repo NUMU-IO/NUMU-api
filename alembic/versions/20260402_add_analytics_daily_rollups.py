@@ -88,7 +88,10 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE public.analytics_daily_rollups ENABLE ROW LEVEL SECURITY;
-
+        """
+    )
+    op.execute(
+        """
         CREATE POLICY analytics_rollup_tenant_isolation
         ON public.analytics_daily_rollups
         USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
