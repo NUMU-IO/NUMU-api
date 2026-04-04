@@ -226,6 +226,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
 
+    # OpenRouter (for AI insights via Qwen)
+    openrouter_api_key: str | None = None
+    openrouter_model: str = "qwen/qwen3-235b-a22b:free"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
     # Resend (Email)
     resend_api_key: str | None = None
     email_from_address: str = "noreply@numu.com"

@@ -38,6 +38,7 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
+        "src.infrastructure.messaging.tasks.analytics_rollup_tasks",
         "src.infrastructure.messaging.tasks.social_tasks",
     ],
     # Queue definitions
@@ -89,9 +90,19 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.detect_abandoned_carts",
         "schedule": crontab(minute="*/30"),  # Every 30 minutes
     },
+    "daily-analytics-rollup": {
+        "task": "tasks.calculate_analytics_rollups",
+        "schedule": crontab(hour=3, minute=30),  # Daily at 3:30 AM UTC
+    },
     "daily-health-score-calculation": {
         "task": "tasks.calculate_health_scores",
         "schedule": crontab(hour=4, minute=0),  # Daily at 4 AM UTC
+    },
+    "daily-ai-insights": {
+        "task": "tasks.generate_ai_insights",
+        "schedule": crontab(
+            hour=5, minute=0
+        ),  # Daily at 5 AM UTC (after rollup + health)
     },
     # Trust Network maintenance
     "retry-stuck-preliminary-scores": {

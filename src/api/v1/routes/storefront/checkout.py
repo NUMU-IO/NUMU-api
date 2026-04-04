@@ -28,6 +28,7 @@ from src.api.dependencies.auth import get_optional_customer
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_customer_repository,
+    get_funnel_event_repository,
     get_order_repository,
     get_product_repository,
     get_store_repository,
@@ -50,6 +51,9 @@ from src.infrastructure.repositories import (
     OrderRepository,
     ProductRepository,
     StoreRepository,
+)
+from src.infrastructure.repositories.funnel_event_repository import (
+    FunnelEventRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +96,9 @@ async def checkout(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
+    funnel_repo: Annotated[
+        "FunnelEventRepository", Depends(get_funnel_event_repository)
+    ],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
     """Process checkout for the authenticated customer.
@@ -397,6 +404,41 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # Emit funnel event: checkout_started
+    try:
+        await funnel_repo.create(
+            tenant_id=store.tenant_id,
+            store_id=store.id,
+            step="checkout_started",
+            customer_id=current_customer.id,
+            step_data={
+                "order_id": str(created_order.id),
+                "total": created_order.total,
+                "payment_method": request.payment_method,
+                "item_count": len(created_order.line_items),
+            },
+        )
+    except Exception:
+        pass
+
+    # Update real-time counters
+    try:
+        from src.infrastructure.cache.realtime_counters import record_order_created
+
+        await record_order_created(
+            store.id,
+            {
+                "order_id": str(created_order.id),
+                "order_number": created_order.order_number,
+                "total": created_order.total,
+                "customer_name": f"{current_customer.first_name} {current_customer.last_name}",
+                "item_count": len(created_order.line_items),
+                "payment_method": request.payment_method,
+            },
+        )
+    except Exception:
+        pass
 
     # Update customer lifetime stats
     current_customer.total_orders = (current_customer.total_orders or 0) + 1

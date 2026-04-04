@@ -185,6 +185,35 @@ async def paymob_callback(
         )
         await order_repo.update(order)
 
+        # Update real-time revenue counter
+        try:
+            from src.infrastructure.cache.realtime_counters import record_payment
+
+            await record_payment(order.store_id, order.total)
+        except Exception:
+            pass
+
+        # Emit funnel event: order_completed
+        try:
+            from src.infrastructure.repositories.funnel_event_repository import (
+                FunnelEventRepository,
+            )
+
+            fe_repo = FunnelEventRepository(db)
+            await fe_repo.create(
+                tenant_id=order.tenant_id,
+                store_id=order.store_id,
+                step="order_completed",
+                customer_id=order.customer_id,
+                step_data={
+                    "order_id": str(order.id),
+                    "total": order.total,
+                    "payment_method": "paymob",
+                },
+            )
+        except Exception:
+            pass
+
         # Fire OrderStatusChangedEvent so shipment auto-creation triggers
         try:
             from src.core.events.order_events import OrderStatusChangedEvent

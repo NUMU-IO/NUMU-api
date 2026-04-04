@@ -13,7 +13,10 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from src.api.dependencies.auth import get_current_customer
-from src.api.dependencies.repositories import get_product_repository
+from src.api.dependencies.repositories import (
+    get_funnel_event_repository,
+    get_product_repository,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.storefront.cart import (
     AddCartItemRequest,
@@ -25,8 +28,12 @@ from src.core.entities.cart import Cart
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.value_objects.cart_item import CartItem
+from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.repositories import ProductRepository
 from src.infrastructure.repositories.cart_repository import RedisCartRepository
+from src.infrastructure.repositories.funnel_event_repository import (
+    FunnelEventRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +139,7 @@ async def add_cart_item(
     request: AddCartItemRequest,
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
 ):
     """Add a product to the customer's cart.
 
@@ -174,6 +182,24 @@ async def add_cart_item(
     )
     cart.add_item(new_item)
     await _cart_repo.save(cart)
+
+    # Emit funnel event
+    try:
+        tid = get_tenant_id()
+        await funnel_repo.create(
+            tenant_id=UUID(tid) if tid else current_customer.store_id,
+            store_id=current_customer.store_id,
+            step="add_to_cart",
+            customer_id=current_customer.id,
+            step_data={
+                "product_id": str(request.product_id),
+                "product_name": product.name,
+                "quantity": request.quantity,
+                "unit_price": product.price.cents,
+            },
+        )
+    except Exception:
+        pass
 
     return await _build_cart_response(cart, product_repo)
 
