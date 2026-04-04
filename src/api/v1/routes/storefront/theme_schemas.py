@@ -1437,6 +1437,86 @@ SECTION_SCHEMAS: list[dict[str, Any]] = [
             }
         ],
     },
+    # ── Page-level sections (not draggable on home page) ─────────────────────
+    {
+        "type": "products-page",
+        "name": "Products Page",
+        "nameAr": "صفحة المنتجات",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {"key": "show_view_toggle", "type": "checkbox", "label": "Show Grid/List Toggle", "labelAr": "إظهار زر تغيير العرض", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_category_subtitle", "type": "checkbox", "label": "Show Category Subtitle", "labelAr": "إظهار وصف الفئة", "default": False, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "columns_desktop", "type": "range", "label": "Desktop Columns", "labelAr": "أعمدة الديسكتوب", "default": 4, "min": 2, "max": 5, "step": 1, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "columns_mobile", "type": "range", "label": "Mobile Columns", "labelAr": "أعمدة الموبايل", "default": 2, "min": 1, "max": 3, "step": 1, "group": "Layout", "groupAr": "التخطيط"},
+        ],
+        "presets": [],
+    },
+    {
+        "type": "product-detail",
+        "name": "Product Detail Page",
+        "nameAr": "صفحة تفاصيل المنتج",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {"key": "show_rating", "type": "checkbox", "label": "Show Rating", "labelAr": "إظهار التقييم", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_stock", "type": "checkbox", "label": "Show Stock Status", "labelAr": "إظهار حالة المخزون", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_whatsapp", "type": "checkbox", "label": "Show WhatsApp Button", "labelAr": "إظهار زر الواتساب", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_guarantees", "type": "checkbox", "label": "Show Trust Guarantees", "labelAr": "إظهار ضمانات الثقة", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+        ],
+        "presets": [],
+    },
+    {
+        "type": "checkout",
+        "name": "Checkout Page",
+        "nameAr": "صفحة الدفع",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {"key": "show_steps", "type": "checkbox", "label": "Show Progress Steps", "labelAr": "إظهار خطوات التقدم", "default": False, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_security_badge", "type": "checkbox", "label": "Show Security Badge", "labelAr": "إظهار شارة الأمان", "default": False, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_free_shipping_hint", "type": "checkbox", "label": "Show Free Shipping Hint", "labelAr": "إظهار تنبيه الشحن المجاني", "default": False, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_landmark", "type": "checkbox", "label": "Show Landmark Field", "labelAr": "إظهار حقل العلامة المميزة", "default": False, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_page_title", "type": "checkbox", "label": "Show Page Title", "labelAr": "إظهار عنوان الصفحة", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+        ],
+        "presets": [],
+    },
+    {
+        "type": "contact",
+        "name": "Contact Page",
+        "nameAr": "صفحة التواصل",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {"key": "show_working_hours", "type": "checkbox", "label": "Show Working Hours", "labelAr": "إظهار ساعات العمل", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+        ],
+        "presets": [],
+    },
+    {
+        "type": "order-confirmation",
+        "name": "Order Confirmation",
+        "nameAr": "تأكيد الطلب",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {"key": "show_progress", "type": "checkbox", "label": "Show Progress Steps", "labelAr": "إظهار خطوات التقدم", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_whatsapp", "type": "checkbox", "label": "Show WhatsApp Card", "labelAr": "إظهار بطاقة الواتساب", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_track_order", "type": "checkbox", "label": "Show Track Order Button", "labelAr": "إظهار زر تتبع الطلب", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+            {"key": "show_emoji", "type": "checkbox", "label": "Show Emoji in Title", "labelAr": "إظهار إيموجي في العنوان", "default": True, "group": "Content", "groupAr": "المحتوى"},
+        ],
+        "presets": [],
+    },
+    {
+        "type": "profile",
+        "name": "Profile Page",
+        "nameAr": "صفحة الحساب",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {"key": "show_stats", "type": "checkbox", "label": "Show Account Stats", "labelAr": "إظهار إحصائيات الحساب", "default": True, "group": "Layout", "groupAr": "التخطيط"},
+        ],
+        "presets": [],
+    },
 ]
 
 # ── Per-theme global settings schemas ────────────────────────────────────────
@@ -1727,6 +1807,35 @@ THEME_GLOBAL_SETTINGS: dict[str, list[dict[str, Any]]] = {
         radius=0,
         radius_max=16,
     ),
+    "rabbitsocks": _build_global_settings(
+        primary="#000613",
+        secondary="#635e54",
+        accent="#001f3f",
+        background="#f9f9f7",
+        text="#000613",
+        radius=0,
+        radius_max=8,
+        extra=[
+            {
+                "key": "enableAnimations",
+                "type": "checkbox",
+                "label": "Enable Animations",
+                "labelAr": "تفعيل الحركات",
+                "default": True,
+                "group": "Effects",
+                "groupAr": "التأثيرات",
+            },
+            {
+                "key": "enableMarquee",
+                "type": "checkbox",
+                "label": "Enable Marquee Banner",
+                "labelAr": "تفعيل الشريط المتحرك",
+                "default": True,
+                "group": "Effects",
+                "groupAr": "التأثيرات",
+            },
+        ],
+    ),
 }
 
 # ── Per-theme default home templates ─────────────────────────────────────────
@@ -1928,6 +2037,91 @@ THEME_DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
 for _theme_id in ("boutique", "elegant", "skeuomorphic", "tech-wave"):
     THEME_DEFAULT_TEMPLATES[_theme_id] = THEME_DEFAULT_TEMPLATES["modern"]
 
+THEME_DEFAULT_TEMPLATES["rabbitsocks"] = {
+    "name": "home",
+    "sections": {
+        "hero_main": {
+            "id": "hero_main",
+            "type": "hero",
+            "settings": {
+                "headline": "اكتشف أناقة الجوارب الفاخرة",
+                "subtitle": "رفاهية هادئة في كل تفصيلة",
+                "cta_text": "تسوق الآن",
+                "cta_link": "/products",
+            },
+        },
+        "marquee_main": {
+            "id": "marquee_main",
+            "type": "marquee",
+            "settings": {"text": "رفاهية هادئة", "repeat": 8},
+        },
+        "featured_fc": {
+            "id": "featured_fc",
+            "type": "featured-collection",
+            "settings": {
+                "title": "التشكيلة المميزة",
+                "collection_tag": "trending",
+                "view_all_link": "/products",
+            },
+        },
+        "categories_main": {
+            "id": "categories_main",
+            "type": "categories",
+            "settings": {"title": "تسوق حسب الفئة", "columns_desktop": 4, "columns_mobile": 2},
+        },
+        "newsletter_main": {
+            "id": "newsletter_main",
+            "type": "newsletter",
+            "settings": {
+                "title": "انضم إلينا",
+                "subtitle": "اشترك في نشرتنا البريدية لتصلك أحدث التشكيلات والعروض الحصرية",
+            },
+        },
+    },
+    "order": [
+        "hero_main",
+        "marquee_main",
+        "featured_fc",
+        "categories_main",
+        "newsletter_main",
+    ],
+}
+
+# ── Default page templates (shared across all themes) ────────────────────────
+
+_PAGE_TEMPLATES: dict[str, dict[str, Any]] = {
+    "products": {
+        "name": "products",
+        "sections": {"products_page_main": {"id": "products_page_main", "type": "products-page", "settings": {}}},
+        "order": ["products_page_main"],
+    },
+    "product-detail": {
+        "name": "product-detail",
+        "sections": {"pdp_main": {"id": "pdp_main", "type": "product-detail", "settings": {}}},
+        "order": ["pdp_main"],
+    },
+    "checkout": {
+        "name": "checkout",
+        "sections": {"checkout_main": {"id": "checkout_main", "type": "checkout", "settings": {}}},
+        "order": ["checkout_main"],
+    },
+    "contact": {
+        "name": "contact",
+        "sections": {"contact_main": {"id": "contact_main", "type": "contact", "settings": {}}},
+        "order": ["contact_main"],
+    },
+    "order-confirmation": {
+        "name": "order-confirmation",
+        "sections": {"oc_main": {"id": "oc_main", "type": "order-confirmation", "settings": {}}},
+        "order": ["oc_main"],
+    },
+    "profile": {
+        "name": "profile",
+        "sections": {"profile_main": {"id": "profile_main", "type": "profile", "settings": {}}},
+        "order": ["profile_main"],
+    },
+}
+
 # ── Lookup helpers ───────────────────────────────────────────────────────────
 
 _SECTION_SCHEMA_MAP: dict[str, dict[str, Any]] = {s["type"]: s for s in SECTION_SCHEMAS}
@@ -1944,15 +2138,14 @@ def get_theme_schema(theme_id: str) -> dict[str, Any] | None:
     if global_settings is None:
         return None
 
-    default_template = THEME_DEFAULT_TEMPLATES.get(theme_id)
+    home_template = THEME_DEFAULT_TEMPLATES.get(theme_id)
+    default_templates: dict[str, Any] = {**_PAGE_TEMPLATES}
+    if home_template:
+        default_templates["home"] = home_template
 
     return {
         "theme_id": theme_id,
         "global_settings": global_settings,
         "sections": SECTION_SCHEMAS,
-        "default_templates": {
-            "home": default_template,
-        }
-        if default_template
-        else {},
+        "default_templates": default_templates,
     }
