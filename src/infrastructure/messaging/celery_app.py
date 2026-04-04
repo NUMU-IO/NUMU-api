@@ -98,6 +98,12 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.calculate_health_scores",
         "schedule": crontab(hour=4, minute=0),  # Daily at 4 AM UTC
     },
+    "daily-ai-insights": {
+        "task": "tasks.generate_ai_insights",
+        "schedule": crontab(
+            hour=5, minute=0
+        ),  # Daily at 5 AM UTC (after rollup + health)
+    },
     # Trust Network maintenance
     "retry-stuck-preliminary-scores": {
         "task": "tasks.retry_stuck_preliminary_scores",

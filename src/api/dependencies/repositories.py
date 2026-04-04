@@ -189,6 +189,17 @@ def get_analytics_rollup_repository(
     return AnalyticsRollupRepository(session)
 
 
+def get_funnel_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get funnel event repository dependency."""
+    from src.infrastructure.repositories.funnel_event_repository import (
+        FunnelEventRepository,
+    )
+
+    return FunnelEventRepository(session)
+
+
 def get_cart_repository():
     """Get Redis cart repository (no DB session needed)."""
     from src.infrastructure.repositories.cart_repository import RedisCartRepository

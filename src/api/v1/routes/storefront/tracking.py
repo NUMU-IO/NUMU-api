@@ -7,8 +7,12 @@ from fastapi import APIRouter, Depends, Path, Request, Response
 from pydantic import BaseModel, Field
 
 from src.api.dependencies.repositories import (
+    get_funnel_event_repository,
     get_page_view_repository,
     get_store_repository,
+)
+from src.infrastructure.repositories.funnel_event_repository import (
+    FunnelEventRepository,
 )
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
@@ -29,6 +33,7 @@ async def track_page_view(
     store_id: Annotated[UUID, Path()],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
+    funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
 ):
     """Record a storefront page view. Fire-and-forget, no auth required."""
     store = await store_repo.get_by_id(store_id)
@@ -49,4 +54,27 @@ async def track_page_view(
         user_agent=ua,
         referrer=body.referrer,
     )
+
+    # Update real-time counters
+    try:
+        from src.infrastructure.cache.realtime_counters import record_page_view
+
+        await record_page_view(store.id, body.fingerprint, body.path)
+    except Exception:
+        pass
+
+    # Emit funnel event
+    try:
+        is_product = "/products/" in (body.path or "")
+        step = "product_view" if is_product else "page_view"
+        await funnel_repo.create(
+            tenant_id=store.tenant_id,
+            store_id=store.id,
+            step=step,
+            session_fingerprint=body.fingerprint,
+            step_data={"path": body.path, "referrer": body.referrer},
+        )
+    except Exception:
+        pass  # Non-critical — don't break page tracking
+
     return Response(status_code=204)

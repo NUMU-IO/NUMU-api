@@ -25,6 +25,7 @@ from src.infrastructure.database.models.tenant.configuration import (
 )
 from src.infrastructure.database.models.tenant.coupon import CouponModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
+from src.infrastructure.database.models.tenant.funnel_event import FunnelEventModel
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.network_contribution_log import (
@@ -70,6 +71,7 @@ __all__ = [
     "AutomationRuleModel",
     "CategoryModel",
     "CouponModel",
+    "FunnelEventModel",
     "CustomerAddressModel",
     "CustomerModel",
     "InvoiceModel",

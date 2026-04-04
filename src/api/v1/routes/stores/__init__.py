@@ -22,6 +22,7 @@ from fastapi import APIRouter
 
 from src.api.v1.routes.stores import ai as ai_module
 from src.api.v1.routes.stores import analytics as analytics_module
+from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
@@ -60,6 +61,9 @@ router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(inventory_module.router, tags=["Store Inventory"])
 router.include_router(analytics_module.router, tags=["Store Analytics"])
+router.include_router(
+    analytics_realtime_module.router, tags=["Store Analytics Realtime"]
+)
 router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(settings_module.router, tags=["Store Settings"])

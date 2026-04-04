@@ -236,6 +236,26 @@ async def bosta_callback(
                     order.deliver()
                     log.info("order_marked_delivered", order_id=str(order.id))
 
+                    # Emit funnel event: order_delivered
+                    try:
+                        from src.infrastructure.repositories.funnel_event_repository import (
+                            FunnelEventRepository,
+                        )
+
+                        fe_repo = FunnelEventRepository(session)
+                        await fe_repo.create(
+                            tenant_id=tenant_id or order.tenant_id,
+                            store_id=order.store_id,
+                            step="order_delivered",
+                            customer_id=order.customer_id,
+                            step_data={
+                                "order_id": str(order.id),
+                                "tracking_number": tracking_number,
+                            },
+                        )
+                    except Exception:
+                        pass
+
                 if cod_amount and not order.is_paid:
                     order.mark_as_paid(
                         payment_id=f"cod-bosta-{tracking_number}",
