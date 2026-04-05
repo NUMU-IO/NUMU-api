@@ -46,3 +46,37 @@ class GenerateDescriptionResponse(BaseModel):
     seo_description_en: str
     seo_description_ar: str
     tags: list[str]
+
+
+class GeneratePolicyRequest(BaseModel):
+    """Request to generate a store policy using AI."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "policy_type": "return",
+                "store_name": "My Store",
+                "answers": {
+                    "return_window": "14 days",
+                    "refund_method": "Original payment method",
+                    "conditions": "Items must be unused and in original packaging",
+                },
+                "language": "en",
+            }
+        }
+    )
+
+    policy_type: str = Field(
+        ..., description="Policy type: return, shipping, privacy, terms"
+    )
+    store_name: str = Field(..., min_length=1, max_length=255)
+    answers: dict[str, str] = Field(
+        ..., description="Answers to policy-specific questions"
+    )
+    language: str = Field(default="en", description="Language: en or ar")
+
+
+class GeneratePolicyResponse(BaseModel):
+    """Response from AI policy generation."""
+
+    policy_text: str
