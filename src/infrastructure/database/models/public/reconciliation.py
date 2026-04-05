@@ -11,11 +11,14 @@ from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 
 class PaymentReconciliationRunModel(Base, UUIDMixin, TimestampMixin):
-    """One reconciliation pass covering a gateway and time window."""
+    """One reconciliation pass covering a gateway and time window, scoped to a store."""
 
     __tablename__ = "payment_reconciliation_runs"
     __table_args__ = {"schema": "public"}
 
+    store_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     gateway: Mapped[str] = mapped_column(String(50), nullable=False)
     period_start: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

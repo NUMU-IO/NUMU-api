@@ -81,6 +81,13 @@ class CreateProductRequest(BaseModel):
         default_factory=dict,
         description="Arbitrary key-value attributes (size, color, etc.)",
     )
+    status: str | None = Field(
+        None, description="Product status: active, draft, or archived"
+    )
+    seo_title: str | None = Field(None, max_length=70, description="SEO page title")
+    seo_description: str | None = Field(
+        None, max_length=160, description="SEO meta description"
+    )
 
     @field_validator("price_currency")
     @classmethod
@@ -143,6 +150,10 @@ class UpdateProductRequest(BaseModel):
     attributes: dict | None = Field(None, description="Arbitrary key-value attributes")
     status: str | None = Field(
         None, description="Product status: active, draft, or archived"
+    )
+    seo_title: str | None = Field(None, max_length=70, description="SEO page title")
+    seo_description: str | None = Field(
+        None, max_length=160, description="SEO meta description"
     )
 
 

@@ -50,8 +50,10 @@ class ReconciliationService:
     # Public API
     # ------------------------------------------------------------------
 
-    async def run_for_date(self, target_date: date) -> PaymentReconciliationRun:
-        """Run full reconciliation for a calendar day (UTC).
+    async def run_for_date(
+        self, target_date: date, store_id: UUID | None = None
+    ) -> PaymentReconciliationRun:
+        """Run reconciliation for a calendar day (UTC), optionally scoped to a store.
 
         Creates a run record, compares orders vs transactions, persists all
         mismatches, then marks the run completed (or failed on error).
@@ -61,7 +63,7 @@ class ReconciliationService:
         )
         period_end = period_start + timedelta(days=1)
 
-        run = await self._create_run("all", period_start, period_end)
+        run = await self._create_run("all", period_start, period_end, store_id=store_id)
         log = logger.bind(run_id=str(run.id), date=str(target_date))
         log.info("reconciliation_started")
 
@@ -78,13 +80,18 @@ class ReconciliationService:
     # ------------------------------------------------------------------
 
     async def _create_run(
-        self, gateway: str, period_start: datetime, period_end: datetime
+        self,
+        gateway: str,
+        period_start: datetime,
+        period_end: datetime,
+        store_id: UUID | None = None,
     ) -> PaymentReconciliationRun:
         model = PaymentReconciliationRunModel(
             gateway=gateway,
             period_start=period_start,
             period_end=period_end,
             status=ReconciliationStatus.RUNNING.value,
+            store_id=store_id,
         )
         self.session.add(model)
         await self.session.flush()
@@ -101,6 +108,15 @@ class ReconciliationService:
         # Import here to avoid circular dependency at module load time
         from src.infrastructure.database.models.tenant.order import OrderModel
 
+        order_filters = [
+            OrderModel.payment_status == "paid",
+            OrderModel.paid_at >= period_start,
+            OrderModel.paid_at < period_end,
+        ]
+        # Scope to store if this is a store-level run
+        if run.store_id:
+            order_filters.append(OrderModel.store_id == run.store_id)
+
         paid_orders_result = await self.session.execute(
             select(
                 OrderModel.id,
@@ -109,13 +125,7 @@ class ReconciliationService:
                 OrderModel.payment_method,
                 OrderModel.payment_id,
                 OrderModel.paid_at,
-            ).where(
-                and_(
-                    OrderModel.payment_status == "PAID",
-                    OrderModel.paid_at >= period_start,
-                    OrderModel.paid_at < period_end,
-                )
-            )
+            ).where(and_(*order_filters))
         )
         paid_orders = paid_orders_result.all()
 
@@ -287,6 +297,7 @@ class ReconciliationService:
     def _run_to_entity(m: PaymentReconciliationRunModel) -> PaymentReconciliationRun:
         return PaymentReconciliationRun(
             id=m.id,
+            store_id=m.store_id,
             gateway=m.gateway,
             period_start=m.period_start,
             period_end=m.period_end,

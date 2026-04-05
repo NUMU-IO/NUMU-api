@@ -101,6 +101,7 @@ async def create_product(
         description=request.description,
         short_description=request.short_description,
         product_type=request.product_type,
+        status=request.status,
         price=request.price,
         price_currency=request.price_currency,
         compare_at_price=request.compare_at_price,
@@ -111,6 +112,8 @@ async def create_product(
         category_id=request.category_id,
         tags=request.tags,
         attributes=request.attributes,
+        seo_title=request.seo_title,
+        seo_description=request.seo_description,
     )
 
     result = await use_case.execute(
@@ -381,6 +384,8 @@ async def update_product(
         tags=request.tags,
         attributes=request.attributes,
         status=request.status,
+        seo_title=request.seo_title,
+        seo_description=request.seo_description,
     )
 
     result = await use_case.execute(

@@ -172,3 +172,46 @@ class FunnelEventRepository:
             }
             for e in result.scalars().all()
         ]
+
+    async def get_session_events(
+        self,
+        store_id: UUID,
+        session_fingerprint: str,
+    ) -> list[dict]:
+        """Get all funnel events for a specific session, ordered by time."""
+        query = (
+            select(FunnelEventModel)
+            .where(FunnelEventModel.store_id == store_id)
+            .where(FunnelEventModel.session_fingerprint == session_fingerprint)
+            .order_by(FunnelEventModel.created_at)
+        )
+        query = self._tenant_filter(query)
+        result = await self.session.execute(query)
+        return [
+            {
+                "step": e.step,
+                "step_data": e.step_data,
+                "customer_id": str(e.customer_id) if e.customer_id else None,
+                "created_at": e.created_at,
+            }
+            for e in result.scalars().all()
+        ]
+
+    async def get_sessions_with_step(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        step: str,
+    ) -> set[str]:
+        """Get session fingerprints that reached a specific funnel step."""
+        query = (
+            select(func.distinct(FunnelEventModel.session_fingerprint))
+            .where(FunnelEventModel.store_id == store_id)
+            .where(FunnelEventModel.step == step)
+            .where(FunnelEventModel.created_at >= date_from)
+            .where(FunnelEventModel.created_at <= date_to)
+        )
+        query = self._tenant_filter(query)
+        result = await self.session.execute(query)
+        return {row[0] for row in result.all() if row[0]}

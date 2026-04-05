@@ -1822,3 +1822,262 @@ async def get_forecast(
         ),
         message="Forecast generated",
     )
+
+
+# ── Customer Journey / Sessions ──
+
+
+def _parse_device_type(user_agent: str | None) -> str:
+    """Parse device type from user agent string."""
+    if not user_agent:
+        return "unknown"
+    ua = user_agent.lower()
+    if any(k in ua for k in ("mobile", "android", "iphone", "ipad")):
+        if "ipad" in ua or "tablet" in ua:
+            return "tablet"
+        return "mobile"
+    return "desktop"
+
+
+class SessionSummaryItem(BaseModel):
+    session_fingerprint: str
+    page_count: int
+    duration_seconds: int
+    started_at: str
+    device_type: str
+    referrer: str | None
+    funnel_reached: str | None  # deepest funnel step
+    has_order: bool
+
+
+class SessionsOverview(BaseModel):
+    total_sessions: int
+    avg_duration_seconds: int
+    bounce_rate: float  # % sessions with 1 page
+    sessions_with_order_pct: float
+
+
+class SessionsResponse(BaseModel):
+    overview: SessionsOverview
+    sessions: list[SessionSummaryItem]
+
+
+@router.get(
+    "/sessions",
+    response_model=SuccessResponse[SessionsResponse],
+    summary="Get customer sessions list",
+    operation_id="get_sessions",
+)
+async def get_sessions(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
+    funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
+    days: int = Query(7, ge=1, le=30),
+    has_order: bool = Query(False, description="Filter to sessions with orders"),
+    min_pages: int = Query(1, ge=1, description="Minimum page count"),
+    device: str = Query("", description="Filter by device: mobile, desktop, tablet"),
+):
+    """Get session list with duration, pages, funnel reached, and device type."""
+    now = datetime.now(UTC)
+    period_start = now - timedelta(days=days)
+
+    raw_sessions = await pv_repo.get_sessions_summary(
+        store.id, period_start, now, limit=500
+    )
+
+    if not raw_sessions:
+        return SuccessResponse(
+            data=SessionsResponse(
+                overview=SessionsOverview(
+                    total_sessions=0,
+                    avg_duration_seconds=0,
+                    bounce_rate=0,
+                    sessions_with_order_pct=0,
+                ),
+                sessions=[],
+            ),
+            message="Sessions retrieved",
+        )
+
+    # Get sessions that completed an order
+    order_sessions = await funnel_repo.get_sessions_with_step(
+        store.id, period_start, now, "checkout_started"
+    )
+
+    # Get deepest funnel step per session
+    funnel_steps_order = [
+        "page_view",
+        "product_view",
+        "add_to_cart",
+        "checkout_started",
+        "order_completed",
+        "order_delivered",
+    ]
+    # Batch: get all funnel step sets
+    step_sessions: dict[str, set[str]] = {}
+    for step in funnel_steps_order[1:]:  # skip page_view, all have it
+        step_sessions[step] = await funnel_repo.get_sessions_with_step(
+            store.id, period_start, now, step
+        )
+
+    sessions: list[SessionSummaryItem] = []
+    durations: list[int] = []
+    bounces = 0
+
+    for s in raw_sessions:
+        fp = s["session_fingerprint"]
+        page_count = s["page_count"]
+        started = s["started_at"]
+        ended = s["ended_at"]
+        duration = int((ended - started).total_seconds()) if started and ended else 0
+        device_type = _parse_device_type(s.get("user_agent"))
+        in_orders = fp in order_sessions
+
+        # Deepest funnel step
+        deepest = "page_view"
+        for step in funnel_steps_order[1:]:
+            if fp in step_sessions.get(step, set()):
+                deepest = step
+
+        # Apply filters
+        if has_order and not in_orders:
+            continue
+        if page_count < min_pages:
+            continue
+        if device and device_type != device:
+            continue
+
+        if page_count <= 1:
+            bounces += 1
+
+        durations.append(duration)
+        sessions.append(
+            SessionSummaryItem(
+                session_fingerprint=fp,
+                page_count=page_count,
+                duration_seconds=duration,
+                started_at=started.isoformat(),
+                device_type=device_type,
+                referrer=s.get("referrer"),
+                funnel_reached=deepest,
+                has_order=in_orders,
+            )
+        )
+
+    total = len(sessions)
+    avg_dur = sum(durations) // total if total > 0 else 0
+    bounce_rate = round(bounces / total * 100, 1) if total > 0 else 0
+    order_pct = (
+        round(sum(1 for s in sessions if s.has_order) / total * 100, 1)
+        if total > 0
+        else 0
+    )
+
+    return SuccessResponse(
+        data=SessionsResponse(
+            overview=SessionsOverview(
+                total_sessions=total,
+                avg_duration_seconds=avg_dur,
+                bounce_rate=bounce_rate,
+                sessions_with_order_pct=order_pct,
+            ),
+            sessions=sessions[:100],  # Cap at 100 for response size
+        ),
+        message="Sessions retrieved",
+    )
+
+
+# ── Session Detail (Timeline) ──
+
+
+class TimelineEvent(BaseModel):
+    type: str  # "page_view" or funnel step name
+    path: str | None = None
+    step_data: dict | None = None
+    timestamp: str
+
+
+class SessionDetailResponse(BaseModel):
+    session_fingerprint: str
+    device_type: str
+    referrer: str | None
+    page_count: int
+    duration_seconds: int
+    timeline: list[TimelineEvent]
+
+
+@router.get(
+    "/sessions/{fingerprint}",
+    response_model=SuccessResponse[SessionDetailResponse],
+    summary="Get session detail timeline",
+    operation_id="get_session_detail",
+)
+async def get_session_detail(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    fingerprint: str,
+    pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
+    funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
+):
+    """Get full timeline for a specific session."""
+    pages = await pv_repo.get_session_pages(store.id, fingerprint)
+    events = await funnel_repo.get_session_events(store.id, fingerprint)
+
+    # Merge into unified timeline
+    timeline: list[dict] = []
+
+    for p in pages:
+        timeline.append({
+            "type": "page_view",
+            "path": p["path"],
+            "step_data": None,
+            "timestamp": p["created_at"],
+        })
+
+    for e in events:
+        if e["step"] == "page_view":
+            continue  # Already covered by page_views
+        timeline.append({
+            "type": e["step"],
+            "path": e["step_data"].get("path") if e["step_data"] else None,
+            "step_data": e["step_data"],
+            "timestamp": e["created_at"],
+        })
+
+    # Sort by timestamp
+    timeline.sort(key=lambda x: x["timestamp"])
+
+    # Compute session metadata
+    device_type = _parse_device_type(pages[0]["user_agent"] if pages else None)
+    referrer = pages[0]["referrer"] if pages else None
+    page_count = len(pages)
+
+    if timeline:
+        first = timeline[0]["timestamp"]
+        last = timeline[-1]["timestamp"]
+        duration = int((last - first).total_seconds())
+    else:
+        duration = 0
+
+    formatted = [
+        TimelineEvent(
+            type=t["type"],
+            path=t["path"],
+            step_data=t["step_data"],
+            timestamp=t["timestamp"].isoformat()
+            if hasattr(t["timestamp"], "isoformat")
+            else str(t["timestamp"]),
+        )
+        for t in timeline
+    ]
+
+    return SuccessResponse(
+        data=SessionDetailResponse(
+            session_fingerprint=fingerprint,
+            device_type=device_type,
+            referrer=referrer,
+            page_count=page_count,
+            duration_seconds=duration,
+            timeline=formatted,
+        ),
+        message="Session detail retrieved",
+    )

@@ -81,7 +81,7 @@ async def get_balances(
     if store_balance == 0:
         q_orders = select(func.coalesce(func.sum(OrderModel.total), 0)).where(
             OrderModel.store_id == store_id,
-            OrderModel.payment_status == "PAID",
+            OrderModel.payment_status == "paid",
         )
         result_orders = await db.execute(q_orders)
         store_balance = result_orders.scalar() or 0
@@ -178,7 +178,7 @@ async def list_transactions(
         .outerjoin(CustomerModel, OrderModel.customer_id == CustomerModel.id)
         .where(
             OrderModel.store_id == store_id,
-            OrderModel.payment_status.in_(["PAID", "AUTHORIZED"]),
+            OrderModel.payment_status.in_(["paid", "authorized"]),
         )
         .order_by(OrderModel.paid_at.desc().nullslast(), OrderModel.created_at.desc())
         .offset(skip)
@@ -203,7 +203,7 @@ async def list_transactions(
                 amount_cents=order.total,
                 currency=order.currency or "EGP",
                 status="successful"
-                if str(order.payment_status) == "PAID"
+                if str(order.payment_status).lower() in ("paid", "authorized")
                 else "pending",
                 payment_method=order.payment_method or "card",
                 gateway=order.payment_method or "",

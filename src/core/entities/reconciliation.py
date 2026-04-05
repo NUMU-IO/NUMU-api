@@ -22,8 +22,9 @@ class MismatchType(StrEnum):
 
 
 class PaymentReconciliationRun(BaseEntity):
-    """A single reconciliation run covering a time window."""
+    """A single reconciliation run covering a time window, scoped to a store."""
 
+    store_id: UUID | None = None
     gateway: str  # 'paymob', 'fawry', 'all'
     period_start: datetime
     period_end: datetime

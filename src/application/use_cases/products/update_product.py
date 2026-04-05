@@ -80,6 +80,10 @@ class UpdateProductUseCase:
                 product.status = ProductStatus(dto.status)
             except ValueError:
                 pass
+        if dto.seo_title is not None:
+            product.seo_title = dto.seo_title
+        if dto.seo_description is not None:
+            product.seo_description = dto.seo_description
 
         # Save product
         updated_product = await self.product_repository.update(product)

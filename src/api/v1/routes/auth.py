@@ -6,8 +6,11 @@ Tokens are set via httpOnly cookies — never exposed in JSON response body.
 
 import secrets
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_current_user_id,
@@ -15,6 +18,7 @@ from src.api.dependencies import (
     get_token_service,
     get_user_repository,
 )
+from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import get_two_factor_repository
 from src.api.dependencies.services import (
     get_email_service,
@@ -501,11 +505,13 @@ async def resend_verification(
 )
 async def login(
     request: LoginRequest,
+    http_request: Request,
     response: Response,
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
     two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Authenticate user and set tokens as httpOnly cookies.
 
@@ -549,6 +555,19 @@ async def login(
         result.tokens.access_token,
         result.tokens.refresh_token,
     )
+
+    # Record login session
+    try:
+        from src.application.services.session_service import record_session
+
+        ip = http_request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+            http_request.client.host if http_request.client else None
+        )
+        ua = http_request.headers.get("user-agent", "")
+        await record_session(db, user_uuid, user_agent=ua, ip_address=ip)
+        await db.commit()
+    except Exception:
+        pass  # Non-critical — don't block login
 
     return SuccessResponse(
         data=AuthResponse(
@@ -1084,4 +1103,120 @@ async def complete_2fa_login(
             ),
         ),
         message="Login successful",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Active Sessions
+# ---------------------------------------------------------------------------
+
+
+class SessionResponse(BaseModel):
+    id: str
+    device_name: str
+    device_type: str
+    browser: str | None
+    os: str | None
+    ip_address: str | None
+    is_current: bool
+    last_active_at: str
+    created_at: str
+
+
+@router.get(
+    "/sessions",
+    response_model=SuccessResponse[list[SessionResponse]],
+    summary="List active sessions",
+    operation_id="list_sessions",
+)
+async def list_sessions(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """List all active login sessions for the current user."""
+    from src.application.services.session_service import list_active_sessions
+
+    sessions = await list_active_sessions(db, UUID(user_id))
+
+    # Detect current session by matching IP + user-agent
+    current_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+        request.client.host if request.client else None
+    )
+    current_ua = request.headers.get("user-agent", "")
+
+    result = []
+    for s in sessions:
+        is_current = (
+            s.ip_address == current_ip
+            and current_ua
+            and s.browser
+            and s.browser.lower() in current_ua.lower()
+        )
+        result.append(
+            SessionResponse(
+                id=str(s.id),
+                device_name=s.device_name,
+                device_type=s.device_type,
+                browser=s.browser,
+                os=s.os,
+                ip_address=s.ip_address,
+                is_current=bool(is_current),
+                last_active_at=s.last_active_at.isoformat(),
+                created_at=s.created_at.isoformat(),
+            )
+        )
+
+    if result and not any(s.is_current for s in result):
+        result[0].is_current = True
+
+    return SuccessResponse(data=result, message="Sessions retrieved")
+
+
+class RevokeSessionRequest(BaseModel):
+    session_id: str
+
+
+@router.post(
+    "/sessions/revoke",
+    response_model=SuccessResponse[dict],
+    summary="Revoke a specific session",
+    operation_id="revoke_session",
+)
+async def revoke_session_endpoint(
+    body: RevokeSessionRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Revoke a specific login session."""
+    from src.application.services.session_service import revoke_session
+
+    revoked = await revoke_session(db, UUID(body.session_id), UUID(user_id))
+    await db.commit()
+
+    if not revoked:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return SuccessResponse(data={"revoked": True}, message="Session revoked")
+
+
+@router.post(
+    "/sessions/revoke-all",
+    response_model=SuccessResponse[dict],
+    summary="Revoke all other sessions",
+    operation_id="revoke_all_sessions",
+)
+async def revoke_all_sessions_endpoint(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Revoke all sessions except the current one."""
+    from src.application.services.session_service import revoke_all_other_sessions
+
+    count = await revoke_all_other_sessions(db, UUID(user_id))
+    await db.commit()
+
+    return SuccessResponse(
+        data={"revoked_count": count},
+        message=f"{count} sessions revoked",
     )

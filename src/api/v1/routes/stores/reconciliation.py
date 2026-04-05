@@ -16,7 +16,6 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import verify_store_ownership
-from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.core.entities.store import Store
@@ -83,15 +82,15 @@ class TriggerReconciliationResponse(BaseModel):
     operation_id="store_list_reconciliation_runs",
 )
 async def list_reconciliation_runs(
-    store_id: UUID,
-    _user_id: Annotated[str, Depends(get_current_user_id)],
+    store: Annotated[Store, Depends(verify_store_ownership)],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = Query(0, ge=0),
     limit: int = Query(30, ge=1, le=60),
 ):
-    """List the most recent reconciliation runs (platform-wide, read-only for merchants)."""
+    """List reconciliation runs scoped to this store."""
     result = await db.execute(
         select(PaymentReconciliationRunModel)
+        .where(PaymentReconciliationRunModel.store_id == store.id)
         .order_by(desc(PaymentReconciliationRunModel.created_at))
         .offset(skip)
         .limit(limit)
@@ -127,13 +126,12 @@ async def list_reconciliation_runs(
     operation_id="store_list_run_mismatches",
 )
 async def list_run_mismatches(
-    store_id: UUID,
+    store: Annotated[Store, Depends(verify_store_ownership)],
     run_id: UUID,
-    _user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     resolved: bool | None = Query(None),
 ):
-    """Get mismatches for a specific run. Shows all mismatches (platform-wide view)."""
+    """Get mismatches for a specific reconciliation run scoped to this store."""
     q = select(ReconciliationMismatchModel).where(
         ReconciliationMismatchModel.run_id == run_id
     )
@@ -189,7 +187,7 @@ async def trigger_reconciliation(
     )
 
     svc = ReconciliationService(db)
-    run = await svc.run_for_date(target_date)
+    run = await svc.run_for_date(target_date, store_id=store.id)
     await db.commit()
 
     return SuccessResponse(

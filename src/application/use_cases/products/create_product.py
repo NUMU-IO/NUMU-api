@@ -237,6 +237,14 @@ class CreateProductUseCase:
         except ValueError:
             product_type = ProductType.PHYSICAL
 
+        # Parse status
+        try:
+            status = (
+                ProductStatus(dto.status.lower()) if dto.status else ProductStatus.DRAFT
+            )
+        except ValueError:
+            status = ProductStatus.DRAFT
+
         # Create product entity
         product = Product(
             store_id=store_id,
@@ -247,7 +255,7 @@ class CreateProductUseCase:
             description=dto.description,
             short_description=dto.short_description,
             product_type=product_type,
-            status=ProductStatus.DRAFT,
+            status=status,
             price=price,
             compare_at_price=compare_at_price,
             cost_price=cost_price,
@@ -257,6 +265,8 @@ class CreateProductUseCase:
             category_id=dto.category_id,
             tags=dto.tags or [],
             attributes=dto.attributes or {},
+            seo_title=dto.seo_title,
+            seo_description=dto.seo_description,
         )
 
         # Save product

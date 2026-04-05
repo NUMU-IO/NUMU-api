@@ -90,3 +90,71 @@ class PageViewRepository:
         query = self._tenant_filter(query)
         result = await self.session.execute(query)
         return result.scalar_one()
+
+    async def get_sessions_summary(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get session summaries grouped by fingerprint."""
+        query = (
+            select(
+                PageViewModel.session_fingerprint,
+                func.count().label("page_count"),
+                func.min(PageViewModel.created_at).label("started_at"),
+                func.max(PageViewModel.created_at).label("ended_at"),
+                func.min(PageViewModel.user_agent).label("user_agent"),
+                func.min(PageViewModel.referrer).label("referrer"),
+            )
+            .where(PageViewModel.store_id == store_id)
+            .where(PageViewModel.created_at >= date_from)
+            .where(PageViewModel.created_at <= date_to)
+            .where(PageViewModel.session_fingerprint.isnot(None))
+            .group_by(PageViewModel.session_fingerprint)
+            .order_by(func.max(PageViewModel.created_at).desc())
+            .limit(limit)
+        )
+        query = self._tenant_filter(query)
+        result = await self.session.execute(query)
+        return [
+            {
+                "session_fingerprint": row.session_fingerprint,
+                "page_count": row.page_count,
+                "started_at": row.started_at,
+                "ended_at": row.ended_at,
+                "user_agent": row.user_agent,
+                "referrer": row.referrer,
+            }
+            for row in result.all()
+        ]
+
+    async def get_session_pages(
+        self,
+        store_id: UUID,
+        session_fingerprint: str,
+    ) -> list[dict]:
+        """Get all page views for a specific session, ordered by time."""
+        query = (
+            select(
+                PageViewModel.path,
+                PageViewModel.created_at,
+                PageViewModel.referrer,
+                PageViewModel.user_agent,
+            )
+            .where(PageViewModel.store_id == store_id)
+            .where(PageViewModel.session_fingerprint == session_fingerprint)
+            .order_by(PageViewModel.created_at)
+        )
+        query = self._tenant_filter(query)
+        result = await self.session.execute(query)
+        return [
+            {
+                "path": row.path,
+                "created_at": row.created_at,
+                "referrer": row.referrer,
+                "user_agent": row.user_agent,
+            }
+            for row in result.all()
+        ]

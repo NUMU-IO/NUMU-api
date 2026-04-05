@@ -80,6 +80,7 @@ class CreateProductDTO(BaseDTO):
     description: str | None = None
     short_description: str | None = None
     product_type: str = "physical"
+    status: str | None = None
     price_currency: str = "USD"
     compare_at_price: Decimal | None = None
     cost_price: Decimal | None = None
@@ -89,6 +90,8 @@ class CreateProductDTO(BaseDTO):
     category_id: UUID | None = None
     tags: list[str] = field(default_factory=list)
     attributes: dict = field(default_factory=dict)
+    seo_title: str | None = None
+    seo_description: str | None = None
 
 
 @dataclass
@@ -110,3 +113,5 @@ class UpdateProductDTO(BaseDTO):
     tags: list[str] | None = None
     attributes: dict | None = None
     status: str | None = None
+    seo_title: str | None = None
+    seo_description: str | None = None

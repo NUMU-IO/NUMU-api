@@ -228,7 +228,7 @@ class Settings(BaseSettings):
 
     # OpenRouter (for AI insights via Qwen)
     openrouter_api_key: str | None = None
-    openrouter_model: str = "qwen/qwen3-235b-a22b:free"
+    openrouter_model: str = "qwen/qwen3.6-plus:free"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Resend (Email)
