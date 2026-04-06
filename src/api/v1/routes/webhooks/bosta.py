@@ -118,6 +118,67 @@ async def _update_shipment_status(shipment, shipment_repo, state: str, log, **kw
     )
 
 
+async def _record_network_event_from_order(
+    order,
+    shipment,
+    event_type: str,
+    session,
+    log,
+) -> None:
+    """Record an rto/delivery event in the cross-merchant network reputation.
+
+    COD-only and idempotent: a flag is written to ``shipment.metadata``
+    after the first successful write to prevent double-counting on Bosta
+    webhook replays. Fire-and-forget — never raises.
+    """
+    if not order or not shipment:
+        return
+    if not shipment.cod_amount or shipment.cod_amount <= 0:
+        return
+
+    flag_key = f"network_{event_type}_recorded"
+    if shipment.metadata and shipment.metadata.get(flag_key):
+        return
+
+    try:
+        phone = order.shipping_address.phone if order.shipping_address else None
+        if not phone:
+            return
+
+        from src.application.services.network_reputation_service import (
+            extract_phone_hash_from_string,
+            write_network_event,
+        )
+        from src.infrastructure.repositories.shopify_repository import (
+            NetworkReputationRepository,
+        )
+
+        phone_hash = extract_phone_hash_from_string(phone)
+        if not phone_hash:
+            return
+
+        repo = NetworkReputationRepository(session)
+        await write_network_event(
+            phone_hash=phone_hash,
+            store_id=order.store_id,
+            event_type=event_type,
+            network_repo=repo,
+        )
+
+        # Mark the shipment so we don't double-count on webhook replay.
+        if shipment.metadata is None:
+            shipment.metadata = {}
+        shipment.metadata[flag_key] = True
+
+        log.info(
+            "network_event_recorded",
+            event_type=event_type,
+            store_id=str(order.store_id),
+        )
+    except Exception as exc:
+        log.warning("network_event_failed", event_type=event_type, error=str(exc))
+
+
 @router.post("/callback", operation_id="bosta_callback")
 async def bosta_callback(
     request: Request,
@@ -274,6 +335,12 @@ async def bosta_callback(
             shipment, shipment_repo, state, log, cod_amount=cod_amount
         )
 
+        # Record positive network event for the customer (COD only).
+        # Idempotent — replayed webhooks won't double-count.
+        await _record_network_event_from_order(
+            order, shipment, "delivery", session, log
+        )
+
         try:
             await session.commit()
         except Exception as e:
@@ -337,6 +404,11 @@ async def bosta_callback(
             )
 
         await _update_shipment_status(shipment, shipment_repo, state, log)
+
+        # Record RTO event in cross-merchant trust network (COD only,
+        # idempotent). Only RETURNED counts as RTO — DELIVERY_FAILED may
+        # be retried by the carrier.
+        await _record_network_event_from_order(order, shipment, "rto", session, log)
 
         try:
             await session.commit()

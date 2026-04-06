@@ -200,6 +200,21 @@ def get_funnel_event_repository(
     return FunnelEventRepository(session)
 
 
+def get_network_reputation_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get network reputation repository (cross-merchant trust network).
+
+    Re-exported here so storefront routes don't need to import from the
+    `shopify` dependency module.
+    """
+    from src.infrastructure.repositories.shopify_repository import (
+        NetworkReputationRepository,
+    )
+
+    return NetworkReputationRepository(session)
+
+
 def get_cart_repository():
     """Get Redis cart repository (no DB session needed)."""
     from src.infrastructure.repositories.cart_repository import RedisCartRepository

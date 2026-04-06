@@ -25,17 +25,23 @@ from src.api.dependencies.shopify import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.shopify import WebhookProcessRequest
+from src.application.services.network_reputation_service import (
+    extract_phone_hash_from_payload as _extract_phone_hash,
+)
+from src.application.services.network_reputation_service import (
+    lookup_network_reputation,
+)
+from src.application.services.network_reputation_service import (
+    write_network_event as _write_network_event,
+)
 from src.application.use_cases.shopify.automation_engine import (
     OrderContext,
     evaluate_rules,
 )
 from src.application.use_cases.shopify.execute_actions import execute_actions
-from src.application.use_cases.shopify.phone_hash import normalize_and_hash
 from src.application.use_cases.shopify.risk_scoring_engine import (
-    compute_network_score,
     score_order_fast,
 )
-from src.config.settings import get_settings
 from src.infrastructure.messaging.tasks.risk_scoring_tasks import (
     compute_full_risk_score,
 )
@@ -111,128 +117,26 @@ async def _get_and_update_store_avg(store_id: UUID, total_cents: int) -> int:
         return _STORE_AVG_DEFAULT
 
 
-_NET_SCORE_CACHE_KEY = "shopify:net_score:{phone_hash}"
-_NET_SCORE_CACHE_TTL = 3600  # 1 hour
+# Network reputation helpers (lookup, hash, write) live in
+# src.application.services.network_reputation_service. Imported above as
+# `_lookup_network_score`-equivalent (`lookup_network_reputation`),
+# `_extract_phone_hash`, and `_write_network_event` for API compatibility.
 
 
 async def _lookup_network_score(
     phone_hash: str | None,
     network_repo: NetworkReputationRepository,
 ) -> tuple[int, str]:
-    """Look up network reputation: Redis cache → DB fallback → baseline.
+    """Backwards-compatible shim returning ``(score, label)``.
 
-    Returns ``(score, label)``.  Never raises — returns the baseline (55)
-    on any failure.
+    The new shared service returns ``(score, confidence, label)``; this
+    helper drops the confidence so existing Shopify callers don't need to
+    change. New callers should use ``lookup_network_reputation`` directly.
     """
-    if not phone_hash:
-        return 55, "new_to_network"
-
-    # 1. Try Redis cache
-    try:
-        from src.infrastructure.cache.redis_cache import RedisCacheService
-
-        cache = RedisCacheService()
-        key = _NET_SCORE_CACHE_KEY.format(phone_hash=phone_hash)
-        cached = await cache.get(key)
-        await cache.close()
-        if cached is not None and isinstance(cached, dict):
-            return cached.get("score", 55), cached.get("label", "new_to_network")
-    except Exception as exc:
-        logger.warning("Redis network score cache lookup failed: %s", exc)
-
-    # 2. Fallback to DB
-    try:
-        rep = await network_repo.get_by_phone_hash(phone_hash)
-        if rep is None:
-            return 55, "new_to_network"
-
-        score, _confidence, label = compute_network_score(
-            total_orders=rep.total_network_orders,
-            total_rtos=rep.total_network_rtos,
-            total_deliveries=rep.total_successful_deliveries,
-            total_refunds=rep.total_refunds,
-            contributing_store_count=rep.contributing_store_count,
-        )
-
-        # Cache the result in Redis for future lookups
-        try:
-            cache = RedisCacheService()
-            key = _NET_SCORE_CACHE_KEY.format(phone_hash=phone_hash)
-            await cache.set(
-                key,
-                {"score": score, "label": label},
-                expire=_NET_SCORE_CACHE_TTL,
-            )
-            await cache.close()
-        except Exception:
-            pass  # Non-fatal — DB result is authoritative
-
-        return score, label
-    except Exception as exc:
-        logger.warning("DB network score lookup failed: %s", exc)
-        return 55, "new_to_network"
-
-
-def _extract_phone_hash(payload: dict) -> str | None:
-    """Extract phone from a Shopify order payload, normalize, and hash.
-
-    Returns the 64-char hex HMAC-SHA256 digest, or ``None`` if the phone
-    is missing or cannot be normalized to E.164.
-    """
-    customer = payload.get("customer") or {}
-    shipping_address = payload.get("shipping_address") or {}
-    phone = customer.get("phone") or shipping_address.get("phone") or ""
-    if not phone:
-        return None
-
-    salt = get_settings().platform_secret_salt
-    if not salt:
-        logger.error(
-            "PLATFORM_SECRET_SALT is not configured — cannot hash phone numbers"
-        )
-        return None
-
-    return normalize_and_hash(phone, salt)
-
-
-async def _write_network_event(
-    *,
-    phone_hash: str | None,
-    store_id: UUID,
-    event_type: str,
-    network_repo: NetworkReputationRepository,
-) -> None:
-    """Write a network reputation event and update store count.
-
-    Handles ``order``, ``rto`` (cancellation), ``delivery``, and ``refund``.
-    Invalidates the Redis cache for this phone hash after writing.
-    """
-    if not phone_hash:
-        return
-
-    if event_type == "order":
-        await network_repo.upsert_order(phone_hash=phone_hash, store_id=store_id)
-    else:
-        await network_repo.record_event(
-            phone_hash=phone_hash,
-            store_id=store_id,
-            event_type=event_type,
-        )
-
-    # Update contributing store count and recompute cached score
-    await network_repo.update_store_count(phone_hash)
-    await network_repo.recompute_cached_score(phone_hash)
-
-    # Invalidate Redis cache so the next lookup gets fresh data
-    try:
-        from src.infrastructure.cache.redis_cache import RedisCacheService
-
-        cache = RedisCacheService()
-        key = _NET_SCORE_CACHE_KEY.format(phone_hash=phone_hash)
-        await cache.delete(key)
-        await cache.close()
-    except Exception:
-        pass  # Non-fatal
+    score, _confidence, label = await lookup_network_reputation(
+        phone_hash, network_repo
+    )
+    return score, label
 
 
 async def _handle_order_created(

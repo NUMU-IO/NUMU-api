@@ -17,6 +17,7 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     BostaCredentialsResponse,
+    CodTrustResponse,
     CreateShippingZoneRequest,
     CustomizationFooter,
     CustomizationHeader,
@@ -43,6 +44,7 @@ from src.api.v1.schemas.tenant.settings import (
     ShippingSettingsResponse,
     ShippingZone,
     StoreSettingsResponse,
+    UpdateCodTrustRequest,
     UpdateCustomizationRequest,
     UpdateInvoiceSettingsRequest,
     UpdatePaymentSettingsRequest,
@@ -367,6 +369,76 @@ async def update_payment_settings(
     return SuccessResponse(
         data=_build_payment_response(payment_settings),
         message="Payment settings updated successfully",
+    )
+
+
+# ============ COD Trust Network ============
+
+
+_COD_TRUST_DEFAULTS = {
+    "enabled": False,
+    "threshold": 70,
+    "min_confidence": "medium",
+    "action": "block",
+}
+
+
+def _get_cod_trust_settings(store_settings: dict | None) -> dict:
+    """Read cod_trust block from store.settings, applying defaults."""
+    raw = (store_settings or {}).get("cod_trust") or {}
+    result = dict(_COD_TRUST_DEFAULTS)
+    result.update({k: v for k, v in raw.items() if k in _COD_TRUST_DEFAULTS})
+    return result
+
+
+@router.get(
+    "/cod-trust",
+    response_model=SuccessResponse[CodTrustResponse],
+    summary="Get COD trust network protection settings",
+    operation_id="get_cod_trust_settings",
+)
+async def get_cod_trust_settings_endpoint(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get the COD trust network protection settings for the store."""
+    cod_trust = _get_cod_trust_settings(store.settings)
+    return SuccessResponse(
+        data=CodTrustResponse(**cod_trust),
+        message="COD trust settings retrieved",
+    )
+
+
+@router.patch(
+    "/cod-trust",
+    response_model=SuccessResponse[CodTrustResponse],
+    summary="Update COD trust network protection settings",
+    operation_id="update_cod_trust_settings",
+)
+async def update_cod_trust_settings_endpoint(
+    request: UpdateCodTrustRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Update the COD trust network protection settings for the store."""
+    settings = dict(store.settings) if store.settings else {}
+    cod_trust = _get_cod_trust_settings(settings)
+
+    if request.enabled is not None:
+        cod_trust["enabled"] = request.enabled
+    if request.threshold is not None:
+        cod_trust["threshold"] = request.threshold
+    if request.min_confidence is not None:
+        cod_trust["min_confidence"] = request.min_confidence
+    if request.action is not None:
+        cod_trust["action"] = request.action
+
+    settings["cod_trust"] = cod_trust
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=CodTrustResponse(**cod_trust),
+        message="COD trust settings updated",
     )
 
 

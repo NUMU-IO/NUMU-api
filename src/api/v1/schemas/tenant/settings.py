@@ -1,6 +1,6 @@
 """Store settings Pydantic schemas."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +33,25 @@ class UpdatePaymentSettingsRequest(BaseModel):
     paymob_enabled: bool | None = None
     vodafone_cash_enabled: bool | None = None
     bank_transfer_enabled: bool | None = None
+
+
+# COD Trust Network Settings
+class CodTrustResponse(BaseModel):
+    """COD trust network protection settings."""
+
+    enabled: bool = False
+    threshold: int = 70
+    min_confidence: Literal["low", "medium", "high"] = "medium"
+    action: Literal["block", "warn"] = "block"
+
+
+class UpdateCodTrustRequest(BaseModel):
+    """Update COD trust network settings (all fields optional)."""
+
+    enabled: bool | None = None
+    threshold: int | None = Field(None, ge=0, le=100)
+    min_confidence: Literal["low", "medium", "high"] | None = None
+    action: Literal["block", "warn"] | None = None
 
 
 class SavePaymobCredentialsRequest(BaseModel):

@@ -29,6 +29,7 @@ from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_customer_repository,
     get_funnel_event_repository,
+    get_network_reputation_repository,
     get_order_repository,
     get_product_repository,
     get_store_repository,
@@ -39,6 +40,11 @@ from src.application.dto.order import (
     CreateOrderAddressDTO,
     CreateOrderDTO,
     CreateOrderLineItemDTO,
+)
+from src.application.services.cod_trust_service import check_customer_trust
+from src.application.services.network_reputation_service import (
+    extract_phone_hash_from_string,
+    write_network_event,
 )
 from src.config import settings
 from src.core.entities.customer import Customer
@@ -54,6 +60,9 @@ from src.infrastructure.repositories import (
 )
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
+)
+from src.infrastructure.repositories.shopify_repository import (
+    NetworkReputationRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,6 +107,10 @@ async def checkout(
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
     funnel_repo: Annotated[
         "FunnelEventRepository", Depends(get_funnel_event_repository)
+    ],
+    network_repo: Annotated[
+        "NetworkReputationRepository",
+        Depends(get_network_reputation_repository),
     ],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
@@ -206,6 +219,47 @@ async def checkout(
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
+
+    # ── COD Trust Network check ────────────────────────────────────────
+    # Look up customer reputation in the cross-merchant network table.
+    # Fails open on any error — fraud filtering must never block legitimate
+    # orders due to infrastructure issues. Read happens BEFORE the order
+    # event is recorded below, so the customer's own current order does
+    # not inflate their own score during the check.
+    if is_cod:
+        customer_phone = (
+            request.shipping_address.phone if request.shipping_address else None
+        )
+        trust_decision = await check_customer_trust(
+            phone=customer_phone,
+            store_settings=store.settings,
+            network_repo=network_repo,
+        )
+        logger.info(
+            "cod_trust_check store=%s customer=%s allowed=%s reason=%s score=%s confidence=%s",
+            str(store_id),
+            str(current_customer.id),
+            trust_decision.allowed,
+            trust_decision.reason,
+            trust_decision.score,
+            trust_decision.confidence,
+        )
+        if not trust_decision.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "cod_trust_blocked",
+                    "message_ar": (
+                        "عذراً، لا يمكن إتمام طلبك بالدفع عند الاستلام في الوقت "
+                        "الحالي. يمكنك الدفع إلكترونياً."
+                    ),
+                    "message_en": (
+                        "Unable to complete this order with cash on delivery. "
+                        "Please use online payment."
+                    ),
+                    "fallback_payment_methods": ["paymob_card", "paymob_wallet"],
+                },
+            )
 
     # Build line items with server-side price resolution
     line_items: list[CreateOrderLineItemDTO] = []
@@ -404,6 +458,27 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # ── Record COD order in network reputation ─────────────────────────
+    # Fire-and-forget: never break checkout if the network write fails.
+    # Comes AFTER the trust check above so the customer's own current
+    # order doesn't inflate their own score during the check.
+    if is_cod:
+        try:
+            phone_for_network = (
+                order.shipping_address.phone if order.shipping_address else None
+            )
+            if phone_for_network:
+                phone_hash = extract_phone_hash_from_string(phone_for_network)
+                if phone_hash:
+                    await write_network_event(
+                        phone_hash=phone_hash,
+                        store_id=store_id,
+                        event_type="order",
+                        network_repo=network_repo,
+                    )
+        except Exception as exc:
+            logger.warning("network_event_record_failed: %s", exc)
 
     # Emit funnel event: checkout_started
     try:
