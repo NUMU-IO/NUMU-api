@@ -1,0 +1,263 @@
+"""Shared brand base for all NUMU transactional emails.
+
+Single source of truth for:
+- Brand palette
+- Typography (Cairo for Arabic body, Aref Ruqaa for the نُمو wordmark)
+- Email-safe logo block
+- Header / footer / wrapper helpers
+- Egyptian Arabic copy bank used across templates
+
+Egyptian Arabic ("ar") is the primary/default language. English ("en") is
+provided as a secondary fallback.
+"""
+
+from __future__ import annotations
+
+# ──────────────────────────────────────────────────────────────────────────
+# Brand palette
+# ──────────────────────────────────────────────────────────────────────────
+NAVY = "#0A1A3D"  # deep navy from logo background
+NAVY_BRIGHT = "#1034A6"  # interactive / accent navy
+HERO_BG = "#0d1117"  # landing-page hero base (hsl(222 30% 7%))
+GOLD = "#D4AF37"  # signature gold
+GOLD_DARK = "#B8941F"  # gold hover/pressed
+CREAM = "#FAF7F0"  # warm off-white background
+INK = "#1A1A2E"  # body text
+MUTED = "#6C757D"  # secondary text
+HAIRLINE = "#E9ECEF"  # dividers
+SUCCESS = "#1F8A4C"
+DANGER = "#C2362F"
+
+FONT_AR = "'Alexandria', 'Segoe UI', 'Tahoma', Arial, sans-serif"
+FONT_LATIN = "'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif"
+FONT_BRAND_AR = "'Aref Ruqaa', 'Traditional Arabic', serif"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Logo block (email-safe — pure HTML/CSS, no external assets)
+# ──────────────────────────────────────────────────────────────────────────
+def _logo_block(language: str = "ar") -> str:
+    """Render the NUMU brand mark as an email-safe table.
+
+    Uses the Arabic wordmark 'نُمو' set in Aref Ruqaa inside a navy
+    rounded square — mirrors the app icon while staying SVG-free.
+    """
+    wordmark_ar = "نُمو"
+    wordmark_en = "NUMU"
+    return f"""
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
+      <tr>
+        <td style="text-align:center;vertical-align:middle;">
+          <div style="font-family:{FONT_BRAND_AR};font-size:54px;line-height:1;color:#ffffff;font-weight:700;letter-spacing:1px;">
+            {wordmark_ar}
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding-top:12px;text-align:center;font-family:{FONT_LATIN};font-size:11px;letter-spacing:3px;color:rgba(255,255,255,0.85);text-transform:uppercase;">
+          {wordmark_en}
+        </td>
+      </tr>
+    </table>
+    """
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CSS — generated dynamically so RTL/LTR share one source
+# ──────────────────────────────────────────────────────────────────────────
+def _styles(language: str) -> str:
+    is_ar = language == "ar"
+    direction = "rtl" if is_ar else "ltr"
+    align = "right" if is_ar else "left"
+    align_opp = "left" if is_ar else "right"
+    font_family = FONT_AR if is_ar else FONT_LATIN
+    line_height = "1.85" if is_ar else "1.65"
+    # Alexandria is a single font that covers both Latin and Arabic glyphs,
+    # so the same import works for both directions.
+    font_import = "@import url('https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800&family=Aref+Ruqaa:wght@400;700&display=swap');"
+
+    # Step indicators get mirrored padding for RTL.
+    step_dot_margin = (
+        "margin-left:14px;margin-right:0;"
+        if is_ar
+        else "margin-right:14px;margin-left:0;"
+    )
+    step_line_margin = (
+        "margin-right:15px;margin-left:0;"
+        if is_ar
+        else "margin-left:15px;margin-right:0;"
+    )
+    accent_border_side = "border-right" if is_ar else "border-left"
+
+    return f"""
+<style>
+  {font_import}
+  body {{ margin:0; padding:0; background:{CREAM}; color:{INK}; font-family:{font_family}; line-height:{line_height}; direction:{direction}; -webkit-font-smoothing:antialiased; }}
+  table {{ border-collapse:collapse; }}
+  img {{ border:0; outline:none; text-decoration:none; max-width:100%; }}
+  a {{ color:{NAVY_BRIGHT}; text-decoration:none; }}
+  .brand {{ font-family:{FONT_BRAND_AR}; font-weight:700; }}
+
+  .page {{ width:100%; background:{CREAM}; padding:32px 16px; }}
+  .wrapper {{ max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 32px rgba(10,26,61,0.08); }}
+
+  .header {{
+    background-color:{HERO_BG};
+    background-image:
+      radial-gradient(circle at 12% 8%, rgba(59,130,246,0.55) 0%, rgba(59,130,246,0.18) 28%, transparent 58%),
+      radial-gradient(circle at 88% 92%, rgba(168,85,247,0.32) 0%, rgba(168,85,247,0.10) 35%, transparent 65%),
+      radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 26px 26px;
+    background-position: 0 0, 0 0, 0 0;
+    background-repeat: no-repeat, no-repeat, repeat;
+    padding:48px 28px 40px; text-align:center; position:relative;
+  }}
+  .header::after {{ content:""; display:block; height:3px; background:linear-gradient(90deg,transparent 0%,{GOLD} 50%,transparent 100%); margin:32px -28px -40px; }}
+  .header h1 {{ color:#ffffff; margin:22px 0 6px; font-size:24px; font-weight:700; letter-spacing:{"0" if is_ar else "-0.3px"}; font-family:{font_family}; }}
+  .header p {{ color:rgba(255,255,255,0.78); margin:0; font-size:14px; font-family:{font_family}; }}
+  .header .badge {{ display:inline-block; background:rgba(212,175,55,0.18); color:{GOLD}; border:1px solid rgba(212,175,55,0.4); font-size:12px; padding:5px 14px; border-radius:999px; margin-top:14px; font-weight:600; letter-spacing:0.5px; font-family:{FONT_LATIN}; direction:ltr; }}
+
+  .body {{ padding:36px 32px 8px; text-align:{align}; }}
+  .body p {{ margin:0 0 16px; font-size:15px; color:{INK}; }}
+  .body h2 {{ font-size:18px; color:{NAVY}; margin:24px 0 12px; font-weight:700; }}
+  .lead {{ font-size:16px; color:{INK}; }}
+  .muted {{ color:{MUTED}; font-size:13px; }}
+
+  .panel {{ background:{CREAM}; border:1px solid {HAIRLINE}; border-radius:12px; padding:22px; margin:22px 0; {accent_border_side}:4px solid {GOLD}; }}
+  .panel .label {{ font-size:11px; color:{MUTED}; text-transform:uppercase; letter-spacing:1.2px; margin:0 0 6px; font-family:{FONT_LATIN}; }}
+  .panel .value {{ font-size:22px; font-weight:700; color:{NAVY}; margin:0; }}
+
+  .code-box {{ text-align:center; background:#fff; border:2px dashed {GOLD}; border-radius:12px; padding:22px 28px; margin:24px 0; }}
+  .code-box .digits {{ font-family:'Inter','Segoe UI',monospace; font-size:36px; font-weight:700; letter-spacing:10px; color:{NAVY}; margin:0; direction:ltr; display:inline-block; }}
+  .code-box .hint {{ color:{MUTED}; font-size:12px; margin:10px 0 0; }}
+
+  table.items {{ width:100%; margin:18px 0; }}
+  table.items th {{ text-align:{align}; padding:12px 14px; background:{CREAM}; color:{MUTED}; font-size:11px; text-transform:uppercase; letter-spacing:0.8px; border-bottom:2px solid {HAIRLINE}; font-family:{FONT_LATIN}; }}
+  table.items th.price {{ text-align:{align_opp}; }}
+  table.items td {{ padding:14px; border-bottom:1px solid {HAIRLINE}; font-size:14px; color:{INK}; }}
+  table.items td.price {{ text-align:{align_opp}; font-weight:600; color:{NAVY}; direction:ltr; }}
+  table.items tr.total td {{ background:{CREAM}; font-weight:700; font-size:16px; color:{NAVY}; padding:16px 14px; }}
+
+  .btn {{ display:inline-block; padding:15px 38px; background:{GOLD}; color:#ffffff !important; text-decoration:none; border-radius:8px; font-weight:700; font-size:15px; box-shadow:0 4px 14px rgba(212,175,55,0.35); font-family:{font_family}; }}
+  .btn:hover {{ background:{GOLD_DARK}; }}
+  .btn-outline {{ display:inline-block; padding:13px 32px; background:transparent; color:{NAVY} !important; text-decoration:none; border:2px solid {NAVY}; border-radius:8px; font-weight:600; font-size:14px; font-family:{font_family}; }}
+  .center {{ text-align:center; }}
+  .divider {{ height:1px; background:{HAIRLINE}; margin:28px 0; border:0; }}
+
+  .steps {{ margin:24px 0; }}
+  .step {{ display:flex; align-items:flex-start; }}
+  .step-dot {{ width:30px; min-width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0; {step_dot_margin} font-family:{FONT_LATIN}; }}
+  .step-dot.done {{ background:{SUCCESS}; color:#fff; }}
+  .step-dot.active {{ background:{GOLD}; color:#fff; box-shadow:0 0 0 4px rgba(212,175,55,0.18); }}
+  .step-dot.pending {{ background:{HAIRLINE}; color:{MUTED}; }}
+  .step-line {{ width:2px; height:22px; {step_line_margin} }}
+  .step-line.done {{ background:{SUCCESS}; }}
+  .step-line.pending {{ background:{HAIRLINE}; }}
+  .step-text .title {{ font-weight:600; font-size:14px; color:{INK}; margin:4px 0 0; }}
+  .step-text .sub {{ font-size:12px; color:{MUTED}; margin:2px 0 0; }}
+
+  .footer {{ padding:28px 24px 32px; text-align:center; background:{CREAM}; border-top:1px solid {HAIRLINE}; }}
+  .footer p {{ margin:0; font-size:12px; color:{MUTED}; line-height:1.7; }}
+  .footer .links a {{ color:{NAVY_BRIGHT}; margin:0 8px; }}
+  .footer .mark {{ display:inline-block; margin-bottom:10px; font-family:{FONT_BRAND_AR}; font-size:22px; color:{NAVY}; font-weight:700; }}
+
+  @media only screen and (max-width:600px) {{
+    .body {{ padding:28px 20px; }}
+    .header {{ padding:30px 20px; }}
+    .header h1 {{ font-size:21px; }}
+  }}
+</style>
+"""
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Footer copy (Egyptian Arabic + English)
+# ──────────────────────────────────────────────────────────────────────────
+_FOOTER_COPY = {
+    "ar": {
+        "tagline": "منصة التجارة الإلكترونية للتجار المصريين",
+        "help": "محتاج مساعدة؟ رد على الإيميل ده أو كلّمنا.",
+        "rights": 'جميع الحقوق محفوظة &copy; 2026 <span class="brand">نُمو</span>.',
+        "address": "نُمو • القاهرة، مصر",
+    },
+    "en": {
+        "tagline": "E-commerce for Egyptian merchants",
+        "help": "Need help? Reply to this email and we'll get back to you.",
+        "rights": "&copy; 2026 NUMU. All rights reserved.",
+        "address": "NUMU • Cairo, Egypt",
+    },
+}
+
+
+def _footer(language: str) -> str:
+    f = _FOOTER_COPY.get(language, _FOOTER_COPY["ar"])
+    return f"""
+<div class="footer">
+  <div class="mark">نُمو</div>
+  <p>{f["tagline"]}</p>
+  <p style="margin-top:10px;">{f["help"]}</p>
+  <p style="margin-top:14px;">{f["rights"]}</p>
+  <p style="margin-top:6px;font-size:11px;">{f["address"]}</p>
+</div>
+"""
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Header builder
+# ──────────────────────────────────────────────────────────────────────────
+def header(
+    title: str,
+    subtitle: str | None = None,
+    badge: str | None = None,
+    language: str = "ar",
+) -> str:
+    """Build a branded header with logo block + title."""
+    badge_html = f'<div><span class="badge">{badge}</span></div>' if badge else ""
+    sub_html = f"<p>{subtitle}</p>" if subtitle else ""
+    return f"""
+    <div class="header">
+      {_logo_block(language)}
+      <h1>{title}</h1>
+      {sub_html}
+      {badge_html}
+    </div>
+    """
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Wrapper — call this from every template
+# ──────────────────────────────────────────────────────────────────────────
+def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) -> str:
+    """Wrap rendered template body in a full HTML document with brand chrome.
+
+    Args:
+        inner_html: The template body (header + body sections).
+        language: 'ar' (default, Egyptian Arabic, RTL) or 'en'.
+        preheader: Optional inbox preview text.
+    """
+    is_ar = language == "ar"
+    direction = "rtl" if is_ar else "ltr"
+    preheader_html = (
+        f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:transparent;">{preheader}</div>'
+        if preheader
+        else ""
+    )
+    return f"""<!DOCTYPE html>
+<html lang="{language}" dir="{direction}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="x-apple-disable-message-reformatting">
+<title>NUMU</title>
+{_styles(language)}
+</head>
+<body>
+{preheader_html}
+<div class="page">
+  <div class="wrapper">
+    {inner_html}
+    {_footer(language)}
+  </div>
+</div>
+</body>
+</html>"""

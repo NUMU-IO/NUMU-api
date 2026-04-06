@@ -127,13 +127,14 @@ async def invite_waitlist_entry(
         from src.core.interfaces.services.email_service import EmailMessage
         from src.infrastructure.external_services.resend.email_templates.beta_invite import (
             beta_invite_html,
+            beta_invite_subject,
         )
 
         email_service = get_email_service()
         await email_service.send_email(
             EmailMessage(
                 to=updated.email,
-                subject="You're invited to NUMU Beta!",
+                subject=beta_invite_subject(),
                 html_content=beta_invite_html(
                     name=updated.name, invite_code=invite_code
                 ),
@@ -208,13 +209,14 @@ async def direct_invite(
         from src.core.interfaces.services.email_service import EmailMessage
         from src.infrastructure.external_services.resend.email_templates.beta_invite import (
             beta_invite_html,
+            beta_invite_subject,
         )
 
         email_service = get_email_service()
         await email_service.send_email(
             EmailMessage(
                 to=updated.email,
-                subject="You're invited to NUMU Beta!",
+                subject=beta_invite_subject(),
                 html_content=beta_invite_html(
                     name=updated.name, invite_code=invite_code
                 ),

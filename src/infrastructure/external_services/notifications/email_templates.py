@@ -1,12 +1,23 @@
 """Email templates for configuration notifications.
 
 This module provides structured email templates for:
-- Configuration request notifications
+- Configuration request notifications (admin + merchant)
 - Credential configuration notifications
 - Status update notifications
+
+Merchant-facing emails default to Egyptian Arabic ("ar"). The admin
+template stays English (internal staff) but still uses the NUMU brand
+chrome from `_base`.
 """
 
 from dataclasses import dataclass
+
+from src.infrastructure.external_services.resend.email_templates._base import (
+    DANGER,
+    NAVY,
+    header,
+    wrap,
+)
 
 
 @dataclass
@@ -16,6 +27,11 @@ class EmailTemplate:
     subject: str
     html_body: str
     text_body: str
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Configuration request notifications
+# ─────────────────────────────────────────────────────────────────────────
 
 
 class ConfigurationRequestEmailTemplate:
@@ -30,72 +46,56 @@ class ConfigurationRequestEmailTemplate:
         notes: str | None,
         action_url: str,
     ) -> EmailTemplate:
-        """Generate email for new configuration request (to admin).
-
-        Args:
-            merchant_name: The merchant's business name
-            service_name: The service being requested
-            service_type: Type of service
-            priority: Request priority
-            notes: Optional merchant notes
-            action_url: URL to view the request
-
-        Returns:
-            EmailTemplate with subject and body
-        """
+        """Internal admin notification — English, branded NUMU chrome."""
         subject = (
-            f"[NUMU] New Configuration Request: {service_name} - {priority.upper()}"
+            f"[NUMU] New Configuration Request: {service_name} — {priority.upper()}"
         )
+
+        priority_color = {
+            "urgent": DANGER,
+            "high": "#E07B16",
+            "normal": "#1F8A4C",
+        }.get(priority.lower(), NAVY)
 
         notes_section = (
-            f"<p><strong>Merchant Notes:</strong> {notes}</p>" if notes else ""
+            f'<div class="panel"><p class="label">Merchant Notes</p>'
+            f'<p style="margin:4px 0 0; font-size:14px;">{notes}</p></div>'
+            if notes
+            else ""
         )
 
-        html_body = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: #1034A6; color: white; padding: 20px; text-align: center; }}
-                .content {{ padding: 20px; background: #f5f5f5; }}
-                .details {{ background: white; padding: 15px; border-radius: 5px; margin: 15px 0; }}
-                .priority-urgent {{ color: #dc3545; font-weight: bold; }}
-                .priority-high {{ color: #fd7e14; font-weight: bold; }}
-                .priority-normal {{ color: #28a745; }}
-                .button {{ display: inline-block; padding: 12px 24px; background: #D4AF37; color: white; text-decoration: none; border-radius: 5px; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>NUMU Admin</h1>
-                    <p>New Configuration Request</p>
-                </div>
-                <div class="content">
-                    <p>A merchant has requested service configuration:</p>
+        body = f"""
+        {header("New Configuration Request", "Admin action required", language="en")}
+        <div class="body">
+            <p class="lead">A merchant has requested service configuration:</p>
 
-                    <div class="details">
-                        <p><strong>Merchant:</strong> {merchant_name}</p>
-                        <p><strong>Service:</strong> {service_name}</p>
-                        <p><strong>Type:</strong> {service_type}</p>
-                        <p><strong>Priority:</strong> <span class="priority-{priority.lower()}">{priority.upper()}</span></p>
-                        {notes_section}
-                    </div>
-
-                    <p>Please review and configure the credentials:</p>
-                    <a href="{action_url}" class="button">Configure Credentials</a>
-                </div>
+            <div class="panel">
+                <p class="label">Merchant</p>
+                <p style="margin:4px 0 14px; font-size:15px;">{merchant_name}</p>
+                <p class="label">Service</p>
+                <p style="margin:4px 0 14px; font-size:15px;">{service_name} • {service_type}</p>
+                <p class="label">Priority</p>
+                <p style="margin:4px 0 0; font-size:15px; color:{priority_color}; font-weight:700;">
+                    {priority.upper()}
+                </p>
             </div>
-        </body>
-        </html>
-        """
+
+            {notes_section}
+
+            <p>Please review and configure the credentials:</p>
+            <p class="center" style="margin-top:24px;">
+                <a href="{action_url}" class="btn">Configure Credentials</a>
+            </p>
+        </div>"""
+
+        html_body = wrap(
+            body,
+            language="en",
+            preheader=f"New {priority} request from {merchant_name}",
+        )
 
         text_body = f"""
-NUMU Admin - New Configuration Request
-
-A merchant has requested service configuration:
+NUMU Admin — New Configuration Request
 
 Merchant: {merchant_name}
 Service: {service_name}
@@ -103,9 +103,9 @@ Type: {service_type}
 Priority: {priority.upper()}
 {f"Notes: {notes}" if notes else ""}
 
-Please review and configure the credentials at:
+Configure credentials at:
 {action_url}
-        """
+        """.strip()
 
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)
 
@@ -114,70 +114,76 @@ Please review and configure the credentials at:
         merchant_name: str,
         service_name: str,
         request_id: str,
+        language: str = "ar",
     ) -> EmailTemplate:
-        """Generate confirmation email for merchant.
+        """Merchant confirmation — Egyptian Arabic by default."""
+        if language == "en":
+            subject = f"[NUMU] Configuration Request Received: {service_name}"
+            title = "Request Received"
+            subtitle = "We're on it"
+            greeting = f"Hi {merchant_name},"
+            intro = (
+                f"We've received your configuration request for "
+                f"<strong>{service_name}</strong>."
+            )
+            body_text = (
+                "Our team will review your request and configure the service for "
+                "your store. This typically takes 1–2 business days."
+            )
+            ref_label = "Reference ID"
+            outro = "You'll receive an email notification once the configuration is complete."
+            thanks = "Thank you for choosing NUMU!"
+            preheader = f"Your {service_name} request was received"
+        else:
+            subject = f"استلمنا طلبك لإعداد {service_name} — نُمو"
+            title = "استلمنا طلبك"
+            subtitle = "بنشتغل عليه"
+            greeting = f"أهلاً {merchant_name}،"
+            intro = f"استلمنا طلبك لإعداد <strong>{service_name}</strong>."
+            body_text = "فريقنا هيراجع الطلب ويظبط الخدمة لمتجرك. ده عادةً بياخد من يوم لـ يومين عمل."
+            ref_label = "رقم الطلب المرجعي"
+            outro = "هتوصلك رسالة تانية أول ما الإعداد يخلص."
+            thanks = 'شكراً إنك اخترت <span class="brand">نُمو</span>!'
+            preheader = f"استلمنا طلبك لإعداد {service_name}"
 
-        Args:
-            merchant_name: The merchant's business name
-            service_name: The service being requested
-            request_id: The request ID for reference
+        body = f"""
+        {header(title, subtitle, language=language)}
+        <div class="body">
+            <p class="lead">{greeting}</p>
+            <p>{intro}</p>
+            <p>{body_text}</p>
 
-        Returns:
-            EmailTemplate with subject and body
-        """
-        subject = f"[NUMU] Configuration Request Received: {service_name}"
-
-        html_body = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: linear-gradient(135deg, #D4AF37, #1034A6); color: white; padding: 20px; text-align: center; }}
-                .content {{ padding: 20px; }}
-                .reference {{ background: #f5f5f5; padding: 10px; border-radius: 5px; font-family: monospace; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>NUMU</h1>
-                </div>
-                <div class="content">
-                    <p>Hello {merchant_name},</p>
-
-                    <p>We've received your configuration request for <strong>{service_name}</strong>.</p>
-
-                    <p>Our team will review your request and configure the service for your store. This typically takes 1-2 business days.</p>
-
-                    <p>Reference ID:</p>
-                    <div class="reference">{request_id}</div>
-
-                    <p>You'll receive an email notification once the configuration is complete.</p>
-
-                    <p>Thank you for choosing NUMU!</p>
-                </div>
+            <div class="panel">
+                <p class="label">{ref_label}</p>
+                <p class="value" style="font-size:15px; font-family:monospace; word-break:break-all;">{request_id}</p>
             </div>
-        </body>
-        </html>
-        """
+
+            <p>{outro}</p>
+            <p>{thanks}</p>
+        </div>"""
+
+        html_body = wrap(body, language=language, preheader=preheader)
 
         text_body = f"""
-Hello {merchant_name},
+{title}
 
-We've received your configuration request for {service_name}.
+{greeting}
 
-Our team will review your request and configure the service for your store. This typically takes 1-2 business days.
+{intro}
 
-Reference ID: {request_id}
+{body_text}
 
-You'll receive an email notification once the configuration is complete.
+{ref_label}: {request_id}
 
-Thank you for choosing NUMU!
-        """
+{outro}
+        """.strip()
 
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Credentials configured notifications
+# ─────────────────────────────────────────────────────────────────────────
 
 
 class CredentialsConfiguredEmailTemplate:
@@ -190,85 +196,74 @@ class CredentialsConfiguredEmailTemplate:
         service_type: str,
         features: list[str],
         action_url: str,
+        language: str = "ar",
     ) -> EmailTemplate:
-        """Generate email when credentials are configured.
+        """Generate email when credentials are configured."""
+        if language == "en":
+            subject = f"[NUMU] {service_name} is Now Active 🎉"
+            title = "Great News!"
+            subtitle = f"{service_name} is ready"
+            greeting = f"Hi {merchant_name},"
+            intro = (
+                f"Your <strong>{service_name}</strong> integration has been "
+                f"configured and is ready to use."
+            )
+            features_label = "What's enabled"
+            cta = "Go to Settings"
+            help_text = "Need help? Our support team is here for you."
+            preheader = f"{service_name} is now active on your store"
+        else:
+            subject = f"[نُمو] {service_name} اتفعّل دلوقتي 🎉"
+            title = "خبر حلو"
+            subtitle = f"{service_name} جاهز للاستخدام"
+            greeting = f"أهلاً {merchant_name}،"
+            intro = f"تكامل <strong>{service_name}</strong> اتظبط ودلوقتي جاهز تستخدمه."
+            features_label = "اللي اتفعّل"
+            cta = "روح للإعدادات"
+            help_text = "محتاج مساعدة؟ فريق الدعم موجود عشانك."
+            preheader = f"{service_name} اتفعّل في متجرك"
 
-        Args:
-            merchant_name: The merchant's business name
-            service_name: The service configured
-            service_type: Type of service
-            features: List of enabled features
-            action_url: URL to access the service
+        features_html = "".join(
+            f'<li style="margin-bottom:8px;">{f}</li>' for f in features
+        )
 
-        Returns:
-            EmailTemplate with subject and body
-        """
-        subject = f"[NUMU] {service_name} is Now Active! 🎉"
+        body = f"""
+        {header(title, subtitle, language=language)}
+        <div class="body">
+            <p class="lead">{greeting}</p>
+            <p>{intro}</p>
 
-        features_html = "".join([f"<li>{f}</li>" for f in features])
-
-        html_body = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: linear-gradient(135deg, #D4AF37, #1034A6); color: white; padding: 30px; text-align: center; }}
-                .header h1 {{ margin: 0; font-size: 28px; }}
-                .content {{ padding: 30px; }}
-                .success-badge {{ background: #28a745; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; }}
-                .features {{ background: #f5f5f5; padding: 20px; border-radius: 10px; margin: 20px 0; }}
-                .button {{ display: inline-block; padding: 15px 30px; background: #D4AF37; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>🎉 Great News!</h1>
-                    <p>{service_name} is Ready</p>
-                </div>
-                <div class="content">
-                    <p>Hello {merchant_name},</p>
-
-                    <p><span class="success-badge">✓ ACTIVE</span></p>
-
-                    <p>Your <strong>{service_name}</strong> integration has been configured and is ready to use!</p>
-
-                    <div class="features">
-                        <h3>What's Enabled:</h3>
-                        <ul>
-                            {features_html}
-                        </ul>
-                    </div>
-
-                    <p>Start using {service_name} in your store:</p>
-                    <a href="{action_url}" class="button">Go to Settings</a>
-
-                    <p style="margin-top: 30px;">Need help? Our support team is here for you.</p>
-                </div>
+            <div class="panel">
+                <p class="label">{features_label}</p>
+                <ul style="margin:10px 0 0; padding-{("right" if language == "ar" else "left")}:22px; font-size:14px; color:#1A1A2E;">
+                    {features_html}
+                </ul>
             </div>
-        </body>
-        </html>
-        """
 
-        features_text = "\n".join([f"  - {f}" for f in features])
+            <p class="center" style="margin-top:28px;">
+                <a href="{action_url}" class="btn">{cta}</a>
+            </p>
 
+            <p class="muted" style="margin-top:24px;">{help_text}</p>
+        </div>"""
+
+        html_body = wrap(body, language=language, preheader=preheader)
+
+        features_text = "\n".join(f"  - {f}" for f in features)
         text_body = f"""
-Great News! {service_name} is Ready
+{title} — {subtitle}
 
-Hello {merchant_name},
+{greeting}
 
-Your {service_name} integration has been configured and is ready to use!
+{intro}
 
-What's Enabled:
+{features_label}:
 {features_text}
 
-Start using {service_name} in your store:
-{action_url}
+{cta}: {action_url}
 
-Need help? Our support team is here for you.
-        """
+{help_text}
+        """.strip()
 
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)
 
@@ -277,65 +272,65 @@ Need help? Our support team is here for you.
         merchant_name: str,
         service_name: str,
         reason: str,
+        language: str = "ar",
     ) -> EmailTemplate:
-        """Generate email when credentials are revoked.
+        """Generate email when credentials are revoked."""
+        if language == "en":
+            subject = f"[NUMU] Important: {service_name} Configuration Update"
+            title = "Configuration Update"
+            subtitle = "Action may be required"
+            greeting = f"Hi {merchant_name},"
+            alert_intro = (
+                f"<strong>Important:</strong> Your {service_name} configuration "
+                f"has been deactivated."
+            )
+            reason_label = "Reason"
+            note = (
+                "If you need to re-enable this service, please submit a new "
+                "configuration request through your dashboard."
+            )
+            contact = "If you have questions, please contact our support team."
+            preheader = f"Your {service_name} configuration was deactivated"
+        else:
+            subject = f"[نُمو] مهم: تحديث على إعداد {service_name}"
+            title = "تحديث على الإعدادات"
+            subtitle = "ممكن يحتاج تدخل منك"
+            greeting = f"أهلاً {merchant_name}،"
+            alert_intro = f"<strong>مهم:</strong> إعداد {service_name} تم إيقافه."
+            reason_label = "السبب"
+            note = "لو محتاج تفعّل الخدمة دي تاني، ابعت طلب إعداد جديد من لوحة التحكم."
+            contact = "لو عندك أي استفسار، تواصل مع فريق الدعم."
+            preheader = f"إعداد {service_name} تم إيقافه"
 
-        Args:
-            merchant_name: The merchant's business name
-            service_name: The service revoked
-            reason: Reason for revocation
+        body = f"""
+        {header(title, subtitle, language=language)}
+        <div class="body">
+            <p class="lead">{greeting}</p>
 
-        Returns:
-            EmailTemplate with subject and body
-        """
-        subject = f"[NUMU] Important: {service_name} Configuration Update"
-
-        html_body = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: #dc3545; color: white; padding: 20px; text-align: center; }}
-                .content {{ padding: 20px; }}
-                .alert {{ background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Configuration Update</h1>
-                </div>
-                <div class="content">
-                    <p>Hello {merchant_name},</p>
-
-                    <div class="alert">
-                        <p><strong>Important:</strong> Your {service_name} configuration has been deactivated.</p>
-                        <p><strong>Reason:</strong> {reason}</p>
-                    </div>
-
-                    <p>If you need to re-enable this service, please submit a new configuration request through your dashboard.</p>
-
-                    <p>If you have questions, please contact our support team.</p>
-                </div>
+            <div class="panel" style="border-{("right" if language == "ar" else "left")}-color:{DANGER};">
+                <p style="margin:0 0 10px; font-size:15px; color:#1A1A2E;">{alert_intro}</p>
+                <p class="label" style="margin-top:12px;">{reason_label}</p>
+                <p style="margin:4px 0 0; font-size:14px; color:{DANGER};">{reason}</p>
             </div>
-        </body>
-        </html>
-        """
+
+            <p>{note}</p>
+            <p class="muted">{contact}</p>
+        </div>"""
+
+        html_body = wrap(body, language=language, preheader=preheader)
 
         text_body = f"""
-Configuration Update
+{title}
 
-Hello {merchant_name},
+{greeting}
 
-Important: Your {service_name} configuration has been deactivated.
+{alert_intro}
 
-Reason: {reason}
+{reason_label}: {reason}
 
-If you need to re-enable this service, please submit a new configuration request through your dashboard.
+{note}
 
-If you have questions, please contact our support team.
-        """
+{contact}
+        """.strip()
 
         return EmailTemplate(subject=subject, html_body=html_body, text_body=text_body)

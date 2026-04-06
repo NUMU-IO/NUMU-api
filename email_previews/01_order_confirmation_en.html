@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="x-apple-disable-message-reformatting">
+<title>NUMU</title>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800&family=Aref+Ruqaa:wght@400;700&display=swap');
+  body { margin:0; padding:0; background:#FAF7F0; color:#1A1A2E; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; line-height:1.65; direction:ltr; -webkit-font-smoothing:antialiased; }
+  table { border-collapse:collapse; }
+  img { border:0; outline:none; text-decoration:none; max-width:100%; }
+  a { color:#1034A6; text-decoration:none; }
+  .brand { font-family:'Aref Ruqaa', 'Traditional Arabic', serif; font-weight:700; }
+
+  .page { width:100%; background:#FAF7F0; padding:32px 16px; }
+  .wrapper { max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 32px rgba(10,26,61,0.08); }
+
+  .header {
+    background-color:#0d1117;
+    background-image:
+      radial-gradient(circle at 12% 8%, rgba(59,130,246,0.55) 0%, rgba(59,130,246,0.18) 28%, transparent 58%),
+      radial-gradient(circle at 88% 92%, rgba(168,85,247,0.32) 0%, rgba(168,85,247,0.10) 35%, transparent 65%),
+      radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 26px 26px;
+    background-position: 0 0, 0 0, 0 0;
+    background-repeat: no-repeat, no-repeat, repeat;
+    padding:48px 28px 40px; text-align:center; position:relative;
+  }
+  .header::after { content:""; display:block; height:3px; background:linear-gradient(90deg,transparent 0%,#D4AF37 50%,transparent 100%); margin:32px -28px -40px; }
+  .header h1 { color:#ffffff; margin:22px 0 6px; font-size:24px; font-weight:700; letter-spacing:-0.3px; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; }
+  .header p { color:rgba(255,255,255,0.78); margin:0; font-size:14px; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; }
+  .header .badge { display:inline-block; background:rgba(212,175,55,0.18); color:#D4AF37; border:1px solid rgba(212,175,55,0.4); font-size:12px; padding:5px 14px; border-radius:999px; margin-top:14px; font-weight:600; letter-spacing:0.5px; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; direction:ltr; }
+
+  .body { padding:36px 32px 8px; text-align:left; }
+  .body p { margin:0 0 16px; font-size:15px; color:#1A1A2E; }
+  .body h2 { font-size:18px; color:#0A1A3D; margin:24px 0 12px; font-weight:700; }
+  .lead { font-size:16px; color:#1A1A2E; }
+  .muted { color:#6C757D; font-size:13px; }
+
+  .panel { background:#FAF7F0; border:1px solid #E9ECEF; border-radius:12px; padding:22px; margin:22px 0; border-left:4px solid #D4AF37; }
+  .panel .label { font-size:11px; color:#6C757D; text-transform:uppercase; letter-spacing:1.2px; margin:0 0 6px; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; }
+  .panel .value { font-size:22px; font-weight:700; color:#0A1A3D; margin:0; }
+
+  .code-box { text-align:center; background:#fff; border:2px dashed #D4AF37; border-radius:12px; padding:22px 28px; margin:24px 0; }
+  .code-box .digits { font-family:'Inter','Segoe UI',monospace; font-size:36px; font-weight:700; letter-spacing:10px; color:#0A1A3D; margin:0; direction:ltr; display:inline-block; }
+  .code-box .hint { color:#6C757D; font-size:12px; margin:10px 0 0; }
+
+  table.items { width:100%; margin:18px 0; }
+  table.items th { text-align:left; padding:12px 14px; background:#FAF7F0; color:#6C757D; font-size:11px; text-transform:uppercase; letter-spacing:0.8px; border-bottom:2px solid #E9ECEF; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; }
+  table.items th.price { text-align:right; }
+  table.items td { padding:14px; border-bottom:1px solid #E9ECEF; font-size:14px; color:#1A1A2E; }
+  table.items td.price { text-align:right; font-weight:600; color:#0A1A3D; direction:ltr; }
+  table.items tr.total td { background:#FAF7F0; font-weight:700; font-size:16px; color:#0A1A3D; padding:16px 14px; }
+
+  .btn { display:inline-block; padding:15px 38px; background:#D4AF37; color:#ffffff !important; text-decoration:none; border-radius:8px; font-weight:700; font-size:15px; box-shadow:0 4px 14px rgba(212,175,55,0.35); font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; }
+  .btn:hover { background:#B8941F; }
+  .btn-outline { display:inline-block; padding:13px 32px; background:transparent; color:#0A1A3D !important; text-decoration:none; border:2px solid #0A1A3D; border-radius:8px; font-weight:600; font-size:14px; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; }
+  .center { text-align:center; }
+  .divider { height:1px; background:#E9ECEF; margin:28px 0; border:0; }
+
+  .steps { margin:24px 0; }
+  .step { display:flex; align-items:flex-start; }
+  .step-dot { width:30px; min-width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0; margin-right:14px;margin-left:0; font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif; }
+  .step-dot.done { background:#1F8A4C; color:#fff; }
+  .step-dot.active { background:#D4AF37; color:#fff; box-shadow:0 0 0 4px rgba(212,175,55,0.18); }
+  .step-dot.pending { background:#E9ECEF; color:#6C757D; }
+  .step-line { width:2px; height:22px; margin-left:15px;margin-right:0; }
+  .step-line.done { background:#1F8A4C; }
+  .step-line.pending { background:#E9ECEF; }
+  .step-text .title { font-weight:600; font-size:14px; color:#1A1A2E; margin:4px 0 0; }
+  .step-text .sub { font-size:12px; color:#6C757D; margin:2px 0 0; }
+
+  .footer { padding:28px 24px 32px; text-align:center; background:#FAF7F0; border-top:1px solid #E9ECEF; }
+  .footer p { margin:0; font-size:12px; color:#6C757D; line-height:1.7; }
+  .footer .links a { color:#1034A6; margin:0 8px; }
+  .footer .mark { display:inline-block; margin-bottom:10px; font-family:'Aref Ruqaa', 'Traditional Arabic', serif; font-size:22px; color:#0A1A3D; font-weight:700; }
+
+  @media only screen and (max-width:600px) {
+    .body { padding:28px 20px; }
+    .header { padding:30px 20px; }
+    .header h1 { font-size:21px; }
+  }
+</style>
+
+</head>
+<body>
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;font-size:1px;line-height:1px;color:transparent;">Your NUMU order is confirmed</div>
+<div class="page">
+  <div class="wrapper">
+
+
+    <div class="header">
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
+      <tr>
+        <td style="text-align:center;vertical-align:middle;">
+          <div style="font-family:'Aref Ruqaa', 'Traditional Arabic', serif;font-size:54px;line-height:1;color:#ffffff;font-weight:700;letter-spacing:1px;">
+            نُمو
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding-top:12px;text-align:center;font-family:'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif;font-size:11px;letter-spacing:3px;color:rgba(255,255,255,0.85);text-transform:uppercase;">
+          NUMU
+        </td>
+      </tr>
+    </table>
+
+      <h1>Order Confirmed</h1>
+      <p>Thank you for your purchase</p>
+      <div><span class="badge">#NMU-2026-00347</span></div>
+    </div>
+
+    <div class="body">
+        <p class="lead">Hi Ahmed,</p>
+        <p>We've received your order and it's being prepared. Here's a summary:</p>
+
+        <table class="items">
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th class="price">Price</th>
+                </tr>
+            </thead>
+            <tbody>
+
+        <tr>
+            <td>Egyptian cotton shirt</td>
+            <td>2</td>
+            <td class="price">EGP 450.00</td>
+        </tr>
+                <tr class="total">
+                    <td colspan="2">Total</td>
+                    <td class="price">EGP 900.00</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="panel">
+            <p class="label">Order Number</p>
+            <p class="value">#NMU-2026-00347</p>
+        </div>
+
+        <hr class="divider">
+
+        <p><strong>What happens next?</strong></p>
+        <p>The merchant will confirm your order shortly. You'll receive another email once your order ships with tracking details.</p>
+
+        <p class="center" style="margin-top:28px;">
+            <a href="#" class="btn-outline">View Order Status</a>
+        </p>
+    </div>
+
+<div class="footer">
+  <div class="mark">نُمو</div>
+  <p>E-commerce for Egyptian merchants</p>
+  <p style="margin-top:10px;">Need help? Reply to this email and we'll get back to you.</p>
+  <p style="margin-top:14px;">&copy; 2026 NUMU. All rights reserved.</p>
+  <p style="margin-top:6px;font-size:11px;">NUMU • Cairo, Egypt</p>
+</div>
+
+  </div>
+</div>
+</body>
+</html>

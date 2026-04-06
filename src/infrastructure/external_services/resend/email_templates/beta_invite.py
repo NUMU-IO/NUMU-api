@@ -1,95 +1,103 @@
 """Beta invite email template.
 
 Sent to waitlist entries when an admin invites them to create a store.
+Egyptian Arabic is the default language.
 """
 
+from src.infrastructure.external_services.resend.email_templates._base import (
+    NAVY,
+    header,
+    wrap,
+)
 
-def beta_invite_html(name: str | None, invite_code: str) -> str:
-    """Render the beta invite email.
+_BETA_INVITE = {
+    "ar": {
+        "title": "مدعو تنضم لـ نُمو",
+        "subtitle": "وصول مبكر لتجار البيتا",
+        "greeting": "أهلاً {name}،",
+        "greeting_default": "أهلاً بيك،",
+        "intro": 'خبر حلو — اتختارت تنضم لـ <strong>برنامج البيتا الخاص بـ <span class="brand">نُمو</span></strong>. تقدر دلوقتي تعمل متجرك وتبدأ تبيع على أحدث منصة تجارة إلكترونية في مصر.',
+        "code_label": "كود الدعوة بتاعك",
+        "use_code": "استخدم الكود ده وانت بتعمل متجرك. الكود ده مرة واحدة بس ومربوط بحسابك.",
+        "btn": "ابدأ متجرك دلوقتي",
+        "perks_title": "كتاجر بيتا بتاخد:",
+        "perks": [
+            "وصول كامل للمنصة — متجر، دفع، شحن",
+            "بوابات الدفع المصرية (باي موب، فوري، الدفع عند الاستلام)",
+            "فاتورة إلكترونية متوافقة مع مصلحة الضرايب",
+            "دعم فني بأولوية طول فترة البيتا",
+            "أسعار التجار المؤسسين (مثبتة معاك للأبد)",
+        ],
+        "expiry": "الدعوة دي صلاحيتها ٧ أيام. لو عندك أي استفسار، رد على الإيميل ده وهنرد عليك خلال ٢٤ ساعة.",
+        "preheader": "دعوتك لنُمو وصلت — وصول مبكر للتجار",
+        "subject": "مدعو تنضم لـ نُمو بيتا",
+    },
+    "en": {
+        "title": "You're Invited to NUMU",
+        "subtitle": "Early Merchant Access — Beta Program",
+        "greeting": "Hi {name},",
+        "greeting_default": "Hi there,",
+        "intro": "Great news — you've been selected for the <strong>NUMU beta program</strong>. You can now create your store and start selling with Egypt's next-generation e-commerce platform.",
+        "code_label": "Your Beta Invite Code",
+        "use_code": "Use this code when creating your store. It's single-use and tied to your account.",
+        "btn": "Create Your Store",
+        "perks_title": "What you get as a beta merchant:",
+        "perks": [
+            "Full platform access — storefront, payments, shipping",
+            "Egyptian payment gateways (Paymob, Fawry, COD)",
+            "ETA e-invoicing compliance built in",
+            "Priority support during beta",
+            "Founding merchant pricing (locked in forever)",
+        ],
+        "expiry": "This invite expires in 7 days. If you have questions, reply to this email and we'll get back to you within 24 hours.",
+        "preheader": "Your NUMU beta invite has arrived",
+        "subject": "You're invited to NUMU Beta",
+    },
+}
 
-    Args:
-        name: Recipient name (optional).
-        invite_code: The unique invite code for store creation.
 
-    Returns:
-        HTML string for the email body.
-    """
-    greeting = f"Hi {name}," if name else "Hi there,"
+def beta_invite_html(
+    name: str | None,
+    invite_code: str,
+    language: str = "ar",
+) -> str:
+    """Render the beta invite email."""
+    c = _BETA_INVITE.get(language, _BETA_INVITE["ar"])
+    greeting = c["greeting"].format(name=name) if name else c["greeting_default"]
+    code_display = invite_code[:16]
 
-    return f"""
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"></head>
-<body style="margin:0; padding:0; font-family:'Segoe UI',Arial,sans-serif; background:#f4f4f5; color:#1a1a2e; line-height:1.6;">
-<div style="max-width:600px; margin:0 auto; background:#ffffff;">
+    perks_html = "".join(f'<li style="margin-bottom:8px;">{p}</li>' for p in c["perks"])
 
-    <!-- Header -->
-    <div style="background:linear-gradient(135deg,#D4AF37 0%,#1034A6 100%); padding:36px 24px; text-align:center;">
-        <h1 style="color:#fff; margin:0; font-size:26px; font-weight:700; letter-spacing:-0.3px;">
-            You're Invited!
-        </h1>
-        <p style="color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:15px;">
-            NUMU Beta — Early Merchant Access
-        </p>
-    </div>
+    body = f"""
+    {header(c["title"], c["subtitle"], language=language)}
+    <div class="body">
+        <p class="lead">{greeting}</p>
+        <p>{c["intro"]}</p>
 
-    <!-- Body -->
-    <div style="padding:32px 24px;">
-        <p style="margin:0 0 16px; font-size:15px;">{greeting}</p>
-
-        <p style="margin:0 0 16px; font-size:15px;">
-            Great news — you've been selected for the <strong>NUMU beta program</strong>.
-            You can now create your store and start selling with Egypt's next-generation
-            e-commerce platform.
-        </p>
-
-        <!-- Invite Code Box -->
-        <div style="background:#f8f9fa; border:2px solid #1034A6; border-radius:10px; padding:24px; margin:24px 0; text-align:center;">
-            <p style="margin:0 0 6px; font-size:12px; color:#6c757d; text-transform:uppercase; letter-spacing:1px;">
-                YOUR BETA INVITE CODE
+        <div class="code-box">
+            <p style="margin:0 0 8px; font-size:11px; color:#6C757D; text-transform:uppercase; letter-spacing:1.2px;">
+                {c["code_label"]}
             </p>
-            <p style="margin:0; font-size:28px; font-weight:700; color:#1034A6; letter-spacing:2px; font-family:monospace;">
-                {invite_code[:16]}
-            </p>
+            <p class="digits" style="font-size:24px; letter-spacing:3px; color:{NAVY}; word-break:break-all;">{code_display}</p>
         </div>
 
-        <p style="margin:0 0 16px; font-size:15px;">
-            Use this code when creating your store. It's single-use and tied to your account.
+        <p>{c["use_code"]}</p>
+
+        <p class="center" style="margin:30px 0;">
+            <a href="https://numueg.app/register?invite={invite_code}" class="btn">{c["btn"]}</a>
         </p>
 
-        <!-- CTA Button -->
-        <div style="text-align:center; margin:28px 0;">
-            <a href="https://numueg.app/register?invite={invite_code}"
-               style="display:inline-block; padding:14px 36px; background:#D4AF37; color:#fff; text-decoration:none; border-radius:6px; font-weight:700; font-size:15px;">
-                Create Your Store
-            </a>
-        </div>
+        <hr class="divider">
 
-        <div style="height:1px; background:#e9ecef; margin:24px 0;"></div>
-
-        <p style="margin:0 0 12px; font-size:14px; font-weight:600;">What you get as a beta merchant:</p>
-        <ul style="margin:0 0 16px; padding-left:20px; font-size:14px; color:#495057;">
-            <li style="margin-bottom:6px;">Full platform access — storefront, payments, shipping</li>
-            <li style="margin-bottom:6px;">Egyptian payment gateways (Paymob, Fawry, COD)</li>
-            <li style="margin-bottom:6px;">ETA e-invoicing compliance built in</li>
-            <li style="margin-bottom:6px;">Priority support during beta</li>
-            <li style="margin-bottom:6px;">Founding merchant pricing (locked in forever)</li>
+        <p style="font-weight:600; color:{NAVY};">{c["perks_title"]}</p>
+        <ul style="margin:8px 0 16px; padding-{("right" if language == "ar" else "left")}:22px; font-size:14px; color:#495057;">
+            {perks_html}
         </ul>
 
-        <p style="margin:24px 0 0; font-size:13px; color:#6c757d;">
-            This invite expires in 7 days. If you have questions, reply to this email
-            and we'll get back to you within 24 hours.
-        </p>
-    </div>
+        <p class="muted" style="margin-top:24px;">{c["expiry"]}</p>
+    </div>"""
+    return wrap(body, language=language, preheader=c["preheader"])
 
-    <!-- Footer -->
-    <div style="padding:24px; text-align:center; background:#f8f9fa;">
-        <p style="margin:0; font-size:12px; color:#999;">
-            NUMU — E-commerce for Egyptian merchants
-        </p>
-    </div>
 
-</div>
-</body>
-</html>
-"""
+def beta_invite_subject(language: str = "ar") -> str:
+    return _BETA_INVITE.get(language, _BETA_INVITE["ar"])["subject"]

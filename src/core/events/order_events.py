@@ -49,7 +49,7 @@ class OrderStatusChangedEvent(DomainEvent):
     tracking_number: str | None = None
     tracking_url: str | None = None
     carrier: str | None = None
-    language: str = "en"
+    language: str = "ar"
     # Notification preferences (from customer.metadata)
     email_prefs: dict = {}
     whatsapp_prefs: dict = {}
