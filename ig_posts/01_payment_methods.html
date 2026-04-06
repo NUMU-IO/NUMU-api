@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>NUMU IG Post — Payment Methods</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800;900&family=Aref+Ruqaa:wght@400;700&display=swap');
+
+  :root {
+    --hero-bg: #0d1117;
+    --navy: #0A1A3D;
+    --navy-bright: #1034A6;
+    --gold: #D4AF37;
+    --gold-soft: rgba(212, 175, 55, 0.15);
+    --cream: #FAF7F0;
+    --ink: #1A1A2E;
+    --muted: rgba(255, 255, 255, 0.55);
+    --hairline: rgba(255, 255, 255, 0.08);
+    --card-bg: linear-gradient(168deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: #1a1a1a;
+    font-family: 'Alexandria', 'Segoe UI', Tahoma, sans-serif;
+    direction: rtl;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* The actual 1080x1080 canvas */
+  .post {
+    width: 1080px;
+    height: 1080px;
+    margin: 20px auto;
+    position: relative;
+    overflow: hidden;
+    background-color: var(--hero-bg);
+    background-image:
+      radial-gradient(circle at 12% 8%, rgba(59,130,246,0.55) 0%, rgba(59,130,246,0.18) 28%, transparent 58%),
+      radial-gradient(circle at 88% 92%, rgba(168,85,247,0.32) 0%, rgba(168,85,247,0.10) 35%, transparent 65%),
+      radial-gradient(rgba(255,255,255,0.06) 1.2px, transparent 1.2px);
+    background-size: 100% 100%, 100% 100%, 32px 32px;
+    background-repeat: no-repeat, no-repeat, repeat;
+    color: #fff;
+  }
+
+  /* Top bar */
+  .top-bar {
+    position: absolute;
+    top: 56px;
+    left: 56px;
+    right: 56px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 5;
+  }
+
+  .wordmark {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1;
+  }
+  .wordmark .ar {
+    font-family: 'Aref Ruqaa', serif;
+    font-size: 64px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 1px;
+  }
+  .wordmark .en {
+    margin-top: 6px;
+    font-size: 11px;
+    letter-spacing: 5px;
+    color: rgba(255,255,255,0.65);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  .badge-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 22px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 999px;
+    backdrop-filter: blur(10px);
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.85);
+  }
+  .badge-pill .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 12px rgba(52, 211, 153, 0.6);
+  }
+
+  /* Headline block */
+  .headline {
+    position: absolute;
+    top: 180px;
+    left: 56px;
+    right: 56px;
+    text-align: center;
+    z-index: 5;
+  }
+  .headline h1 {
+    font-size: 86px;
+    font-weight: 800;
+    line-height: 1.15;
+    color: #fff;
+    letter-spacing: -1px;
+  }
+  .headline .highlight {
+    display: inline-block;
+    position: relative;
+    color: var(--hero-bg);
+    background: var(--gold);
+    padding: 4px 26px 12px;
+    border-radius: 14px;
+    box-shadow: 0 16px 40px rgba(212, 175, 55, 0.35);
+    transform: rotate(-1deg);
+    margin: 0 8px;
+  }
+  .headline .sub {
+    margin-top: 22px;
+    font-size: 22px;
+    font-weight: 400;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* Card grid */
+  .cards {
+    position: absolute;
+    top: 470px;
+    left: 56px;
+    right: 56px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+    z-index: 5;
+  }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 22px;
+    padding: 26px 28px;
+    backdrop-filter: blur(20px);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.04),
+      0 14px 40px rgba(0,0,0,0.35);
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    top: 0; right: 0;
+    width: 140px; height: 140px;
+    background: radial-gradient(circle, var(--accent, rgba(59,130,246,0.18)) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .card-logo {
+    width: 52px; height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.5px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+  }
+  .card-status {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: rgba(52, 211, 153, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+    letter-spacing: 0.3px;
+  }
+
+  .card-name {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .card-desc {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+
+  .card-features {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .feature-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    font-size: 12px;
+  }
+  .feature-row .label {
+    color: rgba(255,255,255,0.7);
+    font-weight: 500;
+  }
+  .feature-row .value {
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .feature-row.muted .value { color: rgba(255,255,255,0.4); }
+
+  /* Card variants */
+  .card.paymob { --accent: rgba(94, 92, 230, 0.25); }
+  .card.paymob .card-logo { background: linear-gradient(135deg, #5E5CE6, #3B38C9); }
+
+  .card.fawry { --accent: rgba(255, 152, 0, 0.22); }
+  .card.fawry .card-logo { background: linear-gradient(135deg, #FF9800, #E65100); }
+
+  .card.valu { --accent: rgba(231, 0, 116, 0.22); }
+  .card.valu .card-logo { background: linear-gradient(135deg, #E70074, #A30055); }
+
+  .card.cod { --accent: rgba(34, 197, 94, 0.22); }
+  .card.cod .card-logo { background: linear-gradient(135deg, #22c55e, #15803d); }
+
+  /* Bottom CTA */
+  .bottom-bar {
+    position: absolute;
+    bottom: 56px;
+    left: 56px;
+    right: 56px;
+    text-align: center;
+    z-index: 5;
+  }
+  .bottom-pill {
+    display: inline-block;
+    padding: 22px 40px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(212,175,55,0.3);
+    border-radius: 999px;
+    backdrop-filter: blur(20px);
+    font-size: 22px;
+    font-weight: 600;
+    color: #fff;
+    box-shadow:
+      0 0 0 1px rgba(212,175,55,0.1),
+      0 20px 50px rgba(0,0,0,0.4);
+  }
+  .bottom-pill .accent {
+    color: var(--gold);
+    font-weight: 800;
+  }
+
+  /* Decorative gold accent line */
+  .accent-line {
+    position: absolute;
+    bottom: 0;
+    left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, transparent 0%, var(--gold) 50%, transparent 100%);
+    z-index: 4;
+  }
+
+  /* Doodle SVGs */
+  .doodle-left {
+    position: absolute;
+    bottom: 160px;
+    right: 32px;
+    width: 90px;
+    opacity: 0.55;
+    z-index: 3;
+  }
+  .doodle-right {
+    position: absolute;
+    bottom: 160px;
+    left: 32px;
+    width: 100px;
+    opacity: 0.55;
+    z-index: 3;
+  }
+</style>
+</head>
+<body>
+
+<div class="post">
+  <!-- Top bar -->
+  <div class="top-bar">
+    <div class="badge-pill">
+      <span class="dot"></span>
+      <span>متاح في نُمو</span>
+    </div>
+    <div class="wordmark">
+      <div class="ar">نُمو</div>
+      <div class="en">NUMU</div>
+    </div>
+  </div>
+
+  <!-- Headline -->
+  <div class="headline">
+    <h1>
+      كل وسايل الدفع
+      <br>
+      <span class="highlight">المصرية</span>
+      في متجرك
+    </h1>
+    <p class="sub">عميلك يدفع بالطريقة اللي تريحه — وانت تستلم فلوسك في حسابك</p>
+  </div>
+
+  <!-- 4 payment cards -->
+  <div class="cards">
+    <!-- Paymob -->
+    <div class="card paymob">
+      <div class="card-head">
+        <div class="card-logo">P</div>
+        <span class="card-status">مفعّل</span>
+      </div>
+      <div class="card-name">باي موب</div>
+      <div class="card-desc">كروت الائتمان ومحافظ الموبايل</div>
+      <div class="card-features">
+        <div class="feature-row"><span class="label">فيزا وماستركارد</span><span class="value">✓</span></div>
+        <div class="feature-row"><span class="label">فودافون كاش</span><span class="value">✓</span></div>
+      </div>
+    </div>
+
+    <!-- Fawry -->
+    <div class="card fawry">
+      <div class="card-head">
+        <div class="card-logo">F</div>
+        <span class="card-status">مفعّل</span>
+      </div>
+      <div class="card-name">فوري</div>
+      <div class="card-desc">دفع من أي ماكينة فوري في مصر</div>
+      <div class="card-features">
+        <div class="feature-row"><span class="label">+ ١٠٠ ألف منفذ</span><span class="value">✓</span></div>
+        <div class="feature-row"><span class="label">بدون إنترنت</span><span class="value">✓</span></div>
+      </div>
+    </div>
+
+    <!-- ValU -->
+    <div class="card valu">
+      <div class="card-head">
+        <div class="card-logo">V</div>
+        <span class="card-status">مفعّل</span>
+      </div>
+      <div class="card-name">ValU</div>
+      <div class="card-desc">تقسيط لحد ٦٠ شهر بدون فوايد</div>
+      <div class="card-features">
+        <div class="feature-row"><span class="label">موافقة فورية</span><span class="value">✓</span></div>
+        <div class="feature-row"><span class="label">٠٪ مقدم</span><span class="value">✓</span></div>
+      </div>
+    </div>
+
+    <!-- COD -->
+    <div class="card cod">
+      <div class="card-head">
+        <div class="card-logo">C</div>
+        <span class="card-status">مفعّل</span>
+      </div>
+      <div class="card-name">الدفع عند الاستلام</div>
+      <div class="card-desc">عميلك يدفع لما الطلب يوصله</div>
+      <div class="card-features">
+        <div class="feature-row"><span class="label">كل المحافظات</span><span class="value">✓</span></div>
+        <div class="feature-row"><span class="label">آمن ١٠٠٪</span><span class="value">✓</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Doodles -->
+  <svg class="doodle-right" viewBox="0 0 100 100" fill="none" stroke="rgba(212,175,55,0.6)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="50" cy="42" r="22"/>
+    <path d="M50 64 v14"/>
+    <path d="M40 78 h20"/>
+    <path d="M40 86 h20"/>
+    <path d="M44 92 h12"/>
+    <path d="M50 16 v6 M68 24 l-4 4 M82 42 h-6 M32 24 l4 4 M18 42 h6"/>
+  </svg>
+
+  <svg class="doodle-left" viewBox="0 0 100 100" fill="none" stroke="rgba(212,175,55,0.6)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 50 l18 18 l42 -42"/>
+    <circle cx="50" cy="50" r="40"/>
+  </svg>
+
+  <!-- Bottom CTA pill -->
+  <div class="bottom-bar">
+    <div class="bottom-pill">
+      اعرض كل وسايل الدفع المصرية <span class="accent">في كليك واحد</span>
+    </div>
+  </div>
+
+  <div class="accent-line"></div>
+</div>
+
+</body>
+</html>

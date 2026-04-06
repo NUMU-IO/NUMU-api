@@ -43,7 +43,7 @@ def send_order_confirmation_email_task(
     email: str,
     order_number: str,
     order_details: dict,
-    language: str = "en",
+    language: str = "ar",
 ):
     """Send order confirmation email asynchronously.
 
@@ -92,7 +92,7 @@ def send_shipping_notification_email_task(
     order_number: str,
     tracking_number: str | None = None,
     carrier: str | None = None,
-    language: str = "en",
+    language: str = "ar",
 ):
     """Send shipping notification email asynchronously.
 
@@ -141,7 +141,7 @@ def send_delivery_confirmation_email_task(
     email: str,
     order_number: str,
     store_name: str,
-    language: str = "en",
+    language: str = "ar",
 ):
     """Send delivery confirmation email asynchronously.
 
@@ -423,7 +423,7 @@ def send_whatsapp_order_confirmation_task(
     order_number: str,
     total: str,
     store_name: str,
-    language: str = "en",
+    language: str = "ar",
 ):
     """Send order confirmation via WhatsApp asynchronously.
 
@@ -480,7 +480,7 @@ def send_whatsapp_shipping_update_task(
     order_number: str,
     tracking_number: str,
     carrier: str = "Bosta",
-    language: str = "en",
+    language: str = "ar",
 ):
     """Send shipping update via WhatsApp asynchronously.
 
@@ -538,7 +538,7 @@ def send_whatsapp_delivery_confirmation_task(
     customer_name: str,
     order_number: str,
     store_name: str,
-    language: str = "en",
+    language: str = "ar",
 ):
     """Send delivery confirmation via WhatsApp asynchronously.
 

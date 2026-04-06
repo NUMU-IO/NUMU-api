@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>نُمو — حاجة جديدة جاية</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .post.dark.teaser {
+    background-image:
+      radial-gradient(circle at 50% 110%, rgba(212, 175, 55, 0.28) 0%, rgba(212, 175, 55, 0.06) 30%, transparent 55%),
+      radial-gradient(circle at 12% 8%, rgba(59,130,246,0.45) 0%, rgba(59,130,246,0.12) 32%, transparent 58%),
+      radial-gradient(rgba(255,255,255,0.06) 1.2px, transparent 1.2px);
+    background-size: 100% 100%, 100% 100%, 32px 32px;
+    background-repeat: no-repeat, no-repeat, repeat;
+  }
+
+  .top-bar {
+    position: absolute;
+    top: 64px; left: 64px; right: 64px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  .corner-mark {
+    font-family: 'Alexandria', sans-serif;
+    font-size: 12px;
+    letter-spacing: 4px;
+    color: var(--white-35);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .corner-mark .num {
+    color: var(--gold);
+    font-weight: 700;
+  }
+
+  .center-stage {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 0 80px;
+  }
+
+  .pre-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 18px;
+    color: var(--white-55);
+    font-weight: 500;
+    letter-spacing: 1px;
+    margin-bottom: 36px;
+  }
+  .pre-title::before, .pre-title::after {
+    content: "";
+    width: 50px;
+    height: 1px;
+    background: var(--gold);
+    opacity: 0.6;
+  }
+
+  .big-title {
+    font-size: 138px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #fff;
+    letter-spacing: -2px;
+    text-shadow: 0 30px 80px rgba(0,0,0,0.4);
+  }
+  .big-title .gold {
+    color: var(--gold);
+    font-weight: 900;
+  }
+
+  .small-title {
+    font-size: 36px;
+    font-weight: 400;
+    color: var(--white-70);
+    margin-top: 26px;
+    line-height: 1.5;
+  }
+  .small-title strong {
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .arrow-down {
+    position: absolute;
+    bottom: 230px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    opacity: 0.7;
+    animation: bounce 2s ease-in-out infinite;
+  }
+  @keyframes bounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(10px); }
+  }
+
+  .bottom-mark {
+    position: absolute;
+    bottom: 70px;
+    left: 0; right: 0;
+    text-align: center;
+  }
+  .bottom-mark .ar {
+    font-family: 'Aref Ruqaa', serif;
+    font-size: 56px;
+    color: #fff;
+    line-height: 1;
+    text-shadow: 0 0 40px rgba(212,175,55,0.4);
+  }
+  .bottom-mark .en {
+    margin-top: 10px;
+    font-size: 11px;
+    letter-spacing: 6px;
+    color: var(--gold);
+    font-weight: 600;
+  }
+
+  .corner-doodle {
+    position: absolute;
+    width: 80px;
+    opacity: 0.45;
+    fill: none;
+    stroke: var(--gold);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+  }
+  .corner-doodle.tl { top: 140px; left: 110px; transform: rotate(15deg); }
+  .corner-doodle.tr { top: 140px; right: 110px; transform: rotate(-15deg) scaleX(-1); }
+</style>
+</head>
+<body>
+
+<div class="post dark teaser">
+  <div class="top-bar">
+    <div class="corner-mark">
+      <span class="num">٠١</span> &nbsp;/ &nbsp;٠٥
+    </div>
+    <div class="corner-mark">
+      <i class="ph-fill ph-circle" style="font-size:8px;color:var(--gold);"></i> &nbsp; قريب جداً
+    </div>
+  </div>
+
+  <!-- decorative star bursts -->
+  <svg class="corner-doodle tl" viewBox="0 0 100 100">
+    <path d="M50 10 v25 M50 65 v25 M10 50 h25 M65 50 h25"/>
+    <path d="M22 22 l16 16 M62 62 l16 16 M22 78 l16 -16 M62 38 l16 -16"/>
+  </svg>
+  <svg class="corner-doodle tr" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="20" stroke-dasharray="3 4"/>
+    <circle cx="50" cy="50" r="35" stroke-dasharray="2 6"/>
+  </svg>
+
+  <div class="center-stage">
+    <div class="pre-title">للتجار المصريين</div>
+    <h1 class="big-title">
+      حاجة <span class="gold">جديدة</span>
+      <br>
+      جاية ليكم
+    </h1>
+    <p class="small-title">
+      الانتظار قرّب يخلص. <strong>استعد لتغيير في طريقة بيعك أونلاين.</strong>
+    </p>
+  </div>
+
+  <svg class="arrow-down" viewBox="0 0 60 80">
+    <path d="M30 5 v60 M10 45 l20 20 l20 -20" fill="none" stroke="rgba(212,175,55,0.7)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+
+  <div class="bottom-mark">
+    <div class="wordmark">
+      <div class="ar">نُمو</div>
+      <div class="en">NUMU</div>
+    </div>
+  </div>
+
+  <div class="accent-line"></div>
+</div>
+
+</body>
+</html>

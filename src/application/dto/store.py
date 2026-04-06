@@ -73,7 +73,7 @@ class CreateStoreDTO(BaseDTO):
     slug: str | None = None
     description: str | None = None
     default_currency: str = "EGP"
-    default_language: str = "en"
+    default_language: str = "ar"
     contact_email: str | None = None
     contact_phone: str | None = None
     invite_code: str | None = None

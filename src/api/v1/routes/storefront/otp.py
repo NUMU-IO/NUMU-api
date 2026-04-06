@@ -195,26 +195,17 @@ async def send_cod_otp(
                 from src.infrastructure.external_services.resend.email_service import (
                     ResendEmailService,
                 )
+                from src.infrastructure.external_services.resend.email_templates.transactional import (
+                    otp_code_email,
+                )
 
                 email_service = ResendEmailService()
+                tpl = otp_code_email(code=otp_code, purpose="order", expires_minutes=5)
                 await email_service.send_email(
                     EmailMessage(
                         to=customer_email,
-                        subject="كود تأكيد الطلب - NUMU",
-                        html_content=f"""
-                    <div dir="rtl" style="font-family: 'Cairo', Arial, sans-serif; max-width: 400px; margin: 0 auto; padding: 20px;">
-                        <h2 style="text-align: center;">كود تأكيد الطلب</h2>
-                        <p style="text-align: center; font-size: 14px; color: #666;">
-                            استخدم الكود التالي لتأكيد طلبك
-                        </p>
-                        <div style="text-align: center; padding: 20px; margin: 20px 0; background: #f8f8f8; border-radius: 8px;">
-                            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; font-family: monospace;">{otp_code}</span>
-                        </div>
-                        <p style="text-align: center; font-size: 12px; color: #999;">
-                            الكود صالح لمدة 5 دقائق
-                        </p>
-                    </div>
-                    """,
+                        subject=tpl["subject"],
+                        html_content=tpl["html"],
                     )
                 )
                 sent = True

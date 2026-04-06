@@ -1,0 +1,168 @@
+"""Render the نُمو wordmark in Aref Ruqaa via headless Chromium.
+
+PIL can't run the GSUB substitutions Aref Ruqaa needs for proper letter
+joining. Headless Chromium uses HarfBuzz internally and produces the
+exact same rendering you see in the browser — which IS the brand mark.
+
+Output is written to `_assets/wordmark.py` as a base64 data URL constant
+so the email base module can embed it without runtime browser dependency.
+
+Run once whenever the brand mark changes.
+"""
+
+import base64
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parent.parent
+ASSETS = (
+    ROOT
+    / "src"
+    / "infrastructure"
+    / "external_services"
+    / "resend"
+    / "email_templates"
+    / "_assets"
+)
+FONT_PATH = ASSETS / "ArefRuqaa-Regular.ttf"
+DAMMA_FONT_PATH = ASSETS / "NotoNaskhArabic.ttf"
+OUT_PNG = ASSETS / "wordmark_white.png"
+OUT_PY = ASSETS / "wordmark.py"
+
+# Render at high DPI then downsample for crisp output on retina displays.
+DPR = 4
+FONT_PX = 320
+# Render the body without the dhamma — Aref Ruqaa's U+064F glyph is a
+# tiny geometric mark that doesn't read as a recognizable damma at email
+# size. We composite a hand-drawn SVG damma over the noon below.
+BODY_TEXT = "نمو"
+COLOR = "#ffffff"
+
+# Inline the fonts as data URLs so the page doesn't need network access.
+font_b64 = base64.b64encode(FONT_PATH.read_bytes()).decode("ascii")
+font_data_url = f"data:font/ttf;base64,{font_b64}"
+damma_font_b64 = base64.b64encode(DAMMA_FONT_PATH.read_bytes()).decode("ascii")
+damma_font_data_url = f"data:font/ttf;base64,{damma_font_b64}"
+
+HTML = f"""<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {{
+    font-family: 'Aref Ruqaa Wordmark';
+    src: url('{font_data_url}') format('truetype');
+    font-weight: 400;
+    font-display: block;
+  }}
+  @font-face {{
+    font-family: 'Damma Font';
+    src: url('{damma_font_data_url}') format('truetype');
+    font-weight: 700;
+    font-display: block;
+  }}
+  html, body {{ margin: 0; padding: 0; background: transparent; }}
+  body {{
+    display: inline-block;
+    padding: 60px;
+  }}
+</style>
+</head>
+<body>
+  <svg id="w" xmlns="http://www.w3.org/2000/svg"
+       width="900" height="700" viewBox="0 0 900 700">
+    <!-- Aref Ruqaa noon-meem-waw cascade rendered as SVG text. SVG
+         text uses HarfBuzz so the contextual joining and stylistic
+         features are applied just like in the browser. -->
+    <text x="450" y="500"
+          font-family="'Aref Ruqaa Wordmark', serif"
+          font-weight="400"
+          font-size="{FONT_PX}"
+          fill="{COLOR}"
+          text-anchor="middle"
+          direction="rtl"
+          xml:lang="ar">{BODY_TEXT}</text>
+
+    <!-- Standalone damma curl from Noto Naskh Arabic, positioned
+         explicitly above the noon. -->
+    <text x="600" y="220"
+          font-family="'Damma Font', serif"
+          font-weight="700"
+          font-size="{int(FONT_PX * 1.6)}"
+          fill="{COLOR}"
+          text-anchor="middle"
+          direction="rtl"
+          xml:lang="ar">\u064f</text>
+  </svg>
+</body>
+</html>
+"""
+
+
+def main() -> None:
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context(
+            viewport={"width": 1200, "height": 900},
+            device_scale_factor=DPR,
+        )
+        page = context.new_page()
+        page.set_content(HTML, wait_until="networkidle")
+        # Wait for fonts to actually be ready
+        page.evaluate("document.fonts.ready")
+        page.wait_for_timeout(300)
+
+        # Full-page screenshot — captures the entire stack including
+        # absolutely positioned damma overlay (element.screenshot() can
+        # miss children that overflow the element box).
+        png_bytes = page.screenshot(omit_background=True, full_page=True)
+        browser.close()
+
+    OUT_PNG.write_bytes(png_bytes)
+
+    # Trim transparent borders to a tight crop, then halve the dimensions so
+    # the displayed @1x size matches a normal email layout while keeping the
+    # 2x retina pixel data inside the file.
+    from PIL import Image
+
+    img = Image.open(OUT_PNG).convert("RGBA")
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
+    # Add a few pixels of padding so the glyph doesn't touch the edges
+    pad = 8 * (DPR // 2)
+    padded = Image.new(
+        "RGBA", (img.width + pad * 2, img.height + pad * 2), (0, 0, 0, 0)
+    )
+    padded.paste(img, (pad, pad), img)
+
+    # Downsample by 2 (we still want @2x density vs the displayed dimensions)
+    final_w = padded.width // 2
+    final_h = padded.height // 2
+    final = padded.resize((final_w, final_h), Image.LANCZOS)
+    final.save(OUT_PNG, "PNG", optimize=True)
+
+    data = OUT_PNG.read_bytes()
+    b64 = base64.b64encode(data).decode("ascii")
+    data_url = f"data:image/png;base64,{b64}"
+
+    OUT_PY.write_text(
+        '"""Auto-generated by scripts/generate_wordmark.py. Do not edit by hand."""\n'
+        "\n"
+        f"WORDMARK_WHITE_PNG_DATA_URL = (\n"
+        f'    "{data_url}"\n'
+        f")\n"
+        f"WORDMARK_WIDTH = {final_w}\n"
+        f"WORDMARK_HEIGHT = {final_h}\n",
+        encoding="ascii",
+    )
+
+    print(f"Wrote {OUT_PNG} ({len(data)} bytes)")
+    print(f"Wrote {OUT_PY} ({len(b64)} base64 chars)")
+    print(f"Final size: {final_w}x{final_h}")
+
+
+if __name__ == "__main__":
+    main()

@@ -101,14 +101,16 @@ async def join_waitlist(
 
         email_service = get_email_service()
         from src.core.interfaces.services.email_service import EmailMessage
+        from src.infrastructure.external_services.resend.email_templates.transactional import (
+            waitlist_welcome_email,
+        )
 
+        tpl = waitlist_welcome_email(name=created.name, referral_code=referral_code)
         await email_service.send_email(
             EmailMessage(
                 to=created.email,
-                subject="You're on the NUMU beta waitlist!",
-                html_content=_welcome_email_html(
-                    name=created.name, referral_code=referral_code
-                ),
+                subject=tpl["subject"],
+                html_content=tpl["html"],
             )
         )
     except Exception:
@@ -148,30 +150,3 @@ async def waitlist_stats(
         },
         message="Waitlist stats",
     )
-
-
-def _welcome_email_html(name: str | None, referral_code: str) -> str:
-    """Render the waitlist welcome email."""
-    greeting = f"Hi {name}," if name else "Hi there,"
-    return f"""
-    <div style="font-family: Inter, Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a2e;">
-        <h1 style="color: #1034A6;">{greeting}</h1>
-        <p>Welcome to the <strong>NUMU</strong> beta waitlist! We're building the
-        e-commerce platform Egyptian merchants deserve, and you'll be among the
-        first to try it.</p>
-
-        <div style="background: #f1f3f5; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
-            <p style="margin: 0 0 4px; font-size: 13px; color: #6c757d;">YOUR REFERRAL CODE</p>
-            <p style="margin: 0; font-size: 24px; font-weight: bold; color: #1034A6; letter-spacing: 2px;">
-                {referral_code}
-            </p>
-        </div>
-
-        <p>Share your referral code with other merchants. Each signup with your
-        code bumps you higher on the list.</p>
-
-        <p style="color: #6c757d; font-size: 13px; margin-top: 30px;">
-            &mdash; The NUMU Team
-        </p>
-    </div>
-    """

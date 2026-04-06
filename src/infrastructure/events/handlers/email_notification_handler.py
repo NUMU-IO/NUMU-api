@@ -70,7 +70,7 @@ async def handle_email_notification(event: OrderStatusChangedEvent) -> None:
         tracking_number=event.tracking_number,
         carrier=event.carrier,
         reason=event.reason,
-        language=event.language,
+        language="ar",  # NUMU emails are Egyptian Arabic only for now
     )
 
     if not template:

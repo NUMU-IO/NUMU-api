@@ -1,0 +1,171 @@
+/* NUMU campaign — shared design tokens & components */
+@import url('https://fonts.googleapis.com/css2?family=Alexandria:wght@200;300;400;500;600;700;800;900&family=Aref+Ruqaa:wght@400;700&display=swap');
+@import url('https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css');
+@import url('https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css');
+@import url('https://unpkg.com/@phosphor-icons/web@2.1.1/src/duotone/style.css');
+@import url('https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css');
+
+:root {
+  --hero-bg: #0d1117;
+  --hero-bg-2: #0a0d14;
+  --navy: #0A1A3D;
+  --navy-bright: #1034A6;
+  --gold: #D4AF37;
+  --gold-bright: #F0C959;
+  --gold-dark: #B8941F;
+  --gold-soft: rgba(212, 175, 55, 0.12);
+  --cream: #FAF7F0;
+  --ink: #0A0E1A;
+  --white-95: rgba(255, 255, 255, 0.95);
+  --white-70: rgba(255, 255, 255, 0.7);
+  --white-55: rgba(255, 255, 255, 0.55);
+  --white-35: rgba(255, 255, 255, 0.35);
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.14);
+  --card-bg: linear-gradient(168deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: #1a1a1a;
+  font-family: 'Alexandria', 'Segoe UI', Tahoma, sans-serif;
+  direction: rtl;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* The IG canvas */
+.post {
+  width: 1080px;
+  height: 1080px;
+  margin: 24px auto;
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  font-family: 'Alexandria', sans-serif;
+}
+
+.post.dark {
+  background-color: var(--hero-bg);
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(59,130,246,0.55) 0%, rgba(59,130,246,0.18) 28%, transparent 58%),
+    radial-gradient(circle at 88% 92%, rgba(168,85,247,0.32) 0%, rgba(168,85,247,0.10) 35%, transparent 65%),
+    radial-gradient(rgba(255,255,255,0.06) 1.2px, transparent 1.2px);
+  background-size: 100% 100%, 100% 100%, 32px 32px;
+  background-repeat: no-repeat, no-repeat, repeat;
+}
+
+.post.dark-deep {
+  background-color: var(--hero-bg-2);
+  background-image:
+    radial-gradient(circle at 50% 30%, rgba(59,130,246,0.4) 0%, rgba(59,130,246,0.12) 35%, transparent 65%),
+    radial-gradient(rgba(255,255,255,0.05) 1.2px, transparent 1.2px);
+  background-size: 100% 100%, 32px 32px;
+  background-repeat: no-repeat, repeat;
+}
+
+.post.cream {
+  background-color: var(--cream);
+  color: var(--ink);
+  background-image:
+    radial-gradient(circle at 92% 8%, rgba(16, 52, 166, 0.10) 0%, transparent 50%),
+    radial-gradient(circle at 8% 92%, rgba(212, 175, 55, 0.14) 0%, transparent 55%),
+    radial-gradient(rgba(10, 14, 26, 0.06) 1.2px, transparent 1.2px);
+  background-size: 100% 100%, 100% 100%, 30px 30px;
+  background-repeat: no-repeat, no-repeat, repeat;
+}
+
+/* Wordmark */
+.wordmark {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+}
+.wordmark .ar {
+  font-family: 'Aref Ruqaa', serif;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 1px;
+}
+.wordmark.dark .ar { color: var(--ink); }
+.wordmark .en {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 5px;
+  color: var(--white-55);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.wordmark.dark .en { color: rgba(10,14,26,0.5); }
+
+/* Pill / badge */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 22px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--white-95);
+}
+.pill.dark {
+  background: rgba(10,14,26,0.04);
+  border-color: rgba(10,14,26,0.12);
+  color: var(--ink);
+}
+.pill .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.6);
+}
+.pill.gold {
+  background: rgba(212, 175, 55, 0.12);
+  border-color: rgba(212, 175, 55, 0.35);
+  color: var(--gold);
+}
+.pill .ph, .pill .ph-bold, .pill .ph-fill, .pill .ph-duotone {
+  font-size: 16px;
+}
+
+/* Bottom gold accent */
+.accent-line {
+  position: absolute;
+  bottom: 0;
+  left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, transparent 0%, var(--gold) 50%, transparent 100%);
+  z-index: 4;
+}
+
+/* Sticker label / handwritten underline accent */
+.underline-stroke {
+  position: relative;
+  display: inline-block;
+}
+.underline-stroke::after {
+  content: "";
+  position: absolute;
+  bottom: -8px;
+  left: -4%;
+  width: 108%;
+  height: 14px;
+  background: var(--gold);
+  border-radius: 999px;
+  transform: rotate(-1deg);
+  z-index: -1;
+  opacity: 0.85;
+}
+
+/* Common arrow doodle (gold) */
+.arrow-doodle {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

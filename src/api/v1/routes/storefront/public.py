@@ -808,24 +808,19 @@ async def customer_forgot_password(
         )
         try:
             from src.core.interfaces.services.email_service import EmailMessage
+            from src.infrastructure.external_services.resend.email_templates.transactional import (
+                otp_code_email,
+            )
 
             email_service = ResendEmailService()
+            tpl = otp_code_email(
+                code=code, purpose="password_reset", expires_minutes=15
+            )
             await email_service.send_email(
                 EmailMessage(
                     to=request.email,
-                    subject="كود استعادة كلمة المرور",
-                    html_content=f"""
-                <div dir="rtl" style="font-family: sans-serif; padding: 20px;">
-                    <h2>استعادة كلمة المرور</h2>
-                    <p>كود التحقق الخاص بك:</p>
-                    <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; padding: 16px; background: #f5f5f5; text-align: center; border-radius: 8px;">
-                        {code}
-                    </div>
-                    <p style="color: #666; font-size: 14px; margin-top: 16px;">
-                        الكود صالح لمدة ١٥ دقيقة. لو مطلبتش الكود ده، تجاهل الرسالة دي.
-                    </p>
-                </div>
-                """,
+                    subject=tpl["subject"],
+                    html_content=tpl["html"],
                 )
             )
         except Exception:

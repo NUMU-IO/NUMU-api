@@ -793,7 +793,7 @@ async def checkout(
                         email=customer_email,
                         order_number=created_order.order_number,
                         order_details=order_details,
-                        language=store.default_language,
+                        language="ar",  # NUMU emails are Egyptian Arabic only for now
                     )
                     logger.info(f"Order confirmation email sent to {customer_email}")
                 except Exception as exc:

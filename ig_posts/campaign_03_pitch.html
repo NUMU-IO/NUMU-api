@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>نُمو — متجرك في 5 دقايق</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .top-bar {
+    position: absolute;
+    top: 64px; left: 64px; right: 64px;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 5;
+  }
+  .corner-mark {
+    font-size: 12px;
+    letter-spacing: 4px;
+    color: var(--white-35);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .corner-mark .num { color: var(--gold); font-weight: 700; }
+
+  .top-wordmark .ar {
+    font-family: 'Aref Ruqaa', serif;
+    font-size: 38px;
+    color: #fff;
+    line-height: 1;
+  }
+
+  .heading-zone {
+    position: absolute;
+    top: 175px;
+    left: 64px; right: 64px;
+    text-align: center;
+    z-index: 5;
+  }
+  .heading-zone .pre {
+    display: inline-block;
+    padding: 8px 18px;
+    background: rgba(212,175,55,0.12);
+    border: 1px solid rgba(212,175,55,0.35);
+    color: var(--gold);
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 26px;
+  }
+  .heading-zone h1 {
+    font-size: 88px;
+    font-weight: 800;
+    line-height: 1.15;
+    color: #fff;
+    letter-spacing: -1px;
+    margin-bottom: 18px;
+  }
+  .heading-zone h1 .num {
+    color: var(--gold);
+    font-size: 110px;
+    font-weight: 900;
+    display: inline-block;
+    transform: translateY(8px);
+  }
+  .heading-zone p {
+    font-size: 22px;
+    color: var(--white-70);
+    font-weight: 400;
+    line-height: 1.6;
+  }
+
+  /* 4 feature cards */
+  .features {
+    position: absolute;
+    top: 540px;
+    left: 64px; right: 64px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+    z-index: 5;
+  }
+
+  .feat {
+    background: var(--card-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 22px;
+    padding: 28px 30px;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 18px 48px rgba(0,0,0,0.4);
+    position: relative;
+    overflow: hidden;
+  }
+  .feat::after {
+    content: "";
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(circle, var(--accent, rgba(59,130,246,0.18)) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .feat .icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+    font-size: 32px;
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.4);
+    background: var(--icon-bg, linear-gradient(135deg, #3B82F6, #1E40AF));
+  }
+  .feat h3 {
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+  .feat p {
+    font-size: 15px;
+    color: var(--white-70);
+    line-height: 1.55;
+  }
+  .feat .num-tag {
+    position: absolute;
+    top: 24px;
+    left: 28px;
+    font-size: 56px;
+    font-weight: 900;
+    color: rgba(255,255,255,0.06);
+    line-height: 1;
+    font-family: 'Alexandria', sans-serif;
+  }
+
+  .feat.f1 { --accent: rgba(59, 130, 246, 0.28); }
+  .feat.f1 .icon { background: linear-gradient(135deg, #3B82F6, #1E40AF); }
+  .feat.f2 { --accent: rgba(212, 175, 55, 0.28); }
+  .feat.f2 .icon { background: linear-gradient(135deg, #D4AF37, #B8941F); }
+  .feat.f3 { --accent: rgba(34, 197, 94, 0.25); }
+  .feat.f3 .icon { background: linear-gradient(135deg, #22c55e, #15803d); }
+  .feat.f4 { --accent: rgba(168, 85, 247, 0.28); }
+  .feat.f4 .icon { background: linear-gradient(135deg, #A855F7, #7C3AED); }
+
+  .bottom-cta {
+    position: absolute;
+    bottom: 64px;
+    left: 64px; right: 64px;
+    text-align: center;
+    z-index: 5;
+  }
+  .bottom-cta .text {
+    display: inline-block;
+    padding: 18px 38px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(212,175,55,0.3);
+    border-radius: 999px;
+    backdrop-filter: blur(20px);
+    font-size: 19px;
+    color: #fff;
+    font-weight: 600;
+  }
+  .bottom-cta .text .gold { color: var(--gold); font-weight: 800; }
+</style>
+</head>
+<body>
+
+<div class="post dark">
+  <div class="top-bar">
+    <div class="corner-mark"><span class="num">٠٣</span> / ٠٥</div>
+    <div class="top-wordmark"><div class="ar">نُمو</div></div>
+  </div>
+
+  <div class="heading-zone">
+    <div class="pre">نُمو في سطر</div>
+    <h1>متجرك أونلاين في <span class="num">٥</span> دقايق</h1>
+    <p>كل اللي محتاجه عشان تبدأ تبيع — في مكان واحد. مفيش تعقيد، مفيش مبرمجين، مفيش انتظار.</p>
+  </div>
+
+  <div class="features">
+    <div class="feat f1">
+      <div class="num-tag">01</div>
+      <div class="icon"><i class="ph-bold ph-storefront"></i></div>
+      <h3>متجر جاهز</h3>
+      <p>اختار من تصاميم مظبوطة وابدأ تبيع في دقايق</p>
+    </div>
+    <div class="feat f2">
+      <div class="num-tag">02</div>
+      <div class="icon"><i class="ph-bold ph-credit-card"></i></div>
+      <h3>دفع مصري</h3>
+      <p>باي موب، فوري، فودافون كاش، والدفع عند الاستلام</p>
+    </div>
+    <div class="feat f3">
+      <div class="num-tag">03</div>
+      <div class="icon"><i class="ph-bold ph-truck"></i></div>
+      <h3>شحن بوسطة</h3>
+      <p>تكامل مباشر، تتبّع لحظي، وتغطية كل المحافظات</p>
+    </div>
+    <div class="feat f4">
+      <div class="num-tag">04</div>
+      <div class="icon"><i class="ph-bold ph-chart-line-up"></i></div>
+      <h3>تحليلات حقيقية</h3>
+      <p>اعرف منتجاتك الأفضل وعملاءك الدائمين بالأرقام</p>
+    </div>
+  </div>
+
+  <div class="bottom-cta">
+    <div class="text">
+      ابدأ متجرك من <span class="gold">numueg.app</span>
+    </div>
+  </div>
+
+  <div class="accent-line"></div>
+</div>
+
+</body>
+</html>

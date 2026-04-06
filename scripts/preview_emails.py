@@ -14,6 +14,7 @@ from src.infrastructure.external_services.resend.email_templates import (
     beta_invite,
     notifications,
     onboarding,
+    transactional,
 )
 from src.infrastructure.external_services.resend.email_templates._base import (
     header,
@@ -211,8 +212,28 @@ previews["18_credentials_revoked_ar"] = (
     ).html_body
 )
 
-# 19. Admin notification (English, kept for internal staff)
-previews["19_admin_new_request_en"] = (
+# 19a. OTP — order confirmation
+previews["19a_otp_order_ar"] = transactional.otp_code_email(
+    code="428193", purpose="order", expires_minutes=5
+)["html"]
+
+# 19b. OTP — password reset
+previews["19b_otp_password_reset_ar"] = transactional.otp_code_email(
+    code="729184", purpose="password_reset", expires_minutes=15
+)["html"]
+
+# 19c. OTP — phone verification
+previews["19c_otp_phone_ar"] = transactional.otp_code_email(
+    code="305817", purpose="phone", expires_minutes=5
+)["html"]
+
+# 19d. Waitlist welcome
+previews["19d_waitlist_welcome_ar"] = transactional.waitlist_welcome_email(
+    name=MERCHANT, referral_code="REF-AHMED-2026-XYZ"
+)["html"]
+
+# 20. Admin notification (English, kept for internal staff)
+previews["20_admin_new_request_en"] = (
     cfg.ConfigurationRequestEmailTemplate.new_request_admin(
         merchant_name="Nile Store",
         service_name="Paymob",

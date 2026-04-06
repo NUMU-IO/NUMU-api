@@ -53,7 +53,7 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         nullable=False,
     )
     default_language: Mapped[str] = mapped_column(
-        String(5), nullable=False, server_default="en"
+        String(5), nullable=False, server_default="ar"
     )
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)

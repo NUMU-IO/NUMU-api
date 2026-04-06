@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>نُمو — ليه نُمو مختلفة</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .post.cream {
+    color: var(--ink);
+  }
+
+  .top-bar {
+    position: absolute;
+    top: 64px; left: 64px; right: 64px;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 5;
+  }
+  .corner-mark {
+    font-size: 12px;
+    letter-spacing: 4px;
+    color: rgba(10,14,26,0.45);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .corner-mark .num { color: var(--navy-bright); font-weight: 700; }
+
+  .top-wordmark .ar {
+    font-family: 'Aref Ruqaa', serif;
+    font-size: 38px;
+    color: var(--ink);
+    line-height: 1;
+  }
+
+  /* Headline */
+  .head {
+    position: absolute;
+    top: 160px;
+    left: 64px;
+    right: 64px;
+    text-align: right;
+    z-index: 5;
+  }
+  .head .pre {
+    display: inline-block;
+    padding: 8px 18px;
+    background: var(--navy-bright);
+    color: #fff;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 22px;
+  }
+  .head h1 {
+    font-size: 92px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--ink);
+    letter-spacing: -1.5px;
+  }
+  .head h1 .accent {
+    position: relative;
+    display: inline-block;
+    color: var(--navy-bright);
+  }
+  .head h1 .accent::after {
+    content: "";
+    position: absolute;
+    bottom: 8px;
+    left: -4%;
+    width: 108%;
+    height: 18px;
+    background: var(--gold);
+    border-radius: 999px;
+    transform: rotate(-1deg);
+    z-index: -1;
+    opacity: 0.85;
+  }
+
+  /* Numbered list */
+  .reasons {
+    position: absolute;
+    top: 410px;
+    left: 64px;
+    right: 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    z-index: 5;
+  }
+
+  .reason {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 24px 28px;
+    background: #fff;
+    border: 1px solid rgba(10,14,26,0.08);
+    border-radius: 22px;
+    box-shadow: 0 8px 28px rgba(10, 26, 61, 0.08);
+    position: relative;
+  }
+
+  .reason .num {
+    flex-shrink: 0;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--navy);
+    color: var(--gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    font-weight: 800;
+    font-family: 'Alexandria', sans-serif;
+    box-shadow: 0 6px 20px rgba(10, 26, 61, 0.25);
+  }
+
+  .reason .body { flex: 1; }
+  .reason .body h3 {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .reason .body p {
+    font-size: 16px;
+    color: rgba(10,14,26,0.6);
+    line-height: 1.5;
+  }
+
+  .reason .icon {
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: rgba(212,175,55,0.15);
+    color: var(--gold-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+  }
+
+  /* Bottom signature */
+  .signature {
+    position: absolute;
+    bottom: 64px;
+    left: 64px;
+    right: 64px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 5;
+  }
+  .signature .quote {
+    font-size: 18px;
+    color: rgba(10,14,26,0.6);
+    font-weight: 500;
+    max-width: 600px;
+    line-height: 1.5;
+  }
+  .signature .quote strong { color: var(--ink); font-weight: 800; }
+
+  .signature .url {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--navy-bright);
+  }
+
+  /* Decorative accent */
+  .corner-blob {
+    position: absolute;
+    pointer-events: none;
+  }
+  .corner-blob.tl {
+    top: -100px; left: -100px;
+    width: 320px; height: 320px;
+    background: radial-gradient(circle, rgba(212,175,55,0.25) 0%, transparent 65%);
+  }
+</style>
+</head>
+<body>
+
+<div class="post cream">
+  <div class="corner-blob tl"></div>
+
+  <div class="top-bar">
+    <div class="corner-mark"><span class="num">٠٤</span> / ٠٥</div>
+    <div class="top-wordmark"><div class="ar">نُمو</div></div>
+  </div>
+
+  <div class="head">
+    <div class="pre">للسوق المصري</div>
+    <h1>
+      ليه <span class="accent">نُمو</span> غير<br>أي حاجة قبلها؟
+    </h1>
+  </div>
+
+  <div class="reasons">
+    <div class="reason">
+      <div class="num">١</div>
+      <div class="body">
+        <h3>كل وسايل الدفع المصرية</h3>
+        <p>باي موب، فوري، فودافون كاش، ValU، والدفع عند الاستلام — جاهزين من اليوم الأول</p>
+      </div>
+      <div class="icon"><i class="ph-bold ph-credit-card"></i></div>
+    </div>
+
+    <div class="reason">
+      <div class="num">٢</div>
+      <div class="body">
+        <h3>تكامل بوسطة جاهز</h3>
+        <p>اشحن لأي محافظة في مصر، تابع طلباتك لحظة بلحظة، وادفع بأسعار التاجر</p>
+      </div>
+      <div class="icon"><i class="ph-bold ph-truck"></i></div>
+    </div>
+
+    <div class="reason">
+      <div class="num">٣</div>
+      <div class="body">
+        <h3>فاتورة إلكترونية متوافقة مع مصلحة الضرايب</h3>
+        <p>كل فاتورة بتطلع متظبطة على متطلبات الـ ETA — انت بس بتبيع</p>
+      </div>
+      <div class="icon"><i class="ph-bold ph-receipt"></i></div>
+    </div>
+
+    <div class="reason">
+      <div class="num">٤</div>
+      <div class="body">
+        <h3>واجهة عربي ١٠٠٪</h3>
+        <p>كل حاجة بالعربي — لوحة التحكم، الإيميلات، الفواتير، والمتجر بتاع عملاءك</p>
+      </div>
+      <div class="icon"><i class="ph-bold ph-translate"></i></div>
+    </div>
+  </div>
+
+  <div class="signature">
+    <div class="quote">
+      <strong>نُمو اتعملت في مصر، عشان مصر.</strong><br>
+      مش ترجمة لمنصة أجنبية — بل منصة بتفهم تاجر بلدنا.
+    </div>
+    <div class="url">numueg.app</div>
+  </div>
+
+  <div class="accent-line"></div>
+</div>
+
+</body>
+</html>
