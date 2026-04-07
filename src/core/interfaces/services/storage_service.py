@@ -13,6 +13,7 @@ class StorageBucket(StrEnum):
     AVATARS = "avatars"
     DOCUMENTS = "documents"
     CATEGORIES = "categories"
+    THEMES = "themes"
 
 
 @dataclass

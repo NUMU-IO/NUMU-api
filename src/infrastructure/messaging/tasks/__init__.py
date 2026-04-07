@@ -42,6 +42,9 @@ from src.infrastructure.messaging.tasks.slack_tasks import (  # noqa: F401
 from src.infrastructure.messaging.tasks.social_tasks import (  # noqa: F401
     import_social_posts_task,
 )
+from src.infrastructure.messaging.tasks.theme_build_tasks import (  # noqa: F401
+    build_external_theme,
+)
 from src.infrastructure.messaging.tasks.trust_network_maintenance import (  # noqa: F401
     cleanup_expired_payment_links,
     retry_stuck_preliminary_scores,
