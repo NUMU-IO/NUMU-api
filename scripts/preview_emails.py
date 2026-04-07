@@ -9,20 +9,43 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.infrastructure.external_services.notifications import email_templates as cfg
-from src.infrastructure.external_services.resend.email_templates import (
+OUT = ROOT / "email_previews"
+OUT.mkdir(exist_ok=True)
+
+# Copy the wordmark PNG into the previews dir and point the templates at
+# the local copy so the browser preview actually shows the image. In
+# production the FastAPI app serves it from /static/brand via the mount
+# in src/main.py.
+import os as _os  # noqa: E402
+import shutil as _shutil  # noqa: E402
+
+_brand_src = (
+    ROOT
+    / "src"
+    / "infrastructure"
+    / "external_services"
+    / "resend"
+    / "email_templates"
+    / "_assets"
+    / "numu-logo-white.png"
+)
+if _brand_src.exists():
+    _shutil.copy2(_brand_src, OUT / "numu-logo-white.png")
+_os.environ["BRAND_ASSETS_BASE_URL"] = "."
+
+from src.infrastructure.external_services.notifications import (
+    email_templates as cfg,  # noqa: E402
+)
+from src.infrastructure.external_services.resend.email_templates import (  # noqa: E402
     beta_invite,
     notifications,
     onboarding,
     transactional,
 )
-from src.infrastructure.external_services.resend.email_templates._base import (
+from src.infrastructure.external_services.resend.email_templates._base import (  # noqa: E402
     header,
     wrap,
 )
-
-OUT = ROOT / "email_previews"
-OUT.mkdir(exist_ok=True)
 
 # Sample data
 STORE = "متجر النيل"

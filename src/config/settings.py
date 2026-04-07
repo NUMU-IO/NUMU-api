@@ -235,6 +235,11 @@ class Settings(BaseSettings):
     resend_api_key: str | None = None
     email_from_address: str = "noreply@numu.com"
     email_from_name: str = "numu"
+    # Absolute base URL used inside email HTML to reference hosted brand
+    # assets (logo PNG, etc.). Must be a public HTTPS URL since Gmail
+    # strips base64 data: URLs inside <img> tags. The default points at
+    # the landing-page nginx location which already serves /numu-logo-*.
+    brand_assets_base_url: str = "https://numueg.app"
 
     # Google OAuth
     google_oauth_client_id: str | None = None

@@ -265,6 +265,10 @@ def create_app() -> FastAPI:
         uploads_dir.mkdir(parents=True, exist_ok=True)
         app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
+    # Note: brand assets (logo PNG) used inside emails are served by the
+    # landing-page nginx location at https://numueg.app/numu-logo-*.png
+    # — see brand_assets_base_url in settings.py.
+
     # Setup admin panel (public schema only)
     setup_admin(app)
 
