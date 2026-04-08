@@ -56,6 +56,11 @@ class DashboardStatsResponse(BaseModel):
     total_products: int
     low_stock_count: int
 
+    # Profit (only for products with cost_price set)
+    total_profit: int
+    total_cogs: int
+    products_with_cost: int
+
     # Period
     period_start: str
     period_end: str
@@ -125,6 +130,9 @@ async def get_dashboard_stats(
             new_customers=result.new_customers,
             total_products=result.total_products,
             low_stock_count=result.low_stock_count,
+            total_profit=result.total_profit,
+            total_cogs=result.total_cogs,
+            products_with_cost=result.products_with_cost,
             period_start=str(result.period_start),
             period_end=str(result.period_end),
         ),

@@ -1154,6 +1154,10 @@ class ProductPerformanceItem(BaseModel):
     quantity_sold: int
     current_stock: int
     revenue_trend: list[int]  # 7 data points (daily revenue, last 7 days)
+    # Profit fields. All null if the product has no cost_price set.
+    cost_price: int | None = None  # cents (current product cost)
+    profit: int | None = None  # cents
+    margin_percent: float | None = None
 
 
 class CategoryPerformanceItem(BaseModel):
@@ -1251,6 +1255,16 @@ async def get_product_performance(
         p = product_map.get(pid)
         stock = p.quantity if p else 0
         trend = [product_daily.get(pid, {}).get(d, 0) for d in trend_dates]
+
+        cost_cents: int | None = None
+        profit_cents: int | None = None
+        margin_pct: float | None = None
+        if p is not None and p.cost_price is not None:
+            cost_cents = p.cost_price.cents
+            profit_cents = data["revenue"] - (cost_cents * data["quantity"])
+            if data["revenue"] > 0:
+                margin_pct = round(profit_cents / data["revenue"] * 100, 1)
+
         product_items.append(
             ProductPerformanceItem(
                 id=pid,
@@ -1260,6 +1274,9 @@ async def get_product_performance(
                 quantity_sold=data["quantity"],
                 current_stock=stock,
                 revenue_trend=trend,
+                cost_price=cost_cents,
+                profit=profit_cents,
+                margin_percent=margin_pct,
             )
         )
 
