@@ -39,6 +39,12 @@ class DashboardStatsDTO:
     total_products: int
     low_stock_count: int
 
+    # Profit (only over products with cost_price set; products without
+    # cost_price are excluded from the totals)
+    total_profit: int  # In cents
+    total_cogs: int  # In cents
+    products_with_cost: int
+
     # Period info
     period_start: datetime
     period_end: datetime
@@ -160,6 +166,37 @@ class GetDashboardStatsUseCase:
             round(current_revenue / total_orders) if total_orders > 0 else 0
         )
 
+        # Profit / COGS aggregation. Only counts line items whose product
+        # currently has a cost_price set; products without a cost are
+        # excluded from the totals (the UI nudges merchants to set one).
+        period_orders = await self.order_repository.get_by_date_range(
+            store_id, period_start, now, limit=5000
+        )
+        all_products = await self.product_repository.get_by_store(
+            store_id, skip=0, limit=5000
+        )
+        product_cost_map: dict[UUID, int] = {
+            p.id: p.cost_price.cents for p in all_products if p.cost_price is not None
+        }
+        products_with_cost = len(product_cost_map)
+
+        total_cogs = 0
+        total_profit = 0
+        for order in period_orders:
+            if order.payment_status not in [
+                PaymentStatus.PAID,
+                PaymentStatus.PARTIALLY_REFUNDED,
+            ]:
+                continue
+            for item in order.line_items:
+                cost_cents = product_cost_map.get(item.product_id)
+                if cost_cents is None:
+                    continue
+                line_cogs = cost_cents * item.quantity
+                line_profit = (item.unit_price - cost_cents) * item.quantity
+                total_cogs += line_cogs
+                total_profit += line_profit
+
         return DashboardStatsDTO(
             total_revenue=current_revenue,
             revenue_change_percent=round(revenue_change_percent, 1),
@@ -176,6 +213,9 @@ class GetDashboardStatsUseCase:
             new_customers=new_customers,
             total_products=total_products,
             low_stock_count=low_stock_count,
+            total_profit=total_profit,
+            total_cogs=total_cogs,
+            products_with_cost=products_with_cost,
             period_start=period_start,
             period_end=now,
         )
