@@ -992,12 +992,18 @@ async def checkout(
                         f"Invoice {created_inv.invoice_number} generated and emailed "
                         f"to {_inv_customer_email}"
                     )
-                except Exception as exc:
-                    logger.warning(f"Invoice generation/email failed: {exc}")
+                except Exception:
+                    logger.exception(
+                        "Invoice generation/email failed for order %s",
+                        _inv_order_number,
+                    )
 
             asyncio.create_task(_generate_invoice())
-        except Exception as e:
-            logger.warning(f"Failed to dispatch invoice generation: {e}")
+        except Exception:
+            logger.exception(
+                "Failed to dispatch invoice generation for order %s",
+                created_order.order_number,
+            )
 
     # Merchant onboarding: send first-order email if this is order #1
     try:

@@ -157,13 +157,32 @@ class InvoiceRepository:
         return True
 
     async def get_next_invoice_number(self, store_id: UUID) -> str:
-        query = select(func.count(InvoiceModel.id)).where(
-            InvoiceModel.store_id == store_id
-        )
-        result = await self.session.execute(self._tenant_filter(query))
-        count = result.scalar() or 0
+        """Generate the next per-store invoice number for the current year.
+
+        Format: ``INV-{year}-{seq:06d}`` where ``seq`` is the highest
+        sequence already used for ``store_id`` in the current year, plus
+        one. The composite UNIQUE index on ``(store_id, invoice_number)``
+        is the source of truth — if two concurrent checkouts on the same
+        store both compute the same next number, the second INSERT will
+        raise IntegrityError, which the caller is expected to surface
+        (and the merchant can retry).
+        """
         year = datetime.utcnow().year
-        return f"INV-{year}-{count + 1:06d}"
+        prefix = f"INV-{year}-"
+        query = (
+            select(func.max(InvoiceModel.invoice_number))
+            .where(InvoiceModel.store_id == store_id)
+            .where(InvoiceModel.invoice_number.like(f"{prefix}%"))
+        )
+        result = await self.session.execute(query)
+        last_number = result.scalar()
+        last_seq = 0
+        if last_number:
+            try:
+                last_seq = int(last_number[len(prefix) :])
+            except (ValueError, IndexError):
+                last_seq = 0
+        return f"{prefix}{last_seq + 1:06d}"
 
     @staticmethod
     def _line_item_to_dict(item: InvoiceLineItem) -> dict:
