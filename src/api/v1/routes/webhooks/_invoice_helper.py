@@ -193,10 +193,10 @@ async def generate_invoice_for_paid_order(
                     logger.info(
                         f"Invoice {created_inv.invoice_number} emailed to {customer_email}"
                     )
-            except Exception as exc:
-                logger.warning(f"Invoice PDF/email failed: {exc}")
+            except Exception:
+                logger.exception("Invoice PDF/email failed for order %s", order_id)
 
         asyncio.create_task(_generate_pdf_and_email())
 
-    except Exception as e:
-        logger.error(f"Invoice generation failed for order {order_id}: {e}")
+    except Exception:
+        logger.exception("Invoice generation failed for order %s", order_id)

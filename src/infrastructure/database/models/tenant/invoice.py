@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,7 +19,18 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     """Invoice database model for Egyptian e-invoicing (ETA)."""
 
     __tablename__ = "invoices"
-    __table_args__ = {"schema": "public"}
+    # invoice_number is unique per (store_id, invoice_number), not globally —
+    # the per-store sequential numbering scheme would otherwise collide
+    # across stores. See migration 8e1f6a2b4d5c.
+    __table_args__ = (
+        Index(
+            "uq_invoices_store_invoice_number",
+            "store_id",
+            "invoice_number",
+            unique=True,
+        ),
+        {"schema": "public"},
+    )
 
     # Relationships
     store_id: Mapped[str] = mapped_column(
@@ -41,10 +52,8 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         index=True,
     )
 
-    # Invoice identification
-    invoice_number: Mapped[str] = mapped_column(
-        String(50), nullable=False, unique=True, index=True
-    )
+    # Invoice identification. Unique per store via composite index above.
+    invoice_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     internal_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Type and status
