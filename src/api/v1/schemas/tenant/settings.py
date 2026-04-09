@@ -372,6 +372,11 @@ class CustomizationResponse(BaseModel):
     # V2 section engine fields
     schema_version: int | None = None
     templates: dict[str, Any] | None = None
+    # External theme — merchant-edited values keyed by the bundle's
+    # settings_schema. Stored under store.theme_settings["external_theme"]
+    # ["merchant_settings"], not the customization blob, so it ships in the
+    # same payload the storefront already reads from theme_settings.
+    external_theme_merchant_settings: dict[str, Any] | None = None
 
 
 class UpdateCustomizationRequest(BaseModel):
@@ -395,6 +400,11 @@ class UpdateCustomizationRequest(BaseModel):
     # V2 section engine fields
     schema_version: int | None = None  # 2 for v2 format
     templates: dict[str, Any] | None = None  # { "home": { sections, order } }
+    # External theme merchant settings — values keyed by the active external
+    # theme's settings_schema. Persisted under
+    # ``store.theme_settings["external_theme"]["merchant_settings"]`` so the
+    # storefront's existing fetch path picks them up.
+    external_theme_merchant_settings: dict[str, Any] | None = None
 
 
 # Invoice / Tax Settings
