@@ -2,6 +2,7 @@
 
 Provides endpoints for merchants to submit, check, and remove external themes:
 - POST   /stores/{store_id}/themes/external          — Submit a GitHub repo for building
+- POST   /stores/{store_id}/themes/external/dev-mode — Connect a local dev server URL
 - GET    /stores/{store_id}/themes/external           — Get current external theme info
 - GET    /stores/{store_id}/themes/external/builds/{build_id} — Check build status
 - DELETE /stores/{store_id}/themes/external           — Remove external theme
@@ -11,6 +12,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.dependencies import (
@@ -21,7 +23,9 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront.public import AVAILABLE_THEMES
 from src.api.v1.schemas.tenant.theme import (
+    ConnectDevServerRequest,
     ExternalThemeInfoResponse,
+    RebuildExternalThemeRequest,
     RemoveExternalThemeRequest,
     StoreThemeListItem,
     StoreThemesListResponse,
@@ -29,19 +33,16 @@ from src.api.v1.schemas.tenant.theme import (
     ThemeBuildResponse,
     ThemeBuildStatus,
     ThemeBuildStatusResponse,
+    ThemeValidationResponse,
+    ValidationErrorModel,
 )
 from src.core.entities.store import Store
+from src.infrastructure.cache.theme_build_store import get_theme_build_store
 from src.infrastructure.repositories import StoreRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/{store_id}/themes")
-
-
-# ─── In-memory build status tracking ─────────────────────────────────────────
-# In production, this would be stored in Redis or the database.
-# Using in-memory dict for the initial implementation.
-_build_statuses: dict[str, dict] = {}
 
 
 @router.get(
@@ -93,6 +94,7 @@ async def list_store_themes(
                 version=external.get("version"),
                 source_repo=external.get("source_repo"),
                 settings_schema=external.get("settings_schema"),
+                mode=external.get("mode"),
             )
         )
 
@@ -132,19 +134,22 @@ async def submit_external_theme(
     build_id = uuid.uuid4().hex
 
     # Store build status
-    _build_statuses[build_id] = {
-        "build_id": build_id,
-        "status": ThemeBuildStatus.QUEUED,
-        "store_id": str(store.id),
-        "github_url": request.github_url,
-        "branch": request.branch,
-        "theme_id": None,
-        "bundle_url": None,
-        "css_url": None,
-        "error": None,
-        "started_at": datetime.now(UTC),
-        "completed_at": None,
-    }
+    await get_theme_build_store().set(
+        build_id,
+        {
+            "build_id": build_id,
+            "status": ThemeBuildStatus.QUEUED,
+            "store_id": str(store.id),
+            "github_url": request.github_url,
+            "branch": request.branch,
+            "theme_id": None,
+            "bundle_url": None,
+            "css_url": None,
+            "error": None,
+            "started_at": datetime.now(UTC),
+            "completed_at": None,
+        },
+    )
 
     # Dispatch Celery task
     try:
@@ -160,8 +165,10 @@ async def submit_external_theme(
         )
     except Exception as e:
         logger.error("Failed to dispatch theme build task: %s", e)
-        _build_statuses[build_id]["status"] = ThemeBuildStatus.FAILED
-        _build_statuses[build_id]["error"] = "Failed to queue build task"
+        await get_theme_build_store().update(
+            build_id,
+            {"status": ThemeBuildStatus.FAILED, "error": "Failed to queue build task"},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Theme build service is temporarily unavailable",
@@ -183,6 +190,146 @@ async def submit_external_theme(
             message="Theme build has been queued. Poll the build status endpoint for updates.",
         ),
         message="Theme build queued successfully",
+    )
+
+
+# ─── Dev mode: connect a local theme server ──────────────────────────────────
+
+
+@router.post(
+    "/external/dev-mode",
+    response_model=SuccessResponse[ExternalThemeInfoResponse],
+    dependencies=[Depends(verify_store_ownership)],
+    summary="Connect a local theme dev server (numu-theme dev)",
+)
+async def connect_dev_server(
+    request: ConnectDevServerRequest,
+    store: Store = Depends(get_current_store),
+    store_repo: StoreRepository = Depends(get_store_repository),
+) -> SuccessResponse[ExternalThemeInfoResponse]:
+    """Connect a local theme dev server URL to this store.
+
+    The dev server should be running `numu-theme dev` (default port: 4321).
+    The backend probes the dev server to verify it's reachable, then stores
+    the URL in theme_settings.external_theme with mode="dev" so the storefront
+    knows to bypass caching and always re-fetch the bundle.
+
+    Used for the local development workflow:
+    1. Developer runs `numu-theme dev` in their theme repo
+    2. Developer pastes the URL (http://localhost:4321) into the dashboard
+    3. Storefront loads from the dev URL, no caching
+    4. Developer edits files → vite rebuilds → developer refreshes storefront
+    """
+    dev_url = request.dev_url.rstrip("/")
+    bundle_url = f"{dev_url}/theme.js"
+    css_url = f"{dev_url}/theme.css"
+    manifest_url = f"{dev_url}/theme.json"
+    schema_url = f"{dev_url}/settings_schema.json"
+
+    # Probe the dev server: fetch theme.json to verify it's a valid theme
+    manifest: dict = {}
+    settings_schema: dict | None = None
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # theme.json is the source manifest — most dev servers serve it
+            try:
+                manifest_res = await client.get(manifest_url)
+                if manifest_res.status_code == 200:
+                    manifest = manifest_res.json()
+            except Exception as e:
+                logger.warning(
+                    "Could not fetch theme.json from %s: %s", manifest_url, e
+                )
+
+            # Try to fetch settings_schema.json
+            try:
+                schema_res = await client.get(schema_url)
+                if schema_res.status_code == 200:
+                    settings_schema = schema_res.json()
+            except Exception as e:
+                logger.warning(
+                    "Could not fetch settings_schema.json from %s: %s", schema_url, e
+                )
+
+            # Verify theme.js is reachable
+            bundle_res = await client.head(bundle_url)
+            if bundle_res.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Dev server at {dev_url} is not serving theme.js "
+                        f"(got HTTP {bundle_res.status_code}). "
+                        "Make sure `numu-theme dev` is running."
+                    ),
+                )
+    except HTTPException:
+        raise
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Could not reach dev server at {dev_url}. "
+                f"Make sure `numu-theme dev` is running and the URL is correct. "
+                f"Error: {e}"
+            ),
+        ) from e
+
+    if not manifest.get("id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Dev server at {dev_url} did not return a valid theme.json. "
+                "Make sure your theme has theme.json with an 'id' field."
+            ),
+        )
+
+    theme_id = manifest["id"]
+
+    # Update store theme_settings with the dev server URLs
+    theme_settings = dict(store.theme_settings or {})
+    theme_settings["external_theme"] = {
+        "bundle_url": bundle_url,
+        "css_url": css_url,
+        "theme_id": theme_id,
+        "name": manifest.get("name", theme_id),
+        "nameAr": manifest.get("nameAr", theme_id),
+        "description": manifest.get("description", "Local dev theme"),
+        "version": manifest.get("version", "0.0.0-dev"),
+        "author": manifest.get("author", "Developer"),
+        "tags": manifest.get("tags", []),
+        "source_repo": dev_url,  # Used as the "source" for the dashboard UI
+        "built_at": datetime.now(UTC).isoformat(),
+        "settings_schema": settings_schema,
+        "mode": "dev",  # Storefront uses this to bypass caching
+    }
+
+    # Set base_theme to the external theme's ID so it becomes active immediately
+    if "theme" not in theme_settings:
+        theme_settings["theme"] = {}
+    theme_settings["theme"]["base_theme"] = theme_id
+
+    await store_repo.update(store.id, {"theme_settings": theme_settings})
+
+    logger.info(
+        "Dev server connected",
+        extra={
+            "store_id": str(store.id),
+            "theme_id": theme_id,
+            "dev_url": dev_url,
+        },
+    )
+
+    return SuccessResponse(
+        data=ExternalThemeInfoResponse(
+            has_external_theme=True,
+            theme_id=theme_id,
+            bundle_url=bundle_url,
+            css_url=css_url,
+            version=manifest.get("version"),
+            source_repo=dev_url,
+            built_at=datetime.now(UTC),
+        ),
+        message=f"Dev server connected. Theme '{theme_id}' is now active.",
     )
 
 
@@ -226,7 +373,7 @@ async def get_build_status(
     store: Store = Depends(get_current_store),
 ) -> SuccessResponse[ThemeBuildStatusResponse]:
     """Check the status of a theme build."""
-    build_info = _build_statuses.get(build_id)
+    build_info = await get_theme_build_store().get(build_id)
 
     if not build_info:
         raise HTTPException(
@@ -252,6 +399,166 @@ async def get_build_status(
             started_at=build_info.get("started_at"),
             completed_at=build_info.get("completed_at"),
         ),
+    )
+
+
+@router.post(
+    "/external/rebuild",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SuccessResponse[ThemeBuildResponse],
+    dependencies=[Depends(verify_store_ownership)],
+)
+async def rebuild_external_theme(
+    request: RebuildExternalThemeRequest,
+    store: Store = Depends(get_current_store),
+) -> SuccessResponse[ThemeBuildResponse]:
+    """Rebuild the current external theme using the stored source_repo URL."""
+    theme_settings = store.theme_settings or {}
+    external = theme_settings.get("external_theme")
+    if not external or not external.get("source_repo"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Store does not have a GitHub-connected external theme",
+        )
+    if external.get("mode") == "dev":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot rebuild a dev-mode theme",
+        )
+
+    build_id = uuid.uuid4().hex
+    github_url = external["source_repo"]
+    branch = request.branch
+
+    await get_theme_build_store().set(
+        build_id,
+        {
+            "build_id": build_id,
+            "status": ThemeBuildStatus.QUEUED,
+            "message": "Queued for rebuild",
+            "store_id": str(store.id),
+            "github_url": github_url,
+            "branch": branch,
+            "started_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+    try:
+        from src.infrastructure.messaging.tasks.theme_build_tasks import (
+            build_external_theme,
+        )
+
+        build_external_theme.delay(
+            store_id=str(store.id),
+            github_url=github_url,
+            branch=branch,
+            build_id=build_id,
+        )
+    except Exception as e:
+        logger.error(f"Failed to queue theme rebuild task: {e}")
+        await get_theme_build_store().update(
+            build_id,
+            {
+                "status": ThemeBuildStatus.FAILED,
+                "message": "Failed to start build task",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to queue rebuild task",
+        )
+
+    return SuccessResponse(
+        data=ThemeBuildResponse(
+            build_id=build_id,
+            status=ThemeBuildStatus.QUEUED,
+            message="Theme queued for rebuilding",
+        ),
+    )
+
+
+@router.post(
+    "/external/validate",
+    response_model=SuccessResponse[ThemeValidationResponse],
+    dependencies=[Depends(verify_store_ownership)],
+)
+async def validate_external_theme(
+    store: Store = Depends(get_current_store),
+) -> SuccessResponse[ThemeValidationResponse]:
+    """Validate the bundle of the currently configured external theme."""
+    import re
+
+    theme_settings = store.theme_settings or {}
+    external = theme_settings.get("external_theme")
+    if not external or not external.get("bundle_url"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Store does not have a bundled external theme installed",
+        )
+
+    bundle_url = external["bundle_url"]
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(bundle_url)
+            resp.raise_for_status()
+            content = resp.text
+    except Exception as e:
+        logger.error(f"Failed to fetch theme bundle for validation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch theme bundle for validation",
+        )
+
+    errors = []
+    warnings = []
+
+    DANGEROUS_PATTERNS = [
+        (
+            r"\beval\s*\(",
+            "eval() calls are not allowed — potential code injection",
+            "error",
+        ),
+        (
+            r"new\s+Function\s*\(",
+            "new Function() is not allowed — potential code injection",
+            "error",
+        ),
+        (r"document\.cookie", "document.cookie access is not allowed", "error"),
+        (
+            r"\.innerHTML\s*=",
+            "innerHTML assignment detected — potential XSS vector",
+            "warning",
+        ),
+        (r"document\.write\s*\(", "document.write() is not allowed", "error"),
+    ]
+
+    for pattern, msg, severity in DANGEROUS_PATTERNS:
+        if re.search(pattern, content):
+            err = ValidationErrorModel(
+                file="dist/theme.js", message=msg, severity=severity
+            )
+            if severity == "error":
+                errors.append(err)
+            else:
+                warnings.append(err)
+
+    if len(content.encode("utf-8")) > 2 * 1024 * 1024:
+        errors.append(
+            ValidationErrorModel(
+                file="dist/theme.js",
+                message="Bundle size exceeds maximum of 2MB",
+                severity="error",
+            )
+        )
+
+    return SuccessResponse(
+        data=ThemeValidationResponse(
+            valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings,
+            contract_version=external.get("contract_version", "1.0"),
+        )
     )
 
 

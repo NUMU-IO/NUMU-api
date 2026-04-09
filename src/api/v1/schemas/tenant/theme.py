@@ -37,12 +37,38 @@ class SubmitExternalThemeRequest(BaseModel):
     )
 
 
+class RebuildExternalThemeRequest(BaseModel):
+    """Request to rebuild the external theme using its stored source_repo."""
+
+    branch: str = Field(
+        default="main",
+        description="Branch to rebuild from",
+    )
+
+
 class RemoveExternalThemeRequest(BaseModel):
     """Request to remove an external theme and revert to built-in."""
 
     fallback_theme: str = Field(
         default="modern",
         description="Built-in theme to revert to after removal",
+    )
+
+
+class ConnectDevServerRequest(BaseModel):
+    """Request to connect a local theme dev server to a store.
+
+    The dev_url should point to a running `numu-theme dev` server
+    (e.g., http://localhost:4321 or a tunneled URL like https://abc.ngrok.io).
+    The backend fetches the theme manifest from the dev server and registers
+    the theme as an external theme with mode="dev" so the storefront knows
+    to bypass caching.
+    """
+
+    dev_url: str = Field(
+        ...,
+        description="URL of the running numu-theme dev server (e.g., http://localhost:4321)",
+        pattern=r"^https?://[^\s]+$",
     )
 
 
@@ -96,6 +122,7 @@ class StoreThemeListItem(BaseModel):
     version: str | None = None
     source_repo: str | None = None
     settings_schema: dict | None = None  # The full schema for the customizer UI
+    mode: str | None = None  # "dev" for local dev server, None/missing for production
 
 
 class StoreThemesListResponse(BaseModel):
@@ -103,3 +130,19 @@ class StoreThemesListResponse(BaseModel):
 
     themes: list[StoreThemeListItem]
     active_theme_id: str | None = None
+
+
+from pydantic import BaseModel
+
+
+class ValidationErrorModel(BaseModel):
+    file: str
+    message: str
+    severity: str
+
+
+class ThemeValidationResponse(BaseModel):
+    valid: bool
+    errors: list[ValidationErrorModel]
+    warnings: list[ValidationErrorModel]
+    contract_version: str | None = None
