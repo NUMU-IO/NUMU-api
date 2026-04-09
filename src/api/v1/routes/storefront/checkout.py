@@ -455,6 +455,7 @@ async def checkout(
         utm_source=request.utm_source,
         utm_medium=request.utm_medium,
         utm_campaign=request.utm_campaign,
+        session_fingerprint=request.session_fingerprint,
     )
 
     created_order = await order_repo.create(order)
@@ -487,6 +488,7 @@ async def checkout(
             store_id=store.id,
             step="checkout_started",
             customer_id=current_customer.id,
+            session_fingerprint=request.session_fingerprint,
             step_data={
                 "order_id": str(created_order.id),
                 "total": created_order.total,
@@ -496,6 +498,30 @@ async def checkout(
         )
     except Exception:
         pass
+
+    # Emit funnel event: order_completed (COD only)
+    #
+    # For COD, the customer's funnel is complete the moment they place the
+    # order — there is no follow-up payment webhook to wait for. For online
+    # payments (paymob/kashier) this event is fired from the gateway webhook
+    # only after payment actually succeeds, so abandoned-mid-payment carts
+    # don't falsely count as conversions.
+    if is_cod:
+        try:
+            await funnel_repo.create(
+                tenant_id=store.tenant_id,
+                store_id=store.id,
+                step="order_completed",
+                customer_id=current_customer.id,
+                session_fingerprint=request.session_fingerprint,
+                step_data={
+                    "order_id": str(created_order.id),
+                    "total": created_order.total,
+                    "payment_method": "cod",
+                },
+            )
+        except Exception:
+            pass
 
     # Update real-time counters
     try:

@@ -199,6 +199,30 @@ async def kashier_callback(
         )
         await order_repo.update(order)
 
+        # Emit funnel event: order_completed
+        # Mirrors the paymob webhook — fired only on payment success so the
+        # funnel correctly excludes carts abandoned mid-payment.
+        try:
+            from src.infrastructure.repositories.funnel_event_repository import (
+                FunnelEventRepository,
+            )
+
+            fe_repo = FunnelEventRepository(db)
+            await fe_repo.create(
+                tenant_id=order.tenant_id,
+                store_id=order.store_id,
+                step="order_completed",
+                customer_id=order.customer_id,
+                session_fingerprint=order.session_fingerprint,
+                step_data={
+                    "order_id": str(order.id),
+                    "total": order.total,
+                    "payment_method": "kashier",
+                },
+            )
+        except Exception:
+            pass
+
         # Fire OrderStatusChangedEvent so shipment auto-creation triggers
         try:
             from src.core.events.order_events import OrderStatusChangedEvent
