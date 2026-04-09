@@ -289,6 +289,25 @@ def build_external_theme(
             except Exception as e:
                 logger.warning("Failed to parse settings_schema.json: %s", e)
 
+        # Optional: read sections.json (manifest of section types this bundle
+        # ships). Mirrors the dev-mode connect endpoint so production-built
+        # external themes also surface their custom sections in the dashboard
+        # picker. Bundles that don't ship sections won't have the file —
+        # that's fine, the dashboard handles a missing manifest gracefully.
+        sections_manifest = None
+        sections_path = theme_dir / "sections.json"
+        if sections_path.exists():
+            try:
+                sections_manifest = json.loads(
+                    sections_path.read_text(encoding="utf-8")
+                )
+                logger.info(
+                    "Read sections.json with %d sections",
+                    len(sections_manifest.get("sections", [])),
+                )
+            except Exception as e:
+                logger.warning("Failed to parse sections.json: %s", e)
+
         # ── Step 8: Update store theme_settings ──────────────────────────
         logger.info("Updating store theme_settings with CDN URLs")
 
@@ -307,6 +326,18 @@ def build_external_theme(
                 # theme_settings is a TOP-LEVEL JSONB column, not nested in settings
                 theme_settings = dict(store.theme_settings or {})
 
+                # Preserve any merchant_settings the merchant has already
+                # edited against this same theme — a rebuild shouldn't wipe
+                # their customizations. Only carry them across if the rebuild
+                # is for the SAME theme_id (a different theme would have a
+                # different settings schema, so the values wouldn't apply).
+                existing_external = theme_settings.get("external_theme") or {}
+                preserved_merchant_settings = (
+                    existing_external.get("merchant_settings")
+                    if existing_external.get("theme_id") == theme_id
+                    else None
+                )
+
                 # Set the external_theme config (with manifest + schema for the dashboard)
                 theme_settings["external_theme"] = {
                     "bundle_url": bundle_url,
@@ -321,7 +352,15 @@ def build_external_theme(
                     "source_repo": github_url,
                     "built_at": datetime.now(UTC).isoformat(),
                     "settings_schema": settings_schema,
+                    # Section schemas extracted from the bundle's sections.json,
+                    # consumed by the dashboard's section picker. None when the
+                    # bundle ships no custom sections.
+                    "section_schemas": sections_manifest,
                 }
+                if preserved_merchant_settings is not None:
+                    theme_settings["external_theme"]["merchant_settings"] = (
+                        preserved_merchant_settings
+                    )
 
                 # Set base_theme to the external theme's ID — this makes it
                 # the active theme on the storefront immediately

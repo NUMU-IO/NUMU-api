@@ -122,6 +122,12 @@ class StoreThemeListItem(BaseModel):
     version: str | None = None
     source_repo: str | None = None
     settings_schema: dict | None = None  # The full schema for the customizer UI
+    # Optional sections.json manifest extracted from the bundle. Each entry
+    # describes a section type the bundle ships — either an OVERRIDE of an
+    # existing shared section type or a brand-NEW type with its own schema.
+    # Used by the dashboard's section picker so merchants can drop external
+    # sections into templates.
+    section_schemas: dict | None = None
     mode: str | None = None  # "dev" for local dev server, None/missing for production
 
 

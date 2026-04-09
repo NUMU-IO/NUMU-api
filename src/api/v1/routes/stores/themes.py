@@ -94,6 +94,7 @@ async def list_store_themes(
                 version=external.get("version"),
                 source_repo=external.get("source_repo"),
                 settings_schema=external.get("settings_schema"),
+                section_schemas=external.get("section_schemas"),
                 mode=external.get("mode"),
             )
         )
@@ -225,10 +226,12 @@ async def connect_dev_server(
     css_url = f"{dev_url}/theme.css"
     manifest_url = f"{dev_url}/theme.json"
     schema_url = f"{dev_url}/settings_schema.json"
+    sections_url = f"{dev_url}/sections.json"
 
     # Probe the dev server: fetch theme.json to verify it's a valid theme
     manifest: dict = {}
     settings_schema: dict | None = None
+    sections_manifest: dict | None = None
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             # theme.json is the source manifest — most dev servers serve it
@@ -249,6 +252,18 @@ async def connect_dev_server(
             except Exception as e:
                 logger.warning(
                     "Could not fetch settings_schema.json from %s: %s", schema_url, e
+                )
+
+            # Try to fetch sections.json (optional — only present if the
+            # bundle ships custom sections). Used by the dashboard's section
+            # picker so merchants can drop external sections into templates.
+            try:
+                sections_res = await client.get(sections_url)
+                if sections_res.status_code == 200:
+                    sections_manifest = sections_res.json()
+            except Exception as e:
+                logger.warning(
+                    "Could not fetch sections.json from %s: %s", sections_url, e
                 )
 
             # Verify theme.js is reachable
@@ -285,6 +300,15 @@ async def connect_dev_server(
 
     theme_id = manifest["id"]
 
+    # Preserve any merchant_settings that were set against this same theme
+    # before the reconnect, so a dev-server restart doesn't wipe customizations.
+    existing_external = (store.theme_settings or {}).get("external_theme") or {}
+    preserved_merchant_settings = (
+        existing_external.get("merchant_settings")
+        if existing_external.get("theme_id") == theme_id
+        else None
+    )
+
     # Update store theme_settings with the dev server URLs
     theme_settings = dict(store.theme_settings or {})
     theme_settings["external_theme"] = {
@@ -300,8 +324,14 @@ async def connect_dev_server(
         "source_repo": dev_url,  # Used as the "source" for the dashboard UI
         "built_at": datetime.now(UTC).isoformat(),
         "settings_schema": settings_schema,
+        # Section schemas extracted from the bundle's sections.json — fed to
+        # the dashboard's section picker so merchants can compose templates
+        # with the bundle's custom sections.
+        "section_schemas": sections_manifest,
         "mode": "dev",  # Storefront uses this to bypass caching
     }
+    if preserved_merchant_settings is not None:
+        theme_settings["external_theme"]["merchant_settings"] = preserved_merchant_settings
 
     # Set base_theme to the external theme's ID so it becomes active immediately
     if "theme" not in theme_settings:

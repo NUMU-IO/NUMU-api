@@ -154,6 +154,20 @@ jobs:
             echo "CSS_URL=$CSS_URL" >> $GITHUB_ENV
           fi
 
+          # Upload sections.json if the bundle ships custom sections.
+          # The dashboard's section picker fetches this so merchants can
+          # drop external sections into page templates. Bundles that don't
+          # ship sections won't have the file — that's fine.
+          if [ -f "dist/sections.json" ]; then
+            aws s3 cp "dist/sections.json" \
+              "s3://${{ secrets.R2_BUCKET }}/themes/${THEME_ID}-${SHORT_BUILD}-sections.json" \
+              --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+              --content-type "application/json"
+
+            SECTIONS_URL="${{ secrets.R2_PUBLIC_URL }}/themes/${THEME_ID}-${SHORT_BUILD}-sections.json"
+            echo "SECTIONS_URL=$SECTIONS_URL" >> $GITHUB_ENV
+          fi
+
           echo "Uploaded: $BUNDLE_URL"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -165,6 +179,10 @@ jobs:
           THEME_ID=$(node -e "console.log(require('./theme/theme.json').id)")
           VERSION=$(node -e "console.log(require('./theme/theme.json').version)")
 
+          # sections_url is null when the bundle ships no custom sections.
+          # The API callback handler is expected to fetch the JSON from this
+          # URL and store it under external_theme.section_schemas, mirroring
+          # how the dev-mode connect endpoint behaves.
           curl -X POST "${{ secrets.NUMU_API_URL }}/api/v1/internal/theme-build-callback" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.NUMU_INTERNAL_TOKEN }}" \
@@ -176,5 +194,6 @@ jobs:
               \"version\": \"$VERSION\",
               \"bundle_url\": \"$BUNDLE_URL\",
               \"css_url\": \"${CSS_URL:-null}\",
+              \"sections_url\": \"${SECTIONS_URL:-null}\",
               \"source_repo\": \"$THEME_REPO\"
             }"

@@ -1302,8 +1302,17 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def _build_customization_response(settings: dict) -> CustomizationResponse:
-    """Build customization response from stored settings."""
+def _build_customization_response(
+    settings: dict,
+    theme_settings: dict | None = None,
+) -> CustomizationResponse:
+    """Build customization response from stored settings.
+
+    ``settings`` is the per-store customization blob (lives in
+    ``store.settings["customization"]``). ``theme_settings`` is the parallel
+    JSONB column where the external theme metadata + merchant settings live;
+    pass it to surface ``external_theme.merchant_settings`` in the response.
+    """
     defaults = _get_default_customization()
     merged = _deep_merge(defaults, settings)
 
@@ -1319,6 +1328,15 @@ def _build_customization_response(settings: dict) -> CustomizationResponse:
 
     # Build layout
     layout_data = merged.get("layout", {})
+
+    # External theme merchant-edited settings (lives outside customization)
+    external_theme_merchant_settings: dict[str, Any] | None = None
+    if theme_settings:
+        external_theme = theme_settings.get("external_theme")
+        if isinstance(external_theme, dict):
+            ms = external_theme.get("merchant_settings")
+            if isinstance(ms, dict):
+                external_theme_merchant_settings = ms
 
     return CustomizationResponse(
         customization_mode=merged.get("customization_mode", "preset"),
@@ -1345,6 +1363,7 @@ def _build_customization_response(settings: dict) -> CustomizationResponse:
         # V2 section engine fields
         schema_version=merged.get("schema_version"),
         templates=merged.get("templates"),
+        external_theme_merchant_settings=external_theme_merchant_settings,
     )
 
 
@@ -1362,7 +1381,9 @@ async def get_customization(
     customization = settings.get("customization", {})
 
     return SuccessResponse(
-        data=_build_customization_response(customization),
+        data=_build_customization_response(
+            customization, theme_settings=store.theme_settings
+        ),
         message="Customization settings retrieved successfully",
     )
 
@@ -1465,13 +1486,36 @@ async def update_customization(
         existing_templates = customization.get("templates", {})
         customization["templates"] = {**existing_templates, **request.templates}
 
+    # External theme merchant settings — persisted on the parallel
+    # ``theme_settings`` JSONB column under ``external_theme.merchant_settings``
+    # so the storefront's existing fetch path picks them up alongside
+    # ``bundle_url`` / ``css_url`` / ``settings_schema``.
+    theme_settings = store.theme_settings or {}
+    if request.external_theme_merchant_settings is not None:
+        external_theme = theme_settings.get("external_theme")
+        if not isinstance(external_theme, dict):
+            # Defensive: if no external theme is connected yet, store the
+            # values anyway so they're not lost on a future connect.
+            external_theme = {}
+        existing_ms = external_theme.get("merchant_settings")
+        if not isinstance(existing_ms, dict):
+            existing_ms = {}
+        external_theme["merchant_settings"] = {
+            **existing_ms,
+            **request.external_theme_merchant_settings,
+        }
+        theme_settings["external_theme"] = external_theme
+        store.theme_settings = theme_settings
+
     # Save to store settings
     settings["customization"] = customization
     store.settings = settings
     await store_repo.update(store)
 
     return SuccessResponse(
-        data=_build_customization_response(customization),
+        data=_build_customization_response(
+            customization, theme_settings=store.theme_settings
+        ),
         message="Customization saved as draft successfully",
     )
 
@@ -1514,6 +1558,14 @@ async def publish_customization(
         published["schema_version"] = 2
         published["templates"] = customization.get("templates", {})
 
+    # Preserve external theme metadata (bundle_url, css_url, settings_schema,
+    # merchant_settings, …) across the publish — historically this handler
+    # overwrote the whole theme_settings column and silently dropped it.
+    existing_theme_settings = store.theme_settings or {}
+    existing_external = existing_theme_settings.get("external_theme")
+    if isinstance(existing_external, dict):
+        published["external_theme"] = existing_external
+
     store.theme_settings = published
 
     settings["customization"] = customization
@@ -1521,7 +1573,9 @@ async def publish_customization(
     await store_repo.update(store)
 
     return SuccessResponse(
-        data=_build_customization_response(customization),
+        data=_build_customization_response(
+            customization, theme_settings=store.theme_settings
+        ),
         message="Storefront published successfully",
     )
 
