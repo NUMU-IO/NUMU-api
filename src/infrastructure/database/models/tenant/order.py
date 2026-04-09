@@ -103,6 +103,11 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         String(200), nullable=True, index=True
     )
 
+    # Funnel deduplication: stable per-visitor ID set by the storefront.
+    # Persisted on the order so payment webhooks (paymob/kashier) can read
+    # it back when emitting the `order_completed` funnel event.
+    session_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Optimistic locking — auto-incremented by SQLAlchemy on every UPDATE
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"

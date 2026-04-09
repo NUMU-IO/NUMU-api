@@ -205,6 +205,7 @@ async def paymob_callback(
                 store_id=order.store_id,
                 step="order_completed",
                 customer_id=order.customer_id,
+                session_fingerprint=order.session_fingerprint,
                 step_data={
                     "order_id": str(order.id),
                     "total": order.total,

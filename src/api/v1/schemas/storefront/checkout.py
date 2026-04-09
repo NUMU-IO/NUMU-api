@@ -38,6 +38,11 @@ class CheckoutRequest(BaseModel):
     utm_source: str | None = Field(None, max_length=200)
     utm_medium: str | None = Field(None, max_length=200)
     utm_campaign: str | None = Field(None, max_length=200)
+    # Session fingerprint for funnel deduplication. Same value the storefront
+    # sends to /track for page_view/product_view/add_to_cart, so the
+    # COUNT(DISTINCT session_fingerprint) funnel query can connect this
+    # checkout to the visitor's earlier steps.
+    session_fingerprint: str | None = Field(None, max_length=64)
 
 
 class CheckoutResponse(BaseModel):
