@@ -331,7 +331,9 @@ async def connect_dev_server(
         "mode": "dev",  # Storefront uses this to bypass caching
     }
     if preserved_merchant_settings is not None:
-        theme_settings["external_theme"]["merchant_settings"] = preserved_merchant_settings
+        theme_settings["external_theme"]["merchant_settings"] = (
+            preserved_merchant_settings
+        )
 
     # Set base_theme to the external theme's ID so it becomes active immediately
     if "theme" not in theme_settings:
