@@ -128,7 +128,7 @@ def _styles(language: str) -> str:
   .brand {{ font-family:{FONT_BRAND_AR}; font-weight:700; }}
 
   .page {{ width:100%; background:{CREAM}; padding:32px 16px; }}
-  .wrapper {{ max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 32px rgba(10,26,61,0.08); }}
+  .wrapper {{ max-width:600px; margin:0 auto; background:#ffffff; overflow:hidden; }}
 
   .header {{
     background-color:{HERO_BG};
@@ -361,13 +361,29 @@ def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) ->
 </style>
 <![endif]-->
 </head>
-<body style="margin:0;padding:0;background:{CREAM};direction:{direction};">
+<body class="body" style="margin:0;padding:0;background:{CREAM};direction:{direction};width:100%;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 {preheader_html}
-<div class="page" style="width:100%;background:{CREAM};padding:32px 16px;">
-  <div class="wrapper" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(10,26,61,0.08);">
-    {inner_html}
-    {_footer(language)}
-  </div>
-</div>
+<!--[if mso]>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};"><tr><td align="center" style="padding:0 0 32px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td>
+<![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};">
+  <tr>
+    <td align="center" style="padding:0 0 32px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrapper" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;overflow:hidden;">
+        <tr>
+          <td>
+            {inner_html}
+            {_footer(language)}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<!--[if mso]>
+</td></tr></table>
+</td></tr></table>
+<![endif]-->
 </body>
 </html>"""

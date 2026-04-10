@@ -18,6 +18,7 @@ class TokenPayload:
         token_type: str = "access",
         iat: int = 0,
         jti: str | None = None,
+        tenant_id: UUID | None = None,
     ) -> None:
         self.user_id = user_id
         self.email = email
@@ -26,6 +27,10 @@ class TokenPayload:
         self.token_type = token_type
         self.iat = iat
         self.jti = jti
+        # Optional tenant scope baked into the token. When present, callers can
+        # rely on it instead of resolving the tenant via subdomain middleware.
+        # Populated by the demo provisioning flow and (eventually) by login.
+        self.tenant_id = tenant_id
 
 
 class CustomerTokenPayload:
@@ -50,12 +55,17 @@ class ITokenService(ABC):
     """JWT token service interface."""
 
     @abstractmethod
-    def create_access_token(self, user: User) -> str:
-        """Create an access token for a user."""
+    def create_access_token(self, user: User, tenant_id: UUID | None = None) -> str:
+        """Create an access token for a user.
+
+        ``tenant_id`` is optional. When supplied, it is embedded in the
+        token payload so consumers can read the tenant scope without
+        re-resolving via subdomain middleware (used by the demo flow).
+        """
         pass
 
     @abstractmethod
-    def create_refresh_token(self, user: User) -> str:
+    def create_refresh_token(self, user: User, tenant_id: UUID | None = None) -> str:
         """Create a refresh token for a user."""
         pass
 
