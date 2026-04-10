@@ -115,6 +115,17 @@ class Settings(BaseSettings):
         None  # Set to your domain in production (e.g., "numu.com")
     )
 
+    # ─── Try-a-Demo flow (Stream 1 of NUMU plan) ──────────────────────
+    # Cloudflare Turnstile bot protection. Get keys from
+    # https://dash.cloudflare.com/?to=/:account/turnstile
+    # Test keys (always pass): site=1x00000000000000000000AA, secret=1x0000000000000000000000000000000AA
+    turnstile_site_key: str | None = None
+    turnstile_secret_key: str | None = None
+    # Where storefronts live ("{subdomain}.{base}"). Demo storefronts use the same.
+    storefront_base_domain: str = "numu.io"
+    # Where the merchant hub is hosted. Used to build the demo redirect URL.
+    merchant_hub_url: str = "https://merchant.numueg.app"
+
     @model_validator(mode="after")
     def validate_jwt_keys(self) -> "Settings":
         """Validate that RSA keys are provided when using RS256."""

@@ -1,5 +1,6 @@
 """Tenant repository for database operations."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.interfaces.repositories.tenant_repository import ITenantRepository
 from src.infrastructure.database.models.public import TenantModel
+from src.infrastructure.database.models.public.tenant import TenantLifecycleState
 
 
 class TenantRepository(ITenantRepository):
@@ -73,6 +75,58 @@ class TenantRepository(ITenantRepository):
             .offset(skip)
             .limit(limit)
             .order_by(TenantModel.created_at.desc())
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    # ─── Lifecycle sweeper queries (Stream 1.5 + Stream 4.6) ──────────────
+
+    async def find_expired_demos(self, limit: int = 100) -> list[TenantModel]:
+        """Demo tenants whose 7-day expiry has elapsed.
+
+        Demos do NOT pass through the read-only grace; they are deleted
+        outright by the demo cleanup task.
+        """
+        now = datetime.now(UTC)
+        query = (
+            select(TenantModel)
+            .where(TenantModel.lifecycle_state == TenantLifecycleState.DEMO)
+            .where(TenantModel.expires_at.is_not(None))
+            .where(TenantModel.expires_at < now)
+            .order_by(TenantModel.expires_at.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def find_expired_trials(self, limit: int = 100) -> list[TenantModel]:
+        """Trial tenants whose 30-day expiry has elapsed but have not converted.
+
+        These flip to ``read_only`` (not deleted) — the read-only purge task
+        handles deletion 30 days later.
+        """
+        now = datetime.now(UTC)
+        query = (
+            select(TenantModel)
+            .where(TenantModel.lifecycle_state == TenantLifecycleState.TRIAL)
+            .where(TenantModel.expires_at.is_not(None))
+            .where(TenantModel.expires_at < now)
+            .order_by(TenantModel.expires_at.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def find_purgeable_read_only(self, limit: int = 100) -> list[TenantModel]:
+        """Read-only tenants past their ``delete_at`` deadline."""
+        now = datetime.now(UTC)
+        query = (
+            select(TenantModel)
+            .where(TenantModel.lifecycle_state == TenantLifecycleState.READ_ONLY)
+            .where(TenantModel.delete_at.is_not(None))
+            .where(TenantModel.delete_at < now)
+            .order_by(TenantModel.delete_at.asc())
+            .limit(limit)
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())

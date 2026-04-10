@@ -38,6 +38,9 @@ from fastapi import APIRouter
 from src.api.v1.routes.admin import router as admin_router
 from src.api.v1.routes.auth import router as auth_router
 
+# Demo routes (authenticated demo session)
+from src.api.v1.routes.demo import router as demo_router
+
 # Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
 from src.api.v1.routes.public import router as public_router
@@ -174,6 +177,9 @@ api_router.include_router(
     prefix="/storefront/store/{store_id}/checkout",
     tags=["Storefront - Checkout"],
 )
+
+# Demo routes (authenticated demo session → convert to real account)
+api_router.include_router(demo_router, tags=["Demo"])
 
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)
 api_router.include_router(shopify_router, prefix="/shopify")
