@@ -128,7 +128,7 @@ def _styles(language: str) -> str:
   .brand {{ font-family:{FONT_BRAND_AR}; font-weight:700; }}
 
   .page {{ width:100%; background:{CREAM}; padding:32px 16px; }}
-  .wrapper {{ max-width:600px; margin:0 auto; background:#ffffff; overflow:hidden; }}
+  .wrapper {{ max-width:600px; margin:0 auto; background:transparent; overflow:hidden; }}
 
   .header {{
     background-color:{HERO_BG};
@@ -156,7 +156,7 @@ def _styles(language: str) -> str:
   .panel .label {{ font-size:11px; color:{MUTED}; text-transform:uppercase; letter-spacing:1.2px; margin:0 0 6px; font-family:{FONT_LATIN}; }}
   .panel .value {{ font-size:22px; font-weight:700; color:{NAVY}; margin:0; }}
 
-  .code-box {{ text-align:center; background:#fff; border:2px dashed {GOLD}; border-radius:12px; padding:22px 28px; margin:24px 0; }}
+  .code-box {{ text-align:center; background:transparent; border:2px dashed {GOLD}; border-radius:12px; padding:22px 28px; margin:24px 0; }}
   .code-box .digits {{ font-family:'Inter','Segoe UI',monospace; font-size:36px; font-weight:700; letter-spacing:10px; color:{NAVY}; margin:0; direction:ltr; display:inline-block; }}
   .code-box .hint {{ color:{MUTED}; font-size:12px; margin:10px 0 0; }}
 
@@ -365,12 +365,12 @@ def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) ->
 {preheader_html}
 <!--[if mso]>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};"><tr><td align="center" style="padding:0 0 32px;">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td>
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="background:transparent;"><tr><td>
 <![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};">
   <tr>
     <td align="center" style="padding:0 0 32px;">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrapper" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;overflow:hidden;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrapper" style="max-width:600px;width:100%;margin:0 auto;background:transparent;overflow:hidden;">
         <tr>
           <td>
             {inner_html}
