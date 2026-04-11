@@ -196,6 +196,27 @@ AVAILABLE_THEMES = [
         "layout": "rabbitsocks",
         "description": "Luxury minimalism — quiet luxury aesthetic with serif italic headlines, generous whitespace, and editorial photography",
     },
+    {
+        "id": "gilded-glamour-boutique",
+        "name": "Gilded Glamour Boutique",
+        "nameAr": "بوتيك الفخامة المُذهَّبة",
+        "layout": "luxury-minimal",
+        "description": "A bold, gold-accented luxury fashion theme with parallax hero, scroll-fill text animations, and curated vertical layouts.",
+    },
+    {
+        "id": "bazar",
+        "name": "Bazar",
+        "nameAr": "بازار",
+        "layout": "bazar",
+        "description": "Bold streetwear aesthetic — vibrant amber/yellow palette, chunky uppercase typography, organic wavy shapes, and split product layouts",
+    },
+    {
+        "id": "saw-saw",
+        "name": "Saw Saw — The Gilded Curator",
+        "nameAr": "Saw Saw — The Gilded Curator",
+        "layout": "default",
+        "description": "High-end editorial luxury theme with intentional asymmetry, generous breathing room, and gold accents.",
+    },
 ]
 
 

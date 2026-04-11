@@ -21,6 +21,11 @@ class StartDemoResponse(BaseModel):
     expires_at: datetime
     dashboard_url: str
     storefront_url: str
+    # Tokens are also set as cookies, but returned in the body so the
+    # landing page can pass them via URL params to the merchant hub
+    # (cross-origin token handoff).
+    access_token: str
+    refresh_token: str
     message: str
 
 

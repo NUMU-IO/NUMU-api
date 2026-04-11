@@ -28,6 +28,15 @@ HAIRLINE = "#E9ECEF"  # dividers
 SUCCESS = "#1F8A4C"
 DANGER = "#C2362F"
 
+# Dark-mode palette — used in @media (prefers-color-scheme: dark)
+DK_BG = "#1a1a2e"  # page background
+DK_SURFACE = "#222238"  # card / wrapper background
+DK_TEXT = "#e4e4e7"  # body text
+DK_MUTED = "#9ca3af"  # secondary text
+DK_HAIRLINE = "#333350"  # dividers
+DK_PANEL = "#2a2a42"  # panel / code-box background
+DK_LINK = "#6b8cff"  # link color
+
 FONT_AR = "'Alexandria', 'Segoe UI', 'Tahoma', Arial, sans-serif"
 FONT_LATIN = "'Alexandria', 'Inter', 'Segoe UI', Arial, sans-serif"
 FONT_BRAND_AR = "'Aref Ruqaa', 'Traditional Arabic', serif"
@@ -121,7 +130,7 @@ def _styles(language: str) -> str:
     return f"""
 <style>
   {font_import}
-  body {{ margin:0; padding:0; background:{CREAM}; color:{INK}; font-family:{font_family}; line-height:{line_height}; direction:{direction}; -webkit-font-smoothing:antialiased; }}
+  body {{ margin:0; padding:0; background:{CREAM}; color:{INK}; font-family:{font_family}; line-height:{line_height}; direction:{direction}; -webkit-font-smoothing:antialiased; color-scheme:light dark; }}
   table {{ border-collapse:collapse; }}
   img {{ border:0; outline:none; text-decoration:none; max-width:100%; }}
   a {{ color:{NAVY_BRIGHT}; text-decoration:none; }}
@@ -194,6 +203,47 @@ def _styles(language: str) -> str:
     .body {{ padding:28px 20px; }}
     .header {{ padding:24px 20px; }}
     .header h1 {{ font-size:21px; }}
+  }}
+
+  @media (prefers-color-scheme: dark) {{
+    /* Page & wrapper */
+    .page, .page-table {{ background:{DK_BG} !important; }}
+    .wrapper {{ background:{DK_SURFACE} !important; }}
+
+    /* Body content */
+    .body p, .lead {{ color:{DK_TEXT} !important; }}
+    .body h2 {{ color:{DK_TEXT} !important; }}
+    .muted, .step-text .sub {{ color:{DK_MUTED} !important; }}
+    a {{ color:{DK_LINK} !important; }}
+
+    /* Panels & code boxes */
+    .panel {{ background:{DK_PANEL} !important; border-color:{DK_HAIRLINE} !important; }}
+    .panel .label {{ color:{DK_MUTED} !important; }}
+    .panel .value {{ color:{DK_TEXT} !important; }}
+    .code-box {{ background:{DK_PANEL} !important; border-color:{GOLD_DARK} !important; }}
+    .code-box .digits {{ color:{DK_TEXT} !important; }}
+
+    /* Items table */
+    table.items th {{ background:{DK_PANEL} !important; color:{DK_MUTED} !important; border-color:{DK_HAIRLINE} !important; }}
+    table.items td {{ color:{DK_TEXT} !important; border-color:{DK_HAIRLINE} !important; }}
+    table.items td.price {{ color:{DK_TEXT} !important; }}
+    table.items tr.total td {{ background:{DK_PANEL} !important; color:{DK_TEXT} !important; }}
+
+    /* Divider */
+    .divider {{ background:{DK_HAIRLINE} !important; }}
+
+    /* Steps */
+    .step-text .title {{ color:{DK_TEXT} !important; }}
+    .step-dot.pending {{ background:{DK_HAIRLINE} !important; }}
+    .step-line.pending {{ background:{DK_HAIRLINE} !important; }}
+
+    /* Footer */
+    .footer {{ background:{DK_BG} !important; border-color:{DK_HAIRLINE} !important; }}
+    .footer p {{ color:{DK_MUTED} !important; }}
+    .footer .mark {{ color:{DK_TEXT} !important; }}
+    .footer .links a {{ color:{DK_LINK} !important; }}
+
+    /* Buttons stay the same gold — no override needed */
   }}
 </style>
 """
@@ -336,23 +386,22 @@ def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) ->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="x-apple-disable-message-reformatting">
-<meta name="color-scheme" content="only light">
-<meta name="supported-color-schemes" content="only light">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <title>NUMU</title>
 {_styles(language)}
 <style type="text/css">
-  /* Force light color scheme — stops Gmail / Outlook.com mobile from
-     auto-inverting our dark hero header into a light one. */
-  :root {{ color-scheme: only light; supported-color-schemes: only light; }}
-  /* Gmail-specific dark-mode override: force the header cell to keep
-     its dark background and white text even when the user is in dark
-     mode. The [data-ogsc] selector targets Outlook.com Gmail-style
-     rendering. */
+  :root {{ color-scheme: light dark; supported-color-schemes: light dark; }}
+  /* Hero header must stay dark regardless of color scheme */
   u + .body .gmail-fix {{ background-color: {HERO_BG} !important; color: #ffffff !important; }}
   [data-ogsc] .gmail-fix {{ background-color: {HERO_BG} !important; color: #ffffff !important; }}
   @media (prefers-color-scheme: dark) {{
     .gmail-fix {{ background-color: {HERO_BG} !important; color: #ffffff !important; }}
+    /* Dark mode — page & wrapper overrides (duplicated from _styles for
+       clients that only read this style block) */
+    .page-table {{ background-color: {DK_BG} !important; }}
+    .wrapper {{ background-color: {DK_SURFACE} !important; }}
   }}
 </style>
 <!--[if mso]>
@@ -367,9 +416,9 @@ def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) ->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};"><tr><td align="center" style="padding:0 0 32px;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td>
 <![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="page-table" style="background:{CREAM};">
   <tr>
-    <td align="center" style="padding:0 0 32px;">
+    <td align="center" class="page-table" style="padding:0 0 32px;">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrapper" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;overflow:hidden;">
         <tr>
           <td>

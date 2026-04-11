@@ -145,6 +145,8 @@ async def start_demo(
             expires_at=result.expires_at,
             dashboard_url=result.dashboard_url,
             storefront_url=result.storefront_url,
+            access_token=result.access_token,
+            refresh_token=result.refresh_token,
             message="Your demo store is ready. Have fun exploring.",
         ),
         message="Demo session created",
