@@ -1,6 +1,7 @@
-"""Admin landing page configuration endpoints.
+"""Admin landing page + pricing configuration endpoints.
 
 URL: /api/v1/admin/landing-config
+     /api/v1/admin/landing-config/pricing-plans
 Requires SUPER_ADMIN role.
 """
 
@@ -17,6 +18,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.public.landing import DEFAULT_PRICING_PLANS
 from src.infrastructure.database.models.public.platform_config import (
     DEFAULT_LANDING_CONFIG,
     PlatformConfigModel,
@@ -122,3 +124,102 @@ async def update_landing_config(
         data=config.value,
         message="Landing page configuration updated",
     )
+
+
+# ---------------------------------------------------------------------------
+# Pricing plans CRUD
+# ---------------------------------------------------------------------------
+
+PRICING_KEY = "pricing_plans"
+
+
+class PlanFeatureItem(BaseModel):
+    en: str
+    ar: str
+
+
+class PlanItem(BaseModel):
+    key: str
+    name_en: str
+    name_ar: str
+    price_monthly: int  # EGP, -1 = custom
+    price_annual: int
+    currency: str = "EGP"
+    cta: str  # try_demo, subscribe, contact
+    popular: bool = False
+    features: list[PlanFeatureItem]
+
+
+class PromoConfig(BaseModel):
+    code: str
+    text_en: str
+    text_ar: str
+
+
+class UpdatePricingPlansRequest(BaseModel):
+    plans: list[PlanItem]
+    promo: PromoConfig | None = None
+
+
+@router.get(
+    "/pricing-plans",
+    response_model=SuccessResponse[dict],
+    summary="Get pricing plans config (admin)",
+    operation_id="admin_get_pricing_plans",
+)
+async def admin_get_pricing_plans(
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return current pricing plan configuration."""
+    result = await db.execute(
+        select(PlatformConfigModel).where(PlatformConfigModel.key == PRICING_KEY)
+    )
+    config = result.scalar_one_or_none()
+    data = config.value if config else DEFAULT_PRICING_PLANS
+
+    return SuccessResponse(data=data, message="Pricing plans configuration")
+
+
+@router.put(
+    "/pricing-plans",
+    response_model=SuccessResponse[dict],
+    summary="Update pricing plans (admin)",
+    operation_id="admin_update_pricing_plans",
+)
+async def admin_update_pricing_plans(
+    request: UpdatePricingPlansRequest,
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Update pricing plans displayed on the landing page.
+
+    Changes take effect immediately — the public endpoint
+    ``GET /public/pricing-plans`` reads from this config.
+    """
+    result = await db.execute(
+        select(PlatformConfigModel).where(PlatformConfigModel.key == PRICING_KEY)
+    )
+    config = result.scalar_one_or_none()
+
+    new_value = {
+        "plans": [p.model_dump() for p in request.plans],
+    }
+    if request.promo:
+        new_value["promo"] = request.promo.model_dump()
+
+    if config is None:
+        config = PlatformConfigModel(
+            key=PRICING_KEY,
+            value=new_value,
+            description="Pricing plans for landing page (admin-editable)",
+        )
+        db.add(config)
+    else:
+        config.value = new_value
+        flag_modified(config, "value")
+
+    await db.flush()
+    logger.info("Pricing plans updated by admin %s", _admin_id)
+
+    return SuccessResponse(data=new_value, message="Pricing plans updated")

@@ -165,3 +165,112 @@ async def get_public_landing_config(
         data=data,
         message="Landing page configuration",
     )
+
+
+# Default pricing plans served to the landing page. Admin can override
+# via PUT /admin/platform-config/pricing_plans.
+DEFAULT_PRICING_PLANS = {
+    "plans": [
+        {
+            "key": "trial",
+            "name_en": "30-Day Free Trial",
+            "name_ar": "تجربة مجانية ٣٠ يوم",
+            "price_monthly": 0,
+            "price_annual": 0,
+            "currency": "EGP",
+            "cta": "try_demo",
+            "popular": False,
+            "features": [
+                {"en": "100 products", "ar": "١٠٠ منتج"},
+                {"en": "Custom domain", "ar": "دومين خاص"},
+                {"en": "All 12 premium themes", "ar": "كل الـ ١٢ ثيم"},
+                {"en": "Basic analytics", "ar": "تحليلات أساسية"},
+                {"en": "WhatsApp support", "ar": "دعم واتساب"},
+            ],
+        },
+        {
+            "key": "starter",
+            "name_en": "Starter",
+            "name_ar": "ستارتر",
+            "price_monthly": 99,
+            "price_annual": 990,
+            "currency": "EGP",
+            "cta": "subscribe",
+            "popular": False,
+            "features": [
+                {"en": "100 products", "ar": "١٠٠ منتج"},
+                {"en": "Custom domain", "ar": "دومين خاص"},
+                {"en": "All 12 premium themes", "ar": "كل الـ ١٢ ثيم"},
+                {"en": "Discount codes", "ar": "أكواد خصم"},
+                {"en": "3 staff members", "ar": "٣ أعضاء فريق"},
+                {"en": "Webhooks", "ar": "ويب هوكس"},
+            ],
+        },
+        {
+            "key": "pro",
+            "name_en": "Pro",
+            "name_ar": "برو",
+            "price_monthly": 299,
+            "price_annual": 2990,
+            "currency": "EGP",
+            "cta": "subscribe",
+            "popular": True,
+            "features": [
+                {"en": "Unlimited products", "ar": "منتجات بلا حدود"},
+                {"en": "Advanced analytics", "ar": "تحليلات متقدمة"},
+                {"en": "Automations", "ar": "أتمتة"},
+                {"en": "Abandoned cart recovery", "ar": "استرداد السلات المتروكة"},
+                {"en": "API access", "ar": "وصول API"},
+                {"en": "10 staff members", "ar": "١٠ أعضاء فريق"},
+                {"en": "Priority support", "ar": "دعم أولوية"},
+            ],
+        },
+        {
+            "key": "enterprise",
+            "name_en": "Enterprise",
+            "name_ar": "إنتربرايز",
+            "price_monthly": -1,
+            "price_annual": -1,
+            "currency": "EGP",
+            "cta": "contact",
+            "popular": False,
+            "features": [
+                {"en": "Everything in Pro", "ar": "كل مميزات برو"},
+                {"en": "Multi-store", "ar": "متاجر متعددة"},
+                {"en": "Dedicated account manager", "ar": "مدير حساب مخصص"},
+                {"en": "SLA & uptime guarantee", "ar": "ضمان SLA"},
+                {"en": "White-glove onboarding", "ar": "إعداد مخصص"},
+            ],
+        },
+    ],
+    "promo": {
+        "code": "LAUNCH50",
+        "text_en": "Launch offer: 50% off first 3 months with code LAUNCH50",
+        "text_ar": "عرض الإطلاق: ٥٠٪ خصم أول ٣ شهور بكود LAUNCH50",
+    },
+}
+
+
+@router.get(
+    "/pricing-plans",
+    summary="Pricing plans for landing page (admin-editable)",
+    operation_id="get_public_pricing_plans",
+)
+async def get_public_pricing_plans(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return pricing plan data for the landing page.
+
+    If an admin has customized the plans via the backoffice, those
+    overrides are returned. Otherwise, falls back to the hardcoded
+    defaults. This lets the admin change prices, feature lists, and
+    promo banners without a code deploy.
+    """
+    result = await db.execute(
+        select(PlatformConfigModel).where(PlatformConfigModel.key == "pricing_plans")
+    )
+    config = result.scalar_one_or_none()
+
+    data = config.value if config else DEFAULT_PRICING_PLANS
+
+    return SuccessResponse(data=data, message="Pricing plans")
