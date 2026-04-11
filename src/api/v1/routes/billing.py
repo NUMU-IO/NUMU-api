@@ -23,8 +23,8 @@ from src.application.use_cases.billing.cancel_subscription import (
 )
 from src.application.use_cases.billing.subscribe import SubscribeUseCase
 from src.infrastructure.database.models.public.billing import (
+    BillingInvoiceModel,
     DiscountCodeModel,
-    InvoiceModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 
@@ -166,9 +166,9 @@ async def list_invoices(
         return SuccessResponse(data=[], message="No invoices")
 
     inv_q = (
-        select(InvoiceModel)
-        .where(InvoiceModel.tenant_id == tenant.id)
-        .order_by(InvoiceModel.created_at.desc())
+        select(BillingInvoiceModel)
+        .where(BillingInvoiceModel.tenant_id == tenant.id)
+        .order_by(BillingInvoiceModel.created_at.desc())
         .limit(50)
     )
     invoices = (await db.execute(inv_q)).scalars().all()

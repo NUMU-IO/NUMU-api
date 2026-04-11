@@ -13,8 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.models.public.billing import (
+    BillingInvoiceModel,
     DiscountCodeModel,
-    InvoiceModel,
 )
 from src.infrastructure.database.models.public.tenant import (
     TenantLifecycleState,
@@ -85,7 +85,7 @@ class SubscribeUseCase:
             timedelta(days=365) if billing_cycle == "annual" else timedelta(days=30)
         )
 
-        invoice = InvoiceModel(
+        invoice = BillingInvoiceModel(
             tenant_id=tenant_id,
             period_start=now,
             period_end=period_end,

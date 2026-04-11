@@ -54,9 +54,9 @@ def upgrade() -> None:
         schema="public",
     )
 
-    # ─── Invoices ─────────────────────────────────────────────────────
+    # ─── Billing invoices ────────────────────────────────────────────
     op.create_table(
-        "invoices",
+        "billing_invoices",
         sa.Column(
             "id",
             sa.dialects.postgresql.UUID(as_uuid=True),
@@ -160,5 +160,5 @@ def downgrade() -> None:
     op.drop_column("tenants", "payment_method_last4", schema="public")
     op.drop_column("tenants", "paymob_subscription_id", schema="public")
     op.drop_column("tenants", "paymob_customer_id", schema="public")
-    op.drop_table("invoices", schema="public")
+    op.drop_table("billing_invoices", schema="public")
     op.drop_table("discount_codes", schema="public")

@@ -12,10 +12,10 @@ from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 
-class InvoiceModel(Base, UUIDMixin, TimestampMixin):
+class BillingInvoiceModel(Base, UUIDMixin, TimestampMixin):
     """Subscription invoice for a billing period."""
 
-    __tablename__ = "invoices"
+    __tablename__ = "billing_invoices"
     __table_args__ = {"schema": "public"}
 
     tenant_id: Mapped[str] = mapped_column(
