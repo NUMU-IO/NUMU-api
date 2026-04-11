@@ -59,6 +59,12 @@ from src.infrastructure.database.models.tenant.social_connection import (
 )
 from src.infrastructure.database.models.tenant.social_post import SocialPostModel
 from src.infrastructure.database.models.tenant.store import StoreModel
+from src.infrastructure.database.models.tenant.theme import (
+    StoreThemeModel,
+    ThemeAssetModel,
+    ThemeModel,
+    ThemeVersionModel,
+)
 from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
 from src.infrastructure.database.models.tenant.webhook import (
     WebhookDeliveryLogModel,
@@ -101,6 +107,10 @@ __all__ = [
     "StoreModel",
     "SocialConnectionModel",
     "SocialPostModel",
+    "ThemeModel",
+    "ThemeVersionModel",
+    "StoreThemeModel",
+    "ThemeAssetModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",
 ]

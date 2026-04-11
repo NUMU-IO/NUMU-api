@@ -32,6 +32,13 @@ from src.core.entities.order import (
 )
 from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.entities.store import Store, StoreStatus
+from src.core.entities.theme import (
+    StoreTheme,
+    Theme,
+    ThemeStatus,
+    ThemeType,
+    ThemeVersion,
+)
 from src.core.entities.user import User, UserRole, UserStatus
 
 __all__ = [
@@ -46,6 +53,12 @@ __all__ = [
     # Store
     "Store",
     "StoreStatus",
+    # Theme
+    "Theme",
+    "ThemeVersion",
+    "StoreTheme",
+    "ThemeType",
+    "ThemeStatus",
     # Product
     "Product",
     "ProductStatus",

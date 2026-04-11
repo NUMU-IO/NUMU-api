@@ -67,8 +67,11 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
 )
+
+# Storefront theme resolution (internal — Next.js SSR → FastAPI)
 from src.api.v1.routes.storefront import (
     storefront_lookup_router,
+    theme_resolution_router,
 )
 from src.api.v1.routes.storefront import (
     tracking_router as storefront_tracking_router,
@@ -87,6 +90,12 @@ from src.api.v1.routes.tenants import (
 from src.api.v1.routes.tenants import (
     router as tenants_router,
 )
+
+# Theme marketplace routes (public)
+from src.api.v1.routes.themes import router as themes_marketplace_router
+
+# Theme ZIP upload + build status + preview token (authenticated developers)
+from src.api.v1.routes.themes_upload import router as themes_upload_router
 
 # Webhook routes (external service callbacks)
 from src.api.v1.routes.webhooks import router as webhooks_router
@@ -178,6 +187,18 @@ api_router.include_router(
     tags=["Storefront - Checkout"],
 )
 
+# Theme marketplace (public browsing of published themes)
+api_router.include_router(themes_marketplace_router, tags=["Themes - Marketplace"])
+
+# Theme upload + build status + preview (authenticated)
+api_router.include_router(themes_upload_router, tags=["Themes - Upload"])
+
+# Storefront - theme resolution (internal, Next.js SSR → FastAPI)
+api_router.include_router(
+    theme_resolution_router,
+    prefix="/storefront",
+    tags=["Storefront - Theme Resolution"],
+)
 # Demo routes (authenticated demo session → convert to real account)
 api_router.include_router(demo_router, tags=["Demo"])
 

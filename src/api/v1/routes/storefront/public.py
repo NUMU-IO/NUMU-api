@@ -205,7 +205,66 @@ AVAILABLE_THEMES = [
     summary="List available storefront themes",
 )
 async def list_themes():
-    """Return the list of available storefront themes for the dashboard."""
+    """Return the list of available storefront themes for the dashboard.
+
+    Pulls from the new public.themes table (theme engine v2) joined with the
+    latest theme_version to get nameAr/layout out of the manifest. Falls back
+    to the static AVAILABLE_THEMES list if the DB query fails or returns
+    empty so the dashboard never sees an empty marketplace during a deploy.
+    """
+    import logging
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.theme_repository import ThemeRepository
+    from src.infrastructure.repositories.theme_version_repository import (
+        ThemeVersionRepository,
+    )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            theme_repo = ThemeRepository(session)
+            version_repo = ThemeVersionRepository(session)
+            db_themes = await theme_repo.list_published(
+                type_filter=None, skip=0, limit=200
+            )
+
+            if not db_themes:
+                return SuccessResponse(
+                    data=AVAILABLE_THEMES,
+                    message="Themes retrieved successfully",
+                )
+
+            # Batch-load latest version manifests to extract nameAr/layout
+            latest_versions = await version_repo.get_latest_for_themes([
+                t.id for t in db_themes
+            ])
+
+            payload = []
+            for t in db_themes:
+                manifest = (
+                    latest_versions[t.id].manifest if t.id in latest_versions else {}
+                )
+                payload.append({
+                    "id": t.slug,
+                    "name": t.name,
+                    "nameAr": manifest.get("nameAr")
+                    or manifest.get("name_ar")
+                    or t.name,
+                    "layout": manifest.get("layout") or "default",
+                    "description": t.description or "",
+                })
+
+            return SuccessResponse(
+                data=payload,
+                message="Themes retrieved successfully",
+            )
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "list_themes_db_fallback",
+            extra={"error": str(exc)},
+        )
+
+    # Fallback: return the static list if the DB is empty/unreachable
     return SuccessResponse(
         data=AVAILABLE_THEMES,
         message="Themes retrieved successfully",

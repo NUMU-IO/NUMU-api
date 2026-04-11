@@ -41,6 +41,10 @@ from src.infrastructure.database.models.tenant import (
     SocialConnectionModel,
     SocialPostModel,
     StoreModel,
+    StoreThemeModel,
+    ThemeAssetModel,
+    ThemeModel,
+    ThemeVersionModel,
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
 )
@@ -82,4 +86,8 @@ __all__ = [
     "SocialPostModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",
+    "ThemeModel",
+    "ThemeVersionModel",
+    "StoreThemeModel",
+    "ThemeAssetModel",
 ]
