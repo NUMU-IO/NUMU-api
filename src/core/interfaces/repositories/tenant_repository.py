@@ -46,3 +46,20 @@ class ITenantRepository(ABC):
     async def list_active(self, skip: int = 0, limit: int = 100) -> list[TenantModel]:
         """List all active tenants with pagination."""
         ...
+
+    # ─── Lifecycle sweeper queries (Stream 1.5 + Stream 4.6) ──────────────
+
+    @abstractmethod
+    async def find_expired_demos(self, limit: int = 100) -> list[TenantModel]:
+        """Find demo tenants whose 7-day window has elapsed."""
+        ...
+
+    @abstractmethod
+    async def find_expired_trials(self, limit: int = 100) -> list[TenantModel]:
+        """Find trial tenants whose 30-day window has elapsed."""
+        ...
+
+    @abstractmethod
+    async def find_purgeable_read_only(self, limit: int = 100) -> list[TenantModel]:
+        """Find read-only tenants past their delete_at deadline."""
+        ...

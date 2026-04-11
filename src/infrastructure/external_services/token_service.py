@@ -56,12 +56,19 @@ class TokenService(ITokenService):
         user: User,
         token_type: str,
         expires_delta: timedelta,
+        tenant_id: UUID | None = None,
     ) -> str:
-        """Create a JWT token."""
+        """Create a JWT token.
+
+        ``tenant_id`` is optional and, when supplied, is embedded in the
+        payload so downstream code can read the tenant scope directly from
+        the token without re-resolving via subdomain middleware. This is
+        used by the demo provisioning flow.
+        """
         expire = datetime.utcnow() + expires_delta
         # Handle role as enum or string (for compatibility with DB enum names)
         role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
-        payload = {
+        payload: dict = {
             "sub": str(user.id),
             "email": str(user.email),
             "role": role_value,
@@ -69,19 +76,21 @@ class TokenService(ITokenService):
             "exp": expire,
             "iat": datetime.utcnow(),
         }
+        if tenant_id is not None:
+            payload["tenant_id"] = str(tenant_id)
         return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
-    def create_access_token(self, user: User) -> str:
+    def create_access_token(self, user: User, tenant_id: UUID | None = None) -> str:
         """Create an access token for a user."""
         expires_delta = timedelta(minutes=self.access_token_expire_minutes)
-        return self._create_token(user, "access", expires_delta)
+        return self._create_token(user, "access", expires_delta, tenant_id=tenant_id)
 
-    def create_refresh_token(self, user: User) -> str:
+    def create_refresh_token(self, user: User, tenant_id: UUID | None = None) -> str:
         """Create a refresh token for a user (includes jti for rotation tracking)."""
         expires_delta = timedelta(days=self.refresh_token_expire_days)
         expire = datetime.utcnow() + expires_delta
         role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
-        payload = {
+        payload: dict = {
             "sub": str(user.id),
             "email": str(user.email),
             "role": role_value,
@@ -90,6 +99,8 @@ class TokenService(ITokenService):
             "iat": datetime.utcnow(),
             "jti": secrets.token_hex(16),
         }
+        if tenant_id is not None:
+            payload["tenant_id"] = str(tenant_id)
         return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_reset_token(self, user: User) -> str:
@@ -112,6 +123,7 @@ class TokenService(ITokenService):
             iat = payload.get("iat", 0)
             if hasattr(iat, "timestamp"):
                 iat = int(iat.timestamp())
+            tenant_id_raw = payload.get("tenant_id")
             return TokenPayload(
                 user_id=UUID(payload["sub"]),
                 email=payload["email"],
@@ -120,6 +132,7 @@ class TokenService(ITokenService):
                 token_type=payload.get("token_type", "access"),
                 iat=int(iat),
                 jti=payload.get("jti"),
+                tenant_id=UUID(tenant_id_raw) if tenant_id_raw else None,
             )
         except ExpiredSignatureError:
             raise TokenExpiredError()

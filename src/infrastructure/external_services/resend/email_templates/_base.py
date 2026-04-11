@@ -74,7 +74,7 @@ def _logo_block(language: str = "ar") -> str:
     # Display height in px. The Aref Ruqaa wordmark is roughly 0.75 wide
     # vs tall (the dhamma sits above the noon, the waw descends below),
     # so we anchor on height and let the width fall out.
-    display_h = 140
+    display_h = 80
     display_w = max(1, round(WORDMARK_WIDTH * display_h / WORDMARK_HEIGHT))
     url = _wordmark_url()
     return f"""
@@ -128,7 +128,7 @@ def _styles(language: str) -> str:
   .brand {{ font-family:{FONT_BRAND_AR}; font-weight:700; }}
 
   .page {{ width:100%; background:{CREAM}; padding:32px 16px; }}
-  .wrapper {{ max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 32px rgba(10,26,61,0.08); }}
+  .wrapper {{ max-width:600px; margin:0 auto; background:#ffffff; overflow:hidden; }}
 
   .header {{
     background-color:{HERO_BG};
@@ -139,9 +139,9 @@ def _styles(language: str) -> str:
     background-size: 100% 100%, 100% 100%, 26px 26px;
     background-position: 0 0, 0 0, 0 0;
     background-repeat: no-repeat, no-repeat, repeat;
-    padding:48px 28px 40px; text-align:center; position:relative;
+    padding:32px 28px 28px; text-align:center; position:relative;
   }}
-  .header::after {{ content:""; display:block; height:3px; background:linear-gradient(90deg,transparent 0%,{GOLD} 50%,transparent 100%); margin:32px -28px -40px; }}
+  .header::after {{ content:""; display:block; height:3px; background:linear-gradient(90deg,transparent 0%,{GOLD} 50%,transparent 100%); margin:24px -28px -28px; }}
   .header h1 {{ color:#ffffff; margin:22px 0 6px; font-size:24px; font-weight:700; letter-spacing:{"0" if is_ar else "-0.3px"}; font-family:{font_family}; }}
   .header p {{ color:rgba(255,255,255,0.78); margin:0; font-size:14px; font-family:{font_family}; }}
   .header .badge {{ display:inline-block; background:rgba(212,175,55,0.18); color:{GOLD}; border:1px solid rgba(212,175,55,0.4); font-size:12px; padding:5px 14px; border-radius:999px; margin-top:14px; font-weight:600; letter-spacing:0.5px; font-family:{FONT_LATIN}; direction:ltr; }}
@@ -156,7 +156,7 @@ def _styles(language: str) -> str:
   .panel .label {{ font-size:11px; color:{MUTED}; text-transform:uppercase; letter-spacing:1.2px; margin:0 0 6px; font-family:{FONT_LATIN}; }}
   .panel .value {{ font-size:22px; font-weight:700; color:{NAVY}; margin:0; }}
 
-  .code-box {{ text-align:center; background:#fff; border:2px dashed {GOLD}; border-radius:12px; padding:22px 28px; margin:24px 0; }}
+  .code-box {{ text-align:center; background:#ffffff; border:2px dashed {GOLD}; border-radius:12px; padding:22px 28px; margin:24px 0; }}
   .code-box .digits {{ font-family:'Inter','Segoe UI',monospace; font-size:36px; font-weight:700; letter-spacing:10px; color:{NAVY}; margin:0; direction:ltr; display:inline-block; }}
   .code-box .hint {{ color:{MUTED}; font-size:12px; margin:10px 0 0; }}
 
@@ -192,7 +192,7 @@ def _styles(language: str) -> str:
 
   @media only screen and (max-width:600px) {{
     .body {{ padding:28px 20px; }}
-    .header {{ padding:30px 20px; }}
+    .header {{ padding:24px 20px; }}
     .header h1 {{ font-size:21px; }}
   }}
 </style>
@@ -282,15 +282,15 @@ def header(
     # Yahoo) still get the glows.
     return f"""
     <!--[if mso]>
-    <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="mso-width-percent:1000;height:300px;">
+    <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="mso-width-percent:1000;height:220px;">
       <v:fill type="solid" color="{HERO_BG}"/>
       <v:textbox inset="0,0,0,0">
     <![endif]-->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{HERO_BG}" class="gmail-fix" style="background-color:{HERO_BG};">
       <tr>
-        <td bgcolor="{HERO_BG}" align="center" valign="middle" class="gmail-fix" style="{header_bg_style}padding:48px 28px 40px;text-align:center;color:#ffffff;">
+        <td bgcolor="{HERO_BG}" align="center" valign="middle" class="gmail-fix" style="{header_bg_style}padding:32px 28px 28px;text-align:center;color:#ffffff;">
           {_logo_block(language)}
-          <h1 style="color:#ffffff;margin:24px 0 8px;font-size:24px;font-weight:700;font-family:{font_family};line-height:1.4;mso-line-height-rule:exactly;">{title}</h1>
+          <h1 style="color:#ffffff;margin:16px 0 6px;font-size:22px;font-weight:700;font-family:{font_family};line-height:1.4;mso-line-height-rule:exactly;">{title}</h1>
           {sub_html}
           {badge_html}
         </td>
@@ -361,13 +361,29 @@ def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) ->
 </style>
 <![endif]-->
 </head>
-<body style="margin:0;padding:0;background:{CREAM};direction:{direction};">
+<body class="body" style="margin:0;padding:0;background:{CREAM};direction:{direction};width:100%;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 {preheader_html}
-<div class="page" style="width:100%;background:{CREAM};padding:32px 16px;">
-  <div class="wrapper" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(10,26,61,0.08);">
-    {inner_html}
-    {_footer(language)}
-  </div>
-</div>
+<!--[if mso]>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};"><tr><td align="center" style="padding:0 0 32px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td>
+<![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{CREAM};">
+  <tr>
+    <td align="center" style="padding:0 0 32px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="wrapper" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;overflow:hidden;">
+        <tr>
+          <td>
+            {inner_html}
+            {_footer(language)}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<!--[if mso]>
+</td></tr></table>
+</td></tr></table>
+<![endif]-->
 </body>
 </html>"""

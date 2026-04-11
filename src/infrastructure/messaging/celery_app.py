@@ -40,6 +40,10 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.health_score_tasks",
         "src.infrastructure.messaging.tasks.analytics_rollup_tasks",
         "src.infrastructure.messaging.tasks.social_tasks",
+        # Stream 1.5 + 4.6: Demo + trial lifecycle sweepers
+        "src.infrastructure.messaging.tasks.demo_cleanup_task",
+        "src.infrastructure.messaging.tasks.trial_expiry_task",
+        "src.infrastructure.messaging.tasks.read_only_purge_task",
     ],
     # Queue definitions
     task_queues=(
@@ -123,5 +127,20 @@ celery_app.conf.beat_schedule = {
     "send-trial-expiry-warnings": {
         "task": "tasks.send_trial_expiry_warnings",
         "schedule": crontab(hour=8, minute=0),  # Daily at 08:00 UTC (10 AM Cairo)
+    },
+    # ─── Stream 1.5: Demo cleanup (every 2 hours) ────────────────────
+    "cleanup-expired-demo-tenants": {
+        "task": "tasks.cleanup_expired_demo_tenants",
+        "schedule": crontab(minute=0, hour="*/2"),  # Every 2 hours
+    },
+    # ─── Stream 4.6: Trial expiry sweep (hourly) ─────────────────────
+    "expire-trials": {
+        "task": "tasks.expire_trials",
+        "schedule": crontab(minute=15),  # Every hour at :15
+    },
+    # ─── Stream 4.6: Read-only purge (every 6 hours) ─────────────────
+    "purge-read-only-tenants": {
+        "task": "tasks.purge_read_only_tenants",
+        "schedule": crontab(minute=30, hour="*/6"),  # Every 6 hours at :30
     },
 }
