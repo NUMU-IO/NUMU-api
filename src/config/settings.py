@@ -237,10 +237,12 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
 
-    # OpenRouter (for AI insights via Qwen)
-    openrouter_api_key: str | None = None
-    openrouter_model: str = "qwen/qwen3.6-plus:free"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Google AI Studio (for AI insights & policy generation via Gemini)
+    # Uses Google's OpenAI-compatible endpoint so the existing AsyncOpenAI
+    # client can be reused without rewriting to the google-genai SDK.
+    google_ai_api_key: str | None = None
+    google_ai_model: str = "gemini-3.1-flash-lite-preview"
+    google_ai_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
     # Resend (Email)
     resend_api_key: str | None = None
