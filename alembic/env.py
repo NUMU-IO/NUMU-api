@@ -35,7 +35,11 @@ from src.infrastructure.database.models import (  # noqa: F401
     SocialPostModel,
     StoreModel,
     StoreOnboardingModel,
+    StoreThemeModel,
     TenantModel,
+    ThemeAssetModel,
+    ThemeModel,
+    ThemeVersionModel,
     UserModel,
     WaitlistModel,
 )

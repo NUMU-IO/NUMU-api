@@ -23,6 +23,11 @@ from src.infrastructure.repositories.social_connection_repository import (
 )
 from src.infrastructure.repositories.social_post_repository import SocialPostRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
+from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
+from src.infrastructure.repositories.theme_repository import ThemeRepository
+from src.infrastructure.repositories.theme_version_repository import (
+    ThemeVersionRepository,
+)
 from src.infrastructure.repositories.two_factor_repository import TwoFactorRepository
 from src.infrastructure.repositories.upsell_rule_repository import UpsellRuleRepository
 from src.infrastructure.repositories.user_repository import UserRepository
@@ -38,7 +43,10 @@ __all__ = [
     "AnalyticsRollupRepository",
     "UserRepository",
     "StoreRepository",
-    "ProductRepository",
+    "StoreThemeRepository",
+    "ThemeRepository",
+    "ThemeVersionRepository",
+    "TwoFactorRepository",
     "CategoryRepository",
     "CouponRepository",
     "CredentialRepository",
@@ -50,13 +58,13 @@ __all__ = [
     "OnboardingRepository",
     "OrderRepository",
     "PageViewRepository",
+    "ProductRepository",
     "RedisCartRepository",
     "RefundRepository",
     "ShipmentRepository",
     "SocialConnectionRepository",
     "SocialPostRepository",
     "WaitlistRepository",
-    "TwoFactorRepository",
     "UpsellRuleRepository",
     "WebhookSubscriptionRepository",
     "WebhookDeliveryLogRepository",

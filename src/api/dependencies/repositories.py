@@ -22,6 +22,9 @@ from src.infrastructure.repositories import (
     RefundRepository,
     ShipmentRepository,
     StoreRepository,
+    StoreThemeRepository,
+    ThemeRepository,
+    ThemeVersionRepository,
     TwoFactorRepository,
     UpsellRuleRepository,
     UserRepository,
@@ -220,3 +223,24 @@ def get_cart_repository():
     from src.infrastructure.repositories.cart_repository import RedisCartRepository
 
     return RedisCartRepository()
+
+
+def get_theme_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ThemeRepository:
+    """Get theme repository dependency."""
+    return ThemeRepository(session)
+
+
+def get_theme_version_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ThemeVersionRepository:
+    """Get theme version repository dependency."""
+    return ThemeVersionRepository(session)
+
+
+def get_store_theme_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StoreThemeRepository:
+    """Get store-theme installation repository dependency."""
+    return StoreThemeRepository(session)
