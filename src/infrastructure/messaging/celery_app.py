@@ -40,6 +40,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.health_score_tasks",
         "src.infrastructure.messaging.tasks.analytics_rollup_tasks",
         "src.infrastructure.messaging.tasks.social_tasks",
+        # Stream 7.1: Onboarding abandoned nudges
+        "src.infrastructure.messaging.tasks.onboarding_nudge_task",
         # Stream 1.5 + 4.6: Demo + trial lifecycle sweepers
         "src.infrastructure.messaging.tasks.demo_cleanup_task",
         "src.infrastructure.messaging.tasks.trial_expiry_task",
@@ -142,5 +144,10 @@ celery_app.conf.beat_schedule = {
     "purge-read-only-tenants": {
         "task": "tasks.purge_read_only_tenants",
         "schedule": crontab(minute=30, hour="*/6"),  # Every 6 hours at :30
+    },
+    # ─── Stream 7.1: Onboarding abandoned nudges (every 6 hours) ─────
+    "send-onboarding-nudges": {
+        "task": "tasks.send_onboarding_nudges",
+        "schedule": crontab(minute=45, hour="*/6"),  # Every 6 hours at :45
     },
 }

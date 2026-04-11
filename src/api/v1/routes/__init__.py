@@ -38,12 +38,18 @@ from fastapi import APIRouter
 from src.api.v1.routes.admin import router as admin_router
 from src.api.v1.routes.auth import router as auth_router
 
+# Billing routes (subscribe, cancel, invoices)
+from src.api.v1.routes.billing import router as billing_router
+
 # Demo routes (authenticated demo session)
 from src.api.v1.routes.demo import router as demo_router
 
 # Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
 from src.api.v1.routes.public import router as public_router
+
+# Referral routes (merchant-to-merchant referral program)
+from src.api.v1.routes.referrals import router as referrals_router
 
 # Shopify app routes
 from src.api.v1.routes.shopify import router as shopify_router
@@ -66,6 +72,9 @@ from src.api.v1.routes.storefront import (
 # Storefront routes (customer-facing)
 from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
+)
+from src.api.v1.routes.storefront import (
+    shipping_quote_router as storefront_shipping_quote_router,
 )
 
 # Storefront theme resolution (internal — Next.js SSR → FastAPI)
@@ -187,6 +196,13 @@ api_router.include_router(
     tags=["Storefront - Checkout"],
 )
 
+# Storefront - shipping rate quotes (public, scoped to store)
+api_router.include_router(
+    storefront_shipping_quote_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Shipping"],
+)
+
 # Theme marketplace (public browsing of published themes)
 api_router.include_router(themes_marketplace_router, tags=["Themes - Marketplace"])
 
@@ -201,6 +217,12 @@ api_router.include_router(
 )
 # Demo routes (authenticated demo session → convert to real account)
 api_router.include_router(demo_router, tags=["Demo"])
+
+# Billing routes (subscribe, cancel, invoices, discount codes)
+api_router.include_router(billing_router, tags=["Billing"])
+
+# Referral routes (merchant referral program)
+api_router.include_router(referrals_router, tags=["Referrals"])
 
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)
 api_router.include_router(shopify_router, prefix="/shopify")

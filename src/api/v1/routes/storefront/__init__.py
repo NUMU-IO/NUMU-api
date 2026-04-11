@@ -23,6 +23,7 @@ from src.api.v1.routes.storefront.public import (
     lookup_router as storefront_lookup_router,
 )
 from src.api.v1.routes.storefront.public import router as public_router
+from src.api.v1.routes.storefront.shipping_quote import router as shipping_quote_router
 from src.api.v1.routes.storefront.theme_resolution import (
     router as theme_resolution_router,
 )
@@ -40,4 +41,5 @@ __all__ = [
     "otp_router",
     "tracking_router",
     "theme_resolution_router",
+    "shipping_quote_router",
 ]
