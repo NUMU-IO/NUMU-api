@@ -730,12 +730,40 @@ async def reset_password(
 async def get_current_user(
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Get current authenticated user's profile."""
+    """Get current authenticated user's profile + tenant lifecycle state."""
     user = await user_repo.get_by_id(user_id)
 
     if not user:
         raise EntityNotFoundError("User", str(user_id))
+
+    # Resolve tenant owned by this user (if any)
+    tenant_info = None
+    try:
+        from sqlalchemy import select
+
+        from src.api.v1.schemas.public.auth import TenantInfoResponse
+        from src.infrastructure.database.models.public.tenant import TenantModel
+
+        tenant_q = select(TenantModel).where(TenantModel.owner_id == user.id)
+        tenant = (await db.execute(tenant_q)).scalar_one_or_none()
+        if tenant:
+            tenant_info = TenantInfoResponse(
+                id=str(tenant.id),
+                name=tenant.name,
+                subdomain=tenant.subdomain,
+                plan=tenant.plan,
+                lifecycle_state=tenant.lifecycle_state,
+                is_demo=tenant.is_demo,
+                is_on_trial=tenant.is_on_trial,
+                is_read_only=tenant.is_read_only,
+                is_writable=tenant.is_writable,
+                expires_at=tenant.expires_at.isoformat() if tenant.expires_at else None,
+                days_remaining=tenant.days_remaining,
+            )
+    except Exception:
+        pass  # Non-critical — old tenants without lifecycle columns still work
 
     return SuccessResponse(
         data=UserResponse(
@@ -752,6 +780,7 @@ async def get_current_user(
             created_at=str(user.created_at),
             updated_at=str(user.updated_at),
             trial_ends_at=str(user.trial_ends_at) if user.trial_ends_at else None,
+            tenant=tenant_info,
         ),
         message="User retrieved successfully",
     )
