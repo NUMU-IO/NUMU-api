@@ -86,6 +86,32 @@ class UserResponse(BaseModel):
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
     trial_ends_at: str | None = Field(None, description="Trial period end date")
 
+    # Tenant lifecycle info (populated by GET /auth/me)
+    tenant: "TenantInfoResponse | None" = Field(
+        None,
+        description="Tenant lifecycle state. Present when user owns a tenant.",
+    )
+
+
+class TenantInfoResponse(BaseModel):
+    """Lightweight tenant info embedded in the /auth/me response.
+
+    Gives the merchant hub enough info to show demo banners,
+    trial countdowns, and read-only warnings without a separate API call.
+    """
+
+    id: str
+    name: str
+    subdomain: str
+    plan: str
+    lifecycle_state: str
+    is_demo: bool
+    is_on_trial: bool
+    is_read_only: bool
+    is_writable: bool
+    expires_at: str | None = None
+    days_remaining: int | None = None
+
 
 # Keep TokenResponse for internal use / backward compat with use-case DTOs
 class TokenResponse(BaseModel):

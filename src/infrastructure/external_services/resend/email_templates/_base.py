@@ -74,7 +74,7 @@ def _logo_block(language: str = "ar") -> str:
     # Display height in px. The Aref Ruqaa wordmark is roughly 0.75 wide
     # vs tall (the dhamma sits above the noon, the waw descends below),
     # so we anchor on height and let the width fall out.
-    display_h = 140
+    display_h = 80
     display_w = max(1, round(WORDMARK_WIDTH * display_h / WORDMARK_HEIGHT))
     url = _wordmark_url()
     return f"""
@@ -139,9 +139,9 @@ def _styles(language: str) -> str:
     background-size: 100% 100%, 100% 100%, 26px 26px;
     background-position: 0 0, 0 0, 0 0;
     background-repeat: no-repeat, no-repeat, repeat;
-    padding:48px 28px 40px; text-align:center; position:relative;
+    padding:32px 28px 28px; text-align:center; position:relative;
   }}
-  .header::after {{ content:""; display:block; height:3px; background:linear-gradient(90deg,transparent 0%,{GOLD} 50%,transparent 100%); margin:32px -28px -40px; }}
+  .header::after {{ content:""; display:block; height:3px; background:linear-gradient(90deg,transparent 0%,{GOLD} 50%,transparent 100%); margin:24px -28px -28px; }}
   .header h1 {{ color:#ffffff; margin:22px 0 6px; font-size:24px; font-weight:700; letter-spacing:{"0" if is_ar else "-0.3px"}; font-family:{font_family}; }}
   .header p {{ color:rgba(255,255,255,0.78); margin:0; font-size:14px; font-family:{font_family}; }}
   .header .badge {{ display:inline-block; background:rgba(212,175,55,0.18); color:{GOLD}; border:1px solid rgba(212,175,55,0.4); font-size:12px; padding:5px 14px; border-radius:999px; margin-top:14px; font-weight:600; letter-spacing:0.5px; font-family:{FONT_LATIN}; direction:ltr; }}
@@ -192,7 +192,7 @@ def _styles(language: str) -> str:
 
   @media only screen and (max-width:600px) {{
     .body {{ padding:28px 20px; }}
-    .header {{ padding:30px 20px; }}
+    .header {{ padding:24px 20px; }}
     .header h1 {{ font-size:21px; }}
   }}
 </style>
@@ -282,15 +282,15 @@ def header(
     # Yahoo) still get the glows.
     return f"""
     <!--[if mso]>
-    <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="mso-width-percent:1000;height:300px;">
+    <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="mso-width-percent:1000;height:220px;">
       <v:fill type="solid" color="{HERO_BG}"/>
       <v:textbox inset="0,0,0,0">
     <![endif]-->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{HERO_BG}" class="gmail-fix" style="background-color:{HERO_BG};">
       <tr>
-        <td bgcolor="{HERO_BG}" align="center" valign="middle" class="gmail-fix" style="{header_bg_style}padding:48px 28px 40px;text-align:center;color:#ffffff;">
+        <td bgcolor="{HERO_BG}" align="center" valign="middle" class="gmail-fix" style="{header_bg_style}padding:32px 28px 28px;text-align:center;color:#ffffff;">
           {_logo_block(language)}
-          <h1 style="color:#ffffff;margin:24px 0 8px;font-size:24px;font-weight:700;font-family:{font_family};line-height:1.4;mso-line-height-rule:exactly;">{title}</h1>
+          <h1 style="color:#ffffff;margin:16px 0 6px;font-size:22px;font-weight:700;font-family:{font_family};line-height:1.4;mso-line-height-rule:exactly;">{title}</h1>
           {sub_html}
           {badge_html}
         </td>
@@ -336,15 +336,15 @@ def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) ->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="x-apple-disable-message-reformatting">
-<meta name="color-scheme" content="light dark">
-<meta name="supported-color-schemes" content="light dark">
+<meta name="color-scheme" content="only light">
+<meta name="supported-color-schemes" content="only light">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <title>NUMU</title>
 {_styles(language)}
 <style type="text/css">
   /* Force light color scheme — stops Gmail / Outlook.com mobile from
      auto-inverting our dark hero header into a light one. */
-  :root {{ color-scheme: light dark; supported-color-schemes: light dark; }}
+  :root {{ color-scheme: only light; supported-color-schemes: only light; }}
   /* Gmail-specific dark-mode override: force the header cell to keep
      its dark background and white text even when the user is in dark
      mode. The [data-ogsc] selector targets Outlook.com Gmail-style
