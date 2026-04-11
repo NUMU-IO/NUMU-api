@@ -2,7 +2,7 @@
 
 Two-layer architecture:
 1. Rule engine: detects anomalies, trends, risks, opportunities from rollup data
-2. LLM layer (Qwen via OpenRouter): generates natural-language narratives from signals
+2. LLM layer (Gemini via Google AI Studio): generates natural-language narratives from signals
 
 The rule engine always works. The LLM layer is optional — if it fails, we fall back
 to template-based text.
@@ -385,17 +385,17 @@ async def generate_llm_narrative(
     metrics_summary: dict,
     lang: str = "ar",
 ) -> str | None:
-    """Use Qwen via OpenRouter to generate a natural-language narrative from signals.
+    """Use Gemini via Google AI Studio to generate a natural-language narrative from signals.
 
     Returns None if LLM is unavailable or fails.
     """
-    if not settings.openrouter_api_key:
+    if not settings.google_ai_api_key:
         return None
 
     try:
         client = AsyncOpenAI(
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
+            api_key=settings.google_ai_api_key,
+            base_url=settings.google_ai_base_url,
         )
 
         signals_text = json.dumps(signals, ensure_ascii=False, indent=2)
@@ -427,7 +427,7 @@ Provide your analysis as a JSON object with these keys:
 Return ONLY the JSON object, no markdown."""
 
         response = await client.chat.completions.create(
-            model=settings.openrouter_model,
+            model=settings.google_ai_model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800,
             temperature=0.3,

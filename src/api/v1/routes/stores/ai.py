@@ -167,13 +167,13 @@ async def generate_policy(
     request: GeneratePolicyRequest,
     store: Annotated[Store, Depends(verify_store_ownership)],
 ):
-    """Generate a store policy (return, shipping, privacy, terms) using Qwen via OpenRouter.
+    """Generate a store policy (return, shipping, privacy, terms) using Gemini via Google AI Studio.
 
     Rate limited to 10 requests per store per minute.
     """
     _check_rate_limit(str(store.id))
 
-    if not settings.openrouter_api_key:
+    if not settings.google_ai_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -218,12 +218,12 @@ async def generate_policy(
 
     try:
         client = AsyncOpenAI(
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
+            api_key=settings.google_ai_api_key,
+            base_url=settings.google_ai_base_url,
         )
 
         response = await client.chat.completions.create(
-            model=settings.openrouter_model,
+            model=settings.google_ai_model,
             messages=[
                 {"role": "system", "content": policy_config["system"]},
                 {"role": "user", "content": prompt},
