@@ -47,6 +47,10 @@ from src.api.v1.routes.stores import theme_installations as theme_installations_
 from src.api.v1.routes.stores import themes as themes_module
 from src.api.v1.routes.stores import upsells as upsells_module
 from src.api.v1.routes.stores import webhooks as webhooks_module
+from src.api.v1.routes.stores import whatsapp as whatsapp_module
+from src.api.v1.routes.stores import whatsapp_campaigns as whatsapp_campaigns_module
+from src.api.v1.routes.stores import whatsapp_chat as whatsapp_chat_module
+from src.api.v1.routes.stores import whatsapp_templates as whatsapp_templates_module
 
 # Create main stores router - this will be mounted at /stores in the main router
 router = APIRouter()
@@ -82,5 +86,13 @@ router.include_router(social_module.router, tags=["Store Social Import"])
 router.include_router(ai_module.router, tags=["Store AI"])
 router.include_router(themes_module.router, tags=["Store Themes"])
 router.include_router(theme_installations_module.router, tags=["Store Themes V2"])
+router.include_router(whatsapp_module.router, tags=["Store WhatsApp"])
+router.include_router(
+    whatsapp_templates_module.router, tags=["Store WhatsApp Templates"]
+)
+router.include_router(whatsapp_chat_module.router, tags=["Store WhatsApp Chat"])
+router.include_router(
+    whatsapp_campaigns_module.router, tags=["Store WhatsApp Campaigns"]
+)
 
 __all__ = ["router"]

@@ -60,6 +60,7 @@ class ServiceName(StrEnum):
     STRIPE = "stripe"
     TAP = "tap"
     KASHIER = "kashier"
+    FAWATERAK = "fawaterak"
 
     # Shipping Carriers
     ARAMEX = "aramex"

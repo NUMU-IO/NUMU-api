@@ -70,6 +70,16 @@ from src.infrastructure.database.models.tenant.webhook import (
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
 )
+from src.infrastructure.database.models.tenant.whatsapp_campaign import (
+    WhatsAppCampaignModel,
+    WhatsAppCampaignRecipientModel,
+)
+from src.infrastructure.database.models.tenant.whatsapp_conversation import (
+    WhatsAppConversationModel,
+)
+from src.infrastructure.database.models.tenant.whatsapp_template import (
+    WhatsAppTemplateModel,
+)
 
 __all__ = [
     "AnalyticsDailyRollupModel",
@@ -113,4 +123,9 @@ __all__ = [
     "ThemeAssetModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",
+    # WhatsApp models
+    "WhatsAppTemplateModel",
+    "WhatsAppConversationModel",
+    "WhatsAppCampaignModel",
+    "WhatsAppCampaignRecipientModel",
 ]

@@ -30,7 +30,16 @@ async def handle_whatsapp_notification(event: OrderStatusChangedEvent) -> None:
         WhatsAppMessagingService,
     )
 
+    # Use per-store resolver when possible, fall back to global
     service = WhatsAppMessagingService()
+    try:
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.external_services.whatsapp import get_whatsapp_service
+
+        async with AsyncSessionLocal() as session:
+            service = await get_whatsapp_service(event.store_id, session)
+    except Exception:
+        pass  # Fall back to global service
     recipient = MessageRecipient(
         phone=event.customer_phone,
         name=event.customer_name or "",

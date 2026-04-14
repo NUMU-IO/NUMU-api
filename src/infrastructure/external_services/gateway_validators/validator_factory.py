@@ -15,6 +15,7 @@ from .communication_validators import (
     WhatsAppValidator,
 )
 from .payment_validators import (
+    FawaterakValidator,
     FawryValidator,
     KashierValidator,
     PaymobValidator,
@@ -59,6 +60,7 @@ class GatewayValidatorFactory:
             ServiceName.STRIPE: StripeValidator,
             ServiceName.TAP: TapValidator,
             ServiceName.KASHIER: KashierValidator,
+            ServiceName.FAWATERAK: FawaterakValidator,
         },
         ServiceType.SHIPPING_CARRIER: {
             ServiceName.ARAMEX: AramexValidator,

@@ -31,6 +31,7 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationResponse,
     CustomizationSocialLinks,
     CustomizationTheme,
+    FawaterakCredentialsResponse,
     InvoiceSettingsResponse,
     KashierCredentialsResponse,
     NotificationTemplate,
@@ -38,6 +39,7 @@ from src.api.v1.schemas.tenant.settings import (
     PaymentSettingsResponse,
     PaymobCredentialsResponse,
     SaveBostaCredentialsRequest,
+    SaveFawaterakCredentialsRequest,
     SaveKashierCredentialsRequest,
     SavePaymobCredentialsRequest,
     ShippingCarrierStatus,
@@ -69,6 +71,11 @@ def _get_default_payment_settings() -> dict:
     return {
         "cod": {"enabled": True, "is_configured": True, "last_configured": None},
         "fawry": {"enabled": False, "is_configured": False, "last_configured": None},
+        "fawaterak": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
         "paymob": {"enabled": False, "is_configured": False, "last_configured": None},
         "vodafone_cash": {
             "enabled": False,
@@ -329,6 +336,15 @@ async def update_payment_settings(
                 detail="Fawry is not configured. Contact administrator.",
             )
         payment_settings["fawry"]["enabled"] = request.fawry_enabled
+    if getattr(request, "fawaterak_enabled", None) is not None:
+        if not payment_settings.get("fawaterak", {}).get("is_configured"):
+            raise HTTPException(
+                status_code=400,
+                detail="Fawaterak is not configured. Contact administrator.",
+            )
+        payment_settings.setdefault("fawaterak", {})["enabled"] = (
+            request.fawaterak_enabled
+        )
     if request.paymob_enabled is not None:
         if not payment_settings["paymob"]["is_configured"]:
             raise HTTPException(
@@ -359,7 +375,14 @@ async def update_payment_settings(
     # Auto-complete configure_payment onboarding step when any method is enabled
     any_enabled = any(
         payment_settings.get(m, {}).get("enabled", False)
-        for m in ("cod", "fawry", "paymob", "vodafone_cash", "bank_transfer")
+        for m in (
+            "cod",
+            "fawry",
+            "fawaterak",
+            "paymob",
+            "vodafone_cash",
+            "bank_transfer",
+        )
     )
     if any_enabled:
         await try_complete_onboarding_step(
@@ -748,6 +771,156 @@ async def delete_kashier_credentials(
     return SuccessResponse(
         data=KashierCredentialsResponse(is_configured=False),
         message="Kashier credentials removed successfully",
+    )
+
+
+# ============ Fawaterak Credentials ============
+
+
+@router.put(
+    "/payment/fawaterak/credentials",
+    response_model=SuccessResponse[FawaterakCredentialsResponse],
+    summary="Save Fawaterak credentials",
+    operation_id="save_fawaterak_credentials",
+)
+async def save_fawaterak_credentials(
+    request: SaveFawaterakCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save or update Fawaterak payment gateway credentials for the store."""
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = await secrets.get_current_key_id()
+
+    credential_data = {
+        "api_key": request.api_key,
+        "vendor_key": request.vendor_key,
+        "environment": request.environment,
+    }
+
+    encrypted = await secrets.encrypt(credential_data, key_id)
+    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
+
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["fawaterak"] = {
+        "enabled": True,
+        "is_configured": True,
+        "last_configured": datetime.now(UTC).isoformat(),
+        "encrypted_credentials": encrypted_b64,
+        "encryption_key_id": key_id,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+    )
+
+    logger.info(f"Fawaterak credentials saved for store {store.id}")
+
+    return SuccessResponse(
+        data=FawaterakCredentialsResponse(
+            is_configured=True,
+            api_key_masked=secrets.mask_credential(request.api_key),
+            vendor_key_masked=secrets.mask_credential(request.vendor_key),
+            environment=request.environment,
+            last_configured=payment_settings["fawaterak"]["last_configured"],
+        ),
+        message="Fawaterak credentials saved successfully",
+    )
+
+
+@router.get(
+    "/payment/fawaterak/credentials",
+    response_model=SuccessResponse[FawaterakCredentialsResponse],
+    summary="Get Fawaterak credentials status",
+    operation_id="get_fawaterak_credentials",
+)
+async def get_fawaterak_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked Fawaterak credential status for the store."""
+    settings = store.settings or {}
+    fawaterak_settings = settings.get("payment", {}).get("fawaterak", {})
+
+    if not fawaterak_settings.get("encrypted_credentials"):
+        return SuccessResponse(
+            data=FawaterakCredentialsResponse(is_configured=False),
+            message="Fawaterak credentials not configured",
+        )
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = fawaterak_settings["encryption_key_id"]
+    encrypted = base64.b64decode(fawaterak_settings["encrypted_credentials"])
+
+    try:
+        creds = await secrets.decrypt(encrypted, key_id)
+    except Exception:
+        logger.error(f"Failed to decrypt Fawaterak credentials for store {store.id}")
+        return SuccessResponse(
+            data=FawaterakCredentialsResponse(
+                is_configured=True,
+                last_configured=fawaterak_settings.get("last_configured"),
+            ),
+            message="Credentials configured but could not be read. Please re-save.",
+        )
+
+    return SuccessResponse(
+        data=FawaterakCredentialsResponse(
+            is_configured=True,
+            api_key_masked=secrets.mask_credential(creds["api_key"]),
+            vendor_key_masked=secrets.mask_credential(creds["vendor_key"]),
+            environment=creds.get("environment", "staging"),
+            last_configured=fawaterak_settings.get("last_configured"),
+        ),
+        message="Fawaterak credentials retrieved successfully",
+    )
+
+
+@router.delete(
+    "/payment/fawaterak/credentials",
+    response_model=SuccessResponse[FawaterakCredentialsResponse],
+    summary="Remove Fawaterak credentials",
+    operation_id="delete_fawaterak_credentials",
+)
+async def delete_fawaterak_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove Fawaterak credentials and disable Fawaterak payments."""
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["fawaterak"] = {
+        "enabled": False,
+        "is_configured": False,
+        "last_configured": None,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    logger.info(f"Fawaterak credentials removed for store {store.id}")
+
+    return SuccessResponse(
+        data=FawaterakCredentialsResponse(is_configured=False),
+        message="Fawaterak credentials removed successfully",
     )
 
 

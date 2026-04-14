@@ -5,7 +5,7 @@ service providers before storing them. This ensures that only valid
 credentials are saved, preventing configuration errors.
 
 Supported Services:
-- Payment Gateways: Fawry, Paymob, Vodafone Cash, Stripe, Tap
+- Payment Gateways: Fawry, Fawaterak, Paymob, Vodafone Cash, Stripe, Tap
 - Shipping Carriers: Aramex, Bosta, MylerZ
 - Communication: WhatsApp Business API, Twilio
 """
@@ -16,6 +16,7 @@ from .communication_validators import (
     WhatsAppValidator,
 )
 from .payment_validators import (
+    FawaterakValidator,
     FawryValidator,
     PaymobValidator,
     StripeValidator,
@@ -38,6 +39,7 @@ __all__ = [
     "GatewayValidatorFactory",
     "get_validator_factory",
     # Payment
+    "FawaterakValidator",
     "FawryValidator",
     "PaymobValidator",
     "VodafoneCashValidator",

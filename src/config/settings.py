@@ -231,6 +231,7 @@ class Settings(BaseSettings):
     # Meta (Facebook/Instagram) Graph API
     meta_app_id: str | None = None
     meta_app_secret: str | None = None
+    meta_config_id: str | None = None  # Embedded Signup configuration ID
     meta_graph_api_version: str = "v19.0"
 
     # OpenAI
@@ -246,6 +247,8 @@ class Settings(BaseSettings):
 
     # Resend (Email)
     resend_api_key: str | None = None
+    resend_webhook_secret: str | None = None
+    resend_forward_to: str = "yahyasheriif@gmail.com"  # Forwards all received emails to this address (for testing)
     email_from_address: str = "noreply@numu.com"
     email_from_name: str = "numu"
     # Absolute base URL used inside email HTML to reference hosted brand
