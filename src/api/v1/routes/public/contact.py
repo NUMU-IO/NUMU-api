@@ -67,7 +67,7 @@ async def submit_contact(
             )
         )
 
-        return SuccessResponse(message="Message sent successfully")
+        return SuccessResponse(data={"sent": True}, message="Message sent successfully")
 
     except Exception:
         logger.exception("Failed to send contact form email")
