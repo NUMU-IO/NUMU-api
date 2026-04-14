@@ -1842,7 +1842,13 @@ async def upload_customization_asset(
     Returns the URL of the uploaded asset.
     """
     # Validate asset type
-    allowed_types = {"logo", "favicon", "hero_image", "profile_picture"}
+    allowed_types = {
+        "logo",
+        "favicon",
+        "hero_image",
+        "profile_picture",
+        "section_image",
+    }
     if asset_type not in allowed_types:
         raise HTTPException(
             status_code=400,
@@ -1895,3 +1901,25 @@ async def upload_customization_asset(
         data={"url": url, "asset_type": asset_type, "filename": file.filename},
         message=f"{asset_type.replace('_', ' ').title()} uploaded successfully",
     )
+
+
+@router.get(
+    "/customization/assets",
+    response_model=SuccessResponse[list],
+    summary="List customization assets",
+    operation_id="list_customization_assets",
+)
+async def list_customization_assets(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """List all uploaded theme/customization assets for this store."""
+    from src.api.dependencies.services import get_storage_service
+
+    storage = get_storage_service()
+    prefix = f"customization/{store.id}/"
+
+    try:
+        assets = await storage.list_files(prefix)
+        return SuccessResponse(data=assets, message="Assets retrieved successfully")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list assets: {str(e)}")

@@ -147,3 +147,25 @@ class CloudflareR2StorageService(IStorageService):
         if self.public_url:
             return f"{self.public_url}/{key}"
         return f"{self.endpoint_url}/{self.bucket_name}/{key}"
+
+    async def list_files(self, prefix: str) -> list[dict]:
+        """List files under a given prefix."""
+        if not self.client:
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
+
+        try:
+            response = self.client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=prefix,
+            )
+            files = []
+            for obj in response.get("Contents", []):
+                files.append({
+                    "key": obj["Key"],
+                    "url": self.get_public_url(obj["Key"]),
+                    "size": obj["Size"],
+                    "last_modified": obj["LastModified"].isoformat(),
+                })
+            return files
+        except Exception as e:
+            raise ExternalServiceError("S3 Storage", str(e))
