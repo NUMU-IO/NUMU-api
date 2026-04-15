@@ -63,3 +63,8 @@ class IStorageService(ABC):
     def get_public_url(self, key: str) -> str:
         """Get the public URL for a file."""
         ...
+
+    @abstractmethod
+    async def list_files(self, prefix: str) -> list[dict]:
+        """List files under a given prefix. Returns list of {key, url, size, last_modified}."""
+        ...
