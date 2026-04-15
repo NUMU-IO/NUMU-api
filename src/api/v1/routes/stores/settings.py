@@ -1488,7 +1488,20 @@ async def update_customization(
             **request.identity,
         }
     if request.theme is not None:
+        # If the merchant is switching to a different base_theme, drop any
+        # previously-saved section templates (hero/featured/promo text etc.).
+        # Otherwise the V2 section engine would keep rendering the previous
+        # theme's default copy — e.g. a luxury hero headline on a streetwear
+        # theme — because templates are merchant-level overrides that persist
+        # across theme switches.
+        old_base_theme = customization.get("theme", {}).get("base_theme")
+        new_base_theme = request.theme.get("base_theme")
+        base_theme_changing = (
+            new_base_theme is not None and new_base_theme != old_base_theme
+        )
         customization["theme"] = {**customization.get("theme", {}), **request.theme}
+        if base_theme_changing:
+            customization.pop("templates", None)
     if request.header is not None:
         customization["header"] = {**customization.get("header", {}), **request.header}
     if request.hero is not None:
