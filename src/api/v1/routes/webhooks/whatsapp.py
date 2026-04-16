@@ -152,6 +152,11 @@ async def whatsapp_callback(
                         message_log_repo=message_log_repo,
                     )
 
+                    # Upsert conversations for inbound messages
+                    await _upsert_conversations_from_webhook(
+                        db, change.get("value", {})
+                    )
+
         return {"status": "received"}
 
     except Exception as e:
@@ -194,3 +199,66 @@ async def get_message_status(
         "status": "unknown",
         "note": "No log entry found for this message ID",
     }
+
+
+async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> None:
+    """Create/update WhatsApp conversations from inbound webhook messages."""
+    from src.infrastructure.repositories.whatsapp_conversation_repository import (
+        WhatsAppConversationRepository,
+    )
+
+    messages = value.get("messages", [])
+    contacts = value.get("contacts", [])
+    contact_map = {
+        c.get("wa_id", ""): c.get("profile", {}).get("name") for c in contacts
+    }
+
+    if not messages:
+        return
+
+    conv_repo = WhatsAppConversationRepository(db)
+
+    for message in messages:
+        from_number = message.get("from")
+        if not from_number:
+            continue
+
+        msg_type = message.get("type")
+        text_content = None
+        if msg_type == "text":
+            text_content = message.get("text", {}).get("body", "")
+        elif msg_type == "button":
+            text_content = message.get("button", {}).get("text", "")
+        elif msg_type == "image":
+            text_content = "[Image]"
+        elif msg_type == "document":
+            text_content = "[Document]"
+        elif msg_type == "video":
+            text_content = "[Video]"
+        elif msg_type == "audio":
+            text_content = "[Audio]"
+        else:
+            text_content = f"[{msg_type}]"
+
+        customer_name = contact_map.get(from_number)
+
+        # Resolve store from prior message logs
+        prior = await MessageLogRepository(db).get_latest_by_phone(from_number)
+        if not prior:
+            logger.debug(
+                "No prior messages for %s — cannot resolve store for conversation",
+                from_number,
+            )
+            continue
+
+        try:
+            await conv_repo.upsert_on_message(
+                store_id=prior.store_id,
+                tenant_id=prior.tenant_id,
+                phone=from_number,
+                name=customer_name,
+                message_preview=text_content,
+                direction="inbound",
+            )
+        except Exception as e:
+            logger.warning("Failed to upsert conversation for %s: %s", from_number, e)

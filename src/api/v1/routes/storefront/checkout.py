@@ -669,6 +669,89 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
+    elif request.payment_method == "fawaterak":
+        # Fawaterak payment via store.settings encrypted credentials
+        try:
+            from src.infrastructure.external_services.fawaterak.payment_service import (
+                FawaterakPaymentService,
+                get_merchant_fawaterak_credentials,
+            )
+
+            credentials = await get_merchant_fawaterak_credentials(store.settings)
+            fawaterak_service = FawaterakPaymentService(
+                api_key=credentials["api_key"],
+                vendor_key=credentials.get("vendor_key"),
+                environment=credentials.get("environment", "staging"),
+            )
+
+            created_order.payment_id = str(created_order.id)
+            await order_repo.update(created_order)
+
+            customer_email_str = (
+                str(current_customer.email) if current_customer.email else None
+            )
+            customer_phone = (
+                str(current_customer.phone) if current_customer.phone else None
+            )
+
+            # Build redirect URLs for Fawaterak
+            subdomain = store.subdomain
+            base_storefront_url = f"https://{subdomain}.numueg.app"
+
+            intent = await fawaterak_service.create_payment_intent(
+                amount=created_order.total,
+                currency=currency,
+                customer_email=customer_email_str,
+                metadata={
+                    "order_id": str(created_order.id),
+                    "billing_data": {
+                        "first_name": ship_addr.first_name or "Customer",
+                        "last_name": ship_addr.last_name or "Customer",
+                        "email": customer_email_str or "customer@example.com",
+                        "phone_number": customer_phone or "",
+                        "street": ship_addr.address_line1 or "",
+                        "city": ship_addr.city or "",
+                    },
+                    "items": [
+                        {
+                            "name": li.product_name,
+                            "price": li.unit_price / 100,
+                            "quantity": li.quantity,
+                        }
+                        for li in order_line_items
+                    ],
+                    "redirect_urls": {
+                        "success_url": f"{base_storefront_url}/order-confirmation?order_id={created_order.id}&order_number={created_order.order_number}&status=paid",
+                        "fail_url": f"{base_storefront_url}/checkout?payment_failed=true",
+                        "pending_url": f"{base_storefront_url}/order-confirmation?order_id={created_order.id}&status=pending",
+                    },
+                },
+            )
+
+            # Update payment_id to Fawaterak invoice ID
+            created_order.payment_id = intent.id
+            await order_repo.update(created_order)
+
+            # Fawaterak returns a payment URL for redirect
+            payment_data = {
+                "provider": "fawaterak",
+                "type": "redirect",
+                "payment_url": intent.client_secret,
+                "invoice_id": intent.id,
+                "order_id": str(created_order.id),
+                "amount": f"{created_order.total / 100:.2f}",
+                "currency": currency,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Fawaterak payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Online payment is not available for this store. Please choose another payment method.",
+            )
+
     elif request.payment_method == "fawry":
         # Fawry payment via store.settings encrypted credentials
         try:

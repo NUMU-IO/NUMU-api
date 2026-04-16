@@ -29,6 +29,7 @@ PROVIDER_SERVICE_MAP: dict[str, tuple[ServiceType, ServiceName]] = {
     "paymob": (ServiceType.PAYMENT_GATEWAY, ServiceName.PAYMOB),
     "fawry": (ServiceType.PAYMENT_GATEWAY, ServiceName.FAWRY),
     "stripe": (ServiceType.PAYMENT_GATEWAY, ServiceName.STRIPE),
+    "fawaterak": (ServiceType.PAYMENT_GATEWAY, ServiceName.FAWATERAK),
 }
 
 
@@ -56,6 +57,17 @@ def _build_paymob(creds: dict[str, Any]):
     )
 
 
+def _build_fawaterak(creds: dict[str, Any]):
+    """Build FawaterakPaymentService from decrypted credentials."""
+    from src.infrastructure.external_services.fawaterak import FawaterakPaymentService
+
+    return FawaterakPaymentService(
+        api_key=creds.get("api_key"),
+        vendor_key=creds.get("vendor_key"),
+        environment=creds.get("environment", "staging"),
+    )
+
+
 def _build_fawry(creds: dict[str, Any]):
     """Build FawryPaymentService from decrypted credentials."""
     from src.infrastructure.external_services.fawry import FawryPaymentService
@@ -71,6 +83,7 @@ PROVIDER_BUILDERS: dict[str, Any] = {
     "kashier": _build_kashier,
     "paymob": _build_paymob,
     "fawry": _build_fawry,
+    "fawaterak": _build_fawaterak,
 }
 
 

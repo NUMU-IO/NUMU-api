@@ -445,6 +445,87 @@ class TapValidator(GatewayValidator):
             )
 
 
+class FawaterakValidator(GatewayValidator):
+    """Validator for Fawaterak payment gateway credentials.
+
+    Fawaterak is an Egyptian payment aggregator supporting:
+    - Credit/Debit cards
+    - Mobile wallets
+    - Fawry reference payments
+    - Aman, Masary
+
+    Required credentials:
+    - api_key: Fawaterak API bearer token
+    - vendor_key: Secret key for webhook HMAC verification
+
+    Optional credentials:
+    - environment: "staging" or "production" (default: staging)
+    """
+
+    STAGING_URL = "https://staging.fawaterk.com/api/v2"
+    PRODUCTION_URL = "https://app.fawaterk.com/api/v2"
+
+    @property
+    def service_name(self) -> str:
+        return "fawaterak"
+
+    @property
+    def required_fields(self) -> list[str]:
+        return ["api_key", "vendor_key"]
+
+    @property
+    def optional_fields(self) -> list[str]:
+        return ["environment"]
+
+    async def validate(self, credentials: dict[str, Any]) -> ValidationResult:
+        """Validate Fawaterak credentials.
+
+        Validates by calling the getInvoiceData endpoint with a dummy ID.
+        A 401 means invalid key; other errors mean the key is valid.
+        """
+        structure_result = self.validate_structure(credentials)
+        if not structure_result.is_valid:
+            return structure_result
+
+        api_key = credentials["api_key"]
+        environment = credentials.get("environment", "staging")
+        base_url = (
+            self.PRODUCTION_URL if environment == "production" else self.STAGING_URL
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT) as client:
+                response = await client.get(
+                    f"{base_url}/getInvoiceData/0",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                if response.status_code == 401:
+                    return ValidationResult.failure(
+                        message="Invalid Fawaterak API key",
+                        error_code="INVALID_API_KEY",
+                    )
+
+                # Any other response (404, 200 with error) means the key is valid
+                return ValidationResult.success(
+                    message="Fawaterak credentials validated successfully",
+                    details={"environment": environment},
+                )
+
+        except httpx.TimeoutException:
+            return ValidationResult.timeout(
+                message="Fawaterak API validation request timed out"
+            )
+        except Exception as e:
+            return ValidationResult.error(
+                message=f"Failed to validate Fawaterak credentials: {str(e)}",
+                error_code="VALIDATION_ERROR",
+            )
+
+
 class KashierValidator(GatewayValidator):
     """Validator for Kashier payment gateway credentials.
 

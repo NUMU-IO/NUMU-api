@@ -40,6 +40,8 @@ STOREFRONT_AUTH_EXEMPT_SUFFIXES = (
     "/auth/logout",
     "/auth/verify-email",
     "/auth/resend-verification",
+    "/checkout/otp/send",
+    "/checkout/otp/verify",
 )
 
 

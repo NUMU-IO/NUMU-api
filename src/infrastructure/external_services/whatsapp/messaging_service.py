@@ -68,6 +68,13 @@ class WhatsAppMessagingService(IMessagingService):
         )
         self.app_secret = app_secret or settings.whatsapp_app_secret
         self.enabled = settings.whatsapp_enabled
+        # Set by get_whatsapp_service() resolver
+        self._is_own: bool = False
+
+    @property
+    def connection_type(self) -> str:
+        """Return 'own' if using per-store credentials, 'shared' otherwise."""
+        return "own" if self._is_own else "shared"
 
     @property
     def channel(self) -> MessageChannel:
@@ -434,6 +441,148 @@ class WhatsAppMessagingService(IMessagingService):
             },
         )
         return await self.send_message(content)
+
+    async def send_text_message(
+        self,
+        phone: str,
+        text: str,
+    ) -> MessageResult:
+        """Send a freeform text message (only within 24h customer service window).
+
+        Args:
+            phone: Recipient phone number.
+            text: Plain text message body.
+
+        Returns:
+            MessageResult with delivery status.
+        """
+        if not self.enabled:
+            return MessageResult(
+                success=False,
+                channel=MessageChannel.WHATSAPP,
+                status=MessageStatus.FAILED,
+                error_message="WhatsApp messaging is disabled",
+            )
+
+        formatted_phone = self._format_phone_number(phone)
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": formatted_phone,
+            "type": "text",
+            "text": {"body": text},
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{WHATSAPP_API_BASE}/{self.phone_number_id}/messages",
+                    headers=self._get_headers(),
+                    json=payload,
+                    timeout=30.0,
+                )
+                if response.status_code in (200, 201):
+                    data = response.json()
+                    message_id = data.get("messages", [{}])[0].get("id")
+                    return MessageResult(
+                        success=True,
+                        message_id=message_id,
+                        channel=MessageChannel.WHATSAPP,
+                        status=MessageStatus.SENT,
+                    )
+                else:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get(
+                        "message", "Unknown error"
+                    )
+                    return MessageResult(
+                        success=False,
+                        channel=MessageChannel.WHATSAPP,
+                        status=MessageStatus.FAILED,
+                        error_message=error_msg,
+                    )
+        except Exception as e:
+            logger.error(f"WhatsApp text send error: {e}")
+            return MessageResult(
+                success=False,
+                channel=MessageChannel.WHATSAPP,
+                status=MessageStatus.FAILED,
+                error_message=str(e),
+            )
+
+    async def send_media_message(
+        self,
+        phone: str,
+        media_url: str,
+        caption: str | None = None,
+        media_type: str = "image",
+    ) -> MessageResult:
+        """Send a media message (image, document, video).
+
+        Args:
+            phone: Recipient phone number.
+            media_url: Public URL of the media file.
+            caption: Optional caption text.
+            media_type: One of 'image', 'document', 'video'.
+
+        Returns:
+            MessageResult with delivery status.
+        """
+        if not self.enabled:
+            return MessageResult(
+                success=False,
+                channel=MessageChannel.WHATSAPP,
+                status=MessageStatus.FAILED,
+                error_message="WhatsApp messaging is disabled",
+            )
+
+        formatted_phone = self._format_phone_number(phone)
+        media_obj: dict[str, Any] = {"link": media_url}
+        if caption:
+            media_obj["caption"] = caption
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": formatted_phone,
+            "type": media_type,
+            media_type: media_obj,
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{WHATSAPP_API_BASE}/{self.phone_number_id}/messages",
+                    headers=self._get_headers(),
+                    json=payload,
+                    timeout=30.0,
+                )
+                if response.status_code in (200, 201):
+                    data = response.json()
+                    message_id = data.get("messages", [{}])[0].get("id")
+                    return MessageResult(
+                        success=True,
+                        message_id=message_id,
+                        channel=MessageChannel.WHATSAPP,
+                        status=MessageStatus.SENT,
+                    )
+                else:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get(
+                        "message", "Unknown error"
+                    )
+                    return MessageResult(
+                        success=False,
+                        channel=MessageChannel.WHATSAPP,
+                        status=MessageStatus.FAILED,
+                        error_message=error_msg,
+                    )
+        except Exception as e:
+            logger.error(f"WhatsApp media send error: {e}")
+            return MessageResult(
+                success=False,
+                channel=MessageChannel.WHATSAPP,
+                status=MessageStatus.FAILED,
+                error_message=str(e),
+            )
 
     async def get_message_status(
         self,

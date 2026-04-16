@@ -25,6 +25,11 @@ SERVICE_INFO = {
         "description": "Egypt's payment infrastructure provider. Supports cards, mobile wallets, installments, and BNPL.",
         "documentation_url": "https://docs.paymob.com",
     },
+    ServiceName.FAWATERAK: {
+        "display_name": "Fawaterak",
+        "description": "Egyptian payment aggregator supporting cards, wallets, Fawry, Aman, and Masary.",
+        "documentation_url": "https://fawaterak-api.readme.io/reference/overview",
+    },
     ServiceName.VODAFONE_CASH: {
         "display_name": "Vodafone Cash",
         "description": "Egypt's leading mobile wallet service for instant payments.",

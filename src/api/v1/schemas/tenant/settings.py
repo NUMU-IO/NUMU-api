@@ -30,6 +30,7 @@ class UpdatePaymentSettingsRequest(BaseModel):
 
     cod_enabled: bool | None = None
     fawry_enabled: bool | None = None
+    fawaterak_enabled: bool | None = None
     paymob_enabled: bool | None = None
     vodafone_cash_enabled: bool | None = None
     bank_transfer_enabled: bool | None = None
@@ -106,6 +107,24 @@ class FawryCredentialsResponse(BaseModel):
     is_configured: bool
     merchant_code: str | None = None
     security_key_masked: str | None = None
+    last_configured: str | None = None
+
+
+class SaveFawaterakCredentialsRequest(BaseModel):
+    """Save Fawaterak gateway credentials for a store."""
+
+    api_key: str = Field(..., min_length=10, max_length=500)
+    vendor_key: str = Field(..., min_length=10, max_length=500)
+    environment: str = Field(default="staging", pattern="^(staging|production)$")
+
+
+class FawaterakCredentialsResponse(BaseModel):
+    """Fawaterak credentials status (masked, never returns real keys)."""
+
+    is_configured: bool
+    api_key_masked: str | None = None
+    vendor_key_masked: str | None = None
+    environment: str | None = None
     last_configured: str | None = None
 
 

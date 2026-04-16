@@ -6,6 +6,7 @@ Generates and verifies OTP codes for COD orders to reduce fake orders.
 OTP is sent via WhatsApp (primary) or email (fallback).
 """
 
+import hashlib
 import logging
 import secrets
 from typing import Annotated
@@ -14,7 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
 
-from src.api.dependencies.auth import get_current_customer
+from src.api.dependencies.auth import get_optional_customer
 from src.api.responses import SuccessResponse
 from src.config import settings
 from src.core.entities.customer import Customer
@@ -33,19 +34,19 @@ OTP_COOLDOWN_SECONDS = 60  # 1 minute between resends
 OTP_MAX_ATTEMPTS = 5  # Max verification attempts before lockout
 
 
-def _otp_key(store_id: UUID, customer_id: UUID) -> str:
+def _otp_key(store_id: UUID, customer_id: str) -> str:
     return f"cod_otp:{store_id}:{customer_id}"
 
 
-def _otp_attempts_key(store_id: UUID, customer_id: UUID) -> str:
+def _otp_attempts_key(store_id: UUID, customer_id: str) -> str:
     return f"cod_otp_attempts:{store_id}:{customer_id}"
 
 
-def _otp_cooldown_key(store_id: UUID, customer_id: UUID) -> str:
+def _otp_cooldown_key(store_id: UUID, customer_id: str) -> str:
     return f"cod_otp_cooldown:{store_id}:{customer_id}"
 
 
-def _otp_verified_key(store_id: UUID, customer_id: UUID) -> str:
+def _otp_verified_key(store_id: UUID, customer_id: str) -> str:
     return f"cod_otp_verified:{store_id}:{customer_id}"
 
 
@@ -61,6 +62,10 @@ class SendOtpResponse(BaseModel):
 
 class VerifyOtpRequest(BaseModel):
     otp_code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+    phone: str | None = Field(
+        None,
+        description="Phone number (required for guest, optional for authenticated)",
+    )
 
 
 class VerifyOtpResponse(BaseModel):
@@ -76,7 +81,7 @@ class VerifyOtpResponse(BaseModel):
 async def send_cod_otp(
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: SendOtpRequest,
-    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    current_customer: Annotated[Customer | None, Depends(get_optional_customer)],
 ):
     """Send a 6-digit OTP to the customer's phone via WhatsApp.
 
@@ -89,15 +94,23 @@ async def send_cod_otp(
             detail="OTP service is not available",
         )
 
-    # Verify customer belongs to this store
-    if current_customer.store_id != store_id:
+    # Use customer ID if authenticated, otherwise use phone as identifier for guest
+    customer_id = current_customer.id if current_customer else None
+    if not customer_id:
+        # For guest checkout, use phone as identifier
+        import hashlib
+
+        customer_id = hashlib.sha256(request.phone.encode()).hexdigest()[:32]
+
+    # Verify customer belongs to this store (skip for guest)
+    if current_customer and current_customer.store_id != store_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Customer does not belong to this store",
         )
 
     # Cooldown check — prevent spamming
-    cooldown_key = _otp_cooldown_key(store_id, current_customer.id)
+    cooldown_key = _otp_cooldown_key(store_id, customer_id)
     if await _cache_service.exists(cooldown_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -108,15 +121,15 @@ async def send_cod_otp(
     otp_code = f"{secrets.randbelow(1000000):06d}"
 
     # Store in Redis
-    otp_key = _otp_key(store_id, current_customer.id)
+    otp_key = _otp_key(store_id, customer_id)
     await _cache_service.set(otp_key, otp_code, expire=OTP_TTL_SECONDS)
 
     # Reset attempts counter
-    attempts_key = _otp_attempts_key(store_id, current_customer.id)
+    attempts_key = _otp_attempts_key(store_id, customer_id)
     await _cache_service.delete(attempts_key)
 
     # Clear any previous verified state
-    verified_key = _otp_verified_key(store_id, current_customer.id)
+    verified_key = _otp_verified_key(store_id, customer_id)
     await _cache_service.delete(verified_key)
 
     # Set cooldown
@@ -176,7 +189,7 @@ async def send_cod_otp(
                 if resp.status_code == 200:
                     sent = True
                     logger.info(
-                        f"COD OTP sent via WhatsApp to {phone} for customer {current_customer.id}"
+                        f"COD OTP sent via WhatsApp to {phone} for {customer_id}"
                     )
                 else:
                     logger.warning(
@@ -188,7 +201,11 @@ async def send_cod_otp(
     # Fallback to email if WhatsApp failed or not configured
     if not sent:
         channel = "email"
-        customer_email = str(current_customer.email) if current_customer.email else None
+        customer_email = (
+            str(current_customer.email)
+            if current_customer and current_customer.email
+            else None
+        )
         if customer_email:
             try:
                 from src.core.interfaces.services.email_service import EmailMessage
@@ -210,7 +227,7 @@ async def send_cod_otp(
                 )
                 sent = True
                 logger.info(
-                    f"COD OTP sent via email to {customer_email} for customer {current_customer.id}"
+                    f"COD OTP sent via email to {customer_email} for {customer_id}"
                 )
             except Exception as e:
                 logger.warning(f"Email OTP send failed: {e}")
@@ -244,7 +261,7 @@ async def send_cod_otp(
 async def verify_cod_otp(
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: VerifyOtpRequest,
-    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    current_customer: Annotated[Customer | None, Depends(get_optional_customer)],
 ):
     """Verify the OTP code submitted by the customer.
 
@@ -257,18 +274,29 @@ async def verify_cod_otp(
             detail="OTP service is not available",
         )
 
-    if current_customer.store_id != store_id:
+    # Get customer_id - use authenticated or derive from phone
+    customer_id = str(current_customer.id) if current_customer else None
+    if not customer_id:
+        if not request.phone:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Phone number required for guest verification",
+            )
+        customer_id = hashlib.sha256(request.phone.encode()).hexdigest()[:32]
+
+    # Verify customer belongs to this store (skip for guest)
+    if current_customer and current_customer.store_id != store_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Customer does not belong to this store",
         )
 
     # Check attempts
-    attempts_key = _otp_attempts_key(store_id, current_customer.id)
+    attempts_key = _otp_attempts_key(store_id, customer_id)
     attempts = await _cache_service.get(attempts_key)
     if attempts and int(attempts) >= OTP_MAX_ATTEMPTS:
         # Invalidate the OTP
-        otp_key = _otp_key(store_id, current_customer.id)
+        otp_key = _otp_key(store_id, customer_id)
         await _cache_service.delete(otp_key)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -276,7 +304,7 @@ async def verify_cod_otp(
         )
 
     # Get stored OTP
-    otp_key = _otp_key(store_id, current_customer.id)
+    otp_key = _otp_key(store_id, customer_id)
     stored_otp = await _cache_service.get(otp_key)
 
     if not stored_otp:
@@ -304,12 +332,10 @@ async def verify_cod_otp(
     await _cache_service.delete(attempts_key)
 
     # Set verified flag (valid for 15 minutes — enough time to complete checkout)
-    verified_key = _otp_verified_key(store_id, current_customer.id)
+    verified_key = _otp_verified_key(store_id, customer_id)
     await _cache_service.set(verified_key, "1", expire=900)
 
-    logger.info(
-        f"COD OTP verified for customer {current_customer.id} in store {store_id}"
-    )
+    logger.info(f"COD OTP verified for customer {customer_id} in store {store_id}")
 
     return SuccessResponse(
         data=VerifyOtpResponse(verified=True),
