@@ -182,7 +182,7 @@ class MetaSocialService:
                 raise ExternalServiceError(
                     "Meta", f"OAuth token exchange failed: {resp.status_code}"
                 )
-            short_token = resp.json()["access_token"]
+            short_token: str = resp.json()["access_token"]
 
             # Step 2b: short-lived → long-lived token
             resp = await client.get(
@@ -198,7 +198,8 @@ class MetaSocialService:
                 logger.warning("Long-lived token exchange failed, using short-lived")
                 return short_token
 
-            return resp.json()["access_token"]
+            token: str = resp.json()["access_token"]
+            return token
 
     # ------------------------------------------------------------------
     # Step 3: Account info
@@ -363,7 +364,7 @@ class MetaSocialService:
         params = {
             "access_token": access_token,
             "fields": "id,caption,media_url,thumbnail_url,media_type,like_count,comments_count,timestamp",
-            "limit": min(limit, 100),  # API max is 100 per page
+            "limit": str(min(limit, 100)),  # API max is 100 per page
         }
         if cursor:
             params["after"] = cursor

@@ -124,6 +124,12 @@ Environment variables:
 | `RESEND_API_KEY` | Resend email API key | Optional |
 | `OPENAI_API_KEY` | OpenAI API key | Optional |
 | `R2_ACCESS_KEY_ID` | Cloudflare R2 access key | Optional |
+| `META_APP_ID` | Meta (Facebook/Instagram) App ID | Optional |
+| `META_APP_SECRET` | Meta App Secret | Optional |
+| `META_WEBHOOK_VERIFY_TOKEN` | Webhook verification token | Optional |
+| `META_GRAPH_API_VERSION` | Graph API version | `v21.0` |
+| `META_LOGIN_CONFIG_ID` | Facebook Login Config ID | Optional |
+| `INBOX_REALTIME_ENABLED` | Enable WebSocket inbox realtime | `true` |
 
 See `src/config/settings.py` for all configuration options.
 

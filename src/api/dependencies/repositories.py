@@ -244,3 +244,57 @@ def get_store_theme_repository(
 ) -> StoreThemeRepository:
     """Get store-theme installation repository dependency."""
     return StoreThemeRepository(session)
+
+
+def get_channel_connection_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get channel connection repository dependency."""
+    from src.infrastructure.repositories import ChannelConnectionRepositoryImpl
+
+    return ChannelConnectionRepositoryImpl(session)
+
+
+def get_message_thread_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get message thread repository dependency."""
+    from src.infrastructure.repositories import MessageThreadRepositoryImpl
+
+    return MessageThreadRepositoryImpl(session)
+
+
+def get_channel_message_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get channel message repository dependency."""
+    from src.infrastructure.repositories import ChannelMessageRepositoryImpl
+
+    return ChannelMessageRepositoryImpl(session)
+
+
+def get_whatsapp_template_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get WhatsApp template repository dependency."""
+    from src.infrastructure.repositories import WhatsAppTemplateRepositoryImpl
+
+    return WhatsAppTemplateRepositoryImpl(session)
+
+
+def get_catalog_mapping_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get catalog mapping repository dependency."""
+    from src.infrastructure.repositories import CatalogMappingRepositoryImpl
+
+    return CatalogMappingRepositoryImpl(session)
+
+
+def get_webhook_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get webhook event repository dependency."""
+    from src.infrastructure.repositories import WebhookEventRepositoryImpl
+
+    return WebhookEventRepositoryImpl(session)
