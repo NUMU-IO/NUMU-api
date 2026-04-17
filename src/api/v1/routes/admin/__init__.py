@@ -19,6 +19,7 @@ from src.api.v1.routes.admin.dashboard import router as dashboard_router
 from src.api.v1.routes.admin.feedback import router as feedback_router
 from src.api.v1.routes.admin.landing_page import router as landing_page_router
 from src.api.v1.routes.admin.orders import router as orders_router
+from src.api.v1.routes.admin.platform_config import router as platform_config_router
 from src.api.v1.routes.admin.products import router as products_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.stores import router as stores_router
@@ -41,6 +42,11 @@ router.include_router(
 )
 router.include_router(
     reconciliation_router, prefix="/reconciliation", tags=["Admin - Reconciliation"]
+)
+router.include_router(
+    platform_config_router,
+    prefix="/platform-config",
+    tags=["Admin - Platform Config"],
 )
 # Credentials router already has prefix="/admin/credentials" built-in,
 # so we include it at root "" to avoid /admin/admin/credentials

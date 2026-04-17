@@ -9,11 +9,18 @@ from src.infrastructure.database.models.base import (
 
 # Public schema models
 from src.infrastructure.database.models.public import (
+    CapiEventModel,
+    CatalogMappingModel,
+    ChannelConnectionModel,
+    ChannelMessageModel,
     FeedbackModel,
+    MessageThreadModel,
     StoreOnboardingModel,
     TenantModel,
     UserModel,
     WaitlistModel,
+    WebhookEventModel,
+    WhatsAppTemplateModel,
 )
 
 # Tenant-scoped models (with tenant_id discriminator)
@@ -60,6 +67,14 @@ __all__ = [
     "UserModel",
     "WaitlistModel",
     "AuditLogModel",
+    # Omnichannel
+    "ChannelConnectionModel",
+    "MessageThreadModel",
+    "ChannelMessageModel",
+    "WhatsAppTemplateModel",
+    "CatalogMappingModel",
+    "WebhookEventModel",
+    "CapiEventModel",
     # Tenant-scoped
     "AutomationLogModel",
     "AutomationRuleModel",

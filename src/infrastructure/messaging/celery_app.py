@@ -46,11 +46,15 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.demo_cleanup_task",
         "src.infrastructure.messaging.tasks.trial_expiry_task",
         "src.infrastructure.messaging.tasks.read_only_purge_task",
+        # Feature 001: Omnichannel inbox
+        "src.infrastructure.messaging.tasks.omnichannel_tasks",
     ],
     # Queue definitions
     task_queues=(
         Queue("default"),
         Queue("images"),
+        Queue("messaging"),
+        Queue("catalog"),
     ),
     task_default_queue="default",
     # Route image tasks to dedicated queue

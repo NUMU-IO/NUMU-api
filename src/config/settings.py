@@ -233,6 +233,11 @@ class Settings(BaseSettings):
     meta_app_secret: str | None = None
     meta_config_id: str | None = None  # Embedded Signup configuration ID
     meta_graph_api_version: str = "v19.0"
+    meta_webhook_verify_token: str | None = None
+    meta_login_config_id: str | None = None
+
+    # Omnichannel Inbox
+    inbox_realtime_enabled: bool = True
 
     # OpenAI
     openai_api_key: str | None = None
@@ -375,6 +380,7 @@ class Settings(BaseSettings):
     whatsapp_webhook_verify_token: str | None = None
     whatsapp_app_secret: str | None = None  # For webhook signature verification
     whatsapp_enabled: bool = False
+    whatsapp_business_api_version: str = "v21.0"
 
     # Egyptian Tax Authority (ETA) E-Invoicing
     eta_client_id: str | None = None
