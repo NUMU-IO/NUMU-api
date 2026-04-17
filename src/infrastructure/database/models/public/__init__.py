@@ -16,7 +16,6 @@ from src.infrastructure.database.models.public.omnichannel import (
     ChannelMessageModel,
     MessageThreadModel,
     WebhookEventModel,
-    WhatsAppTemplateModel,
 )
 from src.infrastructure.database.models.public.onboarding import StoreOnboardingModel
 from src.infrastructure.database.models.public.reconciliation import (
@@ -41,7 +40,6 @@ __all__ = [
     "ChannelConnectionModel",
     "MessageThreadModel",
     "ChannelMessageModel",
-    "WhatsAppTemplateModel",
     "CatalogMappingModel",
     "WebhookEventModel",
     "CapiEventModel",
