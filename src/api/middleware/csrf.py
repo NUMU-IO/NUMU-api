@@ -12,6 +12,9 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 # path to exclude from CSRF protection, e.g. webhook endpoints
 CSRF_EXEMPT_PATHS = (
     "/api/v1/webhooks/",
+    "/api/v1/admin/auth/refresh",
+    "/api/v1/admin/auth/login",
+    "/api/v1/admin/auth/logout",
     "/api/v1/auth/refresh",
     "/api/v1/auth/login",
     "/api/v1/auth/2fa/complete-login",
