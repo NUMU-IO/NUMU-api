@@ -1722,6 +1722,143 @@ SECTION_SCHEMAS: list[dict[str, Any]] = [
         ],
         "presets": [],
     },
+    {
+        "type": "about",
+        "name": "About Page",
+        "nameAr": "صفحة عن المتجر",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {
+                "key": "title",
+                "type": "text",
+                "label": "Title",
+                "labelAr": "العنوان",
+                "default": "About Our Store",
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
+                "key": "subtitle",
+                "type": "text",
+                "label": "Subtitle",
+                "labelAr": "العنوان الفرعي",
+                "default": "Our Story",
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
+                "key": "body",
+                "type": "textarea",
+                "label": "Body",
+                "labelAr": "النص",
+                "default": "We specialize in offering the best products with top quality and great prices. Customer satisfaction is our priority.",
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
+                "key": "hero_image",
+                "type": "image",
+                "label": "Hero Image",
+                "labelAr": "صورة البانر",
+                "default": "https://placeholdit.com/1200x600/dddddd/999999",
+                "group": "Media",
+                "groupAr": "الوسائط",
+            },
+            {
+                "key": "show_values",
+                "type": "checkbox",
+                "label": "Show Values Grid",
+                "labelAr": "إظهار شبكة القيم",
+                "default": True,
+                "group": "Layout",
+                "groupAr": "التخطيط",
+            },
+            {
+                "key": "show_stats",
+                "type": "checkbox",
+                "label": "Show Stats",
+                "labelAr": "إظهار الإحصائيات",
+                "default": True,
+                "group": "Layout",
+                "groupAr": "التخطيط",
+            },
+        ],
+        "presets": [],
+    },
+    {
+        "type": "auth",
+        "name": "Auth Page",
+        "nameAr": "صفحة تسجيل الدخول",
+        "limit": 1,
+        "page_section": True,
+        "settings": [
+            {
+                "key": "login_title",
+                "type": "text",
+                "label": "Login Title",
+                "labelAr": "عنوان تسجيل الدخول",
+                "default": "Welcome Back",
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
+                "key": "login_subtitle",
+                "type": "text",
+                "label": "Login Subtitle",
+                "labelAr": "عنوان فرعي لتسجيل الدخول",
+                "default": "Sign in to your account",
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
+                "key": "register_title",
+                "type": "text",
+                "label": "Register Title",
+                "labelAr": "عنوان التسجيل",
+                "default": "Create an Account",
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
+                "key": "register_subtitle",
+                "type": "text",
+                "label": "Register Subtitle",
+                "labelAr": "عنوان فرعي للتسجيل",
+                "default": "Join us and start shopping today",
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
+                "key": "hero_image",
+                "type": "image",
+                "label": "Side Image",
+                "labelAr": "صورة جانبية",
+                "default": "https://placeholdit.com/800x1000/dddddd/999999",
+                "group": "Media",
+                "groupAr": "الوسائط",
+            },
+            {
+                "key": "show_guest_checkout",
+                "type": "checkbox",
+                "label": "Show Continue as Guest",
+                "labelAr": "إظهار المتابعة كضيف",
+                "default": True,
+                "group": "Layout",
+                "groupAr": "التخطيط",
+            },
+            {
+                "key": "show_social_note",
+                "type": "checkbox",
+                "label": "Show Promo Note",
+                "labelAr": "إظهار ملاحظة ترويجية",
+                "default": True,
+                "group": "Layout",
+                "groupAr": "التخطيط",
+            },
+        ],
+        "presets": [],
+    },
 ]
 
 # ── Per-theme global settings schemas ────────────────────────────────────────
@@ -2746,6 +2883,36 @@ _PAGE_TEMPLATES: dict[str, dict[str, Any]] = {
             "profile_main": {"id": "profile_main", "type": "profile", "settings": {}}
         },
         "order": ["profile_main"],
+    },
+    "faq": {
+        "name": "faq",
+        "sections": {
+            "faq_section": {"id": "faq_section", "type": "faq", "settings": {}}
+        },
+        "order": ["faq_section"],
+    },
+    "lookbook": {
+        "name": "lookbook",
+        "sections": {
+            "lookbook_grid": {
+                "id": "lookbook_grid",
+                "type": "slideshow",
+                "settings": {"height": "full"},
+            }
+        },
+        "order": ["lookbook_grid"],
+    },
+    "about": {
+        "name": "about",
+        "sections": {
+            "about_main": {"id": "about_main", "type": "about", "settings": {}}
+        },
+        "order": ["about_main"],
+    },
+    "auth": {
+        "name": "auth",
+        "sections": {"auth_main": {"id": "auth_main", "type": "auth", "settings": {}}},
+        "order": ["auth_main"],
     },
 }
 
