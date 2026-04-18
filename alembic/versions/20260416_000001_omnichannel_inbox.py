@@ -250,65 +250,8 @@ def upgrade() -> None:
         schema="public",
     )
 
-    # ─── whatsapp_templates ───────────────────────────────────────────────
-    op.create_table(
-        "whatsapp_templates",
-        sa.Column(
-            "id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
-            primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
-        ),
-        sa.Column(
-            "tenant_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("public.tenants.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column(
-            "store_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("public.stores.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column(
-            "channel_connection_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("public.channel_connections.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column("external_template_id", sa.Text, nullable=True),
-        sa.Column("name", sa.Text, nullable=False),
-        sa.Column("category", sa.String(20), nullable=False),
-        sa.Column("language", sa.String(10), nullable=False),
-        sa.Column("status", sa.String(20), nullable=False, server_default="DRAFT"),
-        sa.Column("components", sa.dialects.postgresql.JSONB, nullable=True),
-        sa.Column("rejection_reason", sa.Text, nullable=True),
-        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        schema="public",
-    )
-    op.create_unique_constraint(
-        "uq_whatsapp_templates_connection_name_lang",
-        "whatsapp_templates",
-        ["channel_connection_id", "name", "language"],
-        schema="public",
-    )
+    # whatsapp_templates is owned by 20260413_add_whatsapp_tables.py; the
+    # duplicate definition that used to live here is removed.
 
     # ─── catalog_mappings ─────────────────────────────────────────────────
     op.create_table(
@@ -468,10 +411,6 @@ def upgrade() -> None:
         USING (tenant_id::text = current_setting('app.current_tenant', true)::text)
     """)
     op.execute("""
-        CREATE POLICY tenant_isolation_whatsapp_templates ON public.whatsapp_templates
-        USING (tenant_id::text = current_setting('app.current_tenant', true)::text)
-    """)
-    op.execute("""
         CREATE POLICY tenant_isolation_catalog_mappings ON public.catalog_mappings
         USING (tenant_id::text = current_setting('app.current_tenant', true)::text)
     """)
@@ -488,16 +427,12 @@ def downgrade() -> None:
         "DROP POLICY IF EXISTS tenant_isolation_channel_messages ON public.channel_messages"
     )
     op.execute(
-        "DROP POLICY IF EXISTS tenant_isolation_whatsapp_templates ON public.whatsapp_templates"
-    )
-    op.execute(
         "DROP POLICY IF EXISTS tenant_isolation_catalog_mappings ON public.catalog_mappings"
     )
 
     op.drop_table("capi_events", schema="public")
     op.drop_table("webhook_events", schema="public")
     op.drop_table("catalog_mappings", schema="public")
-    op.drop_table("whatsapp_templates", schema="public")
     op.drop_table("channel_messages", schema="public")
     op.drop_table("message_threads", schema="public")
     op.drop_table("channel_connections", schema="public")
