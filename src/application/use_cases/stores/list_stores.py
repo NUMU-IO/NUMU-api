@@ -71,3 +71,30 @@ class ListStoresUseCase:
             page=page,
             page_size=page_size,
         )
+
+    async def accessible_for_user(
+        self,
+        user_id: UUID,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> PaginatedDTO:
+        """List stores the user can access — owned OR active tenant member.
+
+        Used for "my stores" in the merchant dashboard. Staff users who
+        accept an invitation don't own a store but need to see (and switch
+        into) the tenant's stores.
+        """
+        skip = (page - 1) * page_size
+        stores = await self.store_repository.get_accessible_by_user(
+            user_id=user_id,
+            skip=skip,
+            limit=page_size,
+        )
+        total = len(stores)
+
+        return PaginatedDTO.create(
+            items=[StoreDTO.from_entity(store) for store in stores],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )

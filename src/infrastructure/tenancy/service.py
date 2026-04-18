@@ -53,7 +53,7 @@ class TenantService:
 
         Args:
             name: Display name for the store
-            subdomain: Unique subdomain (e.g., 'mystore' for mystore.numu.io)
+            subdomain: Unique subdomain (e.g., 'mystore' for mystore.numueg.app)
             owner_id: UUID of the user who owns this store
             plan: Subscription plan (trial, starter, pro, enterprise, demo)
             is_active: Soft-delete flag

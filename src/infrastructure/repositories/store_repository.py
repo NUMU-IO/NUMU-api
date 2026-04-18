@@ -212,6 +212,47 @@ class StoreRepository(IStoreRepository):
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 
+    async def get_accessible_by_user(
+        self,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Store]:
+        """Get stores the user can access — owned OR active tenant member.
+
+        Staff who accept an invitation get an active TenantMembership on the
+        tenant the invite belongs to; this method returns both the stores they
+        own outright and the stores they've been invited into.
+        """
+        # Imported locally to avoid a circular import at module load time.
+        from src.infrastructure.database.models.public.tenant_membership import (
+            MembershipStatus,
+            TenantMembershipModel,
+        )
+
+        stmt = (
+            select(StoreModel)
+            .outerjoin(
+                TenantMembershipModel,
+                TenantMembershipModel.tenant_id == StoreModel.tenant_id,
+            )
+            .where(
+                or_(
+                    StoreModel.owner_id == user_id,
+                    (
+                        (TenantMembershipModel.user_id == user_id)
+                        & (TenantMembershipModel.status == MembershipStatus.ACTIVE)
+                        & (TenantMembershipModel.deleted_at.is_(None))
+                    ),
+                )
+            )
+            .distinct()
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return [self._to_entity(model) for model in result.scalars().all()]
+
     async def search(
         self,
         query: str,

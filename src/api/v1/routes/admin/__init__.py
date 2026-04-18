@@ -19,11 +19,15 @@ from src.api.v1.routes.admin.dashboard import router as dashboard_router
 from src.api.v1.routes.admin.demos import router as demos_router
 from src.api.v1.routes.admin.feedback import router as feedback_router
 from src.api.v1.routes.admin.landing_page import router as landing_page_router
+from src.api.v1.routes.admin.merchant_hub_nav import (
+    router as merchant_hub_nav_router,
+)
 from src.api.v1.routes.admin.orders import router as orders_router
 from src.api.v1.routes.admin.platform_config import router as platform_config_router
 from src.api.v1.routes.admin.products import router as products_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.stores import router as stores_router
+from src.api.v1.routes.admin.users import router as admin_users_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
 from src.api.v1.routes.tenant.configuration.admin_routes import (
     router as credentials_router,
@@ -49,6 +53,16 @@ router.include_router(
     platform_config_router,
     prefix="/platform-config",
     tags=["Admin - Platform Config"],
+)
+router.include_router(
+    merchant_hub_nav_router,
+    prefix="/merchant-hub-nav",
+    tags=["Admin - Merchant Hub Nav"],
+)
+router.include_router(
+    admin_users_router,
+    prefix="/users",
+    tags=["Admin - Users"],
 )
 # Credentials router already has prefix="/admin/credentials" built-in,
 # so we include it at root "" to avoid /admin/admin/credentials

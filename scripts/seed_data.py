@@ -39,7 +39,7 @@ async def seed_database():
         admin_password = password_service.hash_password("admin123456")
         admin = UserModel(
             id=admin_id,
-            email="admin@numu.io",
+            email="admin@numueg.app",
             hashed_password=admin_password,
             first_name="Super",
             last_name="Admin",
@@ -47,7 +47,7 @@ async def seed_database():
             status=UserStatus.ACTIVE,
         )
         session.add(admin)
-        print("Created admin user: admin@numu.io")
+        print("Created admin user: admin@numueg.app")
 
         # Create store owner user
         owner_id = uuid4()
@@ -200,7 +200,7 @@ async def seed_database():
         print("\n" + "=" * 50)
         print("TEST ACCOUNTS:")
         print("=" * 50)
-        print("Admin:    admin@numu.io / admin123456")
+        print("Admin:    admin@numueg.app / admin123456")
         print("Owner:    owner@example.com / owner123456")
         print("Customer: customer@example.com / customer123456")
         print("=" * 50)

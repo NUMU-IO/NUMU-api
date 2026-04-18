@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     turnstile_site_key: str | None = None
     turnstile_secret_key: str | None = None
     # Where storefronts live ("{subdomain}.{base}"). Demo storefronts use the same.
-    storefront_base_domain: str = "numu.io"
+    storefront_base_domain: str = "numueg.app"
     # Where the merchant hub is hosted. Used to build the demo redirect URL.
     merchant_hub_url: str = "https://merchant.numueg.app"
 

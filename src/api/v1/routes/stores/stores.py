@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
+    get_current_user_id,
     get_store_repository,
     require_store_owner,
     verify_store_ownership,
@@ -188,16 +189,22 @@ async def create_store(
     operation_id="list_stores",
 )
 async def list_stores(
-    user_id: Annotated[UUID, Depends(require_store_owner)],
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """List stores owned by the current user."""
+    """List stores the current user can access.
+
+    Returns stores the user owns outright and stores the user is an active
+    tenant member of (e.g. accepted a staff invitation). This is what the
+    merchant dashboard uses to decide whether to show the store picker or
+    redirect to /create-store.
+    """
     use_case = ListStoresUseCase(store_repository=store_repo)
 
-    result = await use_case.by_owner(
-        owner_id=user_id,
+    result = await use_case.accessible_for_user(
+        user_id=user_id,
         page=page,
         page_size=limit,
     )

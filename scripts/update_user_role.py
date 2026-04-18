@@ -21,7 +21,7 @@ async def check_enum():
         # Check current user role
         result2 = await session.execute(
             text(
-                "SELECT id, email, role FROM public.users WHERE email = 'admin@numu.io'"
+                "SELECT id, email, role FROM public.users WHERE email = 'admin@numueg.app'"
             )
         )
         user = result2.fetchone()

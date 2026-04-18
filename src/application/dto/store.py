@@ -68,7 +68,7 @@ class CreateStoreDTO(BaseDTO):
 
     name: str
     subdomain: (
-        str  # Required - the store's subdomain (e.g., "mystore" for mystore.numu.io)
+        str  # Required - the store's subdomain (e.g., "mystore" for mystore.numueg.app)
     )
     slug: str | None = None
     description: str | None = None

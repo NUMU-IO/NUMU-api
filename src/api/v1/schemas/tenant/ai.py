@@ -12,7 +12,7 @@ class GenerateDescriptionRequest(BaseModel):
                 "product_name": "Egyptian Cotton Tee",
                 "product_name_ar": "تيشيرت قطن مصري",
                 "category": "Clothing",
-                "image_url": "https://r2.numu.io/stores/abc/products/img.jpg",
+                "image_url": "https://r2.numueg.app/stores/abc/products/img.jpg",
                 "attributes": {"material": "100% Egyptian Cotton", "color": "White"},
                 "tone": "professional",
             }

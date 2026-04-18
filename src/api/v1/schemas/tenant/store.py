@@ -30,7 +30,7 @@ class CreateStoreRequest(BaseModel):
         ...,
         min_length=3,
         max_length=63,
-        description="Store subdomain (e.g., 'mystore' for mystore.numu.io)",
+        description="Store subdomain (e.g., 'mystore' for mystore.numueg.app)",
     )
     slug: str | None = Field(
         None,
@@ -108,7 +108,7 @@ class StoreResponse(BaseModel):
                 "slug": "nile-fashion",
                 "subdomain": "nilefashion",
                 "custom_domain": None,
-                "store_url": "https://nilefashion.numu.io",
+                "store_url": "https://nilefashion.numueg.app",
                 "owner_id": "550e8400-e29b-41d4-a716-446655440000",
                 "description": "Premium Egyptian fashion",
                 "logo_url": "https://cdn.numu.com/stores/logo.png",

@@ -294,7 +294,7 @@ class NotificationService:
                             "to": [{"email": payload.recipient_email}],
                         }
                     ],
-                    "from": {"email": "noreply@numu.io", "name": "NUMU"},
+                    "from": {"email": "noreply@numueg.app", "name": "NUMU"},
                     "subject": payload.title,
                     "content": [
                         {
@@ -373,7 +373,7 @@ class NotificationService:
             HTML string for email body
         """
         action_url = payload.data.get("action_url", "")
-        base_url = getattr(settings, "FRONTEND_URL", "https://dashboard.numu.io")
+        base_url = getattr(settings, "FRONTEND_URL", "https://merchant.numueg.app")
         full_action_url = f"{base_url}{action_url}"
 
         return f"""

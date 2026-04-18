@@ -1847,11 +1847,15 @@ async def publish_customization(
 async def upload_customization_asset(
     store: Annotated[Store, Depends(get_current_store)],
     file: UploadFile = File(...),
-    asset_type: str = Form(..., description="Asset type: logo, favicon, or hero_image"),
+    asset_type: str = Form(
+        ...,
+        description="Asset type: logo, favicon, hero_image, section_image, profile_picture, or social_image",
+    ),
 ):
     """Upload an asset for storefront customization.
 
-    Accepts logo, favicon, or hero_image uploads.
+    Accepts logo, favicon, hero_image, section_image, profile_picture,
+    or social_image (Open Graph) uploads.
     Returns the URL of the uploaded asset.
     """
     # Validate asset type
@@ -1861,6 +1865,7 @@ async def upload_customization_asset(
         "hero_image",
         "profile_picture",
         "section_image",
+        "social_image",
     }
     if asset_type not in allowed_types:
         raise HTTPException(

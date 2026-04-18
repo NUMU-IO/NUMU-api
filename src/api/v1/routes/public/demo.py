@@ -147,7 +147,7 @@ async def start_demo(
         token_service=token_service,
         seed_use_case=seed_use_case,
         onboarding_repository=onboarding_repo,
-        base_domain=getattr(settings, "storefront_base_domain", "numu.io"),
+        base_domain=getattr(settings, "storefront_base_domain", "numueg.app"),
         dashboard_base_url=getattr(
             settings, "merchant_hub_url", "https://merchant.numueg.app"
         ),

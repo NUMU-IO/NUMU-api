@@ -214,13 +214,13 @@ Examples:
     python -m scripts.create_superuser
 
   Create with arguments:
-    python -m scripts.create_superuser --email admin@numu.io --password MyP@ss123
+    python -m scripts.create_superuser --email admin@numueg.app --password MyP@ss123
 
   Promote existing user:
     python -m scripts.create_superuser --promote user@example.com
 
   Reset password:
-    python -m scripts.create_superuser --reset-password admin@numu.io
+    python -m scripts.create_superuser --reset-password admin@numueg.app
 
   List all superusers:
     python -m scripts.create_superuser --list

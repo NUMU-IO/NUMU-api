@@ -40,7 +40,7 @@ def send_welcome_email_task(
     self,
     email: str,
     merchant_name: str,
-    dashboard_url: str = "https://dashboard.numu.io",
+    dashboard_url: str = "https://merchant.numueg.app",
     language: str = "ar",
 ):
     """Send welcome email on merchant registration.
@@ -93,7 +93,7 @@ def send_first_product_email_task(
     email: str,
     merchant_name: str,
     product_name: str,
-    dashboard_url: str = "https://dashboard.numu.io",
+    dashboard_url: str = "https://merchant.numueg.app",
     language: str = "ar",
 ):
     """Send congratulations email when merchant adds first product.
@@ -153,7 +153,7 @@ def send_first_order_email_task(
     merchant_name: str,
     order_number: str,
     total: str,
-    dashboard_url: str = "https://dashboard.numu.io",
+    dashboard_url: str = "https://merchant.numueg.app",
     language: str = "ar",
 ):
     """Send congratulations email when merchant receives first order.
@@ -260,11 +260,11 @@ def send_store_approved_email_task(self, store_id: str):
             merchant_name = owner.first_name or owner.email
             store_name = store.name
             store_url = (
-                f"https://{store.subdomain}.numu.io"
+                f"https://{store.subdomain}.numueg.app"
                 if store.subdomain
-                else f"https://{store.slug}.numu.io"
+                else f"https://{store.slug}.numueg.app"
             )
-            dashboard_url = "https://dashboard.numu.io"
+            dashboard_url = "https://merchant.numueg.app"
 
             service = ResendEmailService()
             html = STORE_APPROVED_TEMPLATE["html_fn"](

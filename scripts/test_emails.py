@@ -114,7 +114,7 @@ async def main() -> None:
         # 4. Welcome (Onboarding)
         html = WELCOME_TEMPLATE["html_fn"](
             merchant_name="Yousef",
-            dashboard_url="https://dashboard.numu.io",
+            dashboard_url="https://merchant.numueg.app",
             language=lang,
         )
         subject = WELCOME_TEMPLATE["subject"].get(
@@ -131,7 +131,7 @@ async def main() -> None:
         html = FIRST_PRODUCT_ADDED_TEMPLATE["html_fn"](
             merchant_name="Yousef",
             product_name="Classic White T-Shirt",
-            dashboard_url="https://dashboard.numu.io",
+            dashboard_url="https://merchant.numueg.app",
             language=lang,
         )
         subject = FIRST_PRODUCT_ADDED_TEMPLATE["subject"].get(
@@ -149,7 +149,7 @@ async def main() -> None:
             merchant_name="Yousef",
             order_number="NUMU-TEST-1001",
             total="EGP 2,048.48",
-            dashboard_url="https://dashboard.numu.io",
+            dashboard_url="https://merchant.numueg.app",
             language=lang,
         )
         subject = FIRST_ORDER_RECEIVED_TEMPLATE["subject"].get(

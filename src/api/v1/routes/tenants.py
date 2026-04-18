@@ -65,7 +65,7 @@ async def create_tenant(
         )
 
         # Build store URL
-        base_domain = getattr(settings, "BASE_DOMAIN", "numu.io")
+        base_domain = getattr(settings, "BASE_DOMAIN", "numueg.app")
         store_url = f"https://{tenant.subdomain}.{base_domain}"
 
         logger.info(

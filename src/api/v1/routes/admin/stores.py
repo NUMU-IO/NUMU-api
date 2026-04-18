@@ -8,21 +8,30 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
+from src.api.dependencies.repositories import (
+    get_store_repository,
+    get_user_repository,
+)
+from src.api.dependencies.services import get_token_service
 from src.api.responses import SuccessResponse
+from src.api.utils.cookies import set_auth_cookies
 from src.api.v1.schemas.public.common import PaginatedListResponse
+from src.config import settings
 from src.core.entities.store import StoreStatus
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.store import StoreModel
+from src.infrastructure.external_services.token_service import TokenService
 from src.infrastructure.repositories.store_repository import StoreRepository
+from src.infrastructure.repositories.user_repository import UserRepository
 from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = logging.getLogger(__name__)
@@ -340,4 +349,84 @@ async def store_stats(
             inactive=inactive,
         ),
         message="Store stats retrieved successfully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Impersonate (admin → merchant hub)
+# ---------------------------------------------------------------------------
+
+
+class ImpersonateResponse(BaseModel):
+    dashboard_url: str
+    store_id: str
+    owner_id: str
+    owner_email: str
+
+
+@router.post(
+    "/{store_id}/impersonate",
+    response_model=SuccessResponse[ImpersonateResponse],
+    summary="Issue merchant-hub cookies for a store's owner and return the hub URL",
+    operation_id="admin_impersonate_store",
+)
+async def impersonate_store(
+    store_id: Annotated[UUID, Path()],
+    response: Response,
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[ImpersonateResponse]:
+    """Mint merchant-auth cookies so a super-admin can open the target store's
+    merchant hub as its owner.
+
+    We just issue a normal access + refresh pair for the owner user; the
+    COOKIE_DOMAIN is set to the parent domain (`.numueg.app`) so the cookies
+    set on the API response are visible to the merchant hub subdomain. The
+    response URL carries `?impersonating=1&by=<admin_email>` so the hub can
+    show a persistent banner — nothing secret lives in those params.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
+        )
+
+    owner = await user_repo.get_by_id(store.owner_id)
+    if not owner:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Store owner not found"
+        )
+
+    # Audit log — minimum bar before we wire a real audit table.
+    logger.warning(
+        "admin_impersonate_store admin=%s store=%s owner=%s",
+        admin_id,
+        store_id,
+        owner.id,
+    )
+
+    # Fetch admin email for the banner; best-effort, no auth impact if missing.
+    admin_user_row = await db.execute(
+        select(UserModel.email).where(UserModel.id == admin_id)
+    )
+    admin_email = (admin_user_row.scalar_one_or_none() or "admin") or "admin"
+
+    access = token_service.create_access_token(owner, tenant_id=store.tenant_id)
+    refresh = token_service.create_refresh_token(owner, tenant_id=store.tenant_id)
+    set_auth_cookies(response, access, refresh)
+
+    hub_base = settings.merchant_hub_url.rstrip("/")
+    dashboard_url = f"{hub_base}/?impersonating=1&by={admin_email}"
+
+    return SuccessResponse(
+        data=ImpersonateResponse(
+            dashboard_url=dashboard_url,
+            store_id=str(store.id),
+            owner_id=str(owner.id),
+            owner_email=str(owner.email),
+        ),
+        message="Impersonation session established",
     )

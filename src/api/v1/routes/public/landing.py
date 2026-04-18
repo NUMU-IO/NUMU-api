@@ -167,6 +167,34 @@ async def get_public_landing_config(
     )
 
 
+@router.get(
+    "/merchant-hub-nav",
+    summary="Merchant hub nav config (public read)",
+    operation_id="get_public_merchant_hub_nav",
+)
+async def get_public_merchant_hub_nav(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Tabs the merchant hub should show, hide, mark "coming soon", and order.
+
+    Reads the same platform_config row the admin endpoint writes. Kept public
+    so the merchant hub can fetch it on first paint without authenticating —
+    there are no secrets in this payload, just UI toggles.
+    """
+    from src.api.v1.routes.admin import merchant_hub_nav as nav_module
+
+    NAV_KEY = nav_module.CONFIG_KEY
+    DEFAULT_NAV = nav_module.DEFAULT_CONFIG
+    _merge_with_defaults = nav_module._merge_with_defaults
+
+    result = await db.execute(
+        select(PlatformConfigModel).where(PlatformConfigModel.key == NAV_KEY)
+    )
+    config = result.scalar_one_or_none()
+    data = _merge_with_defaults(config.value) if config else DEFAULT_NAV
+    return SuccessResponse(data=data, message="Merchant hub nav config")
+
+
 # Default pricing plans served to the landing page. Admin can override
 # via PUT /admin/platform-config/pricing_plans.
 DEFAULT_PRICING_PLANS = {

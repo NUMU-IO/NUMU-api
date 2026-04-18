@@ -5,7 +5,7 @@ Usage:
 
 Creates:
     - Tenant: "Staging Test Tenant" (subdomain: staging-test)
-    - User: staging-owner@numu.io (role: STORE_OWNER)
+    - User: staging-owner@numueg.app (role: STORE_OWNER)
     - Store: "Staging Test Store" (slug: staging-test-store)
 
 Safe to run multiple times - skips records that already exist.
@@ -44,7 +44,7 @@ async def seed_staging():
         created_any = False
 
         # ── Check/create user ───────────────────────────────────
-        user_email = "staging-owner@numu.io"
+        user_email = "staging-owner@numueg.app"
         existing_user = await session.execute(
             select(UserModel).where(UserModel.email == user_email)
         )

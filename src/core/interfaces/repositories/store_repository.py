@@ -46,6 +46,16 @@ class IStoreRepository(BaseRepository[Store]):
         ...
 
     @abstractmethod
+    async def get_accessible_by_user(
+        self,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Store]:
+        """Get stores the user can access — owned OR active tenant member."""
+        ...
+
+    @abstractmethod
     async def search(
         self,
         query: str,

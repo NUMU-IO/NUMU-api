@@ -30,7 +30,7 @@ class Store(BaseEntity):
     name: str
     slug: str
     owner_id: UUID
-    subdomain: str | None = None  # e.g., "mystore" for mystore.numu.io
+    subdomain: str | None = None  # e.g., "mystore" for mystore.numueg.app
     custom_domain: str | None = None  # e.g., "shop.mybrand.com"
     description: str | None = None
     logo_url: str | None = None
@@ -59,8 +59,8 @@ class Store(BaseEntity):
         if self.custom_domain:
             return f"https://{self.custom_domain}"
         if self.subdomain:
-            return f"https://{self.subdomain}.numu.io"
-        return f"https://{self.slug}.numu.io"
+            return f"https://{self.subdomain}.numueg.app"
+        return f"https://{self.slug}.numueg.app"
 
     @property
     def is_suspended(self) -> bool:

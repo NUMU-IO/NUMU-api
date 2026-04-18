@@ -5,7 +5,7 @@
  *
  * Usage:
  *   k6 run tests/performance/k6/api-load-test.js
- *   k6 run tests/performance/k6/api-load-test.js --env API_URL=https://staging.api.numu.io
+ *   k6 run tests/performance/k6/api-load-test.js --env API_URL=https://staging.api.numueg.app
  *
  * Thresholds based on 3G network optimization targets:
  *   - p95 < 2000ms (acceptable for 3G)

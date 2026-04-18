@@ -52,7 +52,7 @@ class StartDemoUseCase:
         token_service: ITokenService,
         seed_use_case: SeedDemoTenantUseCase,
         onboarding_repository=None,
-        base_domain: str = "numu.io",
+        base_domain: str = "numueg.app",
         dashboard_base_url: str = "https://merchant.numueg.app",
     ) -> None:
         self.db = db
