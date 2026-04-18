@@ -84,7 +84,12 @@ class MessageThreadModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
         ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
-    thread_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Column is `metadata` in the DB (see 20260416_000001_omnichannel_inbox);
+    # the Python attribute is renamed because `metadata` collides with
+    # SQLAlchemy's DeclarativeBase.metadata.
+    thread_metadata: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<MessageThreadModel(id={self.id}, channel={self.channel}, store_id={self.store_id})>"

@@ -158,10 +158,13 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     by tenant_id, the database will enforce tenant isolation.
     """
     async with AsyncSessionLocal() as session:
-        # Set the search path for the session
+        # Set the search path for the session. Include `public` as a fallback
+        # so shared objects (enum types like `service_type_enum`, public
+        # tables like `users`/`tenants`) resolve when referenced unqualified
+        # — while the tenant schema still takes precedence for tenant tables.
         schema = get_tenant_schema()
         safe_schema = _validate_schema_name(schema)
-        await session.execute(text(f"SET search_path TO {safe_schema}"))
+        await session.execute(text(f"SET search_path TO {safe_schema}, public"))
 
         # Set the tenant context for RLS policies
         tenant_id = get_tenant_id()

@@ -87,8 +87,16 @@ class TenantMiddleware(BaseHTTPMiddleware):
         """
         parts = host.split(".")
 
-        # Need at least 2 parts to have a subdomain
-        if len(parts) < 2:
+        # Handle *.localhost dev URLs (store1.localhost)
+        if parts[-1] == "localhost" and len(parts) == 2:
+            subdomain = parts[0]
+            if subdomain in ("www", "api", "admin", "merchant", "dashboard", "app"):
+                return None
+            return subdomain
+
+        # For internet domains we need at least 3 parts (sub.domain.tld) for a
+        # real subdomain. `numueg.app` (2 parts) is the apex — no subdomain.
+        if len(parts) < 3:
             return None
 
         subdomain = parts[0]

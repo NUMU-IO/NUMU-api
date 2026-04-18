@@ -131,16 +131,20 @@ class TenantMiddleware(BaseHTTPMiddleware):
         if all(part.isdigit() for part in parts):
             return None
 
-        # Need at least 2 parts to have a subdomain
-        if len(parts) < 2:
-            return None
-
-        # Handle *.localhost (e.g., octyra.localhost)
+        # Handle *.localhost (e.g., octyra.localhost) — 2-part localhost dev URLs
         if parts[-1] == "localhost" and len(parts) == 2:
             subdomain = parts[0]
             if subdomain in RESERVED_HOST_SUBDOMAINS:
                 return None
             return subdomain
+
+        # For real internet domains we need at least 3 parts (sub.domain.tld)
+        # for a real subdomain. `numueg.app` (2 parts) is the apex — there is
+        # no subdomain, just the registered name. Returning the SLD here would
+        # cause the tenant resolver to 404 on every apex hit (incl. the
+        # staging host and the vite dev proxy after changeOrigin).
+        if len(parts) < 3:
+            return None
 
         # Handle regular domains (e.g., store1.octyrafiy.com)
         subdomain = parts[0]
