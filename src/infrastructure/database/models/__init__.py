@@ -20,7 +20,6 @@ from src.infrastructure.database.models.public import (
     UserModel,
     WaitlistModel,
     WebhookEventModel,
-    WhatsAppTemplateModel,
 )
 
 # Tenant-scoped models (with tenant_id discriminator)
@@ -54,6 +53,7 @@ from src.infrastructure.database.models.tenant import (
     ThemeVersionModel,
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
+    WhatsAppTemplateModel,
 )
 
 __all__ = [

@@ -94,3 +94,6 @@ class WhatsAppTemplateRepository:
         await self.session.delete(model)
         await self.session.flush()
         return True
+
+
+WhatsAppTemplateRepositoryImpl = WhatsAppTemplateRepository

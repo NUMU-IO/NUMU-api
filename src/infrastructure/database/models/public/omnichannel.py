@@ -129,42 +129,6 @@ class ChannelMessageModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
         return f"<ChannelMessageModel(id={self.id}, thread_id={self.thread_id}, direction={self.direction})>"
 
 
-class WhatsAppTemplateModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
-    """Database model for WhatsApp templates."""
-
-    __tablename__ = "whatsapp_templates"
-    __table_args__ = {"schema": "public"}
-
-    store_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("public.stores.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    channel_connection_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("public.channel_connections.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    external_template_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[str] = mapped_column(String(20), nullable=False)
-    language: Mapped[str] = mapped_column(String(10), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT")
-    components: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    submitted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    approved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    def __repr__(self) -> str:
-        return f"<WhatsAppTemplateModel(id={self.id}, name={self.name}, status={self.status})>"
-
-
 class CatalogMappingModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     """Database model for catalog product mappings."""
 
