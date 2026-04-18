@@ -9,6 +9,14 @@ They include:
 """
 
 from src.infrastructure.database.models.public.feedback import FeedbackModel
+from src.infrastructure.database.models.public.omnichannel import (
+    CapiEventModel,
+    CatalogMappingModel,
+    ChannelConnectionModel,
+    ChannelMessageModel,
+    MessageThreadModel,
+    WebhookEventModel,
+)
 from src.infrastructure.database.models.public.onboarding import StoreOnboardingModel
 from src.infrastructure.database.models.public.reconciliation import (
     PaymentReconciliationRunModel,
@@ -28,4 +36,11 @@ __all__ = [
     "TwoFactorAuthModel",
     "UserModel",
     "WaitlistModel",
+    # Omnichannel
+    "ChannelConnectionModel",
+    "MessageThreadModel",
+    "ChannelMessageModel",
+    "CatalogMappingModel",
+    "WebhookEventModel",
+    "CapiEventModel",
 ]

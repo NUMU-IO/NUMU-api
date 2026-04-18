@@ -85,6 +85,17 @@ async def lifespan(app: FastAPI):
     # Startup
     init_sentry()
 
+    # Check for Meta credentials
+    from src.config import settings as app_settings
+
+    if not app_settings.meta_app_id or not app_settings.meta_app_secret:
+        logger.warning(
+            "meta_credentials_missing",
+            msg="Meta App ID/Secret not configured - Omnichannel Inbox features will be unavailable",
+            meta_app_id_set=bool(app_settings.meta_app_id),
+            meta_app_secret_set=bool(app_settings.meta_app_secret),
+        )
+
     # Initialize event bus (registers all event handlers)
     from src.infrastructure.events.setup import create_event_bus
 
@@ -174,6 +185,14 @@ OPENAPI_TAGS = [
     {"name": "Staff", "description": "Staff account management"},
     {"name": "Staff - Invitations", "description": "Staff invitation workflow"},
     {"name": "Roles", "description": "Role and permission management"},
+    {
+        "name": "Webhooks - Meta",
+        "description": "Meta (Facebook/Instagram) messaging webhook receiver",
+    },
+    {
+        "name": "Store Channels",
+        "description": "Omnichannel messaging inbox (Instagram, Messenger, WhatsApp)",
+    },
 ]
 
 

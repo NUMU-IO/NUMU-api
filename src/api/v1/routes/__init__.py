@@ -46,6 +46,16 @@ from src.api.v1.routes.demo import router as demo_router
 
 # Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
+
+# Omnichannel routes
+from src.api.v1.routes.omnichannel import (
+    capi_router,
+    catalog_router,
+    channels_router,
+    messages_router,
+    templates_router,
+    threads_router,
+)
 from src.api.v1.routes.permissions.routes import router as permissions_router
 from src.api.v1.routes.public import router as public_router
 
@@ -121,6 +131,9 @@ from src.api.v1.routes.themes_upload import router as themes_upload_router
 # Webhook routes (external service callbacks)
 from src.api.v1.routes.webhooks import router as webhooks_router
 
+# WebSocket routes
+from src.api.v1.routes.ws import router as ws_router
+
 # Main v1 router
 api_router = APIRouter(prefix="/api/v1")
 
@@ -144,6 +157,38 @@ api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores")
+
+# Omnichannel - inbox (channels, threads, messages under store scope)
+api_router.include_router(
+    channels_router,
+    prefix="/stores/{store_id}/channels",
+    tags=["Omnichannel - Channels"],
+)
+api_router.include_router(
+    threads_router,
+    prefix="/stores/{store_id}/threads",
+    tags=["Omnichannel - Threads"],
+)
+api_router.include_router(
+    messages_router,
+    prefix="/stores/{store_id}/threads/{thread_id}/messages",
+    tags=["Omnichannel - Messages"],
+)
+api_router.include_router(
+    templates_router,
+    prefix="/stores/{store_id}/whatsapp",
+    tags=["Omnichannel - Templates"],
+)
+api_router.include_router(
+    catalog_router,
+    prefix="/stores/{store_id}/catalog",
+    tags=["Omnichannel - Catalog"],
+)
+api_router.include_router(
+    capi_router,
+    prefix="/stores/{store_id}/capi",
+    tags=["Omnichannel - CAPI"],
+)
 
 # Storefront - store lookup by subdomain (no store_id needed)
 api_router.include_router(
@@ -259,5 +304,8 @@ api_router.include_router(
     staff_access_requests_router, tags=["Staff - Access Requests"]
 )
 api_router.include_router(staff_policies_router, tags=["Staff - Policies"])
+
+# WebSocket for realtime updates
+api_router.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
 
 __all__ = ["api_router"]

@@ -49,11 +49,15 @@ celery_app.conf.update(
         # Staff permission system
         "src.infrastructure.messaging.tasks.detect_suspicious_activity",
         "src.infrastructure.messaging.tasks.expire_temporary_grants",
+        # Feature 001: Omnichannel inbox
+        "src.infrastructure.messaging.tasks.omnichannel_tasks",
     ],
     # Queue definitions
     task_queues=(
         Queue("default"),
         Queue("images"),
+        Queue("messaging"),
+        Queue("catalog"),
     ),
     task_default_queue="default",
     # Route image tasks to dedicated queue

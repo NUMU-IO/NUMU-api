@@ -2,8 +2,21 @@
 
 from src.core.entities.address import AddressLabel, CustomerAddress
 from src.core.entities.base import BaseEntity
+from src.core.entities.capi_event import CapiEvent
 from src.core.entities.cart import Cart
+from src.core.entities.catalog_mapping import CatalogMapping, CatalogSyncStatus
 from src.core.entities.category import Category
+from src.core.entities.channel_connection import (
+    ChannelConnection,
+    ChannelType,
+    ConnectionStatus,
+)
+from src.core.entities.channel_message import (
+    ChannelMessage,
+    MessageDirection,
+    MessageStatus,
+    MessageType,
+)
 from src.core.entities.coupon import Coupon, CouponType
 from src.core.entities.customer import Customer
 from src.core.entities.invoice import (
@@ -17,10 +30,9 @@ from src.core.entities.invoice import (
     TaxType,
 )
 from src.core.entities.message_log import (
-    MessageDirection,
     MessageLog,
-    MessageStatus,
 )
+from src.core.entities.message_thread import MessageThread, ThreadStatus
 from src.core.entities.order import (
     VALID_STATUS_TRANSITIONS,
     FulfillmentStatus,
@@ -40,6 +52,16 @@ from src.core.entities.theme import (
     ThemeVersion,
 )
 from src.core.entities.user import User, UserRole, UserStatus
+from src.core.entities.webhook_event import (
+    WebhookEvent,
+    WebhookProvider,
+    WebhookStatus,
+)
+from src.core.entities.whatsapp_template import (
+    TemplateCategory,
+    TemplateStatus,
+    WhatsAppTemplate,
+)
 
 __all__ = [
     # Base
@@ -82,8 +104,6 @@ __all__ = [
     "VALID_STATUS_TRANSITIONS",
     # MessageLog
     "MessageLog",
-    "MessageDirection",
-    "MessageStatus",
     # Invoice
     "BuyerInfo",
     "Invoice",
@@ -93,4 +113,23 @@ __all__ = [
     "SellerInfo",
     "TaxLine",
     "TaxType",
+    # Omnichannel
+    "ChannelConnection",
+    "ChannelType",
+    "ConnectionStatus",
+    "MessageThread",
+    "ThreadStatus",
+    "ChannelMessage",
+    "MessageDirection",
+    "MessageStatus",
+    "MessageType",
+    "WhatsAppTemplate",
+    "TemplateCategory",
+    "TemplateStatus",
+    "CatalogMapping",
+    "CatalogSyncStatus",
+    "WebhookEvent",
+    "WebhookProvider",
+    "WebhookStatus",
+    "CapiEvent",
 ]

@@ -5,13 +5,25 @@ from src.infrastructure.repositories.analytics_rollup_repository import (
     AnalyticsRollupRepository,
 )
 from src.infrastructure.repositories.cart_repository import RedisCartRepository
+from src.infrastructure.repositories.catalog_mapping_repository import (
+    CatalogMappingRepositoryImpl,
+)
 from src.infrastructure.repositories.category_repository import CategoryRepository
+from src.infrastructure.repositories.channel_connection_repository import (
+    ChannelConnectionRepositoryImpl,
+)
+from src.infrastructure.repositories.channel_message_repository import (
+    ChannelMessageRepositoryImpl,
+)
 from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.credential_repository import CredentialRepository
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
 from src.infrastructure.repositories.message_log_repository import MessageLogRepository
+from src.infrastructure.repositories.message_thread_repository import (
+    MessageThreadRepositoryImpl,
+)
 from src.infrastructure.repositories.onboarding_repository import OnboardingRepository
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
@@ -35,8 +47,14 @@ from src.infrastructure.repositories.waitlist_repository import WaitlistReposito
 from src.infrastructure.repositories.webhook_delivery_log_repository import (
     WebhookDeliveryLogRepository,
 )
+from src.infrastructure.repositories.webhook_event_repository import (
+    WebhookEventRepositoryImpl,
+)
 from src.infrastructure.repositories.webhook_subscription_repository import (
     WebhookSubscriptionRepository,
+)
+from src.infrastructure.repositories.whatsapp_template_repository import (
+    WhatsAppTemplateRepositoryImpl,
 )
 
 __all__ = [
@@ -68,4 +86,11 @@ __all__ = [
     "UpsellRuleRepository",
     "WebhookSubscriptionRepository",
     "WebhookDeliveryLogRepository",
+    # Omnichannel
+    "ChannelConnectionRepositoryImpl",
+    "MessageThreadRepositoryImpl",
+    "ChannelMessageRepositoryImpl",
+    "WhatsAppTemplateRepositoryImpl",
+    "CatalogMappingRepositoryImpl",
+    "WebhookEventRepositoryImpl",
 ]
