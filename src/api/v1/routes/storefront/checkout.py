@@ -121,6 +121,11 @@ async def checkout(
     3. Creates an Order in PENDING status.
     4. Returns an optional payment_url when the payment method requires redirect.
     """
+    # ── Resolve store early so guest customer creation can populate tenant_id ──
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
     # ── Resolve or create customer ──────────────────────────────────────
     current_customer = optional_customer
     is_guest = current_customer is None
@@ -158,7 +163,9 @@ async def checkout(
                 is_verified=False,
                 metadata={"guest": True},
             )
-            current_customer = await customer_repo.create(current_customer)
+            current_customer = await customer_repo.create(
+                current_customer, tenant_id=store.tenant_id
+            )
 
     # ── Idempotency check ──────────────────────────────────────────────
     if idempotency_key and _cache_service:
@@ -214,11 +221,6 @@ async def checkout(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Customer does not belong to this store",
         )
-
-    # Validate store
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise EntityNotFoundError("Store", str(store_id))
 
     # ── COD Trust Network check ────────────────────────────────────────
     # Look up customer reputation in the cross-merchant network table.
