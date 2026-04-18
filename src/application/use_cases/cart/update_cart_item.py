@@ -58,7 +58,7 @@ class UpdateCartItemUseCase:
             cart = await self.cart_repository.get_by_session_id(session_id, store_id)
 
         if not cart:
-            raise EntityNotFoundError("Cart", session_id)
+            raise EntityNotFoundError("Cart", session_id, identifier_name="session_id")
 
         # Check if item exists in cart
         existing_item = cart.get_item(dto.product_id, dto.variant_id)
@@ -66,6 +66,7 @@ class UpdateCartItemUseCase:
             raise EntityNotFoundError(
                 "Cart item",
                 f"product_id={dto.product_id}, variant_id={dto.variant_id}",
+                identifier_name="key",
             )
 
         # If quantity is 0 or less, remove the item

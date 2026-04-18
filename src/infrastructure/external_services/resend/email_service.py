@@ -53,8 +53,16 @@ class ResendEmailService(IEmailService):
                 "from": from_address,
                 "to": to_list,
                 "subject": message.subject,
-                "html": message.html_content,
             }
+
+            # Template-based email
+            if message.template_id:
+                params["template"] = {
+                    "id": message.template_id,
+                    "props": message.context or {},
+                }
+            else:
+                params["html"] = message.html_content
 
             if message.text_content:
                 params["text"] = message.text_content
@@ -64,8 +72,6 @@ class ResendEmailService(IEmailService):
                 params["attachments"] = message.attachments
 
             resend.Emails.send(params)
-            logger.info("email_sent", to=to_list, subject=message.subject)
-            return True
         except Exception as e:
             error_msg = str(e).lower()
             if any(phrase in error_msg for phrase in _PERMANENT_ERROR_PHRASES):
@@ -75,6 +81,15 @@ class ResendEmailService(IEmailService):
                     f"EMAIL_FROM_ADDRESS or verify the domain in Resend dashboard.",
                 )
             raise ExternalServiceError("Resend", str(e))
+
+        # Log success OUTSIDE the try/except — structlog can crash on
+        # non-ASCII subjects (Arabic) when the Windows console uses cp1252.
+        # That encoding error must NOT be mis-reported as an email failure.
+        try:
+            logger.info("email_sent", to=to_list, subject=message.subject)
+        except UnicodeEncodeError:
+            logger.info("email_sent", to=to_list, subject="(non-ascii subject)")
+        return True
 
     async def send_verification_email(
         self, email: str, token: str, code: str | None = None
@@ -118,6 +133,67 @@ class ResendEmailService(IEmailService):
         message = EmailMessage(
             to=email,
             subject="تأكيد إيميلك على نُمو",
+            html_content=html_content,
+        )
+        return await self.send_email(message)
+
+    async def send_staff_invitation_email(
+        self,
+        email: str,
+        invite_url: str,
+        tenant_name: str,
+        inviter_name: str | None = None,
+        personal_message: str | None = None,
+    ) -> bool:
+        """Send a staff invitation email with acceptance link."""
+        from src.infrastructure.external_services.resend.email_templates._base import (
+            header,
+            wrap,
+        )
+
+        inviter_line = (
+            f"<strong>{inviter_name}</strong> دعاك" if inviter_name else "اتدعيت"
+        )
+
+        personal_html = ""
+        if personal_message:
+            personal_html = (
+                '<div class="panel" style="margin:16px 0;">'
+                f'<p style="margin:0;">{personal_message}</p>'
+                "</div>"
+            )
+
+        body = f"""
+        {header("دعوة لنضم للفريق", tenant_name, language="ar")}
+        <div class="body">
+            <p class="lead">أهلاً بيك،</p>
+            <p>
+                {inviter_line} تنضم لفريق <strong>{tenant_name}</strong>
+                على <span class="brand">نُمو</span>.
+            </p>
+            {personal_html}
+            <p>اضغط الزرار ده عشان تقبل الدعوة وتبدأ:</p>
+            <p class="center" style="margin:28px 0;">
+                <a href="{invite_url}" class="btn">قبول الدعوة</a>
+            </p>
+
+            <hr class="divider">
+
+            <p class="muted">الدعوة دي صلاحيتها ٧ أيام.</p>
+            <p class="muted">
+                لو الزرار مش شغال، افتح اللينك ده:<br>
+                <a href="{invite_url}">{invite_url}</a>
+            </p>
+        </div>"""
+
+        html_content = wrap(
+            body,
+            language="ar",
+            preheader=f"دعوة للانضمام لـ {tenant_name} على نُمو",
+        )
+        message = EmailMessage(
+            to=email,
+            subject=f"دعوة للانضمام لـ {tenant_name} — نُمو",
             html_content=html_content,
         )
         return await self.send_email(message)

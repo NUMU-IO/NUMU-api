@@ -14,6 +14,7 @@ from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
 from src.core.validators.password import validate_password
 from src.core.value_objects.email import Email
+from src.infrastructure.tenancy.service import TRIAL_LIFETIME_DAYS
 
 logger = get_logger(__name__)
 
@@ -68,7 +69,7 @@ class RegisterUserUseCase:
             last_name=dto.last_name,
             role=UserRole.STORE_OWNER,
             status=UserStatus.PENDING_VERIFICATION,
-            trial_ends_at=datetime.now(UTC) + timedelta(days=14),
+            trial_ends_at=datetime.now(UTC) + timedelta(days=TRIAL_LIFETIME_DAYS),
         )
 
         # Save user

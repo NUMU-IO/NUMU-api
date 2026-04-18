@@ -111,6 +111,9 @@ class TenantInfoResponse(BaseModel):
     is_writable: bool
     expires_at: str | None = None
     days_remaining: int | None = None
+    # Captured email from the Try-a-Demo form, so the merchant hub can
+    # prefill the demo\u2192trial upgrade form. Only populated for demo tenants.
+    demo_email: str | None = None
 
 
 # Keep TokenResponse for internal use / backward compat with use-case DTOs

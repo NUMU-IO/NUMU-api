@@ -57,6 +57,8 @@ class TokenService(ITokenService):
         token_type: str,
         expires_delta: timedelta,
         tenant_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        perm_version: int = 0,
     ) -> str:
         """Create a JWT token.
 
@@ -64,9 +66,11 @@ class TokenService(ITokenService):
         payload so downstream code can read the tenant scope directly from
         the token without re-resolving via subdomain middleware. This is
         used by the demo provisioning flow.
+
+        ``membership_id`` and ``perm_version`` enable lazy permission cache
+        invalidation when embedded in the token.
         """
         expire = datetime.utcnow() + expires_delta
-        # Handle role as enum or string (for compatibility with DB enum names)
         role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
         payload: dict = {
             "sub": str(user.id),
@@ -78,14 +82,37 @@ class TokenService(ITokenService):
         }
         if tenant_id is not None:
             payload["tenant_id"] = str(tenant_id)
+        if membership_id is not None:
+            payload["membership_id"] = str(membership_id)
+        if perm_version > 0:
+            payload["perm_version"] = perm_version
         return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
-    def create_access_token(self, user: User, tenant_id: UUID | None = None) -> str:
+    def create_access_token(
+        self,
+        user: User,
+        tenant_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        perm_version: int = 0,
+    ) -> str:
         """Create an access token for a user."""
         expires_delta = timedelta(minutes=self.access_token_expire_minutes)
-        return self._create_token(user, "access", expires_delta, tenant_id=tenant_id)
+        return self._create_token(
+            user,
+            "access",
+            expires_delta,
+            tenant_id=tenant_id,
+            membership_id=membership_id,
+            perm_version=perm_version,
+        )
 
-    def create_refresh_token(self, user: User, tenant_id: UUID | None = None) -> str:
+    def create_refresh_token(
+        self,
+        user: User,
+        tenant_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        perm_version: int = 0,
+    ) -> str:
         """Create a refresh token for a user (includes jti for rotation tracking)."""
         expires_delta = timedelta(days=self.refresh_token_expire_days)
         expire = datetime.utcnow() + expires_delta
@@ -101,6 +128,10 @@ class TokenService(ITokenService):
         }
         if tenant_id is not None:
             payload["tenant_id"] = str(tenant_id)
+        if membership_id is not None:
+            payload["membership_id"] = str(membership_id)
+        if perm_version > 0:
+            payload["perm_version"] = perm_version
         return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_reset_token(self, user: User) -> str:
@@ -124,6 +155,8 @@ class TokenService(ITokenService):
             if hasattr(iat, "timestamp"):
                 iat = int(iat.timestamp())
             tenant_id_raw = payload.get("tenant_id")
+            membership_id_raw = payload.get("membership_id")
+            perm_version = payload.get("perm_version", 0)
             return TokenPayload(
                 user_id=UUID(payload["sub"]),
                 email=payload["email"],
@@ -133,6 +166,8 @@ class TokenService(ITokenService):
                 iat=int(iat),
                 jti=payload.get("jti"),
                 tenant_id=UUID(tenant_id_raw) if tenant_id_raw else None,
+                membership_id=UUID(membership_id_raw) if membership_id_raw else None,
+                perm_version=perm_version,
             )
         except ExpiredSignatureError:
             raise TokenExpiredError()

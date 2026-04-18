@@ -761,6 +761,7 @@ async def get_current_user(
                 is_writable=tenant.is_writable,
                 expires_at=tenant.expires_at.isoformat() if tenant.expires_at else None,
                 days_remaining=tenant.days_remaining,
+                demo_email=tenant.demo_email,
             )
     except Exception:
         pass  # Non-critical — old tenants without lifecycle columns still work

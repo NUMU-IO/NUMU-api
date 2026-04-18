@@ -19,6 +19,8 @@ class TokenPayload:
         iat: int = 0,
         jti: str | None = None,
         tenant_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        perm_version: int = 0,
     ) -> None:
         self.user_id = user_id
         self.email = email
@@ -27,10 +29,9 @@ class TokenPayload:
         self.token_type = token_type
         self.iat = iat
         self.jti = jti
-        # Optional tenant scope baked into the token. When present, callers can
-        # rely on it instead of resolving the tenant via subdomain middleware.
-        # Populated by the demo provisioning flow and (eventually) by login.
         self.tenant_id = tenant_id
+        self.membership_id = membership_id
+        self.perm_version = perm_version
 
 
 class CustomerTokenPayload:

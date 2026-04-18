@@ -13,10 +13,15 @@ class DomainException(Exception):
 class EntityNotFoundError(DomainException):
     """Raised when an entity is not found."""
 
-    def __init__(self, entity_name: str, entity_id: str | None = None) -> None:
+    def __init__(
+        self,
+        entity_name: str,
+        entity_id: str | None = None,
+        identifier_name: str = "id",
+    ) -> None:
         message = f"{entity_name} not found"
         if entity_id:
-            message = f"{entity_name} with id '{entity_id}' not found"
+            message = f"{entity_name} with {identifier_name} '{entity_id}' not found"
         super().__init__(message, code="ENTITY_NOT_FOUND")
 
 

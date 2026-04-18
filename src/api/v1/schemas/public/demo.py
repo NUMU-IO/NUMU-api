@@ -15,17 +15,21 @@ class StartDemoRequest(BaseModel):
 
 
 class StartDemoResponse(BaseModel):
-    tenant_id: UUID
-    store_id: UUID
-    subdomain: str
-    expires_at: datetime
-    dashboard_url: str
-    storefront_url: str
+    # "created" = new demo provisioned, tokens returned.
+    # "magic_link_sent" = email already belongs to an existing user;
+    # a login link was emailed and tokens are omitted.
+    status: Literal["created", "magic_link_sent"] = "created"
+    tenant_id: UUID | None = None
+    store_id: UUID | None = None
+    subdomain: str | None = None
+    expires_at: datetime | None = None
+    dashboard_url: str | None = None
+    storefront_url: str | None = None
     # Tokens are also set as cookies, but returned in the body so the
     # landing page can pass them via URL params to the merchant hub
     # (cross-origin token handoff).
-    access_token: str
-    refresh_token: str
+    access_token: str | None = None
+    refresh_token: str | None = None
     message: str
 
 

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,9 +24,7 @@ class TwoFactorAuthModel(Base, UUIDMixin, TimestampMixin):
     )
     method: Mapped[str] = mapped_column(String(20), nullable=False, default="totp")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="disabled")
-    # TOTP secret (base32-encoded) — stored in plaintext (required for HOTP/TOTP math)
     secret: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Hashed backup codes stored as a Postgres text array
     backup_codes: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, default=list
     )
@@ -39,6 +37,13 @@ class TwoFactorAuthModel(Base, UUIDMixin, TimestampMixin):
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    enforced_by_policy: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    backup_codes_hash: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=True)
 
     def __repr__(self) -> str:
         return f"<TwoFactorAuthModel(user_id={self.user_id}, status={self.status})>"

@@ -46,6 +46,9 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.demo_cleanup_task",
         "src.infrastructure.messaging.tasks.trial_expiry_task",
         "src.infrastructure.messaging.tasks.read_only_purge_task",
+        # Staff permission system
+        "src.infrastructure.messaging.tasks.detect_suspicious_activity",
+        "src.infrastructure.messaging.tasks.expire_temporary_grants",
     ],
     # Queue definitions
     task_queues=(
@@ -149,5 +152,26 @@ celery_app.conf.beat_schedule = {
     "send-onboarding-nudges": {
         "task": "tasks.send_onboarding_nudges",
         "schedule": crontab(minute=45, hour="*/6"),  # Every 6 hours at :45
+    },
+    # ─── Staff permission system ────────────────────────────────────────────
+    "expire-temporary-grants": {
+        "task": "tasks.expire_temporary_grants",
+        "schedule": crontab(minute="*/15"),  # Every 15 minutes
+    },
+    "expire-access-requests": {
+        "task": "tasks.expire_access_requests",
+        "schedule": crontab(hour=1, minute=0),  # Daily at 01:00 UTC
+    },
+    "cleanup-staff-sessions": {
+        "task": "tasks.cleanup_staff_sessions",
+        "schedule": crontab(hour=2, minute=0),  # Daily at 02:00 UTC
+    },
+    "detect-suspicious-activity": {
+        "task": "tasks.detect_suspicious_activity",
+        "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    "compute-staff-risk-scores": {
+        "task": "tasks.compute_staff_risk_scores",
+        "schedule": crontab(hour=4, minute=30),  # Daily at 04:30 UTC
     },
 }

@@ -126,6 +126,10 @@ class Settings(BaseSettings):
     # Where the merchant hub is hosted. Used to build the demo redirect URL.
     merchant_hub_url: str = "https://merchant.numueg.app"
 
+    # Secret used to HMAC-hash staff invitation tokens. Must stay stable
+    # across restarts — if it changes, all outstanding invitation links break.
+    invite_secret: str = Field(default="default-invite-secret")
+
     @model_validator(mode="after")
     def validate_jwt_keys(self) -> "Settings":
         """Validate that RSA keys are provided when using RS256."""

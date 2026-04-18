@@ -162,11 +162,18 @@ OPENAPI_TAGS = [
     # ── Webhooks ──────────────────────────────────────────
     {"name": "Webhooks - Paymob", "description": "Paymob payment webhook receiver"},
     {"name": "Webhooks - Fawry", "description": "Fawry payment webhook receiver"},
-    {"name": "Webhooks - Bosta", "description": "Bosta shipping webhook receiver"},
+    {
+        "name": "Webhooks - Bosta",
+        "description": "Bosta shipping webhook receiver",
+    },
     {
         "name": "Webhooks - WhatsApp",
         "description": "WhatsApp messaging webhook receiver",
     },
+    # ── Staff & Roles ────────────────────────────────
+    {"name": "Staff", "description": "Staff account management"},
+    {"name": "Staff - Invitations", "description": "Staff invitation workflow"},
+    {"name": "Roles", "description": "Role and permission management"},
 ]
 
 

@@ -48,7 +48,7 @@ class RemoveFromCartUseCase:
             cart = await self.cart_repository.get_by_session_id(session_id, store_id)
 
         if not cart:
-            raise EntityNotFoundError("Cart", session_id)
+            raise EntityNotFoundError("Cart", session_id, identifier_name="session_id")
 
         # Check if item exists in cart
         existing_item = cart.get_item(dto.product_id, dto.variant_id)
@@ -56,6 +56,7 @@ class RemoveFromCartUseCase:
             raise EntityNotFoundError(
                 "Cart item",
                 f"product_id={dto.product_id}, variant_id={dto.variant_id}",
+                identifier_name="key",
             )
 
         product_name = existing_item.product_name

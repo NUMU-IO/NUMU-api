@@ -99,6 +99,8 @@ class TenantService:
             trial_started_at=trial_started_at,
         )
 
+        await self._clone_system_role_templates(tenant.id)
+
         logger.info(
             "tenant_created",
             extra={
@@ -109,6 +111,60 @@ class TenantService:
             },
         )
         return tenant
+
+    async def _clone_system_role_templates(self, tenant_id: UUID) -> None:
+        """Clone all non-Owner system role templates into a newly created tenant."""
+        from uuid import uuid4
+
+        from sqlalchemy import select
+
+        from src.infrastructure.database.models.public.role import (
+            RoleModel,
+            RolePermissionModel,
+        )
+
+        templates = await self.db.execute(
+            select(RoleModel).where(
+                RoleModel.tenant_id.is_(None),
+                RoleModel.is_system.is_(True),
+                RoleModel.is_owner.is_(False),
+                RoleModel.slug != "custom",
+                RoleModel.deleted_at.is_(None),
+            )
+        )
+        for template in templates.scalars().all():
+            new_role_id = uuid4()
+            self.db.add(
+                RoleModel(
+                    id=new_role_id,
+                    tenant_id=tenant_id,
+                    name=template.name,
+                    slug=template.slug,
+                    description=template.description,
+                    is_system=False,
+                    is_owner=False,
+                    is_locked=False,
+                    version=1,
+                    cloned_from_id=template.id,
+                )
+            )
+
+            perms = await self.db.execute(
+                select(RolePermissionModel).where(
+                    RolePermissionModel.role_id == template.id
+                )
+            )
+            for rp in perms.scalars().all():
+                self.db.add(
+                    RolePermissionModel(
+                        id=uuid4(),
+                        role_id=new_role_id,
+                        permission_id=rp.permission_id,
+                        scope_qualifier=rp.scope_qualifier,
+                    )
+                )
+
+        await self.db.flush()
 
     # ─── Lifecycle state transitions ──────────────────────────────────────
 

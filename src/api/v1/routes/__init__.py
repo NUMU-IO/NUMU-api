@@ -46,13 +46,25 @@ from src.api.v1.routes.demo import router as demo_router
 
 # Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
+from src.api.v1.routes.permissions.routes import router as permissions_router
 from src.api.v1.routes.public import router as public_router
 
 # Referral routes (merchant-to-merchant referral program)
 from src.api.v1.routes.referrals import router as referrals_router
+from src.api.v1.routes.roles.routes import router as roles_router
 
 # Shopify app routes
 from src.api.v1.routes.shopify import router as shopify_router
+from src.api.v1.routes.staff.access_requests import (
+    router as staff_access_requests_router,
+)
+
+# Staff & roles routes
+from src.api.v1.routes.staff.invitations import router as staff_invitations_router
+from src.api.v1.routes.staff.list import router as staff_list_router
+from src.api.v1.routes.staff.overrides import router as staff_overrides_router
+from src.api.v1.routes.staff.policies import router as staff_policies_router
+from src.api.v1.routes.staff.sessions import router as staff_sessions_router
 from src.api.v1.routes.storefront import (
     cart_router as storefront_cart_router,
 )
@@ -227,7 +239,25 @@ api_router.include_router(referrals_router, tags=["Referrals"])
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)
 api_router.include_router(shopify_router, prefix="/shopify")
 
+# Staff management routes (prefixes defined on the routers themselves)
+api_router.include_router(staff_invitations_router, tags=["Staff - Invitations"])
+api_router.include_router(staff_list_router, tags=["Staff"])
+
+# Role management routes
+api_router.include_router(roles_router, tags=["Roles"])
+
+# Permission catalog routes
+api_router.include_router(permissions_router, tags=["Permissions"])
+
 # Webhooks - external service callbacks (no auth required)
 api_router.include_router(webhooks_router, prefix="/webhooks")
+
+# Staff extended routes
+api_router.include_router(staff_overrides_router, tags=["Staff - Overrides"])
+api_router.include_router(staff_sessions_router, tags=["Staff - Sessions"])
+api_router.include_router(
+    staff_access_requests_router, tags=["Staff - Access Requests"]
+)
+api_router.include_router(staff_policies_router, tags=["Staff - Policies"])
 
 __all__ = ["api_router"]

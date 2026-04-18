@@ -13,14 +13,25 @@ from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
     get_onboarding_repository,
     get_store_repository,
+    get_user_repository,
 )
-from src.api.dependencies.services import get_password_service, get_token_service
+from src.api.dependencies.services import (
+    get_email_service,
+    get_password_service,
+    get_token_service,
+)
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import set_auth_cookies
 from src.api.v1.schemas.public.demo import StartDemoRequest, StartDemoResponse
+from src.application.dto.auth import PasswordResetRequestDTO
+from src.application.use_cases.auth import ForgotPasswordUseCase
 from src.application.use_cases.demo import SeedDemoTenantUseCase, StartDemoUseCase
 from src.config import settings
-from src.infrastructure.repositories import OnboardingRepository, StoreRepository
+from src.infrastructure.repositories import (
+    OnboardingRepository,
+    StoreRepository,
+    UserRepository,
+)
 from src.infrastructure.tenancy.service import TenantService
 
 logger = logging.getLogger(__name__)
@@ -85,8 +96,10 @@ async def start_demo(
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[object, Depends(get_password_service)],
     token_service: Annotated[object, Depends(get_token_service)],
+    email_service: Annotated[object, Depends(get_email_service)],
 ):
     """Provision a fresh demo tenant and return an authenticated session."""
     # 1. Disposable email check
@@ -104,7 +117,26 @@ async def start_demo(
             detail="Bot verification failed. Please try again.",
         )
 
-    # 3. Wire up use case
+    # 3. If email already belongs to a real account, send a magic login link
+    #    instead of provisioning another demo. Constant-time delay inside the
+    #    forgot-password use case prevents enumeration timing attacks.
+    existing_user = await user_repo.get_by_email_str(request.email)
+    if existing_user is not None:
+        forgot_use_case = ForgotPasswordUseCase(
+            user_repository=user_repo,
+            token_service=token_service,
+            email_service=email_service,
+        )
+        await forgot_use_case.execute(PasswordResetRequestDTO(email=request.email))
+        return SuccessResponse(
+            data=StartDemoResponse(
+                status="magic_link_sent",
+                message="We sent a login link to your email.",
+            ),
+            message="Existing account detected \u2014 magic login link sent",
+        )
+
+    # 4. Wire up use case
     tenant_service = TenantService(db)
     seed_use_case = SeedDemoTenantUseCase(db)
     use_case = StartDemoUseCase(
@@ -121,7 +153,7 @@ async def start_demo(
         ),
     )
 
-    # 4. Provision
+    # 5. Provision
     try:
         result = await use_case.execute(
             captured_email=request.email, language=request.language, niche=request.niche
@@ -134,7 +166,7 @@ async def start_demo(
             detail="Could not start demo. Please try again in a moment.",
         )
 
-    # 5. Set cross-domain auth cookies
+    # 6. Set cross-domain auth cookies
     set_auth_cookies(response, result.access_token, result.refresh_token)
 
     return SuccessResponse(

@@ -5,6 +5,7 @@ This allows users to belong to multiple tenants.
 """
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -12,6 +13,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.entities.user import UserRole, UserStatus
 from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    pass
 
 
 class UserModel(Base, UUIDMixin, TimestampMixin):
@@ -65,6 +69,12 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
 
     # Relationships
     owned_tenants = relationship("TenantModel", back_populates="owner", lazy="selectin")
+    staff_memberships = relationship(
+        "TenantMembershipModel",
+        back_populates="user",
+        lazy="selectin",
+        foreign_keys="[TenantMembershipModel.user_id]",
+    )
 
     def __repr__(self) -> str:
         return f"<UserModel(id={self.id}, email={self.email})>"

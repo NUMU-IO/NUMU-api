@@ -225,10 +225,27 @@ SECTION_SCHEMAS: list[dict[str, Any]] = [
                 "groupAr": "المحتوى",
             },
             {
+                "key": "product_ids",
+                "type": "products",
+                "label": "Pick products (manual)",
+                "labelAr": "اختيار المنتجات",
+                "default": [],
+                "help": (
+                    "When you pick products here, they are used in the order "
+                    "selected. Leave empty to auto-fill from the collection below."
+                ),
+                "helpAr": (
+                    "عند اختيار منتجات هنا، يتم استخدامها بالترتيب. اترك الحقل "
+                    "فارغاً للتعبئة التلقائية من المجموعة أدناه."
+                ),
+                "group": "Content",
+                "groupAr": "المحتوى",
+            },
+            {
                 "key": "collection_tag",
                 "type": "select",
-                "label": "Collection",
-                "labelAr": "المجموعة",
+                "label": "Collection (auto-fill)",
+                "labelAr": "المجموعة (تعبئة تلقائية)",
                 "default": "new",
                 "options": [
                     {"label": "New Arrivals", "labelAr": "وصل حديثاً", "value": "new"},

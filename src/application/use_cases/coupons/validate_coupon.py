@@ -40,7 +40,7 @@ class ValidateCouponUseCase:
         """
         coupon = await self.coupon_repository.get_by_code(store_id, code)
         if not coupon:
-            raise EntityNotFoundError("Coupon", code)
+            raise EntityNotFoundError("Coupon", code, identifier_name="code")
 
         if not coupon.is_active:
             raise ValidationError("This coupon is currently inactive")

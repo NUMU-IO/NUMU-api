@@ -45,7 +45,9 @@ class ConfirmCodPaymentUseCase:
         order = await self.order_repository.get_by_tracking_number(tracking_number)
         if not order:
             log.warning("cod_confirmation_failed", reason="order_not_found")
-            raise EntityNotFoundError("Order", tracking_number)
+            raise EntityNotFoundError(
+                "Order", tracking_number, identifier_name="tracking_number"
+            )
 
         log = log.bind(
             order_id=str(order.id),

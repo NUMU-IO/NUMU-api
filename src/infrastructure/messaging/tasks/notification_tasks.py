@@ -579,3 +579,79 @@ def send_whatsapp_delivery_confirmation_task(
             error=str(e),
         )
         raise self.retry(exc=e)
+
+
+# ---------------------------------------------------------------------------
+# Generic staff notification task
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(
+    name="tasks.send_email",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+)
+def send_email_task(
+    self,
+    to: str,
+    subject: str,
+    template: str,
+    context: dict | None = None,
+):
+    """Send generic email via template.
+
+    Args:
+        to: Recipient email address
+        subject: Email subject line
+        template: Template name (staff_invitation, access_request_created, etc.)
+        context: Template variables dict
+    """
+    from src.infrastructure.external_services.resend.email_service import (
+        EmailMessage,
+        ResendEmailService,
+    )
+
+    service = ResendEmailService()
+
+    template_map = {
+        "staff_invitation": "dJXzpO4E0001",
+        "access_request_created": "dJXzpO4E0002",
+        "access_request_approved": "dJXzpO4E0003",
+        "access_request_denied": "dJXzpO4E0004",
+        "temporary_access_granted": "dJXzpO4E0005",
+        "staff_activated": "dJXzpO4E0006",
+        "password_reset": "dJXzpO4E0007",
+        "welcome": "dJXzpO4E0008",
+    }
+
+    template_id = template_map.get(template)
+
+    if not template_id:
+        logger.warning("unknown_email_template", template=template)
+        template_id = "dJXzpO4E0008"  # Default to welcome
+
+    message = EmailMessage(
+        to=to,
+        subject=subject,
+        template_id=template_id,
+        context=context or {},
+    )
+
+    try:
+        result = run_async(service.send_email(message))
+        logger.info(
+            "email_sent",
+            to=to,
+            template=template,
+            success=result,
+        )
+        return {"sent": result, "to": to, "template": template}
+    except Exception as e:
+        logger.error(
+            "email_send_failed",
+            to=to,
+            template=template,
+            error=str(e),
+        )
+        raise self.retry(exc=e)

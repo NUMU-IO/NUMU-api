@@ -334,11 +334,11 @@ async def get_store_by_subdomain(
     """Look up a store by its subdomain (public). Used by the storefront frontend."""
     store = await store_repo.get_by_subdomain(subdomain.lower())
     if not store:
-        raise EntityNotFoundError("Store", subdomain)
+        raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
     # Pending stores are not public yet
     if store.status == StoreStatus.PENDING_APPROVAL:
-        raise EntityNotFoundError("Store", subdomain)
+        raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
     return SuccessResponse(
         data={
@@ -633,7 +633,7 @@ async def get_product_by_slug(
     product = await product_repo.get_by_slug(store_id, product_slug)
 
     if not product:
-        raise EntityNotFoundError("Product", product_slug)
+        raise EntityNotFoundError("Product", product_slug, identifier_name="slug")
 
     return SuccessResponse(
         data=ProductResponse(
@@ -871,7 +871,7 @@ async def customer_forgot_password(
 
     # Always return success to prevent email enumeration
     try:
-        email_vo = EmailVO(request.email)
+        email_vo = EmailVO(value=request.email)
     except Exception:
         return SuccessResponse(
             data=None, message="If the email exists, a reset code has been sent"
@@ -938,7 +938,7 @@ async def customer_reset_password(
         )
 
     try:
-        email_vo = EmailVO(request.email)
+        email_vo = EmailVO(value=request.email)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

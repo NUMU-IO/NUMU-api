@@ -258,7 +258,7 @@ def _inactive_email_html(
             and is the most important step to start selling.</p>
 
             <div style="text-align: center; margin: 24px 0;">
-                <a href="https://dashboard.numueg.app/products/new"
+                <a href="https://merchant.numueg.app/products/new"
                    style="display: inline-block; background: #1034A6; color: white;
                           padding: 12px 28px; border-radius: 8px; text-decoration: none;
                           font-weight: 600; font-size: 15px;">
@@ -307,7 +307,7 @@ def _trial_warning_html(name: str | None, days_left: int) -> str:
             </div>
 
             <div style="text-align: center; margin: 24px 0;">
-                <a href="https://dashboard.numueg.app/settings"
+                <a href="https://merchant.numueg.app/settings"
                    style="display: inline-block; background: #e67e22; color: white;
                           padding: 12px 28px; border-radius: 8px; text-decoration: none;
                           font-weight: 600; font-size: 15px;">

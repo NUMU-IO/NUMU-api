@@ -16,6 +16,7 @@ from fastapi import APIRouter
 
 from src.api.v1.routes.admin.customers import router as customers_router
 from src.api.v1.routes.admin.dashboard import router as dashboard_router
+from src.api.v1.routes.admin.demos import router as demos_router
 from src.api.v1.routes.admin.feedback import router as feedback_router
 from src.api.v1.routes.admin.landing_page import router as landing_page_router
 from src.api.v1.routes.admin.orders import router as orders_router
@@ -30,6 +31,7 @@ from src.api.v1.routes.tenant.configuration.admin_routes import (
 router = APIRouter()
 
 router.include_router(waitlist_router, prefix="/waitlist", tags=["Admin - Waitlist"])
+router.include_router(demos_router, prefix="/demos", tags=["Admin - Demos"])
 router.include_router(feedback_router, prefix="/feedback", tags=["Admin - Feedback"])
 router.include_router(orders_router, prefix="/orders", tags=["Admin - Orders"])
 router.include_router(customers_router, prefix="/customers", tags=["Admin - Customers"])

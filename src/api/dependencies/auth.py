@@ -113,9 +113,44 @@ from src.api.dependencies.repositories import (
 )
 from src.core.entities.customer import Customer
 from src.core.entities.store import Store
-from src.core.interfaces.services.token_service import CustomerTokenPayload
+from src.core.interfaces.services.token_service import (
+    CustomerTokenPayload,
+    TokenPayload,
+)
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
+
+
+async def get_current_token_payload(request: Request) -> TokenPayload:
+    """Get full token payload from access_token httpOnly cookie."""
+    token = request.cookies.get("access_token")
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    try:
+        payload = token_service.verify_token(token)
+    except TokenExpiredError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+        )
+    except InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
+
+    if await _revocation_service.is_revoked(payload.user_id, payload.iat):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked. Please log in again.",
+        )
+
+    return payload
 
 
 async def get_current_customer_payload(request: Request) -> CustomerTokenPayload:
