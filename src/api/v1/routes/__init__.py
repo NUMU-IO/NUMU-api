@@ -96,6 +96,9 @@ from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
 )
 from src.api.v1.routes.storefront import (
+    reviews_router as storefront_reviews_router,
+)
+from src.api.v1.routes.storefront import (
     shipping_quote_router as storefront_shipping_quote_router,
 )
 
@@ -230,6 +233,13 @@ api_router.include_router(
     storefront_coupon_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Coupons"],
+)
+
+# Storefront - product reviews (GET public, POST requires customer auth)
+api_router.include_router(
+    storefront_reviews_router,
+    prefix="/storefront/store/{store_id}/products",
+    tags=["Storefront - Reviews"],
 )
 
 # Storefront - upsell offers (public, scoped to store)

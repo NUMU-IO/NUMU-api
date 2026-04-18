@@ -19,6 +19,7 @@ from src.infrastructure.repositories import (
     OrderRepository,
     PageViewRepository,
     ProductRepository,
+    ProductReviewRepository,
     RefundRepository,
     ShipmentRepository,
     StoreRepository,
@@ -53,6 +54,13 @@ def get_product_repository(
 ) -> ProductRepository:
     """Get product repository dependency."""
     return ProductRepository(session)
+
+
+def get_product_review_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProductReviewRepository:
+    """Get product review repository dependency."""
+    return ProductReviewRepository(session)
 
 
 def get_customer_repository(

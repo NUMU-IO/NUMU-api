@@ -8,7 +8,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,6 @@ from src.api.dependencies.repositories import (
 )
 from src.api.dependencies.services import get_token_service
 from src.api.responses import SuccessResponse
-from src.api.utils.cookies import set_auth_cookies
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.config import settings
 from src.core.entities.store import StoreStatus
@@ -362,31 +361,37 @@ class ImpersonateResponse(BaseModel):
     store_id: str
     owner_id: str
     owner_email: str
+    # Tokens live in the body so the admin's frontend can hand them off via
+    # URL → sessionStorage. Cookies are deliberately NOT set: they would
+    # land on `.numueg.app` and clobber both the admin session and any
+    # parallel impersonation tab in the same browser.
+    access_token: str
+    refresh_token: str
 
 
 @router.post(
     "/{store_id}/impersonate",
     response_model=SuccessResponse[ImpersonateResponse],
-    summary="Issue merchant-hub cookies for a store's owner and return the hub URL",
+    summary="Issue merchant-hub tokens for a store's owner and return the hub URL",
     operation_id="admin_impersonate_store",
 )
 async def impersonate_store(
     store_id: Annotated[UUID, Path()],
-    response: Response,
     admin_id: Annotated[UUID, Depends(require_admin)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SuccessResponse[ImpersonateResponse]:
-    """Mint merchant-auth cookies so a super-admin can open the target store's
-    merchant hub as its owner.
+    """Mint merchant-auth tokens so a super-admin can open the target
+    store's merchant hub as its owner — **without touching any cookie on
+    the admin's browser**.
 
-    We just issue a normal access + refresh pair for the owner user; the
-    COOKIE_DOMAIN is set to the parent domain (`.numueg.app`) so the cookies
-    set on the API response are visible to the merchant hub subdomain. The
-    response URL carries `?impersonating=1&by=<admin_email>` so the hub can
-    show a persistent banner — nothing secret lives in those params.
+    The admin frontend opens the returned ``dashboard_url`` (token in the
+    URL fragment) in a new tab; the hub reads the fragment into
+    ``sessionStorage`` (tab-scoped) and sends it via ``Authorization:
+    Bearer`` on every request. Merchants who aren't being impersonated
+    keep using cookie auth exactly as before.
     """
     store = await store_repo.get_by_id(store_id)
     if not store:
@@ -400,7 +405,6 @@ async def impersonate_store(
             status_code=status.HTTP_404_NOT_FOUND, detail="Store owner not found"
         )
 
-    # Audit log — minimum bar before we wire a real audit table.
     logger.warning(
         "admin_impersonate_store admin=%s store=%s owner=%s",
         admin_id,
@@ -408,7 +412,6 @@ async def impersonate_store(
         owner.id,
     )
 
-    # Fetch admin email for the banner; best-effort, no auth impact if missing.
     admin_user_row = await db.execute(
         select(UserModel.email).where(UserModel.id == admin_id)
     )
@@ -416,10 +419,11 @@ async def impersonate_store(
 
     access = token_service.create_access_token(owner, tenant_id=store.tenant_id)
     refresh = token_service.create_refresh_token(owner, tenant_id=store.tenant_id)
-    set_auth_cookies(response, access, refresh)
 
     hub_base = settings.merchant_hub_url.rstrip("/")
-    dashboard_url = f"{hub_base}/?impersonating=1&by={admin_email}"
+    # The token is in the URL *fragment*, not the query string: fragments
+    # are not sent to the server and are not logged in Referer headers.
+    dashboard_url = f"{hub_base}/?by={admin_email}#handoff_token={access}"
 
     return SuccessResponse(
         data=ImpersonateResponse(
@@ -427,6 +431,8 @@ async def impersonate_store(
             store_id=str(store.id),
             owner_id=str(owner.id),
             owner_email=str(owner.email),
+            access_token=access,
+            refresh_token=refresh,
         ),
         message="Impersonation session established",
     )

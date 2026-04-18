@@ -43,6 +43,7 @@ from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
 )
 from src.infrastructure.database.models.tenant.product import ProductModel
+from src.infrastructure.database.models.tenant.product_review import ProductReviewModel
 from src.infrastructure.database.models.tenant.refund import RefundModel
 from src.infrastructure.database.models.tenant.risk_assessment import (
     RiskAssessmentModel,
@@ -111,6 +112,7 @@ __all__ = [
     "RequestPriority",
     "AuditAction",
     "ProductModel",
+    "ProductReviewModel",
     "RefundModel",
     "UpsellRuleModel",
     "ShipmentModel",

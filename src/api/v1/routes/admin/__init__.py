@@ -14,6 +14,7 @@ URL: /api/v1/admin/
 
 from fastapi import APIRouter
 
+from src.api.v1.routes.admin.auth import router as admin_auth_router
 from src.api.v1.routes.admin.customers import router as customers_router
 from src.api.v1.routes.admin.dashboard import router as dashboard_router
 from src.api.v1.routes.admin.demos import router as demos_router
@@ -63,6 +64,11 @@ router.include_router(
     admin_users_router,
     prefix="/users",
     tags=["Admin - Users"],
+)
+router.include_router(
+    admin_auth_router,
+    prefix="/auth",
+    tags=["Admin - Auth"],
 )
 # Credentials router already has prefix="/admin/credentials" built-in,
 # so we include it at root "" to avoid /admin/admin/credentials

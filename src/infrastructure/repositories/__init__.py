@@ -28,6 +28,9 @@ from src.infrastructure.repositories.onboarding_repository import OnboardingRepo
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
+from src.infrastructure.repositories.product_review_repository import (
+    ProductReviewRepository,
+)
 from src.infrastructure.repositories.refund_repository import RefundRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 from src.infrastructure.repositories.social_connection_repository import (
@@ -77,6 +80,7 @@ __all__ = [
     "OrderRepository",
     "PageViewRepository",
     "ProductRepository",
+    "ProductReviewRepository",
     "RedisCartRepository",
     "RefundRepository",
     "ShipmentRepository",
