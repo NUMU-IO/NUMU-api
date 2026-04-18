@@ -26,6 +26,18 @@ PUBLIC_PATH_PREFIXES = (
     "/api/v1/storefront",
 )
 
+# Host subdomains that are part of the control plane, not tenant storefronts.
+# Requests arriving on these hosts (e.g. merchant.numueg.app) must not be
+# resolved as a tenant — they will 404 because no tenant row matches.
+RESERVED_HOST_SUBDOMAINS = frozenset({
+    "www",
+    "api",
+    "admin",
+    "merchant",
+    "dashboard",
+    "app",
+})
+
 
 class TenantMiddleware(BaseHTTPMiddleware):
     """Middleware to identify and set tenant context from subdomain."""
@@ -126,15 +138,15 @@ class TenantMiddleware(BaseHTTPMiddleware):
         # Handle *.localhost (e.g., octyra.localhost)
         if parts[-1] == "localhost" and len(parts) == 2:
             subdomain = parts[0]
-            if subdomain in ("www", "api", "admin"):
+            if subdomain in RESERVED_HOST_SUBDOMAINS:
                 return None
             return subdomain
 
         # Handle regular domains (e.g., store1.octyrafiy.com)
         subdomain = parts[0]
 
-        # Skip common non-tenant subdomains
-        if subdomain in ("www", "api", "admin"):
+        # Skip common non-tenant subdomains (control plane hosts)
+        if subdomain in RESERVED_HOST_SUBDOMAINS:
             return None
 
         return subdomain

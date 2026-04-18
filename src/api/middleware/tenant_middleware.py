@@ -93,8 +93,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
         subdomain = parts[0]
 
-        # Skip common non-tenant subdomains
-        if subdomain in ("www", "api", "admin"):
+        # Skip common non-tenant subdomains (control plane hosts:
+        # the merchant hub, admin backoffice, marketing site, etc.)
+        if subdomain in ("www", "api", "admin", "merchant", "dashboard", "app"):
             return None
 
         return subdomain
