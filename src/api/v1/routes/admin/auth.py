@@ -32,19 +32,19 @@ from src.api.utils.cookies import (
     clear_admin_auth_cookies,
     set_admin_auth_cookies,
 )
-from src.api.v1.schemas.auth import (
+from src.api.v1.schemas.public.auth import (
     AuthResponse,
     LoginRequest,
     TokenResponse,
     UserResponse,
 )
 from src.application.dto.auth import LoginDTO
-from src.application.use_cases.auth.login_user import LoginUserUseCase
-from src.core.entities.user import UserRole
-from src.infrastructure.cache.redis_cache import RedisCacheService
-from src.infrastructure.external_services.account_lockout_service import (
+from src.application.services.lockout_service import (
     AccountLockoutService,
 )
+from src.application.use_cases.auth.login import LoginUserUseCase
+from src.core.entities.user import UserRole
+from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services.password_service import PasswordService
 from src.infrastructure.external_services.token_service import TokenService
 from src.infrastructure.repositories.user_repository import UserRepository
