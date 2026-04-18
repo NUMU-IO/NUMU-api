@@ -136,7 +136,7 @@ async def checkout(
         from src.core.value_objects.email import Email as EmailVO
 
         try:
-            email_vo = EmailVO(guest_email)
+            email_vo = EmailVO(value=guest_email)
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
