@@ -871,7 +871,7 @@ async def customer_forgot_password(
 
     # Always return success to prevent email enumeration
     try:
-        email_vo = EmailVO(request.email)
+        email_vo = EmailVO(value=request.email)
     except Exception:
         return SuccessResponse(
             data=None, message="If the email exists, a reset code has been sent"
@@ -938,7 +938,7 @@ async def customer_reset_password(
         )
 
     try:
-        email_vo = EmailVO(request.email)
+        email_vo = EmailVO(value=request.email)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
