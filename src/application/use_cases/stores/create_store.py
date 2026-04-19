@@ -180,19 +180,20 @@ class CreateStoreUseCase:
             "productCardStyle": "modern",
         }
 
-        # Create tenant first to get tenant_id and provision schema
+        # tenant.is_active gates TenantMiddleware routing — never leave a
+        # brand-new store's tenant inactive, or the owner 404s on their own dashboard.
         tenant = await self.tenant_service.create_tenant(
             name=dto.name,
             subdomain=subdomain,
             owner_id=owner_id,
             plan=plan,
-            is_active=is_beta_invite,
+            is_active=True,
         )
 
-        # Create store entity with tenant_id
-        # Beta-invited users are auto-approved
         store_status = (
-            StoreStatus.ACTIVE if is_beta_invite else StoreStatus.PENDING_APPROVAL
+            StoreStatus.ACTIVE
+            if is_beta_invite or not beta_mode
+            else StoreStatus.PENDING_APPROVAL
         )
         store = Store(
             name=dto.name,
