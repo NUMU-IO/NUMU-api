@@ -579,10 +579,10 @@ async def browse_products_cursor(
             description=product.description,
             short_description=product.short_description,
             product_type=product.product_type,
-            status=product.status,
-            price=str(product.price),
-            price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price)
+            status=product.status.value if hasattr(product.status, "value") else product.status,
+            price=str(product.price.amount),
+            price_currency=product.price.currency.value,
+            compare_at_price=str(product.compare_at_price.amount)
             if product.compare_at_price
             else None,
             cost_price=None,  # Never expose in storefront
@@ -664,9 +664,9 @@ async def get_product_by_slug(
             short_description=product.short_description,
             product_type=product.product_type,
             status=product.status,
-            price=str(product.price),
-            price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price)
+            price=str(product.price.amount),
+            price_currency=product.price.currency.value,
+            compare_at_price=str(product.compare_at_price.amount)
             if product.compare_at_price
             else None,
             cost_price=None,  # Don't expose cost price in storefront
