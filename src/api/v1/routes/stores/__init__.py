@@ -14,6 +14,7 @@ Provides REST endpoints for store CRUD operations and nested resources:
 - /stores/{store_id}/onboarding - Merchant onboarding progress
 - /stores/{store_id}/webhooks - Outgoing webhook subscriptions
 - /stores/{store_id}/upsells - Post-purchase upsell rules
+- /stores/{store_id}/bundles - Frequently Bought Together bundles
 - /stores/{store_id}/social - Social media import
 - /stores/{store_id}/ai - AI description generator
 """
@@ -21,6 +22,7 @@ Provides REST endpoints for store CRUD operations and nested resources:
 from fastapi import APIRouter
 
 from src.api.v1.routes.stores import ai as ai_module
+from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
 from src.api.v1.routes.stores import categories as categories_module
@@ -82,6 +84,7 @@ router.include_router(shipments_module.router, tags=["Store Shipments"])
 router.include_router(payments_module.router, tags=["Store Payments"])
 router.include_router(plan_module.router, tags=["Store Plan"])
 router.include_router(upsells_module.router, tags=["Store Upsells"])
+router.include_router(bundles_module.router, tags=["Store Bundles"])
 router.include_router(social_module.router, tags=["Store Social Import"])
 router.include_router(ai_module.router, tags=["Store AI"])
 router.include_router(themes_module.router, tags=["Store Themes"])

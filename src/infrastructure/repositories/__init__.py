@@ -27,6 +27,9 @@ from src.infrastructure.repositories.message_thread_repository import (
 from src.infrastructure.repositories.onboarding_repository import OnboardingRepository
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
+from src.infrastructure.repositories.product_bundle_repository import (
+    ProductBundleRepository,
+)
 from src.infrastructure.repositories.product_repository import ProductRepository
 from src.infrastructure.repositories.product_review_repository import (
     ProductReviewRepository,
@@ -79,6 +82,7 @@ __all__ = [
     "OnboardingRepository",
     "OrderRepository",
     "PageViewRepository",
+    "ProductBundleRepository",
     "ProductRepository",
     "ProductReviewRepository",
     "RedisCartRepository",

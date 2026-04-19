@@ -113,6 +113,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
 )
+from src.api.v1.routes.storefront import (
+    bundles_router as storefront_bundles_router,
+)
 
 # Store management routes (for store owners)
 from src.api.v1.routes.stores import router as stores_router
@@ -247,6 +250,13 @@ api_router.include_router(
     storefront_upsell_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Upsells"],
+)
+
+# Storefront - FBT bundles (public, scoped to store)
+api_router.include_router(
+    storefront_bundles_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Bundles"],
 )
 
 # Storefront - page view tracking (public, scoped to store)

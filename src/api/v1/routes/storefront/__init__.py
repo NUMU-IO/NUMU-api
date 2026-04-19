@@ -5,6 +5,7 @@ Public routes:
 - /storefront/store/{store_id}/categories - Public category listing
 - /storefront/store/{store_id}/auth - Customer authentication
 - /storefront/store/{store_id}/checkout - Checkout
+- /storefront/store/{store_id}/products/{product_id}/bundles - FBT bundles
 
 Authenticated customer routes:
 - /storefront/me/profile - Customer profile management
@@ -14,6 +15,7 @@ Authenticated customer routes:
 - /storefront/me/orders - Order history
 """
 
+from src.api.v1.routes.storefront.bundles import router as bundles_router
 from src.api.v1.routes.storefront.cart import router as cart_router
 from src.api.v1.routes.storefront.checkout import router as checkout_router
 from src.api.v1.routes.storefront.coupon import router as coupon_router
@@ -44,4 +46,5 @@ __all__ = [
     "tracking_router",
     "theme_resolution_router",
     "shipping_quote_router",
+    "bundles_router",
 ]
