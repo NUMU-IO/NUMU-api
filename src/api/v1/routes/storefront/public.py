@@ -615,22 +615,41 @@ async def browse_products_cursor(
 @router.get(
     "/products/{product_slug}",
     response_model=SuccessResponse[ProductResponse],
-    summary="Get product by slug",
+    summary="Get product by slug (or UUID)",
     operation_id="get_product_by_slug",
 )
 async def get_product_by_slug(
     store_id: Annotated[UUID, Path(description="Store ID")],
-    product_slug: Annotated[str, Path(description="Product slug")],
+    product_slug: Annotated[str, Path(description="Product slug or UUID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Get a product by its slug (public)."""
+    """Get a product by slug or UUID (public).
+
+    We accept both so links minted by Next.js before the slug migration
+    (bare UUIDs in `/product/<uuid>`) keep resolving, and the new
+    `/product/<slug>` URLs work without a second round-trip.
+    """
     # Verify store exists
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
 
-    product = await product_repo.get_by_slug(store_id, product_slug)
+    product = None
+    # Try UUID first — cheap string check before spending a parse exception.
+    if len(product_slug) == 36 and product_slug.count("-") == 4:
+        try:
+            maybe_uuid = UUID(product_slug)
+            product = await product_repo.get_by_id(maybe_uuid)
+            # Scope the UUID result to THIS store so the route can't be
+            # abused to probe products across tenants.
+            if product and product.store_id != store_id:
+                product = None
+        except ValueError:
+            product = None
+
+    if product is None:
+        product = await product_repo.get_by_slug(store_id, product_slug)
 
     if not product:
         raise EntityNotFoundError("Product", product_slug, identifier_name="slug")
