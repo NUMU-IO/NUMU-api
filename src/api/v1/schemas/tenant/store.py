@@ -1,8 +1,9 @@
 """Store Pydantic schemas."""
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from src.api.dependencies.sanitization import SanitizedStr
+from src.api.v1.schemas.tenant.product import _validate_size_chart
 
 
 class CreateStoreRequest(BaseModel):
@@ -94,6 +95,15 @@ class UpdateStoreRequest(BaseModel):
     )
     settings: dict | None = Field(None, description="Store-level settings")
     theme_settings: dict | None = Field(None, description="Storefront theme settings")
+
+    @field_validator("settings", mode="after")
+    @classmethod
+    def _normalize_settings(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return None
+        # Validate the store-default size chart if present; leaves other
+        # keys (payment creds, feature flags, etc.) untouched.
+        return _validate_size_chart(v)
 
 
 class StoreResponse(BaseModel):

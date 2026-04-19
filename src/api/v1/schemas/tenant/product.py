@@ -1,12 +1,81 @@
 """Product Pydantic schemas."""
 
 from decimal import Decimal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.dependencies.sanitization import SanitizedStr
 from src.core.value_objects.money import Currency
+
+
+class SizeChartRow(BaseModel):
+    """One row of the size-chart table — size label + one value per column."""
+
+    size: str = Field("", max_length=40)
+    values: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("values", mode="before")
+    @classmethod
+    def _coerce_values(cls, v: Any) -> list[str]:
+        if not isinstance(v, list):
+            return []
+        # Anything non-string gets str-coerced so bad client payloads don't
+        # reach the DB as mixed-type JSON.
+        return [str(x)[:40] if x is not None else "" for x in v]
+
+
+class SizeChartSchema(BaseModel):
+    """Validator for `product.attributes.size_chart` (and the store-level
+    default stored at `store.settings.size_chart`).
+
+    Accepts three modes:
+      - "default" — product falls back to the store default
+      - "custom"  — product carries its own chart
+      - "off"     — button is hidden even if a store default exists
+
+    Legacy payloads that only had `enabled: bool` are upgraded to a mode
+    by the storefront resolver, so both shapes are accepted here.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    mode: Literal["default", "custom", "off"] = "default"
+    column_headers: list[str] = Field(default_factory=list, max_length=20)
+    rows: list[SizeChartRow] = Field(default_factory=list, max_length=60)
+    unit: Literal["cm", "in"] = "cm"
+    notes: str = Field("", max_length=2000)
+    image_url: str = Field("", max_length=2048)
+
+    @field_validator("column_headers", mode="before")
+    @classmethod
+    def _coerce_headers(cls, v: Any) -> list[str]:
+        if not isinstance(v, list):
+            return []
+        return [str(x)[:80] if x is not None else "" for x in v]
+
+
+def _validate_size_chart(attributes: dict) -> dict:
+    """If `attributes.size_chart` is present, run it through SizeChartSchema
+    so typos or malformed payloads don't land in the DB. Unknown keys are
+    silently dropped (extra="ignore"); invalid shapes raise ValueError,
+    which Pydantic surfaces as a 422 to the caller."""
+    raw = attributes.get("size_chart")
+    if raw is None:
+        return attributes
+    if not isinstance(raw, dict):
+        attributes.pop("size_chart", None)
+        return attributes
+    validated = SizeChartSchema.model_validate(raw).model_dump()
+    # Truncate each row's `values` to the header count — catches
+    # column-drift from editors that don't clean up on column removal.
+    headers_len = len(validated["column_headers"])
+    for row in validated["rows"]:
+        row["values"] = row["values"][:headers_len]
+    attributes["size_chart"] = validated
+    return attributes
 
 
 class CreateProductRequest(BaseModel):
@@ -89,6 +158,11 @@ class CreateProductRequest(BaseModel):
         None, max_length=160, description="SEO meta description"
     )
 
+    @field_validator("attributes", mode="after")
+    @classmethod
+    def _normalize_attributes(cls, v: dict) -> dict:
+        return _validate_size_chart(v)
+
     @field_validator("price_currency")
     @classmethod
     def validate_currency(cls, v: str) -> str:
@@ -155,6 +229,13 @@ class UpdateProductRequest(BaseModel):
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
+
+    @field_validator("attributes", mode="after")
+    @classmethod
+    def _normalize_attributes(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return None
+        return _validate_size_chart(v)
 
 
 class ProductResponse(BaseModel):
