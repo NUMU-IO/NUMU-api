@@ -118,12 +118,85 @@ async def invite_admin(
 ) -> SuccessResponse[InviteAdminResponse]:
     email_vo = EmailVO(value=payload.email)
 
-    if await user_repo.email_exists(email_vo):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists.",
+    # If the email already belongs to a user, two cases:
+    #   1. They're already a SUPER_ADMIN → nothing to do, 409.
+    #   2. They're a merchant/customer/other → promote them in place.
+    #      Their existing password stays, so they log in as usual and then
+    #      see the admin panel. We issue no temp password and send a
+    #      "you've been granted admin access" email instead.
+    existing = await user_repo.get_by_email(email_vo)
+    if existing is not None:
+        if existing.role == UserRole.SUPER_ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This user is already a platform admin.",
+            )
+        existing.role = UserRole.SUPER_ADMIN
+        existing.status = UserStatus.ACTIVE
+        if existing.email_verified_at is None:
+            existing.email_verified_at = datetime.now(UTC)
+        created = await user_repo.update(existing)
+
+        logger.warning(
+            "admin_user_promoted by=%s target=%s email=%s prev_role=%s",
+            admin_id,
+            created.id,
+            payload.email,
+            existing.role,
         )
 
+        # Best-effort "you were granted admin access" email (no temp password).
+        email_sent = False
+        try:
+            sign_in_url = settings.merchant_hub_url.rstrip("/")
+            msg = EmailMessage(
+                to=payload.email,
+                subject="You now have admin access on NUMU",
+                html_content=(
+                    f"<p>Hi {existing.first_name or payload.first_name},</p>"
+                    "<p>Your NUMU account has been granted platform admin "
+                    "privileges. Sign in with your existing password and you'll "
+                    "see the admin panel.</p>"
+                    f'<p><a href="{sign_in_url}">{sign_in_url}</a></p>'
+                ),
+                text_content=(
+                    f"Hi {existing.first_name or payload.first_name},\n\n"
+                    "Your NUMU account has been granted platform admin "
+                    "privileges. Sign in with your existing password:\n"
+                    f"{sign_in_url}\n"
+                ),
+            )
+            email_sent = await email_service.send_email(msg)
+        except Exception as exc:
+            logger.warning("admin_promote_email_failed error=%s", exc)
+
+        created_item = AdminUserItem(
+            id=str(created.id),
+            email=payload.email,
+            first_name=created.first_name,
+            last_name=created.last_name,
+            status=created.status.value
+            if hasattr(created.status, "value")
+            else str(created.status),
+            created_at=created.created_at.isoformat()
+            if getattr(created, "created_at", None)
+            else None,
+            last_login_at=created.last_login_at.isoformat()
+            if getattr(created, "last_login_at", None)
+            else None,
+        )
+        return SuccessResponse(
+            data=InviteAdminResponse(
+                user=created_item,
+                email_sent=email_sent,
+                temporary_password=None,
+            ),
+            message="Existing user promoted to admin — they keep their current password."
+            if email_sent
+            else "Existing user promoted to admin — email could not be sent; tell them to sign in with their existing password.",
+        )
+
+    # No existing user — create a fresh admin with a temp password.
     temp_password = _generate_password()
     hashed = password_service.hash_password(temp_password)
 
