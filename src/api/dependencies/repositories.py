@@ -262,6 +262,16 @@ def get_store_theme_repository(
     return StoreThemeRepository(session)
 
 
+def get_theme_customization_version_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get theme customization version repository dependency (V3)."""
+    from src.infrastructure.repositories.theme_customization_version_repository import (
+        ThemeCustomizationVersionRepository,
+    )
+    return ThemeCustomizationVersionRepository(session)
+
+
 def get_channel_connection_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):

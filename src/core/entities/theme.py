@@ -101,6 +101,9 @@ class StoreTheme(BaseEntity):
     is_active: bool = False
     customization: dict[str, Any] = Field(default_factory=dict)
     draft_customization: dict[str, Any] = Field(default_factory=dict)
+    # V3 Theme Engine columns
+    customization_v3: dict[str, Any] = Field(default_factory=dict)
+    draft_customization_v3: dict[str, Any] = Field(default_factory=dict)
     installed_at: datetime | None = None
     activated_at: datetime | None = None
 

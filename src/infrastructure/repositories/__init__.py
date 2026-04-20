@@ -43,6 +43,9 @@ from src.infrastructure.repositories.social_post_repository import SocialPostRep
 from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_repository import ThemeRepository
+from src.infrastructure.repositories.theme_customization_version_repository import (
+    ThemeCustomizationVersionRepository,
+)
 from src.infrastructure.repositories.theme_version_repository import (
     ThemeVersionRepository,
 )
@@ -69,6 +72,7 @@ __all__ = [
     "StoreRepository",
     "StoreThemeRepository",
     "ThemeRepository",
+    "ThemeCustomizationVersionRepository",
     "ThemeVersionRepository",
     "TwoFactorRepository",
     "CategoryRepository",

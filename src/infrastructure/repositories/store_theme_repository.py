@@ -74,6 +74,8 @@ class StoreThemeRepository(IStoreThemeRepository):
             is_active=model.is_active,
             customization=copy.deepcopy(model.customization or {}),
             draft_customization=copy.deepcopy(model.draft_customization or {}),
+            customization_v3=copy.deepcopy(model.customization_v3 or {}),
+            draft_customization_v3=copy.deepcopy(model.draft_customization_v3 or {}),
             installed_at=installed_at,
             activated_at=activated_at,
             # Denormalized
@@ -100,6 +102,8 @@ class StoreThemeRepository(IStoreThemeRepository):
             is_active=entity.is_active,
             customization=entity.customization,
             draft_customization=entity.draft_customization,
+            customization_v3=entity.customization_v3,
+            draft_customization_v3=entity.draft_customization_v3,
             installed_at=entity.installed_at,
             activated_at=entity.activated_at,
         )
