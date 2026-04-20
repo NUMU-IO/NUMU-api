@@ -66,6 +66,7 @@ def order_confirmation_html(
     store_name: str = "NUMU",
     customer_name: str | None = None,
     language: str = "ar",
+    tracking_url: str | None = None,
     **_kwargs,
 ) -> str:
     c = _ORDER_CONFIRMATION.get(language, _ORDER_CONFIRMATION["ar"])
@@ -120,7 +121,7 @@ def order_confirmation_html(
         <p>{c["what_next_body"]}</p>
 
         <p class="center" style="margin-top:28px;">
-            <a href="#" class="btn-outline">{c["btn"]}</a>
+            <a href="{tracking_url or "#"}" class="btn-outline">{c["btn"]}</a>
         </p>
     </div>"""
     return wrap(body, language=language, preheader=c["preheader"])

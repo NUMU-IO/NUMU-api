@@ -250,6 +250,10 @@ class ResendEmailService(IEmailService):
         currency = order_details.get("currency", "EGP")
         store_name = order_details.get("store_name", "NUMU")
         customer_name = order_details.get("customer_name")
+        # Persistent tracking page on the storefront; reflects real-time
+        # status changes made by the merchant. Caller constructs the full
+        # absolute URL (e.g. https://{subdomain}.numueg.app/track/{order_id}).
+        tracking_url = order_details.get("tracking_url")
 
         html_content = ORDER_CONFIRMATION_TEMPLATE["html_fn"](
             order_number=order_number,
@@ -259,6 +263,7 @@ class ResendEmailService(IEmailService):
             store_name=store_name,
             customer_name=customer_name,
             language=language,
+            tracking_url=tracking_url,
         )
         subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](
             order_number, store_name, language
