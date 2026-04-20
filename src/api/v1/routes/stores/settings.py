@@ -1830,6 +1830,23 @@ async def publish_customization(
     store.settings = settings
     await store_repo.update(store)
 
+    # Bust the Next.js storefront cache so merchant edits go live
+    # immediately instead of waiting out the 60s per-store revalidate
+    # window set on getStoreData().
+    if store.subdomain:
+        try:
+            from src.infrastructure.external_services.nextjs_revalidation import (
+                revalidate_on_customization_publish,
+            )
+
+            await revalidate_on_customization_publish(store.subdomain, str(store.id))
+        except Exception:
+            logger.warning(
+                "Failed to revalidate storefront for %s after publish",
+                store.subdomain,
+                exc_info=True,
+            )
+
     return SuccessResponse(
         data=_build_customization_response(
             customization, theme_settings=store.theme_settings
