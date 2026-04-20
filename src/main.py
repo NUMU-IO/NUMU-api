@@ -17,6 +17,7 @@ from src.api.middleware import (
     CSRFMiddleware,
     DocsAuthMiddleware,
     LoggingMiddleware,
+    MaintenanceModeMiddleware,
     RateLimitMiddleware,
     ResponseTimeMiddleware,
     SecurityHeadersMiddleware,
@@ -256,6 +257,9 @@ def create_app() -> FastAPI:
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(TenantMiddleware)
     app.add_middleware(LoggingMiddleware)
+    # Maintenance mode — outermost so it short-circuits everything except
+    # the allow-list (health, admin, auth, docs).
+    app.add_middleware(MaintenanceModeMiddleware)
 
     # Setup CORS — added LAST so it's the outermost middleware
     # This ensures preflight OPTIONS requests are handled before any other middleware

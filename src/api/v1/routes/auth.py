@@ -222,12 +222,25 @@ async def register(
     password_service: Annotated[PasswordService, Depends(get_password_service)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
     email_service: Annotated[ResendEmailService, Depends(get_email_service)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Register a new platform user account.
 
     Tokens are set as httpOnly cookies — not included in the JSON body.
     A verification email is sent after registration.
     """
+    # Signup gate — the admin can turn new-merchant registration off from
+    # the platform settings page. Check this BEFORE we do any work so we
+    # fail fast with a clear message.
+    from src.api.v1.routes.admin.platform_settings import get_platform_settings
+
+    platform = await get_platform_settings(db)
+    if not platform.get("enable_new_merchant_signups", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="New merchant signups are currently disabled. Please try again later.",
+        )
+
     use_case = RegisterUserUseCase(
         user_repository=user_repo,
         password_service=password_service,

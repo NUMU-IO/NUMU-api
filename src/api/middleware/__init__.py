@@ -10,6 +10,7 @@ from src.api.middleware.error_handler import (
     setup_exception_handlers,
 )
 from src.api.middleware.logging import LoggingMiddleware, logging_middleware
+from src.api.middleware.maintenance import MaintenanceModeMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import (
     SecurityHeadersMiddleware,
@@ -28,6 +29,7 @@ __all__ = [
     "DocsAuthMiddleware",
     "LoggingMiddleware",
     "logging_middleware",
+    "MaintenanceModeMiddleware",
     "TenantMiddleware",
     "RateLimitMiddleware",
     "SecurityHeadersMiddleware",

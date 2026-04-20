@@ -25,6 +25,9 @@ from src.api.v1.routes.admin.merchant_hub_nav import (
 )
 from src.api.v1.routes.admin.orders import router as orders_router
 from src.api.v1.routes.admin.platform_config import router as platform_config_router
+from src.api.v1.routes.admin.platform_settings import (
+    router as platform_settings_router,
+)
 from src.api.v1.routes.admin.products import router as products_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.stores import router as stores_router
@@ -54,6 +57,11 @@ router.include_router(
     platform_config_router,
     prefix="/platform-config",
     tags=["Admin - Platform Config"],
+)
+router.include_router(
+    platform_settings_router,
+    prefix="/platform-settings",
+    tags=["Admin - Platform Settings"],
 )
 router.include_router(
     merchant_hub_nav_router,
