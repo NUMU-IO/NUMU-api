@@ -34,11 +34,27 @@ class ProductBundleRepository:
         return model
 
     async def bulk_create(self, items: list[dict]) -> list[ProductBundleModel]:
-        """Create multiple bundle associations in one flush."""
+        """Create multiple bundle associations in one flush.
+
+        Re-queries the newly flushed rows with `bundled_product` eager-loaded
+        via `selectinload`. Skipping this causes a `MissingGreenlet` error
+        the moment the response serializer (`_bundle_response`) touches
+        `bundle.bundled_product`, because the relationship would otherwise
+        lazy-load *outside* the async session context.
+        """
         models = [ProductBundleModel(**item) for item in items]
         self.session.add_all(models)
         await self.session.flush()
-        return models
+        if not models:
+            return []
+        ids = [m.id for m in models]
+        result = await self.session.execute(
+            select(ProductBundleModel)
+            .options(selectinload(ProductBundleModel.bundled_product))
+            .where(ProductBundleModel.id.in_(ids))
+            .order_by(ProductBundleModel.position.asc())
+        )
+        return list(result.scalars().all())
 
     # ── Read ──────────────────────────────────────────────────────────────
 
@@ -46,8 +62,10 @@ class ProductBundleRepository:
         self, bundle_id: UUID, store_id: UUID | None = None
     ) -> ProductBundleModel | None:
         """Get a single bundle by ID, optionally scoped to store."""
-        query = select(ProductBundleModel).where(
-            ProductBundleModel.id == bundle_id
+        query = (
+            select(ProductBundleModel)
+            .options(selectinload(ProductBundleModel.bundled_product))
+            .where(ProductBundleModel.id == bundle_id)
         )
         if store_id is not None:
             query = query.where(ProductBundleModel.store_id == store_id)
@@ -63,11 +81,17 @@ class ProductBundleRepository:
         """List all bundles for a given primary product (dashboard + storefront).
 
         Returns bundles ordered by position ASC for consistent display.
+        `bundled_product` is eager-loaded so `_bundle_response` can read it
+        without triggering a lazy-load outside the session context.
         """
-        query = select(ProductBundleModel).where(
-            and_(
-                ProductBundleModel.store_id == store_id,
-                ProductBundleModel.primary_product_id == primary_product_id,
+        query = (
+            select(ProductBundleModel)
+            .options(selectinload(ProductBundleModel.bundled_product))
+            .where(
+                and_(
+                    ProductBundleModel.store_id == store_id,
+                    ProductBundleModel.primary_product_id == primary_product_id,
+                )
             )
         )
         if active_only:
@@ -82,8 +106,10 @@ class ProductBundleRepository:
         active_only: bool = False,
     ) -> list[ProductBundleModel]:
         """List all bundles for a store (admin overview)."""
-        query = select(ProductBundleModel).where(
-            ProductBundleModel.store_id == store_id
+        query = (
+            select(ProductBundleModel)
+            .options(selectinload(ProductBundleModel.bundled_product))
+            .where(ProductBundleModel.store_id == store_id)
         )
         if active_only:
             query = query.where(ProductBundleModel.is_active.is_(True))
