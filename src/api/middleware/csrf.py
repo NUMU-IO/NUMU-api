@@ -46,6 +46,10 @@ STOREFRONT_AUTH_EXEMPT_SUFFIXES = (
     "/auth/resend-verification",
     "/checkout/otp/send",
     "/checkout/otp/verify",
+    # Analytics beacon: fire-and-forget POST from the storefront with no
+    # CSRF header. Returning 403 on authenticated sessions caused the
+    # frontend to log errors on every page view / add_to_cart.
+    "/track",
 )
 
 
