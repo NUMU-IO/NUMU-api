@@ -378,7 +378,17 @@ async def paymob_callback_redirect(
             base_url = f"https://{subdomain}.numueg.app"
 
             if success:
-                redirect_url = f"{base_url}/order-confirmation?order_id={internal_order.id}&order_number={internal_order.order_number}&status=paid"
+                # Include the total (in cents) so the confirmation page can
+                # show "Total: EGP X,XXX" on the hard-redirect path —
+                # navigation state is wiped by the Paymob round-trip so the
+                # query string is the only channel for order detail.
+                redirect_url = (
+                    f"{base_url}/order-confirmation"
+                    f"?order_id={internal_order.id}"
+                    f"&order_number={internal_order.order_number}"
+                    f"&status=paid"
+                    f"&total={internal_order.total}"
+                )
             else:
                 redirect_url = f"{base_url}/checkout?payment_failed=true"
 

@@ -355,7 +355,15 @@ async def kashier_redirect(
                 await order_repo.update(internal_order)
 
             if success:
-                redirect_url = f"{base_url}/order-confirmation?order_id={internal_order.id}&order_number={internal_order.order_number}&status=paid"
+                # Include the total (in cents) so the receipt can render
+                # the "Total: EGP X,XXX" row on the hard-redirect path.
+                redirect_url = (
+                    f"{base_url}/order-confirmation"
+                    f"?order_id={internal_order.id}"
+                    f"&order_number={internal_order.order_number}"
+                    f"&status=paid"
+                    f"&total={internal_order.total}"
+                )
             else:
                 redirect_url = f"{base_url}/checkout?payment_failed=true"
 
