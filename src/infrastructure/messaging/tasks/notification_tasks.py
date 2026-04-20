@@ -424,6 +424,7 @@ def send_whatsapp_order_confirmation_task(
     total: str,
     store_name: str,
     language: str = "ar",
+    tracking_url: str | None = None,
 ):
     """Send order confirmation via WhatsApp asynchronously.
 
@@ -434,6 +435,7 @@ def send_whatsapp_order_confirmation_task(
         total: Formatted total amount (e.g. "EGP 250.00").
         store_name: Store name.
         language: Preferred language code.
+        tracking_url: Persistent tracking URL to embed in the message.
     """
     from src.core.interfaces.services.messaging_service import MessageRecipient
     from src.infrastructure.external_services.whatsapp.messaging_service import (
@@ -444,7 +446,13 @@ def send_whatsapp_order_confirmation_task(
         service = WhatsAppMessagingService()
         recipient = MessageRecipient(phone=phone, name=customer_name, language=language)
         result = run_async(
-            service.send_order_confirmation(recipient, order_number, total, store_name)
+            service.send_order_confirmation(
+                recipient,
+                order_number,
+                total,
+                store_name,
+                tracking_url=tracking_url,
+            )
         )
         logger.info(
             "whatsapp_order_confirmation_sent",

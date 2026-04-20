@@ -88,6 +88,9 @@ from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
 )
 from src.api.v1.routes.storefront import (
+    order_tracking_router as storefront_order_tracking_router,
+)
+from src.api.v1.routes.storefront import (
     otp_router as storefront_otp_router,
 )
 
@@ -201,6 +204,13 @@ api_router.include_router(
     storefront_lookup_router,
     prefix="/storefront",
     tags=["Storefront - Public"],
+)
+
+# Storefront - public order tracking (no store_id needed; scoped by order UUID)
+api_router.include_router(
+    storefront_order_tracking_router,
+    prefix="/storefront",
+    tags=["Storefront - Tracking"],
 )
 
 # Storefront - public routes (catalog, customer auth)

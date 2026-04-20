@@ -301,18 +301,22 @@ class WhatsAppMessagingService(IMessagingService):
         order_number: str,
         total: str,
         store_name: str,
+        tracking_url: str | None = None,
     ) -> MessageResult:
         """Send order confirmation message.
 
-        Example message (English):
-        "Hi {name}! Your order #{order_number} for {total} from {store_name}
-        has been confirmed. We'll notify you when it ships. شكراً لك!"
+        The WhatsApp template receives ``tracking_url`` as an additional
+        parameter. If the template is configured to use it (via a URL
+        button or body variable), it'll surface as a tap-to-open tracking
+        link — reflecting live status changes from the merchant dashboard.
 
         Args:
             recipient: Customer contact info
             order_number: Order reference number
             total: Formatted total (e.g., "EGP 250.00")
             store_name: Store name
+            tracking_url: Persistent order-tracking URL, e.g.
+                ``https://<subdomain>.numueg.app/track/<order_id>``.
 
         Returns:
             MessageResult
@@ -325,6 +329,7 @@ class WhatsAppMessagingService(IMessagingService):
                 "order_number": order_number,
                 "total": total,
                 "store_name": store_name,
+                "tracking_url": tracking_url or "",
             },
         )
         return await self.send_message(content)
