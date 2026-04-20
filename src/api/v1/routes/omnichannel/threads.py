@@ -21,7 +21,7 @@ from src.infrastructure.repositories import MessageThreadRepositoryImpl
 router = APIRouter(tags=["Omnichannel"])
 
 
-@router.get("/", response_model=dict, status_code=status.HTTP_200_OK)
+@router.get("/", response_model=SuccessResponse, status_code=status.HTTP_200_OK)
 async def list_threads(
     store_id: UUID,
     channel: str | None = Query(
@@ -58,7 +58,9 @@ async def list_threads(
     )
 
 
-@router.get("/{thread_id}", response_model=dict, status_code=status.HTTP_200_OK)
+@router.get(
+    "/{thread_id}", response_model=SuccessResponse, status_code=status.HTTP_200_OK
+)
 async def get_thread(
     thread_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -75,7 +77,9 @@ async def get_thread(
     return SuccessResponse(data=thread, message=None)
 
 
-@router.post("/{thread_id}/read", response_model=dict, status_code=status.HTTP_200_OK)
+@router.post(
+    "/{thread_id}/read", response_model=SuccessResponse, status_code=status.HTTP_200_OK
+)
 async def mark_read(
     thread_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -92,7 +96,9 @@ async def mark_read(
 
 
 @router.post(
-    "/{thread_id}/resolve", response_model=dict, status_code=status.HTTP_200_OK
+    "/{thread_id}/resolve",
+    response_model=SuccessResponse,
+    status_code=status.HTTP_200_OK,
 )
 async def resolve_thread(
     thread_id: UUID,

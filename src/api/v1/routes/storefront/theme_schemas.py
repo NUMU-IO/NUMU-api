@@ -1868,6 +1868,7 @@ SECTION_SCHEMAS: list[dict[str, Any]] = [
 # and may include theme-specific settings (e.g., neo-brutalism border width).
 
 _FONT_OPTIONS = [
+    # Arabic
     {"label": "Cairo", "value": "Cairo"},
     {"label": "Tajawal", "value": "Tajawal"},
     {"label": "IBM Plex Sans Arabic", "value": "IBM Plex Sans Arabic"},
@@ -1877,9 +1878,19 @@ _FONT_OPTIONS = [
     {"label": "Changa", "value": "Changa"},
     {"label": "Rubik", "value": "Rubik"},
     {"label": "Readex Pro", "value": "Readex Pro"},
+    # Latin sans-serif
     {"label": "Inter", "value": "Inter"},
     {"label": "Poppins", "value": "Poppins"},
     {"label": "Space Grotesk", "value": "Space Grotesk"},
+    # Latin serif (added so luxury / editorial themes can default to a serif)
+    {"label": "Playfair Display", "value": "Playfair Display"},
+    {"label": "Cormorant Garamond", "value": "Cormorant Garamond"},
+    {"label": "DM Serif Display", "value": "DM Serif Display"},
+    {"label": "Lora", "value": "Lora"},
+    {"label": "Merriweather", "value": "Merriweather"},
+    {"label": "Libre Baskerville", "value": "Libre Baskerville"},
+    {"label": "Fraunces", "value": "Fraunces"},
+    {"label": "Newsreader", "value": "Newsreader"},
 ]
 
 
@@ -1894,6 +1905,8 @@ def _build_global_settings(
     radius_max: int = 24,
     extra: list[dict[str, Any]] | None = None,
     include_heading_font: bool = True,
+    heading_font: str = "Cairo",
+    body_font: str = "Cairo",
 ) -> list[dict[str, Any]]:
     """Build a global settings list with theme-specific defaults."""
     settings: list[dict[str, Any]] = [
@@ -1974,7 +1987,7 @@ def _build_global_settings(
                 "type": "font",
                 "label": "Heading Font",
                 "labelAr": "خط العناوين",
-                "default": "Cairo",
+                "default": heading_font,
                 "options": _FONT_OPTIONS,
                 "group": "Typography",
                 "groupAr": "الخطوط",
@@ -1984,7 +1997,7 @@ def _build_global_settings(
                 "type": "font",
                 "label": "Body Font",
                 "labelAr": "خط النصوص",
-                "default": "Cairo",
+                "default": body_font,
                 "options": _FONT_OPTIONS,
                 "group": "Typography",
                 "groupAr": "الخطوط",
@@ -2243,6 +2256,8 @@ THEME_GLOBAL_SETTINGS: dict[str, list[dict[str, Any]]] = {
         text="#000000",
         radius=0,
         radius_max=16,
+        heading_font="Playfair Display",
+        body_font="Inter",
         extra=[
             {
                 "key": "color_gold_light",
