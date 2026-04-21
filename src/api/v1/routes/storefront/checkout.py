@@ -148,24 +148,52 @@ async def checkout(
     is_guest = current_customer is None
 
     if is_guest:
-        # Guest checkout: require email from request
-        guest_email = request.guest_email
-        if not guest_email:
+        # Email requirement follows the merchant's checkout-fields config —
+        # required only if the merchant marked email as required. If email is
+        # disabled entirely, we synthesize a per-order placeholder so the
+        # Customer row (which requires a unique email per store) can be
+        # created; notifications fall back to phone/WhatsApp.
+        from src.core.value_objects.email import Email as EmailVO
+
+        email_cfg = (checkout_config.get("standard_fields") or {}).get("email") or {}
+        email_enabled = bool(email_cfg.get("enabled", True))
+        email_required = bool(email_cfg.get("required", False))
+
+        guest_email = (request.guest_email or "").strip() or None
+
+        if email_required and not guest_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email is required for guest checkout.",
             )
-        from src.core.value_objects.email import Email as EmailVO
 
-        try:
-            email_vo = EmailVO(value=guest_email)
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid email address.",
+        if guest_email:
+            try:
+                email_vo = EmailVO(value=guest_email)
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid email address.",
+                )
+        elif not email_enabled or not email_required:
+            # Merchant opted out of collecting email. Generate a stable
+            # placeholder so the customers.email uniqueness constraint holds.
+            import uuid as _uuid
+
+            email_vo = EmailVO(
+                value=f"guest+{_uuid.uuid4().hex[:12]}@noemail.numueg.app"
+            )
+        else:
+            # Email was enabled-but-not-required and none was supplied; treat
+            # as opt-out path to keep a consistent placeholder.
+            import uuid as _uuid
+
+            email_vo = EmailVO(
+                value=f"guest+{_uuid.uuid4().hex[:12]}@noemail.numueg.app"
             )
 
-        # Re-use existing customer record if same email+store, else create
+        # Re-use existing customer record if same email+store, else create.
+        # Placeholder emails never collide (fresh UUID per order).
         existing = await customer_repo.get_by_email(store_id, email_vo)
         if existing:
             current_customer = existing
@@ -178,7 +206,7 @@ async def checkout(
                 last_name=addr.last_name or "",
                 phone=None,
                 is_verified=False,
-                metadata={"guest": True},
+                metadata={"guest": True, "has_real_email": guest_email is not None},
             )
             current_customer = await customer_repo.create(
                 current_customer, tenant_id=store.tenant_id
