@@ -76,6 +76,9 @@ from src.api.v1.routes.staff.overrides import router as staff_overrides_router
 from src.api.v1.routes.staff.policies import router as staff_policies_router
 from src.api.v1.routes.staff.sessions import router as staff_sessions_router
 from src.api.v1.routes.storefront import (
+    bundles_router as storefront_bundles_router,
+)
+from src.api.v1.routes.storefront import (
     cart_router as storefront_cart_router,
 )
 from src.api.v1.routes.storefront import (
@@ -118,9 +121,6 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
-)
-from src.api.v1.routes.storefront import (
-    bundles_router as storefront_bundles_router,
 )
 
 # Store management routes (for store owners)
@@ -324,8 +324,21 @@ api_router.include_router(referrals_router, tags=["Referrals"])
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)
 api_router.include_router(shopify_router, prefix="/shopify")
 
-# Staff management routes (prefixes defined on the routers themselves)
+# Staff management routes (prefixes defined on the routers themselves).
+#
+# Ordering matters: `staff_list_router` owns the catch-all
+# `/staff/{membership_id}` GET/DELETE/PUT routes, so every static-prefix
+# staff sub-router (/staff/overrides, /staff/sessions, /staff/policies,
+# /staff/access-requests, /staff/invitations) MUST be included before it.
+# Otherwise FastAPI matches `/staff/overrides` against `{membership_id}`,
+# fails UUID validation on the literal string, and returns 422.
 api_router.include_router(staff_invitations_router, tags=["Staff - Invitations"])
+api_router.include_router(staff_overrides_router, tags=["Staff - Overrides"])
+api_router.include_router(staff_sessions_router, tags=["Staff - Sessions"])
+api_router.include_router(
+    staff_access_requests_router, tags=["Staff - Access Requests"]
+)
+api_router.include_router(staff_policies_router, tags=["Staff - Policies"])
 api_router.include_router(staff_list_router, tags=["Staff"])
 
 # Role management routes
@@ -336,14 +349,6 @@ api_router.include_router(permissions_router, tags=["Permissions"])
 
 # Webhooks - external service callbacks (no auth required)
 api_router.include_router(webhooks_router, prefix="/webhooks")
-
-# Staff extended routes
-api_router.include_router(staff_overrides_router, tags=["Staff - Overrides"])
-api_router.include_router(staff_sessions_router, tags=["Staff - Sessions"])
-api_router.include_router(
-    staff_access_requests_router, tags=["Staff - Access Requests"]
-)
-api_router.include_router(staff_policies_router, tags=["Staff - Policies"])
 
 # WebSocket for realtime updates
 api_router.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
