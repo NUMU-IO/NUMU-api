@@ -43,6 +43,13 @@ class CheckoutRequest(BaseModel):
     # COUNT(DISTINCT session_fingerprint) funnel query can connect this
     # checkout to the visitor's earlier steps.
     session_fingerprint: str | None = Field(None, max_length=64)
+    # Merchant-defined custom checkout fields. Keys are the custom field IDs
+    # from store.settings.checkout_fields; values are the raw user inputs.
+    # Validated server-side against the live config — required-field misses
+    # and bad option values 400 before an order is created.
+    custom_fields: dict[str, object] | None = Field(
+        None, description="Map of custom field id → submitted value"
+    )
 
 
 class CheckoutResponse(BaseModel):

@@ -47,6 +47,12 @@ from src.application.services.network_reputation_service import (
     write_network_event,
 )
 from src.config import settings
+from src.core.checkout_fields import (
+    resolve_config as resolve_checkout_config,
+)
+from src.core.checkout_fields import (
+    validate_custom_field_values,
+)
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
@@ -125,6 +131,17 @@ async def checkout(
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
+
+    # ── Checkout-fields: validate submitted custom fields against live config ──
+    checkout_config = resolve_checkout_config(store.settings)
+    accepted_custom_fields, custom_field_errors = validate_custom_field_values(
+        checkout_config, request.custom_fields
+    )
+    if custom_field_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "custom_field_errors", "errors": custom_field_errors},
+        )
 
     # ── Resolve or create customer ──────────────────────────────────────
     current_customer = optional_customer
@@ -453,7 +470,14 @@ async def checkout(
         payment_method=request.payment_method,
         shipping_method=request.shipping_method,
         customer_notes=request.customer_notes,
-        metadata={"ip_address": client_ip} if client_ip else {},
+        metadata={
+            **({"ip_address": client_ip} if client_ip else {}),
+            **(
+                {"custom_fields": accepted_custom_fields}
+                if accepted_custom_fields
+                else {}
+            ),
+        },
         utm_source=request.utm_source,
         utm_medium=request.utm_medium,
         utm_campaign=request.utm_campaign,

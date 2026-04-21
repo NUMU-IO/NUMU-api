@@ -79,6 +79,9 @@ from src.api.v1.routes.storefront import (
     cart_router as storefront_cart_router,
 )
 from src.api.v1.routes.storefront import (
+    checkout_config_router as storefront_checkout_config_router,
+)
+from src.api.v1.routes.storefront import (
     checkout_router as storefront_checkout_router,
 )
 from src.api.v1.routes.storefront import (
@@ -237,6 +240,13 @@ api_router.include_router(
 # Storefront - checkout (authenticated customer, scoped to store)
 api_router.include_router(
     storefront_checkout_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Checkout"],
+)
+
+# Storefront - public checkout field config (no auth, scoped to store)
+api_router.include_router(
+    storefront_checkout_config_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Checkout"],
 )
