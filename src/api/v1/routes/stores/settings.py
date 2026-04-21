@@ -1941,3 +1941,50 @@ async def list_customization_assets(
         return SuccessResponse(data=assets, message="Assets retrieved successfully")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list assets: {str(e)}")
+
+
+# ============ Checkout Fields Config ============
+
+from src.core.checkout_fields import (  # noqa: E402
+    SETTINGS_KEY as _CHECKOUT_KEY,
+)
+from src.core.checkout_fields import (
+    CheckoutFieldsConfig,
+)
+from src.core.checkout_fields import (
+    resolve_config as _resolve_checkout_config,
+)
+
+
+@router.get(
+    "/checkout-fields",
+    response_model=SuccessResponse[dict],
+    summary="Get checkout fields config",
+    operation_id="get_checkout_fields",
+)
+async def get_checkout_fields(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Return the merchant's checkout-fields config (with defaults merged)."""
+    cfg = _resolve_checkout_config(store.settings)
+    return SuccessResponse(data=cfg, message="Checkout fields retrieved")
+
+
+@router.put(
+    "/checkout-fields",
+    response_model=SuccessResponse[dict],
+    summary="Update checkout fields config",
+    operation_id="update_checkout_fields",
+)
+async def update_checkout_fields(
+    payload: CheckoutFieldsConfig,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Persist the merchant's checkout-fields config under ``settings.checkout_fields``."""
+    settings = dict(store.settings or {})
+    settings[_CHECKOUT_KEY] = payload.to_storage()
+    store.settings = settings
+    await store_repo.update(store)
+    cfg = _resolve_checkout_config(settings)
+    return SuccessResponse(data=cfg, message="Checkout fields updated")

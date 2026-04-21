@@ -16,6 +16,9 @@ Authenticated customer routes:
 
 from src.api.v1.routes.storefront.cart import router as cart_router
 from src.api.v1.routes.storefront.checkout import router as checkout_router
+from src.api.v1.routes.storefront.checkout_config import (
+    router as checkout_config_router,
+)
 from src.api.v1.routes.storefront.coupon import router as coupon_router
 from src.api.v1.routes.storefront.customer import router as customer_router
 from src.api.v1.routes.storefront.otp import router as otp_router
@@ -44,4 +47,5 @@ __all__ = [
     "tracking_router",
     "theme_resolution_router",
     "shipping_quote_router",
+    "checkout_config_router",
 ]
