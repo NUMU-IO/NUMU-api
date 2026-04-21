@@ -579,10 +579,10 @@ async def browse_products_cursor(
             description=product.description,
             short_description=product.short_description,
             product_type=product.product_type,
-            status=product.status,
-            price=str(product.price),
-            price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price)
+            status=product.status.value if hasattr(product.status, "value") else product.status,
+            price=str(product.price.amount),
+            price_currency=product.price.currency.value,
+            compare_at_price=str(product.compare_at_price.amount)
             if product.compare_at_price
             else None,
             cost_price=None,  # Never expose in storefront
@@ -615,22 +615,41 @@ async def browse_products_cursor(
 @router.get(
     "/products/{product_slug}",
     response_model=SuccessResponse[ProductResponse],
-    summary="Get product by slug",
+    summary="Get product by slug (or UUID)",
     operation_id="get_product_by_slug",
 )
 async def get_product_by_slug(
     store_id: Annotated[UUID, Path(description="Store ID")],
-    product_slug: Annotated[str, Path(description="Product slug")],
+    product_slug: Annotated[str, Path(description="Product slug or UUID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Get a product by its slug (public)."""
+    """Get a product by slug or UUID (public).
+
+    We accept both so links minted by Next.js before the slug migration
+    (bare UUIDs in `/product/<uuid>`) keep resolving, and the new
+    `/product/<slug>` URLs work without a second round-trip.
+    """
     # Verify store exists
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
 
-    product = await product_repo.get_by_slug(store_id, product_slug)
+    product = None
+    # Try UUID first — cheap string check before spending a parse exception.
+    if len(product_slug) == 36 and product_slug.count("-") == 4:
+        try:
+            maybe_uuid = UUID(product_slug)
+            product = await product_repo.get_by_id(maybe_uuid)
+            # Scope the UUID result to THIS store so the route can't be
+            # abused to probe products across tenants.
+            if product and product.store_id != store_id:
+                product = None
+        except ValueError:
+            product = None
+
+    if product is None:
+        product = await product_repo.get_by_slug(store_id, product_slug)
 
     if not product:
         raise EntityNotFoundError("Product", product_slug, identifier_name="slug")
@@ -645,9 +664,9 @@ async def get_product_by_slug(
             short_description=product.short_description,
             product_type=product.product_type,
             status=product.status,
-            price=str(product.price),
-            price_currency=product.price_currency,
-            compare_at_price=str(product.compare_at_price)
+            price=str(product.price.amount),
+            price_currency=product.price.currency.value,
+            compare_at_price=str(product.compare_at_price.amount)
             if product.compare_at_price
             else None,
             cost_price=None,  # Don't expose cost price in storefront
@@ -1196,17 +1215,28 @@ async def get_store_payment_methods(
 
     payment_settings = (store.settings or {}).get("payment", {})
 
+    # In non-production environments, surface methods that are merely `enabled`
+    # (without `is_configured`) so merchants see what they selected during onboarding
+    # before they've finished credential setup.
+    from src.config import settings as app_settings
+
+    def _show(provider: str) -> bool:
+        cfg = payment_settings.get(provider, {})
+        if not cfg.get("enabled"):
+            return False
+        if cfg.get("is_configured"):
+            return True
+        return app_settings.environment != "production"
+
     methods = []
-    if payment_settings.get("cod", {}).get("enabled"):
+    if _show("cod"):
         methods.append({
             "id": "cod",
             "label": "الدفع عند الاستلام",
             "label_en": "Cash on Delivery",
             "type": "cod",
         })
-    if payment_settings.get("paymob", {}).get("enabled") and payment_settings.get(
-        "paymob", {}
-    ).get("is_configured"):
+    if _show("paymob"):
         methods.append({
             "id": "paymob_card",
             "label": "بطاقة بنكية",
@@ -1221,9 +1251,7 @@ async def get_store_payment_methods(
                 "label_en": "Mobile Wallet",
                 "type": "paymob",
             })
-    if payment_settings.get("fawry", {}).get("enabled") and payment_settings.get(
-        "fawry", {}
-    ).get("is_configured"):
+    if _show("fawry"):
         methods.append({
             "id": "fawry",
             "label": "فوري",
@@ -1232,9 +1260,7 @@ async def get_store_payment_methods(
         })
 
     # Kashier uses tenant credential system — check if configured
-    if payment_settings.get("kashier", {}).get("enabled") and payment_settings.get(
-        "kashier", {}
-    ).get("is_configured"):
+    if _show("kashier"):
         methods.append({
             "id": "kashier",
             "label": "بطاقة بنكية",

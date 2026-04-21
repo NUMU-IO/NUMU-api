@@ -56,8 +56,12 @@ class SendOtpRequest(BaseModel):
 
 class SendOtpResponse(BaseModel):
     sent: bool
-    channel: str = Field(description="Delivery channel: whatsapp or email")
+    channel: str = Field(description="Delivery channel: whatsapp, email, or dev")
     message: str
+    dev_otp: str | None = Field(
+        default=None,
+        description="Only populated in non-production when no delivery channel is configured",
+    )
 
 
 class VerifyOtpRequest(BaseModel):
@@ -131,9 +135,6 @@ async def send_cod_otp(
     # Clear any previous verified state
     verified_key = _otp_verified_key(store_id, customer_id)
     await _cache_service.delete(verified_key)
-
-    # Set cooldown
-    await _cache_service.set(cooldown_key, "1", expire=OTP_COOLDOWN_SECONDS)
 
     # Send OTP via WhatsApp (primary) or email (fallback)
     channel = "whatsapp"
@@ -232,6 +233,16 @@ async def send_cod_otp(
             except Exception as e:
                 logger.warning(f"Email OTP send failed: {e}")
 
+    # Dev fallback: in non-production environments, if neither WhatsApp nor email is
+    # configured, expose the OTP in the response so testers / QA can complete the COD
+    # flow. Mirrors the `invite_code = "admin"` bypass in create_store.py.
+    if not sent and settings.environment != "production":
+        channel = "dev"
+        sent = True
+        logger.warning(
+            f"COD OTP dev fallback active for {customer_id}: code={otp_code}"
+        )
+
     if not sent:
         # Clean up if we couldn't send
         await _cache_service.delete(otp_key)
@@ -240,13 +251,20 @@ async def send_cod_otp(
             detail="فشل في إرسال كود التحقق. حاول مرة أخرى.",
         )
 
+    # Cooldown is set only after a successful delivery (or dev fallback) so a failed
+    # 500 doesn't lock the user out of retrying for 60 seconds.
+    await _cache_service.set(cooldown_key, "1", expire=OTP_COOLDOWN_SECONDS)
+
     return SuccessResponse(
         data=SendOtpResponse(
             sent=True,
             channel=channel,
+            dev_otp=otp_code if channel == "dev" else None,
             message="تم إرسال كود التحقق"
             if channel == "whatsapp"
-            else "تم إرسال كود التحقق على بريدك الإلكتروني",
+            else "تم إرسال كود التحقق على بريدك الإلكتروني"
+            if channel == "email"
+            else f"DEV MODE — OTP: {otp_code}",
         ),
         message="OTP sent successfully",
     )

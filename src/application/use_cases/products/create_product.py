@@ -207,13 +207,30 @@ class CreateProductUseCase:
                 "Product validation failed:\n• " + "\n• ".join(validation_errors)
             )
 
-        # Generate slug if not provided
-        slug = dto.slug or slugify(dto.name)
+        # Generate slug if not provided.
+        # `slugify` strips most Unicode; for pure-Arabic names it returns an
+        # empty string, which would collide across every untitled product.
+        # Fall back to a random suffix in that case so the collision loop
+        # below has something to work with.
+        slug = dto.slug or slugify(dto.name) or f"product-{uuid.uuid4().hex[:8]}"
 
-        # Check if slug already exists in store
-        existing = await self.product_repository.get_by_slug(store_id, slug)
-        if existing:
-            slug = f"{slug}-{str(uuid.uuid4())[:8]}"
+        # Check for collisions within the store and walk forward through
+        # `-2`, `-3`, `-4`, … until we find one that's free. Gives pretty
+        # URLs like `linen-dress-2` instead of `linen-dress-a1b2c3d4`.
+        if await self.product_repository.get_by_slug(store_id, slug):
+            base = slug
+            counter = 2
+            candidate = f"{base}-{counter}"
+            while await self.product_repository.get_by_slug(store_id, candidate):
+                counter += 1
+                # Safety valve — abandon the pretty-suffix walk if we've hit
+                # hundreds of dupes (almost certainly a copy-pasted import)
+                # and fall back to a random suffix.
+                if counter > 100:
+                    candidate = f"{base}-{uuid.uuid4().hex[:6]}"
+                    break
+                candidate = f"{base}-{counter}"
+            slug = candidate
 
         # Parse currency and create Money
         try:

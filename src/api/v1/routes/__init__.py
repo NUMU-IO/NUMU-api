@@ -91,6 +91,9 @@ from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
 )
 from src.api.v1.routes.storefront import (
+    order_tracking_router as storefront_order_tracking_router,
+)
+from src.api.v1.routes.storefront import (
     otp_router as storefront_otp_router,
 )
 
@@ -115,6 +118,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
+)
+from src.api.v1.routes.storefront import (
+    bundles_router as storefront_bundles_router,
 )
 
 # Store management routes (for store owners)
@@ -203,6 +209,13 @@ api_router.include_router(
     tags=["Storefront - Public"],
 )
 
+# Storefront - public order tracking (no store_id needed; scoped by order UUID)
+api_router.include_router(
+    storefront_order_tracking_router,
+    prefix="/storefront",
+    tags=["Storefront - Tracking"],
+)
+
 # Storefront - public routes (catalog, customer auth)
 api_router.include_router(
     storefront_public_router,
@@ -257,6 +270,13 @@ api_router.include_router(
     storefront_upsell_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Upsells"],
+)
+
+# Storefront - FBT bundles (public, scoped to store)
+api_router.include_router(
+    storefront_bundles_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Bundles"],
 )
 
 # Storefront - page view tracking (public, scoped to store)

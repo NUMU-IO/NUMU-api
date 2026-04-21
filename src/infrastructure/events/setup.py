@@ -32,6 +32,9 @@ from src.infrastructure.events.handlers.activity_log_handler import handle_activ
 from src.infrastructure.events.handlers.email_notification_handler import (
     handle_email_notification,
 )
+from src.infrastructure.events.handlers.invoice_on_paid_handler import (
+    handle_invoice_on_order_paid,
+)
 from src.infrastructure.events.handlers.shipment_handler import (
     handle_order_status_for_shipment,
 )
@@ -85,6 +88,9 @@ def create_event_bus() -> EventBus:
     # Order lifecycle webhooks
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
+    # Issue the ETA invoice + email PDF when the merchant marks a COD
+    # order paid (or a future payment-gateway webhook fires OrderPaidEvent).
+    bus.subscribe(OrderPaidEvent, handle_invoice_on_order_paid)
 
     # Product webhooks
     bus.subscribe(ProductCreatedEvent, handle_webhook_product_created)

@@ -232,6 +232,7 @@ async def list_products(
             price_max=price_max,
         )
 
+        from src.application.dto.product import ProductDTO
         from dataclasses import dataclass
 
         @dataclass
@@ -239,7 +240,7 @@ async def list_products(
             items: list
             total: int
 
-        result = _Result(items=items, total=total)
+        result = _Result(items=[ProductDTO.from_entity(p) for p in items], total=total)
 
     elif category_id:
         result = await use_case.by_category(

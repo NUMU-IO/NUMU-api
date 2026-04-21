@@ -18,6 +18,7 @@ from src.infrastructure.repositories import (
     OnboardingRepository,
     OrderRepository,
     PageViewRepository,
+    ProductBundleRepository,
     ProductRepository,
     ProductReviewRepository,
     RefundRepository,
@@ -173,6 +174,13 @@ def get_credential_repository(
 ) -> CredentialRepository:
     """Get credential repository dependency."""
     return CredentialRepository(session)
+
+
+def get_product_bundle_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProductBundleRepository:
+    """Get product bundle repository dependency."""
+    return ProductBundleRepository(session)
 
 
 def get_upsell_rule_repository(
