@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     # queries before they pin a connection for the whole request timeout.
     db_statement_timeout_ms: int = 30000
 
+    # Celery workers run with their own smaller pool (per process). Heavy
+    # background jobs still get bandwidth without stealing from the API. Set
+    # process_role=celery on the worker container (NUMU_PROCESS_ROLE env)
+    # and the import in connection.py picks up these values.
+    celery_db_pool_size: int = 5
+    celery_db_max_overflow: int = 5
+    # Role identifier — read from NUMU_PROCESS_ROLE at startup. "api" uses
+    # the db_* pool sizes above; "celery" uses celery_db_*. Anything else
+    # (tests, scripts) falls back to the api sizes.
+    process_role: str = "api"
+
     @property
     def database_url(self) -> str:
         """Construct async PostgreSQL connection URL."""

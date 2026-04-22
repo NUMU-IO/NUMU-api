@@ -235,6 +235,7 @@ services:
     environment:
       - ENVIRONMENT=production
       - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
     depends_on:
       - redis-master
       - postgres
@@ -259,6 +260,7 @@ services:
     environment:
       - ENVIRONMENT=production
       - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
     depends_on:
       - redis-master
       - postgres

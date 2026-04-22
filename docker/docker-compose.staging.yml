@@ -183,6 +183,9 @@ services:
     environment:
       - ENVIRONMENT=staging
       - LOG_FORMAT=json
+      # Opt into the smaller Celery-specific DB pool so background jobs
+      # can't exhaust the API's connection budget. See connection.py.
+      - PROCESS_ROLE=celery
     depends_on:
       - redis-master
       - postgres
@@ -193,6 +196,7 @@ services:
         limits:
           cpus: '1'
           memory: 1G
+
 
   # ===========================================================================
   # Celery Beat (Scheduler)
@@ -207,6 +211,7 @@ services:
     environment:
       - ENVIRONMENT=staging
       - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
     depends_on:
       - redis-master
       - postgres
