@@ -47,10 +47,27 @@ class Settings(BaseSettings):
 
     # Connection pool (total max = pool_size + max_overflow PER PROCESS)
     # API + Celery + admin each have their own pool — keep under Postgres max_connections
-    db_pool_size: int = 5  # Persistent connections maintained in pool
-    db_max_overflow: int = 10  # Extra connections allowed beyond pool_size
+    # Bumped 2026-04-23 after /api/v1/stores/ started returning 500s under
+    # analytics + bundles burst load; old 5+10=15 cap exhausted while long
+    # range-aggregation queries held connections.
+    db_pool_size: int = 10  # Persistent connections maintained in pool
+    db_max_overflow: int = 20  # Extra connections allowed beyond pool_size
     db_pool_timeout: int = 30  # Seconds to wait for a connection before error
     db_pool_recycle: int = 1800  # Recycle connections older than 30 minutes
+    # Abort any query that runs longer than this (ms). Kills runaway analytics
+    # queries before they pin a connection for the whole request timeout.
+    db_statement_timeout_ms: int = 30000
+
+    # Celery workers run with their own smaller pool (per process). Heavy
+    # background jobs still get bandwidth without stealing from the API. Set
+    # process_role=celery on the worker container (NUMU_PROCESS_ROLE env)
+    # and the import in connection.py picks up these values.
+    celery_db_pool_size: int = 5
+    celery_db_max_overflow: int = 5
+    # Role identifier — read from NUMU_PROCESS_ROLE at startup. "api" uses
+    # the db_* pool sizes above; "celery" uses celery_db_*. Anything else
+    # (tests, scripts) falls back to the api sizes.
+    process_role: str = "api"
 
     @property
     def database_url(self) -> str:

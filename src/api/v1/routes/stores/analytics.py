@@ -205,23 +205,23 @@ async def get_sales_chart(
                 )
             )
     else:
-        # Fallback to raw query if rollup table is empty (first run)
-        now = datetime.now(UTC)
+        # Fallback when the rollup table is empty (first run of the day,
+        # brand-new install). Single GROUP-BY-day query instead of the
+        # previous N+1 (two queries × 30 days). Gap-fills missing days
+        # with zeros so the chart shape stays consistent.
+        start_dt = datetime.combine(date_from, datetime.min.time(), tzinfo=UTC)
+        end_dt = datetime.combine(today, datetime.max.time(), tzinfo=UTC)
+        rows = await order_repo.get_daily_aggregates(store.id, start_dt, end_dt)
+        by_day = {row[0]: row for row in rows}
         data_points = []
-        for i in range(days - 1, -1, -1):
-            day_end = now - timedelta(days=i)
-            day_start = day_end - timedelta(days=1)
-            revenue = await order_repo.get_revenue_by_date_range(
-                store.id, day_start, day_end
-            )
-            order_count = await order_repo.count_by_store(
-                store.id, date_from=day_start, date_to=day_end
-            )
+        for i in range(days):
+            d = date_from + timedelta(days=i)
+            row = by_day.get(d)
             data_points.append(
                 SalesDataPointResponse(
-                    date=day_start.strftime("%b %d"),
-                    sales=revenue,
-                    orders=order_count,
+                    date=d.strftime("%b %d"),
+                    sales=row[1] if row else 0,
+                    orders=row[2] if row else 0,
                 )
             )
 

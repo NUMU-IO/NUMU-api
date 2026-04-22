@@ -1,9 +1,10 @@
 """Order repository implementation."""
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Date as SqlDate
+from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.order import (
@@ -445,6 +446,42 @@ class OrderRepository(IOrderRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
 
+    async def get_daily_aggregates(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[tuple[date, int, int]]:
+        """Daily ``(day, revenue_cents, order_count)`` tuples, one SQL round-trip.
+
+        Replaces the sales-chart fallback that used to issue two queries per
+        day (60 queries for a 30-day window). Cancelled/refunded orders are
+        excluded, matching ``get_revenue_by_date_range``.
+        """
+        day = cast(OrderModel.created_at, SqlDate).label("day")
+        query = (
+            select(
+                day,
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+                func.count(OrderModel.id).label("orders"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+                OrderModel.status.notin_([
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                ]),
+            )
+            .group_by(day)
+            .order_by(day)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            (row.day, int(row.revenue or 0), int(row.orders or 0)) for row in result
+        ]
+
     async def get_customer_order_stats(
         self, store_id: UUID
     ) -> dict[UUID, tuple[int, int]]:
@@ -470,6 +507,20 @@ class OrderRepository(IOrderRepository):
         )
         result = await self.session.execute(self._tenant_filter(query))
         return {row[0]: (row[1], row[2]) for row in result.all()}
+
+    async def exists_by_external_id(self, store_id: UUID, external_id: str) -> bool:
+        """Check if an order in this store was already imported for the given external ID.
+
+        External IDs live under ``OrderModel.extra_data['external_order_id']`` —
+        written by the order-import flow so merchants can re-upload without
+        creating duplicates.
+        """
+        query = select(OrderModel.id).where(
+            OrderModel.store_id == store_id,
+            OrderModel.extra_data["external_order_id"].astext == external_id,
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return result.first() is not None
 
     async def get_next_order_number(self, store_id: UUID) -> str:
         """Generate next order number for a store."""

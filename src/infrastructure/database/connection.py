@@ -76,15 +76,51 @@ class Base(DeclarativeBase):
     pass
 
 
-# Create async engine with configurable pool settings
+# Create async engine with configurable pool settings.
+#
+# Process-role-aware sizing: the Celery worker container sets
+# PROCESS_ROLE=celery so background jobs (analytics rollups, health
+# scores, shipment syncs) get their own smaller pool instead of
+# competing with the API for the same connections. The API container
+# keeps the default (PROCESS_ROLE=api).
+#
+# `pool_use_lifo=True` → reuse the most-recently-returned connection, so
+# idle connections farther back in the pool get a chance to expire via
+# `pool_recycle`; LIFO also tends to keep Postgres's own backend cache warm.
+#
+# `connect_args["server_settings"]["statement_timeout"]` → asyncpg sends
+# this at connection setup. Any single statement taking longer than the
+# configured ms is killed by Postgres with SIGTERM, releasing the
+# connection immediately. Critical for keeping analytics queries from
+# starving the pool.
+_is_celery = settings.process_role.lower() == "celery"
+_pool_size = settings.celery_db_pool_size if _is_celery else settings.db_pool_size
+_max_overflow = (
+    settings.celery_db_max_overflow if _is_celery else settings.db_max_overflow
+)
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
+    pool_use_lifo=True,
+    pool_size=_pool_size,
+    max_overflow=_max_overflow,
     pool_timeout=settings.db_pool_timeout,
     pool_recycle=settings.db_pool_recycle,
+    connect_args={
+        "server_settings": {
+            "statement_timeout": str(settings.db_statement_timeout_ms),
+            # Kill connections whose client has gone away (e.g. uvicorn
+            # worker recycled mid-request) instead of letting Postgres
+            # wait for a TCP FIN that may never arrive.
+            "idle_in_transaction_session_timeout": "60000",
+            # Tag the Postgres backend with which role opened it — shows
+            # up in pg_stat_activity.application_name so we can tell API
+            # vs Celery connections apart when diagnosing pool issues.
+            "application_name": f"numu-{settings.process_role}",
+        },
+    },
 )
 
 
