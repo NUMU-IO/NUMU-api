@@ -1467,7 +1467,22 @@ async def update_whatsapp_settings(
 def _get_default_customization() -> dict:
     """Get default storefront customization settings."""
     return {
-        "identity": {"logo_url": "", "store_name": "", "favicon_url": ""},
+        "identity": {
+            "logo_url": "",
+            "store_name": "",
+            "favicon_url": "",
+            "logo_footer_url": "",
+            "logo_dark_url": "",
+            "logo_alt_text": "",
+            "logo_link_target": "/",
+            "logo_width_desktop": 0,
+            "logo_width_mobile": 0,
+            "logo_footer_width_desktop": 0,
+            "logo_footer_width_mobile": 0,
+            "logo_padding": 0,
+            "logo_background_color": "",
+            "footer_logo_filter_mode": "none",
+        },
         "theme": {
             "base_theme": "modern",
             "primary_color": "",

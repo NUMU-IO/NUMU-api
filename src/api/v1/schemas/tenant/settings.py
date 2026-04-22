@@ -249,11 +249,35 @@ class UpdateWhatsAppSettingsRequest(BaseModel):
 
 
 class CustomizationIdentity(BaseModel):
-    """Store identity customization."""
+    """Store identity customization.
+
+    Logo model (Shopify-parity):
+      * ``logo_url`` — primary logo (header, light backgrounds)
+      * ``logo_dark_url`` — variant for dark surfaces (fallback for footer)
+      * ``logo_footer_url`` — explicit footer override (wins over ``logo_dark_url``)
+      * ``footer_logo_filter_mode`` — ``none`` (default) | ``white`` | ``invert``
+    Widths are pixel numbers; ``0`` means use the theme's default / natural size.
+    """
 
     logo_url: str = ""
     store_name: str = ""
     favicon_url: str = ""
+    # Logo variants (footer/dark surfaces)
+    logo_footer_url: str = ""
+    logo_dark_url: str = ""
+    # Accessibility / interaction
+    logo_alt_text: str = ""
+    logo_link_target: str = "/"
+    # Responsive widths — 0 means "use theme default"
+    logo_width_desktop: int = 0
+    logo_width_mobile: int = 0
+    logo_footer_width_desktop: int = 0
+    logo_footer_width_mobile: int = 0
+    # Spacing / background
+    logo_padding: int = 0
+    logo_background_color: str = ""
+    # Footer-only filter hint (storefront maps to CSS)
+    footer_logo_filter_mode: str = "none"
 
 
 class CustomizationTheme(BaseModel):
