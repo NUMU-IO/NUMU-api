@@ -76,15 +76,35 @@ class Base(DeclarativeBase):
     pass
 
 
-# Create async engine with configurable pool settings
+# Create async engine with configurable pool settings.
+#
+# `pool_use_lifo=True` → reuse the most-recently-returned connection, so
+# idle connections farther back in the pool get a chance to expire via
+# `pool_recycle`; LIFO also tends to keep Postgres's own backend cache warm.
+#
+# `connect_args["server_settings"]["statement_timeout"]` → asyncpg sends
+# this at connection setup. Any single statement taking longer than the
+# configured ms is killed by Postgres with SIGTERM, releasing the
+# connection immediately. Critical for keeping analytics queries from
+# starving the pool.
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     pool_pre_ping=True,
+    pool_use_lifo=True,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
     pool_timeout=settings.db_pool_timeout,
     pool_recycle=settings.db_pool_recycle,
+    connect_args={
+        "server_settings": {
+            "statement_timeout": str(settings.db_statement_timeout_ms),
+            # Kill connections whose client has gone away (e.g. uvicorn
+            # worker recycled mid-request) instead of letting Postgres
+            # wait for a TCP FIN that may never arrive.
+            "idle_in_transaction_session_timeout": "60000",
+        },
+    },
 )
 
 
