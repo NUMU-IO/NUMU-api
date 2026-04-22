@@ -310,6 +310,10 @@ async def checkout(
 
     # Build line items with server-side price resolution
     line_items: list[CreateOrderLineItemDTO] = []
+    # Remember per-line inventory mode so the atomic-deduct step below
+    # can target the right code path (variant combo vs product-level)
+    # without re-resolving the product.
+    line_item_inventory: list[dict] = []
     for item in request.line_items:
         product = await product_repo.get_by_id(item.product_id)
         if not product:
@@ -327,12 +331,58 @@ async def checkout(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {product.name} is not available",
             )
-        if product.quantity < item.quantity:
+
+        # ── Stock pre-check ──
+        # Three modes:
+        #   1. Merchant opted into oversell (continue_selling_when_out_of_stock) → skip
+        #   2. Product has matching variant_combinations + customer picked options → check combo
+        #   3. Otherwise → product-level stock
+        product_attrs = product.attributes or {}
+        allow_negative = bool(product_attrs.get("continue_selling_when_out_of_stock"))
+        selections = item.selections or {}
+        combos = product_attrs.get("variant_combinations") or []
+        matching_combo = None
+        if selections and isinstance(combos, list):
+            for c in combos:
+                if isinstance(c, dict) and c.get("options") == selections:
+                    matching_combo = c
+                    break
+
+        if matching_combo is not None:
+            if matching_combo.get("enabled") is False:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{product.name} is not available in the selected options",
+                )
+            if not allow_negative:
+                raw = matching_combo.get("stock")
+                try:
+                    available = int(raw) if raw not in (None, "") else 0
+                except (TypeError, ValueError):
+                    available = 0
+                if available < item.quantity:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Insufficient stock for {product.name} "
+                            f"({', '.join(f'{k}: {v}' for k, v in selections.items())}) "
+                            f"(available: {available})"
+                        ),
+                    )
+        elif not allow_negative and product.quantity < item.quantity:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Insufficient stock for {product.name} (available: {product.quantity})",
             )
 
+        # Human-readable "Color: Red, Size: M" so the merchant sees what was
+        # actually ordered in the order detail view, without needing to join
+        # against a variant catalog.
+        variant_name = (
+            ", ".join(f"{k}: {v}" for k, v in selections.items())
+            if selections
+            else None
+        )
         line_items.append(
             CreateOrderLineItemDTO(
                 product_id=product.id,
@@ -341,8 +391,15 @@ async def checkout(
                 quantity=item.quantity,
                 unit_price=product.price.cents,
                 variant_id=item.variant_id,
+                variant_name=variant_name,
             )
         )
+        line_item_inventory.append({
+            "product_id": product.id,
+            "selections": selections if matching_combo is not None else None,
+            "allow_negative": allow_negative,
+            "quantity": item.quantity,
+        })
 
     # Build address DTOs
     addr = request.shipping_address
@@ -463,17 +520,39 @@ async def checkout(
         coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
 
-    # Atomically deduct stock BEFORE creating the order.
-    # Uses conditional UPDATE (WHERE quantity >= needed) so concurrent
-    # checkouts cannot oversell. If the transaction rolls back, stock
-    # is automatically restored.
-    for li in line_items:
-        success = await product_repo.deduct_stock(li.product_id, li.quantity)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
+    # Atomically deduct stock BEFORE creating the order. Variant combos
+    # use a row-lock path (deduct_variant_stock); non-variant flows keep
+    # the original conditional-UPDATE path (deduct_stock). Transaction
+    # rollback restores both. When the merchant enabled
+    # continue_selling_when_out_of_stock, the atomic guard is loosened
+    # (stock can go negative) so the order still succeeds.
+    for li, inv in zip(line_items, line_item_inventory):
+        if inv["selections"] is not None:
+            success, reason = await product_repo.deduct_variant_stock(
+                inv["product_id"],
+                inv["selections"],
+                inv["quantity"],
+                allow_negative=inv["allow_negative"],
             )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Insufficient stock for {li.product_name} "
+                        f"({reason}). Please refresh and try again."
+                    ),
+                )
+        else:
+            success = await product_repo.deduct_stock(
+                inv["product_id"],
+                inv["quantity"],
+                allow_negative=inv["allow_negative"],
+            )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
+                )
 
     total = subtotal + dto.shipping_cost + dto.tax_amount - discount_amount
 
