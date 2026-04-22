@@ -295,22 +295,85 @@ class ProductRepository(IProductRepository):
         )
         return result.scalar() or 0
 
-    async def deduct_stock(self, product_id: UUID, quantity: int) -> bool:
+    async def deduct_stock(
+        self,
+        product_id: UUID,
+        quantity: int,
+        allow_negative: bool = False,
+    ) -> bool:
         """Atomically deduct stock if sufficient quantity exists.
 
         Uses a conditional UPDATE that only succeeds when current stock >= requested.
-        Returns True if deduction succeeded, False if insufficient stock.
+        When ``allow_negative=True`` the condition is dropped — used for products
+        flagged ``continue_selling_when_out_of_stock``, where oversell is
+        allowed and stock can go negative so the merchant still sees how deep
+        they're in the hole.
         """
+        conditions = [ProductModel.id == product_id]
+        if not allow_negative:
+            conditions.append(ProductModel.quantity >= quantity)
         result = await self.session.execute(
             update(ProductModel)
-            .where(
-                ProductModel.id == product_id,
-                ProductModel.quantity >= quantity,
-            )
+            .where(*conditions)
             .values(quantity=ProductModel.quantity - quantity)
         )
         await self.session.flush()
         return result.rowcount > 0
+
+    async def deduct_variant_stock(
+        self,
+        product_id: UUID,
+        selections: dict[str, str],
+        quantity: int,
+        allow_negative: bool = False,
+    ) -> tuple[bool, str | None]:
+        """Atomically deduct stock from the matching variant combination.
+
+        Locks the product row (SELECT ... FOR UPDATE), finds the combo
+        whose ``options`` dict matches ``selections``, and decrements its
+        ``stock``. Stock lives under ``attributes.variant_combinations[].stock``
+        (stored as a string by the merchant hub) — we cast defensively.
+
+        Returns ``(success, reason)`` where reason is one of:
+            None                  — success
+            "not_found"           — product doesn't exist
+            "no_matching_variant" — selections don't match any combo
+            "combo_disabled"      — matched combo has enabled=False
+            "insufficient_stock"  — combo stock < quantity (and !allow_negative)
+        """
+        result = await self.session.execute(
+            select(ProductModel).where(ProductModel.id == product_id).with_for_update()
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return False, "not_found"
+
+        attrs = dict(model.attributes or {})
+        combos = attrs.get("variant_combinations") or []
+        if not isinstance(combos, list):
+            return False, "no_matching_variant"
+
+        for combo in combos:
+            if not isinstance(combo, dict):
+                continue
+            if combo.get("options") != selections:
+                continue
+            if combo.get("enabled") is False:
+                return False, "combo_disabled"
+            raw = combo.get("stock")
+            try:
+                current = int(raw) if raw not in (None, "") else 0
+            except (TypeError, ValueError):
+                current = 0
+            if not allow_negative and current < quantity:
+                return False, "insufficient_stock"
+            combo["stock"] = str(current - quantity)
+            attrs["variant_combinations"] = combos
+            model.attributes = attrs  # force SQLAlchemy to pick up the JSONB mutation
+            await self.session.flush()
+            return True, None
+
+        return False, "no_matching_variant"
 
     async def restore_stock(self, product_id: UUID, quantity: int) -> None:
         """Atomically restore stock (e.g. on order cancellation)."""

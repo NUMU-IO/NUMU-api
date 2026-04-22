@@ -14,6 +14,11 @@ class CheckoutLineItem(BaseModel):
     product_id: UUID
     variant_id: UUID | None = None
     quantity: int = Field(default=1, ge=1, le=999)
+    # Option values the customer picked on the PDP (e.g. {"Color": "Red", "Size": "M"}).
+    # When the product carries variant_combinations in attributes, the backend
+    # uses these to resolve the exact combo and decrement its stock. Absent or
+    # empty → falls back to the product-level stock.
+    selections: dict[str, str] | None = None
 
 
 class CheckoutRequest(BaseModel):
