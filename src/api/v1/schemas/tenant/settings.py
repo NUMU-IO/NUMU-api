@@ -324,6 +324,11 @@ class CustomizationProducts(BaseModel):
     products_per_row: int = Field(default=3, ge=2, le=4)
     show_price: bool = True
     show_rating: bool = True
+    # Image aspect ratio for product cards + PDP main image. Storefront
+    # maps these to Tailwind aspect utilities (3/4, 1/1, 4/3). Default
+    # "portrait" gives the most visual weight to the photo — fashion/
+    # apparel stores want this; homeware stores often prefer "square".
+    image_aspect: str = "portrait"  # portrait | square | landscape
 
 
 class CustomizationSocialLinks(BaseModel):
