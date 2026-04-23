@@ -1871,6 +1871,52 @@ async def publish_customization(
 
 
 @router.post(
+    "/customization/reset",
+    response_model=SuccessResponse[CustomizationResponse],
+    summary="Reset storefront customization to theme defaults",
+    operation_id="reset_customization",
+)
+async def reset_customization(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Restore the merchant's customization to the fresh-store defaults.
+
+    Wipes every customization section (identity, theme, header, hero,
+    products, footer, navigation, labels, layout) plus the v2 section-
+    engine templates. The currently selected ``theme.base_theme`` is
+    preserved so the reset feels like "reset this theme" rather than
+    "reset the store".
+
+    Published customization (``store.theme_settings``) is untouched —
+    merchants must click Publish to push the reset live.
+    """
+    settings = dict(store.settings or {})
+    existing = settings.get("customization") or {}
+
+    defaults = _get_default_customization()
+    # Preserve current theme selection + any external-theme metadata
+    # (bundle_url, css_url, merchant_settings on bring-your-own-theme).
+    existing_theme = existing.get("theme") or {}
+    if existing_theme.get("base_theme"):
+        defaults["theme"]["base_theme"] = existing_theme["base_theme"]
+    for key in ("bundle_url", "css_url", "settings_schema", "merchant_settings"):
+        if key in existing_theme:
+            defaults["theme"][key] = existing_theme[key]
+
+    settings["customization"] = defaults
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=_build_customization_response(
+            defaults, theme_settings=store.theme_settings
+        ),
+        message="Customization reset to defaults",
+    )
+
+
+@router.post(
     "/customization/assets",
     response_model=SuccessResponse[dict],
     summary="Upload a customization asset (logo, favicon, hero image)",
