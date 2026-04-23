@@ -82,14 +82,34 @@ def _calculate_discounted_price(
 
 
 def _product_response(product) -> BundledProductResponse:
-    """Convert a product model to a storefront-safe response."""
+    """Convert a product to a storefront-safe response.
+
+    Accepts either a ``ProductModel`` (columns ``price_amount``,
+    ``price_currency``, ``compare_at_price: int | None``) or a domain
+    ``Product`` entity (``price: Money``, ``compare_at_price: Money | None``).
+    We dispatch on attribute presence so the caller can pass whichever
+    shape is cheaper to get. Mixing them silently was the root cause of
+    the AttributeError on this endpoint.
+    """
+    # Domain entity path — Money-based
+    if hasattr(product, "price_amount"):
+        price_cents = product.price_amount
+        price_currency = product.price_currency
+        compare_at = product.compare_at_price
+    else:
+        price_cents = product.price.cents
+        price_currency = product.price.currency.value
+        compare_at = (
+            product.compare_at_price.cents if product.compare_at_price else None
+        )
+
     return BundledProductResponse(
         id=str(product.id),
         name=product.name,
         slug=product.slug,
-        price=product.price_amount,
-        price_currency=product.price_currency,
-        compare_at_price=product.compare_at_price,
+        price=price_cents,
+        price_currency=price_currency,
+        compare_at_price=compare_at,
         image=product.images[0] if product.images else None,
         is_in_stock=product.quantity > 0,
         quantity=product.quantity,
@@ -167,11 +187,13 @@ async def get_product_bundles(
             )
         )
 
-    # Calculate totals
-    primary_price = product.price_amount
-    total_original = primary_price + sum(
-        item.product.price for item in widget_items
-    )
+    # Calculate totals. `product` here is the domain entity from
+    # product_repo.get_by_id() — it exposes price as a Money value object
+    # (`price.cents`), not the DB column name `price_amount` that the
+    # SQLAlchemy ProductModel has. Using the wrong one raised
+    # AttributeError: 'Product' object has no attribute 'price_amount'.
+    primary_price = product.price.cents
+    total_original = primary_price + sum(item.product.price for item in widget_items)
     total_discounted = primary_price + sum(
         item.discounted_price for item in widget_items
     )
