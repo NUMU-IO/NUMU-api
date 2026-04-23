@@ -123,9 +123,58 @@ services:
     networks:
       - numu-network
 
+  # ===========================================================================
+  # Nominatim — self-hosted reverse-geocoder for the storefront checkout
+  # location picker. Behind the `geocoding` profile so `docker compose up`
+  # doesn't block on a ~30min OSM import unless explicitly requested.
+  #
+  #   docker compose --profile geocoding up nominatim
+  #
+  # First startup downloads the Egypt extract (~200MB) and imports it into
+  # the container's internal Postgres (~5GB on disk). Subsequent startups
+  # re-attach the named volume and come up in seconds. REPLICATION_URL +
+  # UPDATE_MODE=continuous keeps the data current via OSM daily diffs —
+  # no Celery task needed.
+  #
+  # To point the API at it, set in the api service env:
+  #   NOMINATIM_URL=http://nominatim:8080
+  # Leave LOCATIONIQ_KEY unset — the route skips the `key` query param
+  # when it's empty and calls Nominatim directly.
+  # ===========================================================================
+  nominatim:
+    image: mediagis/nominatim:4.4
+    profiles: ["geocoding"]
+    environment:
+      - PBF_URL=https://download.geofabrik.de/africa/egypt-latest.osm.pbf
+      - REPLICATION_URL=https://download.geofabrik.de/africa/egypt-updates/
+      - UPDATE_MODE=continuous
+      - IMPORT_WIKIPEDIA=false
+      - IMPORT_US_POSTCODES=false
+      - IMPORT_GB_POSTCODES=false
+      - FREEZE=false
+      - THREADS=4
+      - NOMINATIM_PASSWORD=numu-nominatim-dev
+    volumes:
+      - nominatim_data:/var/lib/postgresql/14/main
+      - nominatim_flatnode:/nominatim/flatnode
+    ports:
+      - "7070:8080"
+    shm_size: 1gb
+    restart: unless-stopped
+    networks:
+      - numu-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40m   # first-time import window
+      retries: 5
+
 volumes:
   postgres_data:
   redis_data:
+  nominatim_data:
+  nominatim_flatnode:
 
 networks:
   numu-network:

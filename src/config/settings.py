@@ -264,6 +264,15 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
 
+    # Reverse geocoding (storefront checkout location picker)
+    # Point to self-hosted Nominatim in prod (e.g. http://nominatim:8080)
+    # or LocationIQ during bootstrap (https://us1.locationiq.com/v1).
+    # Leave both unset to disable the feature — checkout still works with manual entry.
+    nominatim_url: str | None = None
+    locationiq_key: str | None = (
+        None  # only needed if nominatim_url points at LocationIQ
+    )
+
     # Google AI Studio (for AI insights & policy generation via Gemini)
     # Uses Google's OpenAI-compatible endpoint so the existing AsyncOpenAI
     # client can be reused without rewriting to the google-genai SDK.

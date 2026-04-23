@@ -143,6 +143,28 @@ See `src/config/settings.py` for all configuration options.
 | OpenAI | AI-powered features |
 | Resend | Email delivery |
 | Cloudflare R2 | Object storage |
+| Nominatim (self-hosted) / LocationIQ | Reverse geocoding for checkout location picker |
+
+### Self-hosted Nominatim
+
+The storefront checkout location picker calls `/storefront/.../geocode/reverse`, which proxies to either a self-hosted [Nominatim](https://nominatim.org/) container or [LocationIQ](https://locationiq.com/) depending on env config.
+
+Local dev — bring Nominatim up on demand (not in the default `docker compose up` because the first-time OSM import takes ~30min):
+
+```bash
+docker compose --profile geocoding up nominatim
+# wait for healthcheck to flip (watch logs) — first run downloads ~200MB
+# and imports the Egypt OSM extract into the container's internal PG
+# (~5GB disk). Subsequent restarts come up in seconds.
+```
+
+After it's healthy, set in `.env`:
+```
+NOMINATIM_URL=http://nominatim:8080
+```
+and leave `LOCATIONIQ_KEY` empty.
+
+Data stays current automatically — the container runs `UPDATE_MODE=continuous` against Geofabrik's Egypt daily diff feed. No Celery task, no manual re-import.
 
 ## Project Structure
 

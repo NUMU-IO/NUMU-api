@@ -73,6 +73,27 @@ class OrderAddressRequest(BaseModel):
         ..., min_length=2, max_length=100, description="Country name or ISO code"
     )
     phone: str | None = Field(None, max_length=20, description="Contact phone number")
+    # Geolocation fields captured from the storefront map picker. All optional
+    # to preserve backward-compat with clients that don't send them.
+    latitude: float | None = Field(
+        None, ge=-90, le=90, description="Delivery point latitude (WGS84)"
+    )
+    longitude: float | None = Field(
+        None, ge=-180, le=180, description="Delivery point longitude (WGS84)"
+    )
+    location_accuracy: float | None = Field(
+        None, ge=0, description="GPS accuracy radius in meters"
+    )
+    location_source: str | None = Field(
+        None,
+        max_length=20,
+        description="How the location was captured: 'gps' | 'manual_pin'",
+    )
+    geocoded_address: str | None = Field(
+        None,
+        max_length=500,
+        description="Provider-normalized formatted address (from reverse geocoding)",
+    )
 
 
 class CreateOrderRequest(BaseModel):
@@ -209,6 +230,17 @@ class OrderAddressResponse(BaseModel):
     postal_code: str | None = Field(description="Postal code")
     country: str = Field(description="Country")
     phone: str | None = Field(description="Phone number")
+    latitude: float | None = Field(None, description="Delivery point latitude")
+    longitude: float | None = Field(None, description="Delivery point longitude")
+    location_accuracy: float | None = Field(
+        None, description="GPS accuracy radius in meters"
+    )
+    location_source: str | None = Field(
+        None, description="Location capture source: 'gps' | 'manual_pin'"
+    )
+    geocoded_address: str | None = Field(
+        None, description="Provider-normalized formatted address"
+    )
 
 
 class OrderResponse(BaseModel):

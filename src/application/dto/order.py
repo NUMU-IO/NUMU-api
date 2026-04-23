@@ -49,6 +49,11 @@ class OrderAddressDTO(BaseDTO):
     state: str | None = None
     postal_code: str | None = None
     phone: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    location_accuracy: float | None = None
+    location_source: str | None = None
+    geocoded_address: str | None = None
 
     @property
     def full_name(self) -> str:
@@ -68,6 +73,11 @@ class OrderAddressDTO(BaseDTO):
             postal_code=address.postal_code,
             country=address.country,
             phone=address.phone,
+            latitude=address.latitude,
+            longitude=address.longitude,
+            location_accuracy=address.location_accuracy,
+            location_source=address.location_source,
+            geocoded_address=address.geocoded_address,
         )
 
 
@@ -217,6 +227,11 @@ class CreateOrderAddressDTO(BaseDTO):
     state: str | None = None
     postal_code: str | None = None
     phone: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    location_accuracy: float | None = None
+    location_source: str | None = None
+    geocoded_address: str | None = None
 
 
 @dataclass

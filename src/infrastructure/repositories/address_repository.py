@@ -34,6 +34,11 @@ class CustomerAddressRepository(ICustomerAddressRepository):
             phone=model.phone,
             is_default=model.is_default,
             label=model.label,
+            latitude=model.latitude,
+            longitude=model.longitude,
+            location_accuracy=model.location_accuracy,
+            location_source=model.location_source,
+            geocoded_address=model.geocoded_address,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -57,6 +62,11 @@ class CustomerAddressRepository(ICustomerAddressRepository):
             phone=entity.phone,
             is_default=entity.is_default,
             label=entity.label,
+            latitude=entity.latitude,
+            longitude=entity.longitude,
+            location_accuracy=entity.location_accuracy,
+            location_source=entity.location_source,
+            geocoded_address=entity.geocoded_address,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
