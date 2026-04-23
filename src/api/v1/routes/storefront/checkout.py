@@ -41,7 +41,10 @@ from src.application.dto.order import (
     CreateOrderDTO,
     CreateOrderLineItemDTO,
 )
-from src.application.services.cod_trust_service import check_customer_trust
+from src.application.services.cod_trust_service import (
+    LocationSignals,
+    check_customer_trust,
+)
 from src.application.services.network_reputation_service import (
     extract_phone_hash_from_string,
     write_network_event,
@@ -277,19 +280,46 @@ async def checkout(
         customer_phone = (
             request.shipping_address.phone if request.shipping_address else None
         )
+
+        # Build location signals from this checkout's shipping address +
+        # the customer's previous delivery point (for teleport detection).
+        shipping = request.shipping_address
+        previous_coords: tuple[float, float] | None = None
+        try:
+            recent_orders = await order_repo.get_by_customer(
+                current_customer.id, skip=0, limit=1
+            )
+            if recent_orders:
+                prev = recent_orders[0].shipping_address
+                if prev.latitude is not None and prev.longitude is not None:
+                    previous_coords = (prev.latitude, prev.longitude)
+        except Exception as exc:  # noqa: BLE001 — fail-open for fraud signals
+            logger.warning("cod_trust_previous_location_lookup_error: %s", exc)
+
+        location_signals = LocationSignals(
+            latitude=shipping.latitude if shipping else None,
+            longitude=shipping.longitude if shipping else None,
+            accuracy=shipping.location_accuracy if shipping else None,
+            source=shipping.location_source if shipping else None,
+            previous_coords=previous_coords,
+        )
+
         trust_decision = await check_customer_trust(
             phone=customer_phone,
             store_settings=store.settings,
             network_repo=network_repo,
+            location=location_signals,
         )
         logger.info(
-            "cod_trust_check store=%s customer=%s allowed=%s reason=%s score=%s confidence=%s",
+            "cod_trust_check store=%s customer=%s allowed=%s reason=%s score=%s "
+            "confidence=%s factors=%s",
             str(store_id),
             str(current_customer.id),
             trust_decision.allowed,
             trust_decision.reason,
             trust_decision.score,
             trust_decision.confidence,
+            [f["code"] for f in trust_decision.factors],
         )
         if not trust_decision.allowed:
             raise HTTPException(
@@ -413,6 +443,11 @@ async def checkout(
         postal_code=addr.postal_code,
         country=addr.country,
         phone=addr.phone,
+        latitude=addr.latitude,
+        longitude=addr.longitude,
+        location_accuracy=addr.location_accuracy,
+        location_source=addr.location_source,
+        geocoded_address=addr.geocoded_address,
     )
 
     billing_address = None
@@ -428,6 +463,11 @@ async def checkout(
             postal_code=b.postal_code,
             country=b.country,
             phone=b.phone,
+            latitude=b.latitude,
+            longitude=b.longitude,
+            location_accuracy=b.location_accuracy,
+            location_source=b.location_source,
+            geocoded_address=b.geocoded_address,
         )
 
     currency = store.default_currency.value if store.default_currency else "EGP"
@@ -485,6 +525,11 @@ async def checkout(
         postal_code=shipping_address.postal_code,
         country=shipping_address.country,
         phone=shipping_address.phone,
+        latitude=shipping_address.latitude,
+        longitude=shipping_address.longitude,
+        location_accuracy=shipping_address.location_accuracy,
+        location_source=shipping_address.location_source,
+        geocoded_address=shipping_address.geocoded_address,
     )
 
     bill_addr = None
@@ -499,6 +544,11 @@ async def checkout(
             postal_code=billing_address.postal_code,
             country=billing_address.country,
             phone=billing_address.phone,
+            latitude=billing_address.latitude,
+            longitude=billing_address.longitude,
+            location_accuracy=billing_address.location_accuracy,
+            location_source=billing_address.location_source,
+            geocoded_address=billing_address.geocoded_address,
         )
 
     # Apply coupon if provided (with row-level lock to prevent concurrent bypass)

@@ -23,6 +23,7 @@ from src.api.v1.routes.storefront.checkout_config import (
 )
 from src.api.v1.routes.storefront.coupon import router as coupon_router
 from src.api.v1.routes.storefront.customer import router as customer_router
+from src.api.v1.routes.storefront.geocode import router as geocode_router
 from src.api.v1.routes.storefront.order_tracking import router as order_tracking_router
 from src.api.v1.routes.storefront.otp import router as otp_router
 from src.api.v1.routes.storefront.public import (
@@ -53,4 +54,5 @@ __all__ = [
     "shipping_quote_router",
     "checkout_config_router",
     "bundles_router",
+    "geocode_router",
 ]

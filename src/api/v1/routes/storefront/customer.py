@@ -209,6 +209,11 @@ async def list_customer_addresses(
                     is_default=addr.is_default,
                     label=addr.label,
                     formatted_address=addr.formatted_address,
+                    latitude=addr.latitude,
+                    longitude=addr.longitude,
+                    location_accuracy=addr.location_accuracy,
+                    location_source=addr.location_source,
+                    geocoded_address=addr.geocoded_address,
                     created_at=str(addr.created_at) if addr.created_at else None,
                     updated_at=str(addr.updated_at) if addr.updated_at else None,
                 )
@@ -262,6 +267,11 @@ async def create_customer_address(
         phone=request.phone,
         is_default=request.is_default,
         label=request.label,
+        latitude=request.latitude,
+        longitude=request.longitude,
+        location_accuracy=request.location_accuracy,
+        location_source=request.location_source,
+        geocoded_address=request.geocoded_address,
     )
 
     result = await use_case.execute(current_customer.id, dto, tenant_id)
@@ -283,6 +293,11 @@ async def create_customer_address(
             is_default=result.is_default,
             label=result.label,
             formatted_address=result.formatted_address,
+            latitude=result.latitude,
+            longitude=result.longitude,
+            location_accuracy=result.location_accuracy,
+            location_source=result.location_source,
+            geocoded_address=result.geocoded_address,
             created_at=str(result.created_at) if result.created_at else None,
             updated_at=str(result.updated_at) if result.updated_at else None,
         ),

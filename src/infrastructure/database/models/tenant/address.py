@@ -1,6 +1,6 @@
 """Customer address database model (public schema with tenant_id discriminator)."""
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String
+from sqlalchemy import Boolean, Enum, Float, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,14 @@ class CustomerAddressModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         nullable=False,
         default=AddressLabel.HOME,
     )
+    # Optional GPS / reverse-geocoded location captured from the storefront
+    # checkout map picker. Enables reuse across orders and future proximity
+    # queries (delivery zones, fraud clustering).
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    geocoded_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationships
     customer = relationship(

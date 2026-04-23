@@ -67,6 +67,11 @@ class CustomerAddressDTO(BaseDTO):
     is_default: bool = False
     label: str = "home"
     formatted_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    location_accuracy: float | None = None
+    location_source: str | None = None
+    geocoded_address: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -89,6 +94,11 @@ class CustomerAddressDTO(BaseDTO):
             is_default=entity.is_default,
             label=entity.label.value if entity.label else "home",
             formatted_address=entity.formatted_address,
+            latitude=entity.latitude,
+            longitude=entity.longitude,
+            location_accuracy=entity.location_accuracy,
+            location_source=entity.location_source,
+            geocoded_address=entity.geocoded_address,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -184,6 +194,11 @@ class CreateAddressDTO(BaseDTO):
     phone: str | None = None
     is_default: bool = False
     label: str = "home"
+    latitude: float | None = None
+    longitude: float | None = None
+    location_accuracy: float | None = None
+    location_source: str | None = None
+    geocoded_address: str | None = None
 
 
 @dataclass

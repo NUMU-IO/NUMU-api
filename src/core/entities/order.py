@@ -124,6 +124,13 @@ class OrderShippingAddress(BaseModel):
     state: str | None = None
     postal_code: str | None = None
     phone: str | None = None
+    # Geolocation captured from the storefront map picker. All fields optional
+    # for back-compat with orders placed before the feature shipped.
+    latitude: float | None = None
+    longitude: float | None = None
+    location_accuracy: float | None = None  # meters
+    location_source: str | None = None  # "gps" | "manual_pin" | None
+    geocoded_address: str | None = None  # provider-normalized formatted string
 
     @property
     def full_name(self) -> str:
