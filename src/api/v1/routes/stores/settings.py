@@ -2178,26 +2178,83 @@ async def save_instapay_credentials(
     thresholds sit alongside the encrypted blob in plaintext because
     they're policy knobs the merchant sees in the dashboard, not
     secrets.
+
+    `request.ipa` and `request.fallback_phone` are both optional —
+    when omitted, the existing encrypted blob is decrypted and those
+    values carry forward. This lets the merchant edit display name,
+    thresholds, or toggle enabled without re-typing the IPA (the UI
+    shows it masked; it can never unmask to its true form).
+    First-time saves must include `ipa`.
     """
     from src.infrastructure.external_services.secrets.secrets_manager import (
         get_secrets_manager,
     )
 
     secrets = get_secrets_manager()
-    key_id = await secrets.get_current_key_id()
 
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+    existing = payment_settings.get("instapay") or {}
+
+    # Determine the IPA + fallback phone to persist. On update, missing
+    # fields carry forward from the previously-encrypted blob so the
+    # UI can do partial updates.
+    ipa_to_save: str | None = request.ipa
+    phone_to_save: str | None = request.fallback_phone
+
+    needs_existing = ipa_to_save is None or phone_to_save is None
+    if needs_existing:
+        if not existing.get("encrypted_credentials"):
+            # First-time configuration — ipa must be supplied.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=("InstaPay address (IPA) is required for the first save."),
+            )
+        try:
+            prev_key_id = existing["encryption_key_id"]
+            prev_encrypted = base64.b64decode(existing["encrypted_credentials"])
+            prev_creds = await secrets.decrypt(prev_encrypted, prev_key_id)
+        except Exception:
+            # If the prior blob can't be decrypted (key rotation issue,
+            # corrupt bytes), force the merchant to supply a fresh IPA
+            # rather than silently corrupting the record.
+            logger.error(
+                "Failed to decrypt existing InstaPay credentials for "
+                f"store {store.id} during partial update"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Could not read existing InstaPay credentials. Please "
+                    "re-enter your IPA to save."
+                ),
+            )
+        if ipa_to_save is None:
+            ipa_to_save = prev_creds.get("ipa")
+        if phone_to_save is None:
+            phone_to_save = prev_creds.get("fallback_phone")
+
+    if not ipa_to_save:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="InstaPay address (IPA) is required.",
+        )
+
+    key_id = await secrets.get_current_key_id()
     credential_data = {
-        "ipa": request.ipa,
-        "fallback_phone": request.fallback_phone,
+        "ipa": ipa_to_save,
+        "fallback_phone": phone_to_save,
     }
     encrypted = await secrets.encrypt(credential_data, key_id)
     encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
 
-    store_settings = store.settings or {}
-    payment_settings = store_settings.get("payment", _get_default_payment_settings())
-
     payment_settings["instapay"] = {
-        "enabled": True,
+        # Preserve the current enabled state on credential updates —
+        # merchants editing thresholds shouldn't accidentally unmute
+        # a disabled InstaPay option at checkout. First-time saves
+        # still fall through to True via the `or True` below (new
+        # credentials are worth enabling by default).
+        "enabled": bool(existing.get("enabled", True)) if existing else True,
         "is_configured": True,
         "last_configured": datetime.now(UTC).isoformat(),
         "encrypted_credentials": encrypted_b64,
@@ -2221,10 +2278,10 @@ async def save_instapay_credentials(
     return SuccessResponse(
         data=InstapayCredentialsResponse(
             is_configured=True,
-            enabled=True,
-            ipa_masked=secrets.mask_credential(request.ipa),
+            enabled=bool(payment_settings["instapay"]["enabled"]),
+            ipa_masked=secrets.mask_credential(ipa_to_save),
             ipa_display_name=request.ipa_display_name,
-            fallback_phone=request.fallback_phone,
+            fallback_phone=phone_to_save,
             auto_approve_threshold_cents=request.auto_approve_threshold_cents,
             auto_approve_daily_cap_cents=request.auto_approve_daily_cap_cents,
             auto_approve_daily_count=request.auto_approve_daily_count,
