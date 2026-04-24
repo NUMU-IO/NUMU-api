@@ -58,7 +58,7 @@ class OrderRepository(IOrderRepository):
 
         return OrderLineItem(
             product_id=UUID(data["product_id"]),
-            product_name=data["product_name"],
+            product_name=data.get("product_name") or "",
             variant_id=UUID(data["variant_id"]) if data.get("variant_id") else None,
             variant_name=data.get("variant_name"),
             sku=data.get("sku"),
