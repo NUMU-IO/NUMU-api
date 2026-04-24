@@ -40,6 +40,7 @@ from src.core.value_objects.geography import (
     EGYPTIAN_GOVERNORATES,
     LogisticsZone,
     get_governorate_by_code,
+    resolve_governorate,
 )
 from src.infrastructure.repositories.shipping_zone_repository import (
     ShippingZoneRepository,
@@ -524,12 +525,14 @@ async def calculate_preview(
 ):
     """Same shape as storefront /shipping/options — shares the resolver."""
     resolver = ShippingResolver(repo, currency=store.currency or "EGP")
-    # Normalize code (accept legacy Bosta codes like "CAI" → "EG-C").
-    gov = get_governorate_by_code(request.governorate_code)
+    # Accept any form: ISO code, legacy Bosta code, governorate name,
+    # or common city alias — the merchant calculator gets the same
+    # lenient parsing as the storefront.
+    gov = resolve_governorate(request.governorate_code)
     if gov is None:
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown governorate code: {request.governorate_code}",
+            detail=f"Unknown governorate: {request.governorate_code}",
         )
     try:
         result = await resolver.resolve_options(

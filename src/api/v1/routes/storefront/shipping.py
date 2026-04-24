@@ -26,7 +26,7 @@ from src.api.v1.schemas.tenant.shipping import (
 from src.application.services.shipping_resolver import ShippingResolver
 from src.core.value_objects.geography import (
     EGYPTIAN_GOVERNORATES,
-    get_governorate_by_code,
+    resolve_governorate,
 )
 from src.infrastructure.repositories.shipping_zone_repository import (
     ShippingZoneRepository,
@@ -96,11 +96,19 @@ async def get_shipping_options(
     destination zone. The client should render as radio options and
     disable the payment step's COD choice if no option supports COD.
     """
-    gov = get_governorate_by_code(request.governorate_code)
+    # Accept either an ISO 3166-2 code ("EG-DK"), a legacy Bosta code
+    # ("DKH"), the governorate's English/Arabic name, or a common
+    # city/capital alias ("Mansoura" → Dakahlia). Saved customer
+    # addresses from before the ISO-code rollout still carry city
+    # names, and the checkout form hydrates `form.city` from those.
+    gov = resolve_governorate(request.governorate_code)
     if gov is None:
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown governorate code: {request.governorate_code}",
+            detail=(
+                f"Unknown governorate: {request.governorate_code}. "  # nosec B608
+                "Please select a governorate from the dropdown."
+            ),
         )
 
     resolver = ShippingResolver(repo, currency="EGP")

@@ -171,9 +171,14 @@ class SaveInstapayCredentialsRequest(BaseModel):
     swapped IPA lets someone impersonate the merchant on the
     proof-verification step. Phones are optional fallback display.
     Thresholds are policy the merchant tunes.
+
+    `ipa` is optional so merchants can update display/threshold
+    fields without re-typing their address. When omitted, the handler
+    preserves the currently-encrypted IPA. First-time saves must
+    include it; the handler enforces that.
     """
 
-    ipa: str = Field(..., min_length=3, max_length=80)
+    ipa: str | None = Field(default=None, min_length=3, max_length=80)
     ipa_display_name: str | None = Field(None, max_length=100)
     fallback_phone: str | None = Field(None, max_length=20)
     auto_approve_threshold_cents: int = Field(50_000, ge=0, le=10_000_000)
