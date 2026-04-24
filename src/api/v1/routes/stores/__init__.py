@@ -22,9 +22,9 @@ Provides REST endpoints for store CRUD operations and nested resources:
 from fastapi import APIRouter
 
 from src.api.v1.routes.stores import ai as ai_module
-from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
+from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
@@ -33,6 +33,7 @@ from src.api.v1.routes.stores import feedback as feedback_module
 from src.api.v1.routes.stores import inventory as inventory_module
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
+from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
 
 # Import all routers
@@ -64,6 +65,7 @@ router.include_router(stores_module.router, prefix="", tags=["Stores"])
 # Nested resources - products, orders, dashboard, customers, invoices under specific store
 router.include_router(products_module.router, tags=["Store Products"])
 router.include_router(orders_module.router, tags=["Store Orders"])
+router.include_router(order_import_module.router, tags=["Store Order Import"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
