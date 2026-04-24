@@ -14,6 +14,7 @@ class StorageBucket(StrEnum):
     DOCUMENTS = "documents"
     CATEGORIES = "categories"
     THEMES = "themes"
+    PAYMENT_PROOFS = "payment-proofs"
 
 
 @dataclass

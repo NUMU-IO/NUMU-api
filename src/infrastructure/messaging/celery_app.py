@@ -51,6 +51,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.expire_temporary_grants",
         # Feature 001: Omnichannel inbox
         "src.infrastructure.messaging.tasks.omnichannel_tasks",
+        # InstaPay — auto-cancel expired pending-payment orders
+        "src.infrastructure.messaging.tasks.instapay_expiry_task",
     ],
     # Queue definitions
     task_queues=(
@@ -177,5 +179,10 @@ celery_app.conf.beat_schedule = {
     "compute-staff-risk-scores": {
         "task": "tasks.compute_staff_risk_scores",
         "schedule": crontab(hour=4, minute=30),  # Daily at 04:30 UTC
+    },
+    # ─── InstaPay: cancel stale pending-payment orders every minute ──
+    "expire-instapay-orders": {
+        "task": "tasks.expire_instapay_orders",
+        "schedule": 60.0,  # Every 60s — matches 30-min window granularity
     },
 }

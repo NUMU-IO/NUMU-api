@@ -67,6 +67,7 @@ def order_confirmation_html(
     customer_name: str | None = None,
     language: str = "ar",
     tracking_url: str | None = None,
+    instapay: dict | None = None,
     **_kwargs,
 ) -> str:
     c = _ORDER_CONFIRMATION.get(language, _ORDER_CONFIRMATION["ar"])
@@ -86,6 +87,26 @@ def order_confirmation_html(
             <td>{qty}</td>
             <td class="price">{currency} {price:,.2f}</td>
         </tr>"""
+
+    # Optional InstaPay instructions — rendered inline so a customer
+    # who closed the tab still has IPA + ref + amount at hand. The
+    # block is self-contained HTML; see email_templates/instapay.py.
+    instapay_block = ""
+    if instapay:
+        from src.infrastructure.external_services.resend.email_templates.instapay import (
+            instapay_instructions_html,
+        )
+
+        instapay_block = instapay_instructions_html(
+            ipa=instapay.get("ipa", ""),
+            reference_code=instapay.get("reference_code", ""),
+            amount_cents=int(instapay.get("amount_cents", 0)),
+            currency=instapay.get("currency", currency),
+            expires_at=instapay.get("expires_at"),
+            resume_url=instapay.get("resume_url"),
+            fallback_phone=instapay.get("fallback_phone"),
+            language=language,
+        )
 
     body = f"""
     {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
@@ -114,6 +135,8 @@ def order_confirmation_html(
             <p class="label">{c["order_number_label"]}</p>
             <p class="value">#{order_number}</p>
         </div>
+
+        {instapay_block}
 
         <hr class="divider">
 

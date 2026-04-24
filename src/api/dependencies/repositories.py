@@ -23,6 +23,7 @@ from src.infrastructure.repositories import (
     ProductReviewRepository,
     RefundRepository,
     ShipmentRepository,
+    ShippingZoneRepository,
     StoreRepository,
     StoreThemeRepository,
     ThemeRepository,
@@ -146,6 +147,13 @@ def get_two_factor_repository(
 ) -> TwoFactorRepository:
     """Get two-factor authentication repository dependency."""
     return TwoFactorRepository(session)
+
+
+def get_shipping_zone_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ShippingZoneRepository:
+    """Shipping zone + rate repository dependency."""
+    return ShippingZoneRepository(session)
 
 
 def get_webhook_subscription_repository(

@@ -77,6 +77,38 @@ class PaymobCredentialsResponse(BaseModel):
     last_configured: str | None = None
 
 
+class SaveInstapayCredentialsRequest(BaseModel):
+    """Save merchant InstaPay configuration.
+
+    The IPA (Instant Payment Address, e.g. ``merchant@cib``) is the
+    primary routing key and the one sensitive field — a leaked or
+    swapped IPA lets someone impersonate the merchant on the
+    proof-verification step. Phones are optional fallback display.
+    Thresholds are policy the merchant tunes.
+    """
+
+    ipa: str = Field(..., min_length=3, max_length=80)
+    ipa_display_name: str | None = Field(None, max_length=100)
+    fallback_phone: str | None = Field(None, max_length=20)
+    auto_approve_threshold_cents: int = Field(50_000, ge=0, le=10_000_000)
+    auto_approve_daily_cap_cents: int = Field(500_000, ge=0, le=100_000_000)
+    auto_approve_daily_count: int = Field(10, ge=0, le=1_000)
+
+
+class InstapayCredentialsResponse(BaseModel):
+    """Masked InstaPay config (the IPA itself is the only sensitive bit)."""
+
+    is_configured: bool
+    enabled: bool = False
+    ipa_masked: str | None = None
+    ipa_display_name: str | None = None
+    fallback_phone: str | None = None
+    auto_approve_threshold_cents: int | None = None
+    auto_approve_daily_cap_cents: int | None = None
+    auto_approve_daily_count: int | None = None
+    last_configured: str | None = None
+
+
 class SaveKashierCredentialsRequest(BaseModel):
     """Save Kashier gateway credentials for a store."""
 

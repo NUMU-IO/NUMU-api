@@ -17,6 +17,7 @@ class PaymentProvider(StrEnum):
     FAWRY = "fawry"  # Fawry retail pay points
     KASHIER = "kashier"  # Kashier payment gateway
     FAWATERAK = "fawaterak"  # Fawaterak payment gateway
+    INSTAPAY = "instapay"  # InstaPay (manual IPA + proof upload)
 
 
 class PaymentMethod(StrEnum):

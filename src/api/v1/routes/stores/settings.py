@@ -32,6 +32,7 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationSocialLinks,
     CustomizationTheme,
     FawaterakCredentialsResponse,
+    InstapayCredentialsResponse,
     InvoiceSettingsResponse,
     KashierCredentialsResponse,
     NotificationTemplate,
@@ -40,6 +41,7 @@ from src.api.v1.schemas.tenant.settings import (
     PaymobCredentialsResponse,
     SaveBostaCredentialsRequest,
     SaveFawaterakCredentialsRequest,
+    SaveInstapayCredentialsRequest,
     SaveKashierCredentialsRequest,
     SavePaymobCredentialsRequest,
     ShippingCarrierStatus,
@@ -77,6 +79,11 @@ def _get_default_payment_settings() -> dict:
             "last_configured": None,
         },
         "paymob": {"enabled": False, "is_configured": False, "last_configured": None},
+        "instapay": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
         "vodafone_cash": {
             "enabled": False,
             "is_configured": False,
@@ -2066,3 +2073,179 @@ async def update_checkout_fields(
     await store_repo.update(store)
     cfg = _resolve_checkout_config(settings)
     return SuccessResponse(data=cfg, message="Checkout fields updated")
+
+
+# ============ InstaPay Credentials ============
+
+
+@router.put(
+    "/payment/instapay/credentials",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Save InstaPay credentials",
+    operation_id="save_instapay_credentials",
+)
+async def save_instapay_credentials(
+    request: SaveInstapayCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save InstaPay configuration for the store.
+
+    The IPA + fallback phone are encrypted at rest; the auto-approval
+    thresholds sit alongside the encrypted blob in plaintext because
+    they're policy knobs the merchant sees in the dashboard, not
+    secrets.
+    """
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = await secrets.get_current_key_id()
+
+    credential_data = {
+        "ipa": request.ipa,
+        "fallback_phone": request.fallback_phone,
+    }
+    encrypted = await secrets.encrypt(credential_data, key_id)
+    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
+
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["instapay"] = {
+        "enabled": True,
+        "is_configured": True,
+        "last_configured": datetime.now(UTC).isoformat(),
+        "encrypted_credentials": encrypted_b64,
+        "encryption_key_id": key_id,
+        "ipa_display_name": request.ipa_display_name,
+        "auto_approve_threshold_cents": request.auto_approve_threshold_cents,
+        "auto_approve_daily_cap_cents": request.auto_approve_daily_cap_cents,
+        "auto_approve_daily_count": request.auto_approve_daily_count,
+    }
+
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+    )
+
+    logger.info(f"InstaPay credentials saved for store {store.id}")
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=True,
+            enabled=True,
+            ipa_masked=secrets.mask_credential(request.ipa),
+            ipa_display_name=request.ipa_display_name,
+            fallback_phone=request.fallback_phone,
+            auto_approve_threshold_cents=request.auto_approve_threshold_cents,
+            auto_approve_daily_cap_cents=request.auto_approve_daily_cap_cents,
+            auto_approve_daily_count=request.auto_approve_daily_count,
+            last_configured=payment_settings["instapay"]["last_configured"],
+        ),
+        message="InstaPay credentials saved successfully",
+    )
+
+
+@router.get(
+    "/payment/instapay/credentials",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Get InstaPay credentials status",
+    operation_id="get_instapay_credentials",
+)
+async def get_instapay_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked InstaPay config status for the store."""
+    store_settings = store.settings or {}
+    instapay_settings = store_settings.get("payment", {}).get("instapay", {})
+
+    if not instapay_settings.get("encrypted_credentials"):
+        return SuccessResponse(
+            data=InstapayCredentialsResponse(is_configured=False),
+            message="InstaPay credentials not configured",
+        )
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = instapay_settings["encryption_key_id"]
+    encrypted = base64.b64decode(instapay_settings["encrypted_credentials"])
+
+    try:
+        creds = await secrets.decrypt(encrypted, key_id)
+    except Exception:
+        logger.error(f"Failed to decrypt InstaPay credentials for store {store.id}")
+        return SuccessResponse(
+            data=InstapayCredentialsResponse(
+                is_configured=True,
+                enabled=bool(instapay_settings.get("enabled")),
+                last_configured=instapay_settings.get("last_configured"),
+            ),
+            message="InstaPay credentials configured but unreadable",
+        )
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=True,
+            enabled=bool(instapay_settings.get("enabled")),
+            ipa_masked=secrets.mask_credential(creds.get("ipa", "")),
+            ipa_display_name=instapay_settings.get("ipa_display_name"),
+            fallback_phone=creds.get("fallback_phone"),
+            auto_approve_threshold_cents=instapay_settings.get(
+                "auto_approve_threshold_cents"
+            ),
+            auto_approve_daily_cap_cents=instapay_settings.get(
+                "auto_approve_daily_cap_cents"
+            ),
+            auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
+            last_configured=instapay_settings.get("last_configured"),
+        )
+    )
+
+
+@router.delete(
+    "/payment/instapay/credentials",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Remove InstaPay credentials",
+    operation_id="delete_instapay_credentials",
+)
+async def delete_instapay_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove the stored InstaPay IPA and disable InstaPay at checkout.
+
+    Existing ``instapay_intents`` rows are not touched — they belong
+    to already-placed orders and the merchant still needs to see /
+    review their proofs. New orders can no longer choose InstaPay
+    until credentials are re-saved.
+    """
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["instapay"] = {
+        "enabled": False,
+        "is_configured": False,
+        "last_configured": None,
+    }
+
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    logger.info(f"InstaPay credentials removed for store {store.id}")
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(is_configured=False),
+        message="InstaPay credentials removed successfully",
+    )

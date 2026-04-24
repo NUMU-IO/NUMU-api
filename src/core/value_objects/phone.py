@@ -1,6 +1,6 @@
 """Phone number value object."""
 
-from typing import Self
+from typing import Any, Self
 
 import phonenumbers
 from phonenumbers import NumberParseException
@@ -14,6 +14,26 @@ class PhoneNumber(BaseModel):
 
     value: str
     country_code: str = "EG"
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_bare_string(cls, data: Any) -> Any:
+        """Accept a bare phone string in addition to the full
+        ``{"value": ..., "country_code": ...}`` shape.
+
+        Motivation: the CSV order-import service and several legacy
+        callers pass phone as a raw string. Before this validator they
+        hit a ``model_type`` validation error ("Input should be a valid
+        dictionary or instance of PhoneNumber"). Normalising here lets
+        every call site stay simple without forcing them all to wrap
+        with ``PhoneNumber(value=...)``.
+
+        Non-strings (dicts, PhoneNumber instances, None) pass through
+        untouched so the existing ``value=...`` call sites are a no-op.
+        """
+        if isinstance(data, str):
+            return {"value": data}
+        return data
 
     @model_validator(mode="after")
     def normalize_phone(self) -> Self:

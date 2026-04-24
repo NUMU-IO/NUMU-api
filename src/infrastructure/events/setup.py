@@ -9,6 +9,10 @@ from src.core.events.order_events import (
     OrderPaidEvent,
     OrderStatusChangedEvent,
 )
+from src.core.events.payment_events import (
+    PaymentProofApprovedEvent,
+    PaymentProofRejectedEvent,
+)
 from src.core.events.product_events import (
     ProductCreatedEvent,
     ProductDeletedEvent,
@@ -31,6 +35,12 @@ from src.core.events.staff_events import (
 from src.infrastructure.events.handlers.activity_log_handler import handle_activity_log
 from src.infrastructure.events.handlers.email_notification_handler import (
     handle_email_notification,
+)
+from src.infrastructure.events.handlers.instapay_notification_handler import (
+    handle_payment_proof_approved,
+    handle_payment_proof_rejected,
+    handle_whatsapp_payment_proof_approved,
+    handle_whatsapp_payment_proof_rejected,
 )
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
@@ -91,6 +101,16 @@ def create_event_bus() -> EventBus:
     # Issue the ETA invoice + email PDF when the merchant marks a COD
     # order paid (or a future payment-gateway webhook fires OrderPaidEvent).
     bus.subscribe(OrderPaidEvent, handle_invoice_on_order_paid)
+
+    # InstaPay proof lifecycle — short customer confirmation / rejection
+    # emails that fire independently of the invoice handler so they
+    # still land even if PDF generation fails. WhatsApp handlers run
+    # in parallel on the same events so the primary channel in the EG
+    # market never depends on email deliverability.
+    bus.subscribe(PaymentProofApprovedEvent, handle_payment_proof_approved)
+    bus.subscribe(PaymentProofRejectedEvent, handle_payment_proof_rejected)
+    bus.subscribe(PaymentProofApprovedEvent, handle_whatsapp_payment_proof_approved)
+    bus.subscribe(PaymentProofRejectedEvent, handle_whatsapp_payment_proof_rejected)
 
     # Product webhooks
     bus.subscribe(ProductCreatedEvent, handle_webhook_product_created)
