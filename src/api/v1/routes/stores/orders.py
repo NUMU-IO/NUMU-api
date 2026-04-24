@@ -266,7 +266,16 @@ async def list_orders(
     search: str | None = Query(None),
     customer_id: str | None = Query(None, description="Filter by customer ID"),
 ):
-    """List orders for a store with optional filtering and pagination."""
+    """List orders for a store with optional filtering and pagination.
+
+    For the specific case of "orders with an InstaPay proof awaiting
+    merchant review", use the dedicated endpoint
+    ``GET /stores/{store_id}/orders/pending-instapay-review`` instead
+    of a query param on this route. It runs a self-join on
+    ``payment_proofs`` so the server returns only rows where the
+    *latest* proof is ``awaiting_review`` — a condition this list
+    endpoint's repository layer can't express today.
+    """
     use_case = ListOrdersUseCase(
         order_repository=order_repo,
         store_repository=store_repo,

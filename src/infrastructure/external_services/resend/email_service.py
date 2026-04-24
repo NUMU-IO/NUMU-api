@@ -254,6 +254,10 @@ class ResendEmailService(IEmailService):
         # status changes made by the merchant. Caller constructs the full
         # absolute URL (e.g. https://{subdomain}.numueg.app/track/{order_id}).
         tracking_url = order_details.get("tracking_url")
+        # Optional InstaPay block — when the order was placed via the
+        # manual IPA flow, we inline the IPA / ref / amount / expiry so
+        # a customer who closed the tab can still pay from this email.
+        instapay = order_details.get("instapay")
 
         html_content = ORDER_CONFIRMATION_TEMPLATE["html_fn"](
             order_number=order_number,
@@ -264,6 +268,7 @@ class ResendEmailService(IEmailService):
             customer_name=customer_name,
             language=language,
             tracking_url=tracking_url,
+            instapay=instapay,
         )
         subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](
             order_number, store_name, language
@@ -365,6 +370,79 @@ class ResendEmailService(IEmailService):
             ],
         )
         return await self.send_email(message)
+
+    async def send_instapay_payment_confirmed(
+        self,
+        *,
+        email: str,
+        order_number: str,
+        reference_code: str,
+        amount_cents: int,
+        currency: str = "EGP",
+        store_name: str = "NUMU",
+        customer_name: str | None = None,
+        language: str = "ar",
+    ) -> bool:
+        """Send a short "payment received" email after proof approval.
+
+        Fires in parallel with (and independently of) the invoice email,
+        so the customer learns about approval even when PDF generation
+        fails or no invoice is issued.
+        """
+        from src.infrastructure.external_services.resend.email_templates.instapay import (
+            payment_confirmed_html,
+            payment_confirmed_subject,
+        )
+
+        html_content = payment_confirmed_html(
+            order_number=order_number,
+            reference_code=reference_code,
+            amount_cents=amount_cents,
+            currency=currency,
+            store_name=store_name,
+            customer_name=customer_name,
+            language=language,
+        )
+        subject = payment_confirmed_subject(
+            order_number, store_name=store_name, language=language
+        )
+        return await self.send_email(
+            EmailMessage(to=email, subject=subject, html_content=html_content)
+        )
+
+    async def send_instapay_payment_rejected(
+        self,
+        *,
+        email: str,
+        order_number: str,
+        reason: str,
+        can_retry: bool = True,
+        retry_url: str | None = None,
+        store_name: str = "NUMU",
+        customer_name: str | None = None,
+        language: str = "ar",
+    ) -> bool:
+        """Notify the customer that the merchant rejected their proof."""
+        from src.infrastructure.external_services.resend.email_templates.instapay import (
+            payment_rejected_html,
+            payment_rejected_subject,
+        )
+
+        html_content = payment_rejected_html(
+            order_number=order_number,
+            reason=reason,
+            can_retry=can_retry,
+            retry_url=retry_url,
+            store_name=store_name,
+            customer_name=customer_name,
+            language=language,
+        )
+        subject = payment_rejected_subject(
+            order_number, store_name=store_name, language=language
+        )
+        return await self.send_email(
+            EmailMessage(to=email, subject=subject, html_content=html_content)
+        )
 
     async def send_shipping_notification(
         self,

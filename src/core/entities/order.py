@@ -184,6 +184,12 @@ class Order(BaseEntity):
     payment_method: str | None = None
     payment_id: str | None = None
     shipping_method: str | None = None
+    # Snapshot of the shipping resolution at checkout time. Nullable so
+    # orders placed before the shipping-config system rolls out (or via
+    # a legacy flow) still work. Not kept in sync if the zone/rate is
+    # edited later — that's the point: history is preserved as it was.
+    shipping_zone_id: UUID | None = None
+    shipping_rate_id: UUID | None = None
     tracking_number: str | None = None
     tracking_url: str | None = None
     notes: str | None = None

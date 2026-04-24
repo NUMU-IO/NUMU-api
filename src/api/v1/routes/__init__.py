@@ -102,6 +102,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     otp_router as storefront_otp_router,
 )
+from src.api.v1.routes.storefront import (
+    payment_proofs_router as storefront_payment_proofs_router,
+)
 
 # Storefront routes (customer-facing)
 from src.api.v1.routes.storefront import (
@@ -112,6 +115,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     shipping_quote_router as storefront_shipping_quote_router,
+)
+from src.api.v1.routes.storefront import (
+    shipping_router as storefront_shipping_router,
 )
 
 # Storefront theme resolution (internal — Next.js SSR → FastAPI)
@@ -303,11 +309,25 @@ api_router.include_router(
     tags=["Storefront - Checkout"],
 )
 
-# Storefront - shipping rate quotes (public, scoped to store)
+# Storefront - shipping rate quotes (public, scoped to store, legacy)
 api_router.include_router(
     storefront_shipping_quote_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Shipping"],
+)
+
+# Storefront - shipping governorates + options (public, scoped to store)
+api_router.include_router(
+    storefront_shipping_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Shipping"],
+)
+
+# Storefront - InstaPay proof upload / status (authenticated customer)
+api_router.include_router(
+    storefront_payment_proofs_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Payment Proofs"],
 )
 
 # Theme marketplace (public browsing of published themes)

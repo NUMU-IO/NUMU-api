@@ -23,7 +23,17 @@ from src.infrastructure.repositories.credential_repository import (
 
 logger = get_logger(__name__)
 
-# Maps provider string to (ServiceType, ServiceName) for DB lookup
+# Maps provider string to (ServiceType, ServiceName) for DB lookup.
+#
+# NOTE: "instapay" is intentionally absent. InstaPay's "credentials"
+# (merchant IPA, thresholds) are stored inline on ``store.settings``
+# rather than in the ``service_credentials`` table, and the checkout
+# branch builds the service directly via
+# ``get_merchant_instapay_credentials(store.settings)`` — mirroring the
+# Paymob/Fawry pattern, not the Kashier generic-fallback pattern. If a
+# future contributor adds "instapay" here, both paths will coexist and
+# the two credential stores will drift. Prefer extending
+# ``store.settings["payment"]["instapay"]`` instead.
 PROVIDER_SERVICE_MAP: dict[str, tuple[ServiceType, ServiceName]] = {
     "kashier": (ServiceType.PAYMENT_GATEWAY, ServiceName.KASHIER),
     "paymob": (ServiceType.PAYMENT_GATEWAY, ServiceName.PAYMOB),

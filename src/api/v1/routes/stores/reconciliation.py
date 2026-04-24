@@ -6,13 +6,13 @@ and any mismatches that involve their orders.  Store owners can also trigger
 a reconciliation run for a specific date.
 """
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import verify_store_ownership
@@ -22,6 +22,9 @@ from src.core.entities.store import Store
 from src.infrastructure.database.models.public.reconciliation import (
     PaymentReconciliationRunModel,
     ReconciliationMismatchModel,
+)
+from src.infrastructure.database.models.tenant.payment_transaction import (
+    PaymentTransactionModel,
 )
 
 router = APIRouter()
@@ -68,6 +71,28 @@ class TriggerReconciliationResponse(BaseModel):
     run_id: str
     status: str
     message: str
+
+
+class GatewayBreakdownRow(BaseModel):
+    """One row per gateway in a date-window payment summary.
+
+    Surfaces InstaPay volume alongside Paymob/Fawry/Kashier/Fawaterak/COD
+    so merchants can reconcile each rail independently.
+    """
+
+    gateway: str
+    status: str
+    count: int
+    total_cents: int
+    currency: str
+
+
+class GatewayBreakdownResponse(BaseModel):
+    period_start: str
+    period_end: str
+    rows: list[GatewayBreakdownRow]
+    total_successful_cents: int
+    total_failed_cents: int
 
 
 # ---------------------------------------------------------------------------
@@ -197,4 +222,90 @@ async def trigger_reconciliation(
             message=f"Reconciliation completed: {run.mismatches_found} mismatches found",
         ),
         message="Reconciliation triggered successfully",
+    )
+
+
+@router.get(
+    "/{store_id}/reconciliation/gateway-breakdown",
+    response_model=SuccessResponse[GatewayBreakdownResponse],
+    summary="Payment volume broken down by gateway",
+    operation_id="store_reconciliation_gateway_breakdown",
+)
+async def gateway_breakdown(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    date_from: date | None = Query(
+        None, description="Inclusive start date (UTC). Defaults to 7 days ago."
+    ),
+    date_to: date | None = Query(
+        None, description="Inclusive end date (UTC). Defaults to today."
+    ),
+) -> SuccessResponse[GatewayBreakdownResponse]:
+    """Aggregate ``payment_transactions`` by gateway for a date range.
+
+    Returns one row per (gateway, status, currency) triple — so a
+    merchant can see at a glance how much arrived via InstaPay vs.
+    Paymob vs. COD, and how many of each failed. Read-only; does not
+    trigger a reconciliation run.
+    """
+    today = datetime.now(UTC).date()
+    start_date = date_from or (today - timedelta(days=7))
+    end_date = date_to or today
+    period_start = datetime.combine(start_date, time.min, tzinfo=UTC)
+    # end_date is inclusive — use the start of the day *after* to catch
+    # everything timestamped on end_date itself.
+    period_end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=UTC)
+
+    result = await db.execute(
+        select(
+            PaymentTransactionModel.gateway,
+            PaymentTransactionModel.status,
+            PaymentTransactionModel.currency,
+            func.count(PaymentTransactionModel.id),
+            func.coalesce(func.sum(PaymentTransactionModel.amount_cents), 0),
+        )
+        .where(
+            PaymentTransactionModel.store_id == store.id,
+            PaymentTransactionModel.created_at >= period_start,
+            PaymentTransactionModel.created_at < period_end,
+        )
+        .group_by(
+            PaymentTransactionModel.gateway,
+            PaymentTransactionModel.status,
+            PaymentTransactionModel.currency,
+        )
+        .order_by(
+            PaymentTransactionModel.gateway,
+            PaymentTransactionModel.status,
+        )
+    )
+
+    rows: list[GatewayBreakdownRow] = []
+    success_total = 0
+    failed_total = 0
+    for gateway, row_status, currency, count, total in result.all():
+        total_cents = int(total)
+        rows.append(
+            GatewayBreakdownRow(
+                gateway=gateway,
+                status=row_status,
+                count=int(count),
+                total_cents=total_cents,
+                currency=currency,
+            )
+        )
+        if row_status == "success":
+            success_total += total_cents
+        elif row_status == "failed":
+            failed_total += total_cents
+
+    return SuccessResponse(
+        data=GatewayBreakdownResponse(
+            period_start=period_start.date().isoformat(),
+            period_end=end_date.isoformat(),
+            rows=rows,
+            total_successful_cents=success_total,
+            total_failed_cents=failed_total,
+        ),
+        message="Gateway breakdown retrieved",
     )

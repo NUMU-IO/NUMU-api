@@ -32,6 +32,7 @@ from src.api.dependencies.repositories import (
     get_network_reputation_repository,
     get_order_repository,
     get_product_repository,
+    get_shipping_zone_repository,
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
@@ -49,6 +50,7 @@ from src.application.services.network_reputation_service import (
     extract_phone_hash_from_string,
     write_network_event,
 )
+from src.application.services.shipping_resolver import ShippingResolver
 from src.config import settings
 from src.core.checkout_fields import (
     resolve_config as resolve_checkout_config,
@@ -59,12 +61,14 @@ from src.core.checkout_fields import (
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
+from src.core.value_objects.geography import resolve_governorate
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.repositories import (
     CouponRepository,
     CustomerRepository,
     OrderRepository,
     ProductRepository,
+    ShippingZoneRepository,
     StoreRepository,
 )
 from src.infrastructure.repositories.funnel_event_repository import (
@@ -120,6 +124,9 @@ async def checkout(
     network_repo: Annotated[
         "NetworkReputationRepository",
         Depends(get_network_reputation_repository),
+    ],
+    shipping_repo: Annotated[
+        ShippingZoneRepository, Depends(get_shipping_zone_repository)
     ],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
@@ -344,6 +351,11 @@ async def checkout(
     # can target the right code path (variant combo vs product-level)
     # without re-resolving the product.
     line_item_inventory: list[dict] = []
+    # Accumulated cart weight (grams) — used for weight_band rate
+    # evaluation. Products without a weight contribute 0, so weight-band
+    # merchants should either configure per-product weights or use an
+    # open-ended band with sensible defaults.
+    cart_weight_g: int = 0
     for item in request.line_items:
         product = await product_repo.get_by_id(item.product_id)
         if not product:
@@ -430,6 +442,10 @@ async def checkout(
             "allow_negative": allow_negative,
             "quantity": item.quantity,
         })
+        # Product.weight is Decimal kilograms; convert to grams and
+        # multiply by quantity. Missing weight → skip (contributes 0).
+        if product.weight is not None:
+            cart_weight_g += int(product.weight * 1000) * item.quantity
 
     # Build address DTOs
     addr = request.shipping_address
@@ -604,7 +620,77 @@ async def checkout(
                     detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
                 )
 
-    total = subtotal + dto.shipping_cost + dto.tax_amount - discount_amount
+    # ── Server-side shipping resolution (trust-gap closure) ──
+    # The client NEVER sets shipping_cost. If a rate was selected via
+    # /shipping/options, we re-resolve it here using the merchant's
+    # authoritative rules and stamp the snapshot (zone_id + rate_id +
+    # computed amount) on the order.
+    #
+    # If the store has ANY active shipping zones configured, we require
+    # a `selected_shipping_rate_id` on the payload. Without this guard,
+    # a malicious client could omit the field and bypass the merchant's
+    # rate table entirely — the "legacy zero-shipping path" would turn
+    # into a free-shipping exploit the moment the merchant configures
+    # zones. Stores with no active zones (fresh stores / merchants who
+    # haven't finished setup) still accept the legacy path so their
+    # storefront doesn't 400 pre-configuration.
+    shipping_cost_cents = 0
+    resolved_zone_id: UUID | None = None
+    resolved_rate_id: UUID | None = None
+    resolved_label: str | None = request.shipping_method
+
+    if not request.selected_shipping_rate_id:
+        if await shipping_repo.has_active_zones(store_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=("Please select a shipping option before placing your order."),
+            )
+
+    if request.selected_shipping_rate_id:
+        # Resolve the destination governorate from the shipping address.
+        # `resolve_governorate` accepts either an ISO 3166-2 code (e.g.
+        # "EG-C" — what the storefront sends after the UI overhaul) or
+        # a free-text name / legacy Bosta code / Arabic variant, so the
+        # pre-overhaul checkout payload also keeps working.
+        gov = None
+        if shipping_address.state:
+            gov = resolve_governorate(shipping_address.state)
+        if gov is None and shipping_address.city:
+            gov = resolve_governorate(shipping_address.city)
+        if gov is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Could not resolve the shipping address's governorate. "
+                    "Please select a supported governorate."
+                ),
+            )
+
+        resolver = ShippingResolver(shipping_repo, currency=currency)
+        resolution = await resolver.resolve_one(
+            store_id=store_id,
+            rate_id=request.selected_shipping_rate_id,
+            governorate_code=gov.code,
+            cart_subtotal_cents=subtotal,
+            cart_weight_g=cart_weight_g,
+            cod_requested=request.cod_requested,
+        )
+        if resolution is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The selected shipping rate is no longer available for this address.",
+            )
+        if request.cod_requested and not resolution.cod_supported:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cash on delivery isn't available in this area.",
+            )
+        shipping_cost_cents = resolution.amount_cents
+        resolved_zone_id = resolution.zone_id
+        resolved_rate_id = resolution.rate_id
+        resolved_label = resolution.label
+
+    total = subtotal + shipping_cost_cents + dto.tax_amount - discount_amount
 
     order = Order(
         store_id=store_id,
@@ -617,7 +703,7 @@ async def checkout(
         status=OrderStatus.PENDING,
         payment_status=PaymentStatus.PENDING,
         subtotal=subtotal,
-        shipping_cost=dto.shipping_cost,
+        shipping_cost=shipping_cost_cents,
         tax_amount=dto.tax_amount,
         discount_amount=discount_amount,
         coupon_code=coupon_code,
@@ -625,7 +711,9 @@ async def checkout(
         total=total,
         currency=currency,
         payment_method=request.payment_method,
-        shipping_method=request.shipping_method,
+        shipping_method=resolved_label,
+        shipping_zone_id=resolved_zone_id,
+        shipping_rate_id=resolved_rate_id,
         customer_notes=request.customer_notes,
         metadata={
             **({"ip_address": client_ip} if client_ip else {}),
@@ -1002,6 +1090,105 @@ async def checkout(
                 detail="Fawry payment is not available for this store. Please choose another payment method.",
             )
 
+    elif request.payment_method == "instapay":
+        # InstaPay (manual IPA + proof upload). No gateway call — we just
+        # persist the InstapayIntent and hand the storefront the IPA + QR
+        # + reference code to show the customer. Funds move out-of-band;
+        # customer confirms via the proof-upload endpoint.
+        try:
+            from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+            from src.application.use_cases.payments.submit_payment_proof import (  # noqa: F401 (keeps module importable at startup)
+                SubmitPaymentProofUseCase,
+            )
+            from src.core.entities.instapay import InstapayIntent
+            from src.infrastructure.external_services.instapay import (
+                InstapayPaymentService,
+                get_merchant_instapay_credentials,
+            )
+            from src.infrastructure.external_services.instapay.payment_service import (
+                generate_reference_code,
+            )
+            from src.infrastructure.repositories.instapay_intent_repository import (
+                InstapayIntentRepository,
+            )
+
+            credentials = await get_merchant_instapay_credentials(store.settings)
+            instapay_service = InstapayPaymentService(
+                ipa=credentials["ipa"],
+                ipa_display_name=credentials.get("ipa_display_name"),
+                fallback_phone=credentials.get("fallback_phone"),
+            )
+            intent_repo = InstapayIntentRepository(order_repo.session)
+
+            # Reference codes are short enough (~10^9 combinations) that
+            # collisions are rare but not impossible, and a collision
+            # racing between two requests will surface as IntegrityError
+            # from the UNIQUE constraint. Wrap each attempt in a SAVEPOINT
+            # so a collision doesn't poison the outer request transaction,
+            # and retry with a fresh code until success or exhaustion.
+            reference_code = ""
+            qr_payload = ""
+            expires_at = None
+            for _ in range(5):
+                candidate = generate_reference_code()
+                cand_payload, cand_expires_at = instapay_service.build_intent_payload(
+                    amount_cents=created_order.total,
+                    reference_code=candidate,
+                    note=f"Order {created_order.order_number}",
+                )
+                intent_entity = InstapayIntent.new(
+                    tenant_id=created_order.tenant_id,
+                    store_id=created_order.store_id,
+                    order_id=created_order.id,
+                    reference_code=candidate,
+                    display_ipa=credentials["ipa"],
+                    display_phone=credentials.get("fallback_phone"),
+                    amount_cents=created_order.total,
+                    expires_at=cand_expires_at,
+                    qr_payload=cand_payload,
+                )
+                try:
+                    async with order_repo.session.begin_nested():
+                        await intent_repo.create(intent_entity)
+                except _IntegrityError:
+                    # Collision on reference_code OR order_id (same order
+                    # seen twice, very rare here). Retry with a fresh code.
+                    continue
+                reference_code = candidate
+                qr_payload = cand_payload
+                expires_at = cand_expires_at
+                break
+            if not reference_code or expires_at is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Could not allocate an InstaPay reference. Please retry.",
+                )
+
+            created_order.payment_id = reference_code
+            created_order.metadata["instapay"] = {
+                "reference_code": reference_code,
+            }
+            await order_repo.update(created_order)
+
+            payment_data = instapay_service.to_checkout_payload(
+                reference_code=reference_code,
+                qr_payload=qr_payload,
+                amount_cents=created_order.total,
+                currency=currency,
+                expires_at=expires_at,
+                order_id=str(created_order.id),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"InstaPay payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="InstaPay is not available for this store. Please choose another payment method.",
+            )
+
     elif request.payment_method and request.payment_method != "cod":
         # Other payment providers via tenant credentials
         try:
@@ -1090,6 +1277,24 @@ async def checkout(
                 "tracking_url": order_tracking_url,
             }
 
+            # InstaPay: include IPA / ref / amount / expiry + a direct
+            # resume link in the confirmation email so a customer who
+            # closed the tab can still complete the payment.
+            if (
+                request.payment_method == "instapay"
+                and isinstance(payment_data, dict)
+                and payment_data.get("provider") == "instapay"
+            ):
+                order_details["instapay"] = {
+                    "ipa": payment_data.get("ipa"),
+                    "reference_code": payment_data.get("reference_code"),
+                    "amount_cents": payment_data.get("amount_cents"),
+                    "currency": payment_data.get("currency", currency),
+                    "expires_at": payment_data.get("expires_at"),
+                    "fallback_phone": payment_data.get("fallback_phone"),
+                    "resume_url": f"{base_storefront_url}/instapay/{created_order.id}",
+                }
+
             async def _send_order_email():
                 try:
                     svc = ResendEmailService()
@@ -1097,7 +1302,11 @@ async def checkout(
                         email=customer_email,
                         order_number=created_order.order_number,
                         order_details=order_details,
-                        language="ar",  # NUMU emails are Egyptian Arabic only for now
+                        # Follow the merchant's storefront language so
+                        # an EN-facing store isn't shipped Arabic copy
+                        # when their InstaPay block (IPA, ref, expiry)
+                        # carries customer-critical info.
+                        language=(store.default_language or "ar"),
                     )
                     logger.info(f"Order confirmation email sent to {customer_email}")
                 except Exception as exc:

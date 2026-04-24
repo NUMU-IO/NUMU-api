@@ -37,6 +37,19 @@ class CheckoutRequest(BaseModel):
         None, max_length=254, description="Email for guest checkout"
     )
     shipping_method: str | None = None
+    # Rate ID returned by /storefront/store/{id}/shipping/options. When
+    # present, the server re-resolves this rate using the merchant's
+    # authoritative rules and stamps the resulting amount on the order.
+    # When absent, shipping is 0 (legacy / pre-shipping-config flow).
+    # A client-supplied `shipping_cost` field is NOT accepted — the
+    # server never trusts the client's price.
+    selected_shipping_rate_id: UUID | None = Field(
+        None, description="Rate ID from /shipping/options"
+    )
+    cod_requested: bool = Field(
+        False,
+        description="True when the customer intends to pay COD. Controls zone COD check.",
+    )
     customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
     # UTM attribution (captured from URL on storefront)

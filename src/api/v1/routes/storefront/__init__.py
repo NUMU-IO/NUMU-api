@@ -26,11 +26,15 @@ from src.api.v1.routes.storefront.customer import router as customer_router
 from src.api.v1.routes.storefront.geocode import router as geocode_router
 from src.api.v1.routes.storefront.order_tracking import router as order_tracking_router
 from src.api.v1.routes.storefront.otp import router as otp_router
+from src.api.v1.routes.storefront.payment_proofs import (
+    router as payment_proofs_router,
+)
 from src.api.v1.routes.storefront.public import (
     lookup_router as storefront_lookup_router,
 )
 from src.api.v1.routes.storefront.public import router as public_router
 from src.api.v1.routes.storefront.reviews import router as reviews_router
+from src.api.v1.routes.storefront.shipping import router as shipping_router
 from src.api.v1.routes.storefront.shipping_quote import router as shipping_quote_router
 from src.api.v1.routes.storefront.theme_resolution import (
     router as theme_resolution_router,
@@ -48,10 +52,12 @@ __all__ = [
     "coupon_router",
     "upsell_router",
     "otp_router",
+    "payment_proofs_router",
     "tracking_router",
     "order_tracking_router",
     "theme_resolution_router",
     "shipping_quote_router",
+    "shipping_router",
     "checkout_config_router",
     "bundles_router",
     "geocode_router",
