@@ -579,7 +579,9 @@ async def browse_products_cursor(
             description=product.description,
             short_description=product.short_description,
             product_type=product.product_type,
-            status=product.status.value if hasattr(product.status, "value") else product.status,
+            status=product.status.value
+            if hasattr(product.status, "value")
+            else product.status,
             price=str(product.price.amount),
             price_currency=product.price.currency.value,
             compare_at_price=str(product.compare_at_price.amount)
@@ -1268,7 +1270,55 @@ async def get_store_payment_methods(
             "type": "kashier",
         })
 
+    if _show("fawaterak"):
+        methods.append({
+            "id": "fawaterak",
+            "label": "فواتيرك",
+            "label_en": "Fawaterak",
+            "type": "fawaterak",
+        })
+
+    # InstaPay — customers transfer to the merchant's IPA from their
+    # bank app and upload a proof screenshot. No external redirect.
+    if _show("instapay"):
+        methods.append({
+            "id": "instapay",
+            "label": "انستاباي",
+            "label_en": "InstaPay",
+            "type": "instapay",
+        })
+
+    # COD deposit-to-confirm policy. The storefront renders a deposit
+    # section below the COD radio when this is non-null, asking the
+    # customer to pick one of the allowed gateways. Intersect with
+    # currently-shown methods so we don't advertise a deposit gateway
+    # the merchant has since disabled.
+    deposit_payload = None
+    cod_block = payment_settings.get("cod") or {}
+    deposit_raw = cod_block.get("deposit_policy") or {}
+    if (
+        cod_block.get("enabled")
+        and deposit_raw.get("enabled")
+        and int(deposit_raw.get("amount_cents", 0) or 0) > 0
+    ):
+        policy_gateways = list(deposit_raw.get("allowed_gateways") or [])
+        # Determine which of the merchant's allowed gateways are
+        # actually available to the customer right now. `_show` is
+        # the same gate as the methods list above.
+        live_gateways = [g for g in policy_gateways if _show(g)]
+        if live_gateways:
+            deposit_payload = {
+                "amount_cents": int(deposit_raw["amount_cents"]),
+                "ttl_minutes": int(deposit_raw.get("ttl_minutes", 30) or 30),
+                "allowed_gateways": live_gateways,
+            }
+
     return SuccessResponse(
-        data={"methods": methods},
+        data={
+            "methods": methods,
+            # Null when no deposit policy is active; populated when
+            # the merchant requires a deposit to confirm COD orders.
+            "cod_deposit_policy": deposit_payload,
+        },
         message="Payment methods retrieved",
     )

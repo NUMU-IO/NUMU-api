@@ -53,6 +53,10 @@ class BundleWidgetItem(BaseModel):
     discount_value: int
     discounted_price: int  # pre-calculated for the frontend
     selected: bool  # default checked state
+    # Optional merchant-provided explanation ("Why this bundle?") — both
+    # locales. Storefront chip renders a tooltip when either is set.
+    reason_en: str | None = None
+    reason_ar: str | None = None
 
 
 class BundleWidgetResponse(BaseModel):
@@ -184,6 +188,8 @@ async def get_product_bundles(
                 discount_value=bundle.discount_value,
                 discounted_price=discounted_price,
                 selected=True,  # default: all checked
+                reason_en=bundle.reason_en,
+                reason_ar=bundle.reason_ar,
             )
         )
 

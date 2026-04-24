@@ -50,6 +50,19 @@ class CheckoutRequest(BaseModel):
         False,
         description="True when the customer intends to pay COD. Controls zone COD check.",
     )
+    # When the merchant's COD deposit policy is enabled and the customer
+    # picks COD, this names the gateway the customer wants to pay the
+    # deposit through. Must be one of the policy's `allowed_gateways`.
+    # Unused (and ignored) for non-COD checkouts and for stores where
+    # the deposit policy is off.
+    deposit_gateway: str | None = Field(
+        None,
+        description=(
+            "Gateway for the COD deposit payment: paymob|kashier|fawry|"
+            "fawaterak|instapay. Required when the store has "
+            "cod_deposit_policy.enabled=true AND payment_method=cod."
+        ),
+    )
     customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
     # UTM attribution (captured from URL on storefront)

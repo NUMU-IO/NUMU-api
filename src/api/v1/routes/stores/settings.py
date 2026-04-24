@@ -17,6 +17,7 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     BostaCredentialsResponse,
+    CodDepositPolicy,
     CodTrustResponse,
     CreateShippingZoneRequest,
     CustomizationFooter,
@@ -79,6 +80,11 @@ def _get_default_payment_settings() -> dict:
             "last_configured": None,
         },
         "paymob": {"enabled": False, "is_configured": False, "last_configured": None},
+        "kashier": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
         "instapay": {
             "enabled": False,
             "is_configured": False,
@@ -191,17 +197,42 @@ def _build_payment_response(settings: dict) -> PaymentSettingsResponse:
     defaults = _get_default_payment_settings()
     merged = {**defaults, **settings}
 
+    # Deposit policy lives nested under cod. Extract into its own
+    # top-level response field so the merchant UI can bind to it
+    # without reaching into the `cod` object (which only carries
+    # gateway-status booleans).
+    cod_block = merged.get("cod", defaults["cod"]) or {}
+    deposit_raw = cod_block.get("deposit_policy") or {}
+    # Bypass the `_require_gateways_when_enabled` validator here —
+    # reading pre-existing storage should never 500 if a merchant
+    # saved a half-configured policy through an older code path. The
+    # validator runs on writes via UpdatePaymentSettingsRequest.
+    deposit_policy = CodDepositPolicy.model_construct(
+        enabled=bool(deposit_raw.get("enabled", False)),
+        amount_cents=int(deposit_raw.get("amount_cents", 0) or 0),
+        ttl_minutes=int(deposit_raw.get("ttl_minutes", 30) or 30),
+        auto_refund_on_cancel=bool(deposit_raw.get("auto_refund_on_cancel", False)),
+        allowed_gateways=list(deposit_raw.get("allowed_gateways") or []),
+    )
+
+    def _status(key: str) -> PaymentMethodStatus:
+        """Fallback to an empty status when a provider is missing from
+        stored settings — happens on stores older than a given
+        provider's introduction."""
+        fallback = defaults.get(key, {"enabled": False, "is_configured": False})
+        return PaymentMethodStatus(**merged.get(key, fallback))
+
     return PaymentSettingsResponse(
-        cod=PaymentMethodStatus(**merged.get("cod", defaults["cod"])),
-        fawry=PaymentMethodStatus(**merged.get("fawry", defaults["fawry"])),
-        paymob=PaymentMethodStatus(**merged.get("paymob", defaults["paymob"])),
-        vodafone_cash=PaymentMethodStatus(
-            **merged.get("vodafone_cash", defaults["vodafone_cash"])
-        ),
-        bank_transfer=PaymentMethodStatus(
-            **merged.get("bank_transfer", defaults["bank_transfer"])
-        ),
+        cod=PaymentMethodStatus(**cod_block),
+        fawry=_status("fawry"),
+        fawaterak=_status("fawaterak"),
+        paymob=_status("paymob"),
+        kashier=_status("kashier"),
+        instapay=_status("instapay"),
+        vodafone_cash=_status("vodafone_cash"),
+        bank_transfer=_status("bank_transfer"),
         bank_accounts_count=merged.get("bank_accounts_count", 0),
+        cod_deposit_policy=deposit_policy,
     )
 
 
@@ -359,6 +390,22 @@ async def update_payment_settings(
                 detail="Paymob is not configured. Contact administrator.",
             )
         payment_settings["paymob"]["enabled"] = request.paymob_enabled
+    if getattr(request, "kashier_enabled", None) is not None:
+        # Kashier uses the tenant-credential system, so "is_configured"
+        # here might be False even when the merchant has credentials
+        # saved through that flow. We trust the toggle — the storefront's
+        # /payment-methods endpoint re-checks credential availability.
+        payment_settings.setdefault(
+            "kashier",
+            {"enabled": False, "is_configured": False, "last_configured": None},
+        )["enabled"] = request.kashier_enabled
+    if getattr(request, "instapay_enabled", None) is not None:
+        if not payment_settings.get("instapay", {}).get("is_configured"):
+            raise HTTPException(
+                status_code=400,
+                detail="InstaPay is not configured. Save your IPA first.",
+            )
+        payment_settings["instapay"]["enabled"] = request.instapay_enabled
     if request.vodafone_cash_enabled is not None:
         if not payment_settings["vodafone_cash"]["is_configured"]:
             raise HTTPException(
@@ -373,6 +420,37 @@ async def update_payment_settings(
                 detail="Bank Transfer is not configured. Contact administrator.",
             )
         payment_settings["bank_transfer"]["enabled"] = request.bank_transfer_enabled
+    if request.cod_deposit_policy is not None:
+        policy = request.cod_deposit_policy
+        if policy.enabled:
+            # Cross-field guard — every allowed gateway must actually
+            # be enabled+configured on this store, otherwise the
+            # deposit step would hit a gateway the customer can't use.
+            not_ready: list[str] = []
+            for provider in policy.allowed_gateways:
+                cfg = payment_settings.get(provider, {})
+                if not (cfg.get("enabled") and cfg.get("is_configured")):
+                    not_ready.append(provider)
+            if not_ready:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "These deposit gateways aren't enabled + configured: "
+                        + ", ".join(not_ready)
+                        + ". Configure them in Payment Setup first, or remove "
+                        "them from the deposit policy."
+                    ),
+                )
+        payment_settings.setdefault(
+            "cod",
+            {"enabled": True, "is_configured": True, "last_configured": None},
+        )["deposit_policy"] = {
+            "enabled": policy.enabled,
+            "amount_cents": policy.amount_cents,
+            "ttl_minutes": policy.ttl_minutes,
+            "auto_refund_on_cancel": policy.auto_refund_on_cancel,
+            "allowed_gateways": list(policy.allowed_gateways),
+        }
 
     # Save settings
     settings["payment"] = payment_settings
@@ -387,6 +465,8 @@ async def update_payment_settings(
             "fawry",
             "fawaterak",
             "paymob",
+            "kashier",
+            "instapay",
             "vodafone_cash",
             "bank_transfer",
         )

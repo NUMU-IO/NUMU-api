@@ -825,7 +825,88 @@ async def checkout(
     paymob_client_secret: str | None = None
     paymob_public_key: str | None = None
 
-    if request.payment_method and request.payment_method.startswith("paymob"):
+    # ── Deposit-to-confirm COD branch ────────────────────────────────
+    # When the merchant has enabled a COD deposit policy and the
+    # customer picked "cod", we divert the payment dispatch: the order
+    # moves into PENDING_DEPOSIT and we charge only the deposit amount
+    # through the customer's chosen deposit gateway. The order still
+    # records `payment_method="cod"` on the order row — the deposit is a
+    # *precursor* to COD, not a replacement. On delivery, the remaining
+    # balance (`total - deposit_amount_cents`) is collected in cash.
+    #
+    # `_dispatch_method` / `_gateway_amount` decouple the gateway-side
+    # dispatch from the order-side fields so downstream code (analytics,
+    # emails, receipts) keeps using the full order total; only the
+    # gateway charge sees the deposit amount.
+    _dispatch_method: str | None = request.payment_method
+    _gateway_amount: int = created_order.total
+
+    _deposit_policy_raw = (store.settings or {}).get("payment", {}).get("cod", {}).get(
+        "deposit_policy"
+    ) or {}
+    if (
+        request.payment_method == "cod"
+        and _deposit_policy_raw.get("enabled")
+        and int(_deposit_policy_raw.get("amount_cents", 0) or 0) > 0
+    ):
+        _allowed_gateways: list[str] = list(
+            _deposit_policy_raw.get("allowed_gateways") or []
+        )
+        if not request.deposit_gateway:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "This store requires a deposit to confirm COD orders. "
+                    "Please select a deposit payment method."
+                ),
+            )
+        if request.deposit_gateway not in _allowed_gateways:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Selected deposit gateway is not allowed by this store. "
+                    f"Allowed: {', '.join(_allowed_gateways) or '(none)'}."
+                ),
+            )
+
+        from datetime import UTC, datetime, timedelta
+
+        _ttl_minutes = int(_deposit_policy_raw.get("ttl_minutes", 30) or 30)
+        _deposit_amount = int(_deposit_policy_raw["amount_cents"])
+
+        # Mutate the order into PENDING_DEPOSIT. We set `.status`
+        # directly rather than going through `transition_to` because
+        # PENDING → PENDING_DEPOSIT isn't a supported transition —
+        # orders destined for the deposit flow are *created* in this
+        # state rather than migrating from PENDING.
+        from src.core.entities.order import OrderStatus as _OS
+
+        created_order.status = _OS.PENDING_DEPOSIT
+        created_order.deposit_required_cents = _deposit_amount
+        # Pre-populate `deposit_amount_cents` with the required amount.
+        # The gateway's webhook will confirm by transitioning through
+        # `mark_as_paid`; if the captured amount differs from required
+        # (rare — some gateways take a fee from the customer's side),
+        # the merchant can spot it by comparing these two columns.
+        created_order.deposit_amount_cents = _deposit_amount
+        created_order.deposit_expires_at = datetime.now(UTC) + timedelta(
+            minutes=_ttl_minutes
+        )
+        created_order.deposit_gateway = request.deposit_gateway
+        await order_repo.update(created_order)
+
+        # Paymob exposes two sub-methods (card / wallet) in the storefront
+        # — the deposit UI picks "paymob" broadly; default to card, which
+        # is by far the most common customer path. Wallet can be an
+        # explicit choice later if merchants ask.
+        _dispatch_method = (
+            "paymob_card"
+            if request.deposit_gateway == "paymob"
+            else request.deposit_gateway
+        )
+        _gateway_amount = _deposit_amount
+
+    if _dispatch_method and _dispatch_method.startswith("paymob"):
         # Paymob payment initiation (per-merchant via store.settings)
         try:
             from src.infrastructure.external_services.paymob.payment_service import (
@@ -848,7 +929,7 @@ async def checkout(
             ship_addr = request.shipping_address
 
             intent = await paymob_service.create_payment_intent(
-                amount=total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={
@@ -878,7 +959,7 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method == "kashier":
+    elif _dispatch_method == "kashier":
         # Kashier payment via store.settings encrypted credentials
         try:
             from src.infrastructure.external_services.kashier.payment_service import (
@@ -915,7 +996,7 @@ async def checkout(
                 str(current_customer.email) if current_customer.email else None
             )
             intent = await kashier_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={"order_id": str(created_order.id)},
@@ -927,7 +1008,7 @@ async def checkout(
                 "type": "session",
                 "session_url": intent.client_secret,
                 "order_id": intent.id,
-                "amount": f"{created_order.total / 100:.2f}",
+                "amount": f"{_gateway_amount / 100:.2f}",
                 "currency": currency,
             }
 
@@ -940,7 +1021,7 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method == "fawaterak":
+    elif _dispatch_method == "fawaterak":
         # Fawaterak payment via store.settings encrypted credentials
         try:
             from src.infrastructure.external_services.fawaterak.payment_service import (
@@ -970,7 +1051,7 @@ async def checkout(
             base_storefront_url = f"https://{subdomain}.numueg.app"
 
             intent = await fawaterak_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={
@@ -1010,7 +1091,7 @@ async def checkout(
                 "payment_url": intent.client_secret,
                 "invoice_id": intent.id,
                 "order_id": str(created_order.id),
-                "amount": f"{created_order.total / 100:.2f}",
+                "amount": f"{_gateway_amount / 100:.2f}",
                 "currency": currency,
             }
 
@@ -1023,7 +1104,7 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method == "fawry":
+    elif _dispatch_method == "fawry":
         # Fawry payment via store.settings encrypted credentials
         try:
             from src.infrastructure.external_services.fawry.payment_service import (
@@ -1049,7 +1130,7 @@ async def checkout(
             )
 
             intent = await fawry_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={
@@ -1077,7 +1158,7 @@ async def checkout(
                 "reference_number": intent.id,
                 "payment_url": fawry_service.get_payment_url(intent.id),
                 "order_id": str(created_order.id),
-                "amount": f"{created_order.total / 100:.2f}",
+                "amount": f"{_gateway_amount / 100:.2f}",
                 "currency": currency,
             }
 
@@ -1090,7 +1171,7 @@ async def checkout(
                 detail="Fawry payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method == "instapay":
+    elif _dispatch_method == "instapay":
         # InstaPay (manual IPA + proof upload). No gateway call — we just
         # persist the InstapayIntent and hand the storefront the IPA + QR
         # + reference code to show the customer. Funds move out-of-band;
@@ -1133,7 +1214,7 @@ async def checkout(
             for _ in range(5):
                 candidate = generate_reference_code()
                 cand_payload, cand_expires_at = instapay_service.build_intent_payload(
-                    amount_cents=created_order.total,
+                    amount_cents=_gateway_amount,
                     reference_code=candidate,
                     note=f"Order {created_order.order_number}",
                 )
@@ -1144,7 +1225,7 @@ async def checkout(
                     reference_code=candidate,
                     display_ipa=credentials["ipa"],
                     display_phone=credentials.get("fallback_phone"),
-                    amount_cents=created_order.total,
+                    amount_cents=_gateway_amount,
                     expires_at=cand_expires_at,
                     qr_payload=cand_payload,
                 )
@@ -1174,7 +1255,7 @@ async def checkout(
             payment_data = instapay_service.to_checkout_payload(
                 reference_code=reference_code,
                 qr_payload=qr_payload,
-                amount_cents=created_order.total,
+                amount_cents=_gateway_amount,
                 currency=currency,
                 expires_at=expires_at,
                 order_id=str(created_order.id),
@@ -1189,14 +1270,14 @@ async def checkout(
                 detail="InstaPay is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method and request.payment_method != "cod":
+    elif _dispatch_method and _dispatch_method != "cod":
         # Other payment providers via tenant credentials
         try:
             from src.api.dependencies.payment import get_tenant_payment_service
             from src.core.interfaces.services.payment_service import PaymentProvider
 
             payment_service = await get_tenant_payment_service(
-                provider=request.payment_method,
+                provider=_dispatch_method,
                 tenant_id=store.tenant_id,
                 session=order_repo.session,
             )
@@ -1208,7 +1289,7 @@ async def checkout(
                 str(current_customer.email) if current_customer.email else None
             )
             intent = await payment_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={"order_id": str(created_order.id)},
@@ -1221,7 +1302,7 @@ async def checkout(
                     "mid": payment_service._mid,
                     "hash": intent.client_secret,
                     "order_id": intent.id,
-                    "amount": f"{created_order.total / 100:.2f}",
+                    "amount": f"{_gateway_amount / 100:.2f}",
                     "currency": currency,
                     "mode": payment_service._mode,
                 }

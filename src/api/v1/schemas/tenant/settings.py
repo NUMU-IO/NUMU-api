@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # Payment Settings
@@ -14,15 +14,97 @@ class PaymentMethodStatus(BaseModel):
     last_configured: str | None = None
 
 
+# Gateway providers allowed to carry a COD deposit. Bank transfer and
+# vodafone-cash aren't on this list because they're manual/async and
+# would defeat the "confirm before create" purpose.
+DepositGateway = Literal["paymob", "kashier", "fawry", "fawaterak", "instapay"]
+
+DEPOSIT_GATEWAY_VALUES: tuple[str, ...] = (
+    "paymob",
+    "kashier",
+    "fawry",
+    "fawaterak",
+    "instapay",
+)
+
+
+class CodDepositPolicy(BaseModel):
+    """Per-store deposit-to-confirm-COD policy.
+
+    When enabled, customers who select COD at checkout are asked to
+    pay a fixed deposit via one of `allowed_gateways` BEFORE the
+    order is created. On successful deposit, the order moves to
+    CONFIRMED with `deposit_amount_cents` stored and the remaining
+    balance due on delivery. If the deposit isn't completed within
+    `ttl_minutes`, the order auto-cancels.
+
+    Starts with fixed-amount only. Percentage and "cover shipping"
+    variants become alternative shapes of this object when merchants
+    ask for them.
+    """
+
+    enabled: bool = False
+    # Fixed deposit amount in cents. Merchants typically set this to
+    # match their delivery fee (40–80 EGP in Egypt).
+    amount_cents: int = Field(default=0, ge=0)
+    # How long the customer has to complete the deposit payment before
+    # the intent expires and the order auto-cancels. Defaults to
+    # 30 min (matches the existing InstaPay-proof TTL). Range is
+    # deliberately bounded — under 5 min is hostile UX, over 24 h
+    # creates awkward abandoned-order backlog.
+    ttl_minutes: int = Field(default=30, ge=5, le=1440)
+    # If the merchant cancels an order with a paid deposit, auto-issue
+    # a refund via the original gateway. When False, refunds are left
+    # to the merchant to process manually in the gateway console.
+    auto_refund_on_cancel: bool = False
+    # Allowlist of gateways the customer can pay the deposit with. If
+    # the merchant saves an empty list while `enabled=True`, we 400
+    # because the deposit would be uncollectible.
+    allowed_gateways: list[DepositGateway] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _require_gateways_when_enabled(self):
+        if self.enabled and not self.allowed_gateways:
+            raise ValueError(
+                "At least one allowed_gateway is required when the deposit "
+                "policy is enabled."
+            )
+        if self.enabled and self.amount_cents <= 0:
+            raise ValueError(
+                "amount_cents must be greater than 0 when the deposit "
+                "policy is enabled."
+            )
+        # De-dup while preserving order for deterministic storage.
+        if self.allowed_gateways:
+            seen: set[str] = set()
+            deduped: list[DepositGateway] = []
+            for g in self.allowed_gateways:
+                if g not in seen:
+                    seen.add(g)
+                    deduped.append(g)
+            object.__setattr__(self, "allowed_gateways", deduped)
+        return self
+
+
 class PaymentSettingsResponse(BaseModel):
     """Payment settings response."""
 
     cod: PaymentMethodStatus
     fawry: PaymentMethodStatus
+    # Previously absent from the response though present in stored
+    # settings. Surfaced now so the deposit-policy UI can render the
+    # allowed-gateway picker without a separate credential fetch per
+    # gateway.
+    fawaterak: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
     paymob: PaymentMethodStatus
+    kashier: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
+    instapay: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
     vodafone_cash: PaymentMethodStatus
     bank_transfer: PaymentMethodStatus
     bank_accounts_count: int = 0
+    # Flattened onto the response so the merchant hub can render it
+    # as a card under COD without a second round-trip.
+    cod_deposit_policy: CodDepositPolicy = Field(default_factory=CodDepositPolicy)
 
 
 class UpdatePaymentSettingsRequest(BaseModel):
@@ -32,8 +114,12 @@ class UpdatePaymentSettingsRequest(BaseModel):
     fawry_enabled: bool | None = None
     fawaterak_enabled: bool | None = None
     paymob_enabled: bool | None = None
+    kashier_enabled: bool | None = None
+    instapay_enabled: bool | None = None
     vodafone_cash_enabled: bool | None = None
     bank_transfer_enabled: bool | None = None
+    # Send the full policy object to replace it; omit to leave unchanged.
+    cod_deposit_policy: CodDepositPolicy | None = None
 
 
 # COD Trust Network Settings
