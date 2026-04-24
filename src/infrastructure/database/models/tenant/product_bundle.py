@@ -12,9 +12,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Integer,
-    Numeric,
     String,
-    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -117,6 +115,22 @@ class ProductBundleModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         String(200),
         nullable=True,
         comment="Custom widget heading (Arabic)",
+    )
+
+    # Optional "Why this bundle?" explanation — surfaces as a tooltip on
+    # the storefront FBT chip so customers know why the complement is
+    # being suggested ("Most buyers pair this with a case", "Same-day
+    # shipping when ordered together"). Merchants can leave both blank;
+    # the tooltip simply doesn't render.
+    reason_en: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Customer-facing justification for this bundle (English)",
+    )
+    reason_ar: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Customer-facing justification for this bundle (Arabic)",
     )
 
     # ── Relationships (lazy to avoid N+1 in list queries) ─────────────────

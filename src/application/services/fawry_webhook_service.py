@@ -41,7 +41,14 @@ MAX_WEBHOOK_AGE_SECONDS = 5 * 60  # 5 minutes (hardened from 15min)
 
 # Valid prior states for each webhook status. Webhooks arriving when the
 # order is already in a later state are silently ignored (idempotency).
-_PAID_VALID_PRIOR = {OrderStatus.PENDING, OrderStatus.PAYMENT_FAILED}
+_PAID_VALID_PRIOR = {
+    OrderStatus.PENDING,
+    OrderStatus.PAYMENT_FAILED,
+    # COD deposit-to-confirm orders live in PENDING_DEPOSIT until the
+    # gateway confirms. Fawry carrying the deposit transitions the
+    # order to CONFIRMED via the deposit-aware `mark_as_paid` branch.
+    OrderStatus.PENDING_DEPOSIT,
+}
 _EXPIRED_VALID_PRIOR = {OrderStatus.PENDING}
 _CANCELED_VALID_PRIOR = {
     OrderStatus.PENDING,
@@ -278,10 +285,23 @@ class FawryWebhookService:
             return order
 
         # Payment Agent: state transitions
-        order.status = OrderStatus.CONFIRMED
-        order.payment_status = PaymentStatus.PAID
-        order.paid_at = datetime.now(UTC)
-        order.payment_method = payment_method or "fawry"
+        # NOTE: this is the DB model, not the domain entity — so we
+        # can't call the entity's `mark_as_paid`. Mirror its routing
+        # inline: if this Fawry payment was carrying a COD deposit,
+        # record it as such instead of flipping to full-paid.
+        if order.status == OrderStatus.PENDING_DEPOSIT:
+            order.status = OrderStatus.CONFIRMED
+            # payment_status STAYS PENDING — the main order amount is
+            # still due on delivery.
+            order.deposit_paid_at = datetime.now(UTC)
+            order.deposit_payment_id = reference_number
+            if not order.deposit_gateway:
+                order.deposit_gateway = "fawry"
+        else:
+            order.status = OrderStatus.CONFIRMED
+            order.payment_status = PaymentStatus.PAID
+            order.paid_at = datetime.now(UTC)
+            order.payment_method = payment_method or "fawry"
         order.extra_data = {
             **(order.extra_data or {}),
             "fawry_reference": reference_number,

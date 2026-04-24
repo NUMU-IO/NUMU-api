@@ -53,6 +53,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.omnichannel_tasks",
         # InstaPay — auto-cancel expired pending-payment orders
         "src.infrastructure.messaging.tasks.instapay_expiry_task",
+        # COD deposit — auto-cancel orders past deposit_expires_at
+        "src.infrastructure.messaging.tasks.deposit_expiry_task",
     ],
     # Queue definitions
     task_queues=(
@@ -184,5 +186,10 @@ celery_app.conf.beat_schedule = {
     "expire-instapay-orders": {
         "task": "tasks.expire_instapay_orders",
         "schedule": 60.0,  # Every 60s — matches 30-min window granularity
+    },
+    # ─── COD deposit: cancel orders past deposit_expires_at ──
+    "expire-pending-deposit-orders": {
+        "task": "tasks.expire_pending_deposit_orders",
+        "schedule": 60.0,  # Every 60s — finest granularity the merchant can set is 5 min
     },
 }
