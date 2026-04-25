@@ -70,7 +70,13 @@ class OrderRepository(IOrderRepository):
         )
 
     def _address_to_dict(self, address: OrderShippingAddress) -> dict:
-        """Convert OrderShippingAddress to dict for storage."""
+        """Convert OrderShippingAddress to dict for storage.
+
+        Persists the geolocation fields (latitude, longitude,
+        location_accuracy, location_source, geocoded_address) too —
+        they're what the COD trust check's teleport detection reads
+        from the customer's previous order.
+        """
         return {
             "first_name": address.first_name,
             "last_name": address.last_name,
@@ -81,10 +87,19 @@ class OrderRepository(IOrderRepository):
             "postal_code": address.postal_code,
             "country": address.country,
             "phone": address.phone,
+            "latitude": address.latitude,
+            "longitude": address.longitude,
+            "location_accuracy": address.location_accuracy,
+            "location_source": address.location_source,
+            "geocoded_address": address.geocoded_address,
         }
 
     def _dict_to_address(self, data: dict) -> OrderShippingAddress:
-        """Convert dict to OrderShippingAddress."""
+        """Convert dict to OrderShippingAddress.
+
+        Geolocation fields are pulled with ``.get()`` so legacy orders
+        written before the fields existed simply rehydrate as None.
+        """
         return OrderShippingAddress(
             first_name=data["first_name"],
             last_name=data["last_name"],
@@ -95,6 +110,11 @@ class OrderRepository(IOrderRepository):
             postal_code=data.get("postal_code"),
             country=data["country"],
             phone=data.get("phone"),
+            latitude=data.get("latitude"),
+            longitude=data.get("longitude"),
+            location_accuracy=data.get("location_accuracy"),
+            location_source=data.get("location_source"),
+            geocoded_address=data.get("geocoded_address"),
         )
 
     def _to_entity(self, model: OrderModel) -> Order:

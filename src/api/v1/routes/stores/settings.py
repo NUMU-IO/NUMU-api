@@ -490,6 +490,8 @@ _COD_TRUST_DEFAULTS = {
     "threshold": 70,
     "min_confidence": "medium",
     "action": "block",
+    "auto_rto_disabled": False,
+    "auto_rto_days": 14,
 }
 
 
@@ -541,6 +543,10 @@ async def update_cod_trust_settings_endpoint(
         cod_trust["min_confidence"] = request.min_confidence
     if request.action is not None:
         cod_trust["action"] = request.action
+    if request.auto_rto_disabled is not None:
+        cod_trust["auto_rto_disabled"] = request.auto_rto_disabled
+    if request.auto_rto_days is not None:
+        cod_trust["auto_rto_days"] = request.auto_rto_days
 
     settings["cod_trust"] = cod_trust
     store.settings = settings

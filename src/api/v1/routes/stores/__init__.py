@@ -26,6 +26,7 @@ from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
 from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import categories as categories_module
+from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
@@ -79,6 +80,9 @@ router.include_router(
 router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(settings_module.router, tags=["Store Settings"])
+router.include_router(
+    cod_trust_decisions_module.router, tags=["Store COD Trust Decisions"]
+)
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
 router.include_router(refunds_module.router, tags=["Store Refunds"])

@@ -202,6 +202,29 @@ def _evaluate_location_signals(
     return adjustment, factors
 
 
+def _set_sentry_context(decision: CodTrustDecision) -> None:
+    """Tag Sentry events with the trust-check outcome.
+
+    No-op if sentry_sdk isn't installed or the SDK isn't initialized;
+    fraud filtering must never depend on observability infrastructure.
+    """
+    try:
+        import sentry_sdk
+
+        sentry_sdk.set_context(
+            "cod_trust",
+            {
+                "score": decision.score,
+                "confidence": decision.confidence,
+                "label": decision.label,
+                "action": decision.reason,
+                "factor_codes": [f.get("code") for f in decision.factors or []],
+            },
+        )
+    except Exception:
+        pass
+
+
 async def check_customer_trust(
     *,
     phone: str | None,
@@ -251,25 +274,18 @@ async def check_customer_trust(
         location_adjustment, location_factors = _evaluate_location_signals(location)
 
     adjusted_score = min(100, max(0, score + location_adjustment))
+    is_new_customer = score == _BASELINE_SCORE and label == "new_to_network"
 
-    # 4. New customer (baseline score, no record in network) — still apply
-    # location signals; a brand-new account refusing to pin a location
-    # should be flagged the same as any other refuser.
-    if score == _BASELINE_SCORE and label == "new_to_network":
-        return CodTrustDecision(
-            allowed=True,
-            reason="new_customer",
-            score=adjusted_score,
-            confidence=confidence,
-            label=label,
-            factors=location_factors,
-        )
-
-    # 5. Confidence too low to act on
+    # 4. Confidence too low to act on. New customers always have confidence
+    # "low" — with the default `min_confidence="medium"` they'll bail here,
+    # which is exactly what we want (don't block someone with no history).
+    # Merchants who explicitly set `min_confidence="low"` opt into letting
+    # location signals alone push a new customer over the threshold —
+    # the single biggest unlock at pre-volume scale.
     min_conf_rank = _CONFIDENCE_RANK[settings["min_confidence"]]
     actual_conf_rank = _CONFIDENCE_RANK.get(confidence, 0)
     if actual_conf_rank < min_conf_rank:
-        return CodTrustDecision(
+        decision = CodTrustDecision(
             allowed=True,
             reason="low_confidence",
             score=adjusted_score,
@@ -277,11 +293,13 @@ async def check_customer_trust(
             label=label,
             factors=location_factors,
         )
+        _set_sentry_context(decision)
+        return decision
 
-    # 6 & 7. High-risk score (after location adjustment) → block or warn
+    # 5 & 6. High-risk score (after location adjustment) → block or warn
     if adjusted_score >= settings["threshold"]:
         if settings["action"] == "block":
-            return CodTrustDecision(
+            decision = CodTrustDecision(
                 allowed=False,
                 reason="blocked_high_risk",
                 score=adjusted_score,
@@ -289,6 +307,8 @@ async def check_customer_trust(
                 label=label,
                 factors=location_factors,
             )
+            _set_sentry_context(decision)
+            return decision
         # warn mode — allow but log
         logger.warning(
             "cod_trust_warned_high_risk score=%s confidence=%s label=%s factors=%s",
@@ -297,7 +317,7 @@ async def check_customer_trust(
             label,
             [f["code"] for f in location_factors],
         )
-        return CodTrustDecision(
+        decision = CodTrustDecision(
             allowed=True,
             reason="warned_high_risk",
             score=adjusted_score,
@@ -305,13 +325,20 @@ async def check_customer_trust(
             label=label,
             factors=location_factors,
         )
+        _set_sentry_context(decision)
+        return decision
 
-    # 8. Below threshold — all clear
-    return CodTrustDecision(
+    # 7. Below threshold — all clear. Surface the "new_customer" reason
+    # when the customer has no record yet so the merchant feed can
+    # distinguish "we cleared a known-good buyer" from "we cleared a
+    # first-time buyer who had no signals against them".
+    decision = CodTrustDecision(
         allowed=True,
-        reason="below_threshold",
+        reason="new_customer" if is_new_customer else "below_threshold",
         score=adjusted_score,
         confidence=confidence,
         label=label,
         factors=location_factors,
     )
+    _set_sentry_context(decision)
+    return decision

@@ -130,6 +130,12 @@ class CodTrustResponse(BaseModel):
     threshold: int = 70
     min_confidence: Literal["low", "medium", "high"] = "medium"
     action: Literal["block", "warn"] = "block"
+    # Auto-RTO sweep: when a COD order has been SHIPPED for longer than
+    # `auto_rto_days` and the merchant hasn't marked it delivered or
+    # returned, a daily Celery beat task auto-flags it as RETURNED so
+    # the network gets the signal even from forgetful merchants.
+    auto_rto_disabled: bool = False
+    auto_rto_days: int = 14
 
 
 class UpdateCodTrustRequest(BaseModel):
@@ -139,6 +145,8 @@ class UpdateCodTrustRequest(BaseModel):
     threshold: int | None = Field(None, ge=0, le=100)
     min_confidence: Literal["low", "medium", "high"] | None = None
     action: Literal["block", "warn"] | None = None
+    auto_rto_disabled: bool | None = None
+    auto_rto_days: int | None = Field(None, ge=7, le=60)
 
 
 class SavePaymobCredentialsRequest(BaseModel):

@@ -218,6 +218,36 @@ services:
     networks:
       - numu-staging
 
+  # ===========================================================================
+  # n8n — workflow automation (self-hosted)
+  # ===========================================================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: numu-n8n-staging
+    restart: unless-stopped
+    environment:
+      - N8N_HOST=n8n.numueg.app
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://n8n.numueg.app/
+      - N8N_PORT=5678
+      - GENERIC_TIMEZONE=Africa/Cairo
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_PROXY_HOPS=1
+    volumes:
+      - n8n_data:/home/node/.n8n
+    expose:
+      - "5678"
+    networks:
+      - numu-staging
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
 # =============================================================================
 # Networks
 # =============================================================================
@@ -245,4 +275,6 @@ volumes:
   api_logs:
     driver: local
   certbot_webroot:
+    driver: local
+  n8n_data:
     driver: local

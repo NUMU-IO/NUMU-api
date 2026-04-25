@@ -1,5 +1,6 @@
 """Update order status use case."""
 
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from src.application.dto.order import OrderDTO, UpdateOrderStatusDTO
@@ -12,7 +13,20 @@ from src.core.interfaces.repositories.customer_repository import ICustomerReposi
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 
+if TYPE_CHECKING:
+    from src.infrastructure.repositories.shopify_repository import (
+        NetworkReputationRepository,
+    )
+
 logger = get_logger(__name__)
+
+
+# Maps a terminal COD outcome status to the network event_type used by
+# `write_network_event`. Other statuses don't fire a network event.
+_NETWORK_EVENT_FOR_STATUS: dict[OrderStatus, str] = {
+    OrderStatus.DELIVERED: "delivery",
+    OrderStatus.RETURNED: "rto",
+}
 
 
 class UpdateOrderStatusUseCase:
@@ -21,6 +35,12 @@ class UpdateOrderStatusUseCase:
     After persisting the status change, publishes an OrderStatusChangedEvent
     to the event bus. All downstream side-effects (email, WhatsApp, activity
     log, webhooks) are handled by event handlers asynchronously.
+
+    For COD orders transitioning into DELIVERED or RETURNED, also writes
+    a cross-merchant trust-network event so manual-ship merchants (no
+    Bosta integration) feed signals into ``network_reputation``.
+    Idempotent via ``order.metadata["network_{event}_recorded"]`` so the
+    same outcome can't be double-counted by Bosta + manual marks.
     """
 
     def __init__(
@@ -29,11 +49,13 @@ class UpdateOrderStatusUseCase:
         store_repository: IStoreRepository,
         customer_repository: ICustomerRepository | None = None,
         event_bus: EventBus | None = None,
+        network_repository: "NetworkReputationRepository | None" = None,
     ) -> None:
         self.order_repository = order_repository
         self.store_repository = store_repository
         self.customer_repository = customer_repository
         self.event_bus = event_bus
+        self.network_repository = network_repository
 
     async def execute(
         self,
@@ -96,6 +118,8 @@ class UpdateOrderStatusUseCase:
                 order.deliver()
             elif new_status == OrderStatus.CANCELLED:
                 order.cancel(dto.reason)
+            elif new_status == OrderStatus.RETURNED:
+                order.return_to_origin(dto.reason)
             elif new_status == OrderStatus.REFUNDED:
                 order.refund(dto.reason)
             elif new_status == OrderStatus.PAYMENT_FAILED:
@@ -120,12 +144,76 @@ class UpdateOrderStatusUseCase:
             reason=dto.reason,
         )
 
+        # Cross-merchant network reputation: fire delivery/RTO event for
+        # COD orders. Idempotent + fail-open — never breaks the status
+        # update. Bosta webhook also stamps the same flag, so the path
+        # that fires first wins.
+        await self._record_network_event(updated_order, new_status, log)
+
         # Publish domain event — all side-effects handled by event handlers
         await self._publish_status_event(
             updated_order, old_status, new_status, store, dto.reason, log
         )
 
         return OrderDTO.from_entity(updated_order)
+
+    async def _record_network_event(self, order, new_status: OrderStatus, log) -> None:
+        """Write a delivery/RTO event to ``network_reputation``.
+
+        Only fires for COD orders transitioning into DELIVERED or
+        RETURNED. Idempotent via ``order.metadata`` so the same outcome
+        can't be double-counted by Bosta + manual marks.
+        """
+        event_type = _NETWORK_EVENT_FOR_STATUS.get(new_status)
+        if not event_type:
+            return
+        if order.payment_method != "cod":
+            return
+        if not self.network_repository:
+            return
+
+        flag_key = f"network_{event_type}_recorded"
+        metadata = order.metadata or {}
+        if metadata.get(flag_key):
+            log.debug(
+                "network_event_skipped_idempotent",
+                event_type=event_type,
+                order_id=str(order.id),
+            )
+            return
+
+        try:
+            from src.application.services.network_reputation_service import (
+                extract_phone_hash_from_string,
+                write_network_event,
+            )
+
+            phone = order.shipping_address.phone if order.shipping_address else None
+            phone_hash = extract_phone_hash_from_string(phone)
+            if not phone_hash:
+                return
+
+            await write_network_event(
+                phone_hash=phone_hash,
+                store_id=order.store_id,
+                event_type=event_type,
+                network_repo=self.network_repository,
+            )
+
+            order.metadata = {**metadata, flag_key: True}
+            await self.order_repository.update(order)
+
+            log.info(
+                "network_event_recorded",
+                event_type=event_type,
+                order_id=str(order.id),
+            )
+        except Exception as exc:  # noqa: BLE001 — fail-open
+            log.warning(
+                "network_event_record_failed",
+                event_type=event_type,
+                error=str(exc),
+            )
 
     async def _publish_status_event(
         self, order, old_status, new_status, store, reason, log
