@@ -2254,6 +2254,13 @@ async def save_instapay_credentials(
     encrypted = await secrets.encrypt(credential_data, key_id)
     encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
 
+    # qr_link_url: ``None`` from the request means "leave alone";
+    # empty string means "clear"; any non-empty value overwrites.
+    if request.qr_link_url is None:
+        qr_link_to_save = existing.get("qr_link_url")
+    else:
+        qr_link_to_save = request.qr_link_url.strip() or None
+
     payment_settings["instapay"] = {
         # Preserve the current enabled state on credential updates —
         # merchants editing thresholds shouldn't accidentally unmute
@@ -2269,6 +2276,10 @@ async def save_instapay_credentials(
         "auto_approve_threshold_cents": request.auto_approve_threshold_cents,
         "auto_approve_daily_cap_cents": request.auto_approve_daily_cap_cents,
         "auto_approve_daily_count": request.auto_approve_daily_count,
+        # The QR image is uploaded via a dedicated endpoint, so a
+        # credentials PUT must not erase a previously-uploaded URL.
+        "qr_image_url": existing.get("qr_image_url"),
+        "qr_link_url": qr_link_to_save,
     }
 
     store_settings["payment"] = payment_settings
@@ -2292,6 +2303,8 @@ async def save_instapay_credentials(
             auto_approve_daily_cap_cents=request.auto_approve_daily_cap_cents,
             auto_approve_daily_count=request.auto_approve_daily_count,
             last_configured=payment_settings["instapay"]["last_configured"],
+            qr_image_url=payment_settings["instapay"].get("qr_image_url"),
+            qr_link_url=payment_settings["instapay"].get("qr_link_url"),
         ),
         message="InstaPay credentials saved successfully",
     )
@@ -2352,6 +2365,8 @@ async def get_instapay_credentials(
             ),
             auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
             last_configured=instapay_settings.get("last_configured"),
+            qr_image_url=instapay_settings.get("qr_image_url"),
+            qr_link_url=instapay_settings.get("qr_link_url"),
         )
     )
 
@@ -2391,4 +2406,141 @@ async def delete_instapay_credentials(
     return SuccessResponse(
         data=InstapayCredentialsResponse(is_configured=False),
         message="InstaPay credentials removed successfully",
+    )
+
+
+# ============ InstaPay QR image (merchant-supplied) ============
+#
+# The InstaPay scheme's QR codes are EMVCo-encoded and only the
+# official InstaPay app generates ones the app can scan back. We
+# can't synthesise a valid QR client-side, so we let the merchant
+# upload the static QR they generated inside their own InstaPay app
+# and serve that image to checkout customers. The customer scans →
+# InstaPay opens with the IPA prefilled → they type the amount + ref
+# from the page into the note.
+
+
+@router.post(
+    "/payment/instapay/qr-image",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Upload merchant-generated InstaPay QR image",
+    operation_id="upload_instapay_qr_image",
+)
+async def upload_instapay_qr_image(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    file: Annotated[UploadFile, File(description="InstaPay QR image (PNG/JPG)")],
+):
+    """Persist a merchant-supplied InstaPay QR image.
+
+    Stored in the same `STORES` bucket the customization assets use
+    and the resulting URL is written into ``store.settings.payment.
+    instapay.qr_image_url`` so checkout + the InstaPay payment page
+    can render it.
+    """
+    allowed_content = {"image/jpeg", "image/png", "image/webp"}
+    if file.content_type not in allowed_content:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid file type: {file.content_type}. Allowed: JPEG, PNG, WebP."
+            ),
+        )
+
+    max_size = 2 * 1024 * 1024  # 2 MB — QR screenshots are small
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="File size exceeds 2MB limit.")
+
+    ext = (
+        file.filename.rsplit(".", 1)[-1]
+        if file.filename and "." in file.filename
+        else "png"
+    )
+    filename = f"instapay/{store.id}/qr_{uuid.uuid4().hex[:8]}.{ext}"
+
+    from src.api.dependencies.services import get_storage_service
+    from src.core.interfaces.services.storage_service import StorageBucket
+
+    storage = get_storage_service()
+    result = await storage.upload_file(
+        file_content=content,
+        filename=filename,
+        content_type=file.content_type or "image/png",
+        bucket=StorageBucket.STORES,
+    )
+
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+    instapay_settings = payment_settings.get("instapay") or {}
+    instapay_settings["qr_image_url"] = result.url
+    payment_settings["instapay"] = instapay_settings
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    logger.info(f"InstaPay QR image uploaded for store {store.id}")
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=bool(instapay_settings.get("is_configured")),
+            enabled=bool(instapay_settings.get("enabled")),
+            ipa_display_name=instapay_settings.get("ipa_display_name"),
+            auto_approve_threshold_cents=instapay_settings.get(
+                "auto_approve_threshold_cents"
+            ),
+            auto_approve_daily_cap_cents=instapay_settings.get(
+                "auto_approve_daily_cap_cents"
+            ),
+            auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
+            last_configured=instapay_settings.get("last_configured"),
+            qr_image_url=result.url,
+            qr_link_url=instapay_settings.get("qr_link_url"),
+        ),
+        message="InstaPay QR image uploaded successfully",
+    )
+
+
+@router.delete(
+    "/payment/instapay/qr-image",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Remove the uploaded InstaPay QR image",
+    operation_id="delete_instapay_qr_image",
+)
+async def delete_instapay_qr_image(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Clear the uploaded QR image URL.
+
+    Doesn't try to delete the underlying object — storage cleanup is
+    best-effort and orphaned QRs cost ~10 KB. The field is what the
+    storefront looks at; nulling it suppresses the QR section.
+    """
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+    instapay_settings = payment_settings.get("instapay") or {}
+    instapay_settings["qr_image_url"] = None
+    payment_settings["instapay"] = instapay_settings
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=bool(instapay_settings.get("is_configured")),
+            enabled=bool(instapay_settings.get("enabled")),
+            ipa_display_name=instapay_settings.get("ipa_display_name"),
+            auto_approve_threshold_cents=instapay_settings.get(
+                "auto_approve_threshold_cents"
+            ),
+            auto_approve_daily_cap_cents=instapay_settings.get(
+                "auto_approve_daily_cap_cents"
+            ),
+            auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
+            last_configured=instapay_settings.get("last_configured"),
+            qr_image_url=None,
+            qr_link_url=instapay_settings.get("qr_link_url"),
+        ),
+        message="InstaPay QR image removed",
     )

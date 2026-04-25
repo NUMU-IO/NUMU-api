@@ -32,13 +32,14 @@ from fastapi import (
     Form,
     HTTPException,
     Path,
+    Query,
     UploadFile,
     status,
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.auth import get_current_customer
+from src.api.dependencies.auth import get_optional_customer
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
     get_order_repository,
@@ -152,21 +153,57 @@ async def submit_instapay_proof(
     order_id: Annotated[UUID, Path()],
     transaction_ref: Annotated[str, Form(min_length=3, max_length=64)],
     file: Annotated[UploadFile, File(description="Payment screenshot")],
-    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    optional_customer: Annotated[Customer | None, Depends(get_optional_customer)],
     db: Annotated[AsyncSession, Depends(get_db)],
     storage_service: Annotated[IStorageService, Depends(get_storage_service)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     declared_amount_cents: Annotated[int | None, Form()] = None,
     idempotency_key: Annotated[str | None, Form(max_length=80)] = None,
+    reference: Annotated[
+        str | None,
+        Form(
+            max_length=32,
+            description=(
+                "Intent reference_code — required for guest checkouts to "
+                "authorize the upload without a customer session."
+            ),
+        ),
+    ] = None,
 ) -> SuccessResponse[SubmitProofResponse]:
-    # Rate-limit first, before we read the (potentially 5 MB) file
-    # body into memory. A 429 here is much cheaper than letting the
-    # attempt reach validate_image_upload.
+    # Resolve the order + intent up front to authorize the request and
+    # — for guests — to recover the customer_id the use-case needs.
+    order_for_auth = await order_repo.get_by_id(order_id)
+    if order_for_auth is None or order_for_auth.store_id != store_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found."
+        )
+    auth_intent_repo = InstapayIntentRepository(db)
+    auth_intent = await auth_intent_repo.get_by_order_id(order_id)
+    if auth_intent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No InstaPay intent exists for this order.",
+        )
+    customer_match = bool(
+        optional_customer and order_for_auth.customer_id == optional_customer.id
+    )
+    reference_match = bool(reference and reference == auth_intent.reference_code)
+    if not (customer_match or reference_match):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("Sign in or include the reference code to upload a proof."),
+        )
+    # Rate-limit on the order_id when authorized as a guest — the
+    # authenticated path keys on customer_id which gives stronger
+    # per-user fairness; both paths bound abuse on a single order.
+    rate_limit_customer_id = (
+        optional_customer.id if optional_customer else order_for_auth.customer_id
+    )
     await _enforce_upload_rate_limit(
         store_id=store_id,
         order_id=order_id,
-        customer_id=current_customer.id,
+        customer_id=rate_limit_customer_id,
     )
 
     image_bytes = await validate_image_upload(file)
@@ -213,10 +250,16 @@ async def submit_instapay_proof(
         storage_service=storage_service,
     )
 
+    # Guest path: pass the order's own customer_id so the use case's
+    # ownership check still passes. Customer record exists on every
+    # order (guest checkouts synthesize one) so this is always set.
+    use_case_customer_id = (
+        optional_customer.id if optional_customer else order_for_auth.customer_id
+    )
     result = await use_case.execute(
         store_id=store_id,
         order_id=order_id,
-        customer_id=current_customer.id,
+        customer_id=use_case_customer_id,
         image_bytes=image_bytes,
         image_content_type=file.content_type or "application/octet-stream",
         transaction_ref=transaction_ref,
@@ -254,6 +297,14 @@ class InstapayStatusResponse(BaseModel):
     intent_status: str
     payment_status: str
     latest_proof: dict | None = None
+    # Public URL of the merchant's uploaded InstaPay QR image (taken
+    # from inside their InstaPay app). The page falls back to showing
+    # the IPA + reference when this is null.
+    qr_image_url: str | None = None
+    # InstaPay "Share link" URL — when set, the storefront renders a
+    # QR code client-side from this string instead of showing the
+    # uploaded image.
+    qr_link_url: str | None = None
 
 
 @router.get(
@@ -265,19 +316,27 @@ class InstapayStatusResponse(BaseModel):
 async def get_instapay_status(
     store_id: Annotated[UUID, Path()],
     order_id: Annotated[UUID, Path()],
-    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    optional_customer: Annotated[Customer | None, Depends(get_optional_customer)],
     db: Annotated[AsyncSession, Depends(get_db)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    reference: Annotated[
+        str | None,
+        Query(
+            description=(
+                "InstaPay reference_code (returned in checkout payment_data) — "
+                "lets guest checkouts read their own status without a customer "
+                "session. Logged-in customers can omit it; the customer_id "
+                "match is checked first."
+            ),
+            max_length=32,
+        ),
+    ] = None,
 ) -> SuccessResponse[InstapayStatusResponse]:
     order = await order_repo.get_by_id(order_id)
     if order is None or order.store_id != store_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Order not found."
-        )
-    if order.customer_id != current_customer.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Order does not belong to this customer.",
         )
 
     intent_repo = InstapayIntentRepository(db)
@@ -288,6 +347,26 @@ async def get_instapay_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No InstaPay intent exists for this order.",
+        )
+
+    # Authorize: either the request is from the order's owning customer,
+    # OR it carries the intent's reference_code (which the customer
+    # received in the checkout response and is the storefront's normal
+    # way to land on the InstaPay page). The reference_code's
+    # ~10⁹-combination namespace plus its TTL keep guessing attacks
+    # impractical, and the only data exposed here is non-sensitive
+    # (IPA shown openly, masked phone, status flags).
+    customer_match = bool(
+        optional_customer and order.customer_id == optional_customer.id
+    )
+    reference_match = bool(reference and reference == intent.reference_code)
+    if not (customer_match or reference_match):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Sign in or pass the reference code to view this order's "
+                "InstaPay status."
+            ),
         )
 
     latest = await proof_repo.get_latest_for_order(order_id)
@@ -305,12 +384,31 @@ async def get_instapay_status(
     now = datetime.now(UTC)
     expires_in = max(0, int((intent.expires_at - now).total_seconds()))
 
+    # Pull qr_image_url + display name from store.settings — the
+    # intent row doesn't carry them. One extra cached lookup is fine
+    # here; the page only polls every 20s.
+    qr_image_url: str | None = None
+    qr_link_url: str | None = None
+    ipa_display_name: str | None = None
+    try:
+        store = await store_repo.get_by_id(store_id)
+        if store is not None:
+            instapay_settings = (
+                (store.settings or {}).get("payment", {}).get("instapay", {})
+            )
+            qr_image_url = instapay_settings.get("qr_image_url")
+            qr_link_url = instapay_settings.get("qr_link_url")
+            ipa_display_name = instapay_settings.get("ipa_display_name")
+    except Exception:
+        # Non-fatal: the page still works without the QR/display name.
+        pass
+
     return SuccessResponse(
         data=InstapayStatusResponse(
             order_id=order.id,
             reference_code=intent.reference_code,
             ipa=intent.display_ipa,
-            ipa_display_name=None,
+            ipa_display_name=ipa_display_name,
             fallback_phone=intent.display_phone,
             amount_cents=intent.amount_cents,
             currency=order.currency,
@@ -319,5 +417,7 @@ async def get_instapay_status(
             intent_status=intent.status.value,
             payment_status=order.payment_status.value,
             latest_proof=latest_dict,
+            qr_image_url=qr_image_url,
+            qr_link_url=qr_link_url,
         )
     )
