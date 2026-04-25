@@ -57,8 +57,32 @@ class CloudflareR2StorageService(IStorageService):
                 region_name=settings.s3_region,
                 config=Config(signature_version="s3v4"),
             )
+            # A second client used *only* for generating signed URLs.
+            # Reasoning: in containerised deployments the API talks to
+            # MinIO via an internal hostname (e.g. ``http://minio:9000``)
+            # which is not browser-reachable. SigV4 includes the Host
+            # header in the signature, so we can't post-process the URL
+            # to swap the host — the signature must be computed against
+            # the host the browser will actually send. When ``public_url``
+            # differs from ``endpoint_url`` (typical in dev / behind a
+            # reverse proxy), we sign against the public URL while
+            # uploads continue to use the internal one. In R2 / single-
+            # endpoint setups they're identical, so we reuse the same
+            # client.
+            if self.public_url and self.public_url != self.endpoint_url:
+                self.signing_client = boto3.client(
+                    "s3",
+                    endpoint_url=self.public_url,
+                    aws_access_key_id=self.access_key_id,
+                    aws_secret_access_key=self.secret_access_key,
+                    region_name=settings.s3_region,
+                    config=Config(signature_version="s3v4"),
+                )
+            else:
+                self.signing_client = self.client
         else:
             self.client = None
+            self.signing_client = None
 
     def _generate_key(
         self,
@@ -118,11 +142,11 @@ class CloudflareR2StorageService(IStorageService):
         expires_in: int = 3600,
     ) -> str:
         """Get a signed URL for a file."""
-        if not self.client:
+        if not self.signing_client:
             raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
-            url = self.client.generate_presigned_url(
+            url = self.signing_client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self.bucket_name, "Key": key},
                 ExpiresIn=expires_in,
