@@ -100,6 +100,8 @@ async def get_merchant_instapay_credentials(store_settings: dict) -> dict:
     return {
         **decrypted,
         "ipa_display_name": instapay_settings.get("ipa_display_name"),
+        "qr_image_url": instapay_settings.get("qr_image_url"),
+        "qr_link_url": instapay_settings.get("qr_link_url"),
         "auto_approve_threshold_cents": instapay_settings.get(
             "auto_approve_threshold_cents",
             DEFAULT_AUTO_APPROVE_THRESHOLD_CENTS,
@@ -130,6 +132,8 @@ class InstapayPaymentService(IPaymentService):
         ipa: str,
         ipa_display_name: str | None = None,
         fallback_phone: str | None = None,
+        qr_image_url: str | None = None,
+        qr_link_url: str | None = None,
         expiry_minutes: int = DEFAULT_EXPIRY_MINUTES,
     ) -> None:
         if not ipa:
@@ -137,6 +141,8 @@ class InstapayPaymentService(IPaymentService):
         self.ipa = ipa
         self.ipa_display_name = ipa_display_name or ipa
         self.fallback_phone = fallback_phone
+        self.qr_image_url = qr_image_url
+        self.qr_link_url = qr_link_url
         self.expiry_minutes = expiry_minutes
 
     @property
@@ -283,6 +289,17 @@ class InstapayPaymentService(IPaymentService):
             "ipa_display_name": self.ipa_display_name,
             "fallback_phone": self.fallback_phone,
             "qr_payload": qr_payload,
+            # Public URL of the merchant-uploaded QR image. The
+            # client-side `qr_payload` URI is not InstaPay-app
+            # readable; this image is what the customer actually
+            # scans. May be null if the merchant hasn't uploaded yet.
+            "qr_image_url": self.qr_image_url,
+            # Merchant-pasted InstaPay "Share link" URL. The
+            # storefront generates a QR code from this string; the
+            # customer's phone camera follows the URL to the InstaPay
+            # universal link. Takes priority over qr_image_url when
+            # both are set.
+            "qr_link_url": self.qr_link_url,
             "amount": f"{amount_cents / 100:.2f}",
             "amount_cents": amount_cents,
             "currency": currency.upper(),

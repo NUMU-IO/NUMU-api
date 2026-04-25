@@ -1340,6 +1340,8 @@ async def checkout(
                 ipa=credentials["ipa"],
                 ipa_display_name=credentials.get("ipa_display_name"),
                 fallback_phone=credentials.get("fallback_phone"),
+                qr_image_url=credentials.get("qr_image_url"),
+                qr_link_url=credentials.get("qr_link_url"),
             )
             intent_repo = InstapayIntentRepository(order_repo.session)
 

@@ -192,6 +192,12 @@ class SaveInstapayCredentialsRequest(BaseModel):
     auto_approve_threshold_cents: int = Field(50_000, ge=0, le=10_000_000)
     auto_approve_daily_cap_cents: int = Field(500_000, ge=0, le=100_000_000)
     auto_approve_daily_count: int = Field(10, ge=0, le=1_000)
+    # InstaPay "Share link" URL (e.g. https://ipn.eg/QR/...). The
+    # storefront renders a QR code client-side from this string; the
+    # customer's phone camera follows the URL → universal link →
+    # InstaPay app opens with the merchant prefilled. Empty string
+    # clears the field; null leaves it unchanged.
+    qr_link_url: str | None = Field(None, max_length=500)
 
 
 class InstapayCredentialsResponse(BaseModel):
@@ -206,6 +212,14 @@ class InstapayCredentialsResponse(BaseModel):
     auto_approve_daily_cap_cents: int | None = None
     auto_approve_daily_count: int | None = None
     last_configured: str | None = None
+    # Public URL of the merchant's hand-generated InstaPay QR image
+    # (taken from inside the InstaPay app). Plain CDN URL — not a
+    # secret; it gets rendered to every checkout customer anyway.
+    qr_image_url: str | None = None
+    # InstaPay "Share link" URL. The storefront generates a QR code
+    # from this string client-side; the customer scans it with their
+    # phone camera and the universal-link target opens InstaPay.
+    qr_link_url: str | None = None
 
 
 class SaveKashierCredentialsRequest(BaseModel):
