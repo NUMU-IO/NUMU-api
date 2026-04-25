@@ -124,12 +124,22 @@ async def _record_network_event_from_order(
     event_type: str,
     session,
     log,
+    *,
+    order_repo=None,
+    shipment_repo=None,
 ) -> None:
     """Record an rto/delivery event in the cross-merchant network reputation.
 
-    COD-only and idempotent: a flag is written to ``shipment.metadata``
-    after the first successful write to prevent double-counting on Bosta
-    webhook replays. Fire-and-forget — never raises.
+    COD-only and idempotent: flags are written to BOTH
+    ``shipment.metadata`` and ``order.metadata`` after the first
+    successful write so the manual-mark path in
+    ``UpdateOrderStatusUseCase`` and Bosta webhook replays share the
+    same idempotency. Fire-and-forget — never raises.
+
+    ``order_repo`` and ``shipment_repo`` are accepted so the metadata
+    flag is actually persisted. Without re-calling ``.update()``, the
+    domain-entity dict mutation never reaches the DB and the next
+    webhook replay would double-count.
     """
     if not order or not shipment:
         return
@@ -137,7 +147,13 @@ async def _record_network_event_from_order(
         return
 
     flag_key = f"network_{event_type}_recorded"
+    # Idempotency flag may live on either the shipment (Bosta-source) or
+    # the order (manual mark or another webhook hit). Skip if either has
+    # already recorded this event so the manual-mark path and Bosta path
+    # never double-count the same outcome.
     if shipment.metadata and shipment.metadata.get(flag_key):
+        return
+    if order.metadata and order.metadata.get(flag_key):
         return
 
     try:
@@ -165,10 +181,25 @@ async def _record_network_event_from_order(
             network_repo=repo,
         )
 
-        # Mark the shipment so we don't double-count on webhook replay.
+        # Stamp BOTH shipment.metadata (legacy flag, cheap to keep) and
+        # order.metadata (shared with the manual-mark path in
+        # UpdateOrderStatusUseCase) so the next caller — whichever path
+        # it comes from — sees the flag and skips.
         if shipment.metadata is None:
             shipment.metadata = {}
         shipment.metadata[flag_key] = True
+
+        if order.metadata is None:
+            order.metadata = {}
+        order.metadata[flag_key] = True
+
+        # Persist both flags. Repository .update() maps the dict back
+        # to the model's JSONB column — without these calls the
+        # domain-entity mutation is lost.
+        if shipment_repo is not None:
+            await shipment_repo.update(shipment)
+        if order_repo is not None:
+            await order_repo.update(order)
 
         log.info(
             "network_event_recorded",
@@ -338,7 +369,13 @@ async def bosta_callback(
         # Record positive network event for the customer (COD only).
         # Idempotent — replayed webhooks won't double-count.
         await _record_network_event_from_order(
-            order, shipment, "delivery", session, log
+            order,
+            shipment,
+            "delivery",
+            session,
+            log,
+            order_repo=order_repo,
+            shipment_repo=shipment_repo,
         )
 
         try:
@@ -408,7 +445,15 @@ async def bosta_callback(
         # Record RTO event in cross-merchant trust network (COD only,
         # idempotent). Only RETURNED counts as RTO — DELIVERY_FAILED may
         # be retried by the carrier.
-        await _record_network_event_from_order(order, shipment, "rto", session, log)
+        await _record_network_event_from_order(
+            order,
+            shipment,
+            "rto",
+            session,
+            log,
+            order_repo=order_repo,
+            shipment_repo=shipment_repo,
+        )
 
         try:
             await session.commit()

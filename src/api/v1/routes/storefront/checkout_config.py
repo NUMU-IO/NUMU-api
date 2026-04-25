@@ -34,7 +34,22 @@ async def get_public_checkout_config(
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
+    config = resolve_config(store.settings)
+
+    # When the merchant has cod_trust enabled, phone becomes non-optional
+    # at COD checkout — surface this so the storefront form can mark the
+    # field required up-front instead of letting the user discover it via
+    # a 400 from the checkout endpoint.
+    cod_trust = (store.settings or {}).get("cod_trust") or {}
+    if isinstance(cod_trust, dict) and cod_trust.get("enabled"):
+        std = config.setdefault("standard_fields", {})
+        phone_cfg = std.setdefault("phone", {"enabled": True, "required": True})
+        phone_cfg["enabled"] = True
+        phone_cfg["required"] = True
+        # Marker the storefront uses to show a tooltip / explainer.
+        phone_cfg["required_reason"] = "cod_trust"
+
     return SuccessResponse(
-        data=resolve_config(store.settings),
+        data=config,
         message="Checkout config retrieved",
     )

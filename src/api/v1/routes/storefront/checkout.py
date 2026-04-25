@@ -43,6 +43,7 @@ from src.application.dto.order import (
     CreateOrderLineItemDTO,
 )
 from src.application.services.cod_trust_service import (
+    CodTrustDecision,
     LocationSignals,
     check_customer_trust,
 )
@@ -81,6 +82,87 @@ from src.infrastructure.repositories.shopify_repository import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _risk_level_from_score(score: int | None) -> str:
+    """Translate a 0–100 score into the bucket used by RiskAssessmentModel.
+
+    Mirrors the bucket boundaries used by the fraud-detection service so a
+    merchant looking at the unified risk feed sees consistent labels across
+    the COD-trust path and the heuristic fraud path.
+    """
+    if score is None:
+        return "low"
+    if score >= 80:
+        return "critical"
+    if score >= 60:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
+def _suggested_action_from_decision(decision: "CodTrustDecision") -> str:
+    """Map a trust-check outcome to the existing RiskAssessment action taxonomy."""
+    if decision.reason == "blocked_high_risk":
+        return "cancel"
+    if decision.reason == "warned_high_risk":
+        return "whatsapp_confirm"
+    return "auto_approve"
+
+
+async def _persist_cod_trust_assessment(
+    *,
+    session,
+    store,
+    order_id: UUID | None,
+    order_number: str | None,
+    customer,
+    total_cents: int,
+    currency: str,
+    decision: "CodTrustDecision",
+) -> None:
+    """Write a RiskAssessmentModel row for a COD trust decision.
+
+    Fail-open: any persistence error is logged but never raised — fraud
+    auditing must never break a checkout.
+    """
+    try:
+        from datetime import UTC, datetime
+
+        from src.infrastructure.database.models.tenant.risk_assessment import (
+            RiskAssessmentModel,
+        )
+
+        score = decision.score if decision.score is not None else 0
+        assessment = RiskAssessmentModel(
+            tenant_id=store.tenant_id,
+            store_id=store.id,
+            order_id=order_id,
+            order_number=order_number,
+            customer_name=(
+                f"{customer.first_name or ''} {customer.last_name or ''}".strip()
+                or None
+            ),
+            customer_email=str(customer.email) if customer.email else None,
+            total_cents=total_cents,
+            currency=currency,
+            payment_method="cod",
+            risk_score=score,
+            risk_level=_risk_level_from_score(decision.score),
+            score_type="preliminary",
+            suggested_action=_suggested_action_from_decision(decision),
+            action_taken=decision.reason,
+            action_taken_at=datetime.now(UTC),
+            action_taken_by="cod_trust",
+            factors=list(decision.factors or []),
+            scored_at=datetime.now(UTC),
+        )
+        session.add(assessment)
+        await session.flush()
+    except Exception as exc:  # noqa: BLE001 — auditing must never block checkout
+        logger.warning("cod_trust_assessment_persist_failed: %s", exc)
+
 
 _cache_service: RedisCacheService | None = (
     RedisCacheService() if settings.redis_host else None
@@ -283,10 +365,33 @@ async def checkout(
     # orders due to infrastructure issues. Read happens BEFORE the order
     # event is recorded below, so the customer's own current order does
     # not inflate their own score during the check.
+    trust_decision: CodTrustDecision | None = None
     if is_cod:
         customer_phone = (
             request.shipping_address.phone if request.shipping_address else None
         )
+
+        # When the merchant has cod_trust enabled, phone is non-negotiable
+        # for COD: without it the trust check returns `no_phone` and the
+        # filter is silently bypassed. Reject the order at the API
+        # boundary instead — defense in depth alongside the storefront
+        # form's required marker.
+        from src.application.services.cod_trust_service import (
+            get_cod_trust_settings,
+        )
+
+        _cod_trust_cfg = get_cod_trust_settings(store.settings)
+        if _cod_trust_cfg["enabled"] and not (customer_phone or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "phone_required_for_cod",
+                    "message_ar": ("رقم الموبايل مطلوب لإتمام طلب الدفع عند الاستلام."),
+                    "message_en": (
+                        "A phone number is required for cash on delivery orders."
+                    ),
+                },
+            )
 
         # Build location signals from this checkout's shipping address +
         # the customer's previous delivery point (for teleport detection).
@@ -329,6 +434,21 @@ async def checkout(
             [f["code"] for f in trust_decision.factors],
         )
         if not trust_decision.allowed:
+            # Persist the blocked decision before raising so the merchant
+            # sees the action in their COD-trust decisions feed even though
+            # no order row exists yet.
+            await _persist_cod_trust_assessment(
+                session=order_repo.session,
+                store=store,
+                order_id=None,
+                order_number=None,
+                customer=current_customer,
+                total_cents=0,
+                currency=store.default_currency.value
+                if store.default_currency
+                else "EGP",
+                decision=trust_decision,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -730,6 +850,27 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # ── Persist COD trust assessment for the allowed/warned decision ───
+    # Skip non-actionable reasons (disabled, no_phone, lookup_error) —
+    # those are noise for the merchant feed. Below-threshold, warned, new
+    # customer, and low-confidence decisions all make it into the audit
+    # log so the merchant sees the filter actually working.
+    if (
+        is_cod
+        and trust_decision is not None
+        and trust_decision.reason not in {"disabled", "no_phone", "lookup_error"}
+    ):
+        await _persist_cod_trust_assessment(
+            session=order_repo.session,
+            store=store,
+            order_id=created_order.id,
+            order_number=created_order.order_number,
+            customer=current_customer,
+            total_cents=created_order.total,
+            currency=currency,
+            decision=trust_decision,
+        )
 
     # ── Record COD order in network reputation ─────────────────────────
     # Fire-and-forget: never break checkout if the network write fails.

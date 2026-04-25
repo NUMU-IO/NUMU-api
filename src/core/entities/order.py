@@ -26,6 +26,12 @@ class OrderStatus(StrEnum):
     PROCESSING = "processing"
     SHIPPED = "shipped"
     DELIVERED = "delivered"
+    # Customer refused / not handled — used by manual-ship merchants
+    # (no Bosta integration) to record an RTO outcome that feeds into
+    # the cross-merchant trust network. Distinct from CANCELLED to keep
+    # analytics clean: cancellation = ended before shipping; returned =
+    # shipped but never collected.
+    RETURNED = "returned"
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
     PAYMENT_FAILED = "payment_failed"
@@ -58,12 +64,15 @@ VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
     ],
     OrderStatus.SHIPPED: [
         OrderStatus.DELIVERED,
-        # Cannot cancel after shipping
+        # Customer refused / merchant ships manually and records RTO.
+        OrderStatus.RETURNED,
+        # Cannot cancel after shipping — use RETURNED instead.
     ],
     OrderStatus.DELIVERED: [
         OrderStatus.REFUNDED,
     ],
     OrderStatus.CANCELLED: [],  # Terminal state
+    OrderStatus.RETURNED: [],  # Terminal state
     OrderStatus.REFUNDED: [],  # Terminal state
     OrderStatus.PAYMENT_FAILED: [
         OrderStatus.PENDING,  # Can retry payment
@@ -433,6 +442,11 @@ class Order(BaseEntity):
         # Update timestamps based on new status
         if new_status == OrderStatus.CANCELLED:
             self.cancelled_at = datetime.now(UTC)
+        elif new_status == OrderStatus.RETURNED:
+            # Reuse cancelled_at — same semantic of "order ended without
+            # payment / fulfillment". Saves a column migration; UI can
+            # disambiguate via status.
+            self.cancelled_at = datetime.now(UTC)
         elif new_status == OrderStatus.SHIPPED:
             self.shipped_at = datetime.now(UTC)
             self.fulfilled_at = datetime.now(UTC)
@@ -572,6 +586,19 @@ class Order(BaseEntity):
         if reason:
             self.metadata["cancellation_reason"] = reason
         self.touch()
+
+    def return_to_origin(self, reason: str | None = None) -> None:
+        """Mark a shipped order as returned (RTO).
+
+        Used by manual-ship merchants (no Bosta integration) to record
+        a customer-refused / not-collected outcome so the cross-merchant
+        trust network gets the RTO signal. Validates the same way as the
+        canonical transition path so SHIPPED → RETURNED is the only
+        allowed entry point.
+        """
+        self.transition_to(OrderStatus.RETURNED, reason=reason)
+        if reason:
+            self.metadata["return_reason"] = reason
 
     def refund(self, reason: str | None = None) -> None:
         """Refund the order.

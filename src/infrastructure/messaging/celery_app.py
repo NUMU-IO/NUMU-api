@@ -55,6 +55,9 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.instapay_expiry_task",
         # COD deposit — auto-cancel orders past deposit_expires_at
         "src.infrastructure.messaging.tasks.deposit_expiry_task",
+        # COD trust network — auto-flag stale SHIPPED orders as RETURNED
+        # so manual-ship merchants feed RTO signals into the network.
+        "src.infrastructure.messaging.tasks.cod_auto_rto_task",
     ],
     # Queue definitions
     task_queues=(
@@ -191,5 +194,12 @@ celery_app.conf.beat_schedule = {
     "expire-pending-deposit-orders": {
         "task": "tasks.expire_pending_deposit_orders",
         "schedule": 60.0,  # Every 60s — finest granularity the merchant can set is 5 min
+    },
+    # ─── COD trust: auto-flag stale SHIPPED orders as RETURNED ─────────
+    # Daily at 03:00 UTC (~05:00 Cairo). Manual-ship merchants who
+    # forget to mark outcomes still feed RTO signals into the network.
+    "auto-rto-stale-shipped-orders": {
+        "task": "tasks.auto_rto_stale_shipped_orders",
+        "schedule": crontab(hour=3, minute=0),
     },
 }
