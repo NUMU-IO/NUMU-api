@@ -155,6 +155,28 @@ class CloudflareR2StorageService(IStorageService):
         except Exception as e:
             raise ExternalServiceError("S3 Storage", str(e))
 
+    async def get_object_bytes(self, key: str) -> tuple[bytes, str | None]:
+        """Fetch object bytes + content-type for streaming through the API.
+
+        Avoids the signed-URL hostname problem: in containerised
+        deployments where MinIO sits behind a path-rewriting proxy,
+        SigV4 signed URLs fail validation because the canonical path
+        the signature was computed against doesn't match what MinIO
+        receives after the proxy rewrites. Streaming through the API
+        sidesteps all of that — the API container talks to MinIO via
+        the internal endpoint where signing isn't involved.
+        """
+        if not self.client:
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
+
+        try:
+            response = self.client.get_object(Bucket=self.bucket_name, Key=key)
+            body = response["Body"].read()
+            content_type = response.get("ContentType")
+            return body, content_type
+        except Exception as e:
+            raise ExternalServiceError("S3 Storage", str(e))
+
     async def file_exists(self, key: str) -> bool:
         """Check if a file exists in S3-compatible storage."""
         if not self.client:
