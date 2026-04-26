@@ -69,14 +69,30 @@ async def list_cod_trust_decisions(
 ):
     """Return COD trust filter decisions for the merchant's store.
 
-    Filtered to ``payment_method='cod'`` so the Shopify online-payment
-    risk assessments don't pollute the merchant's COD audit view. We do
-    a small left-outer join against orders to pull a phone last-4 for
-    display when the order_id is set; blocked decisions (no order)
-    show ``"—"`` instead.
+    Narrowed three ways so the feed only shows actionable COD trust
+    decisions, not adjacent risk-assessment noise:
+
+      1. ``payment_method='cod'`` — keeps Shopify online-payment risk
+         scores out of the COD audit view.
+      2. ``action_taken_by='cod_trust'`` — distinguishes rows the COD
+         trust filter wrote (which always set this) from rows the
+         general fraud-detection service writes (which doesn't, and
+         uses a different ``factors`` schema). Without this guard the
+         merchant sees rows with empty ``Action`` / ``Signals``
+         columns and assumes the filter is broken.
+      3. ``action_taken IS NOT NULL`` — defensive belt to skip any
+         legacy / partial rows that slipped through before the
+         ``action_taken_by`` column was populated consistently.
+
+    We do a small left-outer join against orders to pull a phone
+    last-4 for display when the order_id is set; blocked decisions
+    (no order) show ``"—"`` instead.
     """
-    base_filter = (RiskAssessmentModel.store_id == store.id) & (
-        RiskAssessmentModel.payment_method == "cod"
+    base_filter = (
+        (RiskAssessmentModel.store_id == store.id)
+        & (RiskAssessmentModel.payment_method == "cod")
+        & (RiskAssessmentModel.action_taken_by == "cod_trust")
+        & (RiskAssessmentModel.action_taken.is_not(None))
     )
 
     total_q = await session.execute(select(RiskAssessmentModel.id).where(base_filter))
