@@ -31,6 +31,7 @@ class StoreDTO(BaseDTO):
     social_links: dict
     settings: dict
     theme_settings: dict
+    business_hours: dict
     created_at: datetime
     updated_at: datetime
 
@@ -57,6 +58,7 @@ class StoreDTO(BaseDTO):
             social_links=entity.social_links,
             settings=entity.settings or {},
             theme_settings=entity.theme_settings,
+            business_hours=entity.business_hours or {},
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -95,3 +97,4 @@ class UpdateStoreDTO(BaseDTO):
     status: str | None = None
     settings: dict | None = None
     theme_settings: dict | None = None
+    business_hours: dict | None = None

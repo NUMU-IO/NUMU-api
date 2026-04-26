@@ -95,6 +95,14 @@ class UpdateStoreRequest(BaseModel):
     )
     settings: dict | None = Field(None, description="Store-level settings")
     theme_settings: dict | None = Field(None, description="Storefront theme settings")
+    business_hours: dict | None = Field(
+        None,
+        description=(
+            "Per-day business hours, e.g. "
+            '{"timezone":"Africa/Cairo","days":{"mon":{"open":"09:00",'
+            '"close":"22:00","closed":false}, ...}}'
+        ),
+    )
 
     @field_validator("settings", mode="after")
     @classmethod
@@ -156,6 +164,9 @@ class StoreResponse(BaseModel):
     social_links: dict = Field(description="Social media links")
     settings: dict = Field(default_factory=dict, description="Store-level settings")
     theme_settings: dict = Field(description="Storefront theme configuration")
+    business_hours: dict = Field(
+        default_factory=dict, description="Per-day business hours configuration"
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
 

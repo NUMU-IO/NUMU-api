@@ -102,6 +102,12 @@ async def lifespan(app: FastAPI):
 
     create_event_bus()
 
+    # Validate email-template registry (defaults must render against
+    # their sample data). Fail-fast on a malformed default.
+    from src.application.services.email_template_registry import validate_registry
+
+    validate_registry()
+
     logger.info(
         "app_startup",
         app_name=settings.app_name,

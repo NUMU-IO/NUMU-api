@@ -206,6 +206,12 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                         _generate_invoice_pdf, created, store_logo_url
                     )
                     svc = ResendEmailService()
+                    # `send_invoice_email` is not in the merchant-template
+                    # registry (the PDF attachment is the payload, not the
+                    # body) so it stays on the legacy code path. Pass
+                    # store_id forward-compatibly: if a future "invoice
+                    # email" event_type is added to the registry, this
+                    # call site already routes through the renderer.
                     await svc.send_invoice_email(
                         email=customer_email,
                         order_number=event.order_number,
