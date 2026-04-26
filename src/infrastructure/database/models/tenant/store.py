@@ -65,6 +65,9 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     theme_settings: Mapped[dict | None] = mapped_column(
         JSONB, nullable=True, default=dict
     )
+    business_hours: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=dict
+    )
 
     # Relationships — use lazy="raise" to prevent accidental implicit loading
     # in async context. Load explicitly with selectinload() where needed.

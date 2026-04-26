@@ -44,6 +44,8 @@ def send_order_confirmation_email_task(
     order_number: str,
     order_details: dict,
     language: str = "ar",
+    store_id: str | None = None,
+    tenant_id: str | None = None,
 ):
     """Send order confirmation email asynchronously.
 
@@ -51,16 +53,33 @@ def send_order_confirmation_email_task(
         email: Customer email address.
         order_number: Order reference number.
         order_details: Dict with items list and total.
+        store_id: Owning store id (UUID string). Used to pick up the
+            merchant custom template, if any, and write an audit log.
+        tenant_id: Owning tenant id (UUID string).
     """
+    from uuid import UUID
+
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
     )
 
+    # TODO(email-templates): wire renderer + email_log_repo into Celery
+    # worker — needs a per-task DB session. For now, the worker uses the
+    # legacy path (no merchant overrides, no audit log row). The FastAPI
+    # request path (where ResendEmailService is built via DI in
+    # api/dependencies/services.py) DOES use the renderer.
     try:
         service = ResendEmailService()
+        store_uuid = UUID(store_id) if store_id else None
+        tenant_uuid = UUID(tenant_id) if tenant_id else None
         result = run_async(
             service.send_order_confirmation(
-                email, order_number, order_details, language=language
+                email,
+                order_number,
+                order_details,
+                language=language,
+                store_id=store_uuid,
+                tenant_id=tenant_uuid,
             )
         )
         logger.info(
@@ -93,6 +112,10 @@ def send_shipping_notification_email_task(
     tracking_number: str | None = None,
     carrier: str | None = None,
     language: str = "ar",
+    store_id: str | None = None,
+    tenant_id: str | None = None,
+    store_name: str = "NUMU",
+    customer_name: str | None = None,
 ):
     """Send shipping notification email asynchronously.
 
@@ -101,16 +124,34 @@ def send_shipping_notification_email_task(
         order_number: Order reference number.
         tracking_number: Optional tracking number.
         carrier: Optional carrier name.
+        store_id: Owning store id (UUID string).
+        tenant_id: Owning tenant id (UUID string).
+        store_name: Store display name (for the body copy).
+        customer_name: Customer display name (for the greeting).
     """
+    from uuid import UUID
+
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
     )
 
+    # TODO(email-templates): wire renderer into Celery worker — needs
+    # per-task DB session. Legacy path until then.
     try:
         service = ResendEmailService()
+        store_uuid = UUID(store_id) if store_id else None
+        tenant_uuid = UUID(tenant_id) if tenant_id else None
         result = run_async(
             service.send_shipping_notification(
-                email, order_number, tracking_number, carrier, language=language
+                email,
+                order_number,
+                tracking_number,
+                carrier,
+                language=language,
+                store_id=store_uuid,
+                tenant_id=tenant_uuid,
+                store_name=store_name,
+                customer_name=customer_name,
             )
         )
         logger.info(
@@ -142,6 +183,9 @@ def send_delivery_confirmation_email_task(
     order_number: str,
     store_name: str,
     language: str = "ar",
+    store_id: str | None = None,
+    tenant_id: str | None = None,
+    customer_name: str | None = None,
 ):
     """Send delivery confirmation email asynchronously.
 
@@ -149,31 +193,36 @@ def send_delivery_confirmation_email_task(
         email: Customer email address.
         order_number: Order reference number.
         store_name: Name of the store.
+        store_id: Owning store id (UUID string).
+        tenant_id: Owning tenant id (UUID string).
+        customer_name: Customer display name (for the greeting).
     """
-    from src.core.interfaces.services.email_service import EmailMessage
+    from uuid import UUID
+
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
     )
-    from src.infrastructure.external_services.resend.email_templates.notifications import (
-        DELIVERY_CONFIRMATION_TEMPLATE,
-    )
 
+    # TODO(email-templates): wire renderer into Celery worker — needs
+    # per-task DB session. Legacy path until then. Routing through the
+    # service-level helper means once the worker IS wired, this task
+    # automatically picks up merchant overrides without code changes.
     try:
         service = ResendEmailService()
-        html_content = DELIVERY_CONFIRMATION_TEMPLATE["html_fn"](
-            order_number=order_number,
-            store_name=store_name,
-            language=language,
+        store_uuid = UUID(store_id) if store_id else None
+        tenant_uuid = UUID(tenant_id) if tenant_id else None
+        result = run_async(
+            service.send_order_status_email(
+                email=email,
+                status="delivered",
+                order_number=order_number,
+                store_name=store_name,
+                customer_name=customer_name,
+                language=language,
+                store_id=store_uuid,
+                tenant_id=tenant_uuid,
+            )
         )
-        subject = DELIVERY_CONFIRMATION_TEMPLATE["subject_fn"](
-            order_number, store_name, language=language
-        )
-        message = EmailMessage(
-            to=email,
-            subject=subject,
-            html_content=html_content,
-        )
-        result = run_async(service.send_email(message))
         logger.info(
             "delivery_confirmation_email_sent",
             email=email,

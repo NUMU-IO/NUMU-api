@@ -354,6 +354,7 @@ async def get_store_by_subdomain(
             else str(store.status),
             "settings": store.settings or {},
             "theme_settings": store.theme_settings,
+            "business_hours": store.business_hours or {},
             "default_currency": store.default_currency.value
             if hasattr(store.default_currency, "value")
             else str(store.default_currency),

@@ -42,6 +42,9 @@ class StoreRepository(IStoreRepository):
             theme_settings=copy.deepcopy(model.theme_settings)
             if model.theme_settings
             else {},
+            business_hours=copy.deepcopy(model.business_hours)
+            if model.business_hours
+            else {},
             tenant_id=model.tenant_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -68,6 +71,7 @@ class StoreRepository(IStoreRepository):
             social_links=entity.social_links,
             settings=entity.settings,
             theme_settings=entity.theme_settings,
+            business_hours=entity.business_hours,
             tenant_id=entity.tenant_id,
             created_at=entity.created_at,
             updated_at=entity.updated_at,

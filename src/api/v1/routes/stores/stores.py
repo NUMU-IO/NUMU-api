@@ -66,6 +66,7 @@ def _build_store_response(store) -> StoreResponse:
         social_links=store.social_links,
         settings=getattr(store, "settings", None) or {},
         theme_settings=store.theme_settings,
+        business_hours=getattr(store, "business_hours", None) or {},
         created_at=str(store.created_at),
         updated_at=str(store.updated_at),
     )
@@ -272,6 +273,7 @@ async def update_store(
         status=request.status,
         settings=request.settings,
         theme_settings=request.theme_settings,
+        business_hours=request.business_hours,
     )
 
     result = await use_case.execute(

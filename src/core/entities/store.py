@@ -46,6 +46,9 @@ class Store(BaseEntity):
     theme_settings: dict[str, Any] = Field(
         default_factory=dict
     )  # NUMU-shop customization
+    business_hours: dict[str, Any] = Field(
+        default_factory=dict
+    )  # Per-day open/close, theme-agnostic
     tenant_id: UUID | None = None
 
     @property

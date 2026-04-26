@@ -10,6 +10,15 @@ from src.api.dependencies.auth import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
+from src.api.dependencies.email_templates import (
+    get_create_email_template_use_case,
+    get_default_template_use_case,
+    get_delete_email_template_use_case,
+    get_get_email_template_use_case,
+    get_list_email_templates_use_case,
+    get_send_test_email_use_case,
+    get_update_email_template_use_case,
+)
 from src.api.dependencies.fieldsets import (
     PRODUCT_DETAIL_FIELDS,
     PRODUCT_FIELDSET_CONFIG,
@@ -29,6 +38,8 @@ from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_customer_address_repository,
     get_customer_repository,
+    get_email_log_repository,
+    get_email_template_repository,
     get_feedback_repository,
     get_onboarding_repository,
     get_order_repository,
@@ -47,6 +58,7 @@ from src.api.dependencies.repositories import (
 from src.api.dependencies.services import (
     get_ai_service,
     get_email_service,
+    get_email_template_renderer,
     get_image_pipeline,
     get_password_service,
     get_payment_service,
@@ -69,6 +81,8 @@ __all__ = [
     # Repositories
     "get_category_repository",
     "get_coupon_repository",
+    "get_email_log_repository",
+    "get_email_template_repository",
     "get_user_repository",
     "get_store_repository",
     "get_product_bundle_repository",
@@ -89,11 +103,20 @@ __all__ = [
     "get_password_service",
     "get_token_service",
     "get_email_service",
+    "get_email_template_renderer",
     "get_payment_service",
     "get_storage_service",
     "get_ai_service",
     "get_image_pipeline",
     "get_product_cache_service",
+    # Email template use cases
+    "get_create_email_template_use_case",
+    "get_update_email_template_use_case",
+    "get_delete_email_template_use_case",
+    "get_get_email_template_use_case",
+    "get_list_email_templates_use_case",
+    "get_default_template_use_case",
+    "get_send_test_email_use_case",
     # Pagination
     "CursorEncoder",
     "CursorParams",

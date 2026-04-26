@@ -30,6 +30,7 @@ from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
+from src.api.v1.routes.stores import email_templates as email_templates_module
 from src.api.v1.routes.stores import feedback as feedback_module
 from src.api.v1.routes.stores import inventory as inventory_module
 from src.api.v1.routes.stores import invoices as invoices_module
@@ -103,6 +104,7 @@ router.include_router(whatsapp_module.router, tags=["Store WhatsApp"])
 router.include_router(
     whatsapp_templates_module.router, tags=["Store WhatsApp Templates"]
 )
+router.include_router(email_templates_module.router, tags=["Store Email Templates"])
 router.include_router(whatsapp_chat_module.router, tags=["Store WhatsApp Chat"])
 router.include_router(
     whatsapp_campaigns_module.router, tags=["Store WhatsApp Campaigns"]

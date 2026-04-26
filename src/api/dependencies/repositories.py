@@ -306,6 +306,24 @@ def get_whatsapp_template_repository(
     return WhatsAppTemplateRepositoryImpl(session)
 
 
+def get_email_template_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get email template repository dependency."""
+    from src.infrastructure.repositories import EmailTemplateRepositoryImpl
+
+    return EmailTemplateRepositoryImpl(session)
+
+
+def get_email_log_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get email log repository dependency."""
+    from src.infrastructure.repositories import EmailLogRepositoryImpl
+
+    return EmailLogRepositoryImpl(session)
+
+
 def get_catalog_mapping_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):

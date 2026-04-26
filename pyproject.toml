@@ -39,6 +39,13 @@ dependencies = [
     # Caching & Messaging
     "redis>=5.0.1",
     "celery>=5.3.6",
+    "cachetools>=5.3.0",  # In-process TTL cache for hot per-store template lookups
+
+    # HTML sanitization for merchant-edited email templates.
+    # bleach[css] pulls in tinycss2, required for the inline-style
+    # sanitizer that preserves CSS values inside `style` attributes.
+    "bleach[css]>=6.1.0",
+    "tinycss2>=1.2.0",
 
     # Observability
     "sentry-sdk[fastapi]>=1.40.0",

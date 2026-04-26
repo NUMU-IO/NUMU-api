@@ -25,6 +25,8 @@ from src.infrastructure.database.models.tenant.configuration import (
 )
 from src.infrastructure.database.models.tenant.coupon import CouponModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
+from src.infrastructure.database.models.tenant.email_log import EmailLogModel
+from src.infrastructure.database.models.tenant.email_template import EmailTemplateModel
 from src.infrastructure.database.models.tenant.funnel_event import FunnelEventModel
 from src.infrastructure.database.models.tenant.instapay_intent import (
     InstapayIntentModel,
@@ -97,6 +99,8 @@ __all__ = [
     "AutomationRuleModel",
     "CategoryModel",
     "CouponModel",
+    "EmailLogModel",
+    "EmailTemplateModel",
     "FunnelEventModel",
     "CustomerAddressModel",
     "CustomerModel",

@@ -105,6 +105,8 @@ async def handle_payment_proof_approved(event: PaymentProofApprovedEvent) -> Non
             store_name=store_name,
             customer_name=customer_name,
             language=language,
+            store_id=event.store_id,
+            tenant_id=event.tenant_id,
         )
         log.info("instapay_approve_email_sent")
     except Exception:
@@ -152,6 +154,8 @@ async def handle_payment_proof_rejected(event: PaymentProofRejectedEvent) -> Non
             store_name=store_name,
             customer_name=customer_name,
             language=language,
+            store_id=event.store_id,
+            tenant_id=event.tenant_id,
         )
         log.info("instapay_reject_email_sent", can_retry=event.can_retry)
     except Exception:

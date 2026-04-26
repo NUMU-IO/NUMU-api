@@ -86,6 +86,7 @@ async def invite_staff(
             tenant_name=tenant.name,
             inviter_name=inviter_name,
             personal_message=message,
+            tenant_id=tenant.id,
         )
         logger.info("staff_invitation_email_result: to=%s sent=%s", email, email_sent)
     except Exception as e:
