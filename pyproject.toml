@@ -42,9 +42,15 @@ dependencies = [
     "cachetools>=5.3.0",  # In-process TTL cache for hot per-store template lookups
 
     # HTML sanitization for merchant-edited email templates.
-    # bleach[css] pulls in tinycss2, required for the inline-style
-    # sanitizer that preserves CSS values inside `style` attributes.
-    "bleach[css]>=6.1.0",
+    # We declare ``tinycss2`` directly (instead of via ``bleach[css]``)
+    # because pip's resolver for the ``[css]`` extra fights every new
+    # bleach minor — the extra adds a redundant ``bleach==X.Y.Z`` pin
+    # on top of the base requirement and the resolver bails out with
+    # "no matching distributions" once a fresh bleach release lands on
+    # PyPI. ``bleach.css_sanitizer`` activates automatically when
+    # ``tinycss2`` is importable, so the extra is purely a convenience
+    # we don't need.
+    "bleach>=6.1.0",
     "tinycss2>=1.2.0",
 
     # Observability
