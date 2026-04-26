@@ -17,12 +17,12 @@ has submitted a proof.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,9 +83,14 @@ async def _hydrate_proof(
     proof,
     storage_service: IStorageService,
 ) -> PaymentProofResponse:
-    signed_url = await storage_service.get_signed_url(
-        proof.proof_image_key, expires_in=3600
-    )
+    # We used to return a presigned S3 URL here, but in containerised
+    # deployments where MinIO sits behind a path-rewriting reverse
+    # proxy the SigV4 signature fails validation (the signed canonical
+    # path doesn't survive the rewrite). Instead, route image fetches
+    # through the API itself — same-origin from the merchant hub means
+    # the httpOnly auth cookie flows naturally, and we don't depend on
+    # any storage hostname being browser-reachable.
+    image_url = f"/api/v1/stores/{proof.store_id}/payment-proofs/{proof.id}/image"
     return PaymentProofResponse(
         id=proof.id,
         order_id=proof.order_id,
@@ -95,7 +100,7 @@ async def _hydrate_proof(
         rejection_reason=proof.rejection_reason,
         review_decision_by=proof.review_decision_by,
         review_decision_at=proof.review_decision_at,
-        signed_image_url=signed_url,
+        signed_image_url=image_url,
         created_at=proof.created_at,
     )
 
@@ -124,11 +129,65 @@ async def list_payment_proofs(
 
     proof_repo = PaymentProofRepository(db)
     proofs = await proof_repo.list_for_order(order_id)
-    # Fan the signed-URL lookups in parallel — sequential awaits would
-    # cost N serial S3 round-trips on a page that can show a small
-    # history of re-upload attempts for a single order.
-    data = await asyncio.gather(*[_hydrate_proof(p, storage_service) for p in proofs])
-    return SuccessResponse(data=list(data))
+    # `_hydrate_proof` no longer hits storage (it just composes a URL),
+    # so a plain comprehension replaces the earlier asyncio.gather.
+    data = [await _hydrate_proof(p, storage_service) for p in proofs]
+    return SuccessResponse(data=data)
+
+
+@router.get(
+    "/payment-proofs/{proof_id}/image",
+    operation_id="merchant_stream_payment_proof_image",
+    summary="Stream a payment proof image (merchant-authenticated)",
+)
+async def stream_payment_proof_image(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    proof_id: Annotated[UUID, Path()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    storage_service: Annotated[IStorageService, Depends(get_storage_service)],
+):
+    """Return the proof image bytes inline.
+
+    This avoids handing the browser a presigned URL whose host the
+    browser may not be able to reach (MinIO behind a path-rewriting
+    proxy) and whose signature can't survive URI rewriting. The
+    merchant is already authenticated via httpOnly cookie; we
+    re-validate the proof belongs to this store and stream the bytes.
+
+    A short private cache lets the merchant scroll back to a proof
+    they just viewed without a fresh fetch, while keeping the bytes
+    out of any shared cache.
+    """
+    proof_repo = PaymentProofRepository(db)
+    proof = await proof_repo.get_by_id(proof_id)
+    if proof is None or proof.store_id != store.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Proof not found."
+        )
+
+    try:
+        body, content_type = await storage_service.get_object_bytes(
+            proof.proof_image_key
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Proof image is missing."
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not fetch the proof image.",
+        )
+
+    # Fall back to a safe default — the route handler that wrote the
+    # object stamps a real Content-Type, so this only matters in dev
+    # against the local-disk backend.
+    media_type = content_type or "application/octet-stream"
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.post(
