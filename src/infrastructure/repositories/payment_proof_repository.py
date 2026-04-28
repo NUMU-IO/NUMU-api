@@ -14,6 +14,23 @@ from src.infrastructure.database.models.tenant.payment_proof import (
     PaymentProofModel,
 )
 
+_UINT64_MOD = 1 << 64
+_INT64_MAX = (1 << 63) - 1
+
+
+def _phash_to_db(value: int | None) -> int | None:
+    # imagehash returns an unsigned 64-bit int; Postgres BIGINT is signed.
+    # Map values above 2^63-1 into the negative half so asyncpg accepts them.
+    if value is None:
+        return None
+    return value - _UINT64_MOD if value > _INT64_MAX else value
+
+
+def _phash_from_db(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return value + _UINT64_MOD if value < 0 else value
+
 
 class PaymentProofRepository:
     """Persist and query customer-submitted payment proofs."""
@@ -42,7 +59,7 @@ class PaymentProofRepository:
             review_decision_at=model.review_decision_at,
             rejection_reason=model.rejection_reason,
             idempotency_key=model.idempotency_key,
-            perceptual_hash=model.perceptual_hash,
+            perceptual_hash=_phash_from_db(model.perceptual_hash),
             ocr_status=model.ocr_status,
             ocr_extracted_amount_cents=model.ocr_extracted_amount_cents,
             ocr_extracted_ipa=model.ocr_extracted_ipa,
@@ -71,7 +88,7 @@ class PaymentProofRepository:
             review_decision_at=proof.review_decision_at,
             rejection_reason=proof.rejection_reason,
             idempotency_key=proof.idempotency_key,
-            perceptual_hash=proof.perceptual_hash,
+            perceptual_hash=_phash_to_db(proof.perceptual_hash),
             ocr_status=proof.ocr_status,
             ocr_extracted_amount_cents=proof.ocr_extracted_amount_cents,
             ocr_extracted_ipa=proof.ocr_extracted_ipa,
@@ -305,7 +322,10 @@ class PaymentProofRepository:
         for m in models:
             # bit_count() on Python int — O(1) on CPython 3.10+, no
             # numpy / imagehash import needed for the hot path.
-            distance = (m.perceptual_hash ^ phash).bit_count()
+            stored = _phash_from_db(m.perceptual_hash)
+            if stored is None:
+                continue
+            distance = (stored ^ phash).bit_count()
             if distance <= max_distance:
                 out.append((self._to_entity(m), distance))
         return out
