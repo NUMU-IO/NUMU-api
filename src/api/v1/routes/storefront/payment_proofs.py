@@ -45,7 +45,10 @@ from src.api.dependencies.repositories import (
     get_order_repository,
     get_store_repository,
 )
-from src.api.dependencies.services import get_storage_service
+from src.api.dependencies.services import (
+    get_proof_vision_service_for_store,
+    get_storage_service,
+)
 from src.api.responses import SuccessResponse
 from src.api.utils.upload_validation import validate_image_upload
 from src.application.use_cases.payments.submit_payment_proof import (
@@ -55,6 +58,10 @@ from src.config import settings
 from src.core.entities.customer import Customer
 from src.core.interfaces.services.storage_service import IStorageService
 from src.infrastructure.cache.redis_cache import RedisCacheService
+from src.infrastructure.external_services.image.proof_sanitizer import (
+    ProofImageDecodeError,
+    sanitize_proof_image,
+)
 from src.infrastructure.external_services.instapay.auto_approval import (
     AutoApprovalConfig,
 )
@@ -206,7 +213,26 @@ async def submit_instapay_proof(
         customer_id=rate_limit_customer_id,
     )
 
-    image_bytes = await validate_image_upload(file)
+    raw_bytes = await validate_image_upload(file)
+
+    # Phase A: strip EXIF + downscale + re-encode + compute pHash.
+    # All downstream hashing, R2 upload, and dedup operate on the
+    # sanitized bytes so the merchant view, the SHA-256 dedup key,
+    # and the perceptual hash are all derived from the same image.
+    try:
+        sanitized = sanitize_proof_image(
+            raw_bytes,
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except ProofImageDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Could not decode the uploaded image: {exc}",
+        ) from exc
+
+    image_bytes = sanitized.bytes
+    image_content_type = sanitized.content_type
+    perceptual_hash = sanitized.perceptual_hash
 
     store = await store_repo.get_by_id(store_id)
     if store is None:
@@ -238,7 +264,57 @@ async def submit_instapay_proof(
                 DEFAULT_AUTO_APPROVE_DAILY_COUNT,
             )
         ),
+        # Phase C OCR opt-in flags. Defaults match the module
+        # defaults so a merchant who never touched these is
+        # indistinguishable from one who explicitly disabled them.
+        require_ocr_amount_match=bool(
+            payment_settings.get("require_ocr_amount_match", False)
+        ),
+        require_ocr_ipa_match=bool(
+            payment_settings.get("require_ocr_ipa_match", False)
+        ),
+        ocr_amount_tolerance_bps=int(
+            payment_settings.get("ocr_amount_tolerance_bps", 100)
+        ),
+        # Phase C extras
+        require_note_contains_reference=bool(
+            payment_settings.get("require_note_contains_reference", False)
+        ),
+        require_transaction_ref_match=bool(
+            payment_settings.get("require_transaction_ref_match", False)
+        ),
+        require_recipient_name_match=bool(
+            payment_settings.get("require_recipient_name_match", False)
+        ),
     )
+    merchant_recipient_name_token: str | None = (
+        payment_settings.get("recipient_name_token") or None
+    )
+    # Phase A — per-store knob, default 5 of 64 bits ≈ 92% similarity.
+    perceptual_dedup_max_distance = int(
+        payment_settings.get("perceptual_dedup_max_distance", 5)
+    )
+
+    # Phase C — pick the OCR provider the admin assigned to this
+    # store (or a Noop). The factory inspects ``store.settings`` so
+    # we don't pre-resolve any sensitive keys here.
+    vision_service = get_proof_vision_service_for_store(store.settings or {})
+
+    # Decrypt the merchant's IPA so the OCR-IPA-match rule can
+    # compare against it. Soft-fail: if decryption blows up the
+    # rule simply no-ops (it's also gated on the merchant's opt-in
+    # flag, so no observable behaviour change for stores that
+    # haven't enabled it).
+    merchant_ipa: str | None = None
+    try:
+        from src.infrastructure.external_services.instapay import (
+            get_merchant_instapay_credentials,
+        )
+
+        creds = await get_merchant_instapay_credentials(store.settings or {})
+        merchant_ipa = creds.get("ipa")
+    except Exception:
+        merchant_ipa = None
 
     intent_repo = InstapayIntentRepository(db)
     proof_repo = PaymentProofRepository(db)
@@ -261,11 +337,16 @@ async def submit_instapay_proof(
         order_id=order_id,
         customer_id=use_case_customer_id,
         image_bytes=image_bytes,
-        image_content_type=file.content_type or "application/octet-stream",
+        image_content_type=image_content_type,
         transaction_ref=transaction_ref,
         declared_amount_cents=declared_amount_cents,
         idempotency_key=idempotency_key,
         auto_approval_config=auto_config,
+        image_perceptual_hash=perceptual_hash,
+        perceptual_dedup_max_distance=perceptual_dedup_max_distance,
+        vision_service=vision_service,
+        merchant_ipa=merchant_ipa,
+        merchant_recipient_name_token=merchant_recipient_name_token,
     )
 
     # The intent's expires_at is the effective retry deadline for the
@@ -305,6 +386,17 @@ class InstapayStatusResponse(BaseModel):
     # QR code client-side from this string instead of showing the
     # uploaded image.
     qr_link_url: str | None = None
+    # True when this InstaPay flow is paying a *deposit* on a COD
+    # order rather than the full order amount. The storefront uses
+    # this to swap the "Complete your payment" copy for a deposit
+    # banner explaining the rest is collected on delivery.
+    is_deposit: bool = False
+    # Order total in cents (only set when ``is_deposit`` is true) so
+    # the storefront can show "X EGP now, Y EGP on delivery". Null
+    # for full-InstaPay flows where ``amount_cents`` already equals
+    # the full order total.
+    order_total_cents: int | None = None
+    balance_due_cents: int | None = None
 
 
 @router.get(
@@ -403,6 +495,17 @@ async def get_instapay_status(
         # Non-fatal: the page still works without the QR/display name.
         pass
 
+    # Deposit detection: a COD order with InstaPay as the deposit
+    # gateway is paying a deposit, not the full order. The intent's
+    # ``amount_cents`` already holds the deposit amount; we just need
+    # to surface the order total + balance so the storefront can show
+    # both numbers without extra round-trips.
+    is_deposit = order.payment_method == "cod" and order.deposit_gateway == "instapay"
+    order_total_cents = order.total if is_deposit else None
+    balance_due_cents = (
+        max(0, order.total - intent.amount_cents) if is_deposit else None
+    )
+
     return SuccessResponse(
         data=InstapayStatusResponse(
             order_id=order.id,
@@ -419,5 +522,8 @@ async def get_instapay_status(
             latest_proof=latest_dict,
             qr_image_url=qr_image_url,
             qr_link_url=qr_link_url,
+            is_deposit=is_deposit,
+            order_total_cents=order_total_cents,
+            balance_due_cents=balance_due_cents,
         )
     )

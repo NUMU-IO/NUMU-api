@@ -84,7 +84,7 @@ def beta_invite_html(
         <p>{c["use_code"]}</p>
 
         <p class="center" style="margin:30px 0;">
-            <a href="https://numueg.app/register?invite={invite_code}" class="btn">{c["btn"]}</a>
+            <a href="https://numueg.app/accept-invite?code={invite_code}" class="btn">{c["btn"]}</a>
         </p>
 
         <hr class="divider">

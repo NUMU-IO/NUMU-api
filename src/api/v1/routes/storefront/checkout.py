@@ -1402,6 +1402,12 @@ async def checkout(
                 currency=currency,
                 expires_at=expires_at,
                 order_id=str(created_order.id),
+                # When _gateway_amount differs from the order total
+                # we're charging a deposit (COD-with-deposit). Pass
+                # the full total so the storefront can frame the UI
+                # as "X now, Y on delivery".
+                is_deposit=_gateway_amount != created_order.total,
+                order_total_cents=created_order.total,
             )
 
         except HTTPException:

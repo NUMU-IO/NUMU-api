@@ -120,6 +120,28 @@ class PaymentProof:
     review_decision_at: datetime | None = None
     rejection_reason: str | None = None
     idempotency_key: str | None = None
+    # 64-bit pHash of the sanitized image. ``None`` for rows
+    # predating the Phase-A migration; the dedup layer simply skips
+    # them when scanning for near-duplicates.
+    perceptual_hash: int | None = None
+    # Phase C OCR enrichment. ``ocr_status`` is one of
+    # ``ok | skipped | failed`` when populated; the auto-approval
+    # rules only act on ``ok`` rows so transient provider failures
+    # never escalate into customer-visible behaviour.
+    ocr_status: str | None = None
+    ocr_extracted_amount_cents: int | None = None
+    ocr_extracted_ipa: str | None = None
+    ocr_raw_text: str | None = None
+    ocr_provider: str | None = None
+    ocr_processed_at: datetime | None = None
+    # Phase C extras — the bank-app's note / transaction-ref / recipient
+    # name as OCR'd. Each is paired with an opt-in merchant rule that
+    # cross-checks against expected values (intent reference code,
+    # submitted transaction_ref, registered name token). Nullable
+    # everywhere — pre-extension rows simply have no signal.
+    ocr_extracted_note: str | None = None
+    ocr_extracted_transaction_ref: str | None = None
+    ocr_extracted_recipient_name: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -135,6 +157,16 @@ class PaymentProof:
         transaction_ref: str,
         declared_amount_cents: int | None = None,
         idempotency_key: str | None = None,
+        perceptual_hash: int | None = None,
+        ocr_status: str | None = None,
+        ocr_extracted_amount_cents: int | None = None,
+        ocr_extracted_ipa: str | None = None,
+        ocr_raw_text: str | None = None,
+        ocr_provider: str | None = None,
+        ocr_processed_at: datetime | None = None,
+        ocr_extracted_note: str | None = None,
+        ocr_extracted_transaction_ref: str | None = None,
+        ocr_extracted_recipient_name: str | None = None,
     ) -> PaymentProof:
         return cls(
             id=uuid4(),
@@ -146,6 +178,16 @@ class PaymentProof:
             transaction_ref=transaction_ref,
             declared_amount_cents=declared_amount_cents,
             idempotency_key=idempotency_key,
+            perceptual_hash=perceptual_hash,
+            ocr_status=ocr_status,
+            ocr_extracted_amount_cents=ocr_extracted_amount_cents,
+            ocr_extracted_ipa=ocr_extracted_ipa,
+            ocr_raw_text=ocr_raw_text,
+            ocr_provider=ocr_provider,
+            ocr_processed_at=ocr_processed_at,
+            ocr_extracted_note=ocr_extracted_note,
+            ocr_extracted_transaction_ref=ocr_extracted_transaction_ref,
+            ocr_extracted_recipient_name=ocr_extracted_recipient_name,
         )
 
     def mark_auto_approved(self) -> None:

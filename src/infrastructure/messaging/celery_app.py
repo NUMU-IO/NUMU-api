@@ -58,6 +58,8 @@ celery_app.conf.update(
         # COD trust network — auto-flag stale SHIPPED orders as RETURNED
         # so manual-ship merchants feed RTO signals into the network.
         "src.infrastructure.messaging.tasks.cod_auto_rto_task",
+        # Phase C — keep HF OCR Spaces warm for stores that opt in.
+        "src.infrastructure.messaging.tasks.warm_hf_vision_spaces",
     ],
     # Queue definitions
     task_queues=(
@@ -201,5 +203,12 @@ celery_app.conf.beat_schedule = {
     "auto-rto-stale-shipped-orders": {
         "task": "tasks.auto_rto_stale_shipped_orders",
         "schedule": crontab(hour=3, minute=0),
+    },
+    # ─── Phase C: keep HF OCR Spaces warm for opted-in stores ──────────
+    # Free HF Spaces sleep on inactivity → 30–60s cold-start. Pinging
+    # every 10 minutes is well under HF's idle threshold.
+    "warm-hf-vision-spaces": {
+        "task": "tasks.warm_hf_vision_spaces",
+        "schedule": 600.0,  # 10 minutes
     },
 }

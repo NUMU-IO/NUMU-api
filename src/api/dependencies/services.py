@@ -187,6 +187,56 @@ def get_ai_service():
     return OpenAIService()
 
 
+def get_proof_vision_service_for_store(store_settings: dict):
+    """Pick a vision OCR provider for an InstaPay proof submission.
+
+    The provider is admin-assigned per-store via
+    ``store.settings.payment.instapay.ocr_provider``. Merchants
+    cannot self-select — the merchant credentials PUT silently drops
+    that field, see :func:`save_instapay_credentials`. Falls back to
+    a Noop provider (status="skipped") whenever:
+
+      * the store has no provider assigned, or
+      * the assigned provider is unknown / typo, or
+      * the assigned provider is ``google_vision`` but the API key
+        env var is unset.
+
+    Soft-fail by design: the auto-approval engine treats every non-OK
+    result as "no signal", so a missing config never breaks checkout.
+    """
+    from src.infrastructure.external_services.vision import (
+        DeepSeekHFProofService,
+        GlmHFProofService,
+        GoogleVisionProofService,
+        IProofVisionService,
+        NoopProofVisionService,
+    )
+
+    instapay_settings = (store_settings or {}).get("payment", {}).get("instapay", {})
+    provider = (instapay_settings.get("ocr_provider") or "").strip().lower()
+
+    impl: IProofVisionService
+    if provider == "google_vision":
+        if not settings.google_vision_api_key:
+            _logger.warning(
+                "ocr_provider=google_vision but no GOOGLE_VISION_API_KEY set; "
+                "falling back to noop"
+            )
+            impl = NoopProofVisionService()
+        else:
+            impl = GoogleVisionProofService(
+                api_key=settings.google_vision_api_key,
+            )
+    elif provider == "deepseek_hf":
+        impl = DeepSeekHFProofService(hf_token=settings.huggingface_token)
+    elif provider == "glm_hf":
+        impl = GlmHFProofService(hf_token=settings.huggingface_token)
+    else:
+        impl = NoopProofVisionService()
+
+    return impl
+
+
 def get_image_pipeline():
     """Get image processing pipeline dependency."""
     return ImagePipeline(

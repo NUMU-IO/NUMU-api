@@ -270,6 +270,8 @@ class InstapayPaymentService(IPaymentService):
         currency: str,
         expires_at: datetime,
         order_id: str,
+        is_deposit: bool = False,
+        order_total_cents: int | None = None,
     ) -> dict[str, Any]:
         """Assemble the ``payment_data`` the storefront renders after checkout.
 
@@ -308,4 +310,16 @@ class InstapayPaymentService(IPaymentService):
                 0, int((expires_at - datetime.now(UTC)).total_seconds())
             ),
             "order_id": order_id,
+            # Deposit context — when ``is_deposit`` is true the
+            # storefront swaps to a "deposit of X, balance Y on
+            # delivery" banner. ``order_total_cents`` is null on
+            # full-InstaPay flows; ``balance_due_cents`` is computed
+            # here so the storefront doesn't have to re-derive it.
+            "is_deposit": is_deposit,
+            "order_total_cents": order_total_cents if is_deposit else None,
+            "balance_due_cents": (
+                max(0, order_total_cents - amount_cents)
+                if is_deposit and order_total_cents is not None
+                else None
+            ),
         }

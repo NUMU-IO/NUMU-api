@@ -2280,6 +2280,22 @@ async def save_instapay_credentials(
         # credentials PUT must not erase a previously-uploaded URL.
         "qr_image_url": existing.get("qr_image_url"),
         "qr_link_url": qr_link_to_save,
+        # Phase C — merchant-facing OCR opt-in flags. The provider
+        # itself is admin-managed and intentionally NOT read from the
+        # request, so a merchant can't self-promote onto a paid tier.
+        "ocr_provider": existing.get("ocr_provider"),
+        "require_ocr_amount_match": request.require_ocr_amount_match,
+        "require_ocr_ipa_match": request.require_ocr_ipa_match,
+        "ocr_amount_tolerance_bps": request.ocr_amount_tolerance_bps,
+        # Phase C extras
+        "require_note_contains_reference": (request.require_note_contains_reference),
+        "require_transaction_ref_match": (request.require_transaction_ref_match),
+        "require_recipient_name_match": (request.require_recipient_name_match),
+        "recipient_name_token": (
+            request.recipient_name_token.strip()
+            if request.recipient_name_token
+            else None
+        ),
     }
 
     store_settings["payment"] = payment_settings
@@ -2305,6 +2321,30 @@ async def save_instapay_credentials(
             last_configured=payment_settings["instapay"]["last_configured"],
             qr_image_url=payment_settings["instapay"].get("qr_image_url"),
             qr_link_url=payment_settings["instapay"].get("qr_link_url"),
+            ocr_provider=payment_settings["instapay"].get("ocr_provider"),
+            require_ocr_amount_match=bool(
+                payment_settings["instapay"].get("require_ocr_amount_match", False)
+            ),
+            require_ocr_ipa_match=bool(
+                payment_settings["instapay"].get("require_ocr_ipa_match", False)
+            ),
+            ocr_amount_tolerance_bps=int(
+                payment_settings["instapay"].get("ocr_amount_tolerance_bps", 100)
+            ),
+            require_note_contains_reference=bool(
+                payment_settings["instapay"].get(
+                    "require_note_contains_reference", False
+                )
+            ),
+            require_transaction_ref_match=bool(
+                payment_settings["instapay"].get("require_transaction_ref_match", False)
+            ),
+            require_recipient_name_match=bool(
+                payment_settings["instapay"].get("require_recipient_name_match", False)
+            ),
+            recipient_name_token=payment_settings["instapay"].get(
+                "recipient_name_token"
+            ),
         ),
         message="InstaPay credentials saved successfully",
     )
@@ -2367,6 +2407,26 @@ async def get_instapay_credentials(
             last_configured=instapay_settings.get("last_configured"),
             qr_image_url=instapay_settings.get("qr_image_url"),
             qr_link_url=instapay_settings.get("qr_link_url"),
+            ocr_provider=instapay_settings.get("ocr_provider"),
+            require_ocr_amount_match=bool(
+                instapay_settings.get("require_ocr_amount_match", False)
+            ),
+            require_ocr_ipa_match=bool(
+                instapay_settings.get("require_ocr_ipa_match", False)
+            ),
+            ocr_amount_tolerance_bps=int(
+                instapay_settings.get("ocr_amount_tolerance_bps", 100)
+            ),
+            require_note_contains_reference=bool(
+                instapay_settings.get("require_note_contains_reference", False)
+            ),
+            require_transaction_ref_match=bool(
+                instapay_settings.get("require_transaction_ref_match", False)
+            ),
+            require_recipient_name_match=bool(
+                instapay_settings.get("require_recipient_name_match", False)
+            ),
+            recipient_name_token=instapay_settings.get("recipient_name_token"),
         )
     )
 

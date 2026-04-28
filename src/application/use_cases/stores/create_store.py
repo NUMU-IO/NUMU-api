@@ -1,6 +1,5 @@
 """Create store use case."""
 
-import logging
 import re
 import uuid
 from uuid import UUID
@@ -8,7 +7,6 @@ from uuid import UUID
 from slugify import slugify
 
 from src.application.dto.store import CreateStoreDTO, StoreDTO
-from src.config import settings
 from src.core.entities.store import Store, StoreStatus
 from src.core.exceptions import EntityAlreadyExistsError, ValidationError
 from src.core.interfaces.repositories.onboarding_repository import (
@@ -17,8 +15,6 @@ from src.core.interfaces.repositories.onboarding_repository import (
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency
 from src.infrastructure.tenancy.service import TenantService
-
-logger = logging.getLogger(__name__)
 
 # Reserved subdomains that cannot be used
 RESERVED_SUBDOMAINS = {
@@ -110,42 +106,31 @@ def validate_subdomain(subdomain: str) -> str:
 
 
 class CreateStoreUseCase:
-    """Use case for creating a new store."""
+    """Use case for creating a new store.
+
+    Beta-invite redemption is handled by the dedicated /public/beta/redeem
+    endpoint, which combines user signup with store creation atomically.
+    This use case is the post-signup path: it just creates a store for an
+    already-authenticated owner.
+    """
 
     def __init__(
         self,
         store_repository: IStoreRepository,
         tenant_service: TenantService,
         onboarding_repository: IOnboardingRepository | None = None,
-        waitlist_repository=None,
     ) -> None:
         self.store_repository = store_repository
         self.tenant_service = tenant_service
         self.onboarding_repository = onboarding_repository
-        self.waitlist_repository = waitlist_repository
 
     async def execute(
         self,
         dto: CreateStoreDTO,
         owner_id: UUID,
-        invite_code: str | None = None,
         plan: str = "free",
     ) -> StoreDTO:
-        """Create a new store.
-
-        During beta (settings.beta_mode is True), a valid invite code
-        is required. The code is validated against the waitlist table
-        and the entry is marked as converted upon success.
-        """
-        # Beta gate: require invite code when beta_mode is enabled
-        beta_mode = getattr(settings, "beta_mode", False)
-        is_beta_invite = False
-        if beta_mode:
-            await self._validate_invite_code(invite_code)
-            if invite_code:
-                is_beta_invite = True
-                plan = "beta"
-
+        """Create a new store for the given owner."""
         # Validate and normalize subdomain
         subdomain = validate_subdomain(dto.subdomain)
 
@@ -190,18 +175,13 @@ class CreateStoreUseCase:
             is_active=True,
         )
 
-        store_status = (
-            StoreStatus.ACTIVE
-            if is_beta_invite or not beta_mode
-            else StoreStatus.PENDING_APPROVAL
-        )
         store = Store(
             name=dto.name,
             slug=slug,
             subdomain=subdomain,
             owner_id=owner_id,
             description=dto.description,
-            status=store_status,
+            status=StoreStatus.ACTIVE,
             default_currency=currency,
             default_language=dto.default_language,
             contact_email=dto.contact_email,
@@ -223,46 +203,4 @@ class CreateStoreUseCase:
                 self.onboarding_repository, created_store.id
             )
 
-        # Mark waitlist entry as converted (best-effort)
-        if invite_code and self.waitlist_repository:
-            try:
-                entry = await self.waitlist_repository.get_by_invite_code(invite_code)
-                if entry:
-                    entry.convert()
-                    await self.waitlist_repository.update(entry)
-            except Exception:
-                logger.warning("waitlist_conversion_failed", exc_info=True)
-
         return StoreDTO.from_entity(created_store)
-
-    async def _validate_invite_code(self, invite_code: str | None) -> None:
-        """Validate a beta invite code against the waitlist."""
-        if not invite_code:
-            raise ValidationError(
-                "Beta invite code is required during the beta period",
-                field="invite_code",
-            )
-
-        # Global admin bypass code
-        if invite_code == "admin":
-            return
-
-        if not self.waitlist_repository:
-            # No repo injected — skip validation (allows tests to pass)
-            logger.warning("waitlist_repo_missing_during_beta_validation")
-            return
-
-        entry = await self.waitlist_repository.get_by_invite_code(invite_code)
-
-        if not entry:
-            raise ValidationError("Invalid invite code", field="invite_code")
-
-        from src.core.entities.waitlist import WaitlistStatus
-
-        if entry.status == WaitlistStatus.CONVERTED:
-            raise ValidationError(
-                "This invite code has already been used", field="invite_code"
-            )
-
-        if entry.status != WaitlistStatus.INVITED:
-            raise ValidationError("This invite code is not active", field="invite_code")

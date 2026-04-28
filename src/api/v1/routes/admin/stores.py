@@ -436,3 +436,94 @@ async def impersonate_store(
         ),
         message="Impersonation session established",
     )
+
+
+# ---------------------------------------------------------------------------
+# InstaPay OCR provider routing (Phase C)
+# ---------------------------------------------------------------------------
+#
+# Admin-only because OCR provider choice has cost (Google Vision is paid)
+# and privacy (HF providers send the customer's screenshot to a public
+# Space) implications. Surfacing it on the merchant hub would let any
+# merchant flip themselves onto the paid tier or onto a public-data
+# provider without operator awareness — neither outcome we want.
+
+
+_VALID_OCR_PROVIDERS = frozenset({"none", "google_vision", "deepseek_hf", "glm_hf"})
+
+
+class AdminSetOcrProviderRequest(BaseModel):
+    """Set the per-store OCR provider for InstaPay proof verification.
+
+    The frontend passes ``"none"`` to disable OCR for the store; any
+    other value must match one of the impls in
+    :mod:`src.infrastructure.external_services.vision`.
+    """
+
+    provider: str
+
+
+class AdminOcrProviderResponse(BaseModel):
+    store_id: str
+    provider: str | None
+
+
+@router.put(
+    "/{store_id}/instapay/ocr-provider",
+    response_model=SuccessResponse[AdminOcrProviderResponse],
+    summary="Assign the OCR provider for a store's InstaPay proofs",
+    operation_id="admin_set_instapay_ocr_provider",
+)
+async def admin_set_instapay_ocr_provider(
+    store_id: Annotated[UUID, Path()],
+    body: AdminSetOcrProviderRequest,
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+) -> SuccessResponse[AdminOcrProviderResponse]:
+    """Persist ``store.settings.payment.instapay.ocr_provider``.
+
+    ``provider="none"`` clears the field. Anything else must match
+    one of the registered impls; unknown values are rejected at the
+    route boundary so a typo doesn't silently devolve to "no OCR".
+    """
+    provider = (body.provider or "").strip().lower()
+    if provider not in _VALID_OCR_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unknown OCR provider '{body.provider}'. "
+                f"Allowed: {sorted(_VALID_OCR_PROVIDERS)}."
+            ),
+        )
+
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
+        )
+
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment") or {}
+    instapay_settings = payment_settings.get("instapay") or {}
+    # ``"none"`` is the UX wire value for "disabled" — store as null
+    # so a per-store JSONB scan doesn't have to distinguish the two.
+    instapay_settings["ocr_provider"] = None if provider == "none" else provider
+    payment_settings["instapay"] = instapay_settings
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    logger.warning(
+        "admin_set_instapay_ocr_provider admin=%s store=%s provider=%s",
+        admin_id,
+        store_id,
+        instapay_settings["ocr_provider"],
+    )
+
+    return SuccessResponse(
+        data=AdminOcrProviderResponse(
+            store_id=str(store.id),
+            provider=instapay_settings["ocr_provider"],
+        ),
+        message="OCR provider updated",
+    )

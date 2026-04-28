@@ -19,7 +19,6 @@ class CreateStoreRequest(BaseModel):
                 "default_language": "ar",
                 "contact_email": "hello@nilefashion.com",
                 "contact_phone": "+201001234567",
-                "invite_code": "BETA-2025",
             }
         }
     )
@@ -48,9 +47,6 @@ class CreateStoreRequest(BaseModel):
     contact_email: EmailStr | None = Field(None, description="Public contact email")
     contact_phone: str | None = Field(
         None, max_length=20, description="Public contact phone number"
-    )
-    invite_code: str | None = Field(
-        None, max_length=100, description="Beta invite code (required during beta)"
     )
 
 

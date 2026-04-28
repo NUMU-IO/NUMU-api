@@ -295,6 +295,20 @@ class Settings(BaseSettings):
     # Google OAuth
     google_oauth_client_id: str | None = None
 
+    # Google Cloud Vision (InstaPay proof OCR — Phase C). API-key path
+    # for v1; service-account JSON via google-auth is the upgrade path
+    # if paid traffic justifies the extra dep. Unset → the
+    # ``google_vision`` provider is unavailable; admin attempts to
+    # assign it 503 cleanly via the DI factory.
+    google_vision_api_key: str | None = None
+
+    # HuggingFace Hub access token. Used by the HF-backed OCR
+    # providers (DeepSeek / GLM Spaces) to bump our ZeroGPU queue
+    # priority. Anonymous calls get rejected after 60s on busy
+    # Spaces; a free HF account ($0) is enough to clear that. Unset
+    # → calls run anonymously and frequently soft-fail.
+    huggingface_token: str | None = None
+
     # S3-compatible Object Storage (MinIO / Cloudflare R2 / AWS S3)
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None

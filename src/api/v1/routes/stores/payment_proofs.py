@@ -70,6 +70,17 @@ class PaymentProofResponse(BaseModel):
     review_decision_at: datetime | None
     signed_image_url: str
     created_at: datetime
+    # Phase C — OCR readout the merchant review pane renders next
+    # to the proof image so the merchant can see why a soft-block
+    # fired (or that the OCR engine was unavailable). All optional
+    # — pre-Phase-C rows leave them null and the UI just hides.
+    ocr_status: str | None = None
+    ocr_provider: str | None = None
+    ocr_extracted_amount_cents: int | None = None
+    ocr_extracted_ipa: str | None = None
+    ocr_extracted_note: str | None = None
+    ocr_extracted_transaction_ref: str | None = None
+    ocr_extracted_recipient_name: str | None = None
 
 
 class RejectRequest(BaseModel):
@@ -102,6 +113,13 @@ async def _hydrate_proof(
         review_decision_at=proof.review_decision_at,
         signed_image_url=image_url,
         created_at=proof.created_at,
+        ocr_status=proof.ocr_status,
+        ocr_provider=proof.ocr_provider,
+        ocr_extracted_amount_cents=proof.ocr_extracted_amount_cents,
+        ocr_extracted_ipa=proof.ocr_extracted_ipa,
+        ocr_extracted_note=proof.ocr_extracted_note,
+        ocr_extracted_transaction_ref=proof.ocr_extracted_transaction_ref,
+        ocr_extracted_recipient_name=proof.ocr_extracted_recipient_name,
     )
 
 
@@ -266,6 +284,124 @@ async def reject_payment_proof(
         rejection_reason=body.reason,
     )
     return SuccessResponse(data=await _hydrate_proof(result.proof, storage_service))
+
+
+# ── Reverse-image lookup (Phase B) ────────────────────────────────────
+
+
+class SimilarProof(BaseModel):
+    """One match on the per-store pHash neighbour scan.
+
+    Mirrors the shape ``PaymentProofResponse`` exposes so the merchant
+    review pane can reuse the same image-streaming path; the extra
+    ``order_number`` + ``hamming_distance`` fields drive the
+    "Possibly related submissions" UI.
+    """
+
+    proof_id: UUID
+    order_id: UUID
+    order_number: str
+    status: str
+    transaction_ref: str
+    declared_amount_cents: int | None
+    created_at: datetime
+    signed_image_url: str
+    hamming_distance: int
+
+
+@router.get(
+    "/payment-proofs/{proof_id}/similar",
+    operation_id="merchant_list_similar_payment_proofs",
+    response_model=SuccessResponse[list[SimilarProof]],
+    summary="Find perceptually similar prior proofs in this store",
+)
+async def list_similar_payment_proofs(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    proof_id: Annotated[UUID, Path()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[list[SimilarProof]]:
+    """Surface prior proofs whose pHash is within Hamming distance ≤ 8.
+
+    Looser than the dedup gate (≤ 5) — at review time the merchant
+    benefits from seeing "even loosely similar" submissions, not just
+    near-exact ones. Populates the "Possibly related submissions"
+    panel above Approve/Reject so the merchant can spot e.g. the
+    same screenshot resubmitted across two orders.
+
+    Empty result when the proof has no perceptual_hash (predates
+    Phase A) or when nothing similar exists in the per-store
+    90-day window the repository scans.
+    """
+    from datetime import UTC
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    proof_repo = PaymentProofRepository(db)
+    proof = await proof_repo.get_by_id(proof_id)
+    if proof is None or proof.store_id != store.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment proof not found.",
+        )
+
+    if proof.perceptual_hash is None:
+        # Predates Phase A — no hash to compare. Return empty rather
+        # than 404 so the UI panel just stays hidden.
+        return SuccessResponse(data=[])
+
+    neighbours = await proof_repo.find_perceptual_neighbours(
+        store.id,
+        proof.perceptual_hash,
+        max_distance=8,
+        since=_dt.now(UTC) - _td(days=90),
+        limit=50,
+    )
+    # Drop the proof itself (distance 0) and cap to 10. Sort by
+    # ascending distance so the most-similar match leads.
+    filtered = sorted(
+        [(p, d) for (p, d) in neighbours if p.id != proof.id],
+        key=lambda pd: pd[1],
+    )[:10]
+
+    if not filtered:
+        return SuccessResponse(data=[])
+
+    # Batch-resolve order_numbers in one round-trip rather than N
+    # repository hits. Read-only and store-scoped, so we hit the
+    # OrderModel directly here.
+    order_ids = list({p.order_id for (p, _) in filtered})
+    rows = await db.execute(
+        select(OrderModel.id, OrderModel.order_number).where(
+            OrderModel.id.in_(order_ids),
+            OrderModel.store_id == store.id,
+        )
+    )
+    order_number_by_id = dict(rows.all())
+
+    items: list[SimilarProof] = []
+    for p, distance in filtered:
+        order_number = order_number_by_id.get(p.order_id)
+        if order_number is None:
+            # Defensive — shouldn't happen given the join scope above,
+            # but skip silently rather than error the whole panel.
+            continue
+        items.append(
+            SimilarProof(
+                proof_id=p.id,
+                order_id=p.order_id,
+                order_number=order_number,
+                status=p.status.value,
+                transaction_ref=p.transaction_ref,
+                declared_amount_cents=p.declared_amount_cents,
+                created_at=p.created_at,
+                signed_image_url=(
+                    f"/api/v1/stores/{p.store_id}/payment-proofs/{p.id}/image"
+                ),
+                hamming_distance=distance,
+            )
+        )
+
+    return SuccessResponse(data=items)
 
 
 # ── Pending-verification queue ────────────────────────────────────────

@@ -10,6 +10,7 @@ from datetime import datetime
 from uuid import UUID as PyUUID
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     Enum,
     ForeignKey,
@@ -40,6 +41,10 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
         Index("ix_payment_proofs_order_id", "order_id"),
         Index("ix_payment_proofs_status", "status"),
         Index("ix_payment_proofs_store_created", "store_id", "created_at"),
+        # Phase A pHash dedup — narrows ``find_perceptual_neighbours``
+        # scans to a covering range. Hamming distance is computed in
+        # Python on the small per-store window the index returns.
+        Index("ix_payment_proofs_store_phash", "store_id", "perceptual_hash"),
         UniqueConstraint(
             "store_id",
             "proof_image_hash",
@@ -102,6 +107,34 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # 64-bit pHash of the sanitized image. Nullable so older rows
+    # predating Phase A continue to work; new uploads always populate.
+    perceptual_hash: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+    # Phase C OCR enrichment. All nullable; rows predating Phase C
+    # carry NULLs and the auto-approval rules silently no-op for them.
+    ocr_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_extracted_amount_cents: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    ocr_extracted_ipa: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    ocr_raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ocr_processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # Phase C extras — note / txn-ref / recipient-name extracted by
+    # the same OCR pass for cross-checks against expected values.
+    ocr_extracted_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_extracted_transaction_ref: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    ocr_extracted_recipient_name: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
 
     # Back-reference so listing-style queries can selectinload proofs
     # alongside their orders in one round-trip. ``lazy="raise"`` makes

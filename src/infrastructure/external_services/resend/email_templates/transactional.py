@@ -92,16 +92,21 @@ def waitlist_welcome_email(name: str | None, referral_code: str) -> dict:
             الإلكترونية اللي بنبنيها للتجار المصريين، وانت من أوائل اللي هيجربوها.
         </p>
 
-        <div class="code-box">
-            <p style="margin:0 0 8px; font-size:11px; color:#6C757D; text-transform:uppercase; letter-spacing:1.2px;">
-                كود الإحالة بتاعك
-            </p>
-            <p class="digits" style="font-size:22px; letter-spacing:3px; color:{NAVY}; word-break:break-all;">{referral_code}</p>
-            <p class="hint">شارك الكود ده مع تجار تانيين</p>
-        </div>
-
         <p>
-            كل ما تاجر يسجل بالكود بتاعك، انت بتتقدم في الترتيب وبتاخد الدعوة بدري.
+            <strong>إيه اللي بعد كده؟</strong> فريقنا هيراجع طلبك وهيبعتلك إيميل دعوة منفصل
+            بكود تفعيل خاص بيك تقدر تستخدمه عشان تعمل متجرك. الإيميل ده
+            بس تأكيد إنك دخلت قائمة الانتظار.
+        </p>
+
+        <hr class="divider">
+
+        <p style="font-weight:700; color:{NAVY};">قدّم في الترتيب — ادعُ تجار تانيين</p>
+        <p style="font-size:13px; color:#495057;">
+            كود الإحالة بتاعك (للمشاركة فقط — مش بيفعّل حساب):
+            <span style="font-family:monospace; background:#F1F3F5; padding:2px 8px; border-radius:4px; color:{NAVY}; letter-spacing:1px;">{referral_code}</span>
+        </p>
+        <p style="font-size:13px; color:#495057;">
+            كل ما تاجر يسجل في قائمة الانتظار وهو ذاكر الكود ده، بتتقدم في الترتيب وبتاخد الدعوة بدري.
         </p>
 
         <hr class="divider">
@@ -115,7 +120,7 @@ def waitlist_welcome_email(name: str | None, referral_code: str) -> dict:
         </ul>
 
         <p class="muted" style="margin-top:24px;">
-            هنبعتلك إيميل تاني أول ما دورك يجي. لو عندك أي استفسار، رد على الإيميل ده.
+            هنبعتلك إيميل الدعوة بكود التفعيل أول ما دورك يجي. لو عندك أي استفسار، رد على الإيميل ده.
         </p>
     </div>"""
 

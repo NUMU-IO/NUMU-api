@@ -58,6 +58,11 @@ from src.infrastructure.external_services.instapay.metrics import (
     proof_review_latency_seconds,
     proof_submissions_total,
 )
+from src.infrastructure.external_services.vision import (
+    IProofVisionService,
+    NoopProofVisionService,
+    ProofVisionResult,
+)
 from src.infrastructure.repositories.instapay_intent_repository import (
     InstapayIntentRepository,
 )
@@ -132,6 +137,29 @@ class SubmitPaymentProofUseCase:
         auto_approval_config: AutoApprovalConfig,
         declared_amount_cents: int | None = None,
         idempotency_key: str | None = None,
+        # Phase A — pHash of the sanitized image, computed by the
+        # route handler before this method runs. ``None`` means the
+        # caller skipped sanitization (test paths only); the dedup
+        # layer is then a no-op for this call.
+        image_perceptual_hash: int | None = None,
+        # Per-store Hamming-distance cutoff for the pHash dedup gate.
+        # 5 of 64 bits ≈ 92% similarity — empirically rejects re-saves
+        # and small crops, accepts genuine retries from a different
+        # angle/screenshot session.
+        perceptual_dedup_max_distance: int = 5,
+        # Phase C — vision OCR provider picked by the store's admin
+        # config, or a NoopProofVisionService when none is assigned.
+        # Always non-None; ``None`` here would mean a caller didn't
+        # construct one, which is a programming error.
+        vision_service: IProofVisionService | None = None,
+        # Merchant's stored InstaPay address — passed into the rules
+        # engine so the OCR-IPA-match check can compare against it.
+        # ``None`` means the rule no-ops, which is fine because the
+        # rule is also gated on the merchant's opt-in flag.
+        merchant_ipa: str | None = None,
+        # Phase C extras — facts the new rules need. All optional;
+        # missing values cause the matching rule to silently no-op.
+        merchant_recipient_name_token: str | None = None,
     ) -> SubmitPaymentProofResult:
         log = logger.bind(
             store_id=str(store_id),
@@ -209,9 +237,20 @@ class SubmitPaymentProofUseCase:
                 detail="Order is cancelled. Please contact the merchant.",
             )
         # (#8) Defensive: refuse a proof for an order that wasn't placed
-        # as InstaPay. The matching InstapayIntent check below mostly
-        # covers this, but the method-level check is cheaper and clearer.
-        if order.payment_method and order.payment_method != "instapay":
+        # as InstaPay. Two valid paths reach this code with a real proof:
+        #   1. Full InstaPay checkout — ``payment_method == "instapay"``.
+        #   2. COD-with-deposit where the customer chose InstaPay as the
+        #      deposit gateway — ``payment_method == "cod"`` AND
+        #      ``deposit_gateway == "instapay"``. The order is COD; the
+        #      deposit (a precursor) is what the proof attests to.
+        # Any other combination is genuinely off-flow and we reject. The
+        # matching ``InstapayIntent`` check below is the actual safety
+        # net; this method-level check just yields a clearer error.
+        is_full_instapay = order.payment_method == "instapay"
+        is_instapay_deposit = (
+            order.payment_method == "cod" and order.deposit_gateway == "instapay"
+        )
+        if order.payment_method and not (is_full_instapay or is_instapay_deposit):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This order was not placed with InstaPay.",
@@ -247,6 +286,28 @@ class SubmitPaymentProofUseCase:
                 detail="This transaction reference has already been used.",
             )
 
+        # Perceptual-hash dedup — catches re-saves / 1-px-crops that
+        # SHA-256 misses. Skipped when the caller didn't supply a
+        # hash (legacy callers or test paths). 90-day window mirrors
+        # what an attacker could plausibly recycle from old proofs;
+        # tunable per-store via ``perceptual_dedup_max_distance``.
+        if image_perceptual_hash is not None:
+            phash_window_start = datetime.now(UTC) - timedelta(days=90)
+            neighbours = await self.proof_repo.find_perceptual_neighbours(
+                order.store_id,
+                image_perceptual_hash,
+                max_distance=perceptual_dedup_max_distance,
+                since=phash_window_start,
+            )
+            if neighbours:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "This screenshot looks very similar to one already "
+                        "submitted in this store."
+                    ),
+                )
+
         # ── Upload to R2 ───────────────────────────────────────────
         filename = f"{order.store_id}/{order_id}/{intent.reference_code}.bin"
         uploaded = await self.storage_service.upload_file(
@@ -263,6 +324,17 @@ class SubmitPaymentProofUseCase:
                 await self.storage_service.delete_file(uploaded.key)
             except Exception:
                 log.warning("payment_proof_r2_cleanup_failed", key=uploaded.key)
+
+        # ── OCR (Phase C) — runs once on the sanitized bytes ───────
+        # Soft-fail by contract: any provider error returns a
+        # ``ProofVisionResult.failed`` and the auto-approval rules
+        # silently no-op for non-OK statuses. We still persist the
+        # status + provider so observability can split provider
+        # health from "feature off". When no service was injected
+        # (test paths) we use a Noop directly so the rest of the
+        # method stays uniform.
+        vision: IProofVisionService = vision_service or NoopProofVisionService()
+        ocr_result: ProofVisionResult = await vision.extract(image_bytes)
 
         # (#1) Serialize the cap evaluation + proof write per store so
         # two concurrent uploads can't both see "count=9, cap=10" and
@@ -297,6 +369,26 @@ class SubmitPaymentProofUseCase:
             order_total_cents=order.total,
             daily_auto_approved_count=daily_count,
             daily_auto_approved_cents=daily_cents,
+            merchant_ipa=merchant_ipa,
+            # Phase C extras — the new rules need these facts to
+            # compare against ``proof.ocr_extracted_*`` fields.
+            intent_reference_code=intent.reference_code,
+            submitted_transaction_ref=transaction_ref,
+            merchant_recipient_name_token=merchant_recipient_name_token,
+        )
+        # OCR fields land on both the speculative proof (so the
+        # rules engine sees them) and the persisted row below. We
+        # store ``ocr_status`` only when it's meaningful (skipped
+        # rows persist as NULL — they're indistinguishable from
+        # pre-Phase-C rows for query purposes).
+        ocr_persist_status = (
+            ocr_result.status if ocr_result.status != "skipped" else None
+        )
+        ocr_persist_provider = (
+            ocr_result.provider if ocr_result.status != "skipped" else None
+        )
+        ocr_persist_processed_at = (
+            ocr_result.processed_at if ocr_result.status != "skipped" else None
         )
         decision = evaluate_auto_approval(
             intent=intent,
@@ -308,6 +400,16 @@ class SubmitPaymentProofUseCase:
                 proof_image_hash=image_hash,
                 transaction_ref=transaction_ref,
                 declared_amount_cents=declared_amount_cents,
+                perceptual_hash=image_perceptual_hash,
+                ocr_status=ocr_persist_status,
+                ocr_extracted_amount_cents=ocr_result.extracted_amount_cents,
+                ocr_extracted_ipa=ocr_result.extracted_ipa,
+                ocr_raw_text=ocr_result.raw_text or None,
+                ocr_provider=ocr_persist_provider,
+                ocr_processed_at=ocr_persist_processed_at,
+                ocr_extracted_note=ocr_result.extracted_note,
+                ocr_extracted_transaction_ref=ocr_result.extracted_transaction_ref,
+                ocr_extracted_recipient_name=ocr_result.extracted_recipient_name,
             ),
             config=auto_approval_config,
             facts=facts,
@@ -323,6 +425,16 @@ class SubmitPaymentProofUseCase:
             transaction_ref=transaction_ref,
             declared_amount_cents=declared_amount_cents,
             idempotency_key=idempotency_key,
+            perceptual_hash=image_perceptual_hash,
+            ocr_status=ocr_persist_status,
+            ocr_extracted_amount_cents=ocr_result.extracted_amount_cents,
+            ocr_extracted_ipa=ocr_result.extracted_ipa,
+            ocr_raw_text=ocr_result.raw_text or None,
+            ocr_provider=ocr_persist_provider,
+            ocr_processed_at=ocr_persist_processed_at,
+            ocr_extracted_note=ocr_result.extracted_note,
+            ocr_extracted_transaction_ref=ocr_result.extracted_transaction_ref,
+            ocr_extracted_recipient_name=ocr_result.extracted_recipient_name,
         )
         # Metric: rule breakdown on soft blocks. Fires once per
         # reason so dashboards can pivot on which rule trips most —

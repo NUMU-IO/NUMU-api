@@ -198,6 +198,24 @@ class SaveInstapayCredentialsRequest(BaseModel):
     # InstaPay app opens with the merchant prefilled. Empty string
     # clears the field; null leaves it unchanged.
     qr_link_url: str | None = Field(None, max_length=500)
+    # Phase C OCR opt-in flags. Either flag toggled on without an
+    # admin-assigned ``ocr_provider`` is harmless: the auto-approval
+    # engine no-ops when ``ocr_status != "ok"``, and a Noop provider
+    # always returns ``skipped``. Defaults stay off so a merchant
+    # who hasn't read the docs doesn't inadvertently soft-block
+    # legitimate proofs.
+    require_ocr_amount_match: bool = False
+    require_ocr_ipa_match: bool = False
+    ocr_amount_tolerance_bps: int = Field(100, ge=0, le=5_000)
+    # Phase C extras — three additional opt-in cross-checks the
+    # auto-approval engine can run against the OCR'd screenshot.
+    # ``recipient_name_token`` is the merchant's name as it appears
+    # under "To" on bank-app receipts (typically the first name);
+    # blank disables the rule even when the flag is on.
+    require_note_contains_reference: bool = False
+    require_transaction_ref_match: bool = False
+    require_recipient_name_match: bool = False
+    recipient_name_token: str | None = Field(None, max_length=80)
 
 
 class InstapayCredentialsResponse(BaseModel):
@@ -220,6 +238,18 @@ class InstapayCredentialsResponse(BaseModel):
     # from this string client-side; the customer scans it with their
     # phone camera and the universal-link target opens InstaPay.
     qr_link_url: str | None = None
+    # Phase C OCR config. ``ocr_provider`` is read-only here —
+    # admins set it via :mod:`src.api.v1.routes.admin`; the merchant
+    # endpoint silently drops any incoming ``ocr_provider`` so a
+    # malicious merchant can't unilaterally swap onto a paid tier.
+    ocr_provider: str | None = None
+    require_ocr_amount_match: bool = False
+    require_ocr_ipa_match: bool = False
+    ocr_amount_tolerance_bps: int = 100
+    require_note_contains_reference: bool = False
+    require_transaction_ref_match: bool = False
+    require_recipient_name_match: bool = False
+    recipient_name_token: str | None = None
 
 
 class SaveKashierCredentialsRequest(BaseModel):
