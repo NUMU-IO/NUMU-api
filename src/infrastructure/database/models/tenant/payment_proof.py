@@ -21,7 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.instapay import PaymentProofStatus
@@ -134,6 +134,13 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
     ocr_extracted_recipient_name: Mapped[str | None] = mapped_column(
         Text, nullable=True
+    )
+    # Phase D — flattened ``decision.reasons`` from the rules engine
+    # (e.g. ``ocr_amount_mismatch``). NULL means "approved" or
+    # "predates the column"; the review pane treats both the same.
+    auto_approval_block_reasons: Mapped[list[str] | None] = mapped_column(
+        ARRAY(Text),
+        nullable=True,
     )
 
     # Back-reference so listing-style queries can selectinload proofs

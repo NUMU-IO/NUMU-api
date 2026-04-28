@@ -435,6 +435,12 @@ class SubmitPaymentProofUseCase:
             ocr_extracted_note=ocr_result.extracted_note,
             ocr_extracted_transaction_ref=ocr_result.extracted_transaction_ref,
             ocr_extracted_recipient_name=ocr_result.extracted_recipient_name,
+            # Persist the rule-engine reasons so the merchant review
+            # pane can render them. Approved proofs leave NULL — the UI
+            # only shows the panel when there's something to explain.
+            auto_approval_block_reasons=(
+                list(decision.reasons) if not decision.approved else None
+            ),
         )
         # Metric: rule breakdown on soft blocks. Fires once per
         # reason so dashboards can pivot on which rule trips most —

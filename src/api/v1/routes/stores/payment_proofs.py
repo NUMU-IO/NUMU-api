@@ -81,6 +81,10 @@ class PaymentProofResponse(BaseModel):
     ocr_extracted_note: str | None = None
     ocr_extracted_transaction_ref: str | None = None
     ocr_extracted_recipient_name: str | None = None
+    # Phase D — rule-engine tags explaining why auto-approval didn't
+    # fire (e.g. ``["ocr_amount_mismatch"]``). NULL when the proof was
+    # auto-approved or the row predates the column.
+    auto_approval_block_reasons: list[str] | None = None
 
 
 class RejectRequest(BaseModel):
@@ -120,6 +124,7 @@ async def _hydrate_proof(
         ocr_extracted_note=proof.ocr_extracted_note,
         ocr_extracted_transaction_ref=proof.ocr_extracted_transaction_ref,
         ocr_extracted_recipient_name=proof.ocr_extracted_recipient_name,
+        auto_approval_block_reasons=proof.auto_approval_block_reasons,
     )
 
 

@@ -142,6 +142,10 @@ class PaymentProof:
     ocr_extracted_note: str | None = None
     ocr_extracted_transaction_ref: str | None = None
     ocr_extracted_recipient_name: str | None = None
+    # Phase D — auto-approval rule reasons captured at submission time
+    # (e.g. ``["ocr_amount_mismatch"]``). Empty / None for approved
+    # proofs; the merchant review pane renders friendly copy per tag.
+    auto_approval_block_reasons: list[str] | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -167,6 +171,7 @@ class PaymentProof:
         ocr_extracted_note: str | None = None,
         ocr_extracted_transaction_ref: str | None = None,
         ocr_extracted_recipient_name: str | None = None,
+        auto_approval_block_reasons: list[str] | None = None,
     ) -> PaymentProof:
         return cls(
             id=uuid4(),
@@ -188,6 +193,7 @@ class PaymentProof:
             ocr_extracted_note=ocr_extracted_note,
             ocr_extracted_transaction_ref=ocr_extracted_transaction_ref,
             ocr_extracted_recipient_name=ocr_extracted_recipient_name,
+            auto_approval_block_reasons=auto_approval_block_reasons,
         )
 
     def mark_auto_approved(self) -> None:
