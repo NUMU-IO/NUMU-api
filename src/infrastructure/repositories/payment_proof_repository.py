@@ -69,6 +69,7 @@ class PaymentProofRepository:
             ocr_extracted_note=model.ocr_extracted_note,
             ocr_extracted_transaction_ref=model.ocr_extracted_transaction_ref,
             ocr_extracted_recipient_name=model.ocr_extracted_recipient_name,
+            auto_approval_block_reasons=model.auto_approval_block_reasons,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -98,6 +99,7 @@ class PaymentProofRepository:
             ocr_extracted_note=proof.ocr_extracted_note,
             ocr_extracted_transaction_ref=proof.ocr_extracted_transaction_ref,
             ocr_extracted_recipient_name=proof.ocr_extracted_recipient_name,
+            auto_approval_block_reasons=proof.auto_approval_block_reasons,
         )
         self.session.add(model)
         await self.session.flush()
