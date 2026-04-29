@@ -115,7 +115,7 @@ def _product_response(product) -> BundledProductResponse:
         price_currency=price_currency,
         compare_at_price=compare_at,
         image=product.images[0] if product.images else None,
-        is_in_stock=product.quantity > 0,
+        is_in_stock=product.is_in_stock,
         quantity=product.quantity,
     )
 

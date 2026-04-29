@@ -73,7 +73,14 @@ class Product(BaseEntity):
 
     @property
     def is_in_stock(self) -> bool:
-        """Check if product is in stock."""
+        # Merchants can opt into oversell via the
+        # `continue_selling_when_out_of_stock` flag — when set, the product
+        # is purchasable regardless of `quantity`. `is_low_stock` /
+        # `is_out_of_stock` deliberately keep reflecting actual quantity
+        # so merchant-side analytics still flag inventory that needs
+        # restocking.
+        if (self.attributes or {}).get("continue_selling_when_out_of_stock"):
+            return True
         return self.quantity > 0
 
     @property
