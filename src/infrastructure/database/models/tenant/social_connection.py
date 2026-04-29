@@ -28,7 +28,12 @@ class SocialConnectionModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         index=True,
     )
     platform: Mapped[SocialPlatform] = mapped_column(
-        Enum(SocialPlatform, name="socialplatform", schema="public"),
+        Enum(
+            SocialPlatform,
+            name="socialplatform",
+            schema="public",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
     platform_account_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -40,7 +45,12 @@ class SocialConnectionModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         DateTime(timezone=True), nullable=True
     )
     status: Mapped[SocialConnectionStatus] = mapped_column(
-        Enum(SocialConnectionStatus, name="socialconnectionstatus", schema="public"),
+        Enum(
+            SocialConnectionStatus,
+            name="socialconnectionstatus",
+            schema="public",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         default=SocialConnectionStatus.ACTIVE,
         nullable=False,
     )

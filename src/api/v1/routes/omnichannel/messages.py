@@ -28,7 +28,7 @@ from src.infrastructure.repositories import (
 router = APIRouter(tags=["Omnichannel"])
 
 
-@router.get("/", response_model=dict, status_code=status.HTTP_200_OK)
+@router.get("/", status_code=status.HTTP_200_OK)
 async def list_messages(
     thread_id: UUID,
     cursor: str | None = Query(None, description="Pagination cursor"),
@@ -55,7 +55,7 @@ async def list_messages(
     )
 
 
-@router.post("/send", response_model=dict, status_code=status.HTTP_200_OK)
+@router.post("/send", status_code=status.HTTP_200_OK)
 async def send_message(
     dto: SendMessageDTO,
     store_id: UUID,

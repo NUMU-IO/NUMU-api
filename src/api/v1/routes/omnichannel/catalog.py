@@ -23,7 +23,7 @@ from src.infrastructure.repositories import (
 router = APIRouter(tags=["Omnichannel"])
 
 
-@router.post("/sync", response_model=dict, status_code=status.HTTP_200_OK)
+@router.post("/sync", status_code=status.HTTP_200_OK)
 async def sync_catalog(
     dto: SyncCatalogDTO,
     store_id: UUID,
@@ -56,7 +56,7 @@ async def sync_catalog(
     )
 
 
-@router.get("/mappings", response_model=dict, status_code=status.HTTP_200_OK)
+@router.get("/mappings", status_code=status.HTTP_200_OK)
 async def list_catalog_mappings(
     store_id: UUID,
     db: AsyncSession = Depends(get_db),

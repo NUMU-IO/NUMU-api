@@ -27,7 +27,7 @@ from src.infrastructure.repositories import (
 router = APIRouter(tags=["Omnichannel"])
 
 
-@router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_template(
     dto: CreateTemplateDTO,
     store_id: UUID,
@@ -68,7 +68,7 @@ async def create_template(
     )
 
 
-@router.get("/", response_model=dict, status_code=status.HTTP_200_OK)
+@router.get("/", status_code=status.HTTP_200_OK)
 async def list_templates(
     connection_id: UUID,
     status_filter: str | None = Query(None, description="Filter by status"),

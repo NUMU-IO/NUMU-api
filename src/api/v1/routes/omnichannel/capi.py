@@ -17,7 +17,7 @@ from src.infrastructure.repositories import StoreRepository
 router = APIRouter(tags=["Omnichannel"])
 
 
-@router.post("/event", response_model=dict, status_code=status.HTTP_200_OK)
+@router.post("/event", status_code=status.HTTP_200_OK)
 async def send_capi_event(
     dto: SendCapiEventDTO,
     store_id: UUID,
