@@ -18,12 +18,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.funnel_emit_service import emit_order_delivered
 from src.config import settings
 from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.bosta import BostaShippingService
+from src.infrastructure.repositories.funnel_event_repository import (
+    FunnelEventRepository,
+)
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 from src.infrastructure.tenancy.rls import narrow_to_tenant
@@ -324,29 +328,11 @@ async def bosta_callback(
         log.info("delivery_completed")
         if order:
             try:
+                delivered_now = False
                 if order.status == OrderStatus.SHIPPED:
                     order.deliver()
+                    delivered_now = True
                     log.info("order_marked_delivered", order_id=str(order.id))
-
-                    # Emit funnel event: order_delivered
-                    try:
-                        from src.infrastructure.repositories.funnel_event_repository import (
-                            FunnelEventRepository,
-                        )
-
-                        fe_repo = FunnelEventRepository(session)
-                        await fe_repo.create(
-                            tenant_id=tenant_id or order.tenant_id,
-                            store_id=order.store_id,
-                            step="order_delivered",
-                            customer_id=order.customer_id,
-                            step_data={
-                                "order_id": str(order.id),
-                                "tracking_number": tracking_number,
-                            },
-                        )
-                    except Exception:
-                        pass
 
                 if cod_amount and not order.is_paid:
                     order.mark_as_paid(
@@ -359,6 +345,14 @@ async def bosta_callback(
                     log.info("cod_collected", amount=cod_amount, order_id=str(order.id))
 
                 await order_repo.update(order)
+
+                if delivered_now:
+                    # Idempotent via order.metadata flag — replays and the
+                    # manual UpdateOrderStatusUseCase path that may fire
+                    # earlier won't double-count.
+                    await emit_order_delivered(
+                        order, FunnelEventRepository(session), order_repo
+                    )
             except Exception as e:
                 log.error("delivery_order_update_failed", error=str(e))
 

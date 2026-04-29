@@ -365,6 +365,29 @@ async def submit_instapay_proof(
     )
 
 
+class CustomerProofRequirements(BaseModel):
+    """What the customer must do / show on the screenshot, derived from
+    the merchant's auto-approval flags. The storefront uses this to
+    only ask for things the merchant actually enforces — silent flags
+    don't pester the customer. Each field maps 1-1 to a server-side
+    rule but uses customer-facing names so the storefront doesn't
+    couple to internal rule tags."""
+
+    # ``require_note_contains_reference`` → tell the customer to paste
+    # the reference code into the bank app's Note / Reason field.
+    note_must_contain_reference: bool = False
+    # ``require_ocr_amount_match`` → amount must be visible in the
+    # uploaded screenshot.
+    screenshot_must_show_amount: bool = False
+    # ``require_ocr_ipa_match`` → recipient IPA must be visible.
+    screenshot_must_show_recipient_ipa: bool = False
+    # ``require_recipient_name_match`` → recipient name must be visible.
+    screenshot_must_show_recipient_name: bool = False
+    # ``require_transaction_ref_match`` → bank's transaction reference
+    # must be visible (so the customer-typed value can be cross-checked).
+    screenshot_must_show_transaction_ref: bool = False
+
+
 class InstapayStatusResponse(BaseModel):
     order_id: UUID
     reference_code: str
@@ -378,6 +401,10 @@ class InstapayStatusResponse(BaseModel):
     intent_status: str
     payment_status: str
     latest_proof: dict | None = None
+    # Phase E — merchant-driven customer-facing requirements. Always
+    # present (defaults all-false), so the storefront can render
+    # without conditional null-checks.
+    customer_requirements: CustomerProofRequirements = CustomerProofRequirements()
     # Public URL of the merchant's uploaded InstaPay QR image (taken
     # from inside their InstaPay app). The page falls back to showing
     # the IPA + reference when this is null.
@@ -482,6 +509,7 @@ async def get_instapay_status(
     qr_image_url: str | None = None
     qr_link_url: str | None = None
     ipa_display_name: str | None = None
+    customer_requirements = CustomerProofRequirements()
     try:
         store = await store_repo.get_by_id(store_id)
         if store is not None:
@@ -491,8 +519,29 @@ async def get_instapay_status(
             qr_image_url = instapay_settings.get("qr_image_url")
             qr_link_url = instapay_settings.get("qr_link_url")
             ipa_display_name = instapay_settings.get("ipa_display_name")
+            # Phase E — collapse the 5 merchant rule flags into the
+            # customer-facing requirements payload. Defaults to all-
+            # false, which means the storefront shows minimal copy.
+            customer_requirements = CustomerProofRequirements(
+                note_must_contain_reference=bool(
+                    instapay_settings.get("require_note_contains_reference")
+                ),
+                screenshot_must_show_amount=bool(
+                    instapay_settings.get("require_ocr_amount_match")
+                ),
+                screenshot_must_show_recipient_ipa=bool(
+                    instapay_settings.get("require_ocr_ipa_match")
+                ),
+                screenshot_must_show_recipient_name=bool(
+                    instapay_settings.get("require_recipient_name_match")
+                ),
+                screenshot_must_show_transaction_ref=bool(
+                    instapay_settings.get("require_transaction_ref_match")
+                ),
+            )
     except Exception:
-        # Non-fatal: the page still works without the QR/display name.
+        # Non-fatal: the page still works without the QR/display name
+        # and falls back to the all-false requirements default.
         pass
 
     # Deposit detection: a COD order with InstaPay as the deposit
@@ -525,5 +574,6 @@ async def get_instapay_status(
             is_deposit=is_deposit,
             order_total_cents=order_total_cents,
             balance_due_cents=balance_due_cents,
+            customer_requirements=customer_requirements,
         )
     )

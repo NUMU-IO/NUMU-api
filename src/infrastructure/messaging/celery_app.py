@@ -60,6 +60,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.cod_auto_rto_task",
         # Phase C — keep HF OCR Spaces warm for stores that opt in.
         "src.infrastructure.messaging.tasks.warm_hf_vision_spaces",
+        # Analytics retention — drops funnel/page-view rows past TTL.
+        "src.infrastructure.messaging.tasks.analytics_retention_task",
     ],
     # Queue definitions
     task_queues=(
@@ -210,5 +212,13 @@ celery_app.conf.beat_schedule = {
     "warm-hf-vision-spaces": {
         "task": "tasks.warm_hf_vision_spaces",
         "schedule": 600.0,  # 10 minutes
+    },
+    # ─── Analytics retention — drop funnel/page-view rows older than
+    # the configured window so the tables don't grow unboundedly. Daily
+    # at 02:30 UTC, before the 03:30 rollup so the rollup never sees
+    # rows that are about to be deleted.
+    "purge-analytics-events": {
+        "task": "tasks.purge_analytics_events",
+        "schedule": crontab(hour=2, minute=30),
     },
 }

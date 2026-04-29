@@ -18,7 +18,10 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.plan import require_order_limit
-from src.api.dependencies.repositories import get_network_reputation_repository
+from src.api.dependencies.repositories import (
+    get_funnel_event_repository,
+    get_network_reputation_repository,
+)
 from src.application.services.cod_trust_service import (
     CodTrustDecision,
     LocationSignals,
@@ -590,6 +593,7 @@ async def update_order_status(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
 ):
     """Update order status."""
     use_case = UpdateOrderStatusUseCase(
@@ -598,6 +602,7 @@ async def update_order_status(
         customer_repository=customer_repo,
         event_bus=get_event_bus(),
         network_repository=network_repo,
+        funnel_repository=funnel_repo,
     )
 
     dto = UpdateOrderStatusDTO(
@@ -631,6 +636,7 @@ async def cancel_order(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
     reason: str | None = Query(None, description="Cancellation reason"),
 ):
     """Cancel an order."""
@@ -640,6 +646,7 @@ async def cancel_order(
         customer_repository=customer_repo,
         event_bus=get_event_bus(),
         network_repository=network_repo,
+        funnel_repository=funnel_repo,
     )
 
     dto = UpdateOrderStatusDTO(
@@ -854,6 +861,7 @@ async def bulk_update_order_status(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
 ):
     """Update the status of multiple orders at once."""
     use_case = UpdateOrderStatusUseCase(
@@ -862,6 +870,7 @@ async def bulk_update_order_status(
         customer_repository=customer_repo,
         event_bus=get_event_bus(),
         network_repository=network_repo,
+        funnel_repository=funnel_repo,
     )
 
     updated = 0

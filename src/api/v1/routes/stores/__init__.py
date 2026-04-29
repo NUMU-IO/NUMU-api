@@ -68,6 +68,13 @@ router.include_router(stores_module.router, prefix="", tags=["Stores"])
 
 # Nested resources - products, orders, dashboard, customers, invoices under specific store
 router.include_router(products_module.router, tags=["Store Products"])
+# payment_proofs must be registered BEFORE orders: it owns the static
+# path ``/{store_id}/orders/pending-instapay-review`` which would
+# otherwise be shadowed by the orders router's catch-all
+# ``/{store_id}/orders/{order_id}`` pattern (FastAPI matches routes in
+# include order, so the UUID-typed wildcard wins and 422s on the
+# non-UUID literal segment).
+router.include_router(payment_proofs_module.router, tags=["Store InstaPay Proofs"])
 router.include_router(orders_module.router, tags=["Store Orders"])
 router.include_router(order_import_module.router, tags=["Store Order Import"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
@@ -92,7 +99,6 @@ router.include_router(reconciliation_module.router, tags=["Store Reconciliation"
 router.include_router(shipments_module.router, tags=["Store Shipments"])
 router.include_router(shipping_module.router, tags=["Store Shipping"])
 router.include_router(payments_module.router, tags=["Store Payments"])
-router.include_router(payment_proofs_module.router, tags=["Store InstaPay Proofs"])
 router.include_router(plan_module.router, tags=["Store Plan"])
 router.include_router(upsells_module.router, tags=["Store Upsells"])
 router.include_router(bundles_module.router, tags=["Store Bundles"])

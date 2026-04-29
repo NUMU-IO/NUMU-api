@@ -72,6 +72,17 @@ def _is_coupon_apply(path: str) -> bool:
     )
 
 
+def _is_track_beacon(path: str) -> bool:
+    """Anonymous storefront analytics beacon.
+
+    Fires on every page view, add_to_cart, etc. — orders of magnitude
+    more frequent than checkout. Needs its own bucket so a chatty
+    storefront page doesn't blow through the general 60/min anon
+    budget and silently lose events.
+    """
+    return path.startswith("/api/v1/storefront/store/") and path.endswith("/track")
+
+
 # ------------------------------------------------------------------ #
 # Redis sliding-window check
 # ------------------------------------------------------------------ #
@@ -144,6 +155,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif _is_coupon_apply(path):
             tier = "coupon"
             limit = 10  # 10 coupon validations per minute per IP
+        elif _is_track_beacon(path):
+            tier = "tracking"
+            limit = 600  # ~10/sec per IP — analytics beacons are noisy
         else:
             tier = "general"
             has_auth = "authorization" in request.headers
