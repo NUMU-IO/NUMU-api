@@ -478,6 +478,45 @@ class AnalyticsRepository:
             "unique_customers": int(row.customers or 0),
         }
 
+    # ── Daily revenue series (forecast fallback) ───────────────────
+    async def daily_revenue_series(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """One row per UTC date that had at least one non-cancelled order.
+
+        Fallback for the forecast endpoint when the daily-rollup task
+        hasn't run yet for this store (brand-new merchants, or the
+        cron hasn't fired since signup). Returns
+        ``[{rollup_date, total_revenue_cents, total_orders}]`` so the
+        route can wrap each row in a rollup-shaped object and feed it
+        to the existing forecast service unchanged.
+        """
+        from sqlalchemy import Date as _Date
+
+        day_expr = cast(OrderModel.created_at, _Date).label("day")
+        query = (
+            select(
+                day_expr,
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue_cents"),
+                func.count(OrderModel.id).label("orders"),
+            )
+            .where(*self._store_window(store_id, date_from, date_to))
+            .group_by(day_expr)
+            .order_by(day_expr)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            {
+                "rollup_date": row.day,
+                "total_revenue_cents": int(row.revenue_cents or 0),
+                "total_orders": int(row.orders or 0),
+            }
+            for row in result.all()
+        ]
+
     # ── COD outcomes (order-derived, not shipment-derived) ─────────
     async def cod_summary(
         self,

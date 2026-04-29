@@ -1603,12 +1603,15 @@ async def get_insights(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     lang: str = Query("ar", description="Language: ar or en"),
 ):
     """Get AI-powered insights with anomaly detection and LLM narratives.
 
     Uses cached insights from store.settings when available (refreshed daily
     by Celery task). Falls back to live calculation if no cache exists.
+    Same rollup-vs-orders fallback as ``/forecast``: brand-new stores
+    have no rollup rows yet, so we aggregate from ``orders`` directly.
     """
     from src.application.services.ai_insights_service import generate_insights
 
@@ -1643,6 +1646,30 @@ async def get_insights(
     today = date.today()
     date_from = today - timedelta(days=35)  # 5 weeks for baseline + current
     rollups = await rollup_repo.get_range(store.id, date_from, today)
+
+    # Order-derived fallback: if the rollup is shorter than the order
+    # history (typical on stores where the daily cron hasn't run yet),
+    # synthesise rollup-shaped objects from a SQL aggregation. The
+    # rule engine reads ``rollup_date / total_revenue_cents /
+    # total_orders``, so a small adapter object is enough.
+    from datetime import datetime as _dt
+
+    period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
+    period_to = datetime.now(UTC)
+    order_rows = await analytics_repo.daily_revenue_series(
+        store.id, period_from, period_to
+    )
+    if len(order_rows) > len(rollups):
+
+        class _PseudoRollup:
+            __slots__ = ("rollup_date", "total_revenue_cents", "total_orders")
+
+            def __init__(self, row: dict) -> None:
+                self.rollup_date = row["rollup_date"]
+                self.total_revenue_cents = row["total_revenue_cents"]
+                self.total_orders = row["total_orders"]
+
+        rollups = [_PseudoRollup(r) for r in order_rows]
 
     currency = store.default_currency.value if store.default_currency else "EGP"
     result = await generate_insights(rollups, store_currency=currency, lang=lang)
@@ -1719,14 +1746,47 @@ async def get_forecast(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     horizon: int = Query(30, ge=7, le=90, description="Forecast horizon in days"),
 ):
-    """Get sales revenue forecast using Holt-Winters exponential smoothing."""
+    """Get sales revenue forecast using Holt-Winters exponential smoothing.
+
+    Preferred source: the nightly ``analytics_daily_rollup`` table.
+    Fallback: aggregate ``orders`` directly when the rollup hasn't
+    caught up to this store yet (brand-new merchants, or the daily
+    cron hasn't fired since signup). The forecast service consumes a
+    sequence of rollup-shaped objects, so we just wrap the raw daily
+    rows in a tiny adapter when we use the fallback path.
+    """
     from src.application.services.forecast_service import generate_forecast
 
     today = date.today()
     date_from = today - timedelta(days=365)  # Use up to 1 year of data
     rollups = await rollup_repo.get_range(store.id, date_from, today)
+
+    # The forecast service requires ≥14 days of data. If the rollup
+    # table is short of that, try aggregating orders directly — most
+    # of the time this is the difference between "0 days" (rollup
+    # hasn't run yet) and "you have enough" for a real merchant.
+    if len(rollups) < 14:
+        from datetime import datetime as _dt
+
+        period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
+        period_to = datetime.now(UTC)
+        order_rows = await analytics_repo.daily_revenue_series(
+            store.id, period_from, period_to
+        )
+        if len(order_rows) > len(rollups):
+
+            class _PseudoRollup:
+                __slots__ = ("rollup_date", "total_revenue_cents", "total_orders")
+
+                def __init__(self, row: dict) -> None:
+                    self.rollup_date = row["rollup_date"]
+                    self.total_revenue_cents = row["total_revenue_cents"]
+                    self.total_orders = row["total_orders"]
+
+            rollups = [_PseudoRollup(r) for r in order_rows]
 
     result = generate_forecast(rollups, horizon=horizon)
 
