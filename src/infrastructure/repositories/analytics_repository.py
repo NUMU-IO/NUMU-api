@@ -225,16 +225,19 @@ class AnalyticsRepository:
         date_from: datetime,
         date_to: datetime,
     ) -> dict[str, float]:
-        """avg / p50 / p95 hours from order ``created_at`` to ``shipped_at``.
+        """avg / p50 / p95 hours from order ``created_at`` to ``fulfilled_at``.
 
         Uses Postgres ``percentile_cont`` rather than an in-memory sort
         of all order rows. Excludes orders that never shipped (NULL
-        shipped_at) — those would otherwise drag the average to inf.
+        ``fulfilled_at``) — those would otherwise drag the average to
+        inf. The OrderModel column is ``fulfilled_at`` (not
+        ``shipped_at``); it's set when the order transitions to a
+        fulfilled / shipped state.
         """
         delta_hours = (
             extract(
                 "epoch",
-                OrderModel.shipped_at - OrderModel.created_at,
+                OrderModel.fulfilled_at - OrderModel.created_at,
             )
             / 3600.0
         ).label("hours")
@@ -248,7 +251,7 @@ class AnalyticsRepository:
             ).label("p95_h"),
         ).where(
             *self._store_window(store_id, date_from, date_to),
-            OrderModel.shipped_at.isnot(None),
+            OrderModel.fulfilled_at.isnot(None),
         )
         result = await self.session.execute(self._tenant_filter(query))
         row = result.one()
@@ -835,7 +838,11 @@ class AnalyticsRepository:
         ).where(*self._store_window(store_id, date_from, date_to))
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
 
-        li = line_items_cte.c.li
+        # See ``top_products`` for why this cast is required — the
+        # subquery wrapper drops JSONB type info, so subscripting
+        # ``c.li[...]`` raises ``Operator 'getitem' is not supported``
+        # without it.
+        li = cast(line_items_cte.c.li, JSONB)
         product_id_expr = li["product_id"].astext.label("product_id")
         revenue_per_line = func.coalesce(
             cast(li["total_price"].astext, Integer),
