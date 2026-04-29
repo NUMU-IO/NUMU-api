@@ -286,27 +286,19 @@ class SubmitPaymentProofUseCase:
                 detail="This transaction reference has already been used.",
             )
 
-        # Perceptual-hash dedup — catches re-saves / 1-px-crops that
-        # SHA-256 misses. Skipped when the caller didn't supply a
-        # hash (legacy callers or test paths). 90-day window mirrors
-        # what an attacker could plausibly recycle from old proofs;
-        # tunable per-store via ``perceptual_dedup_max_distance``.
-        if image_perceptual_hash is not None:
-            phash_window_start = datetime.now(UTC) - timedelta(days=90)
-            neighbours = await self.proof_repo.find_perceptual_neighbours(
-                order.store_id,
-                image_perceptual_hash,
-                max_distance=perceptual_dedup_max_distance,
-                since=phash_window_start,
-            )
-            if neighbours:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        "This screenshot looks very similar to one already "
-                        "submitted in this store."
-                    ),
-                )
+        # NOTE: We deliberately don't gate submissions on perceptual-hash
+        # neighbours. InstaPay's success-screen UI is a fixed template
+        # — same merchant + same amount + same recipient produces
+        # near-identical pHashes for two genuinely different
+        # transactions, so any pHash gate (hard 409 or soft block)
+        # is ~100% false-positive in this domain. The actual replay
+        # surface is covered by the SHA-256 + transaction_ref unique
+        # constraints above (exact-byte replay and ref reuse) plus
+        # the OCR transaction-ref match rule (catches image reuse with
+        # a freshly-typed ref — OCR'd ref will differ from typed). The
+        # pHash column is still computed and stored for forensics and
+        # the Phase B "possibly related submissions" merchant-review
+        # hint, just not acted on at submission time.
 
         # ── Upload to R2 ───────────────────────────────────────────
         filename = f"{order.store_id}/{order_id}/{intent.reference_code}.bin"
