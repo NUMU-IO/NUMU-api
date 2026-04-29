@@ -1619,15 +1619,28 @@ async def get_insights(
     if store.settings:
         cached = store.settings.get("ai_insights")
         if cached and cached.get("generated_at"):
-            # Use cache if generated today
+            # Use cache if generated today AND it represents real data.
+            # An "insufficient data" cache is sticky-bad: the rollup
+            # cron may have run on an empty store earlier today, then
+            # the merchant placed orders — without this guard we'd
+            # serve "0 days available" until tomorrow UTC.
             from datetime import UTC, datetime
+
+            cached_signals = cached.get("signals", [])
+            cached_narrative = cached.get("narrative") or {}
+            cached_outlook = (
+                cached_narrative.get("outlook")
+                if isinstance(cached_narrative, dict)
+                else None
+            )
+            looks_empty = not cached_signals and (
+                not cached_outlook or "insufficient" in str(cached_outlook).lower()
+            )
 
             try:
                 gen_time = datetime.fromisoformat(cached["generated_at"])
-                if gen_time.date() == datetime.now(UTC).date():
-                    signals = [
-                        InsightSignalResponse(**s) for s in cached.get("signals", [])
-                    ]
+                if gen_time.date() == datetime.now(UTC).date() and not looks_empty:
+                    signals = [InsightSignalResponse(**s) for s in cached_signals]
                     narrative = None
                     if cached.get("narrative"):
                         narrative = InsightNarrativeResponse(**cached["narrative"])
