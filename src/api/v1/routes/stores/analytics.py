@@ -1682,12 +1682,53 @@ async def get_insights(
     if len(order_rows) > len(rollups):
 
         class _PseudoRollup:
-            __slots__ = ("rollup_date", "total_revenue_cents", "total_orders")
+            # Mirror every attribute the insights rule engine reads off
+            # the real ``AnalyticsDailyRollupModel`` so it can iterate
+            # the fallback rows interchangeably. Fields the SQL
+            # aggregation doesn't supply default to zero / empty list —
+            # the matching rule (COD-rejection, refunds, customer-mix,
+            # traffic) simply won't fire, which is correct: we don't
+            # have the data, so we can't trigger the signal.
+            __slots__ = (
+                "rollup_date",
+                "total_revenue_cents",
+                "total_orders",
+                "paid_orders",
+                "cancelled_orders",
+                "avg_order_value_cents",
+                "new_customers",
+                "returning_customers",
+                "total_page_views",
+                "unique_visitors",
+                "cod_orders",
+                "cod_delivered",
+                "cod_rejected",
+                "refund_count",
+                "refund_amount_cents",
+                "top_products_json",
+                "revenue_by_location_json",
+                "traffic_sources_json",
+            )
 
             def __init__(self, row: dict) -> None:
                 self.rollup_date = row["rollup_date"]
                 self.total_revenue_cents = row["total_revenue_cents"]
                 self.total_orders = row["total_orders"]
+                self.paid_orders = row.get("paid_orders", 0)
+                self.cancelled_orders = row.get("cancelled_orders", 0)
+                self.avg_order_value_cents = row.get("avg_order_value_cents", 0)
+                self.new_customers = row.get("new_customers", 0)
+                self.returning_customers = row.get("returning_customers", 0)
+                self.total_page_views = row.get("total_page_views", 0)
+                self.unique_visitors = row.get("unique_visitors", 0)
+                self.cod_orders = row.get("cod_orders", 0)
+                self.cod_delivered = row.get("cod_delivered", 0)
+                self.cod_rejected = row.get("cod_rejected", 0)
+                self.refund_count = row.get("refund_count", 0)
+                self.refund_amount_cents = row.get("refund_amount_cents", 0)
+                self.top_products_json = row.get("top_products_json", [])
+                self.revenue_by_location_json = row.get("revenue_by_location_json", [])
+                self.traffic_sources_json = row.get("traffic_sources_json", [])
 
         rollups = [_PseudoRollup(r) for r in order_rows]
 
