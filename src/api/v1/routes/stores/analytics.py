@@ -1627,14 +1627,21 @@ async def get_insights(
             from datetime import UTC, datetime
 
             cached_signals = cached.get("signals", [])
-            cached_narrative = cached.get("narrative") or {}
-            cached_outlook = (
-                cached_narrative.get("outlook")
-                if isinstance(cached_narrative, dict)
-                else None
+            cached_metrics = cached.get("metrics_summary") or {}
+            # The rule engine emits a single ``insufficient_data``
+            # signal when it sees <7 days of rollup rows. That's the
+            # reliable "cache was built on no data" marker — checking
+            # for an empty signals list misses the case (the empty
+            # state has 1 signal, not 0). Bypass either when we see
+            # that signal type or when the cached metrics summary
+            # explicitly says <7 days were analyzed.
+            has_insufficient_signal = any(
+                isinstance(s, dict) and s.get("type") == "insufficient_data"
+                for s in cached_signals
             )
-            looks_empty = not cached_signals and (
-                not cached_outlook or "insufficient" in str(cached_outlook).lower()
+            cached_days = int(cached_metrics.get("days_analyzed") or 0)
+            looks_empty = (
+                not cached_signals or has_insufficient_signal or cached_days < 7
             )
 
             try:
