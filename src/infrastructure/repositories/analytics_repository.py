@@ -26,6 +26,7 @@ from sqlalchemy import (
     func,
     select,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.order import OrderStatus
@@ -581,12 +582,17 @@ class AnalyticsRepository:
             .limit(20)
         )
         result = await self.session.execute(self._tenant_filter(query))
+        # Key is "rate" (not "rejection_rate") to match
+        # CodRejectionLocationResponse — that field uses the unprefixed
+        # name because the model's parent already scopes the value to
+        # rejections (the top-level CodRejectionStatsResponse keeps
+        # the longer ``rejection_rate`` to disambiguate).
         return [
             {
                 "location": row.location,
                 "total": int(row.total or 0),
                 "rejected": int(row.rejected or 0),
-                "rejection_rate": (
+                "rate": (
                     round(int(row.rejected or 0) / int(row.total or 1) * 100, 1)
                     if row.total
                     else 0.0
@@ -910,7 +916,14 @@ class AnalyticsRepository:
         ).where(*self._store_window(store_id, date_from, date_to))
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
 
-        li = line_items_cte.c.li
+        # ``jsonb_array_elements`` returns JSONB at the DB level, but
+        # after ``.subquery()`` SQLAlchemy loses the type info — the
+        # ``c.li`` column reads as a plain element with no ``[]``
+        # operator. Cast back to JSONB so subscript expressions like
+        # ``li["product_id"].astext`` lower to the Postgres ``->``
+        # operator instead of raising ``Operator 'getitem' is not
+        # supported on this expression``.
+        li = cast(line_items_cte.c.li, JSONB)
         product_id_expr = li["product_id"].astext.label("product_id")
         product_name_expr = li["name"].astext.label("product_name")
         quantity_expr = cast(func.coalesce(li["quantity"].astext, "0"), Integer).label(

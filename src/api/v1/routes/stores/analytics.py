@@ -287,10 +287,15 @@ async def get_analytics_top_products(
         rows = await analytics_repo.top_products(
             store.id, period_start, now, limit=limit
         )
+        # Older orders' line_items JSONB may not carry a ``name`` field;
+        # ``jsonb_array_elements(...)['name'].astext`` returns NULL in
+        # that case and Pydantic rejects ``name: str`` at the response
+        # stage. Coalesce to a stable placeholder so the chart still
+        # renders — matches the rollup branch above which uses ``""``.
         sorted_products = [
             {
                 "id": r["product_id"],
-                "name": r["product_name"],
+                "name": r["product_name"] or "(unnamed product)",
                 "sku": None,
                 "quantity": r["units_sold"],
                 "revenue": r["revenue_cents"],
