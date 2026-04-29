@@ -18,12 +18,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.funnel_emit_service import emit_order_delivered
 from src.config import settings
 from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.jt import JTShippingService
+from src.infrastructure.repositories.funnel_event_repository import (
+    FunnelEventRepository,
+)
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 from src.infrastructure.tenancy.rls import narrow_to_tenant
@@ -233,8 +237,10 @@ async def jt_callback(
         log.info("delivery_completed")
         if order:
             try:
+                delivered_now = False
                 if order.status == OrderStatus.SHIPPED:
                     order.deliver()
+                    delivered_now = True
                     log.info("order_marked_delivered", order_id=str(order.id))
 
                 if cod_amount and not order.is_paid:
@@ -248,6 +254,11 @@ async def jt_callback(
                     log.info("cod_collected", amount=cod_amount, order_id=str(order.id))
 
                 await order_repo.update(order)
+
+                if delivered_now:
+                    await emit_order_delivered(
+                        order, FunnelEventRepository(session), order_repo
+                    )
             except Exception as e:
                 log.error("delivery_order_update_failed", error=str(e))
 

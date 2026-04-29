@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from src.application.dto.order import OrderDTO, UpdateOrderStatusDTO
+from src.application.services.funnel_emit_service import emit_order_delivered
 from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
 from src.core.events.base import EventBus
@@ -14,6 +15,9 @@ from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 
 if TYPE_CHECKING:
+    from src.infrastructure.repositories.funnel_event_repository import (
+        FunnelEventRepository,
+    )
     from src.infrastructure.repositories.shopify_repository import (
         NetworkReputationRepository,
     )
@@ -50,12 +54,14 @@ class UpdateOrderStatusUseCase:
         customer_repository: ICustomerRepository | None = None,
         event_bus: EventBus | None = None,
         network_repository: "NetworkReputationRepository | None" = None,
+        funnel_repository: "FunnelEventRepository | None" = None,
     ) -> None:
         self.order_repository = order_repository
         self.store_repository = store_repository
         self.customer_repository = customer_repository
         self.event_bus = event_bus
         self.network_repository = network_repository
+        self.funnel_repository = funnel_repository
 
     async def execute(
         self,
@@ -149,6 +155,13 @@ class UpdateOrderStatusUseCase:
         # update. Bosta webhook also stamps the same flag, so the path
         # that fires first wins.
         await self._record_network_event(updated_order, new_status, log)
+
+        # Funnel: record the post-purchase delivered step. Idempotent via
+        # order.metadata flag; fail-open inside the helper.
+        if new_status == OrderStatus.DELIVERED and self.funnel_repository:
+            await emit_order_delivered(
+                updated_order, self.funnel_repository, self.order_repository
+            )
 
         # Publish domain event — all side-effects handled by event handlers
         await self._publish_status_event(

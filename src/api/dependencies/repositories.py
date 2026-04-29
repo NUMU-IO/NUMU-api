@@ -227,6 +227,17 @@ def get_funnel_event_repository(
     return FunnelEventRepository(session)
 
 
+def get_analytics_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get the SQL-aggregation analytics repository dependency."""
+    from src.infrastructure.repositories.analytics_repository import (
+        AnalyticsRepository,
+    )
+
+    return AnalyticsRepository(session)
+
+
 def get_network_reputation_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):

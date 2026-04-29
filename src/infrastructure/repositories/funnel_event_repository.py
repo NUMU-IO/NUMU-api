@@ -107,30 +107,34 @@ class FunnelEventRepository:
         step_from: str,
         step_to: str,
     ) -> float | None:
-        """Get average minutes between two funnel steps for the same session."""
-        from_sub = (
-            select(
-                FunnelEventModel.session_fingerprint,
-                func.min(FunnelEventModel.created_at).label("ts"),
-            )
-            .where(FunnelEventModel.store_id == store_id)
-            .where(FunnelEventModel.step == step_from)
-            .where(FunnelEventModel.created_at >= date_from)
-            .where(FunnelEventModel.created_at <= date_to)
-            .group_by(FunnelEventModel.session_fingerprint)
-        ).subquery("from_step")
+        """Get average minutes between two funnel steps for the same session.
 
-        to_sub = (
-            select(
-                FunnelEventModel.session_fingerprint,
-                func.min(FunnelEventModel.created_at).label("ts"),
-            )
-            .where(FunnelEventModel.store_id == store_id)
-            .where(FunnelEventModel.step == step_to)
-            .where(FunnelEventModel.created_at >= date_from)
-            .where(FunnelEventModel.created_at <= date_to)
-            .group_by(FunnelEventModel.session_fingerprint)
-        ).subquery("to_step")
+        ``session_fingerprint`` is generated client-side and only
+        guaranteed unique within a single browser/storefront — across
+        stores, two different visitors could theoretically share a
+        fingerprint. The join therefore matches on ``(fingerprint,
+        store_id)`` so step pairings can never cross tenant.
+        """
+
+        def _per_store_min(step: str, alias: str):
+            return (
+                select(
+                    FunnelEventModel.session_fingerprint.label("fp"),
+                    FunnelEventModel.store_id.label("store_id"),
+                    func.min(FunnelEventModel.created_at).label("ts"),
+                )
+                .where(FunnelEventModel.store_id == store_id)
+                .where(FunnelEventModel.step == step)
+                .where(FunnelEventModel.created_at >= date_from)
+                .where(FunnelEventModel.created_at <= date_to)
+                .group_by(
+                    FunnelEventModel.session_fingerprint,
+                    FunnelEventModel.store_id,
+                )
+            ).subquery(alias)
+
+        from_sub = _per_store_min(step_from, "from_step")
+        to_sub = _per_store_min(step_to, "to_step")
 
         query = select(
             func.avg(func.extract("epoch", to_sub.c.ts - from_sub.c.ts) / 60).label(
@@ -139,13 +143,46 @@ class FunnelEventRepository:
         ).select_from(
             from_sub.join(
                 to_sub,
-                from_sub.c.session_fingerprint == to_sub.c.session_fingerprint,
+                (from_sub.c.fp == to_sub.c.fp)
+                & (from_sub.c.store_id == to_sub.c.store_id),
             )
         )
 
         result = await self.session.execute(query)
         row = result.one()
         return float(row.avg_minutes) if row.avg_minutes is not None else None
+
+    async def get_steps_per_session(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict[str, set[str]]:
+        """``{session_fingerprint: {step1, step2, ...}}`` in a single query.
+
+        Replaces the loop that called ``get_sessions_with_step`` once
+        per funnel step (5–6 round-trips). Each fingerprint maps to the
+        set of distinct steps it triggered in the window so the route
+        can compute "deepest step" or "session has step X" with O(1)
+        lookups.
+        """
+        query = (
+            select(
+                FunnelEventModel.session_fingerprint,
+                FunnelEventModel.step,
+            )
+            .where(FunnelEventModel.store_id == store_id)
+            .where(FunnelEventModel.created_at >= date_from)
+            .where(FunnelEventModel.created_at <= date_to)
+            .where(FunnelEventModel.session_fingerprint.isnot(None))
+            .group_by(FunnelEventModel.session_fingerprint, FunnelEventModel.step)
+        )
+        query = self._tenant_filter(query)
+        result = await self.session.execute(query)
+        out: dict[str, set[str]] = {}
+        for row in result.all():
+            out.setdefault(row.session_fingerprint, set()).add(row.step)
+        return out
 
     async def get_attribution_data(
         self,

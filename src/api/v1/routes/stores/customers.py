@@ -263,3 +263,69 @@ async def get_customer_trust_stats(
         ),
         message="Trust stats retrieved",
     )
+
+
+# ── DSAR: erase a customer's analytics footprint ───────────────────────
+
+
+class AnalyticsEraseResponse(BaseModel):
+    """Result of a DSAR analytics erase request."""
+
+    customer_id: str
+    funnel_events_deleted: int
+    note: str
+
+
+@router.delete(
+    "/{customer_id}/analytics",
+    response_model=SuccessResponse[AnalyticsEraseResponse],
+    summary="Erase a customer's analytics footprint (DSAR)",
+    operation_id="erase_customer_analytics",
+)
+async def erase_customer_analytics(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    customer_id: Annotated[UUID, Path(description="Customer ID")],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+):
+    """Delete every funnel event linked to ``customer_id`` for this store.
+
+    Companion to the existing customer DSAR flows. Only removes events
+    where ``customer_id`` is set on the funnel row — anonymous events
+    keyed only on ``session_fingerprint`` aren't tied to a person and
+    fall under the analytics retention policy instead. Page views are
+    already anonymized at write-time (truncated IP, no customer_id).
+
+    Idempotent — re-running on a customer with no events returns 0.
+    """
+    from sqlalchemy import delete
+
+    from src.core.exceptions import EntityNotFoundError
+    from src.infrastructure.database.models.tenant.funnel_event import (
+        FunnelEventModel,
+    )
+
+    customer = await customer_repo.get_by_id(customer_id)
+    if not customer or customer.store_id != store.id:
+        raise EntityNotFoundError("Customer", str(customer_id))
+
+    # Reuse the customer_repo session — it's already tenant-scoped via RLS.
+    session = customer_repo.session  # type: ignore[attr-defined]
+    stmt = delete(FunnelEventModel).where(
+        FunnelEventModel.store_id == store.id,
+        FunnelEventModel.customer_id == customer_id,
+    )
+    result = await session.execute(stmt)
+    deleted = int(result.rowcount or 0)
+    await session.commit()
+
+    return SuccessResponse(
+        data=AnalyticsEraseResponse(
+            customer_id=str(customer_id),
+            funnel_events_deleted=deleted,
+            note=(
+                "Anonymous events keyed only on session_fingerprint are not "
+                "linked to a customer; those are pruned by the retention cron."
+            ),
+        ),
+        message="Customer analytics erased",
+    )

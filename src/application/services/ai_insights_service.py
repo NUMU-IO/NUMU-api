@@ -8,6 +8,7 @@ The rule engine always works. The LLM layer is optional — if it fails, we fall
 to template-based text.
 """
 
+import asyncio
 import json
 import logging
 import math
@@ -426,11 +427,17 @@ Provide your analysis as a JSON object with these keys:
 
 Return ONLY the JSON object, no markdown."""
 
-        response = await client.chat.completions.create(
-            model=settings.google_ai_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=800,
-            temperature=0.3,
+        # 20 s wall-clock cap. The endpoint is user-facing; if Gemini
+        # is slow, we'd rather render the rule-based signals with no
+        # narrative than hang the dashboard.
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=settings.google_ai_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=800,
+                temperature=0.3,
+            ),
+            timeout=20.0,
         )
 
         content = response.choices[0].message.content
@@ -441,6 +448,9 @@ Return ONLY the JSON object, no markdown."""
                 content = response.choices[0].message.content.split("```")[-2].strip()
 
         return content
+    except TimeoutError:
+        logger.warning("llm_narrative_timeout", timeout_s=20)
+        return None
     except Exception as e:
         logger.warning("llm_narrative_failed", error=str(e))
         return None

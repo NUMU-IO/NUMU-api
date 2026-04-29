@@ -433,6 +433,7 @@ class OrderRepository(IOrderRepository):
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         customer_id: UUID | None = None,
+        exclude_statuses: list[OrderStatus] | None = None,
     ) -> int:
         """Get total count of orders for a store with optional filters."""
         query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
@@ -444,6 +445,8 @@ class OrderRepository(IOrderRepository):
             query = query.where(OrderModel.payment_status == payment_status)
         if fulfillment_status:
             query = query.where(OrderModel.fulfillment_status == fulfillment_status)
+        if exclude_statuses:
+            query = query.where(OrderModel.status.notin_(exclude_statuses))
         if date_from:
             query = query.where(OrderModel.created_at >= date_from)
         if date_to:
