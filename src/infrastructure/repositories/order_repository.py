@@ -97,18 +97,28 @@ class OrderRepository(IOrderRepository):
     def _dict_to_address(self, data: dict) -> OrderShippingAddress:
         """Convert dict to OrderShippingAddress.
 
-        Geolocation fields are pulled with ``.get()`` so legacy orders
-        written before the fields existed simply rehydrate as None.
+        Every required string field falls back to ``""`` and every
+        optional field to ``None`` when missing. Imported orders (and
+        some legacy rows) carry partial address JSONBs — e.g. Bosta /
+        manual-entry imports occasionally drop ``address_line1`` and
+        provide a free-form ``street`` only, or omit ``country`` for
+        in-Egypt orders. Bracket access on those rows used to
+        ``KeyError`` and 500 every endpoint that rehydrates the order,
+        including ``/dashboard/revenue`` and ``/dashboard/top-products``
+        which iterate the store's whole order list to aggregate.
+        Falling back to ``""`` lets the entity exist — consumers that
+        actually need the address can still detect "unset" by the
+        empty string.
         """
         return OrderShippingAddress(
-            first_name=data["first_name"],
-            last_name=data["last_name"],
-            address_line1=data["address_line1"],
+            first_name=data.get("first_name") or "",
+            last_name=data.get("last_name") or "",
+            address_line1=data.get("address_line1") or "",
             address_line2=data.get("address_line2"),
-            city=data["city"],
+            city=data.get("city") or "",
             state=data.get("state"),
             postal_code=data.get("postal_code"),
-            country=data["country"],
+            country=data.get("country") or "",
             phone=data.get("phone"),
             latitude=data.get("latitude"),
             longitude=data.get("longitude"),
