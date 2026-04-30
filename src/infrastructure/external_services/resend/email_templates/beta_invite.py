@@ -62,11 +62,23 @@ def beta_invite_html(
     language: str = "ar",
 ) -> str:
     """Render the beta invite email."""
+    # Late import so a settings/env misconfiguration doesn't blow up at
+    # module-load time — only when an invite is actually sent.
+    from src.config.settings import settings
+
     c = _BETA_INVITE.get(language, _BETA_INVITE["ar"])
     greeting = c["greeting"].format(name=name) if name else c["greeting_default"]
     code_display = invite_code[:16]
 
     perks_html = "".join(f'<li style="margin-bottom:8px;">{p}</li>' for p in c["perks"])
+
+    # The /accept-invite route lives in the merchant hub
+    # (``merchant.numueg.app``) — the apex (``numueg.app``) is the
+    # marketing site and 404s on this path. Pull the right host from
+    # the central setting so envs (staging/prod) don't drift.
+    accept_url = (
+        f"{settings.merchant_hub_url.rstrip('/')}/accept-invite?code={invite_code}"
+    )
 
     body = f"""
     {header(c["title"], c["subtitle"], language=language)}
@@ -84,7 +96,7 @@ def beta_invite_html(
         <p>{c["use_code"]}</p>
 
         <p class="center" style="margin:30px 0;">
-            <a href="https://numueg.app/accept-invite?code={invite_code}" class="btn">{c["btn"]}</a>
+            <a href="{accept_url}" class="btn">{c["btn"]}</a>
         </p>
 
         <hr class="divider">
