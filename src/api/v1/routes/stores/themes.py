@@ -45,6 +45,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{store_id}/themes")
 
 
+def _read_base_theme(theme_block) -> str | None:
+    """Read the active base-theme id from a ``theme_settings.theme`` slot.
+
+    Stores can hold one of two shapes:
+      * ``"modern"`` — legacy form, the slot is a plain string id.
+      * ``{"base_theme": "modern", ...}`` — canonical object form.
+
+    Returns the id as a string for both, or ``None`` when the slot is
+    missing or holds an unexpected type.
+    """
+    if isinstance(theme_block, str):
+        return theme_block
+    if isinstance(theme_block, dict):
+        value = theme_block.get("base_theme")
+        return value if isinstance(value, str) else None
+    return None
+
+
 @router.get(
     "",
     response_model=SuccessResponse[StoreThemesListResponse],
@@ -62,7 +80,12 @@ async def list_store_themes(
     """
     theme_settings = store.theme_settings or {}
     external = theme_settings.get("external_theme")
-    active_theme_id = theme_settings.get("theme", {}).get("base_theme")
+    # Some legacy stores stored ``theme`` as a plain string (the
+    # base-theme id directly) instead of the canonical
+    # ``{"base_theme": "modern", ...}`` object. Coerce both shapes
+    # to a string id so the response stays consistent and the route
+    # doesn't AttributeError on ``str.get``.
+    active_theme_id = _read_base_theme(theme_settings.get("theme"))
 
     items: list[StoreThemeListItem] = []
 

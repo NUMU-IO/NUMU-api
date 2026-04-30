@@ -1630,6 +1630,23 @@ def _to_snake_case(name: str) -> str:
     return re.sub(r"([A-Z])", r"_\1", name).lower().lstrip("_")
 
 
+def _normalize_theme_block(theme_block: Any) -> dict[str, Any]:
+    """Coerce a ``theme_settings.theme`` slot to the canonical dict shape.
+
+    Some stores were saved with ``theme`` as a plain string id
+    (legacy form) rather than the canonical ``{"base_theme": "<id>",
+    ...}`` object. Read paths used to do ``foo.get("theme", {}).get(
+    "base_theme")`` and crashed with ``AttributeError: 'str' object
+    has no attribute 'get'`` against the legacy rows. This wraps the
+    string into the object shape so every consumer can assume a dict.
+    """
+    if isinstance(theme_block, str):
+        return {"base_theme": theme_block}
+    if isinstance(theme_block, dict):
+        return theme_block
+    return {}
+
+
 def _normalize_keys(obj: Any) -> Any:
     """Recursively convert all dict keys to snake_case and deduplicate."""
     if isinstance(obj, dict):
@@ -1694,7 +1711,9 @@ def _build_customization_response(
     return CustomizationResponse(
         customization_mode=merged.get("customization_mode", "preset"),
         identity=CustomizationIdentity(**merged.get("identity", defaults["identity"])),
-        theme=CustomizationTheme(**merged.get("theme", defaults["theme"])),
+        theme=CustomizationTheme(
+            **_normalize_theme_block(merged.get("theme")) or defaults["theme"]
+        ),
         header=CustomizationHeader(**merged.get("header", defaults["header"])),
         hero=CustomizationHero(**merged.get("hero", defaults["hero"])),
         products=CustomizationProducts(**merged.get("products", defaults["products"])),
@@ -1775,12 +1794,13 @@ async def update_customization(
         # theme's default copy — e.g. a luxury hero headline on a streetwear
         # theme — because templates are merchant-level overrides that persist
         # across theme switches.
-        old_base_theme = customization.get("theme", {}).get("base_theme")
+        old_theme_block = _normalize_theme_block(customization.get("theme"))
+        old_base_theme = old_theme_block.get("base_theme")
         new_base_theme = request.theme.get("base_theme")
         base_theme_changing = (
             new_base_theme is not None and new_base_theme != old_base_theme
         )
-        customization["theme"] = {**customization.get("theme", {}), **request.theme}
+        customization["theme"] = {**old_theme_block, **request.theme}
         if base_theme_changing:
             customization.pop("templates", None)
     if request.header is not None:
