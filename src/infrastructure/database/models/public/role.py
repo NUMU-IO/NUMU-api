@@ -66,8 +66,15 @@ class RoleModel(Base, UUIDMixin, TimestampMixin):
         return f"<RoleModel(name={self.name}, tenant_id={self.tenant_id})>"
 
 
-class RolePermissionModel(Base, TimestampMixin):
-    """Many-to-many join table for roles and permissions."""
+class RolePermissionModel(Base, UUIDMixin, TimestampMixin):
+    """Many-to-many join table for roles and permissions.
+
+    Inherits ``UUIDMixin`` so the ``id`` column carries a
+    ``default=uuid4`` — without it, ``clone_role`` (and every other
+    insert path that doesn't manually pass an id) flushes with a NULL
+    primary key and SQLAlchemy raises ``FlushError: NULL identity
+    key``.
+    """
 
     __tablename__ = "role_permissions"
     __table_args__ = (
@@ -76,9 +83,6 @@ class RolePermissionModel(Base, TimestampMixin):
         {"schema": "public"},
     )
 
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, nullable=False
-    )
     role_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.roles.id", ondelete="CASCADE"),

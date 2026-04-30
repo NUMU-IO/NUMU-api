@@ -26,6 +26,7 @@ from sqlalchemy import (
     func,
     select,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.order import OrderStatus
@@ -224,16 +225,19 @@ class AnalyticsRepository:
         date_from: datetime,
         date_to: datetime,
     ) -> dict[str, float]:
-        """avg / p50 / p95 hours from order ``created_at`` to ``shipped_at``.
+        """avg / p50 / p95 hours from order ``created_at`` to ``fulfilled_at``.
 
         Uses Postgres ``percentile_cont`` rather than an in-memory sort
         of all order rows. Excludes orders that never shipped (NULL
-        shipped_at) — those would otherwise drag the average to inf.
+        ``fulfilled_at``) — those would otherwise drag the average to
+        inf. The OrderModel column is ``fulfilled_at`` (not
+        ``shipped_at``); it's set when the order transitions to a
+        fulfilled / shipped state.
         """
         delta_hours = (
             extract(
                 "epoch",
-                OrderModel.shipped_at - OrderModel.created_at,
+                OrderModel.fulfilled_at - OrderModel.created_at,
             )
             / 3600.0
         ).label("hours")
@@ -247,7 +251,7 @@ class AnalyticsRepository:
             ).label("p95_h"),
         ).where(
             *self._store_window(store_id, date_from, date_to),
-            OrderModel.shipped_at.isnot(None),
+            OrderModel.fulfilled_at.isnot(None),
         )
         result = await self.session.execute(self._tenant_filter(query))
         row = result.one()
@@ -474,6 +478,45 @@ class AnalyticsRepository:
             "unique_customers": int(row.customers or 0),
         }
 
+    # ── Daily revenue series (forecast fallback) ───────────────────
+    async def daily_revenue_series(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """One row per UTC date that had at least one non-cancelled order.
+
+        Fallback for the forecast endpoint when the daily-rollup task
+        hasn't run yet for this store (brand-new merchants, or the
+        cron hasn't fired since signup). Returns
+        ``[{rollup_date, total_revenue_cents, total_orders}]`` so the
+        route can wrap each row in a rollup-shaped object and feed it
+        to the existing forecast service unchanged.
+        """
+        from sqlalchemy import Date as _Date
+
+        day_expr = cast(OrderModel.created_at, _Date).label("day")
+        query = (
+            select(
+                day_expr,
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue_cents"),
+                func.count(OrderModel.id).label("orders"),
+            )
+            .where(*self._store_window(store_id, date_from, date_to))
+            .group_by(day_expr)
+            .order_by(day_expr)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            {
+                "rollup_date": row.day,
+                "total_revenue_cents": int(row.revenue_cents or 0),
+                "total_orders": int(row.orders or 0),
+            }
+            for row in result.all()
+        ]
+
     # ── COD outcomes (order-derived, not shipment-derived) ─────────
     async def cod_summary(
         self,
@@ -581,12 +624,17 @@ class AnalyticsRepository:
             .limit(20)
         )
         result = await self.session.execute(self._tenant_filter(query))
+        # Key is "rate" (not "rejection_rate") to match
+        # CodRejectionLocationResponse — that field uses the unprefixed
+        # name because the model's parent already scopes the value to
+        # rejections (the top-level CodRejectionStatsResponse keeps
+        # the longer ``rejection_rate`` to disambiguate).
         return [
             {
                 "location": row.location,
                 "total": int(row.total or 0),
                 "rejected": int(row.rejected or 0),
-                "rejection_rate": (
+                "rate": (
                     round(int(row.rejected or 0) / int(row.total or 1) * 100, 1)
                     if row.total
                     else 0.0
@@ -829,7 +877,11 @@ class AnalyticsRepository:
         ).where(*self._store_window(store_id, date_from, date_to))
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
 
-        li = line_items_cte.c.li
+        # See ``top_products`` for why this cast is required — the
+        # subquery wrapper drops JSONB type info, so subscripting
+        # ``c.li[...]`` raises ``Operator 'getitem' is not supported``
+        # without it.
+        li = cast(line_items_cte.c.li, JSONB)
         product_id_expr = li["product_id"].astext.label("product_id")
         revenue_per_line = func.coalesce(
             cast(li["total_price"].astext, Integer),
@@ -910,7 +962,14 @@ class AnalyticsRepository:
         ).where(*self._store_window(store_id, date_from, date_to))
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
 
-        li = line_items_cte.c.li
+        # ``jsonb_array_elements`` returns JSONB at the DB level, but
+        # after ``.subquery()`` SQLAlchemy loses the type info — the
+        # ``c.li`` column reads as a plain element with no ``[]``
+        # operator. Cast back to JSONB so subscript expressions like
+        # ``li["product_id"].astext`` lower to the Postgres ``->``
+        # operator instead of raising ``Operator 'getitem' is not
+        # supported on this expression``.
+        li = cast(line_items_cte.c.li, JSONB)
         product_id_expr = li["product_id"].astext.label("product_id")
         product_name_expr = li["name"].astext.label("product_name")
         quantity_expr = cast(func.coalesce(li["quantity"].astext, "0"), Integer).label(

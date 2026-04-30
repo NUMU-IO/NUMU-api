@@ -107,6 +107,20 @@ def _product_response(product) -> BundledProductResponse:
             product.compare_at_price.cents if product.compare_at_price else None
         )
 
+    # ``is_in_stock`` is a Python property on the ``Product`` entity
+    # (which respects the OOS-override flag in attributes) but not on
+    # ``ProductModel`` — the ORM row has no such method. Dispatch the
+    # same way the price branch does so callers can hand us whichever
+    # shape is cheaper to construct.
+    if hasattr(product, "is_in_stock"):
+        in_stock = bool(product.is_in_stock)
+    else:
+        attrs = product.attributes or {}
+        in_stock = (
+            bool(attrs.get("continue_selling_when_out_of_stock"))
+            or (product.quantity or 0) > 0
+        )
+
     return BundledProductResponse(
         id=str(product.id),
         name=product.name,
@@ -115,7 +129,7 @@ def _product_response(product) -> BundledProductResponse:
         price_currency=price_currency,
         compare_at_price=compare_at,
         image=product.images[0] if product.images else None,
-        is_in_stock=product.is_in_stock,
+        is_in_stock=in_stock,
         quantity=product.quantity,
     )
 

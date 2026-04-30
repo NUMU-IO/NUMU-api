@@ -287,10 +287,15 @@ async def get_analytics_top_products(
         rows = await analytics_repo.top_products(
             store.id, period_start, now, limit=limit
         )
+        # Older orders' line_items JSONB may not carry a ``name`` field;
+        # ``jsonb_array_elements(...)['name'].astext`` returns NULL in
+        # that case and Pydantic rejects ``name: str`` at the response
+        # stage. Coalesce to a stable placeholder so the chart still
+        # renders — matches the rollup branch above which uses ``""``.
         sorted_products = [
             {
                 "id": r["product_id"],
-                "name": r["product_name"],
+                "name": r["product_name"] or "(unnamed product)",
                 "sku": None,
                 "quantity": r["units_sold"],
                 "revenue": r["revenue_cents"],
@@ -1598,12 +1603,15 @@ async def get_insights(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     lang: str = Query("ar", description="Language: ar or en"),
 ):
     """Get AI-powered insights with anomaly detection and LLM narratives.
 
     Uses cached insights from store.settings when available (refreshed daily
     by Celery task). Falls back to live calculation if no cache exists.
+    Same rollup-vs-orders fallback as ``/forecast``: brand-new stores
+    have no rollup rows yet, so we aggregate from ``orders`` directly.
     """
     from src.application.services.ai_insights_service import generate_insights
 
@@ -1611,15 +1619,35 @@ async def get_insights(
     if store.settings:
         cached = store.settings.get("ai_insights")
         if cached and cached.get("generated_at"):
-            # Use cache if generated today
+            # Use cache if generated today AND it represents real data.
+            # An "insufficient data" cache is sticky-bad: the rollup
+            # cron may have run on an empty store earlier today, then
+            # the merchant placed orders — without this guard we'd
+            # serve "0 days available" until tomorrow UTC.
             from datetime import UTC, datetime
+
+            cached_signals = cached.get("signals", [])
+            cached_metrics = cached.get("metrics_summary") or {}
+            # The rule engine emits a single ``insufficient_data``
+            # signal when it sees <7 days of rollup rows. That's the
+            # reliable "cache was built on no data" marker — checking
+            # for an empty signals list misses the case (the empty
+            # state has 1 signal, not 0). Bypass either when we see
+            # that signal type or when the cached metrics summary
+            # explicitly says <7 days were analyzed.
+            has_insufficient_signal = any(
+                isinstance(s, dict) and s.get("type") == "insufficient_data"
+                for s in cached_signals
+            )
+            cached_days = int(cached_metrics.get("days_analyzed") or 0)
+            looks_empty = (
+                not cached_signals or has_insufficient_signal or cached_days < 7
+            )
 
             try:
                 gen_time = datetime.fromisoformat(cached["generated_at"])
-                if gen_time.date() == datetime.now(UTC).date():
-                    signals = [
-                        InsightSignalResponse(**s) for s in cached.get("signals", [])
-                    ]
+                if gen_time.date() == datetime.now(UTC).date() and not looks_empty:
+                    signals = [InsightSignalResponse(**s) for s in cached_signals]
                     narrative = None
                     if cached.get("narrative"):
                         narrative = InsightNarrativeResponse(**cached["narrative"])
@@ -1638,6 +1666,71 @@ async def get_insights(
     today = date.today()
     date_from = today - timedelta(days=35)  # 5 weeks for baseline + current
     rollups = await rollup_repo.get_range(store.id, date_from, today)
+
+    # Order-derived fallback: if the rollup is shorter than the order
+    # history (typical on stores where the daily cron hasn't run yet),
+    # synthesise rollup-shaped objects from a SQL aggregation. The
+    # rule engine reads ``rollup_date / total_revenue_cents /
+    # total_orders``, so a small adapter object is enough.
+    from datetime import datetime as _dt
+
+    period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
+    period_to = datetime.now(UTC)
+    order_rows = await analytics_repo.daily_revenue_series(
+        store.id, period_from, period_to
+    )
+    if len(order_rows) > len(rollups):
+
+        class _PseudoRollup:
+            # Mirror every attribute the insights rule engine reads off
+            # the real ``AnalyticsDailyRollupModel`` so it can iterate
+            # the fallback rows interchangeably. Fields the SQL
+            # aggregation doesn't supply default to zero / empty list —
+            # the matching rule (COD-rejection, refunds, customer-mix,
+            # traffic) simply won't fire, which is correct: we don't
+            # have the data, so we can't trigger the signal.
+            __slots__ = (
+                "rollup_date",
+                "total_revenue_cents",
+                "total_orders",
+                "paid_orders",
+                "cancelled_orders",
+                "avg_order_value_cents",
+                "new_customers",
+                "returning_customers",
+                "total_page_views",
+                "unique_visitors",
+                "cod_orders",
+                "cod_delivered",
+                "cod_rejected",
+                "refund_count",
+                "refund_amount_cents",
+                "top_products_json",
+                "revenue_by_location_json",
+                "traffic_sources_json",
+            )
+
+            def __init__(self, row: dict) -> None:
+                self.rollup_date = row["rollup_date"]
+                self.total_revenue_cents = row["total_revenue_cents"]
+                self.total_orders = row["total_orders"]
+                self.paid_orders = row.get("paid_orders", 0)
+                self.cancelled_orders = row.get("cancelled_orders", 0)
+                self.avg_order_value_cents = row.get("avg_order_value_cents", 0)
+                self.new_customers = row.get("new_customers", 0)
+                self.returning_customers = row.get("returning_customers", 0)
+                self.total_page_views = row.get("total_page_views", 0)
+                self.unique_visitors = row.get("unique_visitors", 0)
+                self.cod_orders = row.get("cod_orders", 0)
+                self.cod_delivered = row.get("cod_delivered", 0)
+                self.cod_rejected = row.get("cod_rejected", 0)
+                self.refund_count = row.get("refund_count", 0)
+                self.refund_amount_cents = row.get("refund_amount_cents", 0)
+                self.top_products_json = row.get("top_products_json", [])
+                self.revenue_by_location_json = row.get("revenue_by_location_json", [])
+                self.traffic_sources_json = row.get("traffic_sources_json", [])
+
+        rollups = [_PseudoRollup(r) for r in order_rows]
 
     currency = store.default_currency.value if store.default_currency else "EGP"
     result = await generate_insights(rollups, store_currency=currency, lang=lang)
@@ -1714,14 +1807,47 @@ async def get_forecast(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     horizon: int = Query(30, ge=7, le=90, description="Forecast horizon in days"),
 ):
-    """Get sales revenue forecast using Holt-Winters exponential smoothing."""
+    """Get sales revenue forecast using Holt-Winters exponential smoothing.
+
+    Preferred source: the nightly ``analytics_daily_rollup`` table.
+    Fallback: aggregate ``orders`` directly when the rollup hasn't
+    caught up to this store yet (brand-new merchants, or the daily
+    cron hasn't fired since signup). The forecast service consumes a
+    sequence of rollup-shaped objects, so we just wrap the raw daily
+    rows in a tiny adapter when we use the fallback path.
+    """
     from src.application.services.forecast_service import generate_forecast
 
     today = date.today()
     date_from = today - timedelta(days=365)  # Use up to 1 year of data
     rollups = await rollup_repo.get_range(store.id, date_from, today)
+
+    # The forecast service requires ≥14 days of data. If the rollup
+    # table is short of that, try aggregating orders directly — most
+    # of the time this is the difference between "0 days" (rollup
+    # hasn't run yet) and "you have enough" for a real merchant.
+    if len(rollups) < 14:
+        from datetime import datetime as _dt
+
+        period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
+        period_to = datetime.now(UTC)
+        order_rows = await analytics_repo.daily_revenue_series(
+            store.id, period_from, period_to
+        )
+        if len(order_rows) > len(rollups):
+
+            class _PseudoRollup:
+                __slots__ = ("rollup_date", "total_revenue_cents", "total_orders")
+
+                def __init__(self, row: dict) -> None:
+                    self.rollup_date = row["rollup_date"]
+                    self.total_revenue_cents = row["total_revenue_cents"]
+                    self.total_orders = row["total_orders"]
+
+            rollups = [_PseudoRollup(r) for r in order_rows]
 
     result = generate_forecast(rollups, horizon=horizon)
 
