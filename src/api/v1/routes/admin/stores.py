@@ -24,7 +24,10 @@ from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.config import settings
 from src.core.entities.store import StoreStatus
-from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.public.tenant import (
+    TenantLifecycleState,
+    TenantModel,
+)
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.store import StoreModel
@@ -323,9 +326,16 @@ async def store_stats(
     _admin_id: Annotated[UUID, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Get store counts grouped by status."""
+    """Get store counts grouped by status, excluding demo tenants."""
+    demo_tenant_ids = (
+        select(TenantModel.id)
+        .where(TenantModel.lifecycle_state == TenantLifecycleState.DEMO.value)
+        .scalar_subquery()
+    )
     result = await db.execute(
-        select(StoreModel.status, func.count(StoreModel.id)).group_by(StoreModel.status)
+        select(StoreModel.status, func.count(StoreModel.id))
+        .where(StoreModel.tenant_id.notin_(demo_tenant_ids))
+        .group_by(StoreModel.status)
     )
     counts = {row[0]: row[1] for row in result.all()}
 

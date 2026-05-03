@@ -32,6 +32,7 @@ from src.api.v1.routes.admin.platform_settings import (
 from src.api.v1.routes.admin.products import router as products_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.stores import router as stores_router
+from src.api.v1.routes.admin.themes import router as themes_router
 from src.api.v1.routes.admin.users import router as admin_users_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
 from src.api.v1.routes.tenant.configuration.admin_routes import (
@@ -69,6 +70,11 @@ router.include_router(
     merchant_hub_nav_router,
     prefix="/merchant-hub-nav",
     tags=["Admin - Merchant Hub Nav"],
+)
+router.include_router(
+    themes_router,
+    prefix="/themes",
+    tags=["Admin - Themes"],
 )
 router.include_router(
     admin_users_router,

@@ -232,14 +232,71 @@ async def list_themes():
     latest theme_version to get nameAr/layout out of the manifest. Falls back
     to the static AVAILABLE_THEMES list if the DB query fails or returns
     empty so the dashboard never sees an empty marketplace during a deploy.
+
+    Each entry is then decorated with admin-config flags (required_plan,
+    display_order, preview_image_url, demo_url) and themes flagged
+    is_visible=false are filtered out before returning.
     """
     import logging
 
+    from sqlalchemy import select
+
+    from src.config.settings import get_settings
     from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.public.theme_admin_config import (
+        ThemeAdminConfigModel,
+    )
     from src.infrastructure.repositories.theme_repository import ThemeRepository
     from src.infrastructure.repositories.theme_version_repository import (
         ThemeVersionRepository,
     )
+
+    settings = get_settings()
+    assets_base = settings.storefront_assets_base_url.rstrip("/")
+
+    # Load admin-config flags once. Missing rows → defaults (visible, free,
+    # display_order=100). The admin GET endpoint upserts missing slugs, so
+    # this map should be near-complete in steady state.
+    admin_flags: dict[str, dict] = {}
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ThemeAdminConfigModel))
+            for row in result.scalars().all():
+                admin_flags[row.theme_slug] = {
+                    "is_visible": row.is_visible,
+                    "required_plan": row.required_plan,
+                    "display_order": row.display_order,
+                }
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "list_themes_admin_flags_unavailable",
+            extra={"error": str(exc)},
+        )
+
+    def _decorate(entry: dict) -> dict | None:
+        """Filter by visibility, then decorate with required_plan/display_order/asset URLs.
+
+        Returns ``None`` for invisible themes — caller filters those out.
+        """
+        slug = entry.get("id", "")
+        flags = admin_flags.get(
+            slug,
+            {"is_visible": True, "required_plan": "free", "display_order": 100},
+        )
+        if not flags["is_visible"]:
+            return None
+        return {
+            **entry,
+            "required_plan": flags["required_plan"],
+            "display_order": flags["display_order"],
+            "preview_image_url": f"{assets_base}/themes/{slug}/preview.png",
+            "demo_url": f"https://{slug}-demo.numueg.app",
+        }
+
+    def _build_payload(raw: list[dict]) -> list[dict]:
+        decorated = [out for out in (_decorate(e) for e in raw) if out is not None]
+        decorated.sort(key=lambda x: (x.get("display_order", 100), x.get("name", "")))
+        return decorated
 
     try:
         async with AsyncSessionLocal() as session:
@@ -251,7 +308,7 @@ async def list_themes():
 
             if not db_themes:
                 return SuccessResponse(
-                    data=AVAILABLE_THEMES,
+                    data=_build_payload(AVAILABLE_THEMES),
                     message="Themes retrieved successfully",
                 )
 
@@ -276,7 +333,7 @@ async def list_themes():
                 })
 
             return SuccessResponse(
-                data=payload,
+                data=_build_payload(payload),
                 message="Themes retrieved successfully",
             )
     except Exception as exc:
@@ -287,7 +344,7 @@ async def list_themes():
 
     # Fallback: return the static list if the DB is empty/unreachable
     return SuccessResponse(
-        data=AVAILABLE_THEMES,
+        data=_build_payload(AVAILABLE_THEMES),
         message="Themes retrieved successfully",
     )
 
