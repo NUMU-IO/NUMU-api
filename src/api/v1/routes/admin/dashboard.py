@@ -18,7 +18,10 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.core.entities.order import PaymentStatus
-from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.public.tenant import (
+    TenantLifecycleState,
+    TenantModel,
+)
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.order import OrderModel
 
@@ -70,15 +73,30 @@ async def get_dashboard_stats(
     _admin_id: Annotated[UUID, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Get aggregated platform-wide statistics with month-over-month changes."""
+    """Get aggregated platform-wide statistics with month-over-month changes.
+
+    Demo tenants (``lifecycle_state == "demo"``) are excluded from every
+    aggregate so the platform dashboard reflects real merchant activity only.
+    """
     now = datetime.now(UTC)
     current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     prev_month_start = (current_month_start - timedelta(days=1)).replace(day=1)
 
+    # Subquery of tenant IDs flagged as demo — used to filter all aggregates.
+    demo_tenant_ids = (
+        select(TenantModel.id)
+        .where(TenantModel.lifecycle_state == TenantLifecycleState.DEMO.value)
+        .scalar_subquery()
+    )
+    not_demo_order = OrderModel.tenant_id.notin_(demo_tenant_ids)
+    not_demo_customer = CustomerModel.tenant_id.notin_(demo_tenant_ids)
+    not_demo_tenant = TenantModel.lifecycle_state != TenantLifecycleState.DEMO.value
+
     # --- Total revenue (paid orders) ---
     rev_result = await db.execute(
         select(func.coalesce(func.sum(OrderModel.total), 0)).where(
-            OrderModel.payment_status == PaymentStatus.PAID
+            OrderModel.payment_status == PaymentStatus.PAID,
+            not_demo_order,
         )
     )
     total_revenue = rev_result.scalar() or 0
@@ -88,6 +106,7 @@ async def get_dashboard_stats(
         select(func.coalesce(func.sum(OrderModel.total), 0)).where(
             OrderModel.payment_status == PaymentStatus.PAID,
             OrderModel.created_at >= current_month_start,
+            not_demo_order,
         )
     )
     rev_this_month = rev_current.scalar() or 0
@@ -98,17 +117,21 @@ async def get_dashboard_stats(
             OrderModel.payment_status == PaymentStatus.PAID,
             OrderModel.created_at >= prev_month_start,
             OrderModel.created_at < current_month_start,
+            not_demo_order,
         )
     )
     rev_last_month = rev_prev.scalar() or 0
 
     # --- Total orders ---
-    orders_total_result = await db.execute(select(func.count(OrderModel.id)))
+    orders_total_result = await db.execute(
+        select(func.count(OrderModel.id)).where(not_demo_order)
+    )
     total_orders = orders_total_result.scalar() or 0
 
     orders_current = await db.execute(
         select(func.count(OrderModel.id)).where(
-            OrderModel.created_at >= current_month_start
+            OrderModel.created_at >= current_month_start,
+            not_demo_order,
         )
     )
     orders_this_month = orders_current.scalar() or 0
@@ -117,17 +140,21 @@ async def get_dashboard_stats(
         select(func.count(OrderModel.id)).where(
             OrderModel.created_at >= prev_month_start,
             OrderModel.created_at < current_month_start,
+            not_demo_order,
         )
     )
     orders_last_month = orders_prev.scalar() or 0
 
     # --- Total customers ---
-    cust_total_result = await db.execute(select(func.count(CustomerModel.id)))
+    cust_total_result = await db.execute(
+        select(func.count(CustomerModel.id)).where(not_demo_customer)
+    )
     total_customers = cust_total_result.scalar() or 0
 
     cust_current = await db.execute(
         select(func.count(CustomerModel.id)).where(
-            CustomerModel.created_at >= current_month_start
+            CustomerModel.created_at >= current_month_start,
+            not_demo_customer,
         )
     )
     cust_this_month = cust_current.scalar() or 0
@@ -136,13 +163,17 @@ async def get_dashboard_stats(
         select(func.count(CustomerModel.id)).where(
             CustomerModel.created_at >= prev_month_start,
             CustomerModel.created_at < current_month_start,
+            not_demo_customer,
         )
     )
     cust_last_month = cust_prev.scalar() or 0
 
     # --- Active merchants (tenants) ---
     merchants_result = await db.execute(
-        select(func.count(TenantModel.id)).where(TenantModel.is_active.is_(True))
+        select(func.count(TenantModel.id)).where(
+            TenantModel.is_active.is_(True),
+            not_demo_tenant,
+        )
     )
     active_merchants = merchants_result.scalar() or 0
 
@@ -150,6 +181,7 @@ async def get_dashboard_stats(
         select(func.count(TenantModel.id)).where(
             TenantModel.is_active.is_(True),
             TenantModel.created_at >= current_month_start,
+            not_demo_tenant,
         )
     )
     merchants_this_month = merchants_current.scalar() or 0
@@ -159,6 +191,7 @@ async def get_dashboard_stats(
             TenantModel.is_active.is_(True),
             TenantModel.created_at >= prev_month_start,
             TenantModel.created_at < current_month_start,
+            not_demo_tenant,
         )
     )
     merchants_last_month = merchants_prev.scalar() or 0

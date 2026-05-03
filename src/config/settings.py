@@ -292,6 +292,14 @@ class Settings(BaseSettings):
     # the landing-page nginx location which already serves /numu-logo-*.
     brand_assets_base_url: str = "https://numueg.app"
 
+    # Absolute base URL serving the storefront's static assets (theme
+    # preview screenshots under /themes/{slug}/preview.png, etc.). The
+    # merchant hub fetches these directly via <img src> from this host,
+    # so it must be reachable from the merchant browser. In production
+    # this points at the deployed storefront (or its CDN edge); in dev,
+    # set to the local Vite host (e.g. http://localhost:5173).
+    storefront_assets_base_url: str = "https://numueg.app"
+
     # Google OAuth
     google_oauth_client_id: str | None = None
 
