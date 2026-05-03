@@ -266,6 +266,7 @@ async def list_themes():
                     "is_visible": row.is_visible,
                     "required_plan": row.required_plan,
                     "display_order": row.display_order,
+                    "preview_image_url": row.preview_image_url,
                 }
     except Exception as exc:
         logging.getLogger(__name__).warning(
@@ -281,15 +282,26 @@ async def list_themes():
         slug = entry.get("id", "")
         flags = admin_flags.get(
             slug,
-            {"is_visible": True, "required_plan": "free", "display_order": 100},
+            {
+                "is_visible": True,
+                "required_plan": "free",
+                "display_order": 100,
+                "preview_image_url": None,
+            },
         )
         if not flags["is_visible"]:
             return None
+        # Admin-uploaded preview overrides the convention URL when set.
+        # Otherwise we fall back to {STOREFRONT_ASSETS_BASE_URL}/themes/{slug}/preview.png
+        # so any screenshots checked into the storefront repo's public/ keep working.
+        preview_url = (
+            flags.get("preview_image_url") or f"{assets_base}/themes/{slug}/preview.png"
+        )
         return {
             **entry,
             "required_plan": flags["required_plan"],
             "display_order": flags["display_order"],
-            "preview_image_url": f"{assets_base}/themes/{slug}/preview.png",
+            "preview_image_url": preview_url,
             "demo_url": f"https://{slug}-demo.numueg.app",
         }
 

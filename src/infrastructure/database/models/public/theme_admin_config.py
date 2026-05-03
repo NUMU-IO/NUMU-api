@@ -42,3 +42,8 @@ class ThemeAdminConfigModel(Base, TimestampMixin):
     display_order: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="100"
     )
+    # Override URL for the merchant-facing preview screenshot. When NULL,
+    # the storefront API falls back to the convention
+    # f"{STOREFRONT_ASSETS_BASE_URL}/themes/{slug}/preview.png" so any
+    # screenshots checked into the storefront repo's public/ keep working.
+    preview_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
