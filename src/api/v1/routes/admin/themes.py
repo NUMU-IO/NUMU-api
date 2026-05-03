@@ -17,9 +17,10 @@ so the admin client can ``setQueryData`` without a refetch.
 """
 
 import logging
+import uuid
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -29,6 +30,7 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront.public import AVAILABLE_THEMES
+from src.core.interfaces.services.storage_service import StorageBucket
 from src.infrastructure.database.models.public.theme_admin_config import (
     ThemeAdminConfigModel,
 )
@@ -56,6 +58,9 @@ class ThemeAdminConfigItem(BaseModel):
     is_visible: bool
     required_plan: RequiredPlan
     display_order: int
+    # When set, overrides the convention-based preview URL. NULL means the
+    # storefront should fall back to {STOREFRONT_ASSETS_BASE_URL}/themes/{slug}/preview.png.
+    preview_image_url: str | None = None
 
 
 class ThemeAdminConfigUpdate(BaseModel):
@@ -124,6 +129,7 @@ def _decorate(
         is_visible=row.is_visible,
         required_plan=row.required_plan,  # type: ignore[arg-type]
         display_order=row.display_order,
+        preview_image_url=row.preview_image_url,
     )
 
 
@@ -216,3 +222,145 @@ async def update_theme_admin_config(
         "Theme admin config updated — themes=%s", [t.theme_slug for t in request.themes]
     )
     return SuccessResponse(data=items, message="Theme admin config saved")
+
+
+# ---------------------------------------------------------------------------
+# Preview screenshot upload
+# ---------------------------------------------------------------------------
+
+# Allowed MIME types — same set used for store customization assets, minus
+# SVG/ICO since theme previews are full-bleed screenshots.
+_ALLOWED_PREVIEW_CONTENT = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+# 8 MB is comfortable for high-res 1280×800+ PNGs and gives admins
+# headroom for retina captures without loading the page indefinitely.
+_PREVIEW_MAX_BYTES = 8 * 1024 * 1024
+
+
+@router.post(
+    "/{slug}/preview",
+    response_model=SuccessResponse[ThemeAdminConfigItem],
+    summary="Upload preview screenshot for a theme",
+    operation_id="admin_upload_theme_preview",
+)
+async def upload_theme_preview(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _admin: Annotated[Any, Depends(require_admin)],
+    slug: Annotated[
+        str, Path(description="Theme slug (e.g. modern, gilded-glamour-boutique)")
+    ],
+    file: Annotated[UploadFile, File(description="PNG/JPEG/WebP screenshot")],
+):
+    """Persist a merchant-facing preview screenshot for ``slug``.
+
+    The previous URL (if any) is left in storage — we don't try to delete
+    it because admins commonly upload new captures on top of old ones and
+    a stale CDN URL is better than a broken one if the delete fails.
+    Storage GC handles long-tail cleanup elsewhere.
+    """
+    catalog = _catalog_index()
+    if slug not in catalog:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown theme slug: {slug}",
+        )
+
+    if file.content_type not in _ALLOWED_PREVIEW_CONTENT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {file.content_type}. Allowed: PNG, JPEG, WebP.",
+        )
+
+    content = await file.read()
+    if len(content) > _PREVIEW_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File exceeds {_PREVIEW_MAX_BYTES // (1024 * 1024)}MB limit",
+        )
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    ext = (
+        file.filename.rsplit(".", 1)[-1].lower()
+        if file.filename and "." in file.filename
+        else "png"
+    )
+    # Stable per-theme path; the random suffix forces a fresh CDN URL each
+    # upload so admins see their new screenshot without a hard refresh.
+    storage_key = f"previews/{slug}/{uuid.uuid4().hex[:10]}.{ext}"
+
+    from src.api.dependencies.services import get_storage_service
+
+    storage = get_storage_service()
+    uploaded = await storage.upload_file(
+        file_content=content,
+        filename=storage_key,
+        content_type=file.content_type or "image/png",
+        bucket=StorageBucket.THEMES,
+    )
+
+    # Ensure a row exists for this slug, then patch the URL.
+    result = await db.execute(
+        select(ThemeAdminConfigModel).where(ThemeAdminConfigModel.theme_slug == slug)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = ThemeAdminConfigModel(
+            theme_slug=slug,
+            is_visible=True,
+            required_plan="free",
+            display_order=1000,
+        )
+        db.add(row)
+    row.preview_image_url = uploaded.url
+
+    await db.commit()
+    await db.refresh(row)
+    logger.info("Uploaded preview screenshot for theme=%s", slug)
+
+    return SuccessResponse(
+        data=_decorate(row, catalog),
+        message="Preview uploaded",
+    )
+
+
+@router.delete(
+    "/{slug}/preview",
+    response_model=SuccessResponse[ThemeAdminConfigItem],
+    summary="Clear the uploaded preview override for a theme",
+    operation_id="admin_clear_theme_preview",
+)
+async def clear_theme_preview(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _admin: Annotated[Any, Depends(require_admin)],
+    slug: Annotated[str, Path(description="Theme slug")],
+):
+    """Drop the preview_image_url override.
+
+    The stored asset is left in storage (cheap, GC handles cleanup) — we
+    just clear the row's pointer so the storefront falls back to the
+    convention URL again.
+    """
+    catalog = _catalog_index()
+    if slug not in catalog:
+        raise HTTPException(status_code=404, detail=f"Unknown theme slug: {slug}")
+
+    result = await db.execute(
+        select(ThemeAdminConfigModel).where(ThemeAdminConfigModel.theme_slug == slug)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No config row for {slug}")
+
+    row.preview_image_url = None
+    await db.commit()
+    await db.refresh(row)
+    logger.info("Cleared preview override for theme=%s", slug)
+
+    return SuccessResponse(
+        data=_decorate(row, catalog),
+        message="Preview cleared",
+    )
