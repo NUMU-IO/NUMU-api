@@ -169,6 +169,13 @@ class StoreThemeModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     draft_customization: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
+    # V3 Theme Engine columns (additive — Alembic migration 20260420_add_theme_v3_columns)
+    customization_v3: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    draft_customization_v3: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
     installed_at: Mapped[str | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

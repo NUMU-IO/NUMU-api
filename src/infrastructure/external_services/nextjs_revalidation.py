@@ -92,9 +92,6 @@ async def revalidate_store(
     if not (paths or tags):
         return False
 
-    # `{subdomain}` placeholder is optional — useful in prod for per-store
-    # subdomain routing. In dev (single localhost storefront) the env var
-    # has no placeholder and we just append /api/revalidate.
     if "{subdomain}" in STOREFRONT_BASE_URL:
         base = STOREFRONT_BASE_URL.format(subdomain=subdomain)
     else:

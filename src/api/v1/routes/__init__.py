@@ -47,6 +47,14 @@ from src.api.v1.routes.demo import router as demo_router
 # Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
 
+# Marketplace V3 routes (catalog, developer, admin, store install)
+from src.api.v1.routes.marketplace import (
+    marketplace_admin_router,
+    marketplace_catalog_router,
+    marketplace_developer_router,
+    marketplace_store_install_router,
+)
+
 # Omnichannel routes
 from src.api.v1.routes.omnichannel import (
     capi_router,
@@ -332,6 +340,18 @@ api_router.include_router(
 
 # Theme marketplace (public browsing of published themes)
 api_router.include_router(themes_marketplace_router, tags=["Themes - Marketplace"])
+
+# Marketplace V3 routes
+api_router.include_router(marketplace_catalog_router, tags=["Marketplace - Catalog"])
+api_router.include_router(
+    marketplace_developer_router, tags=["Marketplace - Developer"]
+)
+api_router.include_router(marketplace_admin_router, tags=["Marketplace - Admin"])
+api_router.include_router(
+    marketplace_store_install_router,
+    prefix="/stores/{store_id}",
+    tags=["Marketplace - Store Install"],
+)
 
 # Theme upload + build status + preview (authenticated)
 api_router.include_router(themes_upload_router, tags=["Themes - Upload"])

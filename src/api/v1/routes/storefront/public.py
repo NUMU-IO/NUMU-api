@@ -302,7 +302,14 @@ async def list_themes():
             "required_plan": flags["required_plan"],
             "display_order": flags["display_order"],
             "preview_image_url": preview_url,
-            "demo_url": f"https://{slug}-demo.numueg.app",
+            # Single shared "demo" store rendered with the requested theme via
+            # ?preview_theme=. The storefront reads that param in StoreContext
+            # and overrides theme_settings.theme.base_theme so every theme can
+            # be previewed against the same seeded sample products — no
+            # per-theme demo subdomain to provision.
+            "demo_url": (
+                f"https://demo.{settings.storefront_base_domain}/?preview_theme={slug}"
+            ),
         }
 
     def _build_payload(raw: list[dict]) -> list[dict]:
