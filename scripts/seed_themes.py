@@ -128,6 +128,14 @@ BUILT_IN_THEMES = [
         "layout": "luxury-minimal",
         "author": "Saw Saw Atelier",
     },
+    {
+        "slug": "vionne",
+        "name": "Vionne",
+        "description": "Refined grayscale storefront for modest fashion. Crisp typography, slow fade slideshow, draggable before/after, and motion-led product cards.",
+        "supported_features": {"darkMode": False, "rtl": True},
+        "tags": ["hijab", "modest", "fashion", "ecommerce", "minimal", "grayscale"],
+        "layout": "vionne",
+    },
 ]
 
 THEME_VERSION = "1.0.0"
