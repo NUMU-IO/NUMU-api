@@ -192,7 +192,7 @@ async def _aggregate_day(
     rollup_date: date,
 ) -> dict:
     """Aggregate all metrics for one store on one day."""
-    from sqlalchemy import and_, func, select
+    from sqlalchemy import String, and_, cast, func, select
 
     from src.infrastructure.database.models.tenant.customer import CustomerModel
     from src.infrastructure.database.models.tenant.order import OrderModel
@@ -218,7 +218,12 @@ async def _aggregate_day(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            OrderModel.status != "payment_failed",
+            # The orderstatus enum has the lowercase value `payment_failed`
+            # from an early migration. SQLAlchemy's default enum binding
+            # would send the uppercase member name `PAYMENT_FAILED`, which
+            # PG rejects with `invalid input value for enum`. Cast to text
+            # so the comparison runs against the actual enum value.
+            cast(OrderModel.status, String) != "payment_failed",
         )
     )
     order_result = await session.execute(order_query)
@@ -243,7 +248,12 @@ async def _aggregate_day(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            OrderModel.status != "payment_failed",
+            # The orderstatus enum has the lowercase value `payment_failed`
+            # from an early migration. SQLAlchemy's default enum binding
+            # would send the uppercase member name `PAYMENT_FAILED`, which
+            # PG rejects with `invalid input value for enum`. Cast to text
+            # so the comparison runs against the actual enum value.
+            cast(OrderModel.status, String) != "payment_failed",
         )
     )
     orders_result = await session.execute(orders_query)
