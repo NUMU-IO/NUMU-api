@@ -1,5 +1,6 @@
 """Storefront page view tracking."""
 
+import ipaddress
 from typing import Annotated
 from uuid import UUID
 
@@ -30,6 +31,28 @@ _VALID_FUNNEL_STEPS = {
 }
 
 
+def _anonymize_ip(raw: str | None) -> str | None:
+    """Truncate IPv4 to /24 and IPv6 to /48.
+
+    Keeps geo-bucket utility (governorate-level analytics still works
+    in MENA where we route through carrier-grade NAT anyway) without
+    persisting a host-identifying address. Unparseable input returns
+    None rather than the raw bytes — better to lose the row than store
+    something that turns out to be PII.
+    """
+    if not raw:
+        return None
+    try:
+        addr = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    if isinstance(addr, ipaddress.IPv4Address):
+        net = ipaddress.ip_network(f"{addr}/24", strict=False)
+        return str(net.network_address)
+    net = ipaddress.ip_network(f"{addr}/48", strict=False)
+    return str(net.network_address)
+
+
 class TrackPageViewRequest(BaseModel):
     path: str = Field(max_length=500)
     fingerprint: str | None = Field(None, max_length=64)
@@ -55,9 +78,10 @@ async def track_page_view(
     if not store:
         return Response(status_code=204)  # Silently ignore invalid store
 
-    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+    raw_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
         request.client.host if request.client else None
     )
+    ip = _anonymize_ip(raw_ip)
     ua = request.headers.get("user-agent", "")[:500]
 
     # Resolve funnel step: explicit > path-based inference. The storefront

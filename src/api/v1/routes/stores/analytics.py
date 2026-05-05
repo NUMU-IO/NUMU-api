@@ -14,10 +14,10 @@ from src.api.dependencies import (
     get_customer_repository,
     get_order_repository,
     get_product_repository,
-    get_shipment_repository,
     verify_store_ownership,
 )
 from src.api.dependencies.repositories import (
+    get_analytics_repository,
     get_analytics_rollup_repository,
     get_funnel_event_repository,
     get_page_view_repository,
@@ -32,12 +32,12 @@ from src.infrastructure.repositories import (
     OrderRepository,
     StoreRepository,
 )
+from src.infrastructure.repositories.analytics_repository import AnalyticsRepository
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
 )
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
-from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 
 router = APIRouter(prefix="/{store_id}/analytics")
 
@@ -205,23 +205,23 @@ async def get_sales_chart(
                 )
             )
     else:
-        # Fallback to raw query if rollup table is empty (first run)
-        now = datetime.now(UTC)
+        # Fallback when the rollup table is empty (first run of the day,
+        # brand-new install). Single GROUP-BY-day query instead of the
+        # previous N+1 (two queries × 30 days). Gap-fills missing days
+        # with zeros so the chart shape stays consistent.
+        start_dt = datetime.combine(date_from, datetime.min.time(), tzinfo=UTC)
+        end_dt = datetime.combine(today, datetime.max.time(), tzinfo=UTC)
+        rows = await order_repo.get_daily_aggregates(store.id, start_dt, end_dt)
+        by_day = {row[0]: row for row in rows}
         data_points = []
-        for i in range(days - 1, -1, -1):
-            day_end = now - timedelta(days=i)
-            day_start = day_end - timedelta(days=1)
-            revenue = await order_repo.get_revenue_by_date_range(
-                store.id, day_start, day_end
-            )
-            order_count = await order_repo.count_by_store(
-                store.id, date_from=day_start, date_to=day_end
-            )
+        for i in range(days):
+            d = date_from + timedelta(days=i)
+            row = by_day.get(d)
             data_points.append(
                 SalesDataPointResponse(
-                    date=day_start.strftime("%b %d"),
-                    sales=revenue,
-                    orders=order_count,
+                    date=d.strftime("%b %d"),
+                    sales=row[1] if row else 0,
+                    orders=row[2] if row else 0,
                 )
             )
 
@@ -242,18 +242,24 @@ async def get_analytics_top_products(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(5, ge=1, le=20),
 ):
-    """Get top selling products (merges pre-aggregated rollup data)."""
+    """Get top selling products.
+
+    Preferred path: merge ``top_products_json`` across daily rollup rows
+    (cheap — at most ``days`` rows × ~50 products each). Fallback when
+    rollup is empty: SQL aggregation on the orders table that unnests
+    ``line_items`` JSONB and groups by ``product_id`` — replaces the
+    previous ``limit=1000`` truncated Python loop.
+    """
     today = date.today()
     date_from = today - timedelta(days=days)
 
     rollups = await rollup_repo.get_range(store.id, date_from, today)
 
     if rollups:
-        # Merge top_products_json across rollup days
         merged: dict[str, dict] = {}
         for r in rollups:
             for item in r.top_products_json or []:
@@ -276,53 +282,42 @@ async def get_analytics_top_products(
         )[:limit]
         total_revenue = sum(p["revenue"] for p in merged.values())
     else:
-        # Fallback to raw query
         now = datetime.now(UTC)
         period_start = now - timedelta(days=days)
-        orders = await order_repo.get_by_date_range(
-            store.id, period_start, now, limit=1000
+        rows = await analytics_repo.top_products(
+            store.id, period_start, now, limit=limit
         )
-        product_sales: dict[str, dict] = {}
-        total_revenue = 0
-        for order in orders:
-            if order.payment_status not in [
-                PaymentStatus.PAID,
-                PaymentStatus.PARTIALLY_REFUNDED,
-            ]:
-                continue
-            for item in order.line_items:
-                pid = str(item.product_id)
-                if pid not in product_sales:
-                    product_sales[pid] = {
-                        "id": pid,
-                        "name": item.product_name,
-                        "sku": item.sku,
-                        "quantity": 0,
-                        "revenue": 0,
-                    }
-                product_sales[pid]["quantity"] += item.quantity
-                product_sales[pid]["revenue"] += item.total_price
-                total_revenue += item.total_price
-        sorted_products = sorted(
-            product_sales.values(), key=lambda x: x["revenue"], reverse=True
-        )[:limit]
+        # Older orders' line_items JSONB may not carry a ``name`` field;
+        # ``jsonb_array_elements(...)['name'].astext`` returns NULL in
+        # that case and Pydantic rejects ``name: str`` at the response
+        # stage. Coalesce to a stable placeholder so the chart still
+        # renders — matches the rollup branch above which uses ``""``.
+        sorted_products = [
+            {
+                "id": r["product_id"],
+                "name": r["product_name"] or "(unnamed product)",
+                "sku": None,
+                "quantity": r["units_sold"],
+                "revenue": r["revenue_cents"],
+            }
+            for r in rows
+        ]
+        total_revenue = sum(p["revenue"] for p in sorted_products)
 
-    result = []
-    for p in sorted_products:
-        percentage = (p["revenue"] / total_revenue * 100) if total_revenue > 0 else 0
-        result.append(
+    return SuccessResponse(
+        data=[
             AnalyticsTopProductResponse(
                 id=str(p["id"]),
                 name=p["name"],
                 sku=p["sku"],
                 quantity_sold=p["quantity"],
                 revenue=p["revenue"],
-                percentage=round(percentage, 1),
+                percentage=round(p["revenue"] / total_revenue * 100, 1)
+                if total_revenue > 0
+                else 0,
             )
-        )
-
-    return SuccessResponse(
-        data=result,
+            for p in sorted_products
+        ],
         message="Top products retrieved successfully",
     )
 
@@ -335,61 +330,35 @@ async def get_analytics_top_products(
 )
 async def get_sales_by_location(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
-    """Get sales breakdown by location/governorate."""
+    """Get sales breakdown by location/governorate.
+
+    SQL ``GROUP BY LOWER(TRIM(shipping_address->>'city'))`` so the
+    dashboard no longer shows ``Cairo`` and ``cairo`` as two separate
+    rows. Falls back to ``state`` when ``city`` is missing.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
-
-    # Aggregate by location
-    location_sales: dict[str, dict] = {}
-    total_sales = 0
-
-    for order in orders:
-        if order.payment_status not in [
-            PaymentStatus.PAID,
-            PaymentStatus.PARTIALLY_REFUNDED,
-        ]:
-            continue
-
-        # Get location from shipping address
-        location = "Unknown"
-        if order.shipping_address:
-            location = (
-                order.shipping_address.city or order.shipping_address.state or "Unknown"
-            )
-
-        if location not in location_sales:
-            location_sales[location] = {"sales": 0, "orders": 0}
-
-        location_sales[location]["sales"] += order.total
-        location_sales[location]["orders"] += 1
-        total_sales += order.total
-
-    # Sort by sales and format
-    sorted_locations = sorted(
-        location_sales.items(),
-        key=lambda x: x[1]["sales"],
-        reverse=True,
-    )
-
-    result = []
-    for location, data in sorted_locations:
-        percentage = (data["sales"] / total_sales * 100) if total_sales > 0 else 0
-        result.append(
-            SalesByLocationResponse(
-                location=location,
-                sales=data["sales"],
-                orders=data["orders"],
-                percentage=round(percentage, 1),
-            )
-        )
+    rows = await analytics_repo.sales_by_location(store.id, period_start, now)
+    total_sales = sum(r["revenue_cents"] for r in rows)
 
     return SuccessResponse(
-        data=result,
+        data=[
+            SalesByLocationResponse(
+                location=r["location"],
+                sales=r["revenue_cents"],
+                orders=r["orders"],
+                percentage=(
+                    round(r["revenue_cents"] / total_sales * 100, 1)
+                    if total_sales > 0
+                    else 0.0
+                ),
+            )
+            for r in rows
+        ],
         message="Sales by location retrieved successfully",
     )
 
@@ -403,39 +372,35 @@ async def get_sales_by_location(
 async def get_customer_analytics(
     store: Annotated[Store, Depends(verify_store_ownership)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
-    """Get customer analytics for the store."""
+    """Get customer analytics for the store.
+
+    "New vs returning" comes from a CTE that joins active-in-window
+    customers against their first-order timestamp across all time, so a
+    customer whose first order pre-dates the window is "returning" even
+    if their only window order was today.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
     total_customers = await customer_repo.count_by_store(store.id)
-
-    # Get orders to calculate metrics
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
-
-    # Count unique customers and their order frequency
-    customer_orders: dict[UUID, int] = {}
-    total_revenue = 0
-
-    for order in orders:
-        if order.customer_id:
-            customer_orders[order.customer_id] = (
-                customer_orders.get(order.customer_id, 0) + 1
-            )
-        total_revenue += order.total
-
-    new_customers = sum(1 for count in customer_orders.values() if count == 1)
-    returning_customers = sum(1 for count in customer_orders.values() if count > 1)
-
-    avg_customer_value = total_revenue // len(customer_orders) if customer_orders else 0
+    split = await analytics_repo.new_vs_returning(store.id, period_start, now)
+    period = await analytics_repo.period_revenue_and_unique_customers(
+        store.id, period_start, now
+    )
+    avg_customer_value = (
+        period["revenue_cents"] // period["unique_customers"]
+        if period["unique_customers"] > 0
+        else 0
+    )
 
     return SuccessResponse(
         data=CustomerAnalyticsResponse(
             total_customers=total_customers,
-            new_customers=new_customers,
-            returning_customers=returning_customers,
+            new_customers=split["new"],
+            returning_customers=split["returning"],
             avg_customer_value=avg_customer_value,
         ),
         message="Customer analytics retrieved successfully",
@@ -452,20 +417,38 @@ async def get_conversion_stats(
     store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
+    funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
     """Get conversion statistics for the store."""
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=1000)
-    total_orders = len(orders)
+    # Real order count (SQL COUNT, no truncation), excluding cancelled/refunded
+    # so the conversion rate isn't deflated by orders that never represented
+    # paid revenue.
+    total_orders = await order_repo.count_by_store(
+        store.id,
+        date_from=period_start,
+        date_to=now,
+        exclude_statuses=[OrderStatus.CANCELLED, OrderStatus.REFUNDED],
+    )
 
     total_visitors = await pv_repo.count_unique_visitors(store.id, period_start, now)
     conversion_rate = (total_orders / total_visitors * 100) if total_visitors > 0 else 0
 
-    # Cart abandonment - would need cart tracking
-    cart_abandonment_rate = 70.0
+    # Cart abandonment: sessions that fired add_to_cart minus sessions that
+    # completed an order, divided by add_to_cart sessions. Funnel event
+    # counts are unique session_fingerprint counts so the math is in the
+    # same unit on both sides.
+    funnel_counts = await funnel_repo.get_funnel_counts(store.id, period_start, now)
+    add_to_cart_sessions = funnel_counts.get("add_to_cart", 0)
+    completed_sessions = funnel_counts.get("order_completed", 0)
+    if add_to_cart_sessions > 0:
+        abandoned = max(0, add_to_cart_sessions - completed_sessions)
+        cart_abandonment_rate = round(abandoned / add_to_cart_sessions * 100, 2)
+    else:
+        cart_abandonment_rate = 0.0
 
     return SuccessResponse(
         data=ConversionStatsResponse(
@@ -495,46 +478,36 @@ class TrafficSourceResponse(BaseModel):
 )
 async def get_traffic_sources(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
-    """Get order attribution by UTM source."""
+    """Get order attribution by UTM source.
+
+    SQL ``GROUP BY LOWER(TRIM(utm_source))`` so casing collisions are
+    collapsed; missing utm falls into a ``direct`` bucket. No row cap —
+    the database does the aggregation, so big stores don't silently
+    truncate at the old ``limit=5000`` boundary.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=5000)
-
-    source_data: dict[str, dict] = {}
-    total_revenue = 0
-
-    for order in orders:
-        source = order.utm_source or "direct"
-        if source not in source_data:
-            source_data[source] = {"orders": 0, "revenue": 0}
-        source_data[source]["orders"] += 1
-        source_data[source]["revenue"] += order.total
-        total_revenue += order.total
-
-    sorted_sources = sorted(
-        source_data.items(),
-        key=lambda x: x[1]["revenue"],
-        reverse=True,
-    )
-
-    result = []
-    for source, data in sorted_sources:
-        percentage = (data["revenue"] / total_revenue * 100) if total_revenue > 0 else 0
-        result.append(
-            TrafficSourceResponse(
-                source=source,
-                orders=data["orders"],
-                revenue=data["revenue"],
-                percentage=round(percentage, 1),
-            )
-        )
+    rows = await analytics_repo.traffic_sources(store.id, period_start, now)
+    total_revenue = sum(r["revenue_cents"] for r in rows)
 
     return SuccessResponse(
-        data=result,
+        data=[
+            TrafficSourceResponse(
+                source=r["source"],
+                orders=r["orders"],
+                revenue=r["revenue_cents"],
+                percentage=(
+                    round(r["revenue_cents"] / total_revenue * 100, 1)
+                    if total_revenue > 0
+                    else 0.0
+                ),
+            )
+            for r in rows
+        ],
         message="Traffic sources retrieved successfully",
     )
 
@@ -569,27 +542,38 @@ class CodRejectionStatsResponse(BaseModel):
 )
 async def get_cod_rejection_stats(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
-    """Get COD rejection rate and breakdown by location."""
+    """Get COD rejection rate and breakdown by location.
+
+    Sourced from the ``orders`` table directly. Earlier this endpoint
+    queried ``shipments``, which is only populated for stores that
+    integrate a courier (Bosta / MyLerz / J&T) — manual-fulfilment
+    stores read zeros across the board. ``orders`` is the canonical
+    source: courier webhooks already flip ``orders.status`` on
+    delivered/returned, and manual merchants flip it via the merchant
+    UI.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    stats = await shipment_repo.get_cod_stats_by_store(store.id, period_start, now)
-    locations = await shipment_repo.get_cod_rejection_by_location(
+    stats = await analytics_repo.cod_summary(store.id, period_start, now)
+    locations = await analytics_repo.cod_rejections_by_location(
         store.id, period_start, now
     )
 
-    total = stats["total"]
-    rejected = stats["failed"] + stats["returned"]
-    rejection_rate = round((rejected / total) * 100, 1) if total > 0 else 0.0
+    rejection_rate = (
+        round(stats["rejected"] / stats["total"] * 100, 1)
+        if stats["total"] > 0
+        else 0.0
+    )
 
     return SuccessResponse(
         data=CodRejectionStatsResponse(
-            total_cod_shipments=total,
+            total_cod_shipments=stats["total"],
             delivered_count=stats["delivered"],
-            rejected_count=rejected,
+            rejected_count=stats["rejected"],
             returned_count=stats["returned"],
             rejection_rate=rejection_rate,
             total_cod_amount=stats["total_cod_amount"],
@@ -723,66 +707,50 @@ class OrdersBreakdownResponse(BaseModel):
 )
 async def get_orders_breakdown(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
-    """Get orders breakdown by status, payment method, time distribution."""
+    """Get orders breakdown by status, payment method, time distribution.
+
+    Five SQL aggregations replace the previous loop-over-5000-orders
+    pattern. Day-of-week and hour-of-day come from ``EXTRACT(dow ...)``
+    / ``EXTRACT(hour ...)``; fulfillment percentiles use
+    ``percentile_cont`` so we don't sort a Python list of timedeltas.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=5000)
-    total = len(orders)
-
-    # By status
-    status_counts: dict[str, int] = {}
-    for o in orders:
-        s = o.status.value if isinstance(o.status, OrderStatus) else str(o.status)
-        status_counts[s] = status_counts.get(s, 0) + 1
+    status_map = await analytics_repo.orders_by_status(store.id, period_start, now)
+    total = sum(status_map.values())
     by_status = [
         OrdersByStatusItem(
             status=s,
             count=c,
             percentage=round(c / total * 100, 1) if total > 0 else 0,
         )
-        for s, c in sorted(status_counts.items(), key=lambda x: x[1], reverse=True)
+        for s, c in sorted(status_map.items(), key=lambda x: x[1], reverse=True)
     ]
 
-    # By payment method
-    method_data: dict[str, dict] = {}
-    for o in orders:
-        m = o.payment_method or "unknown"
-        if m not in method_data:
-            method_data[m] = {"count": 0, "revenue": 0}
-        method_data[m]["count"] += 1
-        method_data[m]["revenue"] += o.total
+    method_map = await analytics_repo.orders_by_payment_method(
+        store.id, period_start, now
+    )
     by_payment_method = [
-        OrdersByPaymentMethodItem(method=m, count=d["count"], revenue=d["revenue"])
+        OrdersByPaymentMethodItem(
+            method=m, count=d["count"], revenue=d["revenue_cents"]
+        )
         for m, d in sorted(
-            method_data.items(), key=lambda x: x[1]["revenue"], reverse=True
+            method_map.items(), key=lambda x: x[1]["revenue_cents"], reverse=True
         )
     ]
 
-    # Fulfillment time (created_at → shipped_at for shipped/delivered orders)
-    fulfillment_hours: list[float] = []
-    for o in orders:
-        if o.shipped_at and o.created_at:
-            delta = o.shipped_at - o.created_at
-            fulfillment_hours.append(delta.total_seconds() / 3600)
+    f = await analytics_repo.fulfillment_time_stats(store.id, period_start, now)
+    fulfillment_time = FulfillmentTimeStats(
+        avg_hours=f["avg_hours"],
+        p50_hours=f["p50_hours"],
+        p95_hours=f["p95_hours"],
+    )
 
-    if fulfillment_hours:
-        fulfillment_hours.sort()
-        avg_h = sum(fulfillment_hours) / len(fulfillment_hours)
-        p50_idx = int(len(fulfillment_hours) * 0.5)
-        p95_idx = min(int(len(fulfillment_hours) * 0.95), len(fulfillment_hours) - 1)
-        fulfillment_time = FulfillmentTimeStats(
-            avg_hours=round(avg_h, 1),
-            p50_hours=round(fulfillment_hours[p50_idx], 1),
-            p95_hours=round(fulfillment_hours[p95_idx], 1),
-        )
-    else:
-        fulfillment_time = FulfillmentTimeStats(avg_hours=0, p50_hours=0, p95_hours=0)
-
-    # By day of week
+    # Postgres EXTRACT(dow): 0=Sunday … 6=Saturday. Display order: Mon–Sun.
     day_names = [
         "Monday",
         "Tuesday",
@@ -792,26 +760,24 @@ async def get_orders_breakdown(
         "Saturday",
         "Sunday",
     ]
-    day_data: dict[int, dict] = {i: {"orders": 0, "revenue": 0} for i in range(7)}
-    for o in orders:
-        wd = o.created_at.weekday()
-        day_data[wd]["orders"] += 1
-        day_data[wd]["revenue"] += o.total
+    pg_to_iso = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6}
+    dow_raw = await analytics_repo.orders_by_day_of_week(store.id, period_start, now)
+    by_iso: dict[int, dict] = {i: {"orders": 0, "revenue_cents": 0} for i in range(7)}
+    for pg_dow, vals in dow_raw.items():
+        iso = pg_to_iso.get(pg_dow, 0)
+        by_iso[iso] = vals
     by_day_of_week = [
         OrdersByDayOfWeekItem(
             day=day_names[i],
-            orders=day_data[i]["orders"],
-            revenue=day_data[i]["revenue"],
+            orders=by_iso[i]["orders"],
+            revenue=by_iso[i]["revenue_cents"],
         )
         for i in range(7)
     ]
 
-    # By hour of day
-    hour_data: dict[int, int] = dict.fromkeys(range(24), 0)
-    for o in orders:
-        hour_data[o.created_at.hour] += 1
+    hour_map = await analytics_repo.orders_by_hour(store.id, period_start, now)
     by_hour_of_day = [
-        OrdersByHourItem(hour=h, orders=c) for h, c in sorted(hour_data.items())
+        OrdersByHourItem(hour=h, orders=hour_map.get(h, 0)) for h in range(24)
     ]
 
     return SuccessResponse(
@@ -852,63 +818,46 @@ class RevenueBreakdownResponse(BaseModel):
 )
 async def get_revenue_breakdown(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
     days: int = Query(30, ge=1, le=365),
 ):
-    """Get revenue breakdown: gross, discounts, shipping, refunds, net."""
+    """Get revenue breakdown: gross, discounts, shipping, refunds, net.
+
+    Two SQL aggregates (totals + coupon usage) replace the previous
+    truncated 5000-order Python loop. Refunds still come from the daily
+    rollup since refunds are tracked there with their own currency
+    conversion logic.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
     today = date.today()
-    date_from = today - timedelta(days=days)
+    date_from_d = today - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=5000)
+    summary = await analytics_repo.revenue_summary_paid(store.id, period_start, now)
+    coupons = await analytics_repo.coupon_usage(store.id, period_start, now)
 
-    gross_revenue = 0
-    discounts = 0
-    shipping_collected = 0
-    coupon_data: dict[str, dict] = {}
-
-    for o in orders:
-        if o.payment_status not in [
-            PaymentStatus.PAID,
-            PaymentStatus.PARTIALLY_REFUNDED,
-        ]:
-            continue
-        gross_revenue += o.subtotal
-        discounts += o.discount_amount
-        shipping_collected += o.shipping_cost
-
-        if o.coupon_code:
-            code = o.coupon_code
-            if code not in coupon_data:
-                coupon_data[code] = {"uses": 0, "revenue_impact": 0}
-            coupon_data[code]["uses"] += 1
-            coupon_data[code]["revenue_impact"] += o.discount_amount
-
-    # Refunds from rollup (already aggregated)
-    agg = await rollup_repo.get_aggregated(store.id, date_from, today)
+    agg = await rollup_repo.get_aggregated(store.id, date_from_d, today)
     refunds = agg["refund_amount_cents"]
-
-    net_revenue = gross_revenue - refunds
-
-    coupon_usage = [
-        CouponUsageItem(code=code, uses=d["uses"], revenue_impact=d["revenue_impact"])
-        for code, d in sorted(
-            coupon_data.items(), key=lambda x: x[1]["uses"], reverse=True
-        )
-    ]
+    net_revenue = summary["gross_cents"] - refunds
 
     return SuccessResponse(
         data=RevenueBreakdownResponse(
-            gross_revenue=gross_revenue,
-            discounts=discounts,
-            shipping_collected=shipping_collected,
+            gross_revenue=summary["gross_cents"],
+            discounts=summary["discounts_cents"],
+            shipping_collected=summary["shipping_cents"],
             refunds=refunds,
             net_revenue=net_revenue,
-            coupon_usage=coupon_usage,
+            coupon_usage=[
+                CouponUsageItem(
+                    code=c["code"],
+                    uses=c["uses"],
+                    revenue_impact=c["revenue_impact"],
+                )
+                for c in coupons
+            ],
         ),
         message="Revenue breakdown retrieved successfully",
     )
@@ -977,37 +926,36 @@ def _quintile(values: list[float], value: float) -> int:
 )
 async def get_customer_segments(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     days: int = Query(90, ge=30, le=365),
 ):
-    """Get customer segmentation using RFM analysis, cohort retention, and CLV."""
+    """Get customer segmentation using RFM analysis, cohort retention, and CLV.
+
+    Three SQL aggregations replace the previous 10000-order in-memory
+    scan: per-customer aggregates over the window, all-time first-order
+    per active customer (drives cohort assignment), and the customer ×
+    order-month matrix (drives retention). The Python side then loops
+    over a customer-sized set, not an order-sized one.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    orders = await order_repo.get_by_date_range(
-        store.id, period_start, now, limit=10000
+    aggregates = await analytics_repo.customer_period_aggregates(
+        store.id, period_start, now
     )
 
-    # Build per-customer stats
-    customer_stats: dict[UUID, dict] = {}
-    for o in orders:
-        if not o.customer_id or o.status == OrderStatus.CANCELLED:
-            continue
-        cid = o.customer_id
-        if cid not in customer_stats:
-            customer_stats[cid] = {
-                "orders": 0,
-                "total_spent": 0,
-                "last_order": o.created_at,
-                "first_order": o.created_at,
-            }
-        cs = customer_stats[cid]
-        cs["orders"] += 1
-        cs["total_spent"] += o.total
-        if o.created_at > cs["last_order"]:
-            cs["last_order"] = o.created_at
-        if o.created_at < cs["first_order"]:
-            cs["first_order"] = o.created_at
+    # Translate the SQL rows into the same per-customer dict shape the
+    # downstream RFM/cohort scorer was built around. ``first_order`` is
+    # rebound below to the all-time first order (cohort anchor).
+    customer_stats: dict[UUID, dict] = {
+        a["customer_id"]: {
+            "orders": a["orders"],
+            "total_spent": a["total_spent_cents"],
+            "last_order": a["last_at"],
+            "first_order": a["first_at"],
+        }
+        for a in aggregates
+    }
 
     if not customer_stats:
         return SuccessResponse(
@@ -1071,25 +1019,24 @@ async def get_customer_segments(
         )
     ]
 
-    # Cohort retention (month-over-month)
-    # Group customers by first order month
+    # Cohort retention (month-over-month).
+    # Anchor the cohort on the customer's *all-time* first order, not
+    # just the first one inside the analysis window — otherwise a long
+    # tenured customer who only ordered today would wrongly be tagged
+    # as a brand-new cohort.
+    customer_ids = list(customer_stats.keys())
+    all_time_first = await analytics_repo.customer_first_order_all_time(
+        store.id, customer_ids
+    )
+    customer_order_months = await analytics_repo.customer_order_months(
+        store.id, customer_ids
+    )
+
     cohort_customers: dict[str, set[UUID]] = {}
-    customer_order_months: dict[UUID, set[str]] = {}
-
-    for o in orders:
-        if not o.customer_id or o.status == OrderStatus.CANCELLED:
-            continue
-        cid = o.customer_id
-        month_key = o.created_at.strftime("%Y-%m")
-        if cid not in customer_order_months:
-            customer_order_months[cid] = set()
-        customer_order_months[cid].add(month_key)
-
-    for cid, cs in customer_stats.items():
-        cohort_key = cs["first_order"].strftime("%Y-%m")
-        if cohort_key not in cohort_customers:
-            cohort_customers[cohort_key] = set()
-        cohort_customers[cohort_key].add(cid)
+    for cid in customer_ids:
+        first_at = all_time_first.get(cid) or customer_stats[cid]["first_order"]
+        cohort_key = first_at.strftime("%Y-%m")
+        cohort_customers.setdefault(cohort_key, set()).add(cid)
 
     sorted_months = sorted(cohort_customers.keys())
     all_months = sorted({
@@ -1189,89 +1136,74 @@ class ProductPerformanceResponse(BaseModel):
 )
 async def get_product_performance(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     days: int = Query(30, ge=1, le=365),
     sort_by: str = Query("revenue", description="Sort by: revenue, quantity, name"),
 ):
-    """Get product-level performance, category breakdown, and inventory health."""
+    """Get product-level performance, category breakdown, and inventory health.
+
+    Three SQL aggregations replace the previous 5000-order in-memory
+    loop: ``top_products`` (line_items unnest + GROUP BY), the optional
+    7-day daily trend per top product, and inventory bucket counts.
+    Catalog metadata (cost_price, category) is joined via a single
+    product fetch limited to the active SKUs.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
-
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=5000)
-
-    # Aggregate product-level sales from line_items
-    product_sales: dict[str, dict] = {}
-    # For 7-day trend: bucket by (product_id, date)
     seven_days_ago = now - timedelta(days=7)
-    product_daily: dict[str, dict[str, int]] = {}
 
-    for o in orders:
-        if o.payment_status not in [
-            PaymentStatus.PAID,
-            PaymentStatus.PARTIALLY_REFUNDED,
-        ]:
-            continue
-        order_date = o.created_at.strftime("%Y-%m-%d")
-        for item in o.line_items:
-            pid = str(item.product_id)
-            if pid not in product_sales:
-                product_sales[pid] = {
-                    "name": item.product_name,
-                    "sku": item.sku,
-                    "revenue": 0,
-                    "quantity": 0,
-                }
-            product_sales[pid]["revenue"] += item.total_price
-            product_sales[pid]["quantity"] += item.quantity
+    # Top 50 products in the period (paid only, line_items unnested in SQL)
+    top = await analytics_repo.top_products(store.id, period_start, now, limit=50)
+    top_ids = [t["product_id"] for t in top]
 
-            # Track daily for trend (last 7 days only)
-            if o.created_at >= seven_days_ago:
-                if pid not in product_daily:
-                    product_daily[pid] = {}
-                product_daily[pid][order_date] = (
-                    product_daily[pid].get(order_date, 0) + item.total_price
-                )
+    # 7-day per-product trend, scoped to those top products only
+    daily = (
+        await analytics_repo.daily_revenue_per_product(
+            store.id, seven_days_ago, now, product_ids=top_ids
+        )
+        if top_ids
+        else {}
+    )
+    trend_dates = [(now - timedelta(days=6 - i)).strftime("%Y-%m-%d") for i in range(7)]
 
-    # Get current products for stock info and category mapping
+    # Catalog metadata for stock + category. We still fetch the catalog
+    # because inventory health needs it; the loop is bounded by SKU count.
     products = await product_repo.get_by_store(store.id, skip=0, limit=5000)
     product_map = {str(p.id): p for p in products}
 
-    # Build 7-day trend arrays
-    trend_dates = [(now - timedelta(days=6 - i)).strftime("%Y-%m-%d") for i in range(7)]
-
-    # Sort products
+    # Optional client-side sort over the SQL-aggregated top set.
     sort_key = {
-        "revenue": lambda x: x[1]["revenue"],
-        "quantity": lambda x: x[1]["quantity"],
-        "name": lambda x: x[1]["name"].lower(),
-    }.get(sort_by, lambda x: x[1]["revenue"])
+        "revenue": lambda r: r["revenue_cents"],
+        "quantity": lambda r: r["units_sold"],
+        "name": lambda r: (r.get("product_name") or "").lower(),
+    }.get(sort_by, lambda r: r["revenue_cents"])
     reverse = sort_by != "name"
+    top_sorted = sorted(top, key=sort_key, reverse=reverse)
 
-    sorted_products = sorted(product_sales.items(), key=sort_key, reverse=reverse)
-
-    product_items = []
-    for pid, data in sorted_products[:50]:  # Top 50
+    product_items: list[ProductPerformanceItem] = []
+    for r in top_sorted:
+        pid = r["product_id"]
         p = product_map.get(pid)
         stock = p.quantity if p else 0
-        trend = [product_daily.get(pid, {}).get(d, 0) for d in trend_dates]
+        trend = [daily.get(pid, {}).get(d, 0) for d in trend_dates]
 
         cost_cents: int | None = None
         profit_cents: int | None = None
         margin_pct: float | None = None
         if p is not None and p.cost_price is not None:
             cost_cents = p.cost_price.cents
-            profit_cents = data["revenue"] - (cost_cents * data["quantity"])
-            if data["revenue"] > 0:
-                margin_pct = round(profit_cents / data["revenue"] * 100, 1)
+            profit_cents = r["revenue_cents"] - (cost_cents * r["units_sold"])
+            if r["revenue_cents"] > 0:
+                margin_pct = round(profit_cents / r["revenue_cents"] * 100, 1)
 
         product_items.append(
             ProductPerformanceItem(
                 id=pid,
-                name=data["name"],
-                sku=data["sku"],
-                revenue=data["revenue"],
-                quantity_sold=data["quantity"],
+                name=r["product_name"] or (p.name if p else "Unknown"),
+                sku=p.sku if p else None,
+                revenue=r["revenue_cents"],
+                quantity_sold=r["units_sold"],
                 current_stock=stock,
                 revenue_trend=trend,
                 cost_price=cost_cents,
@@ -1280,9 +1212,11 @@ async def get_product_performance(
             )
         )
 
-    # Category-level aggregation
+    # Category aggregation: sum the top set by category. Cheap — bounded
+    # by `limit` (50) so no SQL roundtrip needed.
     category_data: dict[str | None, dict] = {}
-    for pid, data in product_sales.items():
+    for r in top:
+        pid = r["product_id"]
         p = product_map.get(pid)
         cat_id = str(p.category_id) if p and p.category_id else None
         cat_name = "Uncategorized"
@@ -1298,8 +1232,8 @@ async def get_product_performance(
                 "quantity": 0,
                 "products": set(),
             }
-        category_data[cat_id]["revenue"] += data["revenue"]
-        category_data[cat_id]["quantity"] += data["quantity"]
+        category_data[cat_id]["revenue"] += r["revenue_cents"]
+        category_data[cat_id]["quantity"] += r["units_sold"]
         category_data[cat_id]["products"].add(pid)
 
     categories = [
@@ -1315,33 +1249,23 @@ async def get_product_performance(
         )
     ]
 
-    # Inventory health
-    sold_product_ids = set(product_sales.keys())
-    in_stock = 0
-    low_stock = 0
-    out_of_stock = 0
-    dead_stock = 0
-
-    for p in products:
-        pid = str(p.id)
-        if p.quantity <= 0:
-            out_of_stock += 1
-        elif p.quantity <= p.low_stock_threshold:
-            low_stock += 1
-        else:
-            in_stock += 1
-        # Dead stock: has stock but zero sales in period
-        if p.quantity > 0 and pid not in sold_product_ids:
-            dead_stock += 1
+    # Inventory health: in/low/out from a single SQL aggregation; dead
+    # stock is computed against the sold-set in Python (bounded by
+    # catalog size).
+    inv = await analytics_repo.inventory_health(store.id)
+    sold_product_ids = set(top_ids)
+    dead_stock = sum(
+        1 for p in products if p.quantity > 0 and str(p.id) not in sold_product_ids
+    )
 
     return SuccessResponse(
         data=ProductPerformanceResponse(
             products=product_items,
             categories=categories,
             inventory=InventoryHealthResponse(
-                in_stock=in_stock,
-                low_stock=low_stock,
-                out_of_stock=out_of_stock,
+                in_stock=inv["in_stock"],
+                low_stock=inv["low_stock"],
+                out_of_stock=inv["out_of_stock"],
                 dead_stock=dead_stock,
             ),
         ),
@@ -1574,79 +1498,58 @@ def _classify_channel(source: str | None, medium: str | None) -> str:
 )
 async def get_marketing_attribution(
     store: Annotated[Store, Depends(verify_store_ownership)],
-    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
     days: int = Query(30, ge=1, le=365),
 ):
-    """Get marketing channel attribution from order UTM data and page views."""
+    """Get marketing channel attribution from order UTM data and page views.
+
+    Channel classification (Direct / Paid / Social / Email / Referral /
+    Organic) is encoded as a SQL ``CASE`` over ``utm_source`` /
+    ``utm_medium`` so we don't iterate orders. Campaigns come from a
+    second aggregation with normalized (lower/trim) casing.
+    """
     now = datetime.now(UTC)
     period_start = now - timedelta(days=days)
 
-    # Get total visits
     total_visits = await pv_repo.count_unique_visitors(store.id, period_start, now)
+    channel_rows, attributed_visits = await analytics_repo.channel_attribution(
+        store.id, period_start, now
+    )
+    campaign_rows = await analytics_repo.campaign_attribution(
+        store.id, period_start, now, limit=20
+    )
 
-    # Get orders with UTM data for attribution
-    orders = await order_repo.get_by_date_range(store.id, period_start, now, limit=5000)
+    total_orders = sum(r["orders"] for r in channel_rows)
 
-    channel_data: dict[str, dict] = {}
-    campaign_data: dict[str, dict] = {}
-    attributed_visits = 0
-
-    for o in orders:
-        channel = _classify_channel(o.utm_source, o.utm_medium)
-
-        if o.utm_source and o.utm_source != "direct":
-            attributed_visits += 1
-
-        if channel not in channel_data:
-            channel_data[channel] = {"visits": 0, "orders": 0, "revenue": 0}
-        channel_data[channel]["orders"] += 1
-        channel_data[channel]["revenue"] += o.total
-
-        # Campaign tracking
-        if o.utm_campaign:
-            camp = o.utm_campaign
-            if camp not in campaign_data:
-                campaign_data[camp] = {"visits": 0, "orders": 0, "revenue": 0}
-            campaign_data[camp]["orders"] += 1
-            campaign_data[camp]["revenue"] += o.total
-
-    # Estimate visits per channel from order attribution ratios
-    total_orders = len(orders)
-    for _ch, d in channel_data.items():
-        ratio = d["orders"] / total_orders if total_orders > 0 else 0
-        d["visits"] = max(d["orders"], int(total_visits * ratio))
-
-    for _camp, d in campaign_data.items():
-        ratio = d["orders"] / total_orders if total_orders > 0 else 0
-        d["visits"] = max(d["orders"], int(total_visits * ratio))
-
-    channels = [
-        ChannelAttributionItem(
-            channel=ch,
-            visits=d["visits"],
-            orders=d["orders"],
-            revenue=d["revenue"],
-            conversion_rate=round(d["orders"] / d["visits"] * 100, 1)
-            if d["visits"] > 0
-            else 0,
+    channels = []
+    for r in channel_rows:
+        ratio = r["orders"] / total_orders if total_orders > 0 else 0
+        visits = max(r["orders"], int(total_visits * ratio))
+        channels.append(
+            ChannelAttributionItem(
+                channel=r["channel"],
+                visits=visits,
+                orders=r["orders"],
+                revenue=r["revenue_cents"],
+                conversion_rate=(
+                    round(r["orders"] / visits * 100, 1) if visits > 0 else 0
+                ),
+            )
         )
-        for ch, d in sorted(
-            channel_data.items(), key=lambda x: x[1]["revenue"], reverse=True
-        )
-    ]
 
-    campaigns = [
-        CampaignItem(
-            campaign=camp,
-            visits=d["visits"],
-            orders=d["orders"],
-            revenue=d["revenue"],
+    campaigns = []
+    for r in campaign_rows:
+        ratio = r["orders"] / total_orders if total_orders > 0 else 0
+        visits = max(r["orders"], int(total_visits * ratio))
+        campaigns.append(
+            CampaignItem(
+                campaign=r["campaign"],
+                visits=visits,
+                orders=r["orders"],
+                revenue=r["revenue_cents"],
+            )
         )
-        for camp, d in sorted(
-            campaign_data.items(), key=lambda x: x[1]["revenue"], reverse=True
-        )
-    ][:20]
 
     return SuccessResponse(
         data=MarketingAttributionResponse(
@@ -1700,12 +1603,15 @@ async def get_insights(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     lang: str = Query("ar", description="Language: ar or en"),
 ):
     """Get AI-powered insights with anomaly detection and LLM narratives.
 
     Uses cached insights from store.settings when available (refreshed daily
     by Celery task). Falls back to live calculation if no cache exists.
+    Same rollup-vs-orders fallback as ``/forecast``: brand-new stores
+    have no rollup rows yet, so we aggregate from ``orders`` directly.
     """
     from src.application.services.ai_insights_service import generate_insights
 
@@ -1713,15 +1619,35 @@ async def get_insights(
     if store.settings:
         cached = store.settings.get("ai_insights")
         if cached and cached.get("generated_at"):
-            # Use cache if generated today
+            # Use cache if generated today AND it represents real data.
+            # An "insufficient data" cache is sticky-bad: the rollup
+            # cron may have run on an empty store earlier today, then
+            # the merchant placed orders — without this guard we'd
+            # serve "0 days available" until tomorrow UTC.
             from datetime import UTC, datetime
+
+            cached_signals = cached.get("signals", [])
+            cached_metrics = cached.get("metrics_summary") or {}
+            # The rule engine emits a single ``insufficient_data``
+            # signal when it sees <7 days of rollup rows. That's the
+            # reliable "cache was built on no data" marker — checking
+            # for an empty signals list misses the case (the empty
+            # state has 1 signal, not 0). Bypass either when we see
+            # that signal type or when the cached metrics summary
+            # explicitly says <7 days were analyzed.
+            has_insufficient_signal = any(
+                isinstance(s, dict) and s.get("type") == "insufficient_data"
+                for s in cached_signals
+            )
+            cached_days = int(cached_metrics.get("days_analyzed") or 0)
+            looks_empty = (
+                not cached_signals or has_insufficient_signal or cached_days < 7
+            )
 
             try:
                 gen_time = datetime.fromisoformat(cached["generated_at"])
-                if gen_time.date() == datetime.now(UTC).date():
-                    signals = [
-                        InsightSignalResponse(**s) for s in cached.get("signals", [])
-                    ]
+                if gen_time.date() == datetime.now(UTC).date() and not looks_empty:
+                    signals = [InsightSignalResponse(**s) for s in cached_signals]
                     narrative = None
                     if cached.get("narrative"):
                         narrative = InsightNarrativeResponse(**cached["narrative"])
@@ -1740,6 +1666,71 @@ async def get_insights(
     today = date.today()
     date_from = today - timedelta(days=35)  # 5 weeks for baseline + current
     rollups = await rollup_repo.get_range(store.id, date_from, today)
+
+    # Order-derived fallback: if the rollup is shorter than the order
+    # history (typical on stores where the daily cron hasn't run yet),
+    # synthesise rollup-shaped objects from a SQL aggregation. The
+    # rule engine reads ``rollup_date / total_revenue_cents /
+    # total_orders``, so a small adapter object is enough.
+    from datetime import datetime as _dt
+
+    period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
+    period_to = datetime.now(UTC)
+    order_rows = await analytics_repo.daily_revenue_series(
+        store.id, period_from, period_to
+    )
+    if len(order_rows) > len(rollups):
+
+        class _PseudoRollup:
+            # Mirror every attribute the insights rule engine reads off
+            # the real ``AnalyticsDailyRollupModel`` so it can iterate
+            # the fallback rows interchangeably. Fields the SQL
+            # aggregation doesn't supply default to zero / empty list —
+            # the matching rule (COD-rejection, refunds, customer-mix,
+            # traffic) simply won't fire, which is correct: we don't
+            # have the data, so we can't trigger the signal.
+            __slots__ = (
+                "rollup_date",
+                "total_revenue_cents",
+                "total_orders",
+                "paid_orders",
+                "cancelled_orders",
+                "avg_order_value_cents",
+                "new_customers",
+                "returning_customers",
+                "total_page_views",
+                "unique_visitors",
+                "cod_orders",
+                "cod_delivered",
+                "cod_rejected",
+                "refund_count",
+                "refund_amount_cents",
+                "top_products_json",
+                "revenue_by_location_json",
+                "traffic_sources_json",
+            )
+
+            def __init__(self, row: dict) -> None:
+                self.rollup_date = row["rollup_date"]
+                self.total_revenue_cents = row["total_revenue_cents"]
+                self.total_orders = row["total_orders"]
+                self.paid_orders = row.get("paid_orders", 0)
+                self.cancelled_orders = row.get("cancelled_orders", 0)
+                self.avg_order_value_cents = row.get("avg_order_value_cents", 0)
+                self.new_customers = row.get("new_customers", 0)
+                self.returning_customers = row.get("returning_customers", 0)
+                self.total_page_views = row.get("total_page_views", 0)
+                self.unique_visitors = row.get("unique_visitors", 0)
+                self.cod_orders = row.get("cod_orders", 0)
+                self.cod_delivered = row.get("cod_delivered", 0)
+                self.cod_rejected = row.get("cod_rejected", 0)
+                self.refund_count = row.get("refund_count", 0)
+                self.refund_amount_cents = row.get("refund_amount_cents", 0)
+                self.top_products_json = row.get("top_products_json", [])
+                self.revenue_by_location_json = row.get("revenue_by_location_json", [])
+                self.traffic_sources_json = row.get("traffic_sources_json", [])
+
+        rollups = [_PseudoRollup(r) for r in order_rows]
 
     currency = store.default_currency.value if store.default_currency else "EGP"
     result = await generate_insights(rollups, store_currency=currency, lang=lang)
@@ -1816,14 +1807,47 @@ async def get_forecast(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     horizon: int = Query(30, ge=7, le=90, description="Forecast horizon in days"),
 ):
-    """Get sales revenue forecast using Holt-Winters exponential smoothing."""
+    """Get sales revenue forecast using Holt-Winters exponential smoothing.
+
+    Preferred source: the nightly ``analytics_daily_rollup`` table.
+    Fallback: aggregate ``orders`` directly when the rollup hasn't
+    caught up to this store yet (brand-new merchants, or the daily
+    cron hasn't fired since signup). The forecast service consumes a
+    sequence of rollup-shaped objects, so we just wrap the raw daily
+    rows in a tiny adapter when we use the fallback path.
+    """
     from src.application.services.forecast_service import generate_forecast
 
     today = date.today()
     date_from = today - timedelta(days=365)  # Use up to 1 year of data
     rollups = await rollup_repo.get_range(store.id, date_from, today)
+
+    # The forecast service requires ≥14 days of data. If the rollup
+    # table is short of that, try aggregating orders directly — most
+    # of the time this is the difference between "0 days" (rollup
+    # hasn't run yet) and "you have enough" for a real merchant.
+    if len(rollups) < 14:
+        from datetime import datetime as _dt
+
+        period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
+        period_to = datetime.now(UTC)
+        order_rows = await analytics_repo.daily_revenue_series(
+            store.id, period_from, period_to
+        )
+        if len(order_rows) > len(rollups):
+
+            class _PseudoRollup:
+                __slots__ = ("rollup_date", "total_revenue_cents", "total_orders")
+
+                def __init__(self, row: dict) -> None:
+                    self.rollup_date = row["rollup_date"]
+                    self.total_revenue_cents = row["total_revenue_cents"]
+                    self.total_orders = row["total_orders"]
+
+            rollups = [_PseudoRollup(r) for r in order_rows]
 
     result = generate_forecast(rollups, horizon=horizon)
 
@@ -1916,12 +1940,10 @@ async def get_sessions(
             message="Sessions retrieved",
         )
 
-    # Get sessions that completed an order
-    order_sessions = await funnel_repo.get_sessions_with_step(
-        store.id, period_start, now, "checkout_started"
-    )
+    # Single query: ``{fingerprint: {step1, step2, ...}}``. Replaces a
+    # loop that fired ``get_sessions_with_step`` once per funnel step.
+    steps_by_fp = await funnel_repo.get_steps_per_session(store.id, period_start, now)
 
-    # Get deepest funnel step per session
     funnel_steps_order = [
         "page_view",
         "product_view",
@@ -1930,12 +1952,6 @@ async def get_sessions(
         "order_completed",
         "order_delivered",
     ]
-    # Batch: get all funnel step sets
-    step_sessions: dict[str, set[str]] = {}
-    for step in funnel_steps_order[1:]:  # skip page_view, all have it
-        step_sessions[step] = await funnel_repo.get_sessions_with_step(
-            store.id, period_start, now, step
-        )
 
     sessions: list[SessionSummaryItem] = []
     durations: list[int] = []
@@ -1948,12 +1964,14 @@ async def get_sessions(
         ended = s["ended_at"]
         duration = int((ended - started).total_seconds()) if started and ended else 0
         device_type = _parse_device_type(s.get("user_agent"))
-        in_orders = fp in order_sessions
+        fp_steps = steps_by_fp.get(fp, set())
+        in_orders = "checkout_started" in fp_steps
 
-        # Deepest funnel step
+        # Deepest funnel step (last one of the canonical order present
+        # in the session's step set).
         deepest = "page_view"
         for step in funnel_steps_order[1:]:
-            if fp in step_sessions.get(step, set()):
+            if step in fp_steps:
                 deepest = step
 
         # Apply filters

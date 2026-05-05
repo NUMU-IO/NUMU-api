@@ -1,8 +1,9 @@
 """Tenant database model (public schema)."""
 
 from datetime import UTC, datetime
+from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,7 +11,7 @@ from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 
-class TenantStatus(str, Enum):
+class TenantStatus(StrEnum):
     """Tenant status enumeration."""
 
     ACTIVE = "active"
@@ -19,7 +20,7 @@ class TenantStatus(str, Enum):
     PENDING_SETUP = "pending_setup"
 
 
-class TenantPlan(str, Enum):
+class TenantPlan(StrEnum):
     """Tenant subscription plan.
 
     ``FREE`` is **deprecated** as a public-facing plan. It is retained in the
@@ -36,7 +37,7 @@ class TenantPlan(str, Enum):
     ENTERPRISE = "enterprise"
 
 
-class TenantLifecycleState(str, Enum):
+class TenantLifecycleState(StrEnum):
     """Tenant lifecycle state machine.
 
     All ephemerality and billing state lives in this single column to avoid

@@ -4,6 +4,7 @@ URL: /stores/{store_id}/orders/{order_id}/refunds
      /stores/{store_id}/refunds (store-level list)
 """
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -14,8 +15,13 @@ from src.api.dependencies import (
     get_store_repository,
 )
 from src.api.dependencies.auth import get_current_user_id
-from src.api.dependencies.repositories import get_refund_repository
+from src.api.dependencies.repositories import (
+    get_network_reputation_repository,
+    get_refund_repository,
+)
 from src.api.dependencies.services import get_payment_service_for_provider
+
+logger = logging.getLogger(__name__)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.common import PaginatedListResponse
 from src.api.v1.schemas.tenant.refund import (
@@ -241,6 +247,7 @@ async def process_refund(
     refund_repo: Annotated[RefundRepository, Depends(get_refund_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
 ):
     """Process an approved refund through the payment provider."""
     use_case = ProcessRefundUseCase(refund_repo, order_repo, store_repo)
@@ -255,6 +262,42 @@ async def process_refund(
             pass  # Will fall through to manual processing
 
     result = await use_case.execute(refund_id, store_id, user_id, payment_service)
+
+    # ── Network reputation: record the refund event ──────────────────
+    # Mirrors the Shopify webhook path (refunds increment total_refunds).
+    # Idempotent: a flag is written to order.metadata so retries / replays
+    # don't double-count. Fail-open — never raises into the refund flow.
+    if result.status == "completed":
+        try:
+            order = await order_repo.get_by_id(order_id)
+            if order and order.shipping_address and order.shipping_address.phone:
+                metadata = order.metadata or {}
+                if not metadata.get("network_refund_recorded"):
+                    from src.application.services.network_reputation_service import (
+                        extract_phone_hash_from_string,
+                        write_network_event,
+                    )
+
+                    phone_hash = extract_phone_hash_from_string(
+                        order.shipping_address.phone
+                    )
+                    if phone_hash:
+                        await write_network_event(
+                            phone_hash=phone_hash,
+                            store_id=store_id,
+                            event_type="refund",
+                            network_repo=network_repo,
+                        )
+                        order.metadata = {**metadata, "network_refund_recorded": True}
+                        await order_repo.update(order)
+                        logger.info(
+                            "network_refund_recorded order=%s store=%s",
+                            str(order_id),
+                            str(store_id),
+                        )
+        except Exception as exc:  # noqa: BLE001 — fail-open
+            logger.warning("network_refund_record_failed: %s", exc)
+
     return SuccessResponse(
         data=_refund_to_response(result),
         message="Refund processed successfully"

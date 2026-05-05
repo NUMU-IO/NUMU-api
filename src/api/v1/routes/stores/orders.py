@@ -3,11 +3,12 @@
 URL: /stores/{store_id}/orders
 """
 
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from src.api.dependencies import (
     get_customer_repository,
@@ -17,6 +18,17 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.plan import require_order_limit
+from src.api.dependencies.repositories import (
+    get_funnel_event_repository,
+    get_network_reputation_repository,
+)
+from src.application.services.cod_trust_service import (
+    CodTrustDecision,
+    LocationSignals,
+    check_customer_trust,
+)
+
+logger = logging.getLogger(__name__)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CreateOrderRequest,
@@ -52,6 +64,84 @@ from src.infrastructure.repositories import (
 )
 
 router = APIRouter(prefix="/{store_id}/orders")
+
+
+def _risk_level_from_score(score: int | None) -> str:
+    if score is None:
+        return "low"
+    if score >= 80:
+        return "critical"
+    if score >= 60:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
+def _suggested_action_from_decision(decision: CodTrustDecision) -> str:
+    if decision.reason == "blocked_high_risk":
+        return "cancel"
+    if decision.reason == "warned_high_risk":
+        return "whatsapp_confirm"
+    return "auto_approve"
+
+
+async def _persist_cod_trust_assessment(
+    *,
+    session,
+    store: Store,
+    order_id: UUID | None,
+    order_number: str | None,
+    customer_id: UUID,
+    customer_repo: CustomerRepository,
+    total_cents: int,
+    currency: str,
+    decision: CodTrustDecision,
+) -> None:
+    """Persist a RiskAssessmentModel row for a manual-order trust decision.
+
+    Fail-open — fraud auditing must never break order creation.
+    """
+    try:
+        from src.infrastructure.database.models.tenant.risk_assessment import (
+            RiskAssessmentModel,
+        )
+
+        customer = await customer_repo.get_by_id(customer_id)
+        customer_name = None
+        customer_email = None
+        if customer:
+            customer_name = (
+                f"{customer.first_name or ''} {customer.last_name or ''}".strip()
+                or None
+            )
+            customer_email = str(customer.email) if customer.email else None
+
+        score = decision.score if decision.score is not None else 0
+        assessment = RiskAssessmentModel(
+            tenant_id=store.tenant_id,
+            store_id=store.id,
+            order_id=order_id,
+            order_number=order_number,
+            customer_name=customer_name,
+            customer_email=customer_email,
+            total_cents=total_cents,
+            currency=currency,
+            payment_method="cod",
+            risk_score=score,
+            risk_level=_risk_level_from_score(decision.score),
+            score_type="preliminary",
+            suggested_action=_suggested_action_from_decision(decision),
+            action_taken=decision.reason,
+            action_taken_at=datetime.now(UTC),
+            action_taken_by="cod_trust",
+            factors=list(decision.factors or []),
+            scored_at=datetime.now(UTC),
+        )
+        session.add(assessment)
+        await session.flush()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cod_trust_assessment_persist_failed: %s", exc)
 
 
 def _order_address_to_response(address_dto) -> OrderAddressResponse:
@@ -162,8 +252,64 @@ async def create_order(
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
 ):
     """Create a new order for the store."""
+    # ── COD Trust Network check (manual merchant orders) ──────────────
+    # The merchant might enter an order received over WhatsApp / phone
+    # call. We honour the same block/warn setting as storefront so the
+    # merchant gets the same fraud-filter signal. Manual orders almost
+    # never carry GPS coordinates → LocationSignals(None,...) which by
+    # design adds the +15 no-location penalty (a reasonable signal —
+    # the merchant didn't see the customer pin a map either).
+    is_cod = (request.payment_method or "cod") == "cod"
+    trust_decision: CodTrustDecision | None = None
+    if is_cod:
+        customer_phone = (
+            request.shipping_address.phone if request.shipping_address else None
+        )
+        location_signals = LocationSignals()
+        trust_decision = await check_customer_trust(
+            phone=customer_phone,
+            store_settings=store.settings,
+            network_repo=network_repo,
+            location=location_signals,
+        )
+        logger.info(
+            "cod_trust_check_manual store=%s allowed=%s reason=%s score=%s",
+            str(store.id),
+            trust_decision.allowed,
+            trust_decision.reason,
+            trust_decision.score,
+        )
+        if not trust_decision.allowed:
+            await _persist_cod_trust_assessment(
+                session=order_repo.session,
+                store=store,
+                order_id=None,
+                order_number=None,
+                customer_id=request.customer_id,
+                customer_repo=customer_repo,
+                total_cents=0,
+                currency=request.currency or "EGP",
+                decision=trust_decision,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "cod_trust_blocked",
+                    "message_ar": (
+                        "هذا العميل مُعلَّم كعالي المخاطر في شبكة نمو. "
+                        "يُفضَّل التحصيل المسبق."
+                    ),
+                    "message_en": (
+                        "This customer is flagged as high-risk in the trust "
+                        "network. Consider asking for a deposit before "
+                        "creating a COD order."
+                    ),
+                },
+            )
+
     use_case = CreateOrderUseCase(
         order_repository=order_repo,
         store_repository=store_repo,
@@ -233,6 +379,25 @@ async def create_order(
         user_id=store.owner_id,
     )
 
+    # Persist the allowed/warned COD trust assessment so the merchant
+    # decisions feed includes manual orders (matches storefront parity).
+    if (
+        is_cod
+        and trust_decision is not None
+        and trust_decision.reason not in {"disabled", "no_phone", "lookup_error"}
+    ):
+        await _persist_cod_trust_assessment(
+            session=order_repo.session,
+            store=store,
+            order_id=result.id,
+            order_number=result.order_number,
+            customer_id=request.customer_id,
+            customer_repo=customer_repo,
+            total_cents=result.total,
+            currency=result.currency,
+            decision=trust_decision,
+        )
+
     return SuccessResponse(
         data=_order_to_response(result),
         message="Order created successfully",
@@ -266,7 +431,16 @@ async def list_orders(
     search: str | None = Query(None),
     customer_id: str | None = Query(None, description="Filter by customer ID"),
 ):
-    """List orders for a store with optional filtering and pagination."""
+    """List orders for a store with optional filtering and pagination.
+
+    For the specific case of "orders with an InstaPay proof awaiting
+    merchant review", use the dedicated endpoint
+    ``GET /stores/{store_id}/orders/pending-instapay-review`` instead
+    of a query param on this route. It runs a self-join on
+    ``payment_proofs`` so the server returns only rows where the
+    *latest* proof is ``awaiting_review`` — a condition this list
+    endpoint's repository layer can't express today.
+    """
     use_case = ListOrdersUseCase(
         order_repository=order_repo,
         store_repository=store_repo,
@@ -418,6 +592,8 @@ async def update_order_status(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
 ):
     """Update order status."""
     use_case = UpdateOrderStatusUseCase(
@@ -425,6 +601,8 @@ async def update_order_status(
         store_repository=store_repo,
         customer_repository=customer_repo,
         event_bus=get_event_bus(),
+        network_repository=network_repo,
+        funnel_repository=funnel_repo,
     )
 
     dto = UpdateOrderStatusDTO(
@@ -457,6 +635,8 @@ async def cancel_order(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
     reason: str | None = Query(None, description="Cancellation reason"),
 ):
     """Cancel an order."""
@@ -465,6 +645,8 @@ async def cancel_order(
         store_repository=store_repo,
         customer_repository=customer_repo,
         event_bus=get_event_bus(),
+        network_repository=network_repo,
+        funnel_repository=funnel_repo,
     )
 
     dto = UpdateOrderStatusDTO(
@@ -678,6 +860,8 @@ async def bulk_update_order_status(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
 ):
     """Update the status of multiple orders at once."""
     use_case = UpdateOrderStatusUseCase(
@@ -685,6 +869,8 @@ async def bulk_update_order_status(
         store_repository=store_repo,
         customer_repository=customer_repo,
         event_bus=get_event_bus(),
+        network_repository=network_repo,
+        funnel_repository=funnel_repo,
     )
 
     updated = 0

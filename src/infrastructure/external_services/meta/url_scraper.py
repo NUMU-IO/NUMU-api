@@ -185,8 +185,22 @@ def _parse_embed_html(html: str) -> tuple[list[str], str | None, str | None, int
     # --- Images ---
     # Post images use t51.82787-15, profile pics use t51.82787-19.
     # Only match post images (t51.82787-15).
+    #
+    # Instagram serves CDN images from one of three host shapes,
+    # depending on the time / region / which experiment they're
+    # running:
+    #   * scontent.cdninstagram.com                  (current default)
+    #   * scontent-<airport>.cdninstagram.com        (regional variant)
+    #   * instagram.<airport>.fbcdn.net              (legacy)
+    # The legacy form was the only one the original regex matched, so
+    # any post served from the newer hosts came back with zero images
+    # and the route reported "Could not extract image".
     raw_urls = re.findall(
-        r'(https://instagram\.[a-z0-9.-]+\.fbcdn\.net/v/t51\.82787-15/[^"<>\s]+)',
+        r"(https://"
+        r"(?:scontent[a-z0-9.-]*\.cdninstagram\.com"
+        r"|scontent[a-z0-9.-]*\.fbcdn\.net"
+        r"|instagram\.[a-z0-9.-]+\.fbcdn\.net)"
+        r'/v/t51\.82787-15/[^"<>\s]+)',
         html,
     )
     decoded = [unescape(u) for u in raw_urls]

@@ -51,6 +51,17 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.expire_temporary_grants",
         # Feature 001: Omnichannel inbox
         "src.infrastructure.messaging.tasks.omnichannel_tasks",
+        # InstaPay — auto-cancel expired pending-payment orders
+        "src.infrastructure.messaging.tasks.instapay_expiry_task",
+        # COD deposit — auto-cancel orders past deposit_expires_at
+        "src.infrastructure.messaging.tasks.deposit_expiry_task",
+        # COD trust network — auto-flag stale SHIPPED orders as RETURNED
+        # so manual-ship merchants feed RTO signals into the network.
+        "src.infrastructure.messaging.tasks.cod_auto_rto_task",
+        # Phase C — keep HF OCR Spaces warm for stores that opt in.
+        "src.infrastructure.messaging.tasks.warm_hf_vision_spaces",
+        # Analytics retention — drops funnel/page-view rows past TTL.
+        "src.infrastructure.messaging.tasks.analytics_retention_task",
         # Theme builds + marketplace
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
@@ -181,6 +192,38 @@ celery_app.conf.beat_schedule = {
     "compute-staff-risk-scores": {
         "task": "tasks.compute_staff_risk_scores",
         "schedule": crontab(hour=4, minute=30),  # Daily at 04:30 UTC
+    },
+    # ─── InstaPay: cancel stale pending-payment orders every minute ──
+    "expire-instapay-orders": {
+        "task": "tasks.expire_instapay_orders",
+        "schedule": 60.0,  # Every 60s — matches 30-min window granularity
+    },
+    # ─── COD deposit: cancel orders past deposit_expires_at ──
+    "expire-pending-deposit-orders": {
+        "task": "tasks.expire_pending_deposit_orders",
+        "schedule": 60.0,  # Every 60s — finest granularity the merchant can set is 5 min
+    },
+    # ─── COD trust: auto-flag stale SHIPPED orders as RETURNED ─────────
+    # Daily at 03:00 UTC (~05:00 Cairo). Manual-ship merchants who
+    # forget to mark outcomes still feed RTO signals into the network.
+    "auto-rto-stale-shipped-orders": {
+        "task": "tasks.auto_rto_stale_shipped_orders",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    # ─── Phase C: keep HF OCR Spaces warm for opted-in stores ──────────
+    # Free HF Spaces sleep on inactivity → 30–60s cold-start. Pinging
+    # every 10 minutes is well under HF's idle threshold.
+    "warm-hf-vision-spaces": {
+        "task": "tasks.warm_hf_vision_spaces",
+        "schedule": 600.0,  # 10 minutes
+    },
+    # ─── Analytics retention — drop funnel/page-view rows older than
+    # the configured window so the tables don't grow unboundedly. Daily
+    # at 02:30 UTC, before the 03:30 rollup so the rollup never sees
+    # rows that are about to be deleted.
+    "purge-analytics-events": {
+        "task": "tasks.purge_analytics_events",
+        "schedule": crontab(hour=2, minute=30),
     },
 }
 

@@ -167,7 +167,7 @@ async def get_upsell_offers(
                     "price": original_price,
                     "compare_at_price": compare_at,
                     "images": product.images or [],
-                    "is_in_stock": product.quantity > 0,
+                    "is_in_stock": product.is_in_stock,
                 },
                 discount_type=rule.discount_type,
                 discount_value=rule.discount_value,

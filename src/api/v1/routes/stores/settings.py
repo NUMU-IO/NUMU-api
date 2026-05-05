@@ -17,6 +17,7 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     BostaCredentialsResponse,
+    CodDepositPolicy,
     CodTrustResponse,
     CreateShippingZoneRequest,
     CustomizationFooter,
@@ -32,6 +33,7 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationSocialLinks,
     CustomizationTheme,
     FawaterakCredentialsResponse,
+    InstapayCredentialsResponse,
     InvoiceSettingsResponse,
     KashierCredentialsResponse,
     NotificationTemplate,
@@ -40,6 +42,7 @@ from src.api.v1.schemas.tenant.settings import (
     PaymobCredentialsResponse,
     SaveBostaCredentialsRequest,
     SaveFawaterakCredentialsRequest,
+    SaveInstapayCredentialsRequest,
     SaveKashierCredentialsRequest,
     SavePaymobCredentialsRequest,
     ShippingCarrierStatus,
@@ -77,6 +80,16 @@ def _get_default_payment_settings() -> dict:
             "last_configured": None,
         },
         "paymob": {"enabled": False, "is_configured": False, "last_configured": None},
+        "kashier": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
+        "instapay": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
         "vodafone_cash": {
             "enabled": False,
             "is_configured": False,
@@ -184,17 +197,42 @@ def _build_payment_response(settings: dict) -> PaymentSettingsResponse:
     defaults = _get_default_payment_settings()
     merged = {**defaults, **settings}
 
+    # Deposit policy lives nested under cod. Extract into its own
+    # top-level response field so the merchant UI can bind to it
+    # without reaching into the `cod` object (which only carries
+    # gateway-status booleans).
+    cod_block = merged.get("cod", defaults["cod"]) or {}
+    deposit_raw = cod_block.get("deposit_policy") or {}
+    # Bypass the `_require_gateways_when_enabled` validator here —
+    # reading pre-existing storage should never 500 if a merchant
+    # saved a half-configured policy through an older code path. The
+    # validator runs on writes via UpdatePaymentSettingsRequest.
+    deposit_policy = CodDepositPolicy.model_construct(
+        enabled=bool(deposit_raw.get("enabled", False)),
+        amount_cents=int(deposit_raw.get("amount_cents", 0) or 0),
+        ttl_minutes=int(deposit_raw.get("ttl_minutes", 30) or 30),
+        auto_refund_on_cancel=bool(deposit_raw.get("auto_refund_on_cancel", False)),
+        allowed_gateways=list(deposit_raw.get("allowed_gateways") or []),
+    )
+
+    def _status(key: str) -> PaymentMethodStatus:
+        """Fallback to an empty status when a provider is missing from
+        stored settings — happens on stores older than a given
+        provider's introduction."""
+        fallback = defaults.get(key, {"enabled": False, "is_configured": False})
+        return PaymentMethodStatus(**merged.get(key, fallback))
+
     return PaymentSettingsResponse(
-        cod=PaymentMethodStatus(**merged.get("cod", defaults["cod"])),
-        fawry=PaymentMethodStatus(**merged.get("fawry", defaults["fawry"])),
-        paymob=PaymentMethodStatus(**merged.get("paymob", defaults["paymob"])),
-        vodafone_cash=PaymentMethodStatus(
-            **merged.get("vodafone_cash", defaults["vodafone_cash"])
-        ),
-        bank_transfer=PaymentMethodStatus(
-            **merged.get("bank_transfer", defaults["bank_transfer"])
-        ),
+        cod=PaymentMethodStatus(**cod_block),
+        fawry=_status("fawry"),
+        fawaterak=_status("fawaterak"),
+        paymob=_status("paymob"),
+        kashier=_status("kashier"),
+        instapay=_status("instapay"),
+        vodafone_cash=_status("vodafone_cash"),
+        bank_transfer=_status("bank_transfer"),
         bank_accounts_count=merged.get("bank_accounts_count", 0),
+        cod_deposit_policy=deposit_policy,
     )
 
 
@@ -352,6 +390,22 @@ async def update_payment_settings(
                 detail="Paymob is not configured. Contact administrator.",
             )
         payment_settings["paymob"]["enabled"] = request.paymob_enabled
+    if getattr(request, "kashier_enabled", None) is not None:
+        # Kashier uses the tenant-credential system, so "is_configured"
+        # here might be False even when the merchant has credentials
+        # saved through that flow. We trust the toggle — the storefront's
+        # /payment-methods endpoint re-checks credential availability.
+        payment_settings.setdefault(
+            "kashier",
+            {"enabled": False, "is_configured": False, "last_configured": None},
+        )["enabled"] = request.kashier_enabled
+    if getattr(request, "instapay_enabled", None) is not None:
+        if not payment_settings.get("instapay", {}).get("is_configured"):
+            raise HTTPException(
+                status_code=400,
+                detail="InstaPay is not configured. Save your IPA first.",
+            )
+        payment_settings["instapay"]["enabled"] = request.instapay_enabled
     if request.vodafone_cash_enabled is not None:
         if not payment_settings["vodafone_cash"]["is_configured"]:
             raise HTTPException(
@@ -366,6 +420,37 @@ async def update_payment_settings(
                 detail="Bank Transfer is not configured. Contact administrator.",
             )
         payment_settings["bank_transfer"]["enabled"] = request.bank_transfer_enabled
+    if request.cod_deposit_policy is not None:
+        policy = request.cod_deposit_policy
+        if policy.enabled:
+            # Cross-field guard — every allowed gateway must actually
+            # be enabled+configured on this store, otherwise the
+            # deposit step would hit a gateway the customer can't use.
+            not_ready: list[str] = []
+            for provider in policy.allowed_gateways:
+                cfg = payment_settings.get(provider, {})
+                if not (cfg.get("enabled") and cfg.get("is_configured")):
+                    not_ready.append(provider)
+            if not_ready:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "These deposit gateways aren't enabled + configured: "
+                        + ", ".join(not_ready)
+                        + ". Configure them in Payment Setup first, or remove "
+                        "them from the deposit policy."
+                    ),
+                )
+        payment_settings.setdefault(
+            "cod",
+            {"enabled": True, "is_configured": True, "last_configured": None},
+        )["deposit_policy"] = {
+            "enabled": policy.enabled,
+            "amount_cents": policy.amount_cents,
+            "ttl_minutes": policy.ttl_minutes,
+            "auto_refund_on_cancel": policy.auto_refund_on_cancel,
+            "allowed_gateways": list(policy.allowed_gateways),
+        }
 
     # Save settings
     settings["payment"] = payment_settings
@@ -380,6 +465,8 @@ async def update_payment_settings(
             "fawry",
             "fawaterak",
             "paymob",
+            "kashier",
+            "instapay",
             "vodafone_cash",
             "bank_transfer",
         )
@@ -403,6 +490,8 @@ _COD_TRUST_DEFAULTS = {
     "threshold": 70,
     "min_confidence": "medium",
     "action": "block",
+    "auto_rto_disabled": False,
+    "auto_rto_days": 14,
 }
 
 
@@ -454,6 +543,10 @@ async def update_cod_trust_settings_endpoint(
         cod_trust["min_confidence"] = request.min_confidence
     if request.action is not None:
         cod_trust["action"] = request.action
+    if request.auto_rto_disabled is not None:
+        cod_trust["auto_rto_disabled"] = request.auto_rto_disabled
+    if request.auto_rto_days is not None:
+        cod_trust["auto_rto_days"] = request.auto_rto_days
 
     settings["cod_trust"] = cod_trust
     store.settings = settings
@@ -1467,7 +1560,22 @@ async def update_whatsapp_settings(
 def _get_default_customization() -> dict:
     """Get default storefront customization settings."""
     return {
-        "identity": {"logo_url": "", "store_name": "", "favicon_url": ""},
+        "identity": {
+            "logo_url": "",
+            "store_name": "",
+            "favicon_url": "",
+            "logo_footer_url": "",
+            "logo_dark_url": "",
+            "logo_alt_text": "",
+            "logo_link_target": "/",
+            "logo_width_desktop": 0,
+            "logo_width_mobile": 0,
+            "logo_footer_width_desktop": 0,
+            "logo_footer_width_mobile": 0,
+            "logo_padding": 0,
+            "logo_background_color": "",
+            "footer_logo_filter_mode": "none",
+        },
         "theme": {
             "base_theme": "modern",
             "primary_color": "",
@@ -1520,6 +1628,23 @@ def _get_default_customization() -> dict:
 def _to_snake_case(name: str) -> str:
     """Convert camelCase to snake_case."""
     return re.sub(r"([A-Z])", r"_\1", name).lower().lstrip("_")
+
+
+def _normalize_theme_block(theme_block: Any) -> dict[str, Any]:
+    """Coerce a ``theme_settings.theme`` slot to the canonical dict shape.
+
+    Some stores were saved with ``theme`` as a plain string id
+    (legacy form) rather than the canonical ``{"base_theme": "<id>",
+    ...}`` object. Read paths used to do ``foo.get("theme", {}).get(
+    "base_theme")`` and crashed with ``AttributeError: 'str' object
+    has no attribute 'get'`` against the legacy rows. This wraps the
+    string into the object shape so every consumer can assume a dict.
+    """
+    if isinstance(theme_block, str):
+        return {"base_theme": theme_block}
+    if isinstance(theme_block, dict):
+        return theme_block
+    return {}
 
 
 def _normalize_keys(obj: Any) -> Any:
@@ -1586,7 +1711,9 @@ def _build_customization_response(
     return CustomizationResponse(
         customization_mode=merged.get("customization_mode", "preset"),
         identity=CustomizationIdentity(**merged.get("identity", defaults["identity"])),
-        theme=CustomizationTheme(**merged.get("theme", defaults["theme"])),
+        theme=CustomizationTheme(
+            **_normalize_theme_block(merged.get("theme")) or defaults["theme"]
+        ),
         header=CustomizationHeader(**merged.get("header", defaults["header"])),
         hero=CustomizationHero(**merged.get("hero", defaults["hero"])),
         products=CustomizationProducts(**merged.get("products", defaults["products"])),
@@ -1667,12 +1794,13 @@ async def update_customization(
         # theme's default copy — e.g. a luxury hero headline on a streetwear
         # theme — because templates are merchant-level overrides that persist
         # across theme switches.
-        old_base_theme = customization.get("theme", {}).get("base_theme")
+        old_theme_block = _normalize_theme_block(customization.get("theme"))
+        old_base_theme = old_theme_block.get("base_theme")
         new_base_theme = request.theme.get("base_theme")
         base_theme_changing = (
             new_base_theme is not None and new_base_theme != old_base_theme
         )
-        customization["theme"] = {**customization.get("theme", {}), **request.theme}
+        customization["theme"] = {**old_theme_block, **request.theme}
         if base_theme_changing:
             customization.pop("templates", None)
     if request.header is not None:
@@ -1856,6 +1984,52 @@ async def publish_customization(
 
 
 @router.post(
+    "/customization/reset",
+    response_model=SuccessResponse[CustomizationResponse],
+    summary="Reset storefront customization to theme defaults",
+    operation_id="reset_customization",
+)
+async def reset_customization(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Restore the merchant's customization to the fresh-store defaults.
+
+    Wipes every customization section (identity, theme, header, hero,
+    products, footer, navigation, labels, layout) plus the v2 section-
+    engine templates. The currently selected ``theme.base_theme`` is
+    preserved so the reset feels like "reset this theme" rather than
+    "reset the store".
+
+    Published customization (``store.theme_settings``) is untouched —
+    merchants must click Publish to push the reset live.
+    """
+    settings = dict(store.settings or {})
+    existing = settings.get("customization") or {}
+
+    defaults = _get_default_customization()
+    # Preserve current theme selection + any external-theme metadata
+    # (bundle_url, css_url, merchant_settings on bring-your-own-theme).
+    existing_theme = existing.get("theme") or {}
+    if existing_theme.get("base_theme"):
+        defaults["theme"]["base_theme"] = existing_theme["base_theme"]
+    for key in ("bundle_url", "css_url", "settings_schema", "merchant_settings"):
+        if key in existing_theme:
+            defaults["theme"][key] = existing_theme[key]
+
+    settings["customization"] = defaults
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=_build_customization_response(
+            defaults, theme_settings=store.theme_settings
+        ),
+        message="Customization reset to defaults",
+    )
+
+
+@router.post(
     "/customization/assets",
     response_model=SuccessResponse[dict],
     summary="Upload a customization asset (logo, favicon, hero image)",
@@ -1958,3 +2132,495 @@ async def list_customization_assets(
         return SuccessResponse(data=assets, message="Assets retrieved successfully")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list assets: {str(e)}")
+
+
+# ============ Checkout Fields Config ============
+
+from src.core.checkout_fields import (  # noqa: E402
+    SETTINGS_KEY as _CHECKOUT_KEY,
+)
+from src.core.checkout_fields import (
+    CheckoutFieldsConfig,
+)
+from src.core.checkout_fields import (
+    resolve_config as _resolve_checkout_config,
+)
+
+
+@router.get(
+    "/checkout-fields",
+    response_model=SuccessResponse[dict],
+    summary="Get checkout fields config",
+    operation_id="get_checkout_fields",
+)
+async def get_checkout_fields(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Return the merchant's checkout-fields config (with defaults merged)."""
+    cfg = _resolve_checkout_config(store.settings)
+    return SuccessResponse(data=cfg, message="Checkout fields retrieved")
+
+
+@router.put(
+    "/checkout-fields",
+    response_model=SuccessResponse[dict],
+    summary="Update checkout fields config",
+    operation_id="update_checkout_fields",
+)
+async def update_checkout_fields(
+    payload: CheckoutFieldsConfig,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Persist the merchant's checkout-fields config under ``settings.checkout_fields``."""
+    settings = dict(store.settings or {})
+    settings[_CHECKOUT_KEY] = payload.to_storage()
+    store.settings = settings
+    await store_repo.update(store)
+    cfg = _resolve_checkout_config(settings)
+    return SuccessResponse(data=cfg, message="Checkout fields updated")
+
+
+# ============ InstaPay Credentials ============
+
+
+@router.put(
+    "/payment/instapay/credentials",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Save InstaPay credentials",
+    operation_id="save_instapay_credentials",
+)
+async def save_instapay_credentials(
+    request: SaveInstapayCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save InstaPay configuration for the store.
+
+    The IPA + fallback phone are encrypted at rest; the auto-approval
+    thresholds sit alongside the encrypted blob in plaintext because
+    they're policy knobs the merchant sees in the dashboard, not
+    secrets.
+
+    `request.ipa` and `request.fallback_phone` are both optional —
+    when omitted, the existing encrypted blob is decrypted and those
+    values carry forward. This lets the merchant edit display name,
+    thresholds, or toggle enabled without re-typing the IPA (the UI
+    shows it masked; it can never unmask to its true form).
+    First-time saves must include `ipa`.
+    """
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+    existing = payment_settings.get("instapay") or {}
+
+    # Determine the IPA + fallback phone to persist. On update, missing
+    # fields carry forward from the previously-encrypted blob so the
+    # UI can do partial updates.
+    ipa_to_save: str | None = request.ipa
+    phone_to_save: str | None = request.fallback_phone
+
+    needs_existing = ipa_to_save is None or phone_to_save is None
+    if needs_existing:
+        if not existing.get("encrypted_credentials"):
+            # First-time configuration — ipa must be supplied.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=("InstaPay address (IPA) is required for the first save."),
+            )
+        try:
+            prev_key_id = existing["encryption_key_id"]
+            prev_encrypted = base64.b64decode(existing["encrypted_credentials"])
+            prev_creds = await secrets.decrypt(prev_encrypted, prev_key_id)
+        except Exception:
+            # If the prior blob can't be decrypted (key rotation issue,
+            # corrupt bytes), force the merchant to supply a fresh IPA
+            # rather than silently corrupting the record.
+            logger.error(
+                "Failed to decrypt existing InstaPay credentials for "
+                f"store {store.id} during partial update"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Could not read existing InstaPay credentials. Please "
+                    "re-enter your IPA to save."
+                ),
+            )
+        if ipa_to_save is None:
+            ipa_to_save = prev_creds.get("ipa")
+        if phone_to_save is None:
+            phone_to_save = prev_creds.get("fallback_phone")
+
+    if not ipa_to_save:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="InstaPay address (IPA) is required.",
+        )
+
+    key_id = await secrets.get_current_key_id()
+    credential_data = {
+        "ipa": ipa_to_save,
+        "fallback_phone": phone_to_save,
+    }
+    encrypted = await secrets.encrypt(credential_data, key_id)
+    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
+
+    # qr_link_url: ``None`` from the request means "leave alone";
+    # empty string means "clear"; any non-empty value overwrites.
+    if request.qr_link_url is None:
+        qr_link_to_save = existing.get("qr_link_url")
+    else:
+        qr_link_to_save = request.qr_link_url.strip() or None
+
+    payment_settings["instapay"] = {
+        # Preserve the current enabled state on credential updates —
+        # merchants editing thresholds shouldn't accidentally unmute
+        # a disabled InstaPay option at checkout. First-time saves
+        # still fall through to True via the `or True` below (new
+        # credentials are worth enabling by default).
+        "enabled": bool(existing.get("enabled", True)) if existing else True,
+        "is_configured": True,
+        "last_configured": datetime.now(UTC).isoformat(),
+        "encrypted_credentials": encrypted_b64,
+        "encryption_key_id": key_id,
+        "ipa_display_name": request.ipa_display_name,
+        "auto_approve_threshold_cents": request.auto_approve_threshold_cents,
+        "auto_approve_daily_cap_cents": request.auto_approve_daily_cap_cents,
+        "auto_approve_daily_count": request.auto_approve_daily_count,
+        # The QR image is uploaded via a dedicated endpoint, so a
+        # credentials PUT must not erase a previously-uploaded URL.
+        "qr_image_url": existing.get("qr_image_url"),
+        "qr_link_url": qr_link_to_save,
+        # Phase C — merchant-facing OCR opt-in flags. The provider
+        # itself is admin-managed and intentionally NOT read from the
+        # request, so a merchant can't self-promote onto a paid tier.
+        "ocr_provider": existing.get("ocr_provider"),
+        "require_ocr_amount_match": request.require_ocr_amount_match,
+        "require_ocr_ipa_match": request.require_ocr_ipa_match,
+        "ocr_amount_tolerance_bps": request.ocr_amount_tolerance_bps,
+        # Phase C extras
+        "require_note_contains_reference": (request.require_note_contains_reference),
+        "require_transaction_ref_match": (request.require_transaction_ref_match),
+        "require_recipient_name_match": (request.require_recipient_name_match),
+        "recipient_name_token": (
+            request.recipient_name_token.strip()
+            if request.recipient_name_token
+            else None
+        ),
+    }
+
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+    )
+
+    logger.info(f"InstaPay credentials saved for store {store.id}")
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=True,
+            enabled=bool(payment_settings["instapay"]["enabled"]),
+            ipa_masked=secrets.mask_credential(ipa_to_save),
+            ipa_display_name=request.ipa_display_name,
+            fallback_phone=phone_to_save,
+            auto_approve_threshold_cents=request.auto_approve_threshold_cents,
+            auto_approve_daily_cap_cents=request.auto_approve_daily_cap_cents,
+            auto_approve_daily_count=request.auto_approve_daily_count,
+            last_configured=payment_settings["instapay"]["last_configured"],
+            qr_image_url=payment_settings["instapay"].get("qr_image_url"),
+            qr_link_url=payment_settings["instapay"].get("qr_link_url"),
+            ocr_provider=payment_settings["instapay"].get("ocr_provider"),
+            require_ocr_amount_match=bool(
+                payment_settings["instapay"].get("require_ocr_amount_match", False)
+            ),
+            require_ocr_ipa_match=bool(
+                payment_settings["instapay"].get("require_ocr_ipa_match", False)
+            ),
+            ocr_amount_tolerance_bps=int(
+                payment_settings["instapay"].get("ocr_amount_tolerance_bps", 100)
+            ),
+            require_note_contains_reference=bool(
+                payment_settings["instapay"].get(
+                    "require_note_contains_reference", False
+                )
+            ),
+            require_transaction_ref_match=bool(
+                payment_settings["instapay"].get("require_transaction_ref_match", False)
+            ),
+            require_recipient_name_match=bool(
+                payment_settings["instapay"].get("require_recipient_name_match", False)
+            ),
+            recipient_name_token=payment_settings["instapay"].get(
+                "recipient_name_token"
+            ),
+        ),
+        message="InstaPay credentials saved successfully",
+    )
+
+
+@router.get(
+    "/payment/instapay/credentials",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Get InstaPay credentials status",
+    operation_id="get_instapay_credentials",
+)
+async def get_instapay_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked InstaPay config status for the store."""
+    store_settings = store.settings or {}
+    instapay_settings = store_settings.get("payment", {}).get("instapay", {})
+
+    if not instapay_settings.get("encrypted_credentials"):
+        return SuccessResponse(
+            data=InstapayCredentialsResponse(is_configured=False),
+            message="InstaPay credentials not configured",
+        )
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = instapay_settings["encryption_key_id"]
+    encrypted = base64.b64decode(instapay_settings["encrypted_credentials"])
+
+    try:
+        creds = await secrets.decrypt(encrypted, key_id)
+    except Exception:
+        logger.error(f"Failed to decrypt InstaPay credentials for store {store.id}")
+        return SuccessResponse(
+            data=InstapayCredentialsResponse(
+                is_configured=True,
+                enabled=bool(instapay_settings.get("enabled")),
+                last_configured=instapay_settings.get("last_configured"),
+            ),
+            message="InstaPay credentials configured but unreadable",
+        )
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=True,
+            enabled=bool(instapay_settings.get("enabled")),
+            ipa_masked=secrets.mask_credential(creds.get("ipa", "")),
+            ipa_display_name=instapay_settings.get("ipa_display_name"),
+            fallback_phone=creds.get("fallback_phone"),
+            auto_approve_threshold_cents=instapay_settings.get(
+                "auto_approve_threshold_cents"
+            ),
+            auto_approve_daily_cap_cents=instapay_settings.get(
+                "auto_approve_daily_cap_cents"
+            ),
+            auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
+            last_configured=instapay_settings.get("last_configured"),
+            qr_image_url=instapay_settings.get("qr_image_url"),
+            qr_link_url=instapay_settings.get("qr_link_url"),
+            ocr_provider=instapay_settings.get("ocr_provider"),
+            require_ocr_amount_match=bool(
+                instapay_settings.get("require_ocr_amount_match", False)
+            ),
+            require_ocr_ipa_match=bool(
+                instapay_settings.get("require_ocr_ipa_match", False)
+            ),
+            ocr_amount_tolerance_bps=int(
+                instapay_settings.get("ocr_amount_tolerance_bps", 100)
+            ),
+            require_note_contains_reference=bool(
+                instapay_settings.get("require_note_contains_reference", False)
+            ),
+            require_transaction_ref_match=bool(
+                instapay_settings.get("require_transaction_ref_match", False)
+            ),
+            require_recipient_name_match=bool(
+                instapay_settings.get("require_recipient_name_match", False)
+            ),
+            recipient_name_token=instapay_settings.get("recipient_name_token"),
+        )
+    )
+
+
+@router.delete(
+    "/payment/instapay/credentials",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Remove InstaPay credentials",
+    operation_id="delete_instapay_credentials",
+)
+async def delete_instapay_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove the stored InstaPay IPA and disable InstaPay at checkout.
+
+    Existing ``instapay_intents`` rows are not touched — they belong
+    to already-placed orders and the merchant still needs to see /
+    review their proofs. New orders can no longer choose InstaPay
+    until credentials are re-saved.
+    """
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["instapay"] = {
+        "enabled": False,
+        "is_configured": False,
+        "last_configured": None,
+    }
+
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    logger.info(f"InstaPay credentials removed for store {store.id}")
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(is_configured=False),
+        message="InstaPay credentials removed successfully",
+    )
+
+
+# ============ InstaPay QR image (merchant-supplied) ============
+#
+# The InstaPay scheme's QR codes are EMVCo-encoded and only the
+# official InstaPay app generates ones the app can scan back. We
+# can't synthesise a valid QR client-side, so we let the merchant
+# upload the static QR they generated inside their own InstaPay app
+# and serve that image to checkout customers. The customer scans →
+# InstaPay opens with the IPA prefilled → they type the amount + ref
+# from the page into the note.
+
+
+@router.post(
+    "/payment/instapay/qr-image",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Upload merchant-generated InstaPay QR image",
+    operation_id="upload_instapay_qr_image",
+)
+async def upload_instapay_qr_image(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    file: Annotated[UploadFile, File(description="InstaPay QR image (PNG/JPG)")],
+):
+    """Persist a merchant-supplied InstaPay QR image.
+
+    Stored in the same `STORES` bucket the customization assets use
+    and the resulting URL is written into ``store.settings.payment.
+    instapay.qr_image_url`` so checkout + the InstaPay payment page
+    can render it.
+    """
+    allowed_content = {"image/jpeg", "image/png", "image/webp"}
+    if file.content_type not in allowed_content:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid file type: {file.content_type}. Allowed: JPEG, PNG, WebP."
+            ),
+        )
+
+    max_size = 2 * 1024 * 1024  # 2 MB — QR screenshots are small
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="File size exceeds 2MB limit.")
+
+    ext = (
+        file.filename.rsplit(".", 1)[-1]
+        if file.filename and "." in file.filename
+        else "png"
+    )
+    filename = f"instapay/{store.id}/qr_{uuid.uuid4().hex[:8]}.{ext}"
+
+    from src.api.dependencies.services import get_storage_service
+    from src.core.interfaces.services.storage_service import StorageBucket
+
+    storage = get_storage_service()
+    result = await storage.upload_file(
+        file_content=content,
+        filename=filename,
+        content_type=file.content_type or "image/png",
+        bucket=StorageBucket.STORES,
+    )
+
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+    instapay_settings = payment_settings.get("instapay") or {}
+    instapay_settings["qr_image_url"] = result.url
+    payment_settings["instapay"] = instapay_settings
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    logger.info(f"InstaPay QR image uploaded for store {store.id}")
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=bool(instapay_settings.get("is_configured")),
+            enabled=bool(instapay_settings.get("enabled")),
+            ipa_display_name=instapay_settings.get("ipa_display_name"),
+            auto_approve_threshold_cents=instapay_settings.get(
+                "auto_approve_threshold_cents"
+            ),
+            auto_approve_daily_cap_cents=instapay_settings.get(
+                "auto_approve_daily_cap_cents"
+            ),
+            auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
+            last_configured=instapay_settings.get("last_configured"),
+            qr_image_url=result.url,
+            qr_link_url=instapay_settings.get("qr_link_url"),
+        ),
+        message="InstaPay QR image uploaded successfully",
+    )
+
+
+@router.delete(
+    "/payment/instapay/qr-image",
+    response_model=SuccessResponse[InstapayCredentialsResponse],
+    summary="Remove the uploaded InstaPay QR image",
+    operation_id="delete_instapay_qr_image",
+)
+async def delete_instapay_qr_image(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Clear the uploaded QR image URL.
+
+    Doesn't try to delete the underlying object — storage cleanup is
+    best-effort and orphaned QRs cost ~10 KB. The field is what the
+    storefront looks at; nulling it suppresses the QR section.
+    """
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+    instapay_settings = payment_settings.get("instapay") or {}
+    instapay_settings["qr_image_url"] = None
+    payment_settings["instapay"] = instapay_settings
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=InstapayCredentialsResponse(
+            is_configured=bool(instapay_settings.get("is_configured")),
+            enabled=bool(instapay_settings.get("enabled")),
+            ipa_display_name=instapay_settings.get("ipa_display_name"),
+            auto_approve_threshold_cents=instapay_settings.get(
+                "auto_approve_threshold_cents"
+            ),
+            auto_approve_daily_cap_cents=instapay_settings.get(
+                "auto_approve_daily_cap_cents"
+            ),
+            auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
+            last_configured=instapay_settings.get("last_configured"),
+            qr_image_url=None,
+            qr_link_url=instapay_settings.get("qr_link_url"),
+        ),
+        message="InstaPay QR image removed",
+    )

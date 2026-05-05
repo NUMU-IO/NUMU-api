@@ -47,6 +47,14 @@ from src.api.v1.routes.demo import router as demo_router
 # Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
 
+# Marketplace V3 routes (catalog, developer, admin, store install)
+from src.api.v1.routes.marketplace import (
+    marketplace_admin_router,
+    marketplace_catalog_router,
+    marketplace_developer_router,
+    marketplace_store_install_router,
+)
+
 # Omnichannel routes
 from src.api.v1.routes.omnichannel import (
     capi_router,
@@ -76,7 +84,13 @@ from src.api.v1.routes.staff.overrides import router as staff_overrides_router
 from src.api.v1.routes.staff.policies import router as staff_policies_router
 from src.api.v1.routes.staff.sessions import router as staff_sessions_router
 from src.api.v1.routes.storefront import (
+    bundles_router as storefront_bundles_router,
+)
+from src.api.v1.routes.storefront import (
     cart_router as storefront_cart_router,
+)
+from src.api.v1.routes.storefront import (
+    checkout_config_router as storefront_checkout_config_router,
 )
 from src.api.v1.routes.storefront import (
     checkout_router as storefront_checkout_router,
@@ -88,10 +102,16 @@ from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
 )
 from src.api.v1.routes.storefront import (
+    geocode_router as storefront_geocode_router,
+)
+from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
 )
 from src.api.v1.routes.storefront import (
     otp_router as storefront_otp_router,
+)
+from src.api.v1.routes.storefront import (
+    payment_proofs_router as storefront_payment_proofs_router,
 )
 
 # Storefront routes (customer-facing)
@@ -104,6 +124,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     shipping_quote_router as storefront_shipping_quote_router,
 )
+from src.api.v1.routes.storefront import (
+    shipping_router as storefront_shipping_router,
+)
 
 # Storefront theme resolution (internal — Next.js SSR → FastAPI)
 from src.api.v1.routes.storefront import (
@@ -115,9 +138,6 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
-)
-from src.api.v1.routes.storefront import (
-    bundles_router as storefront_bundles_router,
 )
 
 # Store management routes (for store owners)
@@ -133,14 +153,6 @@ from src.api.v1.routes.tenants import (
 
 # Theme marketplace routes (public)
 from src.api.v1.routes.themes import router as themes_marketplace_router
-
-# Marketplace V3 routes (catalog, developer, admin, store install)
-from src.api.v1.routes.marketplace import (
-    marketplace_admin_router,
-    marketplace_catalog_router,
-    marketplace_developer_router,
-    marketplace_store_install_router,
-)
 
 # Theme ZIP upload + build status + preview token (authenticated developers)
 from src.api.v1.routes.themes_upload import router as themes_upload_router
@@ -249,6 +261,20 @@ api_router.include_router(
     tags=["Storefront - Checkout"],
 )
 
+# Storefront - public checkout field config (no auth, scoped to store)
+api_router.include_router(
+    storefront_checkout_config_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Checkout"],
+)
+
+# Storefront - reverse geocoding proxy for the checkout location picker
+api_router.include_router(
+    storefront_geocode_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Geocoding"],
+)
+
 # Storefront - coupon validation (authenticated customer, scoped to store)
 api_router.include_router(
     storefront_coupon_router,
@@ -291,11 +317,25 @@ api_router.include_router(
     tags=["Storefront - Checkout"],
 )
 
-# Storefront - shipping rate quotes (public, scoped to store)
+# Storefront - shipping rate quotes (public, scoped to store, legacy)
 api_router.include_router(
     storefront_shipping_quote_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Shipping"],
+)
+
+# Storefront - shipping governorates + options (public, scoped to store)
+api_router.include_router(
+    storefront_shipping_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Shipping"],
+)
+
+# Storefront - InstaPay proof upload / status (authenticated customer)
+api_router.include_router(
+    storefront_payment_proofs_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Payment Proofs"],
 )
 
 # Theme marketplace (public browsing of published themes)
@@ -303,7 +343,9 @@ api_router.include_router(themes_marketplace_router, tags=["Themes - Marketplace
 
 # Marketplace V3 routes
 api_router.include_router(marketplace_catalog_router, tags=["Marketplace - Catalog"])
-api_router.include_router(marketplace_developer_router, tags=["Marketplace - Developer"])
+api_router.include_router(
+    marketplace_developer_router, tags=["Marketplace - Developer"]
+)
 api_router.include_router(marketplace_admin_router, tags=["Marketplace - Admin"])
 api_router.include_router(
     marketplace_store_install_router,
@@ -332,8 +374,21 @@ api_router.include_router(referrals_router, tags=["Referrals"])
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)
 api_router.include_router(shopify_router, prefix="/shopify")
 
-# Staff management routes (prefixes defined on the routers themselves)
+# Staff management routes (prefixes defined on the routers themselves).
+#
+# Ordering matters: `staff_list_router` owns the catch-all
+# `/staff/{membership_id}` GET/DELETE/PUT routes, so every static-prefix
+# staff sub-router (/staff/overrides, /staff/sessions, /staff/policies,
+# /staff/access-requests, /staff/invitations) MUST be included before it.
+# Otherwise FastAPI matches `/staff/overrides` against `{membership_id}`,
+# fails UUID validation on the literal string, and returns 422.
 api_router.include_router(staff_invitations_router, tags=["Staff - Invitations"])
+api_router.include_router(staff_overrides_router, tags=["Staff - Overrides"])
+api_router.include_router(staff_sessions_router, tags=["Staff - Sessions"])
+api_router.include_router(
+    staff_access_requests_router, tags=["Staff - Access Requests"]
+)
+api_router.include_router(staff_policies_router, tags=["Staff - Policies"])
 api_router.include_router(staff_list_router, tags=["Staff"])
 
 # Role management routes
@@ -344,14 +399,6 @@ api_router.include_router(permissions_router, tags=["Permissions"])
 
 # Webhooks - external service callbacks (no auth required)
 api_router.include_router(webhooks_router, prefix="/webhooks")
-
-# Staff extended routes
-api_router.include_router(staff_overrides_router, tags=["Staff - Overrides"])
-api_router.include_router(staff_sessions_router, tags=["Staff - Sessions"])
-api_router.include_router(
-    staff_access_requests_router, tags=["Staff - Access Requests"]
-)
-api_router.include_router(staff_policies_router, tags=["Staff - Policies"])
 
 # WebSocket for realtime updates
 api_router.include_router(ws_router, prefix="/ws", tags=["WebSocket"])

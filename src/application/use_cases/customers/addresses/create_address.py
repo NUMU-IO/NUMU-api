@@ -54,6 +54,11 @@ class CreateAddressUseCase:
             phone=dto.phone,
             is_default=dto.is_default,
             label=label,
+            latitude=dto.latitude,
+            longitude=dto.longitude,
+            location_accuracy=dto.location_accuracy,
+            location_source=dto.location_source,
+            geocoded_address=dto.geocoded_address,
         )
 
         # Save address

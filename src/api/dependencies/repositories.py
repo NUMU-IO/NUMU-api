@@ -23,6 +23,7 @@ from src.infrastructure.repositories import (
     ProductReviewRepository,
     RefundRepository,
     ShipmentRepository,
+    ShippingZoneRepository,
     StoreRepository,
     StoreThemeRepository,
     ThemeRepository,
@@ -148,6 +149,13 @@ def get_two_factor_repository(
     return TwoFactorRepository(session)
 
 
+def get_shipping_zone_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ShippingZoneRepository:
+    """Shipping zone + rate repository dependency."""
+    return ShippingZoneRepository(session)
+
+
 def get_webhook_subscription_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> WebhookSubscriptionRepository:
@@ -217,6 +225,17 @@ def get_funnel_event_repository(
     )
 
     return FunnelEventRepository(session)
+
+
+def get_analytics_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get the SQL-aggregation analytics repository dependency."""
+    from src.infrastructure.repositories.analytics_repository import (
+        AnalyticsRepository,
+    )
+
+    return AnalyticsRepository(session)
 
 
 def get_network_reputation_repository(
@@ -318,6 +337,24 @@ def get_whatsapp_template_repository(
     from src.infrastructure.repositories import WhatsAppTemplateRepositoryImpl
 
     return WhatsAppTemplateRepositoryImpl(session)
+
+
+def get_email_template_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get email template repository dependency."""
+    from src.infrastructure.repositories import EmailTemplateRepositoryImpl
+
+    return EmailTemplateRepositoryImpl(session)
+
+
+def get_email_log_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get email log repository dependency."""
+    from src.infrastructure.repositories import EmailLogRepositoryImpl
+
+    return EmailLogRepositoryImpl(session)
 
 
 def get_catalog_mapping_repository(

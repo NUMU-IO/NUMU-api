@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # Payment Settings
@@ -14,15 +14,97 @@ class PaymentMethodStatus(BaseModel):
     last_configured: str | None = None
 
 
+# Gateway providers allowed to carry a COD deposit. Bank transfer and
+# vodafone-cash aren't on this list because they're manual/async and
+# would defeat the "confirm before create" purpose.
+DepositGateway = Literal["paymob", "kashier", "fawry", "fawaterak", "instapay"]
+
+DEPOSIT_GATEWAY_VALUES: tuple[str, ...] = (
+    "paymob",
+    "kashier",
+    "fawry",
+    "fawaterak",
+    "instapay",
+)
+
+
+class CodDepositPolicy(BaseModel):
+    """Per-store deposit-to-confirm-COD policy.
+
+    When enabled, customers who select COD at checkout are asked to
+    pay a fixed deposit via one of `allowed_gateways` BEFORE the
+    order is created. On successful deposit, the order moves to
+    CONFIRMED with `deposit_amount_cents` stored and the remaining
+    balance due on delivery. If the deposit isn't completed within
+    `ttl_minutes`, the order auto-cancels.
+
+    Starts with fixed-amount only. Percentage and "cover shipping"
+    variants become alternative shapes of this object when merchants
+    ask for them.
+    """
+
+    enabled: bool = False
+    # Fixed deposit amount in cents. Merchants typically set this to
+    # match their delivery fee (40–80 EGP in Egypt).
+    amount_cents: int = Field(default=0, ge=0)
+    # How long the customer has to complete the deposit payment before
+    # the intent expires and the order auto-cancels. Defaults to
+    # 30 min (matches the existing InstaPay-proof TTL). Range is
+    # deliberately bounded — under 5 min is hostile UX, over 24 h
+    # creates awkward abandoned-order backlog.
+    ttl_minutes: int = Field(default=30, ge=5, le=1440)
+    # If the merchant cancels an order with a paid deposit, auto-issue
+    # a refund via the original gateway. When False, refunds are left
+    # to the merchant to process manually in the gateway console.
+    auto_refund_on_cancel: bool = False
+    # Allowlist of gateways the customer can pay the deposit with. If
+    # the merchant saves an empty list while `enabled=True`, we 400
+    # because the deposit would be uncollectible.
+    allowed_gateways: list[DepositGateway] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _require_gateways_when_enabled(self):
+        if self.enabled and not self.allowed_gateways:
+            raise ValueError(
+                "At least one allowed_gateway is required when the deposit "
+                "policy is enabled."
+            )
+        if self.enabled and self.amount_cents <= 0:
+            raise ValueError(
+                "amount_cents must be greater than 0 when the deposit "
+                "policy is enabled."
+            )
+        # De-dup while preserving order for deterministic storage.
+        if self.allowed_gateways:
+            seen: set[str] = set()
+            deduped: list[DepositGateway] = []
+            for g in self.allowed_gateways:
+                if g not in seen:
+                    seen.add(g)
+                    deduped.append(g)
+            object.__setattr__(self, "allowed_gateways", deduped)
+        return self
+
+
 class PaymentSettingsResponse(BaseModel):
     """Payment settings response."""
 
     cod: PaymentMethodStatus
     fawry: PaymentMethodStatus
+    # Previously absent from the response though present in stored
+    # settings. Surfaced now so the deposit-policy UI can render the
+    # allowed-gateway picker without a separate credential fetch per
+    # gateway.
+    fawaterak: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
     paymob: PaymentMethodStatus
+    kashier: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
+    instapay: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
     vodafone_cash: PaymentMethodStatus
     bank_transfer: PaymentMethodStatus
     bank_accounts_count: int = 0
+    # Flattened onto the response so the merchant hub can render it
+    # as a card under COD without a second round-trip.
+    cod_deposit_policy: CodDepositPolicy = Field(default_factory=CodDepositPolicy)
 
 
 class UpdatePaymentSettingsRequest(BaseModel):
@@ -32,8 +114,12 @@ class UpdatePaymentSettingsRequest(BaseModel):
     fawry_enabled: bool | None = None
     fawaterak_enabled: bool | None = None
     paymob_enabled: bool | None = None
+    kashier_enabled: bool | None = None
+    instapay_enabled: bool | None = None
     vodafone_cash_enabled: bool | None = None
     bank_transfer_enabled: bool | None = None
+    # Send the full policy object to replace it; omit to leave unchanged.
+    cod_deposit_policy: CodDepositPolicy | None = None
 
 
 # COD Trust Network Settings
@@ -44,6 +130,12 @@ class CodTrustResponse(BaseModel):
     threshold: int = 70
     min_confidence: Literal["low", "medium", "high"] = "medium"
     action: Literal["block", "warn"] = "block"
+    # Auto-RTO sweep: when a COD order has been SHIPPED for longer than
+    # `auto_rto_days` and the merchant hasn't marked it delivered or
+    # returned, a daily Celery beat task auto-flags it as RETURNED so
+    # the network gets the signal even from forgetful merchants.
+    auto_rto_disabled: bool = False
+    auto_rto_days: int = 14
 
 
 class UpdateCodTrustRequest(BaseModel):
@@ -53,6 +145,8 @@ class UpdateCodTrustRequest(BaseModel):
     threshold: int | None = Field(None, ge=0, le=100)
     min_confidence: Literal["low", "medium", "high"] | None = None
     action: Literal["block", "warn"] | None = None
+    auto_rto_disabled: bool | None = None
+    auto_rto_days: int | None = Field(None, ge=7, le=60)
 
 
 class SavePaymobCredentialsRequest(BaseModel):
@@ -75,6 +169,87 @@ class PaymobCredentialsResponse(BaseModel):
     card_integration_id: str | None = None
     wallet_integration_id: str | None = None
     last_configured: str | None = None
+
+
+class SaveInstapayCredentialsRequest(BaseModel):
+    """Save merchant InstaPay configuration.
+
+    The IPA (Instant Payment Address, e.g. ``merchant@cib``) is the
+    primary routing key and the one sensitive field — a leaked or
+    swapped IPA lets someone impersonate the merchant on the
+    proof-verification step. Phones are optional fallback display.
+    Thresholds are policy the merchant tunes.
+
+    `ipa` is optional so merchants can update display/threshold
+    fields without re-typing their address. When omitted, the handler
+    preserves the currently-encrypted IPA. First-time saves must
+    include it; the handler enforces that.
+    """
+
+    ipa: str | None = Field(default=None, min_length=3, max_length=80)
+    ipa_display_name: str | None = Field(None, max_length=100)
+    fallback_phone: str | None = Field(None, max_length=20)
+    auto_approve_threshold_cents: int = Field(50_000, ge=0, le=10_000_000)
+    auto_approve_daily_cap_cents: int = Field(500_000, ge=0, le=100_000_000)
+    auto_approve_daily_count: int = Field(10, ge=0, le=1_000)
+    # InstaPay "Share link" URL (e.g. https://ipn.eg/QR/...). The
+    # storefront renders a QR code client-side from this string; the
+    # customer's phone camera follows the URL → universal link →
+    # InstaPay app opens with the merchant prefilled. Empty string
+    # clears the field; null leaves it unchanged.
+    qr_link_url: str | None = Field(None, max_length=500)
+    # Phase C OCR opt-in flags. Either flag toggled on without an
+    # admin-assigned ``ocr_provider`` is harmless: the auto-approval
+    # engine no-ops when ``ocr_status != "ok"``, and a Noop provider
+    # always returns ``skipped``. Defaults stay off so a merchant
+    # who hasn't read the docs doesn't inadvertently soft-block
+    # legitimate proofs.
+    require_ocr_amount_match: bool = False
+    require_ocr_ipa_match: bool = False
+    ocr_amount_tolerance_bps: int = Field(100, ge=0, le=5_000)
+    # Phase C extras — three additional opt-in cross-checks the
+    # auto-approval engine can run against the OCR'd screenshot.
+    # ``recipient_name_token`` is the merchant's name as it appears
+    # under "To" on bank-app receipts (typically the first name);
+    # blank disables the rule even when the flag is on.
+    require_note_contains_reference: bool = False
+    require_transaction_ref_match: bool = False
+    require_recipient_name_match: bool = False
+    recipient_name_token: str | None = Field(None, max_length=80)
+
+
+class InstapayCredentialsResponse(BaseModel):
+    """Masked InstaPay config (the IPA itself is the only sensitive bit)."""
+
+    is_configured: bool
+    enabled: bool = False
+    ipa_masked: str | None = None
+    ipa_display_name: str | None = None
+    fallback_phone: str | None = None
+    auto_approve_threshold_cents: int | None = None
+    auto_approve_daily_cap_cents: int | None = None
+    auto_approve_daily_count: int | None = None
+    last_configured: str | None = None
+    # Public URL of the merchant's hand-generated InstaPay QR image
+    # (taken from inside the InstaPay app). Plain CDN URL — not a
+    # secret; it gets rendered to every checkout customer anyway.
+    qr_image_url: str | None = None
+    # InstaPay "Share link" URL. The storefront generates a QR code
+    # from this string client-side; the customer scans it with their
+    # phone camera and the universal-link target opens InstaPay.
+    qr_link_url: str | None = None
+    # Phase C OCR config. ``ocr_provider`` is read-only here —
+    # admins set it via :mod:`src.api.v1.routes.admin`; the merchant
+    # endpoint silently drops any incoming ``ocr_provider`` so a
+    # malicious merchant can't unilaterally swap onto a paid tier.
+    ocr_provider: str | None = None
+    require_ocr_amount_match: bool = False
+    require_ocr_ipa_match: bool = False
+    ocr_amount_tolerance_bps: int = 100
+    require_note_contains_reference: bool = False
+    require_transaction_ref_match: bool = False
+    require_recipient_name_match: bool = False
+    recipient_name_token: str | None = None
 
 
 class SaveKashierCredentialsRequest(BaseModel):
@@ -249,11 +424,35 @@ class UpdateWhatsAppSettingsRequest(BaseModel):
 
 
 class CustomizationIdentity(BaseModel):
-    """Store identity customization."""
+    """Store identity customization.
+
+    Logo model (Shopify-parity):
+      * ``logo_url`` — primary logo (header, light backgrounds)
+      * ``logo_dark_url`` — variant for dark surfaces (fallback for footer)
+      * ``logo_footer_url`` — explicit footer override (wins over ``logo_dark_url``)
+      * ``footer_logo_filter_mode`` — ``none`` (default) | ``white`` | ``invert``
+    Widths are pixel numbers; ``0`` means use the theme's default / natural size.
+    """
 
     logo_url: str = ""
     store_name: str = ""
     favicon_url: str = ""
+    # Logo variants (footer/dark surfaces)
+    logo_footer_url: str = ""
+    logo_dark_url: str = ""
+    # Accessibility / interaction
+    logo_alt_text: str = ""
+    logo_link_target: str = "/"
+    # Responsive widths — 0 means "use theme default"
+    logo_width_desktop: int = 0
+    logo_width_mobile: int = 0
+    logo_footer_width_desktop: int = 0
+    logo_footer_width_mobile: int = 0
+    # Spacing / background
+    logo_padding: int = 0
+    logo_background_color: str = ""
+    # Footer-only filter hint (storefront maps to CSS)
+    footer_logo_filter_mode: str = "none"
 
 
 class CustomizationTheme(BaseModel):
@@ -300,6 +499,11 @@ class CustomizationProducts(BaseModel):
     products_per_row: int = Field(default=3, ge=2, le=4)
     show_price: bool = True
     show_rating: bool = True
+    # Image aspect ratio for product cards + PDP main image. Storefront
+    # maps these to Tailwind aspect utilities (3/4, 1/1, 4/3). Default
+    # "portrait" gives the most visual weight to the photo — fashion/
+    # apparel stores want this; homeware stores often prefer "square".
+    image_aspect: str = "portrait"  # portrait | square | landscape
 
 
 class CustomizationSocialLinks(BaseModel):

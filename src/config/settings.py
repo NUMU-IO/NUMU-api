@@ -47,10 +47,27 @@ class Settings(BaseSettings):
 
     # Connection pool (total max = pool_size + max_overflow PER PROCESS)
     # API + Celery + admin each have their own pool — keep under Postgres max_connections
-    db_pool_size: int = 5  # Persistent connections maintained in pool
-    db_max_overflow: int = 10  # Extra connections allowed beyond pool_size
+    # Bumped 2026-04-23 after /api/v1/stores/ started returning 500s under
+    # analytics + bundles burst load; old 5+10=15 cap exhausted while long
+    # range-aggregation queries held connections.
+    db_pool_size: int = 10  # Persistent connections maintained in pool
+    db_max_overflow: int = 20  # Extra connections allowed beyond pool_size
     db_pool_timeout: int = 30  # Seconds to wait for a connection before error
     db_pool_recycle: int = 1800  # Recycle connections older than 30 minutes
+    # Abort any query that runs longer than this (ms). Kills runaway analytics
+    # queries before they pin a connection for the whole request timeout.
+    db_statement_timeout_ms: int = 30000
+
+    # Celery workers run with their own smaller pool (per process). Heavy
+    # background jobs still get bandwidth without stealing from the API. Set
+    # process_role=celery on the worker container (NUMU_PROCESS_ROLE env)
+    # and the import in connection.py picks up these values.
+    celery_db_pool_size: int = 5
+    celery_db_max_overflow: int = 5
+    # Role identifier — read from NUMU_PROCESS_ROLE at startup. "api" uses
+    # the db_* pool sizes above; "celery" uses celery_db_*. Anything else
+    # (tests, scripts) falls back to the api sizes.
+    process_role: str = "api"
 
     @property
     def database_url(self) -> str:
@@ -247,6 +264,15 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
 
+    # Reverse geocoding (storefront checkout location picker)
+    # Point to self-hosted Nominatim in prod (e.g. http://nominatim:8080)
+    # or LocationIQ during bootstrap (https://us1.locationiq.com/v1).
+    # Leave both unset to disable the feature — checkout still works with manual entry.
+    nominatim_url: str | None = None
+    locationiq_key: str | None = (
+        None  # only needed if nominatim_url points at LocationIQ
+    )
+
     # Google AI Studio (for AI insights & policy generation via Gemini)
     # Uses Google's OpenAI-compatible endpoint so the existing AsyncOpenAI
     # client can be reused without rewriting to the google-genai SDK.
@@ -266,8 +292,30 @@ class Settings(BaseSettings):
     # the landing-page nginx location which already serves /numu-logo-*.
     brand_assets_base_url: str = "https://numueg.app"
 
+    # Absolute base URL serving the storefront's static assets (theme
+    # preview screenshots under /themes/{slug}/preview.png, etc.). The
+    # merchant hub fetches these directly via <img src> from this host,
+    # so it must be reachable from the merchant browser. In production
+    # this points at the deployed storefront (or its CDN edge); in dev,
+    # set to the local Vite host (e.g. http://localhost:5173).
+    storefront_assets_base_url: str = "https://numueg.app"
+
     # Google OAuth
     google_oauth_client_id: str | None = None
+
+    # Google Cloud Vision (InstaPay proof OCR — Phase C). API-key path
+    # for v1; service-account JSON via google-auth is the upgrade path
+    # if paid traffic justifies the extra dep. Unset → the
+    # ``google_vision`` provider is unavailable; admin attempts to
+    # assign it 503 cleanly via the DI factory.
+    google_vision_api_key: str | None = None
+
+    # HuggingFace Hub access token. Used by the HF-backed OCR
+    # providers (DeepSeek / GLM Spaces) to bump our ZeroGPU queue
+    # priority. Anonymous calls get rejected after 60s on busy
+    # Spaces; a free HF account ($0) is enough to clear that. Unset
+    # → calls run anonymously and frequently soft-fail.
+    huggingface_token: str | None = None
 
     # S3-compatible Object Storage (MinIO / Cloudflare R2 / AWS S3)
     s3_endpoint_url: str | None = None

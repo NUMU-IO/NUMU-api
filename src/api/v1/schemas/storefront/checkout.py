@@ -14,6 +14,11 @@ class CheckoutLineItem(BaseModel):
     product_id: UUID
     variant_id: UUID | None = None
     quantity: int = Field(default=1, ge=1, le=999)
+    # Option values the customer picked on the PDP (e.g. {"Color": "Red", "Size": "M"}).
+    # When the product carries variant_combinations in attributes, the backend
+    # uses these to resolve the exact combo and decrement its stock. Absent or
+    # empty → falls back to the product-level stock.
+    selections: dict[str, str] | None = None
 
 
 class CheckoutRequest(BaseModel):
@@ -32,6 +37,32 @@ class CheckoutRequest(BaseModel):
         None, max_length=254, description="Email for guest checkout"
     )
     shipping_method: str | None = None
+    # Rate ID returned by /storefront/store/{id}/shipping/options. When
+    # present, the server re-resolves this rate using the merchant's
+    # authoritative rules and stamps the resulting amount on the order.
+    # When absent, shipping is 0 (legacy / pre-shipping-config flow).
+    # A client-supplied `shipping_cost` field is NOT accepted — the
+    # server never trusts the client's price.
+    selected_shipping_rate_id: UUID | None = Field(
+        None, description="Rate ID from /shipping/options"
+    )
+    cod_requested: bool = Field(
+        False,
+        description="True when the customer intends to pay COD. Controls zone COD check.",
+    )
+    # When the merchant's COD deposit policy is enabled and the customer
+    # picks COD, this names the gateway the customer wants to pay the
+    # deposit through. Must be one of the policy's `allowed_gateways`.
+    # Unused (and ignored) for non-COD checkouts and for stores where
+    # the deposit policy is off.
+    deposit_gateway: str | None = Field(
+        None,
+        description=(
+            "Gateway for the COD deposit payment: paymob|kashier|fawry|"
+            "fawaterak|instapay. Required when the store has "
+            "cod_deposit_policy.enabled=true AND payment_method=cod."
+        ),
+    )
     customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
     # UTM attribution (captured from URL on storefront)
@@ -43,6 +74,13 @@ class CheckoutRequest(BaseModel):
     # COUNT(DISTINCT session_fingerprint) funnel query can connect this
     # checkout to the visitor's earlier steps.
     session_fingerprint: str | None = Field(None, max_length=64)
+    # Merchant-defined custom checkout fields. Keys are the custom field IDs
+    # from store.settings.checkout_fields; values are the raw user inputs.
+    # Validated server-side against the live config — required-field misses
+    # and bad option values 400 before an order is created.
+    custom_fields: dict[str, object] | None = Field(
+        None, description="Map of custom field id → submitted value"
+    )
 
 
 class CheckoutResponse(BaseModel):

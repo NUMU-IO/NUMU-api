@@ -33,6 +33,12 @@ class CustomerAddress(BaseEntity):
     phone: str | None = None
     is_default: bool = False
     label: AddressLabel = AddressLabel.HOME
+    # Optional geolocation captured from the storefront map picker.
+    latitude: float | None = None
+    longitude: float | None = None
+    location_accuracy: float | None = None  # meters
+    location_source: str | None = None  # "gps" | "manual_pin"
+    geocoded_address: str | None = None
 
     @property
     def full_name(self) -> str:

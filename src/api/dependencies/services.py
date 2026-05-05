@@ -1,8 +1,22 @@
 """Service dependencies."""
 
 import logging
+from typing import Annotated
 
+from fastapi import Depends
+
+from src.api.dependencies.repositories import (
+    get_email_log_repository,
+    get_email_template_repository,
+)
+from src.application.services.email_template_renderer import EmailTemplateRenderer
 from src.config import settings
+from src.core.interfaces.repositories.email_log_repository import (
+    IEmailLogRepository,
+)
+from src.core.interfaces.repositories.email_template_repository import (
+    IEmailTemplateRepository,
+)
 from src.infrastructure.cache import ProductCacheService, get_product_cache
 from src.infrastructure.external_services import (
     password_service,
@@ -36,9 +50,38 @@ def get_totp_service():
     return totp_service
 
 
-def get_email_service():
-    """Get email service dependency."""
-    return ResendEmailService()
+def get_email_template_renderer(
+    repo: Annotated[IEmailTemplateRepository, Depends(get_email_template_repository)],
+) -> EmailTemplateRenderer:
+    """Get email-template renderer dependency.
+
+    The renderer reads merchant overrides through the repository and
+    falls back to the registry default when no override exists.
+    """
+    return EmailTemplateRenderer(email_template_repo=repo)
+
+
+def get_email_service(
+    renderer: Annotated[
+        EmailTemplateRenderer | None, Depends(get_email_template_renderer)
+    ] = None,
+    email_log_repo: Annotated[
+        IEmailLogRepository | None, Depends(get_email_log_repository)
+    ] = None,
+):
+    """Get email service dependency.
+
+    Wires the merchant-facing ``EmailTemplateRenderer`` and the email
+    audit log repository into the service. Callers that pass a
+    ``store_id`` to the service's per-event methods will get merchant
+    custom-template behavior and an audit row written; callers that
+    don't get the legacy behavior unchanged.
+
+    Defaults of ``None`` allow non-DI callers (Celery workers, ad-hoc
+    helpers) to invoke ``get_email_service()`` directly with no
+    arguments — they get a service in legacy mode.
+    """
+    return ResendEmailService(renderer=renderer, email_log_repo=email_log_repo)
 
 
 def get_payment_service():
@@ -142,6 +185,56 @@ def get_storage_service():
 def get_ai_service():
     """Get AI service dependency."""
     return OpenAIService()
+
+
+def get_proof_vision_service_for_store(store_settings: dict):
+    """Pick a vision OCR provider for an InstaPay proof submission.
+
+    The provider is admin-assigned per-store via
+    ``store.settings.payment.instapay.ocr_provider``. Merchants
+    cannot self-select — the merchant credentials PUT silently drops
+    that field, see :func:`save_instapay_credentials`. Falls back to
+    a Noop provider (status="skipped") whenever:
+
+      * the store has no provider assigned, or
+      * the assigned provider is unknown / typo, or
+      * the assigned provider is ``google_vision`` but the API key
+        env var is unset.
+
+    Soft-fail by design: the auto-approval engine treats every non-OK
+    result as "no signal", so a missing config never breaks checkout.
+    """
+    from src.infrastructure.external_services.vision import (
+        DeepSeekHFProofService,
+        GlmHFProofService,
+        GoogleVisionProofService,
+        IProofVisionService,
+        NoopProofVisionService,
+    )
+
+    instapay_settings = (store_settings or {}).get("payment", {}).get("instapay", {})
+    provider = (instapay_settings.get("ocr_provider") or "").strip().lower()
+
+    impl: IProofVisionService
+    if provider == "google_vision":
+        if not settings.google_vision_api_key:
+            _logger.warning(
+                "ocr_provider=google_vision but no GOOGLE_VISION_API_KEY set; "
+                "falling back to noop"
+            )
+            impl = NoopProofVisionService()
+        else:
+            impl = GoogleVisionProofService(
+                api_key=settings.google_vision_api_key,
+            )
+    elif provider == "deepseek_hf":
+        impl = DeepSeekHFProofService(hf_token=settings.huggingface_token)
+    elif provider == "glm_hf":
+        impl = GlmHFProofService(hf_token=settings.huggingface_token)
+    else:
+        impl = NoopProofVisionService()
+
+    return impl
 
 
 def get_image_pipeline():

@@ -120,12 +120,39 @@ async def clone_role(
     new_slug: str,
     cloned_by_id: UUID | None = None,
 ) -> RoleModel:
-    """Clone a role to a new tenant."""
+    """Clone a role to a new tenant.
+
+    The merchant hub typically sends ``new_slug = "<source>-copy"``,
+    which collides with the ``(tenant_id, slug)`` unique constraint
+    the second time the merchant clicks Clone on the same role. Walk
+    the ``-2``, ``-3`` … suffix until we find an unused slug so
+    repeated clones produce ``admin-copy``, ``admin-copy-2``,
+    ``admin-copy-3`` instead of leaking a 500.
+    """
     repo = RoleRepository(db)
+    base_slug = new_slug
+    candidate = base_slug
+    suffix = 2
+    while await repo.get_by_slug(candidate, tenant_id=target_tenant_id) is not None:
+        candidate = f"{base_slug}-{suffix}"
+        suffix += 1
+        if suffix > 100:
+            # Defensive guard — a tenant accumulating 100 copies of the
+            # same role almost certainly has a different problem we
+            # shouldn't paper over with another rename. Surface as 409.
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Too many clones of this role already exist — "
+                    "delete a few before cloning again."
+                ),
+            )
     return await repo.clone_role(
         source_role_id=source_role_id,
         target_tenant_id=target_tenant_id,
-        new_slug=new_slug,
+        new_slug=candidate,
         new_name=new_name,
     )
 

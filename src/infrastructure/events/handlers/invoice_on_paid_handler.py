@@ -68,82 +68,89 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
 
     async with AsyncSessionLocal() as session:
         try:
-            # Short-circuit if an invoice for this order already exists.
-            # This protects against duplicate emails when the event fires
-            # more than once (retry, admin re-issuing mark-paid, etc).
-            existing = await session.execute(
-                select(InvoiceModel.id).where(InvoiceModel.order_id == event.order_id)
-            )
-            if existing.scalar_one_or_none() is not None:
-                log.info("invoice_already_exists_for_order")
-                return
+            created = None
+            customer_email = None
+            store_name = None
+            store_logo_url = None
+            store_language = None
 
-            order_repo = OrderRepository(session)
-            store_repo = StoreRepository(session)
-            customer_repo = CustomerRepository(session)
-            invoice_repo = InvoiceRepository(session)
+            # Single transaction covers the duplicate-check and the write.
+            # Starting it here (instead of nesting session.begin() after
+            # reads) avoids "A transaction is already begun" — the first
+            # session.execute() auto-begins an implicit transaction, which
+            # made a later session.begin() illegal.
+            async with session.begin():
+                existing = await session.execute(
+                    select(InvoiceModel.id).where(
+                        InvoiceModel.order_id == event.order_id
+                    )
+                )
+                if existing.scalar_one_or_none() is not None:
+                    log.info("invoice_already_exists_for_order")
+                    return
 
-            order = await order_repo.get_by_id(event.order_id)
-            if order is None:
-                log.warning("order_not_found_for_invoice")
-                return
+                order_repo = OrderRepository(session)
+                store_repo = StoreRepository(session)
+                customer_repo = CustomerRepository(session)
+                invoice_repo = InvoiceRepository(session)
 
-            store = await store_repo.get_by_id(event.store_id)
-            if store is None:
-                log.warning("store_not_found_for_invoice")
-                return
+                order = await order_repo.get_by_id(event.order_id)
+                if order is None:
+                    log.warning("order_not_found_for_invoice")
+                    return
 
-            customer = await customer_repo.get_by_id(event.customer_id)
-            if customer is None or not getattr(customer, "email", None):
-                # No customer email → nothing to send. Still create the
-                # invoice record so the merchant has a numbered record.
-                log.info("customer_without_email_skipping_send")
-                customer_email = None
-                customer_name = order.shipping_address.first_name or "Customer"
-            else:
-                customer_email = str(customer.email)
-                customer_name = customer.full_name or (
-                    f"{order.shipping_address.first_name} "
-                    f"{order.shipping_address.last_name}".strip()
+                store = await store_repo.get_by_id(event.store_id)
+                if store is None:
+                    log.warning("store_not_found_for_invoice")
+                    return
+
+                customer = await customer_repo.get_by_id(event.customer_id)
+                if customer is None or not getattr(customer, "email", None):
+                    log.info("customer_without_email_skipping_send")
+                    customer_email = None
+                    customer_name = order.shipping_address.first_name or "Customer"
+                else:
+                    customer_email = str(customer.email)
+                    customer_name = customer.full_name or (
+                        f"{order.shipping_address.first_name} "
+                        f"{order.shipping_address.last_name}".strip()
+                    )
+
+                store_address = dict(store.address) if store.address else {}
+                store_settings = dict(store.settings) if store.settings else {}
+                ship = order.shipping_address
+
+                seller = SellerInfo(
+                    tax_id=store_settings.get("tax_id", ""),
+                    name=store.name,
+                    name_ar=store_settings.get("name_ar", store.name),
+                    branch_id=store_settings.get("branch_id", "0"),
+                    country=store_address.get("country", "EG"),
+                    governorate=store_address.get(
+                        "governorate", store_address.get("state", "")
+                    ),
+                    city=store_address.get("city", ""),
+                    street=store_address.get(
+                        "street", store_address.get("address_line1", "")
+                    ),
+                    building_number=store_address.get("building_number", ""),
+                    activity_code=store_settings.get("activity_code", "4649"),
                 )
 
-            store_address = dict(store.address) if store.address else {}
-            store_settings = dict(store.settings) if store.settings else {}
-            ship = order.shipping_address
+                buyer_name = (
+                    f"{ship.first_name or ''} {ship.last_name or ''}".strip()
+                    or customer_name
+                )
+                buyer = BuyerInfo(
+                    buyer_type="P",
+                    name=buyer_name,
+                    name_ar=buyer_name,
+                    city=ship.city or "",
+                    street=ship.address_line1 or "",
+                    phone=ship.phone or "",
+                    email=customer_email or "",
+                )
 
-            seller = SellerInfo(
-                tax_id=store_settings.get("tax_id", ""),
-                name=store.name,
-                name_ar=store_settings.get("name_ar", store.name),
-                branch_id=store_settings.get("branch_id", "0"),
-                country=store_address.get("country", "EG"),
-                governorate=store_address.get(
-                    "governorate", store_address.get("state", "")
-                ),
-                city=store_address.get("city", ""),
-                street=store_address.get(
-                    "street", store_address.get("address_line1", "")
-                ),
-                building_number=store_address.get("building_number", ""),
-                activity_code=store_settings.get("activity_code", "4649"),
-            )
-
-            buyer_name = (
-                f"{ship.first_name or ''} {ship.last_name or ''}".strip()
-                or customer_name
-            )
-            buyer = BuyerInfo(
-                buyer_type="P",
-                name=buyer_name,
-                name_ar=buyer_name,
-                city=ship.city or "",
-                street=ship.address_line1 or "",
-                phone=ship.phone or "",
-                email=customer_email or "",
-            )
-
-            # Write the invoice record inside a single txn.
-            async with session.begin():
                 invoice_number = await invoice_repo.get_next_invoice_number(
                     event.store_id
                 )
@@ -171,7 +178,6 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                         internal_code=li.sku,
                     )
 
-                # ETA QR code
                 try:
                     qr_data, qr_image = generate_eta_qr_code(
                         seller_name=seller.name_ar or seller.name,
@@ -185,28 +191,34 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                 except Exception as qr_exc:
                     log.warning("eta_qr_generation_failed", error=str(qr_exc))
 
-                # Simulated ETA submission — same placeholder the previous
-                # checkout flow used. Replace with real ETA integration later.
                 invoice.eta_uuid = f"simulated-{uuid4().hex[:12]}"
                 invoice.eta_long_id = f"simulated-long-{uuid4().hex[:20]}"
                 invoice.eta_status_code = "accepted"
 
                 created = await invoice_repo.create(invoice)
+                store_name = store.name
+                store_logo_url = store.logo_url
+                store_language = store.default_language
 
-            # Email the PDF to the customer (best effort).
-            if customer_email:
+            if customer_email and created is not None:
                 try:
                     pdf_bytes = await asyncio.to_thread(
-                        _generate_invoice_pdf, created, store.logo_url
+                        _generate_invoice_pdf, created, store_logo_url
                     )
                     svc = ResendEmailService()
+                    # `send_invoice_email` is not in the merchant-template
+                    # registry (the PDF attachment is the payload, not the
+                    # body) so it stays on the legacy code path. Pass
+                    # store_id forward-compatibly: if a future "invoice
+                    # email" event_type is added to the registry, this
+                    # call site already routes through the renderer.
                     await svc.send_invoice_email(
                         email=customer_email,
                         order_number=event.order_number,
                         invoice_number=created.invoice_number,
                         pdf_bytes=pdf_bytes,
-                        store_name=store.name,
-                        language=store.default_language,
+                        store_name=store_name,
+                        language=store_language,
                     )
                     log.info(
                         "invoice_issued_and_emailed",
@@ -215,7 +227,7 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                     )
                 except Exception:
                     log.exception("invoice_email_failed")
-            else:
+            elif created is not None:
                 log.info(
                     "invoice_issued_no_email",
                     invoice_number=created.invoice_number,

@@ -25,7 +25,12 @@ from src.infrastructure.database.models.tenant.configuration import (
 )
 from src.infrastructure.database.models.tenant.coupon import CouponModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
+from src.infrastructure.database.models.tenant.email_log import EmailLogModel
+from src.infrastructure.database.models.tenant.email_template import EmailTemplateModel
 from src.infrastructure.database.models.tenant.funnel_event import FunnelEventModel
+from src.infrastructure.database.models.tenant.instapay_intent import (
+    InstapayIntentModel,
+)
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.network_contribution_log import (
@@ -39,6 +44,7 @@ from src.infrastructure.database.models.tenant.page_view import PageViewModel
 from src.infrastructure.database.models.tenant.payment_link_session import (
     PaymentLinkSessionModel,
 )
+from src.infrastructure.database.models.tenant.payment_proof import PaymentProofModel
 from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
 )
@@ -49,6 +55,11 @@ from src.infrastructure.database.models.tenant.risk_assessment import (
     RiskAssessmentModel,
 )
 from src.infrastructure.database.models.tenant.shipment import ShipmentModel
+from src.infrastructure.database.models.tenant.shipping_rate import ShippingRateModel
+from src.infrastructure.database.models.tenant.shipping_zone import ShippingZoneModel
+from src.infrastructure.database.models.tenant.shipping_zone_governorate import (
+    ShippingZoneGovernorateModel,
+)
 from src.infrastructure.database.models.tenant.shopify_app_settings import (
     ShopifyAppSettingsModel,
 )
@@ -88,6 +99,8 @@ __all__ = [
     "AutomationRuleModel",
     "CategoryModel",
     "CouponModel",
+    "EmailLogModel",
+    "EmailTemplateModel",
     "FunnelEventModel",
     "CustomerAddressModel",
     "CustomerModel",
@@ -95,9 +108,11 @@ __all__ = [
     "MessageLogModel",
     "NetworkContributionLogModel",
     "NetworkReputationModel",
+    "InstapayIntentModel",
     "OrderModel",
     "PageViewModel",
     "PaymentLinkSessionModel",
+    "PaymentProofModel",
     "PaymentTransactionModel",
     "RiskAssessmentModel",
     "ShopifyAppSettingsModel",
@@ -116,6 +131,9 @@ __all__ = [
     "RefundModel",
     "UpsellRuleModel",
     "ShipmentModel",
+    "ShippingRateModel",
+    "ShippingZoneModel",
+    "ShippingZoneGovernorateModel",
     "StoreModel",
     "SocialConnectionModel",
     "SocialPostModel",

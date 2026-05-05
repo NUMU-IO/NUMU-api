@@ -63,6 +63,10 @@ class UpdateStoreUseCase:
                 store.deactivate()
         if dto.settings is not None:
             store.settings = {**(store.settings or {}), **dto.settings}
+        if dto.business_hours is not None:
+            # Replace wholesale — merchants edit the full structure in one go
+            # (selecting a closed day clears its open/close fields).
+            store.business_hours = dto.business_hours
 
         # Save store
         updated_store = await self.store_repository.update(store)

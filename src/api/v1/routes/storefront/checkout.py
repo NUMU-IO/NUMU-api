@@ -32,6 +32,7 @@ from src.api.dependencies.repositories import (
     get_network_reputation_repository,
     get_order_repository,
     get_product_repository,
+    get_shipping_zone_repository,
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
@@ -41,21 +42,34 @@ from src.application.dto.order import (
     CreateOrderDTO,
     CreateOrderLineItemDTO,
 )
-from src.application.services.cod_trust_service import check_customer_trust
+from src.application.services.cod_trust_service import (
+    CodTrustDecision,
+    LocationSignals,
+    check_customer_trust,
+)
 from src.application.services.network_reputation_service import (
     extract_phone_hash_from_string,
     write_network_event,
 )
+from src.application.services.shipping_resolver import ShippingResolver
 from src.config import settings
+from src.core.checkout_fields import (
+    resolve_config as resolve_checkout_config,
+)
+from src.core.checkout_fields import (
+    validate_custom_field_values,
+)
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
+from src.core.value_objects.geography import resolve_governorate
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.repositories import (
     CouponRepository,
     CustomerRepository,
     OrderRepository,
     ProductRepository,
+    ShippingZoneRepository,
     StoreRepository,
 )
 from src.infrastructure.repositories.funnel_event_repository import (
@@ -68,6 +82,87 @@ from src.infrastructure.repositories.shopify_repository import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _risk_level_from_score(score: int | None) -> str:
+    """Translate a 0–100 score into the bucket used by RiskAssessmentModel.
+
+    Mirrors the bucket boundaries used by the fraud-detection service so a
+    merchant looking at the unified risk feed sees consistent labels across
+    the COD-trust path and the heuristic fraud path.
+    """
+    if score is None:
+        return "low"
+    if score >= 80:
+        return "critical"
+    if score >= 60:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
+def _suggested_action_from_decision(decision: "CodTrustDecision") -> str:
+    """Map a trust-check outcome to the existing RiskAssessment action taxonomy."""
+    if decision.reason == "blocked_high_risk":
+        return "cancel"
+    if decision.reason == "warned_high_risk":
+        return "whatsapp_confirm"
+    return "auto_approve"
+
+
+async def _persist_cod_trust_assessment(
+    *,
+    session,
+    store,
+    order_id: UUID | None,
+    order_number: str | None,
+    customer,
+    total_cents: int,
+    currency: str,
+    decision: "CodTrustDecision",
+) -> None:
+    """Write a RiskAssessmentModel row for a COD trust decision.
+
+    Fail-open: any persistence error is logged but never raised — fraud
+    auditing must never break a checkout.
+    """
+    try:
+        from datetime import UTC, datetime
+
+        from src.infrastructure.database.models.tenant.risk_assessment import (
+            RiskAssessmentModel,
+        )
+
+        score = decision.score if decision.score is not None else 0
+        assessment = RiskAssessmentModel(
+            tenant_id=store.tenant_id,
+            store_id=store.id,
+            order_id=order_id,
+            order_number=order_number,
+            customer_name=(
+                f"{customer.first_name or ''} {customer.last_name or ''}".strip()
+                or None
+            ),
+            customer_email=str(customer.email) if customer.email else None,
+            total_cents=total_cents,
+            currency=currency,
+            payment_method="cod",
+            risk_score=score,
+            risk_level=_risk_level_from_score(decision.score),
+            score_type="preliminary",
+            suggested_action=_suggested_action_from_decision(decision),
+            action_taken=decision.reason,
+            action_taken_at=datetime.now(UTC),
+            action_taken_by="cod_trust",
+            factors=list(decision.factors or []),
+            scored_at=datetime.now(UTC),
+        )
+        session.add(assessment)
+        await session.flush()
+    except Exception as exc:  # noqa: BLE001 — auditing must never block checkout
+        logger.warning("cod_trust_assessment_persist_failed: %s", exc)
+
 
 _cache_service: RedisCacheService | None = (
     RedisCacheService() if settings.redis_host else None
@@ -112,6 +207,9 @@ async def checkout(
         "NetworkReputationRepository",
         Depends(get_network_reputation_repository),
     ],
+    shipping_repo: Annotated[
+        ShippingZoneRepository, Depends(get_shipping_zone_repository)
+    ],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
     """Process checkout for the authenticated customer.
@@ -126,29 +224,68 @@ async def checkout(
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
 
+    # ── Checkout-fields: validate submitted custom fields against live config ──
+    checkout_config = resolve_checkout_config(store.settings)
+    accepted_custom_fields, custom_field_errors = validate_custom_field_values(
+        checkout_config, request.custom_fields
+    )
+    if custom_field_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "custom_field_errors", "errors": custom_field_errors},
+        )
+
     # ── Resolve or create customer ──────────────────────────────────────
     current_customer = optional_customer
     is_guest = current_customer is None
 
     if is_guest:
-        # Guest checkout: require email from request
-        guest_email = request.guest_email
-        if not guest_email:
+        # Email requirement follows the merchant's checkout-fields config —
+        # required only if the merchant marked email as required. If email is
+        # disabled entirely, we synthesize a per-order placeholder so the
+        # Customer row (which requires a unique email per store) can be
+        # created; notifications fall back to phone/WhatsApp.
+        from src.core.value_objects.email import Email as EmailVO
+
+        email_cfg = (checkout_config.get("standard_fields") or {}).get("email") or {}
+        email_enabled = bool(email_cfg.get("enabled", True))
+        email_required = bool(email_cfg.get("required", False))
+
+        guest_email = (request.guest_email or "").strip() or None
+
+        if email_required and not guest_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email is required for guest checkout.",
             )
-        from src.core.value_objects.email import Email as EmailVO
 
-        try:
-            email_vo = EmailVO(value=guest_email)
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid email address.",
+        if guest_email:
+            try:
+                email_vo = EmailVO(value=guest_email)
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid email address.",
+                )
+        elif not email_enabled or not email_required:
+            # Merchant opted out of collecting email. Generate a stable
+            # placeholder so the customers.email uniqueness constraint holds.
+            import uuid as _uuid
+
+            email_vo = EmailVO(
+                value=f"guest+{_uuid.uuid4().hex[:12]}@noemail.numueg.app"
+            )
+        else:
+            # Email was enabled-but-not-required and none was supplied; treat
+            # as opt-out path to keep a consistent placeholder.
+            import uuid as _uuid
+
+            email_vo = EmailVO(
+                value=f"guest+{_uuid.uuid4().hex[:12]}@noemail.numueg.app"
             )
 
-        # Re-use existing customer record if same email+store, else create
+        # Re-use existing customer record if same email+store, else create.
+        # Placeholder emails never collide (fresh UUID per order).
         existing = await customer_repo.get_by_email(store_id, email_vo)
         if existing:
             current_customer = existing
@@ -161,7 +298,7 @@ async def checkout(
                 last_name=addr.last_name or "",
                 phone=None,
                 is_verified=False,
-                metadata={"guest": True},
+                metadata={"guest": True, "has_real_email": guest_email is not None},
             )
             current_customer = await customer_repo.create(
                 current_customer, tenant_id=store.tenant_id
@@ -228,25 +365,90 @@ async def checkout(
     # orders due to infrastructure issues. Read happens BEFORE the order
     # event is recorded below, so the customer's own current order does
     # not inflate their own score during the check.
+    trust_decision: CodTrustDecision | None = None
     if is_cod:
         customer_phone = (
             request.shipping_address.phone if request.shipping_address else None
         )
+
+        # When the merchant has cod_trust enabled, phone is non-negotiable
+        # for COD: without it the trust check returns `no_phone` and the
+        # filter is silently bypassed. Reject the order at the API
+        # boundary instead — defense in depth alongside the storefront
+        # form's required marker.
+        from src.application.services.cod_trust_service import (
+            get_cod_trust_settings,
+        )
+
+        _cod_trust_cfg = get_cod_trust_settings(store.settings)
+        if _cod_trust_cfg["enabled"] and not (customer_phone or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "phone_required_for_cod",
+                    "message_ar": ("رقم الموبايل مطلوب لإتمام طلب الدفع عند الاستلام."),
+                    "message_en": (
+                        "A phone number is required for cash on delivery orders."
+                    ),
+                },
+            )
+
+        # Build location signals from this checkout's shipping address +
+        # the customer's previous delivery point (for teleport detection).
+        shipping = request.shipping_address
+        previous_coords: tuple[float, float] | None = None
+        try:
+            recent_orders = await order_repo.get_by_customer(
+                current_customer.id, skip=0, limit=1
+            )
+            if recent_orders:
+                prev = recent_orders[0].shipping_address
+                if prev.latitude is not None and prev.longitude is not None:
+                    previous_coords = (prev.latitude, prev.longitude)
+        except Exception as exc:  # noqa: BLE001 — fail-open for fraud signals
+            logger.warning("cod_trust_previous_location_lookup_error: %s", exc)
+
+        location_signals = LocationSignals(
+            latitude=shipping.latitude if shipping else None,
+            longitude=shipping.longitude if shipping else None,
+            accuracy=shipping.location_accuracy if shipping else None,
+            source=shipping.location_source if shipping else None,
+            previous_coords=previous_coords,
+        )
+
         trust_decision = await check_customer_trust(
             phone=customer_phone,
             store_settings=store.settings,
             network_repo=network_repo,
+            location=location_signals,
         )
         logger.info(
-            "cod_trust_check store=%s customer=%s allowed=%s reason=%s score=%s confidence=%s",
+            "cod_trust_check store=%s customer=%s allowed=%s reason=%s score=%s "
+            "confidence=%s factors=%s",
             str(store_id),
             str(current_customer.id),
             trust_decision.allowed,
             trust_decision.reason,
             trust_decision.score,
             trust_decision.confidence,
+            [f["code"] for f in trust_decision.factors],
         )
         if not trust_decision.allowed:
+            # Persist the blocked decision before raising so the merchant
+            # sees the action in their COD-trust decisions feed even though
+            # no order row exists yet.
+            await _persist_cod_trust_assessment(
+                session=order_repo.session,
+                store=store,
+                order_id=None,
+                order_number=None,
+                customer=current_customer,
+                total_cents=0,
+                currency=store.default_currency.value
+                if store.default_currency
+                else "EGP",
+                decision=trust_decision,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -265,6 +467,15 @@ async def checkout(
 
     # Build line items with server-side price resolution
     line_items: list[CreateOrderLineItemDTO] = []
+    # Remember per-line inventory mode so the atomic-deduct step below
+    # can target the right code path (variant combo vs product-level)
+    # without re-resolving the product.
+    line_item_inventory: list[dict] = []
+    # Accumulated cart weight (grams) — used for weight_band rate
+    # evaluation. Products without a weight contribute 0, so weight-band
+    # merchants should either configure per-product weights or use an
+    # open-ended band with sensible defaults.
+    cart_weight_g: int = 0
     for item in request.line_items:
         product = await product_repo.get_by_id(item.product_id)
         if not product:
@@ -282,12 +493,58 @@ async def checkout(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {product.name} is not available",
             )
-        if product.quantity < item.quantity:
+
+        # ── Stock pre-check ──
+        # Three modes:
+        #   1. Merchant opted into oversell (continue_selling_when_out_of_stock) → skip
+        #   2. Product has matching variant_combinations + customer picked options → check combo
+        #   3. Otherwise → product-level stock
+        product_attrs = product.attributes or {}
+        allow_negative = bool(product_attrs.get("continue_selling_when_out_of_stock"))
+        selections = item.selections or {}
+        combos = product_attrs.get("variant_combinations") or []
+        matching_combo = None
+        if selections and isinstance(combos, list):
+            for c in combos:
+                if isinstance(c, dict) and c.get("options") == selections:
+                    matching_combo = c
+                    break
+
+        if matching_combo is not None:
+            if matching_combo.get("enabled") is False:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{product.name} is not available in the selected options",
+                )
+            if not allow_negative:
+                raw = matching_combo.get("stock")
+                try:
+                    available = int(raw) if raw not in (None, "") else 0
+                except (TypeError, ValueError):
+                    available = 0
+                if available < item.quantity:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Insufficient stock for {product.name} "
+                            f"({', '.join(f'{k}: {v}' for k, v in selections.items())}) "
+                            f"(available: {available})"
+                        ),
+                    )
+        elif not allow_negative and product.quantity < item.quantity:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Insufficient stock for {product.name} (available: {product.quantity})",
             )
 
+        # Human-readable "Color: Red, Size: M" so the merchant sees what was
+        # actually ordered in the order detail view, without needing to join
+        # against a variant catalog.
+        variant_name = (
+            ", ".join(f"{k}: {v}" for k, v in selections.items())
+            if selections
+            else None
+        )
         line_items.append(
             CreateOrderLineItemDTO(
                 product_id=product.id,
@@ -296,8 +553,19 @@ async def checkout(
                 quantity=item.quantity,
                 unit_price=product.price.cents,
                 variant_id=item.variant_id,
+                variant_name=variant_name,
             )
         )
+        line_item_inventory.append({
+            "product_id": product.id,
+            "selections": selections if matching_combo is not None else None,
+            "allow_negative": allow_negative,
+            "quantity": item.quantity,
+        })
+        # Product.weight is Decimal kilograms; convert to grams and
+        # multiply by quantity. Missing weight → skip (contributes 0).
+        if product.weight is not None:
+            cart_weight_g += int(product.weight * 1000) * item.quantity
 
     # Build address DTOs
     addr = request.shipping_address
@@ -311,6 +579,11 @@ async def checkout(
         postal_code=addr.postal_code,
         country=addr.country,
         phone=addr.phone,
+        latitude=addr.latitude,
+        longitude=addr.longitude,
+        location_accuracy=addr.location_accuracy,
+        location_source=addr.location_source,
+        geocoded_address=addr.geocoded_address,
     )
 
     billing_address = None
@@ -326,6 +599,11 @@ async def checkout(
             postal_code=b.postal_code,
             country=b.country,
             phone=b.phone,
+            latitude=b.latitude,
+            longitude=b.longitude,
+            location_accuracy=b.location_accuracy,
+            location_source=b.location_source,
+            geocoded_address=b.geocoded_address,
         )
 
     currency = store.default_currency.value if store.default_currency else "EGP"
@@ -383,6 +661,11 @@ async def checkout(
         postal_code=shipping_address.postal_code,
         country=shipping_address.country,
         phone=shipping_address.phone,
+        latitude=shipping_address.latitude,
+        longitude=shipping_address.longitude,
+        location_accuracy=shipping_address.location_accuracy,
+        location_source=shipping_address.location_source,
+        geocoded_address=shipping_address.geocoded_address,
     )
 
     bill_addr = None
@@ -397,6 +680,11 @@ async def checkout(
             postal_code=billing_address.postal_code,
             country=billing_address.country,
             phone=billing_address.phone,
+            latitude=billing_address.latitude,
+            longitude=billing_address.longitude,
+            location_accuracy=billing_address.location_accuracy,
+            location_source=billing_address.location_source,
+            geocoded_address=billing_address.geocoded_address,
         )
 
     # Apply coupon if provided (with row-level lock to prevent concurrent bypass)
@@ -418,19 +706,111 @@ async def checkout(
         coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
 
-    # Atomically deduct stock BEFORE creating the order.
-    # Uses conditional UPDATE (WHERE quantity >= needed) so concurrent
-    # checkouts cannot oversell. If the transaction rolls back, stock
-    # is automatically restored.
-    for li in line_items:
-        success = await product_repo.deduct_stock(li.product_id, li.quantity)
-        if not success:
+    # Atomically deduct stock BEFORE creating the order. Variant combos
+    # use a row-lock path (deduct_variant_stock); non-variant flows keep
+    # the original conditional-UPDATE path (deduct_stock). Transaction
+    # rollback restores both. When the merchant enabled
+    # continue_selling_when_out_of_stock, the atomic guard is loosened
+    # (stock can go negative) so the order still succeeds.
+    for li, inv in zip(line_items, line_item_inventory):
+        if inv["selections"] is not None:
+            success, reason = await product_repo.deduct_variant_stock(
+                inv["product_id"],
+                inv["selections"],
+                inv["quantity"],
+                allow_negative=inv["allow_negative"],
+            )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Insufficient stock for {li.product_name} "
+                        f"({reason}). Please refresh and try again."
+                    ),
+                )
+        else:
+            success = await product_repo.deduct_stock(
+                inv["product_id"],
+                inv["quantity"],
+                allow_negative=inv["allow_negative"],
+            )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
+                )
+
+    # ── Server-side shipping resolution (trust-gap closure) ──
+    # The client NEVER sets shipping_cost. If a rate was selected via
+    # /shipping/options, we re-resolve it here using the merchant's
+    # authoritative rules and stamp the snapshot (zone_id + rate_id +
+    # computed amount) on the order.
+    #
+    # If the store has ANY active shipping zones configured, we require
+    # a `selected_shipping_rate_id` on the payload. Without this guard,
+    # a malicious client could omit the field and bypass the merchant's
+    # rate table entirely — the "legacy zero-shipping path" would turn
+    # into a free-shipping exploit the moment the merchant configures
+    # zones. Stores with no active zones (fresh stores / merchants who
+    # haven't finished setup) still accept the legacy path so their
+    # storefront doesn't 400 pre-configuration.
+    shipping_cost_cents = 0
+    resolved_zone_id: UUID | None = None
+    resolved_rate_id: UUID | None = None
+    resolved_label: str | None = request.shipping_method
+
+    if not request.selected_shipping_rate_id:
+        if await shipping_repo.has_active_zones(store_id):
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=("Please select a shipping option before placing your order."),
             )
 
-    total = subtotal + dto.shipping_cost + dto.tax_amount - discount_amount
+    if request.selected_shipping_rate_id:
+        # Resolve the destination governorate from the shipping address.
+        # `resolve_governorate` accepts either an ISO 3166-2 code (e.g.
+        # "EG-C" — what the storefront sends after the UI overhaul) or
+        # a free-text name / legacy Bosta code / Arabic variant, so the
+        # pre-overhaul checkout payload also keeps working.
+        gov = None
+        if shipping_address.state:
+            gov = resolve_governorate(shipping_address.state)
+        if gov is None and shipping_address.city:
+            gov = resolve_governorate(shipping_address.city)
+        if gov is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Could not resolve the shipping address's governorate. "
+                    "Please select a supported governorate."
+                ),
+            )
+
+        resolver = ShippingResolver(shipping_repo, currency=currency)
+        resolution = await resolver.resolve_one(
+            store_id=store_id,
+            rate_id=request.selected_shipping_rate_id,
+            governorate_code=gov.code,
+            cart_subtotal_cents=subtotal,
+            cart_weight_g=cart_weight_g,
+            cod_requested=request.cod_requested,
+        )
+        if resolution is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The selected shipping rate is no longer available for this address.",
+            )
+        if request.cod_requested and not resolution.cod_supported:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cash on delivery isn't available in this area.",
+            )
+        shipping_cost_cents = resolution.amount_cents
+        resolved_zone_id = resolution.zone_id
+        resolved_rate_id = resolution.rate_id
+        resolved_label = resolution.label
+
+    total = subtotal + shipping_cost_cents + dto.tax_amount - discount_amount
 
     order = Order(
         store_id=store_id,
@@ -443,7 +823,7 @@ async def checkout(
         status=OrderStatus.PENDING,
         payment_status=PaymentStatus.PENDING,
         subtotal=subtotal,
-        shipping_cost=dto.shipping_cost,
+        shipping_cost=shipping_cost_cents,
         tax_amount=dto.tax_amount,
         discount_amount=discount_amount,
         coupon_code=coupon_code,
@@ -451,9 +831,18 @@ async def checkout(
         total=total,
         currency=currency,
         payment_method=request.payment_method,
-        shipping_method=request.shipping_method,
+        shipping_method=resolved_label,
+        shipping_zone_id=resolved_zone_id,
+        shipping_rate_id=resolved_rate_id,
         customer_notes=request.customer_notes,
-        metadata={"ip_address": client_ip} if client_ip else {},
+        metadata={
+            **({"ip_address": client_ip} if client_ip else {}),
+            **(
+                {"custom_fields": accepted_custom_fields}
+                if accepted_custom_fields
+                else {}
+            ),
+        },
         utm_source=request.utm_source,
         utm_medium=request.utm_medium,
         utm_campaign=request.utm_campaign,
@@ -461,6 +850,27 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # ── Persist COD trust assessment for the allowed/warned decision ───
+    # Skip non-actionable reasons (disabled, no_phone, lookup_error) —
+    # those are noise for the merchant feed. Below-threshold, warned, new
+    # customer, and low-confidence decisions all make it into the audit
+    # log so the merchant sees the filter actually working.
+    if (
+        is_cod
+        and trust_decision is not None
+        and trust_decision.reason not in {"disabled", "no_phone", "lookup_error"}
+    ):
+        await _persist_cod_trust_assessment(
+            session=order_repo.session,
+            store=store,
+            order_id=created_order.id,
+            order_number=created_order.order_number,
+            customer=current_customer,
+            total_cents=created_order.total,
+            currency=currency,
+            decision=trust_decision,
+        )
 
     # ── Record COD order in network reputation ─────────────────────────
     # Fire-and-forget: never break checkout if the network write fails.
@@ -556,7 +966,88 @@ async def checkout(
     paymob_client_secret: str | None = None
     paymob_public_key: str | None = None
 
-    if request.payment_method and request.payment_method.startswith("paymob"):
+    # ── Deposit-to-confirm COD branch ────────────────────────────────
+    # When the merchant has enabled a COD deposit policy and the
+    # customer picked "cod", we divert the payment dispatch: the order
+    # moves into PENDING_DEPOSIT and we charge only the deposit amount
+    # through the customer's chosen deposit gateway. The order still
+    # records `payment_method="cod"` on the order row — the deposit is a
+    # *precursor* to COD, not a replacement. On delivery, the remaining
+    # balance (`total - deposit_amount_cents`) is collected in cash.
+    #
+    # `_dispatch_method` / `_gateway_amount` decouple the gateway-side
+    # dispatch from the order-side fields so downstream code (analytics,
+    # emails, receipts) keeps using the full order total; only the
+    # gateway charge sees the deposit amount.
+    _dispatch_method: str | None = request.payment_method
+    _gateway_amount: int = created_order.total
+
+    _deposit_policy_raw = (store.settings or {}).get("payment", {}).get("cod", {}).get(
+        "deposit_policy"
+    ) or {}
+    if (
+        request.payment_method == "cod"
+        and _deposit_policy_raw.get("enabled")
+        and int(_deposit_policy_raw.get("amount_cents", 0) or 0) > 0
+    ):
+        _allowed_gateways: list[str] = list(
+            _deposit_policy_raw.get("allowed_gateways") or []
+        )
+        if not request.deposit_gateway:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "This store requires a deposit to confirm COD orders. "
+                    "Please select a deposit payment method."
+                ),
+            )
+        if request.deposit_gateway not in _allowed_gateways:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Selected deposit gateway is not allowed by this store. "
+                    f"Allowed: {', '.join(_allowed_gateways) or '(none)'}."
+                ),
+            )
+
+        from datetime import UTC, datetime, timedelta
+
+        _ttl_minutes = int(_deposit_policy_raw.get("ttl_minutes", 30) or 30)
+        _deposit_amount = int(_deposit_policy_raw["amount_cents"])
+
+        # Mutate the order into PENDING_DEPOSIT. We set `.status`
+        # directly rather than going through `transition_to` because
+        # PENDING → PENDING_DEPOSIT isn't a supported transition —
+        # orders destined for the deposit flow are *created* in this
+        # state rather than migrating from PENDING.
+        from src.core.entities.order import OrderStatus as _OS
+
+        created_order.status = _OS.PENDING_DEPOSIT
+        created_order.deposit_required_cents = _deposit_amount
+        # Pre-populate `deposit_amount_cents` with the required amount.
+        # The gateway's webhook will confirm by transitioning through
+        # `mark_as_paid`; if the captured amount differs from required
+        # (rare — some gateways take a fee from the customer's side),
+        # the merchant can spot it by comparing these two columns.
+        created_order.deposit_amount_cents = _deposit_amount
+        created_order.deposit_expires_at = datetime.now(UTC) + timedelta(
+            minutes=_ttl_minutes
+        )
+        created_order.deposit_gateway = request.deposit_gateway
+        await order_repo.update(created_order)
+
+        # Paymob exposes two sub-methods (card / wallet) in the storefront
+        # — the deposit UI picks "paymob" broadly; default to card, which
+        # is by far the most common customer path. Wallet can be an
+        # explicit choice later if merchants ask.
+        _dispatch_method = (
+            "paymob_card"
+            if request.deposit_gateway == "paymob"
+            else request.deposit_gateway
+        )
+        _gateway_amount = _deposit_amount
+
+    if _dispatch_method and _dispatch_method.startswith("paymob"):
         # Paymob payment initiation (per-merchant via store.settings)
         try:
             from src.infrastructure.external_services.paymob.payment_service import (
@@ -579,7 +1070,7 @@ async def checkout(
             ship_addr = request.shipping_address
 
             intent = await paymob_service.create_payment_intent(
-                amount=total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={
@@ -609,7 +1100,7 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method == "kashier":
+    elif _dispatch_method == "kashier":
         # Kashier payment via store.settings encrypted credentials
         try:
             from src.infrastructure.external_services.kashier.payment_service import (
@@ -646,7 +1137,7 @@ async def checkout(
                 str(current_customer.email) if current_customer.email else None
             )
             intent = await kashier_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={"order_id": str(created_order.id)},
@@ -658,7 +1149,7 @@ async def checkout(
                 "type": "session",
                 "session_url": intent.client_secret,
                 "order_id": intent.id,
-                "amount": f"{created_order.total / 100:.2f}",
+                "amount": f"{_gateway_amount / 100:.2f}",
                 "currency": currency,
             }
 
@@ -671,7 +1162,7 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method == "fawaterak":
+    elif _dispatch_method == "fawaterak":
         # Fawaterak payment via store.settings encrypted credentials
         try:
             from src.infrastructure.external_services.fawaterak.payment_service import (
@@ -701,7 +1192,7 @@ async def checkout(
             base_storefront_url = f"https://{subdomain}.numueg.app"
 
             intent = await fawaterak_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={
@@ -741,7 +1232,7 @@ async def checkout(
                 "payment_url": intent.client_secret,
                 "invoice_id": intent.id,
                 "order_id": str(created_order.id),
-                "amount": f"{created_order.total / 100:.2f}",
+                "amount": f"{_gateway_amount / 100:.2f}",
                 "currency": currency,
             }
 
@@ -754,7 +1245,7 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method == "fawry":
+    elif _dispatch_method == "fawry":
         # Fawry payment via store.settings encrypted credentials
         try:
             from src.infrastructure.external_services.fawry.payment_service import (
@@ -780,7 +1271,7 @@ async def checkout(
             )
 
             intent = await fawry_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={
@@ -808,7 +1299,7 @@ async def checkout(
                 "reference_number": intent.id,
                 "payment_url": fawry_service.get_payment_url(intent.id),
                 "order_id": str(created_order.id),
-                "amount": f"{created_order.total / 100:.2f}",
+                "amount": f"{_gateway_amount / 100:.2f}",
                 "currency": currency,
             }
 
@@ -821,14 +1312,121 @@ async def checkout(
                 detail="Fawry payment is not available for this store. Please choose another payment method.",
             )
 
-    elif request.payment_method and request.payment_method != "cod":
+    elif _dispatch_method == "instapay":
+        # InstaPay (manual IPA + proof upload). No gateway call — we just
+        # persist the InstapayIntent and hand the storefront the IPA + QR
+        # + reference code to show the customer. Funds move out-of-band;
+        # customer confirms via the proof-upload endpoint.
+        try:
+            from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+            from src.application.use_cases.payments.submit_payment_proof import (  # noqa: F401 (keeps module importable at startup)
+                SubmitPaymentProofUseCase,
+            )
+            from src.core.entities.instapay import InstapayIntent
+            from src.infrastructure.external_services.instapay import (
+                InstapayPaymentService,
+                get_merchant_instapay_credentials,
+            )
+            from src.infrastructure.external_services.instapay.payment_service import (
+                generate_reference_code,
+            )
+            from src.infrastructure.repositories.instapay_intent_repository import (
+                InstapayIntentRepository,
+            )
+
+            credentials = await get_merchant_instapay_credentials(store.settings)
+            instapay_service = InstapayPaymentService(
+                ipa=credentials["ipa"],
+                ipa_display_name=credentials.get("ipa_display_name"),
+                fallback_phone=credentials.get("fallback_phone"),
+                qr_image_url=credentials.get("qr_image_url"),
+                qr_link_url=credentials.get("qr_link_url"),
+            )
+            intent_repo = InstapayIntentRepository(order_repo.session)
+
+            # Reference codes are short enough (~10^9 combinations) that
+            # collisions are rare but not impossible, and a collision
+            # racing between two requests will surface as IntegrityError
+            # from the UNIQUE constraint. Wrap each attempt in a SAVEPOINT
+            # so a collision doesn't poison the outer request transaction,
+            # and retry with a fresh code until success or exhaustion.
+            reference_code = ""
+            qr_payload = ""
+            expires_at = None
+            for _ in range(5):
+                candidate = generate_reference_code()
+                cand_payload, cand_expires_at = instapay_service.build_intent_payload(
+                    amount_cents=_gateway_amount,
+                    reference_code=candidate,
+                    note=f"Order {created_order.order_number}",
+                )
+                intent_entity = InstapayIntent.new(
+                    tenant_id=created_order.tenant_id,
+                    store_id=created_order.store_id,
+                    order_id=created_order.id,
+                    reference_code=candidate,
+                    display_ipa=credentials["ipa"],
+                    display_phone=credentials.get("fallback_phone"),
+                    amount_cents=_gateway_amount,
+                    expires_at=cand_expires_at,
+                    qr_payload=cand_payload,
+                )
+                try:
+                    async with order_repo.session.begin_nested():
+                        await intent_repo.create(intent_entity)
+                except _IntegrityError:
+                    # Collision on reference_code OR order_id (same order
+                    # seen twice, very rare here). Retry with a fresh code.
+                    continue
+                reference_code = candidate
+                qr_payload = cand_payload
+                expires_at = cand_expires_at
+                break
+            if not reference_code or expires_at is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Could not allocate an InstaPay reference. Please retry.",
+                )
+
+            created_order.payment_id = reference_code
+            created_order.metadata["instapay"] = {
+                "reference_code": reference_code,
+            }
+            await order_repo.update(created_order)
+
+            payment_data = instapay_service.to_checkout_payload(
+                reference_code=reference_code,
+                qr_payload=qr_payload,
+                amount_cents=_gateway_amount,
+                currency=currency,
+                expires_at=expires_at,
+                order_id=str(created_order.id),
+                # When _gateway_amount differs from the order total
+                # we're charging a deposit (COD-with-deposit). Pass
+                # the full total so the storefront can frame the UI
+                # as "X now, Y on delivery".
+                is_deposit=_gateway_amount != created_order.total,
+                order_total_cents=created_order.total,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"InstaPay payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="InstaPay is not available for this store. Please choose another payment method.",
+            )
+
+    elif _dispatch_method and _dispatch_method != "cod":
         # Other payment providers via tenant credentials
         try:
             from src.api.dependencies.payment import get_tenant_payment_service
             from src.core.interfaces.services.payment_service import PaymentProvider
 
             payment_service = await get_tenant_payment_service(
-                provider=request.payment_method,
+                provider=_dispatch_method,
                 tenant_id=store.tenant_id,
                 session=order_repo.session,
             )
@@ -840,7 +1438,7 @@ async def checkout(
                 str(current_customer.email) if current_customer.email else None
             )
             intent = await payment_service.create_payment_intent(
-                amount=created_order.total,
+                amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={"order_id": str(created_order.id)},
@@ -853,7 +1451,7 @@ async def checkout(
                     "mid": payment_service._mid,
                     "hash": intent.client_secret,
                     "order_id": intent.id,
-                    "amount": f"{created_order.total / 100:.2f}",
+                    "amount": f"{_gateway_amount / 100:.2f}",
                     "currency": currency,
                     "mode": payment_service._mode,
                 }
@@ -909,6 +1507,24 @@ async def checkout(
                 "tracking_url": order_tracking_url,
             }
 
+            # InstaPay: include IPA / ref / amount / expiry + a direct
+            # resume link in the confirmation email so a customer who
+            # closed the tab can still complete the payment.
+            if (
+                request.payment_method == "instapay"
+                and isinstance(payment_data, dict)
+                and payment_data.get("provider") == "instapay"
+            ):
+                order_details["instapay"] = {
+                    "ipa": payment_data.get("ipa"),
+                    "reference_code": payment_data.get("reference_code"),
+                    "amount_cents": payment_data.get("amount_cents"),
+                    "currency": payment_data.get("currency", currency),
+                    "expires_at": payment_data.get("expires_at"),
+                    "fallback_phone": payment_data.get("fallback_phone"),
+                    "resume_url": f"{base_storefront_url}/instapay/{created_order.id}",
+                }
+
             async def _send_order_email():
                 try:
                     svc = ResendEmailService()
@@ -916,7 +1532,11 @@ async def checkout(
                         email=customer_email,
                         order_number=created_order.order_number,
                         order_details=order_details,
-                        language="ar",  # NUMU emails are Egyptian Arabic only for now
+                        # Follow the merchant's storefront language so
+                        # an EN-facing store isn't shipped Arabic copy
+                        # when their InstaPay block (IPA, ref, expiry)
+                        # carries customer-critical info.
+                        language=(store.default_language or "ar"),
                     )
                     logger.info(f"Order confirmation email sent to {customer_email}")
                 except Exception as exc:

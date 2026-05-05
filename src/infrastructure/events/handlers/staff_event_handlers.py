@@ -8,7 +8,15 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_staff_invited(event) -> None:
-    """Handle staff invitation - send email notification."""
+    """Handle staff invitation - send email notification.
+
+    Note: staff invites are tenant-level (no `store_id`), so the
+    merchant per-store email-template override does not apply here —
+    the renderer skips lookup when ``store_id is None`` and falls
+    through to the registry default. ``tenant_id`` is forwarded into
+    the email-context so audit logs / future tenant-level overrides
+    have the attribution.
+    """
     from src.infrastructure.messaging.tasks.notification_tasks import send_email_task
 
     logger.info(f"staff_invited: {event.email} tenant={event.tenant_id}")

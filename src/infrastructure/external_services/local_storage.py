@@ -71,3 +71,28 @@ class LocalStorageService(IStorageService):
 
     def get_public_url(self, key: str) -> str:
         return f"{self.base_url}/{key}"
+
+    async def get_object_bytes(self, key: str) -> tuple[bytes, str | None]:
+        file_path = self.base_dir / key
+        if not file_path.exists():
+            raise FileNotFoundError(key)
+        # Local mode doesn't track content-type on disk; the route
+        # falls back to magic-byte sniffing when this is None.
+        return file_path.read_bytes(), None
+
+    async def list_files(self, prefix: str) -> list[dict]:
+        base = self.base_dir / prefix
+        if not base.exists():
+            return []
+        out: list[dict] = []
+        for path in base.rglob("*"):
+            if path.is_file():
+                stat = path.stat()
+                rel_key = str(path.relative_to(self.base_dir)).replace("\\", "/")
+                out.append({
+                    "key": rel_key,
+                    "url": self.get_public_url(rel_key),
+                    "size": stat.st_size,
+                    "last_modified": "",
+                })
+        return out

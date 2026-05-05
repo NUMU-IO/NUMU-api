@@ -6,7 +6,6 @@ status changes. Respects customer notification preferences.
 
 from src.config.logging_config import get_logger
 from src.core.events.order_events import OrderStatusChangedEvent
-from src.core.interfaces.services.email_service import EmailMessage
 
 logger = get_logger(__name__)
 
@@ -58,36 +57,47 @@ async def handle_email_notification(event: OrderStatusChangedEvent) -> None:
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
     )
-    from src.infrastructure.external_services.resend.email_templates.notifications import (
-        order_status_email,
-    )
 
-    template = order_status_email(
-        status=event.new_status,
-        order_number=event.order_number,
-        store_name=event.store_name,
-        customer_name=event.customer_name,
-        tracking_number=event.tracking_number,
-        carrier=event.carrier,
-        reason=event.reason,
-        language="ar",  # NUMU emails are Egyptian Arabic only for now
-    )
+    # Routes through `send_order_status_email`, which:
+    #  * maps status -> registry event_type (order_confirmed, etc.),
+    #  * applies merchant custom-template overrides when the renderer is
+    #    wired (FastAPI request path) — handlers run from the global
+    #    event bus and currently get a worker-style service without a
+    #    renderer, so they fall through to the legacy body. Passing
+    #    `store_id` here is forward-compatible: once the bus runs with
+    #    a renderer the same call-site automatically picks up overrides.
+    service = ResendEmailService()
+    # NUMU emails are Egyptian Arabic only by default; respect the event
+    # language if the order/customer overrides it.
+    language = event.language or "ar"
+    try:
+        result = await service.send_order_status_email(
+            email=event.customer_email,
+            status=event.new_status,
+            order_number=event.order_number,
+            store_name=event.store_name,
+            customer_name=event.customer_name,
+            tracking_number=event.tracking_number,
+            carrier=event.carrier,
+            reason=event.reason,
+            language=language,
+            store_id=event.store_id,
+        )
+    except Exception:
+        logger.exception(
+            "order_status_email_failed",
+            order_id=str(event.order_id),
+            status=event.new_status,
+        )
+        return
 
-    if not template:
+    if not result:
         logger.warning(
             "email_notification_no_template",
             status=event.new_status,
             order_id=str(event.order_id),
         )
         return
-
-    service = ResendEmailService()
-    message = EmailMessage(
-        to=event.customer_email,
-        subject=template["subject"],
-        html_content=template["html"],
-    )
-    result = await service.send_email(message)
 
     logger.info(
         "order_status_email_sent",

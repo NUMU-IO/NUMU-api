@@ -152,6 +152,26 @@ class CreateAddressRequest(BaseModel):
         pattern="^(home|work|other)$",
         description="Address label: home, work, or other",
     )
+    # Optional geolocation from the checkout map picker
+    latitude: float | None = Field(
+        None, ge=-90, le=90, description="Delivery point latitude (WGS84)"
+    )
+    longitude: float | None = Field(
+        None, ge=-180, le=180, description="Delivery point longitude (WGS84)"
+    )
+    location_accuracy: float | None = Field(
+        None, ge=0, description="GPS accuracy radius in meters"
+    )
+    location_source: str | None = Field(
+        None,
+        max_length=20,
+        description="Location capture source: 'gps' | 'manual_pin'",
+    )
+    geocoded_address: str | None = Field(
+        None,
+        max_length=500,
+        description="Provider-normalized formatted address",
+    )
 
 
 class UpdateAddressRequest(BaseModel):
@@ -277,6 +297,17 @@ class CustomerAddressResponse(BaseModel):
     is_default: bool = Field(False, description="Whether this is the default address")
     label: str = Field("home", description="Address label: home, work, other")
     formatted_address: str = Field("", description="Human-readable formatted address")
+    latitude: float | None = Field(None, description="Delivery point latitude")
+    longitude: float | None = Field(None, description="Delivery point longitude")
+    location_accuracy: float | None = Field(
+        None, description="GPS accuracy radius in meters"
+    )
+    location_source: str | None = Field(
+        None, description="Location capture source: 'gps' | 'manual_pin'"
+    )
+    geocoded_address: str | None = Field(
+        None, description="Provider-normalized formatted address"
+    )
     created_at: str | None = Field(None, description="ISO 8601 creation timestamp")
     updated_at: str | None = Field(None, description="ISO 8601 last-update timestamp")
 

@@ -1,9 +1,10 @@
 """Order repository implementation."""
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Date as SqlDate
+from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.order import (
@@ -57,7 +58,7 @@ class OrderRepository(IOrderRepository):
 
         return OrderLineItem(
             product_id=UUID(data["product_id"]),
-            product_name=data["product_name"],
+            product_name=data.get("product_name") or "",
             variant_id=UUID(data["variant_id"]) if data.get("variant_id") else None,
             variant_name=data.get("variant_name"),
             sku=data.get("sku"),
@@ -69,7 +70,13 @@ class OrderRepository(IOrderRepository):
         )
 
     def _address_to_dict(self, address: OrderShippingAddress) -> dict:
-        """Convert OrderShippingAddress to dict for storage."""
+        """Convert OrderShippingAddress to dict for storage.
+
+        Persists the geolocation fields (latitude, longitude,
+        location_accuracy, location_source, geocoded_address) too —
+        they're what the COD trust check's teleport detection reads
+        from the customer's previous order.
+        """
         return {
             "first_name": address.first_name,
             "last_name": address.last_name,
@@ -80,20 +87,44 @@ class OrderRepository(IOrderRepository):
             "postal_code": address.postal_code,
             "country": address.country,
             "phone": address.phone,
+            "latitude": address.latitude,
+            "longitude": address.longitude,
+            "location_accuracy": address.location_accuracy,
+            "location_source": address.location_source,
+            "geocoded_address": address.geocoded_address,
         }
 
     def _dict_to_address(self, data: dict) -> OrderShippingAddress:
-        """Convert dict to OrderShippingAddress."""
+        """Convert dict to OrderShippingAddress.
+
+        Every required string field falls back to ``""`` and every
+        optional field to ``None`` when missing. Imported orders (and
+        some legacy rows) carry partial address JSONBs — e.g. Bosta /
+        manual-entry imports occasionally drop ``address_line1`` and
+        provide a free-form ``street`` only, or omit ``country`` for
+        in-Egypt orders. Bracket access on those rows used to
+        ``KeyError`` and 500 every endpoint that rehydrates the order,
+        including ``/dashboard/revenue`` and ``/dashboard/top-products``
+        which iterate the store's whole order list to aggregate.
+        Falling back to ``""`` lets the entity exist — consumers that
+        actually need the address can still detect "unset" by the
+        empty string.
+        """
         return OrderShippingAddress(
-            first_name=data["first_name"],
-            last_name=data["last_name"],
-            address_line1=data["address_line1"],
+            first_name=data.get("first_name") or "",
+            last_name=data.get("last_name") or "",
+            address_line1=data.get("address_line1") or "",
             address_line2=data.get("address_line2"),
-            city=data["city"],
+            city=data.get("city") or "",
             state=data.get("state"),
             postal_code=data.get("postal_code"),
-            country=data["country"],
+            country=data.get("country") or "",
             phone=data.get("phone"),
+            latitude=data.get("latitude"),
+            longitude=data.get("longitude"),
+            location_accuracy=data.get("location_accuracy"),
+            location_source=data.get("location_source"),
+            geocoded_address=data.get("geocoded_address"),
         )
 
     def _to_entity(self, model: OrderModel) -> Order:
@@ -123,6 +154,14 @@ class OrderRepository(IOrderRepository):
             payment_method=model.payment_method,
             payment_id=model.payment_id,
             shipping_method=model.shipping_method,
+            shipping_zone_id=model.shipping_zone_id,
+            shipping_rate_id=model.shipping_rate_id,
+            deposit_required_cents=model.deposit_required_cents,
+            deposit_amount_cents=model.deposit_amount_cents,
+            deposit_paid_at=model.deposit_paid_at,
+            deposit_expires_at=model.deposit_expires_at,
+            deposit_gateway=model.deposit_gateway,
+            deposit_payment_id=model.deposit_payment_id,
             tracking_number=model.tracking_number,
             notes=model.notes,
             customer_notes=model.customer_notes,
@@ -164,6 +203,14 @@ class OrderRepository(IOrderRepository):
             payment_method=entity.payment_method,
             payment_id=entity.payment_id,
             shipping_method=entity.shipping_method,
+            shipping_zone_id=entity.shipping_zone_id,
+            shipping_rate_id=entity.shipping_rate_id,
+            deposit_required_cents=entity.deposit_required_cents,
+            deposit_amount_cents=entity.deposit_amount_cents,
+            deposit_paid_at=entity.deposit_paid_at,
+            deposit_expires_at=entity.deposit_expires_at,
+            deposit_gateway=entity.deposit_gateway,
+            deposit_payment_id=entity.deposit_payment_id,
             tracking_number=entity.tracking_number,
             notes=entity.notes,
             customer_notes=entity.customer_notes,
@@ -396,6 +443,7 @@ class OrderRepository(IOrderRepository):
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         customer_id: UUID | None = None,
+        exclude_statuses: list[OrderStatus] | None = None,
     ) -> int:
         """Get total count of orders for a store with optional filters."""
         query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
@@ -407,6 +455,8 @@ class OrderRepository(IOrderRepository):
             query = query.where(OrderModel.payment_status == payment_status)
         if fulfillment_status:
             query = query.where(OrderModel.fulfillment_status == fulfillment_status)
+        if exclude_statuses:
+            query = query.where(OrderModel.status.notin_(exclude_statuses))
         if date_from:
             query = query.where(OrderModel.created_at >= date_from)
         if date_to:
@@ -445,6 +495,42 @@ class OrderRepository(IOrderRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
 
+    async def get_daily_aggregates(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[tuple[date, int, int]]:
+        """Daily ``(day, revenue_cents, order_count)`` tuples, one SQL round-trip.
+
+        Replaces the sales-chart fallback that used to issue two queries per
+        day (60 queries for a 30-day window). Cancelled/refunded orders are
+        excluded, matching ``get_revenue_by_date_range``.
+        """
+        day = cast(OrderModel.created_at, SqlDate).label("day")
+        query = (
+            select(
+                day,
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+                func.count(OrderModel.id).label("orders"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+                OrderModel.status.notin_([
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                ]),
+            )
+            .group_by(day)
+            .order_by(day)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            (row.day, int(row.revenue or 0), int(row.orders or 0)) for row in result
+        ]
+
     async def get_customer_order_stats(
         self, store_id: UUID
     ) -> dict[UUID, tuple[int, int]]:
@@ -470,6 +556,20 @@ class OrderRepository(IOrderRepository):
         )
         result = await self.session.execute(self._tenant_filter(query))
         return {row[0]: (row[1], row[2]) for row in result.all()}
+
+    async def exists_by_external_id(self, store_id: UUID, external_id: str) -> bool:
+        """Check if an order in this store was already imported for the given external ID.
+
+        External IDs live under ``OrderModel.extra_data['external_order_id']`` —
+        written by the order-import flow so merchants can re-upload without
+        creating duplicates.
+        """
+        query = select(OrderModel.id).where(
+            OrderModel.store_id == store_id,
+            OrderModel.extra_data["external_order_id"].astext == external_id,
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return result.first() is not None
 
     async def get_next_order_number(self, store_id: UUID) -> str:
         """Generate next order number for a store."""

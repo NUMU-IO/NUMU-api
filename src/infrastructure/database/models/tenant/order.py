@@ -85,6 +85,36 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
 
     # Shipping
     shipping_method: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Snapshot FKs recording which zone/rate were resolved at checkout.
+    # Nullable so pre-shipping-config orders and legacy flows keep working.
+    # SET NULL on delete: history should survive config cleanup.
+    shipping_zone_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.shipping_zones.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    shipping_rate_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.shipping_rates.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # ── Deposit-to-confirm COD snapshot fields ────────────────────
+    # All nullable — populated only on the deposit-flow path. See
+    # Order entity for semantics.
+    deposit_required_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deposit_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deposit_paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deposit_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    deposit_gateway: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deposit_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Notes
@@ -133,6 +163,24 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         "InvoiceModel", back_populates="order", uselist=False, lazy="selectin"
     )
     coupon = relationship("CouponModel", lazy="selectin")
+    # InstaPay: zero-or-one intent per order, zero-or-many proofs
+    # (re-upload after reject). ``lazy="raise"`` keeps us from
+    # accidentally triggering synchronous loads in async request paths
+    # — call sites that want them must ``selectinload`` explicitly.
+    instapay_intent = relationship(
+        "InstapayIntentModel",
+        uselist=False,
+        lazy="raise",
+        viewonly=True,
+        primaryjoin="OrderModel.id == InstapayIntentModel.order_id",
+        foreign_keys="InstapayIntentModel.order_id",
+    )
+    payment_proofs = relationship(
+        "PaymentProofModel",
+        back_populates="order",
+        lazy="raise",
+        order_by="PaymentProofModel.created_at",
+    )
 
     def __repr__(self) -> str:
         return f"<OrderModel(id={self.id}, order_number={self.order_number})>"

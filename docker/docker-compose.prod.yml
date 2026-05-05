@@ -223,6 +223,56 @@ services:
       - "26381:26379"
 
   # ===========================================================================
+  # Nominatim — self-hosted reverse-geocoder for checkout location picker
+  # ---------------------------------------------------------------------------
+  # Replaces LocationIQ once the production server has capacity for the
+  # initial ~30min import. Set NOMINATIM_URL=http://nominatim:8080 in
+  # .env.prod after this service is up and healthy.
+  #
+  # Data freshness is handled automatically — REPLICATION_URL pulls daily
+  # OSM diffs for Egypt, so the DB stays current without operator action.
+  #
+  # First import: ~200MB download, ~5–10GB disk after import, ~40min
+  # runtime on a 4-core box. Subsequent restarts: seconds.
+  # ===========================================================================
+  nominatim:
+    image: mediagis/nominatim:4.4
+    container_name: numu-nominatim-prod
+    restart: unless-stopped
+    environment:
+      - PBF_URL=https://download.geofabrik.de/africa/egypt-latest.osm.pbf
+      - REPLICATION_URL=https://download.geofabrik.de/africa/egypt-updates/
+      - UPDATE_MODE=continuous
+      - IMPORT_WIKIPEDIA=false
+      - IMPORT_US_POSTCODES=false
+      - IMPORT_GB_POSTCODES=false
+      - FREEZE=false
+      - THREADS=4
+      - NOMINATIM_PASSWORD=${NOMINATIM_PASSWORD:?NOMINATIM_PASSWORD must be set}
+    volumes:
+      - nominatim_data:/var/lib/postgresql/14/main
+      - nominatim_flatnode:/nominatim/flatnode
+    expose:
+      - "8080"
+    shm_size: 1gb
+    networks:
+      - numu-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45m
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # ===========================================================================
   # Celery Worker
   # ===========================================================================
   celery-worker:
@@ -235,6 +285,7 @@ services:
     environment:
       - ENVIRONMENT=production
       - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
     depends_on:
       - redis-master
       - postgres
@@ -259,6 +310,7 @@ services:
     environment:
       - ENVIRONMENT=production
       - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
     depends_on:
       - redis-master
       - postgres
@@ -290,4 +342,8 @@ volumes:
   nginx_logs:
     driver: local
   api_logs:
+    driver: local
+  nominatim_data:
+    driver: local
+  nominatim_flatnode:
     driver: local

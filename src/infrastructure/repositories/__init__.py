@@ -18,6 +18,14 @@ from src.infrastructure.repositories.channel_message_repository import (
 from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.credential_repository import CredentialRepository
 from src.infrastructure.repositories.customer_repository import CustomerRepository
+from src.infrastructure.repositories.email_log_repository import (
+    EmailLogRepository,
+    EmailLogRepositoryImpl,
+)
+from src.infrastructure.repositories.email_template_repository import (
+    EmailTemplateRepository,
+    EmailTemplateRepositoryImpl,
+)
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
 from src.infrastructure.repositories.marketplace_repository import (
@@ -39,6 +47,9 @@ from src.infrastructure.repositories.product_review_repository import (
 )
 from src.infrastructure.repositories.refund_repository import RefundRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
+from src.infrastructure.repositories.shipping_zone_repository import (
+    ShippingZoneRepository,
+)
 from src.infrastructure.repositories.social_connection_repository import (
     SocialConnectionRepository,
 )
@@ -84,6 +95,10 @@ __all__ = [
     "CredentialRepository",
     "CustomerRepository",
     "CustomerAddressRepository",
+    "EmailLogRepository",
+    "EmailLogRepositoryImpl",
+    "EmailTemplateRepository",
+    "EmailTemplateRepositoryImpl",
     "FeedbackRepository",
     "InvoiceRepository",
     "MessageLogRepository",
@@ -96,6 +111,7 @@ __all__ = [
     "RedisCartRepository",
     "RefundRepository",
     "ShipmentRepository",
+    "ShippingZoneRepository",
     "SocialConnectionRepository",
     "SocialPostRepository",
     "WaitlistRepository",

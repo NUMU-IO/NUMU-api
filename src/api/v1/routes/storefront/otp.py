@@ -235,7 +235,7 @@ async def send_cod_otp(
 
     # Dev fallback: in non-production environments, if neither WhatsApp nor email is
     # configured, expose the OTP in the response so testers / QA can complete the COD
-    # flow. Mirrors the `invite_code = "admin"` bypass in create_store.py.
+    # flow.
     if not sent and settings.environment != "production":
         channel = "dev"
         sent = True

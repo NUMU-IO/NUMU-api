@@ -66,6 +66,7 @@ def _build_store_response(store) -> StoreResponse:
         social_links=store.social_links,
         settings=getattr(store, "settings", None) or {},
         theme_settings=store.theme_settings,
+        business_hours=getattr(store, "business_hours", None) or {},
         created_at=str(store.created_at),
         updated_at=str(store.updated_at),
     )
@@ -169,12 +170,9 @@ async def create_store(
         default_language=request.default_language,
         contact_email=request.contact_email,
         contact_phone=request.contact_phone,
-        invite_code=request.invite_code,
     )
 
-    result = await use_case.execute(
-        dto, owner_id=user_id, invite_code=request.invite_code, plan=plan
-    )
+    result = await use_case.execute(dto, owner_id=user_id, plan=plan)
 
     return SuccessResponse(
         data=_build_store_response(result),
@@ -272,6 +270,7 @@ async def update_store(
         status=request.status,
         settings=request.settings,
         theme_settings=request.theme_settings,
+        business_hours=request.business_hours,
     )
 
     result = await use_case.execute(

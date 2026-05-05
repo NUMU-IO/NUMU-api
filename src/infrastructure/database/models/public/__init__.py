@@ -23,6 +23,9 @@ from src.infrastructure.database.models.public.reconciliation import (
     ReconciliationMismatchModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.public.theme_admin_config import (
+    ThemeAdminConfigModel,
+)
 from src.infrastructure.database.models.public.two_factor import TwoFactorAuthModel
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.public.waitlist import WaitlistModel
@@ -33,6 +36,7 @@ __all__ = [
     "ReconciliationMismatchModel",
     "StoreOnboardingModel",
     "TenantModel",
+    "ThemeAdminConfigModel",
     "TwoFactorAuthModel",
     "UserModel",
     "WaitlistModel",

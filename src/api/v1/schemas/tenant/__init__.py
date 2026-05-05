@@ -16,6 +16,19 @@ from src.api.v1.schemas.tenant.coupon import (
     CreateCouponRequest,
     UpdateCouponRequest,
 )
+from src.api.v1.schemas.tenant.email_template import (
+    CreateEmailTemplateRequest,
+    DefaultTemplateResponse,
+    EmailEventResponse,
+    EmailTemplateResponse,
+    EmailVariableInfo,
+    PreviewDraftRequest,
+    PreviewEmailRequest,
+    PreviewEmailResponse,
+    SendTestEmailRequest,
+    SendTestEmailResponse,
+    UpdateEmailTemplateRequest,
+)
 from src.api.v1.schemas.tenant.invoice import (
     CreateInvoiceRequest,
     InvoiceListResponse,
@@ -88,6 +101,18 @@ __all__ = [
     "CouponResponse",
     "CreateCouponRequest",
     "UpdateCouponRequest",
+    # Email Template
+    "CreateEmailTemplateRequest",
+    "DefaultTemplateResponse",
+    "EmailEventResponse",
+    "EmailTemplateResponse",
+    "EmailVariableInfo",
+    "PreviewDraftRequest",
+    "PreviewEmailRequest",
+    "PreviewEmailResponse",
+    "SendTestEmailRequest",
+    "SendTestEmailResponse",
+    "UpdateEmailTemplateRequest",
     # Invoice
     "CreateInvoiceRequest",
     "InvoiceListResponse",

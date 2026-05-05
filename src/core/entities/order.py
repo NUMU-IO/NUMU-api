@@ -15,11 +15,23 @@ from src.core.value_objects.money import Currency, Money
 class OrderStatus(StrEnum):
     """Order status enumeration."""
 
+    # An order awaiting a COD deposit payment. Lives in this state
+    # from creation until the gateway webhook confirms the deposit,
+    # at which point it transitions to CONFIRMED. If the deposit's
+    # `deposit_expires_at` passes without confirmation, a background
+    # task transitions it to CANCELLED.
+    PENDING_DEPOSIT = "pending_deposit"
     PENDING = "pending"
     CONFIRMED = "confirmed"
     PROCESSING = "processing"
     SHIPPED = "shipped"
     DELIVERED = "delivered"
+    # Customer refused / not handled — used by manual-ship merchants
+    # (no Bosta integration) to record an RTO outcome that feeds into
+    # the cross-merchant trust network. Distinct from CANCELLED to keep
+    # analytics clean: cancellation = ended before shipping; returned =
+    # shipped but never collected.
+    RETURNED = "returned"
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
     PAYMENT_FAILED = "payment_failed"
@@ -28,6 +40,14 @@ class OrderStatus(StrEnum):
 # Valid status transitions map
 # Key: current status, Value: list of valid next statuses
 VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
+    OrderStatus.PENDING_DEPOSIT: [
+        # Deposit paid → order is confirmed; main amount still collected on delivery.
+        OrderStatus.CONFIRMED,
+        # Customer abandoned / TTL expired / merchant cancelled.
+        OrderStatus.CANCELLED,
+        # Gateway returned a hard failure (e.g., Paymob declined card).
+        OrderStatus.PAYMENT_FAILED,
+    ],
     OrderStatus.PENDING: [
         OrderStatus.CONFIRMED,
         OrderStatus.PROCESSING,  # Direct to processing if auto-confirmed
@@ -44,12 +64,15 @@ VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
     ],
     OrderStatus.SHIPPED: [
         OrderStatus.DELIVERED,
-        # Cannot cancel after shipping
+        # Customer refused / merchant ships manually and records RTO.
+        OrderStatus.RETURNED,
+        # Cannot cancel after shipping — use RETURNED instead.
     ],
     OrderStatus.DELIVERED: [
         OrderStatus.REFUNDED,
     ],
     OrderStatus.CANCELLED: [],  # Terminal state
+    OrderStatus.RETURNED: [],  # Terminal state
     OrderStatus.REFUNDED: [],  # Terminal state
     OrderStatus.PAYMENT_FAILED: [
         OrderStatus.PENDING,  # Can retry payment
@@ -124,6 +147,13 @@ class OrderShippingAddress(BaseModel):
     state: str | None = None
     postal_code: str | None = None
     phone: str | None = None
+    # Geolocation captured from the storefront map picker. All fields optional
+    # for back-compat with orders placed before the feature shipped.
+    latitude: float | None = None
+    longitude: float | None = None
+    location_accuracy: float | None = None  # meters
+    location_source: str | None = None  # "gps" | "manual_pin" | None
+    geocoded_address: str | None = None  # provider-normalized formatted string
 
     @property
     def full_name(self) -> str:
@@ -177,6 +207,28 @@ class Order(BaseEntity):
     payment_method: str | None = None
     payment_id: str | None = None
     shipping_method: str | None = None
+    # Snapshot of the shipping resolution at checkout time. Nullable so
+    # orders placed before the shipping-config system rolls out (or via
+    # a legacy flow) still work. Not kept in sync if the zone/rate is
+    # edited later — that's the point: history is preserved as it was.
+    shipping_zone_id: UUID | None = None
+    shipping_rate_id: UUID | None = None
+    # ─── COD deposit-to-confirm ─────────────────────────────────────
+    # Populated only for orders that went through the deposit flow
+    # (COD with store.settings.payment.cod.deposit_policy.enabled=true).
+    # `deposit_required_cents` is the amount the merchant's policy asked
+    # for at checkout time — snapshotted so later policy edits don't
+    # retroactively rewrite what the customer agreed to pay.
+    # `deposit_amount_cents` is the amount actually collected (matches
+    # `deposit_required_cents` on the happy path — divergence is a
+    # discrepancy worth investigating).
+    # `balance_due_cents` is computed at read-time as `total - deposit_amount_cents`.
+    deposit_required_cents: int | None = None
+    deposit_amount_cents: int | None = None
+    deposit_paid_at: datetime | None = None
+    deposit_expires_at: datetime | None = None
+    deposit_gateway: str | None = None  # one of DepositGateway literals
+    deposit_payment_id: str | None = None  # external txn id for the deposit
     tracking_number: str | None = None
     tracking_url: str | None = None
     notes: str | None = None
@@ -230,6 +282,34 @@ class Order(BaseEntity):
         """Get total as Money object."""
         return Money.from_cents(self.total, Currency(self.currency))
 
+    # ─── Deposit helpers ─────────────────────────────────────────────
+
+    @property
+    def balance_due_cents(self) -> int:
+        """Amount still owed by the customer at delivery.
+
+        For deposit orders: `total - deposit_amount_cents` (clamped ≥ 0).
+        For everything else: 0 if fully paid, else the full `total`.
+        Keeps logic in one place so merchant dashboards, invoices, and
+        delivery-side receipt printing read the same number.
+        """
+        if self.deposit_amount_cents:
+            return max(0, self.total - self.deposit_amount_cents)
+        return 0 if self.is_paid else self.total
+
+    @property
+    def is_deposit_expired(self) -> bool:
+        """True when the deposit window has lapsed without a paid deposit.
+
+        The background sweeper and the order-read lazy-expire check both
+        use this to decide whether to transition PENDING_DEPOSIT → CANCELLED.
+        """
+        if self.status != OrderStatus.PENDING_DEPOSIT:
+            return False
+        if self.deposit_expires_at is None:
+            return False
+        return datetime.now(UTC) >= self.deposit_expires_at
+
     # Status check properties
     @property
     def is_pending(self) -> bool:
@@ -280,6 +360,7 @@ class Order(BaseEntity):
     def can_be_cancelled(self) -> bool:
         """Check if order can be cancelled."""
         return self.status in (
+            OrderStatus.PENDING_DEPOSIT,
             OrderStatus.PENDING,
             OrderStatus.CONFIRMED,
             OrderStatus.PROCESSING,
@@ -361,6 +442,11 @@ class Order(BaseEntity):
         # Update timestamps based on new status
         if new_status == OrderStatus.CANCELLED:
             self.cancelled_at = datetime.now(UTC)
+        elif new_status == OrderStatus.RETURNED:
+            # Reuse cancelled_at — same semantic of "order ended without
+            # payment / fulfillment". Saves a column migration; UI can
+            # disambiguate via status.
+            self.cancelled_at = datetime.now(UTC)
         elif new_status == OrderStatus.SHIPPED:
             self.shipped_at = datetime.now(UTC)
             self.fulfilled_at = datetime.now(UTC)
@@ -386,12 +472,41 @@ class Order(BaseEntity):
         self.touch()
 
     def mark_as_paid(self, payment_id: str, payment_method: str | None = None) -> None:
-        """Mark order as paid.
+        """Mark a gateway charge as successful.
+
+        Routes based on current order state:
+            * PENDING_DEPOSIT → deposit flow. Records the deposit
+              payment_id, sets `deposit_paid_at`, transitions to
+              CONFIRMED. `payment_status` STAYS `PENDING` — the main
+              order amount is still collected on delivery (COD).
+            * Everything else → full-payment flow. Sets `payment_status=PAID`,
+              transitions to PROCESSING (existing behaviour).
+
+        Centralizing the branch here means gateway webhook handlers
+        don't need to be deposit-aware — they just call `mark_as_paid`
+        as before and the entity does the right thing based on state.
 
         Args:
             payment_id: The payment provider's payment ID
-            payment_method: Optional payment method description
+            payment_method: Optional payment method description. For
+                deposit orders this is stored on `deposit_gateway`;
+                for full-payment orders it's stored on `payment_method`.
         """
+        if self.status == OrderStatus.PENDING_DEPOSIT:
+            # Deposit flow: the customer has paid the deposit amount.
+            # The balance (total - deposit) is still due on delivery.
+            self.deposit_paid_at = datetime.now(UTC)
+            self.deposit_payment_id = payment_id
+            if payment_method:
+                self.deposit_gateway = payment_method
+            # Transition via the canonical path — enforces allowed
+            # transitions and records the change in metadata.
+            self.transition_to(
+                OrderStatus.CONFIRMED,
+                reason=f"deposit_paid via {payment_method or 'unknown'}",
+            )
+            return
+        # Full-payment flow (existing behaviour)
         self.payment_status = PaymentStatus.PAID
         self.payment_id = payment_id
         if payment_method:
@@ -471,6 +586,19 @@ class Order(BaseEntity):
         if reason:
             self.metadata["cancellation_reason"] = reason
         self.touch()
+
+    def return_to_origin(self, reason: str | None = None) -> None:
+        """Mark a shipped order as returned (RTO).
+
+        Used by manual-ship merchants (no Bosta integration) to record
+        a customer-refused / not-collected outcome so the cross-merchant
+        trust network gets the RTO signal. Validates the same way as the
+        canonical transition path so SHIPPED → RETURNED is the only
+        allowed entry point.
+        """
+        self.transition_to(OrderStatus.RETURNED, reason=reason)
+        if reason:
+            self.metadata["return_reason"] = reason
 
     def refund(self, reason: str | None = None) -> None:
         """Refund the order.

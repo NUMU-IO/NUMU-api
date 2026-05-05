@@ -232,26 +232,90 @@ async def list_themes():
     latest theme_version to get nameAr/layout out of the manifest. Falls back
     to the static AVAILABLE_THEMES list if the DB query fails or returns
     empty so the dashboard never sees an empty marketplace during a deploy.
+
+    Each entry is then decorated with admin-config flags (required_plan,
+    display_order, preview_image_url, demo_url) and themes flagged
+    is_visible=false are filtered out before returning.
     """
     import logging
 
+    from sqlalchemy import select
+
     from src.config.settings import get_settings
     from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.public.theme_admin_config import (
+        ThemeAdminConfigModel,
+    )
     from src.infrastructure.repositories.theme_repository import ThemeRepository
     from src.infrastructure.repositories.theme_version_repository import (
         ThemeVersionRepository,
     )
 
-    # Single shared "demo" store rendered with the requested theme via
-    # ?preview_theme=. The storefront reads that param in StoreContext and
-    # overrides theme_settings.theme.base_theme so every theme can be
-    # previewed against the same seeded sample products.
-    demo_base = f"https://demo.{get_settings().storefront_base_domain}"
+    settings = get_settings()
+    assets_base = settings.storefront_assets_base_url.rstrip("/")
 
-    def _with_demo(themes: list[dict]) -> list[dict]:
-        return [
-            {**t, "demo_url": f"{demo_base}/?preview_theme={t['id']}"} for t in themes
-        ]
+    # Load admin-config flags once. Missing rows → defaults (visible, free,
+    # display_order=100). The admin GET endpoint upserts missing slugs, so
+    # this map should be near-complete in steady state.
+    admin_flags: dict[str, dict] = {}
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ThemeAdminConfigModel))
+            for row in result.scalars().all():
+                admin_flags[row.theme_slug] = {
+                    "is_visible": row.is_visible,
+                    "required_plan": row.required_plan,
+                    "display_order": row.display_order,
+                    "preview_image_url": row.preview_image_url,
+                }
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "list_themes_admin_flags_unavailable",
+            extra={"error": str(exc)},
+        )
+
+    def _decorate(entry: dict) -> dict | None:
+        """Filter by visibility, then decorate with required_plan/display_order/asset URLs.
+
+        Returns ``None`` for invisible themes — caller filters those out.
+        """
+        slug = entry.get("id", "")
+        flags = admin_flags.get(
+            slug,
+            {
+                "is_visible": True,
+                "required_plan": "free",
+                "display_order": 100,
+                "preview_image_url": None,
+            },
+        )
+        if not flags["is_visible"]:
+            return None
+        # Admin-uploaded preview overrides the convention URL when set.
+        # Otherwise we fall back to {STOREFRONT_ASSETS_BASE_URL}/themes/{slug}/preview.png
+        # so any screenshots checked into the storefront repo's public/ keep working.
+        preview_url = (
+            flags.get("preview_image_url") or f"{assets_base}/themes/{slug}/preview.png"
+        )
+        return {
+            **entry,
+            "required_plan": flags["required_plan"],
+            "display_order": flags["display_order"],
+            "preview_image_url": preview_url,
+            # Single shared "demo" store rendered with the requested theme via
+            # ?preview_theme=. The storefront reads that param in StoreContext
+            # and overrides theme_settings.theme.base_theme so every theme can
+            # be previewed against the same seeded sample products — no
+            # per-theme demo subdomain to provision.
+            "demo_url": (
+                f"https://demo.{settings.storefront_base_domain}/?preview_theme={slug}"
+            ),
+        }
+
+    def _build_payload(raw: list[dict]) -> list[dict]:
+        decorated = [out for out in (_decorate(e) for e in raw) if out is not None]
+        decorated.sort(key=lambda x: (x.get("display_order", 100), x.get("name", "")))
+        return decorated
 
     try:
         async with AsyncSessionLocal() as session:
@@ -263,7 +327,7 @@ async def list_themes():
 
             if not db_themes:
                 return SuccessResponse(
-                    data=_with_demo(AVAILABLE_THEMES),
+                    data=_build_payload(AVAILABLE_THEMES),
                     message="Themes retrieved successfully",
                 )
 
@@ -285,11 +349,10 @@ async def list_themes():
                     or t.name,
                     "layout": manifest.get("layout") or "default",
                     "description": t.description or "",
-                    "demo_url": f"{demo_base}/?preview_theme={t.slug}",
                 })
 
             return SuccessResponse(
-                data=payload,
+                data=_build_payload(payload),
                 message="Themes retrieved successfully",
             )
     except Exception as exc:
@@ -300,7 +363,7 @@ async def list_themes():
 
     # Fallback: return the static list if the DB is empty/unreachable
     return SuccessResponse(
-        data=_with_demo(AVAILABLE_THEMES),
+        data=_build_payload(AVAILABLE_THEMES),
         message="Themes retrieved successfully",
     )
 
@@ -367,6 +430,7 @@ async def get_store_by_subdomain(
             else str(store.status),
             "settings": store.settings or {},
             "theme_settings": store.theme_settings,
+            "business_hours": store.business_hours or {},
             "default_currency": store.default_currency.value
             if hasattr(store.default_currency, "value")
             else str(store.default_currency),
@@ -1283,7 +1347,55 @@ async def get_store_payment_methods(
             "type": "kashier",
         })
 
+    if _show("fawaterak"):
+        methods.append({
+            "id": "fawaterak",
+            "label": "فواتيرك",
+            "label_en": "Fawaterak",
+            "type": "fawaterak",
+        })
+
+    # InstaPay — customers transfer to the merchant's IPA from their
+    # bank app and upload a proof screenshot. No external redirect.
+    if _show("instapay"):
+        methods.append({
+            "id": "instapay",
+            "label": "انستاباي",
+            "label_en": "InstaPay",
+            "type": "instapay",
+        })
+
+    # COD deposit-to-confirm policy. The storefront renders a deposit
+    # section below the COD radio when this is non-null, asking the
+    # customer to pick one of the allowed gateways. Intersect with
+    # currently-shown methods so we don't advertise a deposit gateway
+    # the merchant has since disabled.
+    deposit_payload = None
+    cod_block = payment_settings.get("cod") or {}
+    deposit_raw = cod_block.get("deposit_policy") or {}
+    if (
+        cod_block.get("enabled")
+        and deposit_raw.get("enabled")
+        and int(deposit_raw.get("amount_cents", 0) or 0) > 0
+    ):
+        policy_gateways = list(deposit_raw.get("allowed_gateways") or [])
+        # Determine which of the merchant's allowed gateways are
+        # actually available to the customer right now. `_show` is
+        # the same gate as the methods list above.
+        live_gateways = [g for g in policy_gateways if _show(g)]
+        if live_gateways:
+            deposit_payload = {
+                "amount_cents": int(deposit_raw["amount_cents"]),
+                "ttl_minutes": int(deposit_raw.get("ttl_minutes", 30) or 30),
+                "allowed_gateways": live_gateways,
+            }
+
     return SuccessResponse(
-        data={"methods": methods},
+        data={
+            "methods": methods,
+            # Null when no deposit policy is active; populated when
+            # the merchant requires a deposit to confirm COD orders.
+            "cod_deposit_policy": deposit_payload,
+        },
         message="Payment methods retrieved",
     )

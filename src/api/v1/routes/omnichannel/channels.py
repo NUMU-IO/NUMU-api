@@ -45,7 +45,7 @@ async def _build_connection_response(conn: ChannelConnection) -> ChannelConnecti
     )
 
 
-@router.post("/connect", response_model=dict, status_code=status.HTTP_200_OK)
+@router.post("/connect", status_code=status.HTTP_200_OK)
 async def connect_meta(
     dto: ConnectMetaDTO,
     store_id: UUID,
@@ -70,7 +70,7 @@ async def connect_meta(
     )
 
 
-@router.post("/callback", response_model=dict, status_code=status.HTTP_200_OK)
+@router.post("/callback", status_code=status.HTTP_200_OK)
 async def meta_callback(
     dto: ConnectMetaCallbackDTO,
     store_id: UUID,
@@ -92,7 +92,7 @@ async def meta_callback(
     )
 
 
-@router.delete("/{connection_id}", response_model=dict, status_code=status.HTTP_200_OK)
+@router.delete("/{connection_id}", status_code=status.HTTP_200_OK)
 async def disconnect_channel(
     connection_id: UUID,
     store_id: UUID,
@@ -109,7 +109,7 @@ async def disconnect_channel(
     return SuccessResponse(data=None, message="Channel disconnected successfully")
 
 
-@router.get("/", response_model=dict, status_code=status.HTTP_200_OK)
+@router.get("/", status_code=status.HTTP_200_OK)
 async def list_connections(
     store_id: UUID,
     channel: str | None = Query(None, description="Filter by channel type"),

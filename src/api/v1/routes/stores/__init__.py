@@ -22,20 +22,24 @@ Provides REST endpoints for store CRUD operations and nested resources:
 from fastapi import APIRouter
 
 from src.api.v1.routes.stores import ai as ai_module
-from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
+from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import categories as categories_module
+from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
+from src.api.v1.routes.stores import email_templates as email_templates_module
 from src.api.v1.routes.stores import feedback as feedback_module
 from src.api.v1.routes.stores import inventory as inventory_module
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
+from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
 
 # Import all routers
+from src.api.v1.routes.stores import payment_proofs as payment_proofs_module
 from src.api.v1.routes.stores import payments as payments_module
 from src.api.v1.routes.stores import plan as plan_module
 from src.api.v1.routes.stores import products as products_module
@@ -43,6 +47,7 @@ from src.api.v1.routes.stores import reconciliation as reconciliation_module
 from src.api.v1.routes.stores import refunds as refunds_module
 from src.api.v1.routes.stores import settings as settings_module
 from src.api.v1.routes.stores import shipments as shipments_module
+from src.api.v1.routes.stores import shipping as shipping_module
 from src.api.v1.routes.stores import social as social_module
 from src.api.v1.routes.stores import stores as stores_module
 from src.api.v1.routes.stores import theme_editor_v3 as theme_editor_v3_module
@@ -64,7 +69,15 @@ router.include_router(stores_module.router, prefix="", tags=["Stores"])
 
 # Nested resources - products, orders, dashboard, customers, invoices under specific store
 router.include_router(products_module.router, tags=["Store Products"])
+# payment_proofs must be registered BEFORE orders: it owns the static
+# path ``/{store_id}/orders/pending-instapay-review`` which would
+# otherwise be shadowed by the orders router's catch-all
+# ``/{store_id}/orders/{order_id}`` pattern (FastAPI matches routes in
+# include order, so the UUID-typed wildcard wins and 422s on the
+# non-UUID literal segment).
+router.include_router(payment_proofs_module.router, tags=["Store InstaPay Proofs"])
 router.include_router(orders_module.router, tags=["Store Orders"])
+router.include_router(order_import_module.router, tags=["Store Order Import"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
@@ -76,12 +89,16 @@ router.include_router(
 router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(settings_module.router, tags=["Store Settings"])
+router.include_router(
+    cod_trust_decisions_module.router, tags=["Store COD Trust Decisions"]
+)
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
 router.include_router(refunds_module.router, tags=["Store Refunds"])
 router.include_router(webhooks_module.router, tags=["Store Webhooks"])
 router.include_router(reconciliation_module.router, tags=["Store Reconciliation"])
 router.include_router(shipments_module.router, tags=["Store Shipments"])
+router.include_router(shipping_module.router, tags=["Store Shipping"])
 router.include_router(payments_module.router, tags=["Store Payments"])
 router.include_router(plan_module.router, tags=["Store Plan"])
 router.include_router(upsells_module.router, tags=["Store Upsells"])
@@ -95,6 +112,7 @@ router.include_router(whatsapp_module.router, tags=["Store WhatsApp"])
 router.include_router(
     whatsapp_templates_module.router, tags=["Store WhatsApp Templates"]
 )
+router.include_router(email_templates_module.router, tags=["Store Email Templates"])
 router.include_router(whatsapp_chat_module.router, tags=["Store WhatsApp Chat"])
 router.include_router(
     whatsapp_campaigns_module.router, tags=["Store WhatsApp Campaigns"]
