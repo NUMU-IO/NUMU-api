@@ -15,7 +15,6 @@ from src.core.entities.theme_settings_v3 import (
     ThemeSettingsV3,
 )
 
-
 # ─── BlockInstance ────────────────────────────────────────────────────────────
 
 
@@ -62,7 +61,9 @@ class TestSectionInstance:
             type="rich-text",
             blocks={
                 "heading_1": BlockInstance(type="heading", settings={"text": "Title"}),
-                "paragraph_1": BlockInstance(type="paragraph", settings={"text": "Body"}),
+                "paragraph_1": BlockInstance(
+                    type="paragraph", settings={"text": "Body"}
+                ),
             },
             block_order=["heading_1", "paragraph_1"],
         )
@@ -104,7 +105,9 @@ class TestSectionGroup:
         group = SectionGroup(
             name="Header Group",
             sections={
-                "announcement_1": SectionInstance(type="announcement-bar", settings={"text": "Sale!"}),
+                "announcement_1": SectionInstance(
+                    type="announcement-bar", settings={"text": "Sale!"}
+                ),
                 "header_1": SectionInstance(type="header", settings={}),
             },
             order=["announcement_1", "header_1"],
@@ -119,7 +122,9 @@ class TestSectionGroup:
 
 class TestExternalThemeMetadata:
     def test_production_mode(self):
-        meta = ExternalThemeMetadata(bundle_url="https://cdn.example.com/theme.js")
+        meta = ExternalThemeMetadata(
+            bundle_url="https://cdn.numueg.app/themes/example/theme.js"
+        )
         assert meta.mode == "production"
         assert meta.css_url is None
         assert meta.dev_url is None
@@ -134,7 +139,40 @@ class TestExternalThemeMetadata:
 
     def test_invalid_mode(self):
         with pytest.raises(ValidationError):
-            ExternalThemeMetadata(bundle_url="https://cdn.example.com/theme.js", mode="staging")
+            ExternalThemeMetadata(
+                bundle_url="https://cdn.numueg.app/themes/example/theme.js",
+                mode="staging",
+            )
+
+    def test_bundle_url_must_be_on_allowlist(self):
+        # Arbitrary HTTPS host is rejected — prevents tenant-side script injection.
+        with pytest.raises(ValidationError, match="not on the allowlist"):
+            ExternalThemeMetadata(bundle_url="https://attacker.example/evil.js")
+
+    def test_bundle_url_http_rejected_in_production(self):
+        with pytest.raises(ValidationError, match="not on the allowlist"):
+            ExternalThemeMetadata(bundle_url="http://cdn.numueg.app/themes/x/theme.js")
+
+    def test_dev_mode_allows_localhost(self):
+        meta = ExternalThemeMetadata(
+            bundle_url="http://localhost:5173/theme.js",
+            mode="development",
+        )
+        assert meta.bundle_url.startswith("http://localhost")
+
+    def test_dev_mode_rejects_external_host(self):
+        with pytest.raises(ValidationError, match="not on the allowlist"):
+            ExternalThemeMetadata(
+                bundle_url="http://attacker.example/theme.js",
+                mode="development",
+            )
+
+    def test_css_url_must_be_on_allowlist(self):
+        with pytest.raises(ValidationError, match="css_url"):
+            ExternalThemeMetadata(
+                bundle_url="https://cdn.numueg.app/themes/x/theme.js",
+                css_url="https://attacker.example/evil.css",
+            )
 
 
 # ─── ThemeSettingsV3 ──────────────────────────────────────────────────────────
@@ -187,7 +225,9 @@ class TestThemeSettingsV3:
                             type="hero",
                             settings={"headline": "Welcome"},
                             blocks={
-                                "btn_1": BlockInstance(type="button", settings={"text": "Shop Now"}),
+                                "btn_1": BlockInstance(
+                                    type="button", settings={"text": "Shop Now"}
+                                ),
                             },
                             block_order=["btn_1"],
                         ),
@@ -198,4 +238,10 @@ class TestThemeSettingsV3:
         )
         data = v3.model_dump()
         restored = ThemeSettingsV3(**data)
-        assert restored.templates["home"].sections["hero_1"].blocks["btn_1"].settings["text"] == "Shop Now"
+        assert (
+            restored.templates["home"]
+            .sections["hero_1"]
+            .blocks["btn_1"]
+            .settings["text"]
+            == "Shop Now"
+        )

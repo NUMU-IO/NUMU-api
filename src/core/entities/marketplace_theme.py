@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -13,6 +14,7 @@ from src.core.entities.base import BaseEntity
 
 class MarketplaceThemeStatus(StrEnum):
     """Marketplace theme listing status."""
+
     DRAFT = "draft"
     PENDING_REVIEW = "pending_review"
     PUBLISHED = "published"
@@ -22,6 +24,7 @@ class MarketplaceThemeStatus(StrEnum):
 
 class MarketplaceVersionStatus(StrEnum):
     """Marketplace theme version status."""
+
     PENDING_BUILD = "pending_build"
     BUILDING = "building"
     BUILD_FAILED = "build_failed"
@@ -69,5 +72,17 @@ class MarketplaceThemeVersion(BaseEntity):
     build_log: str | None = None
     size_bytes: int | None = None
     checksum: str | None = None
+    source_zip_path: str | None = None
     review_notes: str | None = None
     reviewed_by: UUID | None = None
+
+
+class MarketplaceThemeInstallation(BaseEntity):
+    """A per-store install record for a marketplace theme."""
+
+    store_id: UUID
+    marketplace_theme_id: UUID
+    marketplace_version_id: UUID
+    is_active: bool = False
+    installed_at: datetime | None = None
+    uninstalled_at: datetime | None = None

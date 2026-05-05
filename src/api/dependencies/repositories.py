@@ -269,7 +269,19 @@ def get_theme_customization_version_repository(
     from src.infrastructure.repositories.theme_customization_version_repository import (
         ThemeCustomizationVersionRepository,
     )
+
     return ThemeCustomizationVersionRepository(session)
+
+
+def get_marketplace_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get marketplace repository dependency."""
+    from src.infrastructure.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    return MarketplaceRepository(session)
 
 
 def get_channel_connection_repository(

@@ -235,11 +235,23 @@ async def list_themes():
     """
     import logging
 
+    from src.config.settings import get_settings
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.repositories.theme_repository import ThemeRepository
     from src.infrastructure.repositories.theme_version_repository import (
         ThemeVersionRepository,
     )
+
+    # Single shared "demo" store rendered with the requested theme via
+    # ?preview_theme=. The storefront reads that param in StoreContext and
+    # overrides theme_settings.theme.base_theme so every theme can be
+    # previewed against the same seeded sample products.
+    demo_base = f"https://demo.{get_settings().storefront_base_domain}"
+
+    def _with_demo(themes: list[dict]) -> list[dict]:
+        return [
+            {**t, "demo_url": f"{demo_base}/?preview_theme={t['id']}"} for t in themes
+        ]
 
     try:
         async with AsyncSessionLocal() as session:
@@ -251,7 +263,7 @@ async def list_themes():
 
             if not db_themes:
                 return SuccessResponse(
-                    data=AVAILABLE_THEMES,
+                    data=_with_demo(AVAILABLE_THEMES),
                     message="Themes retrieved successfully",
                 )
 
@@ -273,6 +285,7 @@ async def list_themes():
                     or t.name,
                     "layout": manifest.get("layout") or "default",
                     "description": t.description or "",
+                    "demo_url": f"{demo_base}/?preview_theme={t.slug}",
                 })
 
             return SuccessResponse(
@@ -287,7 +300,7 @@ async def list_themes():
 
     # Fallback: return the static list if the DB is empty/unreachable
     return SuccessResponse(
-        data=AVAILABLE_THEMES,
+        data=_with_demo(AVAILABLE_THEMES),
         message="Themes retrieved successfully",
     )
 
@@ -579,7 +592,9 @@ async def browse_products_cursor(
             description=product.description,
             short_description=product.short_description,
             product_type=product.product_type,
-            status=product.status.value if hasattr(product.status, "value") else product.status,
+            status=product.status.value
+            if hasattr(product.status, "value")
+            else product.status,
             price=str(product.price.amount),
             price_currency=product.price.currency.value,
             compare_at_price=str(product.compare_at_price.amount)

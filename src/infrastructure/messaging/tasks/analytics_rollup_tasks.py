@@ -1,8 +1,13 @@
 """Celery task for nightly analytics rollup.
 
 Aggregates daily metrics per store into the analytics_daily_rollups table.
-Runs at 3:30 AM UTC, before the health score task (4:00 AM UTC).
-Backfills last 7 days to catch late-arriving events.
+Runs at 03:30 UTC daily, then backfills the previous 90 days every run so a
+single recovery after beat downtime catches up months of history rather
+than just a week.
+
+Each (store, day) is processed in its own session — a SQL error on one
+day used to poison the shared session and silently fail every later day
+on every later store. Now isolated rollbacks contain the blast radius.
 """
 
 import asyncio
@@ -13,6 +18,17 @@ from datetime import UTC, date, datetime, timedelta
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+# Window the daily Celery run backfills. Was 7 — too narrow when beat is
+# down for any non-trivial stretch; older missing days were never filled
+# by the next successful run. 90 covers a full quarter so a single tick
+# repairs a long outage without an ops backfill.
+DEFAULT_BACKFILL_DAYS = 90
+
+# Cap how many failure rows the task return value carries back to the
+# broker. Logs always have everything; this is just to keep the result
+# JSON small.
+_MAX_REPORTED_FAILURES = 50
 
 _task_loop = None
 
@@ -31,10 +47,17 @@ def run_async(coro):
     max_retries=2,
     default_retry_delay=600,
 )
-def calculate_analytics_rollups_task(self):
-    """Calculate analytics rollups for all active stores."""
+def calculate_analytics_rollups_task(self, backfill_days: int = DEFAULT_BACKFILL_DAYS):
+    """Calculate analytics rollups for all active stores.
+
+    Args:
+        backfill_days: How many days back from yesterday to (re)compute.
+            The default 90 covers a quarter so a single run repairs a long
+            beat outage. Pass an explicit smaller value for hot-path runs
+            where you only care about the most recent days.
+    """
     try:
-        result = run_async(_calculate_all_rollups())
+        result = run_async(_calculate_all_rollups(backfill_days))
         logger.info(f"Analytics rollup complete: {result}")
         return result
     except Exception as exc:
@@ -42,19 +65,18 @@ def calculate_analytics_rollups_task(self):
         raise self.retry(exc=exc)
 
 
-async def _calculate_all_rollups() -> dict:
+async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> dict:
     """Calculate and persist daily rollups for all active stores."""
     from sqlalchemy import select
 
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.store import StoreModel
 
-    stats = {"processed": 0, "days_written": 0, "errors": 0}
-
-    # Backfill last 7 days to catch late events
     today = date.today()
-    dates_to_process = [today - timedelta(days=i) for i in range(1, 8)]
+    dates_to_process = [today - timedelta(days=i) for i in range(1, backfill_days + 1)]
 
+    # Pull active stores in one short-lived session so the listing isn't
+    # held open across the full backfill loop.
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(StoreModel.id, StoreModel.tenant_id).where(
@@ -63,27 +85,105 @@ async def _calculate_all_rollups() -> dict:
         )
         stores = result.all()
 
-        for store_row in stores:
-            store_id = store_row.id
-            tenant_id = store_row.tenant_id
-            stats["processed"] += 1
+    stats = {
+        "processed": len(stores),
+        "days_written": 0,
+        "errors": 0,
+        "backfill_days": backfill_days,
+        # (store_id, YYYY-MM-DD, error message) — capped by _MAX_REPORTED_FAILURES.
+        "failures": [],
+    }
 
-            for rollup_date in dates_to_process:
-                try:
+    for store_row in stores:
+        store_stats = await _backfill_store(
+            store_row.tenant_id, store_row.id, dates_to_process
+        )
+        stats["days_written"] += store_stats["days_written"]
+        stats["errors"] += store_stats["errors"]
+        if store_stats["failures"] and len(stats["failures"]) < _MAX_REPORTED_FAILURES:
+            room = _MAX_REPORTED_FAILURES - len(stats["failures"])
+            stats["failures"].extend(store_stats["failures"][:room])
+
+    if stats["errors"]:
+        # One summary line so failures show up even when the broker
+        # truncates the return value or the result backend is being
+        # ignored. Individual per-day warnings are still emitted below.
+        logger.warning(
+            "analytics_rollup_partial_failure: "
+            f"{stats['errors']} day(s) failed across {stats['processed']} stores; "
+            f"first up to {_MAX_REPORTED_FAILURES} returned in stats['failures']"
+        )
+
+    return stats
+
+
+async def _backfill_store(tenant_id, store_id, dates_to_process: list[date]) -> dict:
+    """Compute and upsert rollups for one store across a list of dates.
+
+    Each date runs in its own session. If one day's `_aggregate_day` or
+    `_upsert_rollup` raises (bad data, connection blip, schema drift),
+    that session is rolled back and the next date opens a fresh one — so
+    the failure can't poison subsequent days the way the previous shared
+    session did.
+    """
+    from src.infrastructure.database.connection import AsyncSessionLocal
+
+    out = {"days_written": 0, "errors": 0, "failures": []}
+
+    for rollup_date in dates_to_process:
+        try:
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
                     data = await _aggregate_day(session, store_id, rollup_date)
                     await _upsert_rollup(
                         session, tenant_id, store_id, rollup_date, data
                     )
-                    stats["days_written"] += 1
-                except Exception as e:
-                    logger.warning(
-                        f"Rollup failed for store {store_id} date {rollup_date}: {e}"
-                    )
-                    stats["errors"] += 1
+            out["days_written"] += 1
+        except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}"
+            logger.warning(
+                "rollup_failed",
+                extra={
+                    "store_id": str(store_id),
+                    "rollup_date": rollup_date.isoformat(),
+                    "error": err_msg,
+                },
+            )
+            out["errors"] += 1
+            out["failures"].append((str(store_id), rollup_date.isoformat(), err_msg))
 
-        await session.commit()
+    return out
 
-    return stats
+
+async def backfill_store_range(store_id, start_date: date, end_date: date) -> dict:
+    """Backfill rollups for one store across [start_date, end_date] inclusive.
+
+    Used by the admin endpoint and any one-off CLI to recover a known gap
+    without waiting on the nightly tick. Resolves tenant_id from the
+    store row so callers don't have to pass it.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.store import StoreModel
+
+    if end_date < start_date:
+        raise ValueError(f"end_date {end_date} is before start_date {start_date}")
+
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(StoreModel.tenant_id).where(StoreModel.id == store_id)
+            )
+        ).first()
+    if row is None:
+        raise ValueError(f"Store {store_id} not found")
+    tenant_id = row.tenant_id
+
+    span = (end_date - start_date).days + 1
+    dates_to_process = [start_date + timedelta(days=i) for i in range(span)]
+
+    return await _backfill_store(tenant_id, store_id, dates_to_process)
 
 
 async def _aggregate_day(

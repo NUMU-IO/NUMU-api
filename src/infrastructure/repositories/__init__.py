@@ -20,6 +20,9 @@ from src.infrastructure.repositories.credential_repository import CredentialRepo
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
+from src.infrastructure.repositories.marketplace_repository import (
+    MarketplaceRepository,
+)
 from src.infrastructure.repositories.message_log_repository import MessageLogRepository
 from src.infrastructure.repositories.message_thread_repository import (
     MessageThreadRepositoryImpl,
@@ -42,10 +45,10 @@ from src.infrastructure.repositories.social_connection_repository import (
 from src.infrastructure.repositories.social_post_repository import SocialPostRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
-from src.infrastructure.repositories.theme_repository import ThemeRepository
 from src.infrastructure.repositories.theme_customization_version_repository import (
     ThemeCustomizationVersionRepository,
 )
+from src.infrastructure.repositories.theme_repository import ThemeRepository
 from src.infrastructure.repositories.theme_version_repository import (
     ThemeVersionRepository,
 )
@@ -72,6 +75,7 @@ __all__ = [
     "StoreRepository",
     "StoreThemeRepository",
     "ThemeRepository",
+    "MarketplaceRepository",
     "ThemeCustomizationVersionRepository",
     "ThemeVersionRepository",
     "TwoFactorRepository",

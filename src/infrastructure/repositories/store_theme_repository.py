@@ -151,6 +151,8 @@ class StoreThemeRepository(IStoreThemeRepository):
         model.is_active = entity.is_active
         model.customization = entity.customization
         model.draft_customization = entity.draft_customization
+        model.customization_v3 = entity.customization_v3
+        model.draft_customization_v3 = entity.draft_customization_v3
         model.installed_at = entity.installed_at
         model.activated_at = entity.activated_at
         model.theme_version_id = str(entity.theme_version_id)

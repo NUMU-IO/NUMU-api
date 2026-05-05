@@ -1,24 +1,48 @@
 """V3 Theme Editor API routes.
 
-All endpoints perform Dual-Write: V3 columns + legacy columns.
+All write endpoints perform Dual-Write: V3 columns + legacy columns.
 Mounted at /stores/{store_id}/themes/v3/editor/
+
+Endpoints:
+  GET    /draft               — current draft (V3 if present; else normalized legacy)
+  PUT    /autosave            — autosave a V3 payload (debounced from client)
+  POST   /publish             — publish draft, dual-write, revalidate storefront
+  POST   /discard             — drop the draft, revert to published
+  GET    /versions            — paginated version history
+  POST   /versions/{id}/restore — bring an older version back into the draft
+  GET    /resolve             — published settings (no draft) for storefront SDKs
+  GET    /schemas             — section/block schemas for the active theme
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import ValidationError
 
-from src.api.dependencies import get_current_user_id, verify_store_ownership
+from src.api.dependencies import (
+    get_current_user_id,
+    get_store_repository,
+    verify_store_ownership,
+)
 from src.api.dependencies.repositories import (
     get_store_theme_repository,
     get_theme_customization_version_repository,
 )
 from src.api.responses import SuccessResponse
+from src.api.v1.schemas.tenant.theme_v3 import (
+    AutosaveDraftRequest,
+    AutosaveDraftResponse,
+    DiscardDraftResponse,
+    PublishResponse,
+    SchemaResponse,
+    VersionListResponse,
+)
 from src.application.services.theme_v3_service import ThemeV3Service
+from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_customization_version_repository import (
     ThemeCustomizationVersionRepository,
@@ -34,16 +58,23 @@ router = APIRouter(
 
 
 def _get_v3_service(
-    store_theme_repo: Annotated[StoreThemeRepository, Depends(get_store_theme_repository)],
+    store_theme_repo: Annotated[
+        StoreThemeRepository, Depends(get_store_theme_repository)
+    ],
     version_repo: Annotated[
         ThemeCustomizationVersionRepository,
         Depends(get_theme_customization_version_repository),
     ],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ) -> ThemeV3Service:
-    return ThemeV3Service(store_theme_repo, version_repo)
+    return ThemeV3Service(
+        store_theme_repo=store_theme_repo,
+        version_repo=version_repo,
+        store_repo=store_repo,
+    )
 
 
-# ── Draft (auto-save) ──────────────────────────────────────────────────────────
+# ── Draft ────────────────────────────────────────────────────────────────────
 
 
 @router.get("/draft")
@@ -53,42 +84,52 @@ async def get_draft(
 ):
     """Get the current V3 draft for the active theme.
 
-    If no V3 data exists yet, the backend normalizes V1/V2 → V3 on the fly.
+    If no V3 draft exists yet, prefer V3 published; otherwise normalize
+    V1/V2 legacy data to V3 in memory (Dual-Read).
     """
-    try:
-        data = await svc.get_draft(store_id)
-        return SuccessResponse(data=data, message="Draft retrieved")
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    data = await svc.get_draft(store_id)
+    return SuccessResponse(data=data, message="Draft retrieved")
 
 
-@router.put("/autosave")
+@router.put(
+    "/autosave",
+    response_model=SuccessResponse[AutosaveDraftResponse],
+)
 async def autosave_draft(
     store_id: UUID,
-    payload: dict[str, Any],
+    body: AutosaveDraftRequest,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
     user_id: Annotated[UUID, Depends(get_current_user_id)],
 ):
     """Auto-save V3 draft with Dual-Write to legacy columns.
 
-    Called by the customizer every 2 seconds (debounced on the client).
+    Idempotent if the payload is unchanged from the last draft.
+    Pydantic re-validates the payload (incl. external_theme URL allowlist)
+    before any DB write.
     """
     try:
         data = await svc.autosave_draft(
             store_id=store_id,
-            payload=payload,
+            payload=body.payload,
             user_id=user_id,
-            change_summary="Auto-save",
+            change_summary=body.change_summary or "Auto-save",
         )
-        return SuccessResponse(data=data, message="Draft saved")
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.errors(include_url=False),
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return SuccessResponse(
+        data=AutosaveDraftResponse(draft=data), message="Draft saved"
+    )
 
 
-# ── Publish ─────────────────────────────────────────────────────────────────────
+# ── Publish ──────────────────────────────────────────────────────────────────
 
 
-@router.post("/publish")
+@router.post("/publish", response_model=SuccessResponse[PublishResponse])
 async def publish(
     store_id: UUID,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
@@ -96,19 +137,27 @@ async def publish(
 ):
     """Publish V3 draft with Dual-Write to all columns.
 
-    Triggers Next.js ISR cache invalidation after successful publish.
+    Triggers Next.js ISR cache invalidation after successful publish
+    (non-fatal if the storefront is unreachable).
     """
     try:
         data = await svc.publish(store_id=store_id, user_id=user_id)
-        return SuccessResponse(data=data, message="Published successfully")
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.errors(include_url=False),
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return SuccessResponse(
+        data=PublishResponse(published=data), message="Published successfully"
+    )
 
 
-# ── Version History ─────────────────────────────────────────────────────────────
+# ── Version history ──────────────────────────────────────────────────────────
 
 
-@router.get("/versions")
+@router.get("/versions", response_model=SuccessResponse[VersionListResponse])
 async def list_versions(
     store_id: UUID,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
@@ -116,11 +165,17 @@ async def list_versions(
     per_page: int = Query(20, ge=1, le=100),
 ):
     """List version history for the store's theme customization."""
-    data = await svc.get_versions(store_id=store_id, page=page, per_page=per_page)
-    return SuccessResponse(data=data, message="Versions retrieved")
+    versions = await svc.get_versions(store_id=store_id, page=page, per_page=per_page)
+    return SuccessResponse(
+        data=VersionListResponse(versions=versions, page=page, per_page=per_page),
+        message="Versions retrieved",
+    )
 
 
-@router.post("/versions/{version_id}/restore")
+@router.post(
+    "/versions/{version_id}/restore",
+    response_model=SuccessResponse[AutosaveDraftResponse],
+)
 async def restore_version(
     store_id: UUID,
     version_id: UUID,
@@ -132,15 +187,17 @@ async def restore_version(
         data = await svc.restore_version(
             store_id=store_id, version_id=version_id, user_id=user_id
         )
-        return SuccessResponse(data=data, message="Version restored")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return SuccessResponse(
+        data=AutosaveDraftResponse(draft=data), message="Version restored"
+    )
 
 
-# ── Discard Draft ───────────────────────────────────────────────────────────────
+# ── Discard draft ────────────────────────────────────────────────────────────
 
 
-@router.post("/discard")
+@router.post("/discard", response_model=SuccessResponse[DiscardDraftResponse])
 async def discard_draft(
     store_id: UUID,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
@@ -148,23 +205,28 @@ async def discard_draft(
     """Discard V3 draft and revert to published state."""
     try:
         data = await svc.discard_draft(store_id)
-        return SuccessResponse(data=data, message="Draft discarded")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return SuccessResponse(
+        data=DiscardDraftResponse(published=data), message="Draft discarded"
+    )
 
 
-# ── Schemas ─────────────────────────────────────────────────────────────────────
+# ── Schemas ──────────────────────────────────────────────────────────────────
 
 
-@router.get("/schemas")
+@router.get("/schemas", response_model=SuccessResponse[SchemaResponse])
 async def get_schemas(
     store_id: UUID,
-    store_theme_repo: Annotated[StoreThemeRepository, Depends(get_store_theme_repository)],
+    store_theme_repo: Annotated[
+        StoreThemeRepository, Depends(get_store_theme_repository)
+    ],
 ):
     """Get the active theme's section/block schemas.
 
-    For built-in themes: reads from the theme's settings_schema and section_schemas.
-    For BYOT themes: reads from the marketplace theme version's schema columns.
+    For built-in themes: reads from the theme's settings_schema and
+    section_schemas. For BYOT themes: reads from the marketplace theme
+    version's schema columns.
     """
     store_theme = await store_theme_repo.get_active_for_store(store_id)
     if not store_theme:
@@ -174,17 +236,20 @@ async def get_schemas(
         )
 
     return SuccessResponse(
-        data={
-            "theme_id": str(store_theme.theme_id),
-            "theme_slug": store_theme.theme_slug,
-            "settings_schema": store_theme.settings_schema or {},
-            "section_schemas": store_theme.section_schemas or {},
-        },
+        data=SchemaResponse(
+            theme_id=str(store_theme.theme_id),
+            theme_slug=store_theme.theme_slug,
+            settings_schema=store_theme.settings_schema or {},
+            section_schemas=store_theme.section_schemas or {},
+            theme_type=(
+                store_theme.theme_type.value if store_theme.theme_type else "internal"
+            ),
+        ),
         message="Schemas retrieved",
     )
 
 
-# ── Resolve (Dual-Read) ────────────────────────────────────────────────────────
+# ── Resolve (storefront SDK) ─────────────────────────────────────────────────
 
 
 @router.get("/resolve")
@@ -192,14 +257,12 @@ async def resolve_theme(
     store_id: UUID,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
 ):
-    """Resolve the current theme settings using Dual-Read normalization.
+    """Resolve the published theme settings using Dual-Read normalization.
 
-    Returns V3 data if available, otherwise normalizes V1/V2 → V3 in memory.
-    This is the same as get_draft but semantically used by the customizer
-    to initialize the editor state.
+    Distinct from `/draft`: this endpoint never returns draft data. It is
+    intended for the storefront SDK to render the live theme. Returns V3
+    published data if present; otherwise normalizes V1/V2 published →
+    V3 in memory.
     """
-    try:
-        data = await svc.get_draft(store_id)
-        return SuccessResponse(data=data, message="Theme resolved")
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    data = await svc.get_published(store_id)
+    return SuccessResponse(data=data, message="Theme resolved")

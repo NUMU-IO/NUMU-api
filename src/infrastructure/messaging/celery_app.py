@@ -51,6 +51,10 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.expire_temporary_grants",
         # Feature 001: Omnichannel inbox
         "src.infrastructure.messaging.tasks.omnichannel_tasks",
+        # Theme builds + marketplace
+        "src.infrastructure.messaging.tasks.theme_build_tasks",
+        "src.infrastructure.messaging.tasks.theme_upload_tasks",
+        "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -179,3 +183,28 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=4, minute=30),  # Daily at 04:30 UTC
     },
 }
+
+
+# ─── Eager model loading ───────────────────────────────────────────────
+# SQLAlchemy resolves string-based relationships (e.g. RoleModel ↔
+# membership_roles) lazily, the first time a query against either side is
+# compiled. The Celery worker reaches the ORM through tasks → services →
+# models, but that import chain doesn't transitively touch every model
+# file — anything not on the chain stays unregistered. The first ORM call
+# in an unlucky task then fails with "InvalidRequestError: One or more
+# mappers failed to initialize" and every subsequent ORM call in the
+# worker fails the same way until the process is recycled.
+#
+# Walking the models package once at startup forces every class to
+# register, so the mapper graph is fully resolvable before any task runs.
+def _load_all_models() -> None:
+    import importlib
+    import pkgutil
+
+    import src.infrastructure.database.models as _pkg
+
+    for module_info in pkgutil.walk_packages(_pkg.__path__, prefix=_pkg.__name__ + "."):
+        importlib.import_module(module_info.name)
+
+
+_load_all_models()

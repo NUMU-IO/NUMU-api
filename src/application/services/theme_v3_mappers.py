@@ -7,16 +7,21 @@ resolve_theme_settings: Picks the best available data and returns V3.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from src.core.entities.theme_settings_v3 import (
-    BlockInstance,
     ExternalThemeMetadata,
     PageTemplate,
     SectionGroup,
     SectionInstance,
     ThemeSettingsV3,
 )
+
+
+def _default_theme_id() -> str:
+    """Read the default theme id from env, falling back to "modern"."""
+    return os.getenv("NUMU_DEFAULT_THEME_ID", "modern")
 
 
 def map_v3_to_legacy_store_settings(v3: ThemeSettingsV3) -> dict[str, Any]:
@@ -83,9 +88,8 @@ def normalize_legacy_to_v3(
     Called by the Next.js storefront SDK when a store hasn't been
     touched by the V3 customizer yet.
     """
-    schema_ver = legacy.get("schema_version", 1)
     theme_block = legacy.get("theme", {})
-    theme_id = theme_block.get("base_theme", "modern")
+    theme_id = theme_block.get("base_theme") or _default_theme_id()
 
     # Build global settings from theme block + identity
     global_settings: dict[str, Any] = {}
@@ -196,7 +200,7 @@ def resolve_theme_settings(
 
     # 3. Empty default
     return ThemeSettingsV3(
-        theme_id="modern",
+        theme_id=_default_theme_id(),
         global_settings={},
         templates={},
         section_groups={

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID as PyUUID
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, text
@@ -30,13 +31,19 @@ class ThemeCustomizationVersionModel(Base, UUIDMixin):
     theme_id: Mapped[str] = mapped_column(String(255), nullable=False)
     settings_blob: Mapped[dict] = mapped_column(JSONB, nullable=False)
     change_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[str] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()"), nullable=False
     )
     created_by: Mapped[PyUUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    is_autosave: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    is_published: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    is_autosave: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
     version_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     def __repr__(self) -> str:
-        return f"<ThemeCustomizationVersionModel(id={self.id}, store_id={self.store_id})>"
+        return (
+            f"<ThemeCustomizationVersionModel(id={self.id}, store_id={self.store_id})>"
+        )
