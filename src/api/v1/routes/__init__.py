@@ -139,6 +139,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
 )
+from src.api.v1.routes.storefront.cart_sdk_aliases import (
+    router as storefront_cart_sdk_router,
+)
 
 # Store management routes (for store owners)
 from src.api.v1.routes.stores import router as stores_router
@@ -252,6 +255,16 @@ api_router.include_router(
     storefront_cart_router,
     prefix="/storefront/me",
     tags=["Storefront - Cart"],
+)
+
+# Storefront - cart SDK aliases (consumed by @numu/theme-sdk's NuMuProvider).
+# Same auth + Redis backend as /storefront/me/cart, just at the URL layout
+# the SDK posts to. Kept as a separate include so the legacy paths stay
+# unchanged for older themes during the migration period.
+api_router.include_router(
+    storefront_cart_sdk_router,
+    prefix="/storefront",
+    tags=["Storefront - Cart (SDK aliases)"],
 )
 
 # Storefront - checkout (authenticated customer, scoped to store)

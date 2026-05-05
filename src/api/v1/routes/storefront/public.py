@@ -393,8 +393,38 @@ async def get_theme_schemas(
 
 
 # ============================================================================
-# Store Lookup by Subdomain
+# Store Lookup (subdomain + custom domain)
 # ============================================================================
+
+
+def _serialize_public_store(store) -> dict:
+    """Common payload returned by `/store-by-subdomain` and `/store-by-domain`.
+
+    The Next.js storefront and the @numu/theme-sdk both consume this shape;
+    keep new fields here additive so older client builds keep working.
+    """
+    return {
+        "id": str(store.id),
+        "name": store.name,
+        "slug": store.slug,
+        "subdomain": store.subdomain,
+        "custom_domain": store.custom_domain,
+        "description": store.description,
+        "logo_url": store.logo_url,
+        "banner_url": store.banner_url,
+        "status": store.status.value
+        if hasattr(store.status, "value")
+        else str(store.status),
+        "settings": store.settings or {},
+        "theme_settings": store.theme_settings,
+        "business_hours": store.business_hours or {},
+        "default_currency": store.default_currency.value
+        if hasattr(store.default_currency, "value")
+        else str(store.default_currency),
+        "default_language": store.default_language,
+        "social_links": store.social_links,
+        "use_nextjs_storefront": getattr(store, "use_nextjs_storefront", False),
+    }
 
 
 @lookup_router.get(
@@ -407,36 +437,49 @@ async def get_store_by_subdomain(
     subdomain: Annotated[str, Path(description="Store subdomain")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Look up a store by its subdomain (public). Used by the storefront frontend."""
+    """Look up a store by its subdomain (public). Used by the Next.js
+    storefront when the inbound hostname is `*.numueg.app`."""
     store = await store_repo.get_by_subdomain(subdomain.lower())
     if not store:
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
-    # Pending stores are not public yet
     if store.status == StoreStatus.PENDING_APPROVAL:
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
     return SuccessResponse(
-        data={
-            "id": str(store.id),
-            "name": store.name,
-            "slug": store.slug,
-            "subdomain": store.subdomain,
-            "description": store.description,
-            "logo_url": store.logo_url,
-            "banner_url": store.banner_url,
-            "status": store.status.value
-            if hasattr(store.status, "value")
-            else str(store.status),
-            "settings": store.settings or {},
-            "theme_settings": store.theme_settings,
-            "business_hours": store.business_hours or {},
-            "default_currency": store.default_currency.value
-            if hasattr(store.default_currency, "value")
-            else str(store.default_currency),
-            "default_language": store.default_language,
-            "social_links": store.social_links,
-        },
+        data=_serialize_public_store(store),
+        message="Store retrieved successfully",
+    )
+
+
+@lookup_router.get(
+    "/store-by-domain/{domain}",
+    response_model=SuccessResponse,
+    summary="Get store info by custom domain",
+    operation_id="get_store_by_domain",
+)
+async def get_store_by_domain(
+    domain: Annotated[str, Path(description="Custom hostname, e.g. shop.brand.com")],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Look up a store by its custom domain (public).
+
+    The Next.js middleware passes the full inbound hostname when it does
+    not end in the platform domain. Match is case-insensitive.
+    """
+    normalized = domain.lower().strip()
+    if not normalized or "." not in normalized:
+        raise EntityNotFoundError("Store", domain, identifier_name="domain")
+
+    store = await store_repo.get_by_custom_domain(normalized)
+    if not store:
+        raise EntityNotFoundError("Store", domain, identifier_name="domain")
+
+    if store.status == StoreStatus.PENDING_APPROVAL:
+        raise EntityNotFoundError("Store", domain, identifier_name="domain")
+
+    return SuccessResponse(
+        data=_serialize_public_store(store),
         message="Store retrieved successfully",
     )
 

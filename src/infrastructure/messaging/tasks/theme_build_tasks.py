@@ -117,7 +117,8 @@ def build_external_theme(
     1. Shallow clone the repo
     2. Validate theme contract (theme.json, settings_schema.json, etc.)
     3. npm install (with --ignore-scripts for security)
-    4. npm run build (expects numu-theme-plugin in vite.config)
+    4. npm run build (expects @numu/theme-plugin in vite.config — validates
+       the contract, externalizes the SDK, emits dist/manifest.json)
     5. Security-scan the output bundle
     6. Upload to R2/S3
     7. Update store's theme_settings

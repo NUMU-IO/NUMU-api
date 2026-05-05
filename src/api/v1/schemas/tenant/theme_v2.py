@@ -198,9 +198,21 @@ class StoreInstalledThemesResponse(BaseModel):
 
 
 class StorefrontThemeResponse(BaseModel):
-    """Theme data returned to the Next.js storefront for SSR.
+    """Theme data returned to the storefront for SSR.
 
-    This is the internal contract between the Next.js server and FastAPI.
+    Internal contract between the storefront(s) and FastAPI. Two shapes
+    coexist on the same response so we don't break the older Vite SPA
+    storefront mid-rollout:
+
+    - `customization` (V1/V2 legacy flat) — what the existing Vite
+      storefront reads. Preserved unchanged.
+    - `customization_v3` (V3 sections/blocks) — what the Next.js
+      storefront and the @numu/theme-sdk normalize against. Resolved via
+      `resolve_theme_settings()` so even stores that have never been
+      touched by the V3 customizer get a normalized V3 view.
+
+    Clients should consume whichever shape matches their renderer; both
+    are guaranteed to describe the same published state.
     """
 
     theme_id: str
@@ -209,10 +221,18 @@ class StorefrontThemeResponse(BaseModel):
     version: str | None = None
     bundle_url: str | None = None
     css_url: str | None = None
+    # Legacy flat customization (kept for the Vite SPA storefront).
     customization: dict[str, Any]
+    # V3-shaped customization. Always populated — when no V3 row exists,
+    # it's the normalized in-memory view of the legacy data.
+    customization_v3: dict[str, Any]
     settings_schema: dict[str, Any]
     section_schemas: dict[str, Any] | None = None
     installation_id: str
+    # Optional integrity hint for the Next.js BYOT loader's SRI check.
+    # Populated when the active version is a marketplace version that has
+    # a recorded SHA-256.
+    bundle_checksum: str | None = None
 
 
 # ── Activation response ────────────────────────────────────────────────────────

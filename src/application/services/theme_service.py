@@ -305,17 +305,24 @@ class ThemeService:
         store_id: UUID,
         draft_installation_id: UUID | None = None,
     ) -> dict[str, Any]:
-        """Resolve the active theme for a store (called by Next.js SSR).
+        """Resolve the active theme for a store (called by storefront SSR).
 
         Returns a dict with all theme data needed for server-side rendering.
+        Always populates BOTH the legacy `customization` flat shape (for
+        the older Vite SPA storefront) and a `customization_v3` shape (for
+        the Next.js storefront / @numu/theme-sdk). The two shapes describe
+        the same published state — `customization_v3` is just the V3-
+        normalized view of `customization` when no V3 data exists yet.
 
         - Normal mode: returns the LIVE active installation + customization.
-        - Draft mode (`draft_installation_id` set): looks up that specific
-          installation and returns its draft_customization in place of the
-          live customization. Used by Next.js Draft Mode for theme preview.
+        - Draft mode (`draft_installation_id` set): returns the same
+          installation but with draft data in place of live (preview mode).
         """
+        from src.application.services.theme_v3_mappers import (
+            resolve_theme_settings,
+        )
+
         if draft_installation_id is not None:
-            # Preview mode — fetch the specific installation by id
             inst = await self.store_theme_repo.get_installation(
                 store_id, draft_installation_id
             )
@@ -324,13 +331,19 @@ class ThemeService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Installation {draft_installation_id} not found",
                 )
-            # Use draft_customization, falling back to live customization
-            # if there are no draft changes
-            customization = (
-                inst.draft_customization
-                if inst.has_draft_changes
-                else inst.customization
+            # Pick draft if the installation has unsaved changes; otherwise
+            # the live customization. Same rule for both shapes.
+            use_draft = inst.has_draft_changes
+            legacy_customization = (
+                inst.draft_customization if use_draft else inst.customization
             )
+            v3_customization = (
+                inst.draft_customization_v3 if use_draft else inst.customization_v3
+            ) or {}
+            v3_resolved = resolve_theme_settings(
+                customization_v3=v3_customization,
+                legacy_settings=legacy_customization,
+            ).model_dump()
             return {
                 "theme_id": str(inst.theme_id),
                 "theme_slug": inst.theme_slug,
@@ -338,10 +351,12 @@ class ThemeService:
                 "version": inst.theme_version,
                 "bundle_url": inst.bundle_url,
                 "css_url": inst.css_url,
-                "customization": customization,
+                "customization": legacy_customization,
+                "customization_v3": v3_resolved,
                 "settings_schema": inst.settings_schema or {},
                 "section_schemas": inst.section_schemas,
                 "installation_id": str(inst.id),
+                "bundle_checksum": getattr(inst, "bundle_checksum", None),
             }
 
         active = await self.store_theme_repo.get_active_for_store(store_id)
@@ -350,6 +365,10 @@ class ThemeService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No active theme found for store {store_id}",
             )
+        v3_resolved = resolve_theme_settings(
+            customization_v3=active.customization_v3 or {},
+            legacy_settings=active.customization,
+        ).model_dump()
         return {
             "theme_id": str(active.theme_id),
             "theme_slug": active.theme_slug,
@@ -358,9 +377,11 @@ class ThemeService:
             "bundle_url": active.bundle_url,
             "css_url": active.css_url,
             "customization": active.customization,
+            "customization_v3": v3_resolved,
             "settings_schema": active.settings_schema or {},
             "section_schemas": active.section_schemas,
             "installation_id": str(active.id),
+            "bundle_checksum": getattr(active, "bundle_checksum", None),
         }
 
     # ── Internal helpers ───────────────────────────────────────────────────────
