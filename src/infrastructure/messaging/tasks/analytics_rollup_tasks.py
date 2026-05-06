@@ -65,6 +65,73 @@ def calculate_analytics_rollups_task(self, backfill_days: int = DEFAULT_BACKFILL
         raise self.retry(exc=exc)
 
 
+@celery_app.task(
+    name="tasks.backfill_analytics_rollups",
+    bind=True,
+    max_retries=1,
+)
+def backfill_analytics_rollups_task(
+    self,
+    store_id: str | None = None,
+    days: int = 90,
+):
+    """Re-aggregate the last ``days`` days of rollups.
+
+    Idempotent entry point for ad-hoc backfills (e.g. after a deploy that
+    changes rollup aggregation logic). Delegates to the same path as the
+    nightly task so corrected metrics show up without waiting for the
+    incremental window to catch up.
+
+    Args:
+        store_id: UUID string. When None, backfills all active stores.
+        days: How far back to recompute (default 90).
+    """
+    try:
+        if store_id:
+            from uuid import UUID
+
+            result = run_async(_backfill_single_store(UUID(store_id), days))
+        else:
+            result = run_async(_calculate_all_rollups(days))
+        logger.info(
+            f"Analytics rollup backfill complete: {result} "
+            f"(store_id={store_id}, days={days})"
+        )
+        return result
+    except Exception as exc:
+        logger.exception("Analytics rollup backfill failed")
+        raise self.retry(exc=exc)
+
+
+async def _backfill_single_store(store_id, days: int) -> dict:
+    """Run the standard backfill path for one store across ``days`` days."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.store import StoreModel
+
+    today = date.today()
+    dates_to_process = [today - timedelta(days=i) for i in range(0, days + 1)]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(StoreModel.id, StoreModel.tenant_id).where(
+                StoreModel.id == store_id, StoreModel.status == "ACTIVE"
+            )
+        )
+        row = result.first()
+
+    if row is None:
+        return {"processed": 0, "days_written": 0, "errors": 0}
+
+    out = await _backfill_store(row.tenant_id, row.id, dates_to_process)
+    return {
+        "processed": 1,
+        "days_written": out["days_written"],
+        "errors": out["errors"],
+    }
+
+
 async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> dict:
     """Calculate and persist daily rollups for all active stores."""
     from sqlalchemy import select
@@ -236,6 +303,13 @@ async def _aggregate_day(
     avg_order_value = total_revenue // total_orders if total_orders > 0 else 0
 
     # ── Top products + location + UTM (from individual orders) ──
+    # WHERE excludes the three statuses that never represent realized demand:
+    # cancelled (merchant or customer killed it), refunded (returned), and
+    # payment_failed (customer never completed payment). Anything else —
+    # including pending COD that hasn't been delivered yet — counts toward
+    # "what's selling". COD is the dominant payment method in Egypt and
+    # often sits in pending for days; gating Top Products on payment_status
+    # made the widget empty for COD-heavy stores even when orders existed.
     orders_query = select(
         OrderModel.line_items,
         OrderModel.shipping_address,
@@ -248,12 +322,16 @@ async def _aggregate_day(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            # The orderstatus enum has the lowercase value `payment_failed`
-            # from an early migration. SQLAlchemy's default enum binding
-            # would send the uppercase member name `PAYMENT_FAILED`, which
-            # PG rejects with `invalid input value for enum`. Cast to text
+            # The orderstatus enum has lowercase values from an early
+            # migration. SQLAlchemy's default enum binding would send the
+            # uppercase member name (e.g. `PAYMENT_FAILED`), which PG
+            # rejects with `invalid input value for enum`. Cast to text
             # so the comparison runs against the actual enum value.
-            cast(OrderModel.status, String) != "payment_failed",
+            cast(OrderModel.status, String).notin_((
+                "cancelled",
+                "refunded",
+                "payment_failed",
+            )),
         )
     )
     orders_result = await session.execute(orders_query)
@@ -270,8 +348,11 @@ async def _aggregate_day(
     for row in orders_rows:
         is_paid = row.payment_status in ("paid", "partially_refunded")
 
-        # Products
-        if is_paid and row.line_items:
+        # Products — count any non-cancelled / non-refunded / non-failed
+        # order regardless of payment_status. ``revenue_paid`` is split out
+        # so a future "paid revenue only" view can read either total without
+        # re-aggregating.
+        if row.line_items:
             for item in row.line_items:
                 pid = str(item.get("product_id", ""))
                 if not pid:
@@ -283,9 +364,21 @@ async def _aggregate_day(
                         "sku": item.get("sku"),
                         "quantity": 0,
                         "revenue": 0,
+                        "revenue_paid": 0,
                     }
-                product_agg[pid]["quantity"] += item.get("quantity", 0)
-                product_agg[pid]["revenue"] += item.get("total_price", 0)
+                qty = item.get("quantity", 0)
+                # Older line items only carried unit_price + quantity; new
+                # ones include total_price. Fall through gracefully so the
+                # backfill of historical data doesn't show 0 revenue for
+                # legacy orders.
+                line_revenue = item.get(
+                    "total_price",
+                    item.get("unit_price", 0) * qty,
+                )
+                product_agg[pid]["quantity"] += qty
+                product_agg[pid]["revenue"] += line_revenue
+                if is_paid:
+                    product_agg[pid]["revenue_paid"] += line_revenue
 
         # Location
         addr = row.shipping_address or {}
