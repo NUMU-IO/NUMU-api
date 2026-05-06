@@ -66,6 +66,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
+        # Meta Conversions — per-event fan-out + orphan-purchase sweep
+        "src.infrastructure.messaging.tasks.meta_capi",
     ],
     # Queue definitions
     task_queues=(
@@ -224,6 +226,14 @@ celery_app.conf.beat_schedule = {
     "purge-analytics-events": {
         "task": "tasks.purge_analytics_events",
         "schedule": crontab(hour=2, minute=30),
+    },
+    # ─── Meta Conversions: catch orphaned Purchase events ─────────────
+    # Hourly sweep finds paid orders without a Purchase row in the
+    # event log and re-enqueues them. Recovers from webhook failures
+    # (Paymob/Fawry blip, worker crash mid-fanout, Meta down).
+    "meta-capi-sweep-orphaned-purchases": {
+        "task": "tasks.meta_capi_sweep_orphaned_purchases",
+        "schedule": crontab(minute=10),  # hourly at :10
     },
 }
 
