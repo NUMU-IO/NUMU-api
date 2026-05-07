@@ -29,6 +29,7 @@ from src.api.v1.routes.storefront.otp import router as otp_router
 from src.api.v1.routes.storefront.payment_proofs import (
     router as payment_proofs_router,
 )
+from src.api.v1.routes.storefront.promotions import router as promotions_router
 from src.api.v1.routes.storefront.public import (
     lookup_router as storefront_lookup_router,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "upsell_router",
     "otp_router",
     "payment_proofs_router",
+    "promotions_router",
     "tracking_router",
     "order_tracking_router",
     "theme_resolution_router",
