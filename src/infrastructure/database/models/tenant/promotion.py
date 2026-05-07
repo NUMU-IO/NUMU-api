@@ -312,6 +312,66 @@ class PromotionEventModel(Base, UUIDMixin, TenantMixin):
     )
 
 
+class PromotionEventDailyModel(Base, TenantMixin):
+    """Daily-grain rollup of promotion events.
+
+    Populated nightly by `tasks.rollup_promotion_events_daily`. Read by
+    the merchant analytics endpoint in O(days) instead of scanning the
+    append-only `promotion_events` table for every request. For "today"
+    data the endpoint merges this rollup with a live aggregation over
+    `promotion_events` so the merchant doesn't have to wait until the
+    next rollup window to see the impact of a promotion that just went
+    live.
+
+    Composite primary key (`promotion_id`, `day`, `event_type`) makes
+    the rollup task's `INSERT ... ON CONFLICT DO UPDATE` idempotent —
+    re-running for the same day collapses cleanly.
+    """
+
+    __tablename__ = "promotion_event_daily"
+    __table_args__ = (
+        Index("ix_promo_daily_store_day", "store_id", "day"),
+        {"schema": "public"},
+    )
+
+    store_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    promotion_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.promotions.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    day: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),  # DATE in the migration
+        primary_key=True,
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(
+        _event_type_enum,
+        primary_key=True,
+        nullable=False,
+    )
+    count: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    unique_visitors: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    discount_total_cents: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    revenue_cents: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    rolled_up_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
 class PromotionDismissalModel(Base, UUIDMixin, TenantMixin):
     """Suppression record so a shopper isn't shown the same promo twice.
 
