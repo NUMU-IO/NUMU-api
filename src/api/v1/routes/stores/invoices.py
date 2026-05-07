@@ -19,7 +19,10 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import Response
 
 from src.api.dependencies import verify_store_ownership
-from src.api.dependencies.repositories import get_invoice_repository
+from src.api.dependencies.repositories import (
+    get_invoice_repository,
+    get_order_repository,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.api.v1.schemas.tenant.invoice import (
@@ -39,6 +42,7 @@ from src.core.entities.invoice import (
 from src.core.entities.store import Store
 from src.infrastructure.external_services.eta import ETAInvoiceService
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
+from src.infrastructure.repositories.order_repository import OrderRepository
 
 router = APIRouter(prefix="/{store_id}/invoices")
 logger = logging.getLogger(__name__)
@@ -47,6 +51,69 @@ logger = logging.getLogger(__name__)
 def _format_currency(cents: int, currency: str = "EGP") -> str:
     """Format cents to currency string."""
     return f"{currency} {cents / 100:,.2f}"
+
+
+# Map raw order.payment_method strings to display labels for the invoice
+# stamp. Falls through to a Title Case form of the raw string when not
+# listed.
+_PAYMENT_METHOD_LABELS = {
+    "cod": "Cash on Delivery",
+    "cash_on_delivery": "Cash on Delivery",
+    "paymob": "Paymob",
+    "paymob_card": "Paymob (Card)",
+    "paymob_wallet": "Paymob (Wallet)",
+    "fawry": "Fawry",
+    "stripe": "Stripe",
+    "tap": "Tap",
+    "instapay": "InstaPay",
+    "bank_transfer": "Bank Transfer",
+}
+
+
+async def _resolve_payment_context(
+    invoice: Invoice,
+    order_repo: OrderRepository,
+) -> dict | None:
+    """Build payment context dict for the PDF generator.
+
+    Returns ``None`` when the invoice isn't tied to an order (manual invoices)
+    so the template skips the stamp entirely.
+    """
+    if not invoice.order_id:
+        return None
+
+    try:
+        order = await order_repo.get_by_id(invoice.order_id)
+    except Exception:
+        logger.debug(
+            "payment_context_lookup_failed",
+            extra={"invoice_id": str(invoice.id), "order_id": str(invoice.order_id)},
+        )
+        return None
+
+    if not order:
+        return None
+
+    raw_status = getattr(order, "payment_status", None)
+    if raw_status is None:
+        return None
+
+    paid_at = getattr(order, "paid_at", None)
+    paid_at_str = paid_at.strftime("%Y-%m-%d %H:%M") if paid_at else None
+
+    raw_method = getattr(order, "payment_method", None) or getattr(
+        order, "deposit_gateway", None
+    )
+    method_label = None
+    if raw_method:
+        key = str(raw_method).lower().strip()
+        method_label = _PAYMENT_METHOD_LABELS.get(key, key.replace("_", " ").title())
+
+    return {
+        "status": raw_status,  # generator normalizes to a CSS-class key
+        "method": method_label,
+        "paid_at": paid_at_str,
+    }
 
 
 @router.post(
@@ -423,6 +490,7 @@ async def delete_invoice(
 async def download_invoice_pdf(
     store: Annotated[Store, Depends(verify_store_ownership)],
     invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     invoice_id: Annotated[UUID, Path(description="Invoice ID")],
     regenerate: bool = Query(False, description="Force PDF regeneration"),
 ):
@@ -430,7 +498,8 @@ async def download_invoice_pdf(
 
     Generates a bilingual Arabic/English PDF using the invoice_ar template.
     The PDF is cached in Cloudflare R2 for subsequent downloads.
-    Pass ?regenerate=true to force re-generation after invoice updates.
+    Pass ``?regenerate=true`` to force re-generation after the invoice or
+    its underlying order's payment_status changes.
     """
     invoice = await invoice_repo.get_by_id(invoice_id)
 
@@ -457,6 +526,10 @@ async def download_invoice_pdf(
         except Exception:
             logger.debug("r2_cache_miss", extra={"invoice_id": str(invoice_id)})
 
+    # Best-effort payment context from the linked order. None when the
+    # invoice was created without an order_id (manual invoices).
+    payment_ctx = await _resolve_payment_context(invoice, order_repo)
+
     # Generate PDF
     from src.infrastructure.external_services.invoice import InvoicePDFGenerator
 
@@ -464,7 +537,7 @@ async def download_invoice_pdf(
         template_name="invoice_ar.html",
         language="ar_en",
     )
-    pdf_bytes = await asyncio.to_thread(generator.generate, invoice)
+    pdf_bytes = await asyncio.to_thread(generator.generate, invoice, payment_ctx)
 
     # Upload to R2 (non-blocking best-effort)
     try:

@@ -232,8 +232,9 @@ async def list_products(
             price_max=price_max,
         )
 
-        from src.application.dto.product import ProductDTO
         from dataclasses import dataclass
+
+        from src.application.dto.product import ProductDTO
 
         @dataclass
         class _Result:

@@ -39,7 +39,11 @@ def generate_initial_v3_customization(
         # Extract global settings defaults from settings_schema
         if settings_schema and isinstance(settings_schema, list):
             for setting in settings_schema:
-                if isinstance(setting, dict) and "id" in setting and "default" in setting:
+                if (
+                    isinstance(setting, dict)
+                    and "id" in setting
+                    and "default" in setting
+                ):
                     global_settings[setting["id"]] = setting["default"]
 
         # Build templates from presets

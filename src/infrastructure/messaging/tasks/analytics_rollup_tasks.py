@@ -236,6 +236,13 @@ async def _aggregate_day(
     avg_order_value = total_revenue // total_orders if total_orders > 0 else 0
 
     # ── Top products + location + UTM (from individual orders) ──
+    # WHERE excludes the three statuses that never represent realized demand:
+    # cancelled (merchant or customer killed it), refunded (returned), and
+    # payment_failed (customer never completed payment). Anything else —
+    # including pending COD that hasn't been delivered yet — counts toward
+    # "what's selling". COD is the dominant payment method in Egypt and
+    # often sits in pending for days; gating Top Products on payment_status
+    # made the widget empty for COD-heavy stores even when orders existed.
     orders_query = select(
         OrderModel.line_items,
         OrderModel.shipping_address,
@@ -248,12 +255,18 @@ async def _aggregate_day(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            # The orderstatus enum has the lowercase value `payment_failed`
-            # from an early migration. SQLAlchemy's default enum binding
-            # would send the uppercase member name `PAYMENT_FAILED`, which
-            # PG rejects with `invalid input value for enum`. Cast to text
-            # so the comparison runs against the actual enum value.
-            cast(OrderModel.status, String) != "payment_failed",
+            # Exclude statuses that don't represent realized demand:
+            # cancelled (killed), refunded (returned), payment_failed
+            # (customer never completed payment). Cast to text because
+            # the orderstatus enum has lowercase storage values from an
+            # early migration; SQLAlchemy's default binding would send
+            # the uppercase Python member names, which PG rejects with
+            # `invalid input value for enum`.
+            cast(OrderModel.status, String).notin_((
+                "cancelled",
+                "refunded",
+                "payment_failed",
+            )),
         )
     )
     orders_result = await session.execute(orders_query)
@@ -270,8 +283,11 @@ async def _aggregate_day(
     for row in orders_rows:
         is_paid = row.payment_status in ("paid", "partially_refunded")
 
-        # Products
-        if is_paid and row.line_items:
+        # Products — count any non-cancelled / non-refunded / non-failed
+        # order regardless of payment_status. ``revenue_paid`` is split out
+        # so a future "paid revenue only" view can read either total without
+        # re-aggregating.
+        if row.line_items:
             for item in row.line_items:
                 pid = str(item.get("product_id", ""))
                 if not pid:
@@ -283,9 +299,21 @@ async def _aggregate_day(
                         "sku": item.get("sku"),
                         "quantity": 0,
                         "revenue": 0,
+                        "revenue_paid": 0,
                     }
-                product_agg[pid]["quantity"] += item.get("quantity", 0)
-                product_agg[pid]["revenue"] += item.get("total_price", 0)
+                qty = item.get("quantity", 0)
+                # Older line items only carried unit_price + quantity; new
+                # ones include total_price. Fall through gracefully so the
+                # backfill of historical data doesn't show 0 revenue for
+                # legacy orders.
+                line_revenue = item.get(
+                    "total_price",
+                    item.get("unit_price", 0) * qty,
+                )
+                product_agg[pid]["quantity"] += qty
+                product_agg[pid]["revenue"] += line_revenue
+                if is_paid:
+                    product_agg[pid]["revenue_paid"] += line_revenue
 
         # Location
         addr = row.shipping_address or {}
