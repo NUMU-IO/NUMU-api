@@ -50,6 +50,14 @@ from src.infrastructure.database.models.tenant.payment_transaction import (
 )
 from src.infrastructure.database.models.tenant.product import ProductModel
 from src.infrastructure.database.models.tenant.product_review import ProductReviewModel
+from src.infrastructure.database.models.tenant.promotion import (
+    PromotionDismissalModel,
+    PromotionDisplayModel,
+    PromotionEventModel,
+    PromotionModel,
+    PromotionTargetModel,
+    PromotionTranslationModel,
+)
 from src.infrastructure.database.models.tenant.refund import RefundModel
 from src.infrastructure.database.models.tenant.risk_assessment import (
     RiskAssessmentModel,
@@ -128,6 +136,12 @@ __all__ = [
     "AuditAction",
     "ProductModel",
     "ProductReviewModel",
+    "PromotionModel",
+    "PromotionDismissalModel",
+    "PromotionDisplayModel",
+    "PromotionEventModel",
+    "PromotionTargetModel",
+    "PromotionTranslationModel",
     "RefundModel",
     "UpsellRuleModel",
     "ShipmentModel",
