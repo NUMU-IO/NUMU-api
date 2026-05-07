@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Path, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.dependencies.auth import get_optional_customer
+from src.api.dependencies.feature_flags import require_feature_flag
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_promotion_dismissal_repository,
@@ -65,7 +66,13 @@ from src.infrastructure.repositories.promotion_repository import (
     PromotionTargetRepository,
 )
 
-router = APIRouter()
+router = APIRouter(
+    # Per the offers-v2 rollout plan (step 14 §2): the storefront's
+    # `/promotions/*` endpoints 404 until the tenant has
+    # `ff_storefront_promo_render` enabled. Returning 404 (not 403)
+    # avoids signalling the feature exists during phased rollout.
+    dependencies=[Depends(require_feature_flag("ff_storefront_promo_render"))],
+)
 
 _VISITOR_COOKIE = "numu_visitor"
 

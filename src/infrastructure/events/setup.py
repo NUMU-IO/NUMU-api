@@ -53,6 +53,9 @@ from src.infrastructure.events.handlers.invoice_on_paid_handler import (
 from src.infrastructure.events.handlers.promotion_cache_invalidator import (
     PromotionCacheInvalidator,
 )
+from src.infrastructure.events.handlers.promotion_convert_handler import (
+    handle_promotion_convert_on_order_paid,
+)
 from src.infrastructure.events.handlers.shipment_handler import (
     handle_order_status_for_shipment,
 )
@@ -106,6 +109,10 @@ def create_event_bus() -> EventBus:
     # Order lifecycle webhooks
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
+    # offers-v2: emit `convert` PromotionEvent for every promotion
+    # attributable to a paid order so merchant analytics show real
+    # conversion totals (not just redemptions).
+    bus.subscribe(OrderPaidEvent, handle_promotion_convert_on_order_paid)
     # Issue the ETA invoice + email PDF when the merchant marks a COD
     # order paid (or a future payment-gateway webhook fires OrderPaidEvent).
     bus.subscribe(OrderPaidEvent, handle_invoice_on_order_paid)
