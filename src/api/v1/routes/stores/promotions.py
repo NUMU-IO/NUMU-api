@@ -11,7 +11,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.feature_flags import require_feature_flag
@@ -83,6 +83,75 @@ router = APIRouter(
     # while it's being rolled out in waves.
     dependencies=[Depends(require_feature_flag("ff_promotions_v2"))],
 )
+
+
+# --------------------------------------------------------------------------- #
+# Bulk reorder                                                                #
+# --------------------------------------------------------------------------- #
+
+
+class ReorderPromotionRow(BaseModel):
+    """Single (id, priority) pair for the bulk-reorder endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    promotion_id: UUID
+    priority: int = Field(ge=0, le=10000)
+
+
+class ReorderPromotionsRequest(BaseModel):
+    """Body of `PATCH /stores/{id}/promotions/reorder`.
+
+    Caller sends the full set of (promotion_id, priority) pairs the
+    drag UI just produced. The endpoint sets each row's priority in a
+    single transaction and bumps `version` on every touched row, so
+    concurrent edits from another tab still produce a deterministic
+    final order rather than silently losing one side's changes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ReorderPromotionRow] = Field(min_length=1, max_length=200)
+
+
+@router.patch(
+    "/reorder",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Bulk-update promotion priorities (drag-to-reorder)",
+    operation_id="reorder_promotions",
+)
+async def reorder_promotions(
+    body: ReorderPromotionsRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    promo_repo: Annotated[PromotionRepository, Depends(get_promotion_repository)],
+) -> None:
+    """Apply new priority values for a batch of promotions in one go.
+
+    The drag-to-reorder UI sends the full reordered list each time the
+    user drops a row; the server doesn't try to compute deltas, just
+    overwrites the priority on every id provided. Promotions belonging
+    to a different store are silently skipped — defensive against a
+    forged payload from a malicious tab.
+    """
+    # Validate each row's `promotion_id` belongs to `store.id` before
+    # we mutate. Cheaper than per-row checks inside the repo because
+    # we'd otherwise need a SELECT-then-UPDATE for each row.
+    ids = [row.promotion_id for row in body.items]
+    existing, _ = await promo_repo.list_for_store(
+        store.id, limit=len(ids) + 1, offset=0
+    )
+    existing_ids = {p.id for p in existing}
+    valid_pairs = [
+        (row.promotion_id, row.priority)
+        for row in body.items
+        if row.promotion_id in existing_ids
+    ]
+    if not valid_pairs:
+        return
+
+    # Defer the multi-row UPDATE to the repo so the SQL stays in one
+    # place and we get the version bump for free.
+    await promo_repo.bulk_set_priority(store.id, valid_pairs)
 
 
 # --------------------------------------------------------------------------- #

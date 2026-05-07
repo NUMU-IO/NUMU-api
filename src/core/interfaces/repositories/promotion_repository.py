@@ -60,6 +60,18 @@ class IPromotionRepository(ABC):
         """Update with optimistic locking on `version`."""
 
     @abstractmethod
+    async def bulk_set_priority(
+        self, store_id: UUID, items: list[tuple[UUID, int]]
+    ) -> None:
+        """Bulk priority update for the merchant drag-to-reorder UI.
+
+        Skips rows belonging to a different store (defensive against
+        forged payloads). Bumps `version` on every touched row so a
+        concurrent single-row edit still rejects with the usual
+        optimistic-locking exception.
+        """
+
+    @abstractmethod
     async def delete(self, store_id: UUID, promotion_id: UUID) -> None: ...
 
 

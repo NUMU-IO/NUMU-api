@@ -86,6 +86,16 @@ class FakePromotionRepo:
         self.rows[promo.id] = promo
         return promo
 
+    async def bulk_set_priority(
+        self, store_id: UUID, items: list[tuple[UUID, int]]
+    ) -> None:
+        for promo_id, priority in items:
+            existing = self.rows.get(promo_id)
+            if existing is None or existing.store_id != store_id:
+                continue
+            existing.priority = priority
+            existing.version = (existing.version or 0) + 1
+
     async def delete(self, store_id: UUID, promotion_id: UUID) -> None:
         if promotion_id in self.rows and self.rows[promotion_id].store_id == store_id:
             del self.rows[promotion_id]

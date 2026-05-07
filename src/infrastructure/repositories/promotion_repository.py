@@ -225,6 +225,38 @@ class PromotionRepository(IPromotionRepository):
         ).scalar_one()
         return self.mapper.promotion_to_entity(refreshed)
 
+    async def bulk_set_priority(
+        self, store_id: UUID, items: list[tuple[UUID, int]]
+    ) -> None:
+        if not items:
+            return
+        # Single UPDATE … FROM (VALUES …) keeps the round-trip count to
+        # one and the version bump deterministic. Filtering by
+        # `store_id` inside the WHERE means a forged payload mixing
+        # foreign promotion ids has no effect — we just don't touch them.
+        from sqlalchemy import bindparam, update
+
+        # Parameterized UPDATE … WHERE id = … (single row) per item is
+        # fine here — `items` is bounded at ~200 by the route schema and
+        # asyncpg pipelines them on one connection. Avoiding a CTE keeps
+        # the SQL portable for tests that point at sqlite.
+        for promo_id, priority in items:
+            stmt = (
+                update(PromotionModel)
+                .where(
+                    PromotionModel.id == bindparam("pid"),
+                    PromotionModel.store_id == bindparam("sid"),
+                )
+                .values(
+                    priority=bindparam("prio"),
+                    version=PromotionModel.version + 1,
+                )
+            )
+            await self.session.execute(
+                stmt, {"pid": promo_id, "sid": store_id, "prio": priority}
+            )
+        await self.session.flush()
+
     async def delete(self, store_id: UUID, promotion_id: UUID) -> None:
         existing = await self.session.get(PromotionModel, promotion_id)
         if existing is None or existing.store_id != store_id:
