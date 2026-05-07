@@ -8,12 +8,12 @@ Three jobs:
   hourly cache TTL.
 
 * ``prune_promotion_events`` — daily, deletes raw rows older than 90
-  days. Aggregated rollups (step 13) preserve the historical numbers.
+  days. Aggregated rollups preserve the historical numbers.
 
-* ``rollup_promotion_events_daily`` — daily, fills tomorrow's
-  ``promotion_event_daily`` aggregate. The aggregate table itself ships
-  in step 13 — until then this task is a no-op stub so the registration
-  point exists for ops.
+* ``rollup_promotion_events_daily`` — daily, fills yesterday's row in
+  ``promotion_event_daily`` so the merchant analytics endpoint can read
+  in O(days) instead of scanning the append-only event log. Idempotent
+  via ``ON CONFLICT DO UPDATE`` so retries / backfills are safe.
 
 All three respect the existing default Celery queue.
 """
@@ -24,7 +24,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, update
+from sqlalchemy import delete, func, update
 
 from src.infrastructure.messaging.celery_app import celery_app
 
@@ -139,8 +139,99 @@ def prune_promotion_events(self, retention_days: int = 90) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Daily rollup — stub                                                         #
+# Daily rollup                                                                #
 # --------------------------------------------------------------------------- #
+
+
+async def _rollup_async(target_day: datetime) -> dict[str, int]:
+    """Aggregate `promotion_events` for `target_day` into the daily table.
+
+    Idempotent via `INSERT ... ON CONFLICT (promotion_id, day, event_type)
+    DO UPDATE`. Re-running for the same day collapses cleanly — useful
+    on retries and for backfilling historical days. Counters reflect the
+    full row set in `promotion_events` for the day, not deltas, so a
+    second run after late-arriving events still produces correct totals.
+    """
+    from sqlalchemy import select, text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.promotion import (
+        PromotionEventDailyModel,
+        PromotionEventModel,
+    )
+
+    # `target_day` is interpreted in UTC. Window is [start, start + 1 day).
+    start = target_day.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    day_only = start.date()
+
+    async with AsyncSessionLocal() as session:
+        # Bypass RLS — this task aggregates across every tenant.
+        await session.execute(text("SELECT set_config('app.rls_bypass','true',true)"))
+
+        # One row per (tenant, store, promotion, event_type) for the day.
+        agg_stmt = (
+            select(
+                PromotionEventModel.tenant_id,
+                PromotionEventModel.store_id,
+                PromotionEventModel.promotion_id,
+                PromotionEventModel.event_type,
+                func.count().label("count"),
+                func.count(func.distinct(PromotionEventModel.session_id)).label(
+                    "unique_visitors"
+                ),
+                func.coalesce(
+                    func.sum(PromotionEventModel.discount_amount_cents), 0
+                ).label("discount_total_cents"),
+            )
+            .where(
+                PromotionEventModel.occurred_at >= start,
+                PromotionEventModel.occurred_at < end,
+            )
+            .group_by(
+                PromotionEventModel.tenant_id,
+                PromotionEventModel.store_id,
+                PromotionEventModel.promotion_id,
+                PromotionEventModel.event_type,
+            )
+        )
+        rows = (await session.execute(agg_stmt)).all()
+        if not rows:
+            return {"rows_aggregated": 0, "rows_upserted": 0}
+
+        upsert_count = 0
+        for row in rows:
+            stmt = pg_insert(PromotionEventDailyModel).values(
+                tenant_id=row.tenant_id,
+                store_id=row.store_id,
+                promotion_id=row.promotion_id,
+                day=day_only,
+                event_type=row.event_type,
+                count=int(row.count or 0),
+                unique_visitors=int(row.unique_visitors or 0),
+                discount_total_cents=int(row.discount_total_cents or 0),
+                # `revenue_cents` is left at the default 0 for now — the
+                # order-side attribution rollup (spec §4) lands once the
+                # convert-event writer ties order_id → promotion(s).
+                revenue_cents=0,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["promotion_id", "day", "event_type"],
+                set_={
+                    "tenant_id": stmt.excluded.tenant_id,
+                    "store_id": stmt.excluded.store_id,
+                    "count": stmt.excluded.count,
+                    "unique_visitors": stmt.excluded.unique_visitors,
+                    "discount_total_cents": stmt.excluded.discount_total_cents,
+                    "revenue_cents": stmt.excluded.revenue_cents,
+                    "rolled_up_at": func.now(),
+                },
+            )
+            await session.execute(stmt)
+            upsert_count += 1
+        await session.commit()
+        return {"rows_aggregated": len(rows), "rows_upserted": upsert_count}
 
 
 @celery_app.task(
@@ -151,13 +242,31 @@ def prune_promotion_events(self, retention_days: int = 90) -> dict:
     acks_late=True,
 )
 def rollup_promotion_events_daily(self, day: str | None = None) -> dict:
-    """Daily aggregate into `promotion_event_daily`.
+    """Roll up `promotion_events` into the daily aggregate table.
 
-    The aggregate table lands in step 13 of the offers-v2 plan; this
-    function exists now so Beat can schedule it without churn later.
+    `day` argument: ISO date string `YYYY-MM-DD` (UTC). Defaults to
+    yesterday so the nightly Beat run picks the most recently complete
+    day. Pass an older value to backfill.
     """
-    logger.info(
-        "rollup_promotion_events_daily called (target_day=%s) — stub, no-op until step 13",
-        day,
-    )
-    return {"status": "skipped", "reason": "rollup table not yet created"}
+    if day is None:
+        target = (datetime.now(UTC) - timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+    else:
+        try:
+            target = datetime.fromisoformat(day).replace(tzinfo=UTC)
+        except ValueError as exc:
+            logger.warning("rollup_promotion_events_daily bad day=%r: %s", day, exc)
+            return {"status": "error", "reason": "invalid day"}
+
+    try:
+        result = asyncio.run(_rollup_async(target))
+        logger.info(
+            "rollup_promotion_events_daily target=%s result=%s",
+            target.date(),
+            result,
+        )
+        return {"status": "ok", "day": target.date().isoformat(), **result}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("rollup_promotion_events_daily failed for %s", target.date())
+        raise self.retry(exc=exc)
