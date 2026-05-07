@@ -66,6 +66,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
+        # offers-v2 — promotion lifecycle + analytics maintenance.
+        "src.infrastructure.messaging.tasks.promotion_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -224,6 +226,24 @@ celery_app.conf.beat_schedule = {
     "purge-analytics-events": {
         "task": "tasks.purge_analytics_events",
         "schedule": crontab(hour=2, minute=30),
+    },
+    # ─── offers-v2: promotion lifecycle ─────────────────────────────────
+    # Sweeping the promotion table every 5 min keeps the storefront and
+    # the merchant list in sync with `starts_at` / `ends_at` without
+    # waiting for the 60s cache TTL on every active surface.
+    "expire-promotions": {
+        "task": "tasks.expire_promotions",
+        "schedule": crontab(minute="*/5"),
+    },
+    # Daily prune of raw promotion_events past the 90-day retention.
+    "prune-promotion-events": {
+        "task": "tasks.prune_promotion_events",
+        "schedule": crontab(hour=2, minute=45),
+    },
+    # Daily rollup target — the aggregate table itself ships in step 13.
+    "rollup-promotion-events-daily": {
+        "task": "tasks.rollup_promotion_events_daily",
+        "schedule": crontab(hour=2, minute=15),
     },
 }
 

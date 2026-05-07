@@ -18,6 +18,11 @@ from src.core.events.product_events import (
     ProductDeletedEvent,
     ProductUpdatedEvent,
 )
+from src.core.events.promotion_events import (
+    PromotionCreatedEvent,
+    PromotionDeletedEvent,
+    PromotionUpdatedEvent,
+)
 from src.core.events.staff_events import (
     AccessRequestApprovedEvent,
     AccessRequestCreatedEvent,
@@ -44,6 +49,9 @@ from src.infrastructure.events.handlers.instapay_notification_handler import (
 )
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
+)
+from src.infrastructure.events.handlers.promotion_cache_invalidator import (
+    PromotionCacheInvalidator,
 )
 from src.infrastructure.events.handlers.shipment_handler import (
     handle_order_status_for_shipment,
@@ -116,6 +124,33 @@ def create_event_bus() -> EventBus:
     bus.subscribe(ProductCreatedEvent, handle_webhook_product_created)
     bus.subscribe(ProductUpdatedEvent, handle_webhook_product_updated)
     bus.subscribe(ProductDeletedEvent, handle_webhook_product_deleted)
+
+    # Promotions — cache invalidation. The Redis client is fetched lazily
+    # so import-time test environments without Redis don't crash.
+    try:
+        import redis.asyncio as _redis_async
+
+        from src.config import settings as _settings
+        from src.infrastructure.cache.promotion_cache import PromotionCache
+
+        _promo_cache = PromotionCache(
+            _redis_async.from_url(
+                _settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+        )
+        _promo_invalidator = PromotionCacheInvalidator(_promo_cache)
+        bus.subscribe(PromotionCreatedEvent, _promo_invalidator.on_created)
+        bus.subscribe(PromotionUpdatedEvent, _promo_invalidator.on_updated)
+        bus.subscribe(PromotionDeletedEvent, _promo_invalidator.on_deleted)
+    except Exception as exc:  # noqa: BLE001 — startup tolerates missing Redis
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(
+            "promotion_cache_invalidator_disabled error=%r — promo cache will only "
+            "self-expire on TTL",
+            exc,
+        )
 
     # Staff events - invalidate cache + activity log + notifications
     bus.subscribe(StaffInvitedEvent, handle_staff_invited)
