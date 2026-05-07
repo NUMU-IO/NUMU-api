@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.dependencies.auth import get_optional_customer
 from src.api.dependencies.feature_flags import require_feature_flag
+from src.api.dependencies.promotion_preview import maybe_preview_for_store
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_promotion_dismissal_repository,
@@ -109,6 +110,7 @@ async def get_active_promotions(
     ],
     coupon_repo: Annotated[Any, Depends(get_coupon_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    is_preview: Annotated[bool, Depends(maybe_preview_for_store)],
     customer: Annotated[Customer | None, Depends(get_optional_customer)] = None,
     page: Annotated[str, str] = "/",
     device: Annotated[Literal["desktop", "mobile", "tablet"], str] = "desktop",
@@ -138,7 +140,10 @@ async def get_active_promotions(
         resolver=resolver, coupon_repo=coupon_repo
     )
     out = await use_case.execute(
-        store_id=store_id, tenant_id=store.tenant_id, visitor=visitor
+        store_id=store_id,
+        tenant_id=store.tenant_id,
+        visitor=visitor,
+        preview=is_preview,
     )
     return SuccessResponse(data=out)
 

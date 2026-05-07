@@ -58,6 +58,7 @@ class ResolveActivePromotionsUseCase:
         store_id: UUID,
         tenant_id: UUID,
         visitor: VisitorContextInput,
+        preview: bool = False,
     ) -> ActivePromotionsOutput:
         ctx = EligibilityContext(
             customer_id=visitor.customer_id,
@@ -76,6 +77,7 @@ class ResolveActivePromotionsUseCase:
             store_id=store_id,
             context=ctx,
             page_path=visitor.page_path,
+            preview=preview,
         )
 
         async def _bucket(

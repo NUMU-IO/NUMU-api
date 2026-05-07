@@ -104,11 +104,31 @@ class PromotionRepository(IPromotionRepository):
         return items, int(total)
 
     async def list_active_for_storefront(
-        self, store_id: UUID, now: datetime
+        self,
+        store_id: UUID,
+        now: datetime,
+        *,
+        include_drafts: bool = False,
     ) -> list[Promotion]:
-        stmt = (
-            select(PromotionModel)
-            .where(
+        # `include_drafts` powers the merchant builder preview iframe — we
+        # surface DRAFT / SCHEDULED / PAUSED on top of ACTIVE so the
+        # merchant can rehearse copy + targeting without flipping a row
+        # live. Schedule windows are intentionally NOT enforced in
+        # preview mode either, so a "scheduled to start in 3 days" promo
+        # is still visible while editing.
+        if include_drafts:
+            allowed_statuses = (
+                PromotionStatus.ACTIVE.value,
+                PromotionStatus.DRAFT.value,
+                PromotionStatus.SCHEDULED.value,
+                PromotionStatus.PAUSED.value,
+            )
+            where_clauses = [
+                PromotionModel.store_id == store_id,
+                PromotionModel.status.in_(allowed_statuses),
+            ]
+        else:
+            where_clauses = [
                 PromotionModel.store_id == store_id,
                 PromotionModel.status == PromotionStatus.ACTIVE.value,
                 or_(
@@ -119,7 +139,10 @@ class PromotionRepository(IPromotionRepository):
                     PromotionModel.ends_at.is_(None),
                     PromotionModel.ends_at > now,
                 ),
-            )
+            ]
+        stmt = (
+            select(PromotionModel)
+            .where(*where_clauses)
             .order_by(
                 PromotionModel.priority.desc(),
                 PromotionModel.created_at.desc(),

@@ -60,12 +60,26 @@ class FakePromotionRepo:
         return items[offset : offset + limit], total
 
     async def list_active_for_storefront(
-        self, store_id: UUID, now: datetime
+        self,
+        store_id: UUID,
+        now: datetime,
+        *,
+        include_drafts: bool = False,
     ) -> list[Promotion]:
+        previewable = {
+            PromotionStatus.ACTIVE,
+            PromotionStatus.DRAFT,
+            PromotionStatus.SCHEDULED,
+            PromotionStatus.PAUSED,
+        }
         return [
             p
             for p in self.rows.values()
-            if p.store_id == store_id and p.status == PromotionStatus.ACTIVE
+            if p.store_id == store_id
+            and (
+                (include_drafts and p.status in previewable)
+                or (not include_drafts and p.status == PromotionStatus.ACTIVE)
+            )
         ]
 
     async def update(self, promo: Promotion) -> Promotion:

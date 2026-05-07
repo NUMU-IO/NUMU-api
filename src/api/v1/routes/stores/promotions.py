@@ -11,9 +11,14 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
+from pydantic import BaseModel, Field
 
 from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.feature_flags import require_feature_flag
+from src.api.dependencies.promotion_preview import (
+    PREVIEW_TOKEN_TTL,
+    issue_preview_token,
+)
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_promotion_display_repository,
@@ -78,6 +83,58 @@ router = APIRouter(
     # while it's being rolled out in waves.
     dependencies=[Depends(require_feature_flag("ff_promotions_v2"))],
 )
+
+
+# --------------------------------------------------------------------------- #
+# Preview token                                                               #
+# --------------------------------------------------------------------------- #
+
+
+class PreviewTokenResponse(BaseModel):
+    """Short-lived JWT that unlocks draft-state preview on the storefront.
+
+    The merchant hub appends `?_npt=<token>` to the storefront URL when
+    opening the builder iframe; the storefront forwards the token as
+    `X-Preview-Token` on its server-side promotions fetch.
+    """
+
+    token: str = Field(description="Signed preview JWT (5-minute TTL).")
+    expires_at: str = Field(description="ISO-8601 expiry of the token.")
+    ttl_seconds: int = Field(
+        description=(
+            "Lifetime of the token in seconds — handy for the merchant "
+            "hub to schedule a silent refresh before expiry."
+        ),
+    )
+
+
+@router.post(
+    "/preview-token",
+    response_model=SuccessResponse[PreviewTokenResponse],
+    summary="Issue a short-lived preview token for the builder iframe",
+    operation_id="issue_promotion_preview_token",
+)
+async def create_preview_token(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+) -> SuccessResponse[PreviewTokenResponse]:
+    """Mint a 5-minute preview token scoped to this store.
+
+    No request body — the auth + path-scoping (`verify_store_ownership`)
+    already establish that the caller is the owner of `store_id`. Token
+    is signed with the same JWT key as access / refresh tokens, so it
+    inherits the platform's existing rotation story.
+    """
+    token, expires_at = issue_preview_token(
+        store_id=store.id, tenant_id=store.tenant_id
+    )
+    return SuccessResponse(
+        data=PreviewTokenResponse(
+            token=token,
+            expires_at=expires_at.isoformat(),
+            ttl_seconds=int(PREVIEW_TOKEN_TTL.total_seconds()),
+        ),
+        message="Preview token issued",
+    )
 
 
 # --------------------------------------------------------------------------- #

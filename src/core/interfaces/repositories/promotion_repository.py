@@ -42,9 +42,18 @@ class IPromotionRepository(ABC):
 
     @abstractmethod
     async def list_active_for_storefront(
-        self, store_id: UUID, now: datetime
+        self,
+        store_id: UUID,
+        now: datetime,
+        *,
+        include_drafts: bool = False,
     ) -> list[Promotion]:
-        """Active promos with displays/targets prefetched, for resolver."""
+        """Active promos with displays/targets prefetched, for resolver.
+
+        Pass `include_drafts=True` for the merchant builder preview flow:
+        rows in `draft` / `scheduled` / `paused` are included so the
+        merchant can preview unpublished changes before activating.
+        """
 
     @abstractmethod
     async def update(self, promotion: Promotion) -> Promotion:
