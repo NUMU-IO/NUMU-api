@@ -43,6 +43,7 @@ from src.api.v1.routes.stores import payment_proofs as payment_proofs_module
 from src.api.v1.routes.stores import payments as payments_module
 from src.api.v1.routes.stores import plan as plan_module
 from src.api.v1.routes.stores import products as products_module
+from src.api.v1.routes.stores import promotions as promotions_module
 from src.api.v1.routes.stores import reconciliation as reconciliation_module
 from src.api.v1.routes.stores import refunds as refunds_module
 from src.api.v1.routes.stores import settings as settings_module
@@ -88,6 +89,7 @@ router.include_router(
 )
 router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
+router.include_router(promotions_module.router, tags=["Store Promotions"])
 router.include_router(settings_module.router, tags=["Store Settings"])
 router.include_router(
     cod_trust_decisions_module.router, tags=["Store COD Trust Decisions"]
