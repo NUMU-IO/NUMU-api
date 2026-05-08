@@ -400,13 +400,58 @@ class PaymentTransactionRepository:
         await self.session.flush()
         return model
 
-    async def aggregate_channels(self, store_id: UUID, *, days: int = 30) -> list[dict]:
-        """Aggregate payment transactions by channel for analytics."""
-        since = datetime.utcnow() - timedelta(days=days)
+    async def aggregate_channels(
+        self,
+        store_id: UUID,
+        *,
+        days: int = 30,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+    ) -> list[dict]:
+        """Aggregate payment transactions by channel for analytics.
+
+        ``days`` is the legacy "last N days" mode. ``period_start`` +
+        ``period_end`` is the explicit-window mode used by trend
+        computation (backend-019) where we need to compare last-30
+        vs previous-30 deltas. Either / both are accepted; explicit
+        bounds take precedence.
+
+        Also returns ``avg_processing_ms`` for the channel — the
+        average of (`processing_completed_at - processing_started_at`)
+        in milliseconds for completed transactions, or ``None`` when
+        the channel has no completion timestamps.
+        """
+        if period_start is None and period_end is None:
+            period_end = datetime.utcnow()
+            period_start = period_end - timedelta(days=days)
+        elif period_end is None:
+            period_end = datetime.utcnow()
+        elif period_start is None:
+            period_start = period_end - timedelta(days=days)
 
         success_case = case(
             (PaymentTransactionModel.status == "completed", 1),
             else_=0,
+        )
+
+        # Processing-time average (in milliseconds). Only computed
+        # for completed transactions with both timestamps present.
+        # extract('epoch', ...) gives seconds; * 1000 for ms.
+        proc_diff_seconds = func.extract(
+            "epoch",
+            PaymentTransactionModel.processing_completed_at
+            - PaymentTransactionModel.processing_started_at,
+        )
+        avg_proc_ms = func.avg(
+            case(
+                (
+                    (PaymentTransactionModel.status == "completed")
+                    & PaymentTransactionModel.processing_started_at.is_not(None)
+                    & PaymentTransactionModel.processing_completed_at.is_not(None),
+                    proc_diff_seconds * 1000,
+                ),
+                else_=None,
+            )
         )
 
         result = await self.session.execute(
@@ -425,10 +470,12 @@ class PaymentTransactionRepository:
                         else_=0,
                     )
                 ).label("revenue_cents"),
+                avg_proc_ms.label("avg_processing_ms"),
             )
             .where(
                 PaymentTransactionModel.store_id == store_id,
-                PaymentTransactionModel.created_at >= since,
+                PaymentTransactionModel.created_at >= period_start,
+                PaymentTransactionModel.created_at < period_end,
             )
             .group_by(
                 PaymentTransactionModel.channel,
