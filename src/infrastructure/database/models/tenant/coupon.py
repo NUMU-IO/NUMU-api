@@ -54,6 +54,13 @@ class CouponModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         DateTime(timezone=True), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Phase 3.8 additions.
+    is_auto_apply: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    stackable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     applicable_product_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
     applicable_category_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
 

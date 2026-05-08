@@ -81,6 +81,22 @@ def get_product_subscription_repository(
     return ProductSubscriptionRepository(session)
 
 
+def get_order_return_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get order-return repository dependency (Phase 3.1).
+
+    Same lazy-import pattern as `get_product_subscription_repository`
+    so the new repo doesn't force a re-export churn on
+    `repositories/__init__.py` for this PR.
+    """
+    from src.infrastructure.repositories.order_return_repository import (
+        OrderReturnRepository,
+    )
+
+    return OrderReturnRepository(session)
+
+
 def get_customer_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> CustomerRepository:

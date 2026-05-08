@@ -121,6 +121,9 @@ from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
 )
 from src.api.v1.routes.storefront import (
+    returns_router as storefront_returns_router,
+)
+from src.api.v1.routes.storefront import (
     reviews_router as storefront_reviews_router,
 )
 from src.api.v1.routes.storefront import (
@@ -250,6 +253,13 @@ api_router.include_router(
     storefront_customer_router,
     prefix="/storefront/me",
     tags=["Storefront - Customer"],
+)
+
+# Storefront - returns (authenticated customer; Phase 3.1)
+api_router.include_router(
+    storefront_returns_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Returns"],
 )
 
 # Storefront - cart (authenticated customer)

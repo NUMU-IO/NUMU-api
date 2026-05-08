@@ -45,6 +45,7 @@ from src.api.v1.routes.stores import plan as plan_module
 from src.api.v1.routes.stores import products as products_module
 from src.api.v1.routes.stores import reconciliation as reconciliation_module
 from src.api.v1.routes.stores import refunds as refunds_module
+from src.api.v1.routes.stores import returns as returns_module
 from src.api.v1.routes.stores import settings as settings_module
 from src.api.v1.routes.stores import shipments as shipments_module
 from src.api.v1.routes.stores import shipping as shipping_module
@@ -95,6 +96,7 @@ router.include_router(
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
 router.include_router(refunds_module.router, tags=["Store Refunds"])
+router.include_router(returns_module.router, tags=["Store Returns"])
 router.include_router(webhooks_module.router, tags=["Store Webhooks"])
 router.include_router(reconciliation_module.router, tags=["Store Reconciliation"])
 router.include_router(shipments_module.router, tags=["Store Shipments"])
