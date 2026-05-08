@@ -66,3 +66,12 @@ class ShopifyAppSettingsModel(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         server_default="false",
     )
+    # Per-store opt-in for the cross-merchant trust network. Default
+    # true — the disclosure modal at install captures consent. When
+    # false, write_network_event is a no-op for this store, satisfying
+    # the GDPR Recital 47 legitimate-interest opt-out path.
+    trust_network_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="true",
+    )

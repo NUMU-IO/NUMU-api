@@ -22,6 +22,7 @@ from src.config import get_settings
 if TYPE_CHECKING:
     from src.infrastructure.repositories.shopify_repository import (
         NetworkReputationRepository,
+        ShopifyAppSettingsRepository,
     )
 
 logger = logging.getLogger(__name__)
@@ -134,15 +135,37 @@ async def write_network_event(
     store_id: UUID,
     event_type: Literal["order", "rto", "delivery", "refund"],
     network_repo: NetworkReputationRepository,
+    settings_repo: ShopifyAppSettingsRepository | None = None,
 ) -> None:
     """Write a network reputation event and refresh aggregates.
 
     Handles ``order``, ``rto``, ``delivery``, and ``refund``. Recomputes the
     cached score and invalidates the Redis cache for this phone hash. No-op
     if ``phone_hash`` is None.
+
+    GDPR Recital 47 opt-out: when ``settings_repo`` is provided AND the
+    store has set ``trust_network_enabled = False``, the write is skipped.
+    Callers should pass a settings_repo unless they have a specific reason
+    to bypass the consent check (admin scripts, deletion replays). When
+    ``settings_repo`` is None we log at INFO so consent-bypass paths are
+    auditable.
     """
     if not phone_hash:
         return
+
+    if settings_repo is not None:
+        settings = await settings_repo.get_or_create(store_id)
+        if not settings.trust_network_enabled:
+            logger.info(
+                "network_event_skipped_opted_out",
+                extra={"store_id": str(store_id), "event_type": event_type},
+            )
+            return
+    else:
+        logger.info(
+            "network_event_consent_check_bypassed",
+            extra={"store_id": str(store_id), "event_type": event_type},
+        )
 
     if event_type == "order":
         await network_repo.upsert_order(phone_hash=phone_hash, store_id=store_id)

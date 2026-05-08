@@ -200,12 +200,14 @@ async def _handle_order_created(
     # Read BEFORE write so the current order doesn't inflate the score
     network_score, network_label = await _lookup_network_score(phone_hash, network_repo)
 
-    # Write the "order" event to network reputation
+    # Write the "order" event to network reputation. Pass settings_repo
+    # so the consent flag (trust_network_enabled) is enforced.
     await _write_network_event(
         phone_hash=phone_hash,
         store_id=store_id,
         event_type="order",
         network_repo=network_repo,
+        settings_repo=settings_repo,
     )
 
     # ── 2. Fast score (synchronous, <200ms) ─────────────────────────────────
@@ -446,6 +448,7 @@ async def process_webhook(
             store_id=store_id,
             event_type=event_type,
             network_repo=network_repo,
+            settings_repo=settings_repo,
         )
         result = {"acknowledged": True, "topic": topic, "event_recorded": event_type}
     elif topic in ("orders/paid", "orders/partially_paid", "payment_failed"):
@@ -471,31 +474,78 @@ async def process_webhook(
         logger.info("GDPR shop/redact for %s: deleted %s", body.shop_domain, counts)
         result = {"redacted": True, "deleted": counts}
     elif topic == "customers/redact":
-        # GDPR: Delete all data associated with a specific customer
+        # GDPR: Delete all data associated with a specific customer.
+        # Two halves:
+        #   1. risk_assessments — keyed on customer email (Shopify's key)
+        #   2. network contribution log + reputation aggregates — keyed
+        #      on the HMAC of the customer's phone. Without this second
+        #      half, the cross-merchant signal would retain that
+        #      customer's history indefinitely.
         customer = body.payload.get("customer", {})
         email = customer.get("email", "")
+        phone = customer.get("phone") or ""
+        risk_deleted = 0
+        network_result: dict[str, int] = {
+            "contributions_replayed": 0,
+            "contribution_rows_deleted": 0,
+        }
         if email:
-            deleted = await risk_repo.delete_by_customer_email(store_id, email)
-            logger.info(
-                "GDPR customers/redact for %s (%s): deleted %d records",
-                body.shop_domain,
-                email,
-                deleted,
+            risk_deleted = await risk_repo.delete_by_customer_email(store_id, email)
+        if phone:
+            from src.application.services.network_reputation_service import (
+                extract_phone_hash_from_string,
             )
-            result = {"redacted": True, "records_deleted": deleted}
-        else:
-            result = {
-                "redacted": True,
-                "records_deleted": 0,
-                "note": "no email in payload",
-            }
+
+            phone_hash = extract_phone_hash_from_string(phone)
+            if phone_hash:
+                network_result = await network_repo.delete_customer_network_data(
+                    store_id=store_id, phone_hash=phone_hash
+                )
+        logger.info(
+            "GDPR customers/redact for %s (%s): risk=%d network=%s",
+            body.shop_domain,
+            email,
+            risk_deleted,
+            network_result,
+        )
+        result = {
+            "redacted": True,
+            "records_deleted": risk_deleted,
+            "network": network_result,
+            "note": (
+                "no phone in payload — network signal preserved" if not phone else None
+            ),
+        }
     elif topic == "customers/data_request":
-        # GDPR: Report what data we hold for a specific customer
+        # GDPR: Report what data we hold for a specific customer. Now
+        # includes the cross-merchant network contributions when the
+        # payload provides a phone number, so the DSAR export is
+        # complete (not just risk_assessments).
         customer = body.payload.get("customer", {})
         email = customer.get("email", "")
-        records = (
+        phone = customer.get("phone") or ""
+        risk_records = (
             await risk_repo.list_by_customer_email(store_id, email) if email else []
         )
+        network_contributions: list[dict] = []
+        if phone:
+            from src.application.services.network_reputation_service import (
+                extract_phone_hash_from_string,
+            )
+
+            phone_hash = extract_phone_hash_from_string(phone)
+            if phone_hash:
+                rows = await network_repo.list_customer_contributions(
+                    store_id=store_id, phone_hash=phone_hash
+                )
+                network_contributions = [
+                    {
+                        "type": "network_contribution",
+                        "event_type": r.event_type,
+                        "recorded_at": str(r.created_at),
+                    }
+                    for r in rows
+                ]
         result = {
             "customer_email": email,
             "data_held": [
@@ -505,8 +555,9 @@ async def process_webhook(
                     "risk_score": r.risk_score,
                     "created_at": str(r.created_at),
                 }
-                for r in records
-            ],
+                for r in risk_records
+            ]
+            + network_contributions,
         }
     else:
         logger.warning("Unhandled webhook topic: %s", topic)

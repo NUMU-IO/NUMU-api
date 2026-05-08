@@ -748,6 +748,125 @@ class NetworkReputationRepository:
             .values(network_risk_score=score, confidence_level=confidence)
         )
 
+    async def list_customer_contributions(
+        self, *, store_id: UUID, phone_hash: str
+    ) -> list[NetworkContributionLogModel]:
+        """Return the contribution-log rows for one customer at one store.
+
+        Used by the GDPR ``customers/data_request`` export so a customer
+        can see exactly what cross-merchant signal numu-api has recorded
+        for them. Scoped to a single store because the requesting merchant
+        only has standing to see the data they've themselves contributed.
+        """
+        result = await self.session.execute(
+            select(NetworkContributionLogModel).where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+        )
+        return list(result.scalars().all())
+
+    async def delete_customer_network_data(
+        self, *, store_id: UUID, phone_hash: str
+    ) -> dict[str, int]:
+        """GDPR ``customers/redact`` — remove one customer from the network.
+
+        Replays the contribution log for ``(store_id, phone_hash)`` to
+        decrement the matching ``network_reputation`` aggregates, deletes
+        the contribution rows, and recomputes the cached score so the next
+        risk lookup reflects the erasure.
+
+        This mirrors the per-store erasure logic in ``delete_store_data``
+        but scoped to one phone hash so a single customer's request
+        doesn't wipe the rest of the merchant's contribution history.
+        """
+        deleted_counts: dict[str, int] = {
+            "contributions_replayed": 0,
+            "contribution_rows_deleted": 0,
+        }
+
+        # 1) Replay the contribution log to compute decrements per event_type
+        contrib_rows = await self.session.execute(
+            select(
+                NetworkContributionLogModel.event_type,
+                func.count().label("cnt"),
+            )
+            .where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+            .group_by(NetworkContributionLogModel.event_type)
+        )
+        col_map = {
+            "order": "total_network_orders",
+            "rto": "total_network_rtos",
+            "delivery": "total_successful_deliveries",
+            "refund": "total_refunds",
+        }
+        replayed = 0
+        for row in contrib_rows.all():
+            event_type = row.event_type
+            cnt = row.cnt
+            col_name = col_map.get(event_type)
+            if not col_name:
+                continue
+            col = getattr(NetworkReputationModel, col_name)
+            await self.session.execute(
+                update(NetworkReputationModel)
+                .where(NetworkReputationModel.phone_hash == phone_hash)
+                .values(**{col_name: func.greatest(col - cnt, 0)})
+            )
+            replayed += cnt
+        deleted_counts["contributions_replayed"] = replayed
+
+        # 2) Recompute contributing_store_count after this store's
+        #    contributions disappear. If the store had any rows for this
+        #    phone hash, removing them may drop the network's
+        #    multi-store-attestation count by 1.
+        existed = await self.session.execute(
+            select(func.count())
+            .select_from(NetworkContributionLogModel)
+            .where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+        )
+        had_rows = (existed.scalar_one() or 0) > 0
+
+        # 3) Delete the contribution log rows
+        delete_result = await self.session.execute(
+            delete(NetworkContributionLogModel).where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+        )
+        deleted_counts["contribution_rows_deleted"] = delete_result.rowcount or 0
+
+        # 4) Recompute store count from the remaining log rows
+        if had_rows:
+            await self.update_store_count(phone_hash)
+
+        # 5) Recompute the cached score so the next risk lookup is honest
+        await self.recompute_cached_score(phone_hash)
+
+        # 6) If aggregates have all reached zero, anonymize the row so it
+        #    can no longer be linked back to a person via the hash.
+        await self.session.execute(
+            update(NetworkReputationModel)
+            .where(
+                NetworkReputationModel.phone_hash == phone_hash,
+                NetworkReputationModel.total_network_orders <= 0,
+                NetworkReputationModel.total_network_rtos <= 0,
+                NetworkReputationModel.total_successful_deliveries <= 0,
+                NetworkReputationModel.total_refunds <= 0,
+                NetworkReputationModel.anonymized_at.is_(None),
+            )
+            .values(anonymized_at=func.now())
+        )
+
+        await self.session.flush()
+        return deleted_counts
+
 
 # ---------------------------------------------------------------------------
 # PaymentLinkSessionRepository

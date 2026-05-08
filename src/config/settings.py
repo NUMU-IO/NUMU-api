@@ -221,6 +221,21 @@ class Settings(BaseSettings):
                         "Wildcard (*) is not allowed in production."
                     )
 
+                # PLATFORM_SECRET_SALT gates phone hashing for the
+                # cross-merchant trust network. Without it, every
+                # write_network_event silently no-ops (phone_hash is
+                # None) and the network table stays empty — the
+                # strategic moat becomes marketing copy. Fail loud at
+                # startup instead.
+                if not self.platform_secret_salt:
+                    raise ValueError(
+                        "CRITICAL: PLATFORM_SECRET_SALT must be set in production. "
+                        "Without it, the cross-merchant trust network cannot record "
+                        "events and risk scoring falls back to baseline. "
+                        'Generate a secret: python -c "import secrets; '
+                        'print(secrets.token_urlsafe(32))"'
+                    )
+
                 if not self.resend_api_key:
                     logger.warning(
                         "RESEND_API_KEY is not set. Email delivery will fail in production."
