@@ -74,6 +74,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.beat_heartbeat",
         # backend-005 — Paymob recurring subscription renewals.
         "src.infrastructure.messaging.tasks.subscription_renewal_task",
+        # backend-017 — daily Shopify-side verification overage relay.
+        "src.infrastructure.messaging.tasks.usage_overage_task",
     ],
     # Queue definitions
     task_queues=(
@@ -273,6 +275,15 @@ celery_app.conf.beat_schedule = {
     "process-due-renewals": {
         "task": "tasks.process_due_renewals",
         "schedule": crontab(minute=20),  # Hourly at :20
+    },
+    # ─── backend-017: Shopify verification-overage relay (daily) ─────
+    # Daily at 04:00 UTC (~06:00 Cairo) — after the 03:30 reconciliation
+    # so message counts are settled. Idempotency on the
+    # store_id+period key means re-running the same period within the
+    # day never double-charges.
+    "report-verification-overages": {
+        "task": "tasks.report_verification_overages",
+        "schedule": crontab(hour=4, minute=0),
     },
 }
 
