@@ -1,0 +1,32 @@
+schema_version: "1.0"
+
+extension:
+  id: "plan-review-gate"
+  name: "Plan Review Gate"
+  version: 1.0.0
+  description: "Spec Kit extension for requiring a merge request before proceeding with /speckit.tasks"
+  author: "luno"
+  repository: "https://github.com/luno/spec-kit-plan-review-gate"
+  license: "MIT"
+  homepage: "https://github.com/luno/spec-kit-plan-review-gate"
+
+requires:
+  speckit_version: ">=0.1.0"
+
+provides:
+  commands:
+    - name: "speckit.plan-review-gate.check"
+      file: "commands/check.md"
+      description: "Check that spec.md and plan.md have been merged via MR/PR before allowing task generation"
+
+hooks:
+  before_tasks:
+    command: "speckit.plan-review-gate.check"
+    optional: false
+    description: "Require a merge request before proceeding to task generation"
+
+tags:
+  - "review"
+  - "quality"
+  - "workflow"
+  - "gate"
