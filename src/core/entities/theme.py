@@ -42,7 +42,9 @@ class Theme(BaseEntity):
     thumbnail_url: str | None = Field(default=None, max_length=500)
     is_public: bool = False
     status: ThemeStatus = ThemeStatus.DRAFT
-    settings_schema: dict[str, Any] = Field(default_factory=dict)
+    # See SettingsSchemaShape in api/v1/schemas/tenant/common.py — list or
+    # dict, both round-trip through the JSONB column.
+    settings_schema: list[Any] | dict[str, Any] = Field(default_factory=dict)  # noqa: SettingsSchemaShape
     section_schemas: dict[str, Any] | None = None
     supported_features: dict[str, Any] | None = None  # {darkMode, rtl, ...}
     created_by: UUID | None = None
@@ -114,7 +116,7 @@ class StoreTheme(BaseEntity):
     theme_version: str | None = None
     bundle_url: str | None = None
     css_url: str | None = None
-    settings_schema: dict[str, Any] | None = None
+    settings_schema: list[Any] | dict[str, Any] | None = None
     section_schemas: dict[str, Any] | None = None
     theme_thumbnail_url: str | None = None
 

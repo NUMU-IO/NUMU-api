@@ -2046,11 +2046,17 @@ async def upload_customization_asset(
     """Upload an asset for storefront customization.
 
     Accepts logo, favicon, hero_image, section_image, profile_picture,
-    or social_image (Open Graph) uploads.
+    or social_image (Open Graph) uploads, or `generic_file` for theme
+    file_upload settings (PDFs, fonts, video, audio).
     Returns the URL of the uploaded asset.
     """
-    # Validate asset type
-    allowed_types = {
+    # Image asset types share the strict image-only allowlist + 5MB cap.
+    # `generic_file` is the catch-all for theme file_upload settings; we
+    # broaden the content-type allowlist (PDF, fonts, video, audio) and
+    # raise the cap to 10MB. Keeping these in one branch tree avoids
+    # a parallel route — fewer places to keep auth + storage wiring in
+    # sync.
+    image_asset_types = {
         "logo",
         "favicon",
         "hero_image",
@@ -2058,14 +2064,15 @@ async def upload_customization_asset(
         "section_image",
         "social_image",
     }
+    generic_asset_type = "generic_file"
+    allowed_types = image_asset_types | {generic_asset_type}
     if asset_type not in allowed_types:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid asset_type. Must be one of: {', '.join(allowed_types)}",
+            detail=f"Invalid asset_type. Must be one of: {', '.join(sorted(allowed_types))}",
         )
 
-    # Validate file type
-    allowed_content = {
+    image_content = {
         "image/jpeg",
         "image/png",
         "image/svg+xml",
@@ -2073,17 +2080,49 @@ async def upload_customization_asset(
         "image/x-icon",
         "image/gif",
     }
-    if file.content_type not in allowed_content:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type: {file.content_type}. Allowed: JPEG, PNG, SVG, WebP, ICO, GIF",
-        )
+    # Generic-file allowlist: explicit application types we expect themes
+    # to need + prefix-based whitelisting for fonts / video / audio
+    # (where the subtype space is large and not worth enumerating).
+    generic_content_exact = image_content | {
+        "application/pdf",
+        "application/zip",
+        "application/x-font-ttf",
+        "application/x-font-otf",
+        "application/font-woff",
+        "application/font-woff2",
+        "application/octet-stream",  # some browsers send this for fonts
+    }
+    generic_content_prefixes = ("font/", "video/", "audio/")
 
-    # Validate file size (max 5MB)
-    max_size = 5 * 1024 * 1024
+    if asset_type == generic_asset_type:
+        ct = (file.content_type or "").lower()
+        if ct not in generic_content_exact and not ct.startswith(
+            generic_content_prefixes
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid file type: {file.content_type}. "
+                    f"Allowed: PDF, ZIP, fonts (TTF/OTF/WOFF/WOFF2), "
+                    f"video, audio, or any image."
+                ),
+            )
+    else:
+        if file.content_type not in image_content:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type: {file.content_type}. Allowed: JPEG, PNG, SVG, WebP, ICO, GIF",
+            )
+
+    # Image assets get a 5MB cap (storefront images shouldn't be huge);
+    # generic files get 10MB to fit fonts and small PDFs comfortably.
+    max_size = 10 * 1024 * 1024 if asset_type == generic_asset_type else 5 * 1024 * 1024
     content = await file.read()
     if len(content) > max_size:
-        raise HTTPException(status_code=400, detail="File size exceeds 5MB limit")
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size exceeds {max_size // (1024 * 1024)}MB limit",
+        )
 
     # Generate a unique filename
     ext = (

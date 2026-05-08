@@ -29,10 +29,44 @@ class CartItemResponse(BaseModel):
     variant_name: str | None = None
     sku: str | None = None
     quantity: int
-    unit_price: int = Field(description="Price in cents")
+    unit_price: int = Field(
+        description=(
+            "Snapshotted price in cents (captured when the line was added). "
+            "Use this for the cart subtotal — it is NOT the live product price."
+        ),
+    )
     total_price: int = Field(description="quantity * unit_price in cents")
+    current_price: int | None = Field(
+        default=None,
+        description=(
+            "Live product price in cents at the time of the cart fetch. "
+            "When this differs from `unit_price`, the merchant changed the "
+            "price after the line was added — themes can surface a "
+            "'price changed since you added it' notice."
+        ),
+    )
+    price_changed: bool = Field(
+        default=False,
+        description="True iff `current_price` differs from the snapshotted `unit_price`.",
+    )
     image_url: str | None = None
     in_stock: bool = True
+    available_now: int | None = Field(
+        default=None,
+        description=(
+            "Live remaining inventory at the time of the cart fetch. "
+            "When less than `quantity`, the line is partially fulfillable "
+            "and themes should surface a 'reduce quantity' nudge."
+        ),
+    )
+    sold_out_now: bool = Field(
+        default=False,
+        description=(
+            "True iff the product flipped to out-of-stock between the time "
+            "the line was added and now. The Checkout button should be "
+            "disabled when any cart line is sold_out_now=true."
+        ),
+    )
 
     class Config:
         from_attributes = True

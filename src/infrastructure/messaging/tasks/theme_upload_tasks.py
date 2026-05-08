@@ -40,7 +40,21 @@ MAX_ZIP_SIZE = 20 * 1024 * 1024  # 20 MB
 MAX_BUNDLE_SIZE = 2 * 1024 * 1024  # 2 MB
 MAX_EXTRACTED_SIZE = 50 * 1024 * 1024  # 50 MB (zip bomb protection)
 DOCKER_IMAGE = os.getenv("NUMU_THEME_BUILDER_IMAGE", "numu-theme-builder:latest")
-USE_DOCKER = os.getenv("NUMU_THEME_USE_DOCKER", "false").lower() == "true"
+
+
+# Default to Docker-isolated builds. The previous `false` default was
+# fine while only NUMU staff submitted themes; for a public marketplace
+# we require sandboxing on every build because npm install runs
+# arbitrary developer-controlled code (build scripts, postinstall, etc.)
+# against our worker host. Set NUMU_THEME_USE_DOCKER=false explicitly to
+# opt out for local dev where you don't have the builder image.
+def _docker_default() -> str:
+    return (
+        "true" if os.getenv("ENVIRONMENT", "development") == "production" else "false"
+    )
+
+
+USE_DOCKER = os.getenv("NUMU_THEME_USE_DOCKER", _docker_default()).lower() == "true"
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
@@ -302,25 +316,72 @@ def _run_local_build(
 ) -> subprocess.CompletedProcess:
     """Fallback: run the build directly (used when Docker is not available).
 
-    SECURITY WARNING: This runs untrusted code on the worker host. Always
-    prefer Docker isolation in production.
+    SECURITY WARNING: This runs untrusted code on the worker host. The
+    `--ignore-scripts` flag blocks npm pre/post-install hooks (the most
+    common attack surface) but the BUILD STEP itself is still
+    developer-controlled JavaScript executing as the worker user. Use
+    only on developer laptops for local iteration. Production deploys
+    must run with NUMU_THEME_USE_DOCKER=true and the builder image.
+
+    In production we also fail loudly when this fallback is reached
+    despite ENVIRONMENT=production, so a misconfiguration doesn't
+    silently downgrade isolation.
     """
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        raise ThemeBuildError(
+            "Refusing to run un-isolated theme build in production. "
+            "Set NUMU_THEME_USE_DOCKER=true and ensure the builder image is available."
+        )
     logger.warning(
         "Running theme build WITHOUT Docker isolation. "
         "Set NUMU_THEME_USE_DOCKER=true in production."
     )
-    # Install
-    subprocess.run(
-        ["npm", "install", "--ignore-scripts", "--no-audit"],
+    # On Windows, `npm` is `npm.cmd`. subprocess without shell=True
+    # doesn't resolve PATHEXT, so calling ["npm", ...] raises
+    # FileNotFoundError. shutil.which() walks PATH and respects PATHEXT,
+    # giving us the actual executable in either OS.
+    npm_path = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm_path:
+        raise ThemeBuildError(
+            "npm not found on PATH — install Node.js and retry, or run "
+            "with NUMU_THEME_USE_DOCKER=true to use the sandboxed builder."
+        )
+
+    # Install. Flags align with the Docker entrypoint:
+    #   --ignore-scripts: block pre/post-install hooks (supply-chain).
+    #   --no-audit / --no-fund: avoid network calls beyond resolution.
+    #   --prefer-offline: prefer the local npm cache; reduces blast
+    #                     radius of a transient registry compromise.
+    #
+    # `check=False` so we can surface a sane error message instead of
+    # the bare CalledProcessError (which omits stderr in the repr the
+    # outer task uses for the build_log). When npm fails we tail the
+    # combined stdout+stderr so the developer sees the real cause
+    # (most often "ENOENT — could not resolve @numu/theme-sdk" when
+    # the linked workspace package isn't published to a registry).
+    install_result = subprocess.run(
+        [
+            npm_path,
+            "install",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--prefer-offline",
+        ],
         cwd=str(theme_dir),
         capture_output=True,
         text=True,
         timeout=120,
-        check=True,
+        check=False,
     )
+    if install_result.returncode != 0:
+        tail = (install_result.stderr or install_result.stdout or "").strip()
+        raise ThemeBuildError(
+            f"npm install failed (exit {install_result.returncode}):\n{tail[-2000:]}"
+        )
     # Build
     return subprocess.run(
-        ["npm", "run", "build"],
+        [npm_path, "run", "build"],
         cwd=str(theme_dir),
         capture_output=True,
         text=True,
@@ -348,13 +409,25 @@ def _validate_theme_contract(theme_dir: Path) -> dict:
         if not (theme_dir / f).exists():
             raise ThemeBuildError(f"Missing required file: {f}")
 
-    has_entry = any(
-        (theme_dir / name).exists()
-        for name in ["index.ts", "index.tsx", "numu.config.ts", "numu.config.tsx"]
-    )
+    # Mirror @numu/theme-plugin's ENTRY_CANDIDATES so the worker accepts
+    # whatever the plugin accepts. Modern themes (post-0.2.0 scaffold)
+    # land their entry at src/main.tsx + a vite.config.ts that drives
+    # the build; older themes used a top-level index.ts. Either is fine
+    # — Vite picks the right entry from the plugin's contract check.
+    entry_candidates = [
+        "src/main.tsx",
+        "src/main.ts",
+        "src/index.tsx",
+        "src/index.ts",
+        "index.ts",
+        "index.tsx",
+        "numu.config.ts",
+        "numu.config.tsx",
+    ]
+    has_entry = any((theme_dir / name).exists() for name in entry_candidates)
     if not has_entry:
         raise ThemeBuildError(
-            "Missing entry point: need index.ts, index.tsx, or numu.config.ts"
+            "Missing entry point: expected one of " + ", ".join(entry_candidates)
         )
 
     with open(theme_dir / "theme.json") as f:

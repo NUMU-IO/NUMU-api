@@ -184,3 +184,128 @@ class MarketplaceThemeInstallationModel(Base, UUIDMixin):
             f"<MarketplaceThemeInstallationModel(store_id={self.store_id}, "
             f"theme_id={self.marketplace_theme_id})>"
         )
+
+
+class MarketplaceThemeReviewModel(Base, UUIDMixin):
+    """A merchant-written review + rating for a marketplace theme.
+
+    One row per (theme, user) pair (enforced via the unique
+    constraint). Ratings are integers 1–5 (CHECK constraint at the DB
+    level). The aggregates on `marketplace_themes` are kept up to date
+    via the review service rather than a trigger so the recomputation
+    runs in the same transaction as the user-visible mutation.
+    """
+
+    __tablename__ = "marketplace_theme_reviews"
+    __table_args__ = (
+        UniqueConstraint("marketplace_theme_id", "user_id", name="uq_mtr_theme_user"),
+        {"schema": "public"},
+    )
+
+    marketplace_theme_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketplace_themes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_verified_purchase: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
+    developer_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    developer_response_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    helpful_count: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("NOW()"),
+        onupdate=text("NOW()"),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<MarketplaceThemeReviewModel(id={self.id}, "
+            f"theme={self.marketplace_theme_id}, rating={self.rating})>"
+        )
+
+
+class MarketplaceThemePurchaseModel(Base, UUIDMixin):
+    """Records a paid-theme purchase.
+
+    A row with `status="succeeded"` and `refunded_amount_cents == 0`
+    grants the buyer (`user_id`) install rights for `marketplace_theme_id`
+    across every store they own. Refunds (full or partial) update
+    `refunded_amount_cents` rather than deleting the row so we keep an
+    immutable financial trail.
+
+    `stripe_payment_intent_id` is unique — the webhook keys idempotency
+    on it. `metadata` carries pass-through Stripe metadata (e.g. the
+    invoice URL) and any audit fields the application wants to stash.
+    """
+
+    __tablename__ = "marketplace_theme_purchases"
+    __table_args__ = {"schema": "public"}
+
+    user_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    marketplace_theme_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketplace_themes.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(10), server_default="USD", nullable=False
+    )
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True
+    )
+    stripe_charge_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(50), server_default="pending", nullable=False
+    )
+    refunded_amount_cents: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False
+    )
+    refund_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Renamed from `metadata` because SQLAlchemy reserves that attribute
+    # name on declarative classes. The DB column keeps the conventional
+    # name via `name=`.
+    purchase_metadata: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default="{}", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("NOW()"),
+        onupdate=text("NOW()"),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<MarketplaceThemePurchaseModel(id={self.id}, "
+            f"theme={self.marketplace_theme_id}, status={self.status})>"
+        )

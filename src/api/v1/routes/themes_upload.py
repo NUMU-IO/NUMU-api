@@ -21,7 +21,7 @@ import tempfile
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 
 from src.api.dependencies.auth import get_current_user_id
@@ -41,6 +41,13 @@ class ThemeUploadResponse(BaseModel):
     build_id: str
     status: str
     poll_url: str
+    # On-disk path the worker can read. Returned so the marketplace
+    # `submit_version` flow (which takes `source_zip_path` in its body)
+    # can pair the upload with a version submission without the CLI
+    # having to reconstruct the path from convention. Path is server-
+    # local — production deployments share the upload_dir between the
+    # API and worker hosts (see NUMU_THEME_UPLOAD_DIR).
+    source_zip_path: str
 
 
 class BuildStatusResponse(BaseModel):
@@ -80,9 +87,23 @@ class PreviewTokenResponse(BaseModel):
 )
 async def upload_theme_zip(
     file: Annotated[UploadFile, File(description="Theme ZIP archive")],
+    queue_build: bool = Query(
+        default=True,
+        description=(
+            "When true (default), queues a build_theme_from_zip Celery task "
+            "that builds the theme + uploads to R2 + writes to the store's "
+            "external_theme. The build deletes the ZIP when done. "
+            "Pass `queue_build=false` from flows that just want the ZIP "
+            "stored on disk for a downstream consumer (marketplace "
+            "submissions) — those flows fetch the path via "
+            "`source_zip_path` in the response and pass it to "
+            "/marketplace/developer/themes/{id}/versions, which kicks off "
+            "its own marketplace build pipeline."
+        ),
+    ),
     current_user_id: UUID = Depends(get_current_user_id),
 ) -> SuccessResponse[ThemeUploadResponse]:
-    """Accept a theme ZIP, queue a build, return a build_id for polling.
+    """Accept a theme ZIP, optionally queue a build, return paths for polling.
 
     The zip must contain theme.json, settings_schema.json, styles.css,
     and an entry point (index.ts / index.tsx / numu.config.ts).
@@ -121,29 +142,43 @@ async def upload_theme_zip(
         build_theme_from_zip,
     )
 
-    _update_status(build_id, status="queued", uploader_id=str(current_user_id))
-    build_theme_from_zip.delay(
-        build_id=build_id,
-        zip_path=zip_path,
-        uploader_id=str(current_user_id),
-    )
+    if queue_build:
+        _update_status(build_id, status="queued", uploader_id=str(current_user_id))
+        build_theme_from_zip.delay(
+            build_id=build_id,
+            zip_path=zip_path,
+            uploader_id=str(current_user_id),
+        )
+        upload_status = "queued"
+        message = "Theme upload accepted; build queued"
+    else:
+        # Mark the upload as `stored` so a polling client knows the file
+        # is durable. We don't queue any build here — the caller is
+        # responsible for kicking off whatever downstream pipeline needs
+        # the ZIP (typically marketplace submit_version, which has its
+        # own build worker that won't delete the file out from under us).
+        _update_status(build_id, status="stored", uploader_id=str(current_user_id))
+        upload_status = "stored"
+        message = "Theme upload accepted; awaiting downstream consumer"
 
     logger.info(
-        "theme_zip_upload_queued",
+        "theme_zip_upload_queued" if queue_build else "theme_zip_upload_stored",
         extra={
             "build_id": build_id,
             "uploader_id": str(current_user_id),
             "size": len(contents),
+            "queue_build": queue_build,
         },
     )
 
     return SuccessResponse(
         data=ThemeUploadResponse(
             build_id=build_id,
-            status="queued",
+            status=upload_status,
             poll_url=f"/api/v1/themes/builds/{build_id}",
+            source_zip_path=zip_path,
         ),
-        message="Theme upload accepted; build queued",
+        message=message,
     )
 
 

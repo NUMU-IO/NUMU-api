@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -51,20 +52,33 @@ class UpdateLandingConfigRequest(BaseModel):
 
 
 async def _get_or_create_config(db: AsyncSession) -> PlatformConfigModel:
-    """Get the landing page config row, creating it with defaults if absent."""
+    """Get the landing page config row, creating it with defaults if absent.
+
+    Race-safe via INSERT ... ON CONFLICT DO NOTHING + re-SELECT.
+    """
     result = await db.execute(
         select(PlatformConfigModel).where(PlatformConfigModel.key == LANDING_PAGE_KEY)
     )
     config = result.scalar_one_or_none()
 
     if config is None:
-        config = PlatformConfigModel(
-            key=LANDING_PAGE_KEY,
-            value=DEFAULT_LANDING_CONFIG,
-            description="Landing page section visibility and ordering",
+        stmt = (
+            pg_insert(PlatformConfigModel)
+            .values(
+                key=LANDING_PAGE_KEY,
+                value=DEFAULT_LANDING_CONFIG,
+                description="Landing page section visibility and ordering",
+            )
+            .on_conflict_do_nothing(index_elements=["key"])
         )
-        db.add(config)
+        await db.execute(stmt)
         await db.flush()
+        result = await db.execute(
+            select(PlatformConfigModel).where(
+                PlatformConfigModel.key == LANDING_PAGE_KEY
+            )
+        )
+        config = result.scalar_one()
 
     return config
 
@@ -197,28 +211,28 @@ async def admin_update_pricing_plans(
     Changes take effect immediately — the public endpoint
     ``GET /public/pricing-plans`` reads from this config.
     """
-    result = await db.execute(
-        select(PlatformConfigModel).where(PlatformConfigModel.key == PRICING_KEY)
-    )
-    config = result.scalar_one_or_none()
-
     new_value = {
         "plans": [p.model_dump() for p in request.plans],
     }
     if request.promo:
         new_value["promo"] = request.promo.model_dump()
 
-    if config is None:
-        config = PlatformConfigModel(
+    # Race-safe upsert: previously this did SELECT → if-None INSERT else
+    # mutate-and-flag_modified. Two admins saving simultaneously on a fresh
+    # DB would both INSERT and trip platform_config_key_key.
+    stmt = (
+        pg_insert(PlatformConfigModel)
+        .values(
             key=PRICING_KEY,
             value=new_value,
             description="Pricing plans for landing page (admin-editable)",
         )
-        db.add(config)
-    else:
-        config.value = new_value
-        flag_modified(config, "value")
-
+        .on_conflict_do_update(
+            index_elements=["key"],
+            set_={"value": new_value},
+        )
+    )
+    await db.execute(stmt)
     await db.flush()
     logger.info("Pricing plans updated by admin %s", _admin_id)
 

@@ -138,6 +138,13 @@ celery_app.conf.beat_schedule = {
         "schedule": 300.0,  # Every 5 minutes
         "kwargs": {"max_age_minutes": 5, "batch_size": 50},
     },
+    # Marketplace theme build watchdog — fail orphan builds whose worker
+    # died mid-build (R2 outage, OOM, etc.) so versions don't sit in
+    # `building` forever. The task itself is idempotent.
+    "theme-marketplace-watchdog": {
+        "task": "theme_marketplace_watchdog",
+        "schedule": 300.0,  # Every 5 minutes
+    },
     "cleanup-expired-payment-links": {
         "task": "tasks.cleanup_expired_payment_links",
         "schedule": crontab(hour=4, minute=0),  # Daily at 04:00 UTC

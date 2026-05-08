@@ -19,6 +19,12 @@ from src.api.v1.routes.marketplace.catalog import (
 from src.api.v1.routes.marketplace.developer import (
     router as marketplace_developer_router,
 )
+from src.api.v1.routes.marketplace.purchases import (
+    router as marketplace_purchases_router,
+)
+from src.api.v1.routes.marketplace.reviews import (
+    router as marketplace_reviews_router,
+)
 from src.api.v1.routes.marketplace.store_install import (
     router as marketplace_store_install_router,
 )
@@ -27,5 +33,7 @@ __all__ = [
     "marketplace_admin_router",
     "marketplace_catalog_router",
     "marketplace_developer_router",
+    "marketplace_purchases_router",
+    "marketplace_reviews_router",
     "marketplace_store_install_router",
 ]

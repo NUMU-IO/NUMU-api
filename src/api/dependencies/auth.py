@@ -1,5 +1,6 @@
 """Authentication dependencies — cookie-based (with Bearer fallback)."""
 
+from datetime import UTC
 from typing import Annotated
 from uuid import UUID
 
@@ -62,6 +63,15 @@ async def get_current_user_id(request: Request) -> UUID:
             detail="Session has been revoked. Please log in again.",
         )
 
+    # Populate the user RLS contextvar early in the dependency chain so
+    # the eventual `get_db_session()` can stamp `app.current_user` on
+    # the Postgres session. Marketplace user-scoped RLS policies
+    # (purchases, reviews) read this. Anonymous routes (no auth dep)
+    # leave it None and the policies fall through to admin_bypass for
+    # legitimate cross-user reads handled via get_admin_db_session.
+    from src.infrastructure.database.connection import set_user_id
+
+    set_user_id(payload.user_id)
     return payload.user_id
 
 
@@ -178,6 +188,99 @@ async def require_admin(
             detail="Insufficient permissions",
         )
     return user_id
+
+
+# ── Admin 2FA step-up ────────────────────────────────────────────────────────
+#
+# `require_admin_2fa(max_age_seconds=N)` is the dependency we hang on
+# any admin action that has irreversible blast-radius (approving a
+# marketplace theme, refunding a purchase). It enforces:
+#
+#   1. SUPER_ADMIN role (delegates to `require_admin`).
+#   2. The admin has 2FA *enabled* — not just enrolled-but-pending.
+#   3. The admin completed a 2FA challenge within the last
+#      `max_age_seconds` (default 5 minutes). Stale logins prompt the
+#      frontend to pop a re-verify modal — much better than letting a
+#      forgotten-laptop session approve themes.
+#
+# We consult `two_factor.last_used_at` for the freshness window
+# because that's what the verify-2FA flow bumps on every challenge
+# completion. `verified_at` (set at enrollment) would only ever
+# advance when the admin re-enrolls — useless for step-up.
+#
+# Failure modes return 403 with explicit `detail`s so the frontend
+# can branch:
+#   - "2FA required ..." → admin needs to enroll first.
+#   - "2FA verification expired ..." → admin needs to re-verify.
+# We avoid 401 here since the access token is still valid; 403 is the
+# correct "you're authenticated but lacking the necessary credential
+# strength" code.
+def require_admin_2fa(max_age_seconds: int = 300):
+    """Build a dependency that requires recent 2FA verification.
+
+    Pass into a route's `dependencies=[...]` list. The factory returns
+    the dependency function so each call site can specify a different
+    freshness window without having to hand-roll the closure.
+    """
+    from datetime import datetime
+
+    from src.api.dependencies.repositories import get_two_factor_repository
+    from src.infrastructure.repositories.two_factor_repository import (
+        TwoFactorRepository,
+    )
+
+    async def _check(
+        admin_id: Annotated[UUID, Depends(require_admin)],
+        two_factor_repo: Annotated[
+            TwoFactorRepository, Depends(get_two_factor_repository)
+        ],
+    ) -> UUID:
+        # Dev/staging skip: enforcing 2FA in non-production blocks
+        # local engineers from approving/rejecting their own test
+        # submissions. Production keeps strict enforcement so a stale
+        # session can't approve themes platform-wide. Override with
+        # NUMU_FORCE_ADMIN_2FA=true to test the prod path locally.
+        from src.config import settings as _settings
+
+        force = __import__("os").environ.get("NUMU_FORCE_ADMIN_2FA", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if _settings.environment != "production" and not force:
+            return admin_id
+
+        record = await two_factor_repo.get_by_user_id(admin_id)
+        if record is None or not record.is_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="2FA required for this action — enroll in 2FA first.",
+            )
+        # Prefer the most recent challenge completion. Falls back to
+        # `verified_at` (enrollment) for users whose last_used_at hasn't
+        # been populated yet (legacy rows from before the column was
+        # being bumped on every login).
+        ref = record.last_used_at or record.verified_at
+        if ref is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="2FA verification required.",
+            )
+        # Compare in UTC. Ref is timezone-aware (DateTime(timezone=True))
+        # — naïve `datetime.utcnow()` would silently drift ~hours under
+        # DST so we use `datetime.now(timezone.utc)` deliberately.
+        elapsed = (datetime.now(UTC) - ref).total_seconds()
+        if elapsed > max_age_seconds:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"2FA verification expired after {max_age_seconds}s. "
+                    "Please re-verify."
+                ),
+            )
+        return admin_id
+
+    return _check
 
 
 from src.api.dependencies.repositories import (

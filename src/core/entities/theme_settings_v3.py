@@ -160,7 +160,9 @@ class ExternalThemeMetadata(BaseModel):
 
     bundle_url: str
     css_url: str | None = None
-    settings_schema: dict[str, Any] | None = None
+    # Shopify-style schema is a *list* of setting defs; legacy callers may
+    # pass a wrapped dict. JSONB on the DB side accepts either.
+    settings_schema: list[Any] | dict[str, Any] | None = None
     section_schemas: dict[str, Any] | None = None
     manifest: dict[str, Any] | None = None
     mode: Literal["production", "development"] | None = "production"

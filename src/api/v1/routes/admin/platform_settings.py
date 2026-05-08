@@ -20,6 +20,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import require_admin
@@ -88,7 +89,13 @@ class PlatformSettingsUpdate(BaseModel):
 
 
 async def _get_or_create_settings(db: AsyncSession) -> PlatformConfigModel:
-    """Return the platform_settings row, creating it with DEFAULTS if absent."""
+    """Return the platform_settings row, creating it with DEFAULTS if absent.
+
+    Race-safe: two concurrent requests on a fresh DB would each see no row
+    and try to INSERT, tripping `platform_config_key_key`. Use
+    INSERT ... ON CONFLICT DO NOTHING then re-SELECT, so whichever request
+    wins, both end up with the same row.
+    """
     result = await db.execute(
         select(PlatformConfigModel).where(
             PlatformConfigModel.key == PLATFORM_SETTINGS_KEY
@@ -96,14 +103,23 @@ async def _get_or_create_settings(db: AsyncSession) -> PlatformConfigModel:
     )
     row = result.scalar_one_or_none()
     if row is None:
-        row = PlatformConfigModel(
-            key=PLATFORM_SETTINGS_KEY,
-            value=dict(DEFAULTS),
-            description="Platform-wide settings (branding, signups, maintenance, auth policy)",
+        stmt = (
+            pg_insert(PlatformConfigModel)
+            .values(
+                key=PLATFORM_SETTINGS_KEY,
+                value=dict(DEFAULTS),
+                description="Platform-wide settings (branding, signups, maintenance, auth policy)",
+            )
+            .on_conflict_do_nothing(index_elements=["key"])
         )
-        db.add(row)
+        await db.execute(stmt)
         await db.commit()
-        await db.refresh(row)
+        result = await db.execute(
+            select(PlatformConfigModel).where(
+                PlatformConfigModel.key == PLATFORM_SETTINGS_KEY
+            )
+        )
+        row = result.scalar_one()
     return row
 
 

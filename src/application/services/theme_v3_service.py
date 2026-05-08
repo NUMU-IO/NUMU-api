@@ -7,6 +7,7 @@ restore, and BYOT initialization.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +25,35 @@ logger = logging.getLogger(__name__)
 AUTOSAVE_RETENTION = 20
 
 
+class StaleEtagError(Exception):
+    """Raised by autosave_draft when expected_etag doesn't match the
+    current store_theme.updated_at — i.e. another tab saved while this
+    one was editing. Routes catch this and return 409.
+    """
+
+    def __init__(self, current_etag: str | None, current_draft: dict[str, Any]):
+        super().__init__(
+            "Stale etag — another editor saved since this draft was loaded."
+        )
+        self.current_etag = current_etag
+        self.current_draft = current_draft
+
+
+def _etag_from(value: datetime | str | None) -> str | None:
+    """Encode a store_theme.updated_at as a stable etag string.
+
+    We use the ISO timestamp directly. Microsecond precision means even
+    rapid saves produce distinct etags; if the DB drops fractional
+    seconds the comparison still works because both sides round trip
+    through the same column.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
 class ThemeV3Service:
     """Service for V3 theme editor operations."""
 
@@ -33,32 +63,45 @@ class ThemeV3Service:
         self._store_repo = store_repo
 
     async def get_draft(self, store_id: UUID) -> dict[str, Any]:
-        """Get the current V3 draft. Falls back to normalizing V2 data."""
+        """Get the current V3 draft. Falls back to normalizing V2 data.
+
+        Kept for backward compatibility — `get_draft_with_etag` is the
+        preferred entry point now.
+        """
+        result = await self.get_draft_with_etag(store_id)
+        return result["draft"]
+
+    async def get_draft_with_etag(self, store_id: UUID) -> dict[str, Any]:
+        """Like get_draft but also returns an etag the client can echo
+        back on autosave for optimistic concurrency control.
+        """
         store_theme = await self._store_theme_repo.get_active_for_store(store_id)
         if not store_theme:
-            return {}
+            return {"draft": {}, "etag": None}
+
+        etag = _etag_from(getattr(store_theme, "updated_at", None))
 
         # Prefer V3 draft if present and well-formed
         if (
             store_theme.draft_customization_v3
             and store_theme.draft_customization_v3.get("schema_version") == 3
         ):
-            return store_theme.draft_customization_v3
+            return {"draft": store_theme.draft_customization_v3, "etag": etag}
 
         # Then V3 published
         if (
             store_theme.customization_v3
             and store_theme.customization_v3.get("schema_version") == 3
         ):
-            return store_theme.customization_v3
+            return {"draft": store_theme.customization_v3, "etag": etag}
 
         # Fall back to normalizing legacy data (Dual-Read)
         legacy = store_theme.customization or store_theme.draft_customization or {}
         if legacy:
             v3 = normalize_legacy_to_v3(legacy)
-            return v3.model_dump()
+            return {"draft": v3.model_dump(), "etag": etag}
 
-        return {}
+        return {"draft": {}, "etag": etag}
 
     async def get_published(self, store_id: UUID) -> dict[str, Any]:
         """Get the currently published V3 customization (no draft)."""
@@ -81,16 +124,38 @@ class ThemeV3Service:
         payload: dict[str, Any],
         user_id: UUID | None = None,
         change_summary: str | None = None,
+        expected_etag: str | None = None,
     ) -> dict[str, Any]:
         """Auto-save a V3 draft with Dual-Write to legacy columns.
 
         Skips writing a version row if the payload is unchanged from the
         previous draft (idempotent autosave). Prunes older autosaves
         beyond AUTOSAVE_RETENTION.
+
+        When `expected_etag` is provided, raises StaleEtagError if it
+        doesn't match the current store_theme.updated_at — meaning a
+        different editor saved since this draft was loaded. The route
+        layer maps that to 409.
+
+        First-write callers (no prior etag to compare) can omit
+        `expected_etag` and skip the conflict check; this preserves
+        existing test fixtures and bootstrap flows. Production clients
+        should always pass it after the first /draft fetch.
         """
         store_theme = await self._store_theme_repo.get_active_for_store(store_id)
         if not store_theme:
             raise ValueError(f"No active theme for store {store_id}")
+
+        # Optimistic concurrency guard. We do this BEFORE Pydantic
+        # validation so a conflict with stale data short-circuits even
+        # if the payload is malformed.
+        current_etag = _etag_from(getattr(store_theme, "updated_at", None))
+        if expected_etag is not None and current_etag != expected_etag:
+            current = await self.get_draft_with_etag(store_id)
+            raise StaleEtagError(
+                current_etag=current["etag"],
+                current_draft=current["draft"],
+            )
 
         # Validate V3 payload (raises ValidationError on bad input — caller
         # converts to 400). Includes external_theme URL allowlist enforcement.

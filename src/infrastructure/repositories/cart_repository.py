@@ -15,11 +15,15 @@ class RedisCartRepository(ICartRepository):
     """Cart repository implementation using Redis.
 
     Stores carts with session-based keys and automatic TTL expiration.
-    Default TTL is 7 days for cart persistence.
+    Default TTL matches the storefront's `numu_cart_session` cookie
+    lifetime (30 days). When the two diverge, a returning visitor whose
+    cookie has not yet expired can resolve to a Redis key that is gone,
+    silently losing their cart — a footgun that surfaced after the
+    initial 7-day Redis TTL was set.
     """
 
-    # Default TTL: 7 days in seconds
-    DEFAULT_TTL_SECONDS: int = 7 * 24 * 60 * 60
+    # Default TTL: 30 days in seconds — matches the storefront cookie.
+    DEFAULT_TTL_SECONDS: int = 30 * 24 * 60 * 60
 
     SESSION_KEY_PREFIX: str = "cart:session"
     CUSTOMER_KEY_PREFIX: str = "cart:customer"
