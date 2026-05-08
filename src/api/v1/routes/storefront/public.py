@@ -8,7 +8,7 @@ These routes are publicly accessible without authentication:
 - Customer registration and login
 """
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import (
@@ -21,7 +21,7 @@ from fastapi import (
     Response,
     status,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from src.api.dependencies import (
     CursorParams,
@@ -38,6 +38,7 @@ from src.api.dependencies import (
     get_store_repository,
     get_token_service,
 )
+from src.api.dependencies.repositories import get_product_subscription_repository
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import (
     clear_customer_auth_cookies,
@@ -805,6 +806,161 @@ async def get_product_by_slug(
             updated_at=str(product.updated_at),
         ),
         message="Product retrieved successfully",
+    )
+
+
+class BackInStockSubscribeRequest(BaseModel):
+    """Body for `POST /products/{id}/notify-back-in-stock` (Phase 3.5)."""
+
+    email: EmailStr = Field(..., max_length=254, description="Recipient email")
+    variant_id: UUID | None = Field(
+        None,
+        description=(
+            "Specific variant to wait on (e.g. Large/Blue). When omitted, "
+            "the subscription fires the moment the product-level stock "
+            "flips back in."
+        ),
+    )
+
+
+@router.post(
+    "/products/{product_id}/notify-back-in-stock",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Subscribe an email to back-in-stock notifications",
+    operation_id="notify_back_in_stock",
+)
+async def notify_back_in_stock(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_id: Annotated[UUID, Path(description="Product ID")],
+    body_in: BackInStockSubscribeRequest,
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    sub_repo: Annotated[
+        Any,
+        Depends(get_product_subscription_repository),
+    ],
+):
+    """Phase 3.5 — record a back-in-stock subscription.
+
+    Idempotent: a second click for the same (product, variant, email)
+    upserts to the existing row so the customer can't accidentally
+    flood the queue. Returns 202 (request accepted) without confirming
+    whether the email is new or existing — that distinction is internal.
+
+    The Celery sweep task (`product_subscription_sweep`) handles
+    delivery on its hourly schedule. Out of scope for this endpoint:
+    we never email synchronously here, since a single product flipping
+    in-stock could fan out to thousands of subscribers.
+
+    Returns 200 with `{ status: "subscribed" }` on success even when
+    the product is currently in-stock — the customer's intent ("notify
+    me next time it goes back in stock") is preserved for the next
+    stockout cycle. The Celery sweep skips currently-in-stock products
+    that haven't seen a stockout-then-restock cycle.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    product = await product_repo.get_by_id(product_id)
+    if not product or product.store_id != store_id:
+        raise EntityNotFoundError("Product", str(product_id))
+
+    await sub_repo.upsert_subscription(
+        tenant_id=store.tenant_id or store_id,
+        store_id=store_id,
+        product_id=product_id,
+        variant_id=body_in.variant_id,
+        email=body_in.email,
+    )
+
+    return SuccessResponse(
+        data={"status": "subscribed"},
+        message="You'll be notified when this product is back in stock.",
+    )
+
+
+@router.get(
+    "/products/{product_id}/related",
+    summary="Related products (same category, excluding self)",
+    operation_id="get_related_products",
+)
+async def get_related_products(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    product_id: Annotated[UUID, Path(description="Product ID")],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    limit: int = Query(4, ge=1, le=24),
+):
+    """Phase 3.3 — same-category-minus-self recommendations.
+
+    The SDK's `useRelatedProducts(productId)` consumes this. The
+    recommendation is intentionally simple in v1 (same category, drop
+    the source); collaborative filtering / "frequently bought together"
+    lands in Phase 4 once the funnel-events table has enough volume to
+    train against.
+
+    Returns an empty `items` array (HTTP 200) when:
+      - the product has no category, OR
+      - the category has no other products yet, OR
+      - the category exists but every sibling is inactive.
+
+    Themes branch on `items.length` and either render the section or
+    skip it — they should NOT show an error UI for an empty result.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    source = await product_repo.get_by_id(product_id)
+    if not source or source.store_id != store_id:
+        raise EntityNotFoundError("Product", str(product_id))
+
+    # No category → no recommendation surface. Empty list rather than
+    # 400 so the SDK hook can render unconditionally and skip.
+    if not source.category_id:
+        return SuccessResponse(
+            data={"items": [], "total": 0},
+            message="No related products",
+        )
+
+    # Pull a slightly larger page than `limit` so we have headroom to
+    # drop the source product without making a second call. by_category
+    # already filters to active products via the storefront use case.
+    use_case = ListProductsUseCase(product_repository=product_repo)
+    fetched = await use_case.by_category(
+        category_id=source.category_id,
+        page=1,
+        page_size=limit + 1,
+    )
+    siblings = [p for p in fetched.items if p.id != product_id][:limit]
+
+    items: list[dict] = []
+    for product in siblings:
+        items.append({
+            "id": str(product.id),
+            "store_id": str(product.store_id),
+            "name": product.name,
+            "slug": product.slug,
+            "description": product.description,
+            "short_description": product.short_description,
+            "price": str(product.price),
+            "price_currency": product.price_currency,
+            "compare_at_price": str(product.compare_at_price)
+            if product.compare_at_price
+            else None,
+            "sku": product.sku,
+            "quantity": product.quantity,
+            "is_in_stock": product.is_in_stock,
+            "is_on_sale": product.is_on_sale,
+            "category_id": str(product.category_id) if product.category_id else None,
+            "images": product.images,
+            "tags": product.tags,
+        })
+
+    return SuccessResponse(
+        data={"items": items, "total": len(items)},
+        message="Related products retrieved",
     )
 
 
