@@ -37,7 +37,9 @@ MAX_BUNDLES_PER_PRODUCT = 10  # Shopify allows up to 10
 class CreateBundleRequest(BaseModel):
     """Create a single bundle association."""
 
-    primary_product_id: str = Field(..., description="Product whose page shows the widget")
+    primary_product_id: str = Field(
+        ..., description="Product whose page shows the widget"
+    )
     bundled_product_id: str = Field(..., description="Product to recommend")
     discount_type: str = Field("none", description="none | percentage | fixed")
     discount_value: int = Field(0, ge=0, description="Discount amount (% or cents)")
@@ -51,9 +53,7 @@ class BulkSetBundlesRequest(BaseModel):
     """Replace all bundles for a primary product (set operation)."""
 
     primary_product_id: str = Field(..., description="Product whose bundles to replace")
-    bundles: list["BundleItemRequest"] = Field(
-        ..., max_length=MAX_BUNDLES_PER_PRODUCT
-    )
+    bundles: list["BundleItemRequest"] = Field(..., max_length=MAX_BUNDLES_PER_PRODUCT)
 
 
 class BundleItemRequest(BaseModel):
@@ -179,20 +179,18 @@ async def create_bundle(
             detail=f"Maximum {MAX_BUNDLES_PER_PRODUCT} bundles per product",
         )
 
-    bundle = await bundle_repo.create(
-        {
-            "store_id": store.id,
-            "tenant_id": store.tenant_id,
-            "primary_product_id": primary_id,
-            "bundled_product_id": bundled_id,
-            "discount_type": request.discount_type,
-            "discount_value": request.discount_value,
-            "position": request.position,
-            "is_active": request.is_active,
-            "section_title_en": request.section_title_en,
-            "section_title_ar": request.section_title_ar,
-        }
-    )
+    bundle = await bundle_repo.create({
+        "store_id": store.id,
+        "tenant_id": store.tenant_id,
+        "primary_product_id": primary_id,
+        "bundled_product_id": bundled_id,
+        "discount_type": request.discount_type,
+        "discount_value": request.discount_value,
+        "position": request.position,
+        "is_active": request.is_active,
+        "section_title_en": request.section_title_en,
+        "section_title_ar": request.section_title_ar,
+    })
 
     return SuccessResponse(
         data=_bundle_response(bundle),
@@ -241,20 +239,18 @@ async def set_bundles(
 
     items = []
     for idx, item in enumerate(request.bundles):
-        items.append(
-            {
-                "store_id": store.id,
-                "tenant_id": store.tenant_id,
-                "primary_product_id": primary_id,
-                "bundled_product_id": UUID(item.bundled_product_id),
-                "discount_type": item.discount_type,
-                "discount_value": item.discount_value,
-                "position": item.position if item.position else idx,
-                "is_active": item.is_active,
-                "section_title_en": item.section_title_en,
-                "section_title_ar": item.section_title_ar,
-            }
-        )
+        items.append({
+            "store_id": store.id,
+            "tenant_id": store.tenant_id,
+            "primary_product_id": primary_id,
+            "bundled_product_id": UUID(item.bundled_product_id),
+            "discount_type": item.discount_type,
+            "discount_value": item.discount_value,
+            "position": item.position if item.position else idx,
+            "is_active": item.is_active,
+            "section_title_en": item.section_title_en,
+            "section_title_ar": item.section_title_ar,
+        })
 
     bundles = await bundle_repo.bulk_create(items) if items else []
 

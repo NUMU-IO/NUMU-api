@@ -214,6 +214,13 @@ AVAILABLE_THEMES = [
         "description": "Bold streetwear aesthetic — vibrant amber/yellow palette, chunky uppercase typography, organic wavy shapes, and split product layouts",
     },
     {
+        "id": "vionne",
+        "name": "Vionne",
+        "nameAr": "فيون",
+        "layout": "vionne",
+        "description": "Refined grayscale storefront for modest fashion. Crisp typography, slow fade slideshow, draggable before/after, and motion-led product cards.",
+    },
+    {
         "id": "saw-saw",
         "name": "Saw Saw — The Gilded Curator",
         "nameAr": "Saw Saw — The Gilded Curator",

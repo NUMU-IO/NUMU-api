@@ -250,38 +250,44 @@ async def get_analytics_top_products(
 
     Preferred path: merge ``top_products_json`` across daily rollup rows
     (cheap — at most ``days`` rows × ~50 products each). Fallback when
-    rollup is empty: SQL aggregation on the orders table that unnests
-    ``line_items`` JSONB and groups by ``product_id`` — replaces the
-    previous ``limit=1000`` truncated Python loop.
+    no products are present in the rollup window — either because the
+    nightly task hasn't run yet OR because every rollup row's
+    ``top_products_json`` is empty (legacy data, before the COD-pending
+    fix) — falls through to a live SQL aggregation on the orders table.
     """
     today = date.today()
     date_from = today - timedelta(days=days)
 
     rollups = await rollup_repo.get_range(store.id, date_from, today)
 
-    if rollups:
-        merged: dict[str, dict] = {}
-        for r in rollups:
-            for item in r.top_products_json or []:
-                pid = str(item.get("product_id", ""))
-                if not pid:
-                    continue
-                if pid not in merged:
-                    merged[pid] = {
-                        "id": pid,
-                        "name": item.get("name", ""),
-                        "sku": item.get("sku"),
-                        "quantity": 0,
-                        "revenue": 0,
-                    }
-                merged[pid]["quantity"] += item.get("quantity", 0)
-                merged[pid]["revenue"] += item.get("revenue", 0)
+    merged: dict[str, dict] = {}
+    for r in rollups or []:
+        for item in r.top_products_json or []:
+            pid = str(item.get("product_id", ""))
+            if not pid:
+                continue
+            if pid not in merged:
+                merged[pid] = {
+                    "id": pid,
+                    "name": item.get("name", ""),
+                    "sku": item.get("sku"),
+                    "quantity": 0,
+                    "revenue": 0,
+                }
+            merged[pid]["quantity"] += item.get("quantity", 0)
+            merged[pid]["revenue"] += item.get("revenue", 0)
 
+    if merged:
         sorted_products = sorted(
             merged.values(), key=lambda x: x["revenue"], reverse=True
         )[:limit]
         total_revenue = sum(p["revenue"] for p in merged.values())
     else:
+        # Fallback: rollup either hasn't run yet OR ran with the old
+        # is_paid gate that produced empty top_products_json. The live
+        # SQL path covers both cases — runs on demand, no rollup
+        # dependency. Slightly more expensive but only triggers when
+        # the rollup didn't have anything to merge.
         now = datetime.now(UTC)
         period_start = now - timedelta(days=days)
         rows = await analytics_repo.top_products(
