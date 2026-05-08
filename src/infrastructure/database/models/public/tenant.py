@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -115,6 +115,29 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
+    # ─── Subscription / billing (migration e5f6a7b80c12) ──────────────────
+    paymob_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    paymob_subscription_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    payment_method_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    next_renewal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    billing_cycle: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    subscription_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # ─── Recurring billing (backend-005) ──────────────────────────────────
+    paymob_card_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    renewal_retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+
     # Relationships
     owner = relationship("UserModel", back_populates="owned_tenants", lazy="selectin")
     stores = relationship("StoreModel", back_populates="tenant", lazy="selectin")
@@ -123,7 +146,7 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     def schema_name(self) -> str:
         """Get the tenant's database schema name from settings."""
         if self.settings and "schema_name" in self.settings:
-            return self.settings["schema_name"]
+            return str(self.settings["schema_name"])
         # Fallback: derive from subdomain
         return f"tenant_{self.subdomain}"
 
