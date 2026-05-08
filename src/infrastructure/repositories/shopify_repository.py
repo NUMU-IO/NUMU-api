@@ -250,15 +250,32 @@ class RiskAssessmentRepository:
         return result.scalar_one_or_none()
 
     async def list_by_store(
-        self, store_id: UUID, *, limit: int = 50, offset: int = 0
+        self,
+        store_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        shopify_order_id: str | None = None,
     ) -> list[RiskAssessmentModel]:
-        result = await self.session.execute(
-            select(RiskAssessmentModel)
-            .where(RiskAssessmentModel.store_id == store_id)
-            .order_by(RiskAssessmentModel.created_at.desc())
+        """List risk assessments for a store.
+
+        When `shopify_order_id` is supplied, results are filtered to
+        that single Shopify order — used by the order-risk-card admin
+        block extension (Shopify-app feature 003) to fetch one record
+        per order page render instead of the full ~50-item dashboard
+        list.
+        """
+        stmt = select(RiskAssessmentModel).where(
+            RiskAssessmentModel.store_id == store_id
+        )
+        if shopify_order_id is not None:
+            stmt = stmt.where(RiskAssessmentModel.shopify_order_id == shopify_order_id)
+        stmt = (
+            stmt.order_by(RiskAssessmentModel.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def update_action(
