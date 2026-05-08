@@ -1314,12 +1314,47 @@ async def refresh_customer_token(
             detail="Token does not belong to this store",
         )
 
+    # Phase 5.1 — rotation reuse detection. The refresh token carries
+    # a jti; once consumed it's blacklisted in Redis with a TTL
+    # matching the token's remaining lifetime. A second use of the
+    # same jti = signal of theft. We reject + clear cookies + log so
+    # the legitimate user re-logs in (their next refresh fails the
+    # same check, which is the intended behavior — both stolen and
+    # legitimate sessions die at the suspicious event).
+    from src.application.services.refresh_token_blacklist_service import (
+        RefreshTokenBlacklistService,
+    )
+    from src.config.logging_config import get_logger as _get_logger
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    blacklist = RefreshTokenBlacklistService(RedisCacheService())
+    if payload.jti and await blacklist.is_used(payload.jti):
+        _get_logger(__name__).warning(
+            "customer_refresh_token_reuse_detected",
+            customer_id=str(payload.customer_id),
+            store_id=str(payload.store_id),
+            jti=payload.jti,
+        )
+        clear_customer_auth_cookies(response)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token reuse detected — please sign in again.",
+        )
+
     customer = await customer_repo.get_by_id(payload.customer_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Customer not found",
         )
+
+    # Mark the consumed jti as used BEFORE issuing fresh tokens so a
+    # narrow race (two near-simultaneous refreshes from the same
+    # cookie) doesn't double-issue. The losing call sees the jti
+    # already blacklisted and 401s — the client retries with the
+    # fresh refresh that the winning call set.
+    if payload.jti:
+        await blacklist.mark_used(payload.jti, payload.exp)
 
     new_access = token_service.create_customer_access_token(customer)
     new_refresh = token_service.create_customer_refresh_token(customer)
