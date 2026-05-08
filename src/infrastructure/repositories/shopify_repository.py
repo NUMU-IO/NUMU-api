@@ -35,6 +35,9 @@ from src.infrastructure.database.models.tenant.shopify_app_settings import (
 from src.infrastructure.database.models.tenant.shopify_installation import (
     ShopifyInstallationModel,
 )
+from src.infrastructure.database.models.tenant.shopify_subscription import (
+    ShopifySubscriptionModel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -806,3 +809,114 @@ class PaymentLinkSessionRepository:
             ),
             "conversion_revenue_cents": revenue,
         }
+
+
+# ---------------------------------------------------------------------------
+# ShopifySubscriptionRepository (backend-001)
+# ---------------------------------------------------------------------------
+
+
+_TERMINAL_STATUSES = ("CANCELLED", "EXPIRED", "FROZEN", "DECLINED")
+
+
+class ShopifySubscriptionRepository:
+    """CRUD for shopify_subscriptions table.
+
+    Source of truth is Shopify; the Shopify-app's syncSubscriptionToNumu
+    helper upserts a row here on every subscription create/cancel/upgrade.
+    The Numu dashboard + admin tools read from this table to display the
+    merchant's plan + cycle without re-querying Shopify on every page
+    load.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def upsert(
+        self,
+        *,
+        store_id: UUID,
+        shopify_subscription_id: str,
+        status: str,
+        plan_id: str,
+        is_trial: bool,
+        trial_ends_at: datetime | None,
+        current_period_end: datetime | None,
+        tenant_id: UUID | None = None,
+    ) -> ShopifySubscriptionModel:
+        """Insert-or-update by (store_id, shopify_subscription_id).
+
+        cancelled_at is set the first time `status` transitions to a
+        terminal state and preserved on retries via COALESCE so the
+        audit timestamp is always the earliest one.
+        """
+        now = datetime.now()
+        becomes_terminal = status in _TERMINAL_STATUSES
+        stmt = (
+            pg_insert(ShopifySubscriptionModel)
+            .values(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                shopify_subscription_id=shopify_subscription_id,
+                status=status,
+                plan_id=plan_id,
+                is_trial=is_trial,
+                trial_ends_at=trial_ends_at,
+                current_period_end=current_period_end,
+                cancelled_at=now if becomes_terminal else None,
+                synced_at=now,
+            )
+            .on_conflict_do_update(
+                constraint="uq_shopify_subscription_store_sub",
+                set_={
+                    "status": status,
+                    "plan_id": plan_id,
+                    "is_trial": is_trial,
+                    "trial_ends_at": trial_ends_at,
+                    "current_period_end": current_period_end,
+                    "cancelled_at": (
+                        # Earliest timestamp wins so retries don't churn it.
+                        # COALESCE(existing, now-if-now-terminal-else-NULL).
+                        func.coalesce(
+                            ShopifySubscriptionModel.cancelled_at,
+                            now if becomes_terminal else None,
+                        )
+                    ),
+                    "synced_at": now,
+                    # tenant_id is intentionally not updated — once set it
+                    # belongs to that tenant for the row's lifetime.
+                },
+            )
+            .returning(ShopifySubscriptionModel)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.scalar_one()
+
+    async def get_active(self, store_id: UUID) -> ShopifySubscriptionModel | None:
+        """Return the most recent non-terminal subscription for a store.
+
+        "Most recent" = highest synced_at among rows whose status is not
+        in the terminal set. Returns None if the store has none.
+        """
+        stmt = (
+            select(ShopifySubscriptionModel)
+            .where(
+                ShopifySubscriptionModel.store_id == store_id,
+                ShopifySubscriptionModel.status.notin_(_TERMINAL_STATUSES),
+            )
+            .order_by(ShopifySubscriptionModel.synced_at.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_subscription_id(
+        self, store_id: UUID, shopify_subscription_id: str
+    ) -> ShopifySubscriptionModel | None:
+        stmt = select(ShopifySubscriptionModel).where(
+            ShopifySubscriptionModel.store_id == store_id,
+            ShopifySubscriptionModel.shopify_subscription_id == shopify_subscription_id,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()

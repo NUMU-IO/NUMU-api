@@ -107,3 +107,28 @@ class ShopifyAppSettings(BaseEntity):
     auto_cancel_threshold: int = 90
     paymob_connected: bool = False
     whatsapp_connected: bool = False
+
+
+class ShopifySubscription(BaseEntity):
+    """Shopify Billing API subscription record (numu-trust-network plan).
+
+    Source of truth is Shopify; this row is a synced copy posted by the
+    Shopify-app's `syncSubscriptionToNumu` after every subscription
+    create/cancel/upgrade. Used by the Numu dashboard + admin tools to
+    display merchant plan + cycle without re-querying Shopify.
+
+    Plan IDs match the Shopify-app's `PlanId` literal type
+    (`numu-payments-intelligence/app/lib/billing/plans.ts`):
+    "starter" | "growth" | "scale".
+    """
+
+    store_id: UUID
+    tenant_id: UUID | None = None
+    shopify_subscription_id: str
+    status: str  # ACTIVE | ACCEPTED | PENDING | DECLINED | EXPIRED | CANCELLED | FROZEN
+    plan_id: str  # starter | growth | scale
+    is_trial: bool = False
+    trial_ends_at: datetime | None = None
+    current_period_end: datetime | None = None
+    cancelled_at: datetime | None = None
+    synced_at: datetime = Field(default_factory=datetime.now)
