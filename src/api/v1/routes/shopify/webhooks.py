@@ -243,7 +243,22 @@ async def _handle_order_created(
         ],
     )
 
-    # ── 4. Enqueue full 5-factor Celery task (async, <10s) ──────────────────
+    # ── 4. Enqueue full 8-factor Celery task (async, <10s) ──────────────────
+    # Extract created_at and aggregated product tags from the payload
+    # so the task can score time_pattern + product_risk (backend-016).
+    created_at_iso = payload.get("created_at") or payload.get("processed_at")
+    product_tags: list[str] = []
+    for li in payload.get("line_items", []) or []:
+        tags_field = li.get("tags") or li.get("product_tags") or ""
+        if isinstance(tags_field, str) and tags_field:
+            product_tags.extend(t.strip() for t in tags_field.split(",") if t.strip())
+        elif isinstance(tags_field, list):
+            product_tags.extend(str(t).strip() for t in tags_field if t)
+    # Order-level tags too (Shopify exposes both per-line and per-order)
+    order_tags = payload.get("tags") or ""
+    if isinstance(order_tags, str) and order_tags:
+        product_tags.extend(t.strip() for t in order_tags.split(",") if t.strip())
+
     try:
         compute_full_risk_score.delay(
             assessment_id=str(model.id),
@@ -251,10 +266,12 @@ async def _handle_order_created(
             total_cents=total_cents,
             payment_method=payment_method,
             customer_total_orders=orders_count,
-            customer_cancellation_rate=None,  # Phase 3: enrich from store history
+            customer_cancellation_rate=None,  # enriched from store history in the task
             address=address_str,
             phone=phone or None,
             avg_order_cents=avg_order_cents,
+            created_at_iso=created_at_iso,
+            product_tags=product_tags or None,
         )
     except Exception as exc:
         # Celery unavailable → preliminary score stays operative, never crash

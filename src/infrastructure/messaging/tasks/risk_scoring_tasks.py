@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.infrastructure.messaging.celery_app import celery_app
@@ -54,6 +54,8 @@ def compute_full_risk_score(
     address: str | None,
     phone: str | None,
     avg_order_cents: int,
+    created_at_iso: str | None = None,
+    product_tags: list[str] | None = None,
 ) -> dict:
     """Compute and persist the full 5-factor risk score for a COD order.
 
@@ -80,8 +82,6 @@ def compute_full_risk_score(
     """
 
     async def _run() -> dict:
-        from datetime import datetime
-
         from sqlalchemy import func as sa_func
         from sqlalchemy import select, text, update
 
@@ -187,7 +187,23 @@ def compute_full_risk_score(
                         enriched_cancel_rate,
                     )
 
-        # ── 3. Compute full 5-factor score ─────────────────────────────────
+        # ── 3. Compute full 8-factor score (backend-016) ───────────────────
+        # Parse the order timestamp once so the time_pattern factor can
+        # check the Cairo-time hour. Bad ISO strings just degrade to
+        # the neutral baseline rather than failing the whole score.
+        parsed_created_at = None
+        if created_at_iso:
+            try:
+                parsed_created_at = datetime.fromisoformat(
+                    created_at_iso.replace("Z", "+00:00")
+                )
+            except ValueError:
+                logger.warning(
+                    "Could not parse created_at_iso %r — time_pattern factor "
+                    "will use the neutral baseline",
+                    created_at_iso,
+                )
+
         full_result = score_order(
             total_cents=total_cents,
             payment_method=payment_method,
@@ -198,6 +214,8 @@ def compute_full_risk_score(
             avg_order_cents=avg_order_cents,
             network_score=net_score,
             network_label=net_label,
+            created_at=parsed_created_at,
+            product_tags=product_tags,
         )
 
         factors_json = [
