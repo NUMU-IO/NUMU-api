@@ -356,6 +356,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Base URL of the Shopify-app companion (numu-payments-intelligence).
+    # Used by the verification-overage relay (backend-004) to POST usage
+    # events to the Shopify-app's /api/billing/usage-record endpoint.
+    # Default: empty string; must be set in production for backend-004
+    # to function.  Example: "https://shopify.numu.app".
+    shopify_app_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "shopify_app_url",
+            "SHOPIFY_APP_URL",
+        ),
+    )
+
     # Secret salt for HMAC-SHA256 hashing of phone numbers in the
     # network_reputation table.  Must be a 256-bit (32-byte) hex string.
     # NEVER store in code or database — env-only.
