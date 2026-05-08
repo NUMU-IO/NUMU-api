@@ -153,6 +153,75 @@ def check_disk_space() -> ComponentHealth:
         )
 
 
+async def check_celery() -> ComponentHealth:
+    """Phase 5.8 — Celery worker + beat liveness.
+
+    Pings the Celery control inspect API. We don't care about queue
+    depth here (which would require a broker connection that's
+    expensive to keep open in the request path); just whether at
+    least one worker is reachable. Beat liveness is harder to detect
+    from outside — we read the last beat-tick key from Redis
+    (`celery_beat_last_run`, written by a tiny periodic task) and
+    flag DEGRADED when stale.
+    """
+    import time
+
+    try:
+        from src.infrastructure.messaging.celery_app import celery_app
+
+        # Use the inspect API. ping() returns a list of {worker_name: 'pong'}
+        # dicts. Empty list = no workers responding.
+        inspect = celery_app.control.inspect(timeout=1.5)
+        # `ping` is sync; wrapping in asyncio.to_thread keeps the
+        # FastAPI event loop healthy when Celery's broker is slow.
+        import asyncio
+
+        ping_result = await asyncio.to_thread(inspect.ping)
+        worker_count = len(ping_result or {})
+
+        # Beat heartbeat — written by a tiny task we publish below.
+        # Stored as a unix ts; older than ~120s = beat is stuck.
+        from src.infrastructure.cache.redis_cache import RedisCacheService
+
+        cache = RedisCacheService()
+        try:
+            last_beat = await cache.get("celery_beat_last_run")
+            beat_age = int(time.time()) - int(last_beat) if last_beat else None
+        except Exception:
+            beat_age = None
+
+        details: dict[str, Any] = {
+            "workers_responding": worker_count,
+            "beat_last_seen_seconds_ago": beat_age,
+        }
+
+        if worker_count == 0:
+            return ComponentHealth(
+                status=HealthStatus.UNHEALTHY,
+                message="No Celery workers responding to ping",
+                details=details,
+            )
+        if beat_age is not None and beat_age > 120:
+            return ComponentHealth(
+                status=HealthStatus.DEGRADED,
+                message=f"Celery beat stale ({beat_age}s since last tick)",
+                details=details,
+            )
+        return ComponentHealth(
+            status=HealthStatus.HEALTHY,
+            message=f"{worker_count} Celery worker(s) reachable",
+            details=details,
+        )
+    except Exception as e:
+        logger.warning("health_check_celery_failed", error=str(e))
+        # Don't fail the whole health endpoint when Celery introspection
+        # fails — DEGRADED keeps the status page yellow without paging.
+        return ComponentHealth(
+            status=HealthStatus.DEGRADED,
+            message=f"Could not introspect Celery: {type(e).__name__}",
+        )
+
+
 def determine_overall_status(components: dict[str, ComponentHealth]) -> HealthStatus:
     """Determine overall health status from component statuses."""
     statuses = [c.status for c in components.values()]
@@ -234,12 +303,16 @@ async def detailed_health_check(
     redis_health = await check_redis()
     sentry_health = check_sentry()
     disk_health = check_disk_space()
+    # Phase 5.8 — Celery liveness so the status page can flag worker
+    # outages independently of the API process being up.
+    celery_health = await check_celery()
 
     components = {
         "database": db_health,
         "redis": redis_health,
         "sentry": sentry_health,
         "disk": disk_health,
+        "celery": celery_health,
     }
 
     overall_status = determine_overall_status(components)

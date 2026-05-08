@@ -1081,3 +1081,244 @@ class ResendEmailService(IEmailService):
                 error_code=str(exc)[:100],
             )
             raise
+
+    # ─── Phase 5.4 — back-in-stock + refund + abandoned-cart ──────────
+
+    async def send_back_in_stock(
+        self,
+        email: str,
+        product_name: str,
+        product_url: str,
+        product_image: str | None = None,
+        language: str = "ar",
+        *,
+        store_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        store_name: str = "NUMU",
+    ) -> bool:
+        """Phase 5.4 — back-in-stock notification email.
+
+        Wired by `notification_tasks.send_back_in_stock_email_task`,
+        which is enqueued by the hourly back-in-stock sweep when a
+        subscribed product flips back to in-stock. The sweep already
+        stamps `notified_at` regardless of delivery — failures here
+        won't re-fire because subscriptions are one-shot per cycle
+        (a customer who wants a second alert re-subscribes).
+        """
+        # Inline-render: the back-in-stock template doesn't yet exist in
+        # the merchant-customizable registry, so we keep the body local
+        # and route through send_email. When the registry adds the
+        # event_type, this swaps to _render_or_legacy with no callsite
+        # change.
+        ar = language == "ar"
+        subject = (
+            f"عاد {product_name} إلى المخزون"
+            if ar
+            else f"{product_name} is back in stock"
+        )
+        cta = "تسوّق الآن" if ar else "Shop now"
+        body_text = (
+            f"المنتج الذي طلبت تنبيهًا عنه متاح الآن في {store_name}."
+            if ar
+            else f"The product you asked about is back in stock at {store_name}."
+        )
+        img_block = (
+            f'<img src="{product_image}" alt="" style="max-width:240px;border-radius:8px;margin:16px 0;">'
+            if product_image
+            else ""
+        )
+        html = (
+            f'<div dir="{"rtl" if ar else "ltr"}" style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:24px;">'
+            f'<h1 style="font-size:20px;margin:0 0 12px;">{subject}</h1>'
+            f'<p style="margin:0 0 8px;color:#444;">{body_text}</p>'
+            f"{img_block}"
+            f'<p style="margin:24px 0 0;"><a href="{product_url}" '
+            f'style="background:#111;color:#fff;text-decoration:none;'
+            f'padding:12px 20px;border-radius:6px;display:inline-block;">'
+            f"{cta}</a></p>"
+            f"</div>"
+        )
+
+        message = EmailMessage(
+            to=email,
+            subject=subject,
+            html_content=html,
+        )
+        try:
+            ok = await self.send_email(message)
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="back_in_stock",
+                language=language,
+                subject=subject,
+                status="sent" if ok else "failed",
+                used_custom_template=False,
+                template_id=None,
+            )
+            return ok
+        except Exception as exc:
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="back_in_stock",
+                language=language,
+                subject=subject,
+                status="failed",
+                used_custom_template=False,
+                template_id=None,
+                error_code=str(exc)[:100],
+            )
+            raise
+
+    async def send_refund_confirmation(
+        self,
+        email: str,
+        order_number: str,
+        refund_amount: int,
+        currency: str,
+        language: str = "ar",
+        *,
+        store_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        store_name: str = "NUMU",
+    ) -> bool:
+        """Phase 5.4 — refund confirmation email.
+
+        Fired from the refund pipeline when a refund's status
+        transitions to COMPLETED. amount is in cents.
+        """
+        ar = language == "ar"
+        amt = f"{refund_amount / 100:.2f}"
+        subject = (
+            f"تم استرداد طلبك #{order_number}"
+            if ar
+            else f"Refund processed for order #{order_number}"
+        )
+        body = (
+            f"تم استرداد {amt} {currency} لطلبك #{order_number}. قد يستغرق "
+            "ظهور المبلغ في حسابك حتى 7 أيام عمل."
+            if ar
+            else (
+                f"We've refunded {amt} {currency} for order #{order_number}. "
+                "It may take up to 7 business days to appear in your account."
+            )
+        )
+        html = (
+            f'<div dir="{"rtl" if ar else "ltr"}" style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:24px;">'
+            f'<h1 style="font-size:20px;margin:0 0 12px;">{subject}</h1>'
+            f'<p style="margin:0 0 8px;color:#444;">{body}</p>'
+            f'<p style="margin:24px 0 0;color:#888;font-size:12px;">{store_name}</p>'
+            f"</div>"
+        )
+        message = EmailMessage(to=email, subject=subject, html_content=html)
+        try:
+            ok = await self.send_email(message)
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="refund_confirmation",
+                language=language,
+                subject=subject,
+                status="sent" if ok else "failed",
+                used_custom_template=False,
+                template_id=None,
+            )
+            return ok
+        except Exception as exc:
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="refund_confirmation",
+                language=language,
+                subject=subject,
+                status="failed",
+                used_custom_template=False,
+                template_id=None,
+                error_code=str(exc)[:100],
+            )
+            raise
+
+    async def send_abandoned_cart_recovery(
+        self,
+        email: str,
+        recovery_url: str,
+        cart_total: int,
+        currency: str,
+        language: str = "ar",
+        *,
+        store_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        store_name: str = "NUMU",
+        customer_name: str | None = None,
+    ) -> bool:
+        """Phase 5.4 — abandoned-cart recovery email.
+
+        Triggered by `abandoned_cart_tasks.detect_abandoned_carts_task`
+        per the schedule defined in celery_app's beat (every 30
+        minutes). The Celery task already exists; previously it
+        invoked WhatsApp only, leaving email as a TODO. This method
+        is the email wing.
+        """
+        ar = language == "ar"
+        amt = f"{cart_total / 100:.2f}"
+        greet = (
+            f"مرحبًا {customer_name}"
+            if (ar and customer_name)
+            else (f"Hi {customer_name}" if customer_name else "Hi")
+        )
+        subject = "أكمل عملية الشراء" if ar else "You left items in your cart"
+        cta = "أكمل الطلب" if ar else "Resume checkout"
+        body = (
+            f"{greet}، السلة التي تركتها بقيمة {amt} {currency} لا تزال متاحة "
+            "— احجز عناصرك قبل نفادها."
+            if ar
+            else (
+                f"{greet}, the items in your cart ({amt} {currency}) "
+                "are still waiting. Grab them before they sell out."
+            )
+        )
+        html = (
+            f'<div dir="{"rtl" if ar else "ltr"}" style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:24px;">'
+            f'<h1 style="font-size:20px;margin:0 0 12px;">{subject}</h1>'
+            f'<p style="margin:0 0 8px;color:#444;">{body}</p>'
+            f'<p style="margin:24px 0 0;"><a href="{recovery_url}" '
+            f'style="background:#111;color:#fff;text-decoration:none;'
+            f'padding:12px 20px;border-radius:6px;display:inline-block;">'
+            f"{cta}</a></p>"
+            f'<p style="margin:24px 0 0;color:#888;font-size:12px;">{store_name}</p>'
+            f"</div>"
+        )
+        message = EmailMessage(to=email, subject=subject, html_content=html)
+        try:
+            ok = await self.send_email(message)
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="abandoned_cart_recovery",
+                language=language,
+                subject=subject,
+                status="sent" if ok else "failed",
+                used_custom_template=False,
+                template_id=None,
+            )
+            return ok
+        except Exception as exc:
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="abandoned_cart_recovery",
+                language=language,
+                subject=subject,
+                status="failed",
+                used_custom_template=False,
+                template_id=None,
+                error_code=str(exc)[:100],
+            )
+            raise
