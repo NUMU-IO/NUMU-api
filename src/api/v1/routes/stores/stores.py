@@ -301,3 +301,56 @@ async def delete_store(
     await use_case.execute(store_id=store.id, user_id=store.owner_id)
 
     return None
+
+
+# ─── Phase 5.11 — demo seed catalog ───────────────────────────────
+
+
+@router.post(
+    "/{store_id}/seed-demo",
+    summary="Seed demo catalog (5 products + 1 collection)",
+    operation_id="seed_demo_catalog",
+)
+async def seed_demo_catalog_route(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+):
+    """Phase 5.11 — opt-in demo seed.
+
+    Inserts 5 placeholder products + 1 starter collection so the
+    merchant can preview their storefront before uploading their own
+    catalog. Idempotent — re-running the seed against a store that
+    already has demo rows is a no-op (slug uniqueness covers it).
+
+    The merchant calls this from the hub onboarding flow when they
+    pick "Try with demo products" on store creation, OR later via
+    Settings → Demo Catalog → "Refresh demo data".
+    """
+    from src.application.services.demo_seed_service import seed_demo_catalog
+
+    counts = await seed_demo_catalog(
+        store_id=store.id,
+        tenant_id=store.tenant_id or store.id,
+    )
+    return {"seeded": True, **counts}
+
+
+@router.delete(
+    "/{store_id}/seed-demo",
+    summary="Remove demo catalog (bulk delete tagged products)",
+    operation_id="remove_demo_catalog",
+)
+async def remove_demo_catalog_route(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+):
+    """Phase 5.11 — bulk delete demo-tagged products.
+
+    Used by the hub's "Reset demo" / "I'm ready to go live" button
+    — merchants who started seeded but want a clean slate before
+    launch run this. Doesn't touch products without the `demo` tag,
+    so a merchant who edited a seeded product's tags off keeps that
+    product (intentional — once they edit it, it's "real").
+    """
+    from src.application.services.demo_seed_service import remove_demo_catalog
+
+    deleted = await remove_demo_catalog(store_id=store.id)
+    return {"deleted": deleted}
