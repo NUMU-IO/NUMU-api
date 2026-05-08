@@ -129,4 +129,113 @@ async def track_page_view(
     except Exception:
         pass  # Non-critical — don't break page tracking
 
+    # Phase 4.3 — fan out to merchant-configured analytics providers
+    # (GA4 / Meta CAPI / TikTok). Fire-and-forget; pixel failures must
+    # never block the storefront response.
+    try:
+        from src.application.services.analytics_dispatcher import (
+            AnalyticsDispatcher,
+            AnalyticsEvent,
+        )
+
+        dispatcher = AnalyticsDispatcher(getattr(store, "settings", {}) or {})
+        if dispatcher.enabled_providers:
+            await dispatcher.dispatch(
+                AnalyticsEvent(
+                    event_name=step,
+                    payload=body.step_data or {},
+                    client_id=body.fingerprint or "",
+                    source_ip=ip,
+                    user_agent=ua,
+                )
+            )
+    except Exception:
+        pass
+
+    return Response(status_code=204)
+
+
+# ─── Phase 4.3 — generic analytics event endpoint ─────────────────
+
+
+class TrackAnalyticsEventRequest(BaseModel):
+    """SDK's `useAnalytics().track()` POSTs this shape.
+
+    Distinct from the page-view tracker above because the event names
+    are arbitrary (custom events) and there's no path/referrer
+    obligation. The funnel-event row is recorded for reporting AND
+    the merchant's GA4/Meta/TikTok pixels are fanned out.
+    """
+
+    event: str = Field(..., max_length=64)
+    payload: dict | None = None
+    fingerprint: str | None = Field(None, max_length=64)
+    ts: int | None = None  # client-side ms timestamp; informational
+
+
+@router.post(
+    "/track-event",
+    status_code=204,
+    summary="Generic analytics event (fans to provider pixels)",
+    operation_id="track_analytics_event",
+)
+async def track_analytics_event(
+    body: TrackAnalyticsEventRequest,
+    request: Request,
+    store_id: Annotated[UUID, Path()],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
+):
+    """Phase 4.3 — receive a generic analytics event from the SDK.
+
+    Records the event in the funnel-events table for the merchant's
+    own dashboards AND fans out to GA4 / Meta CAPI / TikTok per the
+    store's `settings.analytics` config. All failures are swallowed —
+    analytics outages must never surface to the customer.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        return Response(status_code=204)
+
+    raw_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+        request.client.host if request.client else None
+    )
+    ip = _anonymize_ip(raw_ip)
+    ua = request.headers.get("user-agent", "")[:500]
+
+    # Funnel row: keeps a per-store audit log of every event the
+    # storefront fired, queryable by step name. Useful for "how many
+    # add_to_wishlist events did we get last week" without depending
+    # on a third-party pixel.
+    try:
+        await funnel_repo.create(
+            tenant_id=store.tenant_id,
+            store_id=store.id,
+            step=body.event,
+            session_fingerprint=body.fingerprint,
+            step_data=body.payload or {},
+        )
+    except Exception:
+        pass
+
+    try:
+        from src.application.services.analytics_dispatcher import (
+            AnalyticsDispatcher,
+            AnalyticsEvent,
+        )
+
+        dispatcher = AnalyticsDispatcher(getattr(store, "settings", {}) or {})
+        if dispatcher.enabled_providers:
+            await dispatcher.dispatch(
+                AnalyticsEvent(
+                    event_name=body.event,
+                    payload=body.payload or {},
+                    client_id=body.fingerprint or "",
+                    source_ip=ip,
+                    user_agent=ua,
+                )
+            )
+    except Exception:
+        pass
+
     return Response(status_code=204)
