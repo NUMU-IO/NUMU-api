@@ -141,6 +141,10 @@ class TenantInfoResponse(BaseModel):
     # Captured email from the Try-a-Demo form, so the merchant hub can
     # prefill the demo\u2192trial upgrade form. Only populated for demo tenants.
     demo_email: str | None = None
+    # Per-tenant feature flags. Read by the merchant hub to gate the
+    # `/marketing/promotions` nav and offers-v2 surfaces during phased
+    # rollout. Empty `{}` means no flags enabled (legacy default).
+    feature_flags: dict[str, bool] = {}
 
 
 # Keep TokenResponse for internal use / backward compat with use-case DTOs

@@ -104,11 +104,31 @@ class PromotionRepository(IPromotionRepository):
         return items, int(total)
 
     async def list_active_for_storefront(
-        self, store_id: UUID, now: datetime
+        self,
+        store_id: UUID,
+        now: datetime,
+        *,
+        include_drafts: bool = False,
     ) -> list[Promotion]:
-        stmt = (
-            select(PromotionModel)
-            .where(
+        # `include_drafts` powers the merchant builder preview iframe — we
+        # surface DRAFT / SCHEDULED / PAUSED on top of ACTIVE so the
+        # merchant can rehearse copy + targeting without flipping a row
+        # live. Schedule windows are intentionally NOT enforced in
+        # preview mode either, so a "scheduled to start in 3 days" promo
+        # is still visible while editing.
+        if include_drafts:
+            allowed_statuses = (
+                PromotionStatus.ACTIVE.value,
+                PromotionStatus.DRAFT.value,
+                PromotionStatus.SCHEDULED.value,
+                PromotionStatus.PAUSED.value,
+            )
+            where_clauses = [
+                PromotionModel.store_id == store_id,
+                PromotionModel.status.in_(allowed_statuses),
+            ]
+        else:
+            where_clauses = [
                 PromotionModel.store_id == store_id,
                 PromotionModel.status == PromotionStatus.ACTIVE.value,
                 or_(
@@ -119,7 +139,10 @@ class PromotionRepository(IPromotionRepository):
                     PromotionModel.ends_at.is_(None),
                     PromotionModel.ends_at > now,
                 ),
-            )
+            ]
+        stmt = (
+            select(PromotionModel)
+            .where(*where_clauses)
             .order_by(
                 PromotionModel.priority.desc(),
                 PromotionModel.created_at.desc(),
@@ -201,6 +224,38 @@ class PromotionRepository(IPromotionRepository):
             )
         ).scalar_one()
         return self.mapper.promotion_to_entity(refreshed)
+
+    async def bulk_set_priority(
+        self, store_id: UUID, items: list[tuple[UUID, int]]
+    ) -> None:
+        if not items:
+            return
+        # Single UPDATE … FROM (VALUES …) keeps the round-trip count to
+        # one and the version bump deterministic. Filtering by
+        # `store_id` inside the WHERE means a forged payload mixing
+        # foreign promotion ids has no effect — we just don't touch them.
+        from sqlalchemy import bindparam, update
+
+        # Parameterized UPDATE … WHERE id = … (single row) per item is
+        # fine here — `items` is bounded at ~200 by the route schema and
+        # asyncpg pipelines them on one connection. Avoiding a CTE keeps
+        # the SQL portable for tests that point at sqlite.
+        for promo_id, priority in items:
+            stmt = (
+                update(PromotionModel)
+                .where(
+                    PromotionModel.id == bindparam("pid"),
+                    PromotionModel.store_id == bindparam("sid"),
+                )
+                .values(
+                    priority=bindparam("prio"),
+                    version=PromotionModel.version + 1,
+                )
+            )
+            await self.session.execute(
+                stmt, {"pid": promo_id, "sid": store_id, "prio": priority}
+            )
+        await self.session.flush()
 
     async def delete(self, store_id: UUID, promotion_id: UUID) -> None:
         existing = await self.session.get(PromotionModel, promotion_id)

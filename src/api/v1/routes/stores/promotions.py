@@ -11,8 +11,14 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.dependencies import verify_store_ownership
+from src.api.dependencies.feature_flags import require_feature_flag
+from src.api.dependencies.promotion_preview import (
+    PREVIEW_TOKEN_TTL,
+    issue_preview_token,
+)
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_promotion_display_repository,
@@ -69,7 +75,135 @@ from src.infrastructure.repositories.promotion_repository import (
     PromotionTranslationRepository,
 )
 
-router = APIRouter(prefix="/{store_id}/promotions")
+router = APIRouter(
+    prefix="/{store_id}/promotions",
+    # Per the offers-v2 rollout plan (step 14 §2): merchant promotions
+    # endpoints 404 until the tenant has `ff_promotions_v2` enabled.
+    # Returning 404 (not 403) avoids leaking that the feature exists
+    # while it's being rolled out in waves.
+    dependencies=[Depends(require_feature_flag("ff_promotions_v2"))],
+)
+
+
+# --------------------------------------------------------------------------- #
+# Bulk reorder                                                                #
+# --------------------------------------------------------------------------- #
+
+
+class ReorderPromotionRow(BaseModel):
+    """Single (id, priority) pair for the bulk-reorder endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    promotion_id: UUID
+    priority: int = Field(ge=0, le=10000)
+
+
+class ReorderPromotionsRequest(BaseModel):
+    """Body of `PATCH /stores/{id}/promotions/reorder`.
+
+    Caller sends the full set of (promotion_id, priority) pairs the
+    drag UI just produced. The endpoint sets each row's priority in a
+    single transaction and bumps `version` on every touched row, so
+    concurrent edits from another tab still produce a deterministic
+    final order rather than silently losing one side's changes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ReorderPromotionRow] = Field(min_length=1, max_length=200)
+
+
+@router.patch(
+    "/reorder",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Bulk-update promotion priorities (drag-to-reorder)",
+    operation_id="reorder_promotions",
+)
+async def reorder_promotions(
+    body: ReorderPromotionsRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    promo_repo: Annotated[PromotionRepository, Depends(get_promotion_repository)],
+) -> None:
+    """Apply new priority values for a batch of promotions in one go.
+
+    The drag-to-reorder UI sends the full reordered list each time the
+    user drops a row; the server doesn't try to compute deltas, just
+    overwrites the priority on every id provided. Promotions belonging
+    to a different store are silently skipped — defensive against a
+    forged payload from a malicious tab.
+    """
+    # Validate each row's `promotion_id` belongs to `store.id` before
+    # we mutate. Cheaper than per-row checks inside the repo because
+    # we'd otherwise need a SELECT-then-UPDATE for each row.
+    ids = [row.promotion_id for row in body.items]
+    existing, _ = await promo_repo.list_for_store(
+        store.id, limit=len(ids) + 1, offset=0
+    )
+    existing_ids = {p.id for p in existing}
+    valid_pairs = [
+        (row.promotion_id, row.priority)
+        for row in body.items
+        if row.promotion_id in existing_ids
+    ]
+    if not valid_pairs:
+        return
+
+    # Defer the multi-row UPDATE to the repo so the SQL stays in one
+    # place and we get the version bump for free.
+    await promo_repo.bulk_set_priority(store.id, valid_pairs)
+
+
+# --------------------------------------------------------------------------- #
+# Preview token                                                               #
+# --------------------------------------------------------------------------- #
+
+
+class PreviewTokenResponse(BaseModel):
+    """Short-lived JWT that unlocks draft-state preview on the storefront.
+
+    The merchant hub appends `?_npt=<token>` to the storefront URL when
+    opening the builder iframe; the storefront forwards the token as
+    `X-Preview-Token` on its server-side promotions fetch.
+    """
+
+    token: str = Field(description="Signed preview JWT (5-minute TTL).")
+    expires_at: str = Field(description="ISO-8601 expiry of the token.")
+    ttl_seconds: int = Field(
+        description=(
+            "Lifetime of the token in seconds — handy for the merchant "
+            "hub to schedule a silent refresh before expiry."
+        ),
+    )
+
+
+@router.post(
+    "/preview-token",
+    response_model=SuccessResponse[PreviewTokenResponse],
+    summary="Issue a short-lived preview token for the builder iframe",
+    operation_id="issue_promotion_preview_token",
+)
+async def create_preview_token(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+) -> SuccessResponse[PreviewTokenResponse]:
+    """Mint a 5-minute preview token scoped to this store.
+
+    No request body — the auth + path-scoping (`verify_store_ownership`)
+    already establish that the caller is the owner of `store_id`. Token
+    is signed with the same JWT key as access / refresh tokens, so it
+    inherits the platform's existing rotation story.
+    """
+    token, expires_at = issue_preview_token(
+        store_id=store.id, tenant_id=store.tenant_id
+    )
+    return SuccessResponse(
+        data=PreviewTokenResponse(
+            token=token,
+            expires_at=expires_at.isoformat(),
+            ttl_seconds=int(PREVIEW_TOKEN_TTL.total_seconds()),
+        ),
+        message="Preview token issued",
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -72,13 +72,23 @@ class PromotionResolver:
         page_path: str,
         *,
         now: datetime | None = None,
+        preview: bool = False,
     ) -> ResolvedPromotions:
+        """Resolve the visible promotion set for one visitor + page.
+
+        `preview=True` is set by the merchant builder iframe (validated
+        upstream by the storefront route from `X-Preview-Token`). In
+        preview mode the repo also returns DRAFT / SCHEDULED / PAUSED
+        rows so the merchant can see un-published changes before going
+        live; eligibility / dismissal filtering still runs so what they
+        see matches what real visitors will see.
+        """
         moment = now or datetime.now(UTC)
 
-        # 1. Load active promotions (with displays/targets eagerly loaded
-        #    by the infra repo for performance).
+        # 1. Load active (or active+draft for preview) promotions —
+        #    displays/targets are eagerly loaded by the infra repo.
         promotions = await self._promotion_repo.list_active_for_storefront(
-            store_id, moment
+            store_id, moment, include_drafts=preview
         )
 
         # 2. Hydrate dismissals once per call.

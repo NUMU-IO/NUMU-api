@@ -53,6 +53,7 @@ from src.infrastructure.database.models.tenant.product_review import ProductRevi
 from src.infrastructure.database.models.tenant.promotion import (
     PromotionDismissalModel,
     PromotionDisplayModel,
+    PromotionEventDailyModel,
     PromotionEventModel,
     PromotionModel,
     PromotionTargetModel,
@@ -139,6 +140,7 @@ __all__ = [
     "PromotionModel",
     "PromotionDismissalModel",
     "PromotionDisplayModel",
+    "PromotionEventDailyModel",
     "PromotionEventModel",
     "PromotionTargetModel",
     "PromotionTranslationModel",

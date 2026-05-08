@@ -32,8 +32,14 @@ class _FakePromotionRepo:
         self.promotions = promotions
 
     async def list_active_for_storefront(
-        self, store_id: UUID, now: datetime
+        self,
+        store_id: UUID,
+        now: datetime,
+        *,
+        include_drafts: bool = False,
     ) -> list[Promotion]:
+        if include_drafts:
+            return [p for p in self.promotions if p.store_id == store_id]
         return [
             p
             for p in self.promotions

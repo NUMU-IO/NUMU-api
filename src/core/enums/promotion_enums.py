@@ -69,3 +69,9 @@ class PromotionEventType(StrEnum):
     DISMISS = "dismiss"
     REDEEM = "redeem"
     CONVERT = "convert"
+    # Form-capture surfaces (popup, floating widget) record `submit` when
+    # the visitor completes the embedded email/phone form. The captured
+    # fields are serialized into the event row's `metadata` blob — we
+    # don't add a separate submissions table because analytics already
+    # lives off `promotion_events` and PII deletion goes through one path.
+    SUBMIT = "submit"

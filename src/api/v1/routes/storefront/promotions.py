@@ -8,6 +8,9 @@ These routes are publicly accessible (no merchant auth):
 * `POST .../{promotion_id}/events` — fire-and-forget analytics writes.
 * `POST .../{promotion_id}/dismiss` — record a per-visitor / per-customer
   suppression so the same shopper isn't nagged twice.
+* `POST .../{promotion_id}/submit` — capture the popup / floating-widget
+  email (and optional phone) form, recording a `submit` event with the
+  PII as metadata and returning the configured discount code.
 
 The cart-side `apply coupon v2` flow lives in [coupon.py](./coupon.py) and
 is tightly coupled to the cart code path; that integration is deferred
@@ -19,9 +22,11 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.api.dependencies.auth import get_optional_customer
+from src.api.dependencies.feature_flags import require_feature_flag
+from src.api.dependencies.promotion_preview import maybe_preview_for_store
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_promotion_dismissal_repository,
@@ -65,7 +70,13 @@ from src.infrastructure.repositories.promotion_repository import (
     PromotionTargetRepository,
 )
 
-router = APIRouter()
+router = APIRouter(
+    # Per the offers-v2 rollout plan (step 14 §2): the storefront's
+    # `/promotions/*` endpoints 404 until the tenant has
+    # `ff_storefront_promo_render` enabled. Returning 404 (not 403)
+    # avoids signalling the feature exists during phased rollout.
+    dependencies=[Depends(require_feature_flag("ff_storefront_promo_render"))],
+)
 
 _VISITOR_COOKIE = "numu_visitor"
 
@@ -102,6 +113,7 @@ async def get_active_promotions(
     ],
     coupon_repo: Annotated[Any, Depends(get_coupon_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    is_preview: Annotated[bool, Depends(maybe_preview_for_store)],
     customer: Annotated[Customer | None, Depends(get_optional_customer)] = None,
     page: Annotated[str, str] = "/",
     device: Annotated[Literal["desktop", "mobile", "tablet"], str] = "desktop",
@@ -131,7 +143,10 @@ async def get_active_promotions(
         resolver=resolver, coupon_repo=coupon_repo
     )
     out = await use_case.execute(
-        store_id=store_id, tenant_id=store.tenant_id, visitor=visitor
+        store_id=store_id,
+        tenant_id=store.tenant_id,
+        visitor=visitor,
+        preview=is_preview,
     )
     return SuccessResponse(data=out)
 
@@ -252,3 +267,134 @@ async def dismiss_promotion(
     # localStorage marker; the DB row is permanent until the merchant
     # purges old dismissals via `tasks.delete_expired_dismissals`.
     _ = body
+
+
+# --------------------------------------------------------------------------- #
+# POST /promotions/{promotion_id}/submit                                      #
+# --------------------------------------------------------------------------- #
+
+
+class SubmitFormRequest(BaseModel):
+    """Visitor-submitted form payload for a popup / floating widget.
+
+    Phone is optional — most merchants only collect email; the WhatsApp-
+    heavy Egyptian market sometimes wants both. `accepts_marketing` is
+    the honest "I agree to receive updates" checkbox. Form-fields beyond
+    these three live in `extra_fields` so a merchant can collect "name"
+    or "size preference" without a schema change.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr = Field(description="Visitor email address.")
+    phone: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Egyptian phone (01xxxxxxxxx) — optional.",
+    )
+    accepts_marketing: bool = Field(
+        default=False,
+        description="Whether the visitor opted in to marketing messages.",
+    )
+    extra_fields: dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional ad-hoc fields configured by the merchant.",
+    )
+
+
+class SubmitFormResponse(BaseModel):
+    """Server response after capturing a popup form submission.
+
+    `discount_code` is populated when the promotion's `content` is
+    configured with a `discount_code_to_reveal` — the storefront flips
+    its popup into the success state and shows the code with a copy
+    button.
+    """
+
+    discount_code: str | None = Field(
+        default=None,
+        description="Code to reveal after a successful submission.",
+    )
+    received_at: str = Field(description="ISO-8601 server-side receipt time.")
+
+
+@router.post(
+    "/promotions/{promotion_id}/submit",
+    response_model=SuccessResponse[SubmitFormResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Capture a popup / floating-widget form submission",
+    operation_id="storefront_submit_promotion_form",
+)
+async def submit_form(
+    request: Request,
+    store_id: Annotated[UUID, Path()],
+    promotion_id: Annotated[UUID, Path()],
+    body: SubmitFormRequest,
+    promo_repo: Annotated[PromotionRepository, Depends(get_promotion_repository)],
+    event_repo: Annotated[
+        PromotionEventRepository, Depends(get_promotion_event_repository)
+    ],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer: Annotated[Customer | None, Depends(get_optional_customer)] = None,
+) -> SuccessResponse[SubmitFormResponse]:
+    """Record a popup form submission and return the reveal code.
+
+    The submission is persisted as a `promotion_events` row with
+    `event_type = 'submit'`; the email / phone / extra fields go into
+    the row's metadata blob so analytics queries and right-to-be-
+    forgotten deletion both flow through one path.
+
+    The endpoint refuses to record a submit for a promotion that
+    doesn't belong to the request's store — defensive, since the public
+    URL otherwise lets any visitor blast email captures into any
+    promotion id they discover.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if store is None:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    promotion = await promo_repo.get_by_id(store_id=store_id, promotion_id=promotion_id)
+    if promotion is None or promotion.store_id != store_id:
+        # Use 404 rather than 403 so we don't confirm to a curious
+        # caller that a given promotion id exists in a different store.
+        raise EntityNotFoundError("Promotion", str(promotion_id))
+
+    use_case = RecordPromotionEventUseCase(
+        promotion_repo=promo_repo, event_repo=event_repo
+    )
+    metadata: dict[str, Any] = {
+        "email": str(body.email),
+        "accepts_marketing": body.accepts_marketing,
+    }
+    if body.phone:
+        metadata["phone"] = body.phone
+    if body.extra_fields:
+        metadata["extra_fields"] = body.extra_fields
+
+    await use_case.execute(
+        tenant_id=store.tenant_id,
+        store_id=store_id,
+        promotion_id=promotion_id,
+        event_type=PromotionEventType.SUBMIT,
+        customer_id=customer.id if customer else None,
+        session_id=_visitor_token(request),
+        metadata=metadata,
+    )
+
+    # Reveal the merchant-configured discount code (if any). The
+    # promotion's `content` payload is a free-form dict — merchant hub
+    # writes `discount_code_to_reveal` for popups that gate a code
+    # behind the form. If the merchant misconfigured the popup with
+    # form fields but no reveal code, we still persist the lead and
+    # return a null code so the storefront falls back to a generic
+    # thanks-screen.
+    content = promotion.content.model_dump() if promotion.content else {}
+    reveal_code: str | None = content.get("discount_code_to_reveal")
+
+    return SuccessResponse(
+        data=SubmitFormResponse(
+            discount_code=reveal_code,
+            received_at=datetime.now(UTC).isoformat(),
+        ),
+        message="Submission received",
+    )
