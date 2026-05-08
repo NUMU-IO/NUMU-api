@@ -4,10 +4,20 @@ Provides fire-and-forget tasks for sending order notifications
 via WhatsApp and email without blocking the order flow.
 """
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 from src.config.logging_config import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
+
+if TYPE_CHECKING:
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
 
 logger = get_logger(__name__)
 
@@ -25,6 +35,43 @@ def run_async(coro):
         _task_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_task_loop)
     return _task_loop.run_until_complete(coro)
+
+
+@asynccontextmanager
+async def _resend_service_with_session() -> AsyncIterator[ResendEmailService]:
+    """Yield a fully-wired ``ResendEmailService`` for one Celery task.
+
+    The FastAPI request path builds this same service via DI in
+    ``api/dependencies/services.py``; the Celery worker has no
+    request-scoped DI, so we open a per-task session and attach the
+    template renderer + email-log repo. This means async sends pick
+    up merchant template overrides AND write the audit-log row,
+    matching the request-path behavior.
+    """
+    from src.application.services.email_template_renderer import (
+        EmailTemplateRenderer,
+    )
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+    from src.infrastructure.repositories.email_log_repository import (
+        EmailLogRepository,
+    )
+    from src.infrastructure.repositories.email_template_repository import (
+        EmailTemplateRepository,
+    )
+
+    async with AsyncSessionLocal() as session:
+        template_repo = EmailTemplateRepository(session)
+        log_repo = EmailLogRepository(session)
+        renderer = EmailTemplateRenderer(template_repo)
+        try:
+            yield ResendEmailService(renderer=renderer, email_log_repo=log_repo)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -59,29 +106,22 @@ def send_order_confirmation_email_task(
     """
     from uuid import UUID
 
-    from src.infrastructure.external_services.resend.email_service import (
-        ResendEmailService,
-    )
-
-    # TODO(email-templates): wire renderer + email_log_repo into Celery
-    # worker — needs a per-task DB session. For now, the worker uses the
-    # legacy path (no merchant overrides, no audit log row). The FastAPI
-    # request path (where ResendEmailService is built via DI in
-    # api/dependencies/services.py) DOES use the renderer.
     try:
-        service = ResendEmailService()
         store_uuid = UUID(store_id) if store_id else None
         tenant_uuid = UUID(tenant_id) if tenant_id else None
-        result = run_async(
-            service.send_order_confirmation(
-                email,
-                order_number,
-                order_details,
-                language=language,
-                store_id=store_uuid,
-                tenant_id=tenant_uuid,
-            )
-        )
+
+        async def _do() -> bool:
+            async with _resend_service_with_session() as service:
+                return await service.send_order_confirmation(
+                    email,
+                    order_number,
+                    order_details,
+                    language=language,
+                    store_id=store_uuid,
+                    tenant_id=tenant_uuid,
+                )
+
+        result = run_async(_do())
         logger.info(
             "order_confirmation_email_sent",
             email=email,
@@ -131,29 +171,25 @@ def send_shipping_notification_email_task(
     """
     from uuid import UUID
 
-    from src.infrastructure.external_services.resend.email_service import (
-        ResendEmailService,
-    )
-
-    # TODO(email-templates): wire renderer into Celery worker — needs
-    # per-task DB session. Legacy path until then.
     try:
-        service = ResendEmailService()
         store_uuid = UUID(store_id) if store_id else None
         tenant_uuid = UUID(tenant_id) if tenant_id else None
-        result = run_async(
-            service.send_shipping_notification(
-                email,
-                order_number,
-                tracking_number,
-                carrier,
-                language=language,
-                store_id=store_uuid,
-                tenant_id=tenant_uuid,
-                store_name=store_name,
-                customer_name=customer_name,
-            )
-        )
+
+        async def _do() -> bool:
+            async with _resend_service_with_session() as service:
+                return await service.send_shipping_notification(
+                    email,
+                    order_number,
+                    tracking_number,
+                    carrier,
+                    language=language,
+                    store_id=store_uuid,
+                    tenant_id=tenant_uuid,
+                    store_name=store_name,
+                    customer_name=customer_name,
+                )
+
+        result = run_async(_do())
         logger.info(
             "shipping_notification_email_sent",
             email=email,
@@ -199,30 +235,24 @@ def send_delivery_confirmation_email_task(
     """
     from uuid import UUID
 
-    from src.infrastructure.external_services.resend.email_service import (
-        ResendEmailService,
-    )
-
-    # TODO(email-templates): wire renderer into Celery worker — needs
-    # per-task DB session. Legacy path until then. Routing through the
-    # service-level helper means once the worker IS wired, this task
-    # automatically picks up merchant overrides without code changes.
     try:
-        service = ResendEmailService()
         store_uuid = UUID(store_id) if store_id else None
         tenant_uuid = UUID(tenant_id) if tenant_id else None
-        result = run_async(
-            service.send_order_status_email(
-                email=email,
-                status="delivered",
-                order_number=order_number,
-                store_name=store_name,
-                customer_name=customer_name,
-                language=language,
-                store_id=store_uuid,
-                tenant_id=tenant_uuid,
-            )
-        )
+
+        async def _do() -> bool:
+            async with _resend_service_with_session() as service:
+                return await service.send_order_status_email(
+                    email=email,
+                    status="delivered",
+                    order_number=order_number,
+                    store_name=store_name,
+                    customer_name=customer_name,
+                    language=language,
+                    store_id=store_uuid,
+                    tenant_id=tenant_uuid,
+                )
+
+        result = run_async(_do())
         logger.info(
             "delivery_confirmation_email_sent",
             email=email,
