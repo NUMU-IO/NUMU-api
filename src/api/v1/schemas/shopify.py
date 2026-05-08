@@ -212,9 +212,14 @@ class UpdateSettingsRequest(BaseModel):
 
 
 class ConnectPaymobRequest(BaseModel):
-    api_key: str
-    integration_id: str
-    hmac_secret: str
+    """Full Paymob credential set, validated against the live Paymob
+    intention API before persistence (backend-018)."""
+
+    secret_key: str = Field(..., min_length=1, max_length=512)
+    public_key: str = Field(..., min_length=1, max_length=512)
+    hmac_secret: str = Field(..., min_length=1, max_length=512)
+    card_integration_id: str = Field(..., min_length=1, max_length=64)
+    wallet_integration_id: str | None = Field(default=None, max_length=64)
 
 
 # ---------------------------------------------------------------------------
