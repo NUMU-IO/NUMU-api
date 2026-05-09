@@ -70,6 +70,10 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.back_in_stock_tasks",
         # Phase 4.4 — smart-collection membership sweep.
         "src.infrastructure.messaging.tasks.smart_collection_tasks",
+        # Phase 5.8 — beat scheduler heartbeat for /health/detailed.
+        "src.infrastructure.messaging.tasks.beat_heartbeat",
+        # backend-005 — Paymob recurring subscription renewals.
+        "src.infrastructure.messaging.tasks.subscription_renewal_task",
     ],
     # Queue definitions
     task_queues=(
@@ -130,6 +134,14 @@ celery_app.conf.beat_schedule = {
     "back-in-stock-sweep": {
         "task": "tasks.product_subscription_sweep",
         "schedule": crontab(minute=15),  # Hourly at :15 past the hour
+    },
+    # Phase 5.8 — beat heartbeat. Every minute, write the current
+    # unix timestamp to Redis so /health/detailed can flag stale beat
+    # processes (workers up but scheduler stuck). The task is tiny
+    # and idempotent.
+    "beat-heartbeat": {
+        "task": "tasks.beat_heartbeat",
+        "schedule": 60.0,
     },
     # Phase 4.4 — smart-collection membership recompute. Hourly at :30
     # so it doesn't pile onto the back-in-stock sweep at :15. Inline
@@ -252,6 +264,15 @@ celery_app.conf.beat_schedule = {
     "purge-analytics-events": {
         "task": "tasks.purge_analytics_events",
         "schedule": crontab(hour=2, minute=30),
+    },
+    # ─── backend-005: Paymob recurring renewals (hourly) ─────────────
+    # Walks tenants whose ``next_renewal_at`` has passed and re-charges
+    # the stored card token. Hourly cadence is fine: failures push
+    # ``next_renewal_at`` +24h so a tenant in dunning isn't re-tried
+    # every minute.
+    "process-due-renewals": {
+        "task": "tasks.process_due_renewals",
+        "schedule": crontab(minute=20),  # Hourly at :20
     },
 }
 

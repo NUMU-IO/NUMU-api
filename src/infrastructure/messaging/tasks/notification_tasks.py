@@ -734,11 +734,12 @@ def send_back_in_stock_email_task(
 ):
     """Notify a subscriber that a product is back in stock.
 
-    v1 stub: logs the dispatch + returns. Phase 5 wires the actual
-    Resend template (a "back-in-stock" email with the product name,
-    image, and CTA back to the PDP). The sweep task stamps
-    `notified_at` on the subscription row regardless, so this is
-    idempotent — re-runs of the sweep won't re-fire the same email.
+    Phase 5.4 — real Resend send via ResendEmailService.send_back_in_stock.
+    The hourly sweep stamps `notified_at` on the subscription row
+    regardless of delivery, so re-runs don't re-fire the same email.
+    A transient SMTP failure here means one customer doesn't get
+    notified for THIS cycle — the DLQ (Phase 5.3) catches the
+    exhausted state for operator retry.
 
     Args:
         store_id: Owning store id (UUID string).
@@ -746,18 +747,62 @@ def send_back_in_stock_email_task(
         email: Recipient email.
         variant_id: Optional variant the customer was waiting on.
     """
-    logger.info(
-        "back_in_stock_email_queued",
-        email=email,
-        store_id=store_id,
-        product_id=product_id,
-        variant_id=variant_id,
-        # Phase 5: replace this log+return with a real template send via
-        # ResendEmailService.send_back_in_stock(). Until then the
-        # subscription is marked notified by the sweep but no actual
-        # email goes out — surfacing an opt-in feature without a working
-        # delivery path is a partial-implementation footgun (per CLAUDE
-        # guidance), so we explicitly note this here.
-        note="Phase 5: wire ResendEmailService.send_back_in_stock template",
+    from uuid import UUID
+
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
     )
-    return {"queued": True, "email": email, "product_id": product_id}
+
+    async def _hydrate_and_send() -> bool:
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.repositories.product_repository import (
+            ProductRepository,
+        )
+        from src.infrastructure.repositories.store_repository import (
+            StoreRepository,
+        )
+
+        store_uuid = UUID(store_id)
+        product_uuid = UUID(product_id)
+        async with AsyncSessionLocal() as session:
+            product_repo = ProductRepository(session)
+            store_repo = StoreRepository(session)
+            product = await product_repo.get_by_id(product_uuid)
+            store = await store_repo.get_by_id(store_uuid)
+        if not product or not store:
+            return False
+        # Build the PDP URL from the store's canonical host. We bias
+        # toward subdomain — custom-domain stores can override later
+        # by routing through their own canonical link, but the
+        # subdomain is always reachable.
+        subdomain = getattr(store, "subdomain", None) or str(store.id)
+        product_url = f"https://{subdomain}.numueg.app/products/{product.slug}"
+        first_image = product.images[0] if product.images else None
+        svc = ResendEmailService()
+        return await svc.send_back_in_stock(
+            email=email,
+            product_name=product.name,
+            product_url=product_url,
+            product_image=first_image,
+            language=getattr(store, "default_language", "ar") or "ar",
+            store_id=store_uuid,
+            tenant_id=getattr(store, "tenant_id", None),
+            store_name=store.name or "NUMU",
+        )
+
+    try:
+        ok = run_async(_hydrate_and_send())
+        logger.info(
+            "back_in_stock_email_sent",
+            email=email,
+            store_id=store_id,
+            product_id=product_id,
+            success=ok,
+        )
+        return {"sent": ok, "email": email, "product_id": product_id}
+    except Exception as e:
+        logger.error("back_in_stock_email_failed", email=email, error=str(e))
+        # Re-raise so Celery's retry kicks in. After max_retries the
+        # DLQ helper (Phase 5.3) records the dead-letter for manual
+        # operator retry from the hub.
+        raise self.retry(exc=e)
