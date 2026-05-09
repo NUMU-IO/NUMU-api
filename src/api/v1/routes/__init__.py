@@ -127,6 +127,9 @@ from src.api.v1.routes.storefront import (
     reviews_router as storefront_reviews_router,
 )
 from src.api.v1.routes.storefront import (
+    search_router as storefront_search_router,
+)
+from src.api.v1.routes.storefront import (
     shipping_quote_router as storefront_shipping_quote_router,
 )
 from src.api.v1.routes.storefront import (
@@ -143,6 +146,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
+)
+from src.api.v1.routes.storefront import (
+    wishlist_router as storefront_wishlist_router,
 )
 from src.api.v1.routes.storefront.cart_sdk_aliases import (
     router as storefront_cart_sdk_router,
@@ -312,6 +318,20 @@ api_router.include_router(
     storefront_reviews_router,
     prefix="/storefront/store/{store_id}/products",
     tags=["Storefront - Reviews"],
+)
+
+# Storefront - search (Phase 4.1; public, store-scoped, tsvector-backed)
+api_router.include_router(
+    storefront_search_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Search"],
+)
+
+# Storefront - wishlist (Phase 4.5; authed customer OR guest session)
+api_router.include_router(
+    storefront_wishlist_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Wishlist"],
 )
 
 # Storefront - upsell offers (public, scoped to store)

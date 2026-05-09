@@ -68,6 +68,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
         # Phase 3.5 — back-in-stock subscription sweep + email dispatch.
         "src.infrastructure.messaging.tasks.back_in_stock_tasks",
+        # Phase 4.4 — smart-collection membership sweep.
+        "src.infrastructure.messaging.tasks.smart_collection_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -128,6 +130,14 @@ celery_app.conf.beat_schedule = {
     "back-in-stock-sweep": {
         "task": "tasks.product_subscription_sweep",
         "schedule": crontab(minute=15),  # Hourly at :15 past the hour
+    },
+    # Phase 4.4 — smart-collection membership recompute. Hourly at :30
+    # so it doesn't pile onto the back-in-stock sweep at :15. Inline
+    # invalidation (on every product save) is too expensive at scale;
+    # hourly batch matches Shopify's documented cadence.
+    "smart-collection-sweep": {
+        "task": "tasks.smart_collection_sweep",
+        "schedule": crontab(minute=30),
     },
     "daily-analytics-rollup": {
         "task": "tasks.calculate_analytics_rollups",

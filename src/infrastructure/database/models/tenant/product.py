@@ -2,8 +2,8 @@
 
 from decimal import Decimal
 
-from sqlalchemy import Enum, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy import Computed, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.product import ProductStatus, ProductType
@@ -81,6 +81,22 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Additional data
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+
+    # Phase 4.1 — Postgres tsvector for full-text search. Maintained
+    # by the database via GENERATED ALWAYS AS (...) STORED — see
+    # alembic/versions/20260508_add_product_search_tsvector.py.
+    # Read-only from the ORM's perspective.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('simple', coalesce(name, '')), 'A') || "
+            "setweight(to_tsvector('simple', coalesce(sku, '')), 'B') || "
+            "setweight(to_tsvector('simple', coalesce(description, '')), 'C') || "
+            "setweight(to_tsvector('simple', coalesce(array_to_string(tags, ' '), '')), 'D')",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     # Relationships
     store = relationship("StoreModel", back_populates="products", lazy="selectin")
