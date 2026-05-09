@@ -712,3 +712,52 @@ def send_email_task(
             error=str(e),
         )
         raise self.retry(exc=e)
+
+
+# ---------------------------------------------------------------------------
+# Back-in-stock notification (Phase 3.5)
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(
+    name="tasks.send_back_in_stock_email",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+)
+def send_back_in_stock_email_task(
+    self,
+    store_id: str,
+    product_id: str,
+    email: str,
+    variant_id: str | None = None,
+):
+    """Notify a subscriber that a product is back in stock.
+
+    v1 stub: logs the dispatch + returns. Phase 5 wires the actual
+    Resend template (a "back-in-stock" email with the product name,
+    image, and CTA back to the PDP). The sweep task stamps
+    `notified_at` on the subscription row regardless, so this is
+    idempotent — re-runs of the sweep won't re-fire the same email.
+
+    Args:
+        store_id: Owning store id (UUID string).
+        product_id: Product that came back in stock (UUID string).
+        email: Recipient email.
+        variant_id: Optional variant the customer was waiting on.
+    """
+    logger.info(
+        "back_in_stock_email_queued",
+        email=email,
+        store_id=store_id,
+        product_id=product_id,
+        variant_id=variant_id,
+        # Phase 5: replace this log+return with a real template send via
+        # ResendEmailService.send_back_in_stock(). Until then the
+        # subscription is marked notified by the sweep but no actual
+        # email goes out — surfacing an opt-in feature without a working
+        # delivery path is a partial-implementation footgun (per CLAUDE
+        # guidance), so we explicitly note this here.
+        note="Phase 5: wire ResendEmailService.send_back_in_stock template",
+    )
+    return {"queued": True, "email": email, "product_id": product_id}

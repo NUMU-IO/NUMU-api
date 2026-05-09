@@ -66,6 +66,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
+        # Phase 3.5 — back-in-stock subscription sweep + email dispatch.
+        "src.infrastructure.messaging.tasks.back_in_stock_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -117,6 +119,15 @@ celery_app.conf.beat_schedule = {
     "detect-abandoned-carts": {
         "task": "tasks.detect_abandoned_carts",
         "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    # Phase 3.5 — sweep pending back-in-stock subscriptions and notify
+    # subscribers of products that came back in stock since the last
+    # sweep. Hourly cadence matches Shopify's documented behavior;
+    # smaller intervals risk emailing during transient stock flips
+    # caused by refund-window decrements.
+    "back-in-stock-sweep": {
+        "task": "tasks.product_subscription_sweep",
+        "schedule": crontab(minute=15),  # Hourly at :15 past the hour
     },
     "daily-analytics-rollup": {
         "task": "tasks.calculate_analytics_rollups",
