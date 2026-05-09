@@ -59,11 +59,39 @@ async def _get_or_create_cart(customer_id: UUID, store_id: UUID) -> Cart:
     return cart
 
 
+async def _get_or_create_guest_cart(session_id: UUID, store_id: UUID) -> Cart:
+    """Return a guest cart keyed on the storefront's `numu_cart_session`
+    cookie, creating an empty one if Redis has no record. Mirrors the
+    customer flow but with no customer_id binding — login can later
+    merge into a customer cart via `_cart_repo.merge`.
+    """
+    cart = await _cart_repo.get_by_session_id(str(session_id), store_id)
+    if cart is None:
+        cart = Cart(
+            id=uuid4(),
+            session_id=str(session_id),
+            store_id=store_id,
+            customer_id=None,
+            currency="EGP",
+        )
+    return cart
+
+
 async def _build_cart_response(
     cart: Cart,
     product_repo: ProductRepository,
 ) -> SuccessResponse[CartResponse]:
-    """Build a CartResponse from a Cart entity, resolving live product data."""
+    """Build a CartResponse from a Cart entity.
+
+    Uses the snapshotted `cart_item.unit_price` (captured when the line
+    was added) for the subtotal — NOT the live product price. This
+    matches Shopify behavior: a merchant editing prices mid-session
+    must not change a customer's existing cart total in real time.
+
+    Live product data (current price, current inventory) is exposed as
+    `current_price` / `available_now` / `sold_out_now` / `price_changed`
+    so themes can surface "price changed" or "reduce quantity" nudges.
+    """
     items: list[CartItemResponse] = []
     subtotal = 0
 
@@ -71,9 +99,20 @@ async def _build_cart_response(
         product = await product_repo.get_by_id(cart_item.product_id)
         if not product or product.status != ProductStatus.ACTIVE:
             continue
-        unit_price = product.price.cents
+
+        # Snapshot — what the customer agreed to pay when they added the
+        # line. CartItem.unit_price is set at add-time in add_cart_item.
+        unit_price = cart_item.unit_price
         total_price = unit_price * cart_item.quantity
         subtotal += total_price
+
+        # Live deltas — the front-end uses these to render "price changed"
+        # banners and to disable Checkout when any line is sold-out.
+        current_price = product.price.cents
+        price_changed = current_price != unit_price
+        available_now = product.quantity if product.quantity is not None else None
+        sold_out_now = not product.is_in_stock
+
         items.append(
             CartItemResponse(
                 id=cart_item.item_key,
@@ -85,8 +124,12 @@ async def _build_cart_response(
                 quantity=cart_item.quantity,
                 unit_price=unit_price,
                 total_price=total_price,
+                current_price=current_price,
+                price_changed=price_changed,
                 image_url=product.images[0] if product.images else None,
                 in_stock=product.is_in_stock,
+                available_now=available_now,
+                sold_out_now=sold_out_now,
             )
         )
 

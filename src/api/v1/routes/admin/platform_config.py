@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import require_admin
@@ -51,26 +52,38 @@ class MetaCredentialsResponse(BaseModel):
 
 
 async def _get_or_create_config(db: AsyncSession) -> PlatformConfigModel:
-    """Get the Meta config row, creating it with defaults if absent."""
+    """Get the Meta config row, creating it with defaults if absent.
+
+    Race-safe via INSERT ... ON CONFLICT DO NOTHING + re-SELECT.
+    """
     result = await db.execute(
         select(PlatformConfigModel).where(PlatformConfigModel.key == META_CONFIG_KEY)
     )
     config = result.scalar_one_or_none()
 
     if config is None:
-        config = PlatformConfigModel(
-            key=META_CONFIG_KEY,
-            value={
-                "meta_app_id": "",
-                "meta_app_secret": "",
-                "meta_webhook_verify_token": "",
-                "meta_login_config_id": "",
-            },
-            description="Meta (Facebook/Instagram/WhatsApp) API credentials",
+        stmt = (
+            pg_insert(PlatformConfigModel)
+            .values(
+                key=META_CONFIG_KEY,
+                value={
+                    "meta_app_id": "",
+                    "meta_app_secret": "",
+                    "meta_webhook_verify_token": "",
+                    "meta_login_config_id": "",
+                },
+                description="Meta (Facebook/Instagram/WhatsApp) API credentials",
+            )
+            .on_conflict_do_nothing(index_elements=["key"])
         )
-        db.add(config)
+        await db.execute(stmt)
         await db.commit()
-        await db.refresh(config)
+        result = await db.execute(
+            select(PlatformConfigModel).where(
+                PlatformConfigModel.key == META_CONFIG_KEY
+            )
+        )
+        config = result.scalar_one()
 
     return config
 

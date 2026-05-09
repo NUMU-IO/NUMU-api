@@ -40,6 +40,11 @@ venv.bak/
 # Alembic
 alembic.ini.local
 
+# Local theme bundle uploads (built artifacts produced by the
+# theme-marketplace upload pipeline and developer-install flow).
+# Never committed — the canonical artifacts live in R2.
+uploads/themes/
+
 # Environment variables
 .env
 .env.local

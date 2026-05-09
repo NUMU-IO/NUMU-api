@@ -5,6 +5,7 @@ from src.api.dependencies.auth import (
     get_current_user_id,
     get_current_user_role,
     require_admin,
+    require_admin_2fa,
     require_roles,
     require_store_owner,
     verify_store_ownership,
@@ -77,6 +78,7 @@ __all__ = [
     "require_roles",
     "require_store_owner",
     "require_admin",
+    "require_admin_2fa",
     "verify_store_ownership",
     # Repositories
     "get_category_repository",

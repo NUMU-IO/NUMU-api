@@ -13,6 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import require_admin
@@ -73,20 +74,30 @@ class NavConfig(BaseModel):
 
 
 async def _get_config_row(db: AsyncSession) -> PlatformConfigModel:
+    """Race-safe upsert. See platform_settings._get_or_create_settings
+    for the rationale — concurrent first-time requests would otherwise
+    both INSERT and trip the unique key."""
     result = await db.execute(
         select(PlatformConfigModel).where(PlatformConfigModel.key == CONFIG_KEY)
     )
     config = result.scalar_one_or_none()
     if config is None:
-        config = PlatformConfigModel(
-            key=CONFIG_KEY,
-            value=DEFAULT_CONFIG,
-            description="Per-tab visibility / coming-soon / order for the "
-            "merchant hub left sidebar.",
+        stmt = (
+            pg_insert(PlatformConfigModel)
+            .values(
+                key=CONFIG_KEY,
+                value=DEFAULT_CONFIG,
+                description="Per-tab visibility / coming-soon / order for the "
+                "merchant hub left sidebar.",
+            )
+            .on_conflict_do_nothing(index_elements=["key"])
         )
-        db.add(config)
+        await db.execute(stmt)
         await db.commit()
-        await db.refresh(config)
+        result = await db.execute(
+            select(PlatformConfigModel).where(PlatformConfigModel.key == CONFIG_KEY)
+        )
+        config = result.scalar_one()
     return config
 
 

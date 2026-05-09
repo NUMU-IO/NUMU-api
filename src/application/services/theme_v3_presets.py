@@ -25,6 +25,7 @@ def generate_initial_v3_customization(
     css_url: str | None = None,
     settings_schema: dict[str, Any] | None = None,
     section_schemas: dict[str, Any] | None = None,
+    mode: str = "production",
 ) -> ThemeSettingsV3:
     """Generate a V3 customization payload from theme presets.
 
@@ -118,7 +119,9 @@ def generate_initial_v3_customization(
             order=["hero_1", "featured_1"],
         )
 
-    # Build external theme metadata for BYOT
+    # Build external theme metadata for BYOT. `mode` controls the bundle-URL
+    # allowlist: "development" permits localhost, "production" requires the
+    # configured CDN hosts.
     external_theme = None
     if bundle_url:
         external_theme = ExternalThemeMetadata(
@@ -126,6 +129,7 @@ def generate_initial_v3_customization(
             css_url=css_url,
             settings_schema=settings_schema,
             section_schemas=section_schemas,
+            mode="development" if mode == "development" else "production",
         )
 
     return ThemeSettingsV3(

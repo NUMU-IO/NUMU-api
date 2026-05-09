@@ -11,8 +11,11 @@ from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.marketplace_theme import (
+    MarketplacePurchaseStatus,
     MarketplaceTheme,
     MarketplaceThemeInstallation,
+    MarketplaceThemePurchase,
+    MarketplaceThemeReview,
     MarketplaceThemeStatus,
     MarketplaceThemeVersion,
     MarketplaceVersionStatus,
@@ -20,6 +23,8 @@ from src.core.entities.marketplace_theme import (
 from src.infrastructure.database.models.tenant.marketplace_theme import (
     MarketplaceThemeInstallationModel,
     MarketplaceThemeModel,
+    MarketplaceThemePurchaseModel,
+    MarketplaceThemeReviewModel,
     MarketplaceThemeVersionModel,
 )
 
@@ -209,6 +214,33 @@ class MarketplaceRepository:
         m = result.scalar_one_or_none()
         return self._version_to_entity(m) if m else None
 
+    async def get_latest_installable_version(
+        self, theme_id: UUID
+    ) -> MarketplaceThemeVersion | None:
+        """Latest version that has a bundle_url, regardless of status.
+
+        Used by the developer self-install path: a developer who built a
+        theme should be able to install it on their own stores even
+        when the listing is `draft` and the version is `pending_review`
+        or `approved` (admin hasn't published yet).
+
+        Build/Failed/Rejected versions are still skipped — they have no
+        usable bundle. We filter on `bundle_url IS NOT NULL` instead of
+        whitelisting statuses so newly-introduced statuses (post-MVP)
+        Just Work as long as they end up populating bundle_url.
+        """
+        result = await self._session.execute(
+            select(MarketplaceThemeVersionModel)
+            .where(
+                MarketplaceThemeVersionModel.theme_id == theme_id,
+                MarketplaceThemeVersionModel.bundle_url.isnot(None),
+            )
+            .order_by(desc(MarketplaceThemeVersionModel.created_at))
+            .limit(1)
+        )
+        m = result.scalar_one_or_none()
+        return self._version_to_entity(m) if m else None
+
     async def list_versions(self, theme_id: UUID) -> list[MarketplaceThemeVersion]:
         result = await self._session.execute(
             select(MarketplaceThemeVersionModel)
@@ -328,3 +360,326 @@ class MarketplaceRepository:
         )
         await self._session.flush()
         return (result.rowcount or 0) > 0
+
+    # ── Purchases ─────────────────────────────────────────────────────────────
+
+    def _purchase_to_entity(
+        self, m: MarketplaceThemePurchaseModel
+    ) -> MarketplaceThemePurchase:
+        return MarketplaceThemePurchase(
+            id=m.id,
+            created_at=m.created_at,
+            updated_at=m.updated_at,
+            user_id=m.user_id,
+            marketplace_theme_id=m.marketplace_theme_id,
+            amount_cents=m.amount_cents,
+            currency=m.currency,
+            stripe_payment_intent_id=m.stripe_payment_intent_id,
+            stripe_charge_id=m.stripe_charge_id,
+            status=MarketplacePurchaseStatus(m.status),
+            refunded_amount_cents=m.refunded_amount_cents,
+            refund_reason=m.refund_reason,
+            purchase_metadata=copy.deepcopy(m.purchase_metadata or {}),
+        )
+
+    async def create_purchase(
+        self,
+        *,
+        user_id: UUID,
+        marketplace_theme_id: UUID,
+        amount_cents: int,
+        currency: str,
+        stripe_payment_intent_id: str | None,
+        purchase_metadata: dict[str, Any] | None = None,
+    ) -> MarketplaceThemePurchase:
+        m = MarketplaceThemePurchaseModel(
+            user_id=user_id,
+            marketplace_theme_id=marketplace_theme_id,
+            amount_cents=amount_cents,
+            currency=currency,
+            stripe_payment_intent_id=stripe_payment_intent_id,
+            purchase_metadata=purchase_metadata or {},
+        )
+        self._session.add(m)
+        await self._session.flush()
+        return self._purchase_to_entity(m)
+
+    async def get_purchase_by_intent(
+        self, payment_intent_id: str
+    ) -> MarketplaceThemePurchase | None:
+        result = await self._session.execute(
+            select(MarketplaceThemePurchaseModel).where(
+                MarketplaceThemePurchaseModel.stripe_payment_intent_id
+                == payment_intent_id
+            )
+        )
+        m = result.scalar_one_or_none()
+        return self._purchase_to_entity(m) if m else None
+
+    async def get_purchase_by_id(
+        self, purchase_id: UUID
+    ) -> MarketplaceThemePurchase | None:
+        result = await self._session.execute(
+            select(MarketplaceThemePurchaseModel).where(
+                MarketplaceThemePurchaseModel.id == purchase_id
+            )
+        )
+        m = result.scalar_one_or_none()
+        return self._purchase_to_entity(m) if m else None
+
+    async def update_purchase(
+        self,
+        purchase_id: UUID,
+        *,
+        status: MarketplacePurchaseStatus | None = None,
+        stripe_charge_id: str | None = None,
+        refunded_amount_cents: int | None = None,
+        refund_reason: str | None = None,
+    ) -> None:
+        # Build a values dict that only sets fields actually passed —
+        # `None` here means "leave alone", not "clear to NULL".
+        values: dict[str, Any] = {}
+        if status is not None:
+            values["status"] = status.value
+        if stripe_charge_id is not None:
+            values["stripe_charge_id"] = stripe_charge_id
+        if refunded_amount_cents is not None:
+            values["refunded_amount_cents"] = refunded_amount_cents
+        if refund_reason is not None:
+            values["refund_reason"] = refund_reason
+        if not values:
+            return
+        await self._session.execute(
+            update(MarketplaceThemePurchaseModel)
+            .where(MarketplaceThemePurchaseModel.id == purchase_id)
+            .values(**values)
+        )
+        await self._session.flush()
+
+    async def has_active_purchase(
+        self, user_id: UUID, marketplace_theme_id: UUID
+    ) -> bool:
+        """Return True if the user has a succeeded, non-refunded purchase
+        for this theme. Used by install_theme to gate paid-theme installs.
+
+        We treat ``partially_refunded`` as "no longer active" — the
+        refund process revokes future-install rights regardless of the
+        refunded amount, since paid themes don't tier features by
+        amount-paid.
+        """
+        result = await self._session.execute(
+            select(MarketplaceThemePurchaseModel.id)
+            .where(
+                MarketplaceThemePurchaseModel.user_id == user_id,
+                MarketplaceThemePurchaseModel.marketplace_theme_id
+                == marketplace_theme_id,
+                MarketplaceThemePurchaseModel.status
+                == MarketplacePurchaseStatus.SUCCEEDED.value,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def list_purchases_by_user(
+        self, user_id: UUID
+    ) -> list[MarketplaceThemePurchase]:
+        result = await self._session.execute(
+            select(MarketplaceThemePurchaseModel)
+            .where(MarketplaceThemePurchaseModel.user_id == user_id)
+            .order_by(desc(MarketplaceThemePurchaseModel.created_at))
+        )
+        return [self._purchase_to_entity(m) for m in result.scalars().all()]
+
+    async def has_active_install(
+        self, user_id: UUID, marketplace_theme_id: UUID
+    ) -> bool:
+        """True if `user_id` has any active install of `theme_id` across
+        any of their stores. Used by the review service to mark a free
+        theme's review as `is_verified_purchase=True`. (For paid themes
+        we use `has_active_purchase` instead — install can be uninstalled
+        but the purchase persists, which is the right "verified" signal.)
+        """
+        # Walk via the user's stores. We don't store user_id directly
+        # on installs — they're store-scoped — so the check joins
+        # `stores` through the user's owner relationship.
+        from src.infrastructure.database.models.tenant.store import StoreModel
+
+        result = await self._session.execute(
+            select(MarketplaceThemeInstallationModel.id)
+            .join(
+                StoreModel,
+                StoreModel.id == MarketplaceThemeInstallationModel.store_id,
+            )
+            .where(
+                StoreModel.owner_id == user_id,
+                MarketplaceThemeInstallationModel.marketplace_theme_id
+                == marketplace_theme_id,
+                MarketplaceThemeInstallationModel.uninstalled_at.is_(None),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    # ── Reviews ───────────────────────────────────────────────────────────────
+
+    def _review_to_entity(
+        self, m: MarketplaceThemeReviewModel
+    ) -> MarketplaceThemeReview:
+        return MarketplaceThemeReview(
+            id=m.id,
+            created_at=m.created_at,
+            updated_at=m.updated_at,
+            marketplace_theme_id=m.marketplace_theme_id,
+            user_id=m.user_id,
+            rating=m.rating,
+            title=m.title,
+            body=m.body,
+            is_verified_purchase=m.is_verified_purchase,
+            developer_response=m.developer_response,
+            developer_response_at=m.developer_response_at,
+            helpful_count=m.helpful_count,
+        )
+
+    async def get_review_by_id(self, review_id: UUID) -> MarketplaceThemeReview | None:
+        result = await self._session.execute(
+            select(MarketplaceThemeReviewModel).where(
+                MarketplaceThemeReviewModel.id == review_id
+            )
+        )
+        m = result.scalar_one_or_none()
+        return self._review_to_entity(m) if m else None
+
+    async def get_review_for_user(
+        self, marketplace_theme_id: UUID, user_id: UUID
+    ) -> MarketplaceThemeReview | None:
+        """Returns the user's existing review for this theme if any —
+        used by the create endpoint to detect duplicates and surface
+        "you already reviewed this; edit instead" cleanly."""
+        result = await self._session.execute(
+            select(MarketplaceThemeReviewModel).where(
+                MarketplaceThemeReviewModel.marketplace_theme_id
+                == marketplace_theme_id,
+                MarketplaceThemeReviewModel.user_id == user_id,
+            )
+        )
+        m = result.scalar_one_or_none()
+        return self._review_to_entity(m) if m else None
+
+    async def create_review(
+        self,
+        *,
+        marketplace_theme_id: UUID,
+        user_id: UUID,
+        rating: int,
+        title: str | None,
+        body: str | None,
+        is_verified_purchase: bool,
+    ) -> MarketplaceThemeReview:
+        m = MarketplaceThemeReviewModel(
+            marketplace_theme_id=marketplace_theme_id,
+            user_id=user_id,
+            rating=rating,
+            title=title,
+            body=body,
+            is_verified_purchase=is_verified_purchase,
+        )
+        self._session.add(m)
+        await self._session.flush()
+        return self._review_to_entity(m)
+
+    async def update_review(
+        self,
+        review_id: UUID,
+        *,
+        rating: int | None = None,
+        title: str | None = None,
+        body: str | None = None,
+        developer_response: str | None = None,
+    ) -> None:
+        # Title/body are nullable — we accept the sentinel "" and "None"
+        # both mean "leave alone"; clearing requires a separate endpoint
+        # (kept simple here, matches Shopify's "edit your review" UX).
+        values: dict[str, Any] = {}
+        if rating is not None:
+            values["rating"] = rating
+        if title is not None:
+            values["title"] = title
+        if body is not None:
+            values["body"] = body
+        if developer_response is not None:
+            values["developer_response"] = developer_response
+            values["developer_response_at"] = datetime.now(UTC)
+        if not values:
+            return
+        await self._session.execute(
+            update(MarketplaceThemeReviewModel)
+            .where(MarketplaceThemeReviewModel.id == review_id)
+            .values(**values)
+        )
+        await self._session.flush()
+
+    async def delete_review(self, review_id: UUID) -> bool:
+        from sqlalchemy import delete
+
+        result = await self._session.execute(
+            delete(MarketplaceThemeReviewModel).where(
+                MarketplaceThemeReviewModel.id == review_id
+            )
+        )
+        await self._session.flush()
+        return (result.rowcount or 0) > 0
+
+    async def list_reviews_for_theme(
+        self,
+        marketplace_theme_id: UUID,
+        *,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> tuple[list[MarketplaceThemeReview], int]:
+        base = select(MarketplaceThemeReviewModel).where(
+            MarketplaceThemeReviewModel.marketplace_theme_id == marketplace_theme_id
+        )
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_q)).scalar() or 0
+
+        q = (
+            base.order_by(desc(MarketplaceThemeReviewModel.created_at))
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+        )
+        result = await self._session.execute(q)
+        return [self._review_to_entity(m) for m in result.scalars().all()], total
+
+    async def recompute_theme_rating_aggregates(
+        self, marketplace_theme_id: UUID
+    ) -> tuple[float, int]:
+        """Recompute (average_rating, review_count) from the review rows
+        and persist them on `marketplace_themes`. Called after every
+        review create/update/delete in the same transaction.
+
+        We compute aggregates in SQL rather than incrementally adjusting
+        because the "user updated their existing review" path needs both
+        before- and after-rating, and SQL keeps the math correct without
+        a select-then-write race.
+        """
+        agg = await self._session.execute(
+            select(
+                func.coalesce(func.avg(MarketplaceThemeReviewModel.rating), 0.0),
+                func.count(MarketplaceThemeReviewModel.id),
+            ).where(
+                MarketplaceThemeReviewModel.marketplace_theme_id == marketplace_theme_id
+            )
+        )
+        avg_rating, review_count = agg.one()
+        avg_rating = float(avg_rating or 0.0)
+        review_count = int(review_count or 0)
+        await self._session.execute(
+            update(MarketplaceThemeModel)
+            .where(MarketplaceThemeModel.id == marketplace_theme_id)
+            .values(
+                average_rating=avg_rating,
+                review_count=review_count,
+            )
+        )
+        await self._session.flush()
+        return avg_rating, review_count

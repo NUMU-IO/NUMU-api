@@ -11,6 +11,7 @@ Provides endpoints for merchants to submit, check, and remove external themes:
 import logging
 import uuid
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -19,6 +20,11 @@ from src.api.dependencies import (
     get_current_store,
     get_store_repository,
     verify_store_ownership,
+)
+from src.api.dependencies.repositories import (
+    get_store_theme_repository,
+    get_theme_repository,
+    get_theme_version_repository,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront.public import AVAILABLE_THEMES
@@ -36,9 +42,26 @@ from src.api.v1.schemas.tenant.theme import (
     ThemeValidationResponse,
     ValidationErrorModel,
 )
+from src.application.services.theme_v3_presets import (
+    generate_initial_v3_customization,
+)
 from src.core.entities.store import Store
+from src.core.entities.theme import (
+    StoreTheme,
+    Theme,
+    ThemeStatus,
+    ThemeType,
+    ThemeVersion,
+)
 from src.infrastructure.cache.theme_build_store import get_theme_build_store
 from src.infrastructure.repositories import StoreRepository
+from src.infrastructure.repositories.store_theme_repository import (
+    StoreThemeRepository,
+)
+from src.infrastructure.repositories.theme_repository import ThemeRepository
+from src.infrastructure.repositories.theme_version_repository import (
+    ThemeVersionRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +253,9 @@ async def connect_dev_server(
     request: ConnectDevServerRequest,
     store: Store = Depends(get_current_store),
     store_repo: StoreRepository = Depends(get_store_repository),
+    theme_repo: ThemeRepository = Depends(get_theme_repository),
+    version_repo: ThemeVersionRepository = Depends(get_theme_version_repository),
+    store_theme_repo: StoreThemeRepository = Depends(get_store_theme_repository),
 ) -> SuccessResponse[ExternalThemeInfoResponse]:
     """Connect a local theme dev server URL to this store.
 
@@ -253,7 +279,9 @@ async def connect_dev_server(
 
     # Probe the dev server: fetch theme.json to verify it's a valid theme
     manifest: dict = {}
-    settings_schema: dict | None = None
+    # settings_schema.json is a Shopify-style *list* of setting defs in V3
+    # themes; accept dict for legacy/wrapped shapes too.
+    settings_schema: list | dict | None = None
     sections_manifest: dict | None = None
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -363,7 +391,124 @@ async def connect_dev_server(
         theme_settings["theme"] = {}
     theme_settings["theme"]["base_theme"] = theme_id
 
-    await store_repo.update(store.id, {"theme_settings": theme_settings})
+    store.theme_settings = theme_settings
+    await store_repo.update(store)
+
+    # ── V3 wiring ────────────────────────────────────────────────────────
+    # The V3 customizer reads from the `store_themes` table (via
+    # StoreThemeRepository.get_active_for_store), not from
+    # `theme_settings.external_theme`. Without these rows the editor shows
+    # "No active theme for this store". Mirror what the marketplace
+    # install/activate flow does, but for a dev-mode bundle.
+    try:
+        # 1. Theme row — upsert by slug. The slug must match manifest.id
+        #    so subsequent reconnects (e.g. after a Vite restart) update
+        #    the same row instead of inserting duplicates.
+        theme_entity = await theme_repo.get_by_slug(theme_id)
+        if theme_entity is None:
+            theme_entity = Theme(
+                id=uuid4(),
+                name=manifest.get("name", theme_id),
+                slug=theme_id,
+                description=manifest.get("description"),
+                author=manifest.get("author") or "Developer",
+                type=ThemeType.EXTERNAL,
+                status=ThemeStatus.PUBLISHED,
+                is_public=False,
+                settings_schema=settings_schema or {},
+                section_schemas=sections_manifest or {},
+                supported_features=manifest.get("supports"),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+            theme_entity = await theme_repo.create(theme_entity)
+        else:
+            # Refresh schemas on every reconnect so the editor reflects
+            # whatever the dev server is currently serving.
+            theme_entity.settings_schema = settings_schema or {}
+            theme_entity.section_schemas = sections_manifest or {}
+            theme_entity.name = manifest.get("name", theme_id)
+            theme_entity.description = manifest.get("description")
+            theme_entity = await theme_repo.update(theme_entity)
+
+        # 2. Fresh ThemeVersion per dev-connect. The dev URL doesn't have
+        #    immutable content addressing so a stable version row would
+        #    serve stale bundles after a rebuild.
+        manifest_version = manifest.get("version", "0.0.0-dev")
+        version_entity = ThemeVersion(
+            id=uuid4(),
+            theme_id=theme_entity.id,
+            version=f"{manifest_version}+dev.{int(datetime.now(UTC).timestamp())}",
+            bundle_url=bundle_url,
+            css_url=css_url,
+            manifest=manifest,
+            is_latest=True,
+            checksum="dev",  # No checksum — dev bundles aren't verified
+            published_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        version_entity = await version_repo.create(version_entity)
+
+        # 3. Deactivate any other active install for this store, then
+        #    upsert a row for this theme marked active.
+        await store_theme_repo.deactivate_all_for_store(store.id)
+
+        existing_install = None
+        for inst in await store_theme_repo.get_installations_for_store(store.id):
+            if inst.theme_id == theme_entity.id:
+                existing_install = inst
+                break
+
+        # Seed V3 customization from theme.json presets so the editor
+        # opens to the developer's intended starting layout.
+        v3_payload = generate_initial_v3_customization(
+            theme_id=str(theme_entity.id),
+            presets=manifest.get("presets") or {},
+            bundle_url=bundle_url,
+            css_url=css_url,
+            settings_schema=settings_schema,
+            section_schemas=sections_manifest,
+            mode="development",  # localhost dev-mode bundle
+        )
+        v3_dict = v3_payload.model_dump()
+
+        if existing_install is None:
+            install = StoreTheme(
+                id=uuid4(),
+                store_id=store.id,
+                tenant_id=store.tenant_id,
+                theme_id=theme_entity.id,
+                theme_version_id=version_entity.id,
+                is_active=True,
+                customization=v3_dict,  # legacy mirror
+                draft_customization={},
+                customization_v3=v3_dict,
+                draft_customization_v3=v3_dict,
+                installed_at=datetime.now(UTC),
+                activated_at=datetime.now(UTC),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+            await store_theme_repo.create(install)
+        else:
+            existing_install.theme_version_id = version_entity.id
+            existing_install.is_active = True
+            existing_install.activated_at = datetime.now(UTC)
+            existing_install.customization_v3 = v3_dict
+            existing_install.draft_customization_v3 = v3_dict
+            existing_install.customization = v3_dict
+            await store_theme_repo.update(existing_install)
+    except Exception as e:
+        # The legacy `theme_settings.external_theme` was already saved
+        # above, but without the V3 rows the customizer can't render
+        # anything. Surface the failure so the merchant sees a clear error
+        # and the underlying cause shows up in Sentry.
+        logger.error("Dev-mode V3 seeding failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Dev server connected but V3 editor seeding failed: {e}",
+        ) from e
 
     logger.info(
         "Dev server connected",
@@ -643,7 +788,8 @@ async def remove_external_theme(
     theme_settings["theme"]["base_theme"] = request.fallback_theme
 
     # Update store theme_settings
-    await store_repo.update(store.id, {"theme_settings": theme_settings})
+    store.theme_settings = theme_settings
+    await store_repo.update(store)
 
     logger.info(
         "External theme removed",

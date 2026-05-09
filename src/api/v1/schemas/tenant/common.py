@@ -1,10 +1,26 @@
 """Common Pydantic schemas."""
 
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
 T = TypeVar("T")
+
+# ── SettingsSchemaShape ───────────────────────────────────────────────────────
+#
+# `settings_schema` round-trips through JSONB and shows up in two shapes:
+#
+#   - Shopify-style array of setting definitions (the standard V3 theme
+#     format — what every BYOT theme's settings_schema.json contains).
+#   - Legacy wrapped dict {"settings": [...]} — older/internal callers.
+#
+# Pydantic v2 with a strict `dict[str, Any]` field rejects the array form
+# at validation time, which previously caused 500s in six places (Theme
+# entity, StoreTheme denormalized field, ExternalThemeMetadata,
+# StoreThemeListItem, StorefrontThemeResponse, SchemaResponse). Use this
+# alias everywhere `settings_schema` is declared so a future field
+# addition can't recreate the bug.
+SettingsSchemaShape = list[Any] | dict[str, Any]
 
 
 class PaginationParams(BaseModel):

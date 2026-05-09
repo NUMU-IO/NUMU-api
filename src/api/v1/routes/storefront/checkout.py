@@ -39,7 +39,6 @@ from src.api.responses import SuccessResponse
 from src.api.v1.schemas.storefront.checkout import CheckoutRequest, CheckoutResponse
 from src.application.dto.order import (
     CreateOrderAddressDTO,
-    CreateOrderDTO,
     CreateOrderLineItemDTO,
 )
 from src.application.services.cod_trust_service import (
@@ -52,6 +51,7 @@ from src.application.services.network_reputation_service import (
     write_network_event,
 )
 from src.application.services.shipping_resolver import ShippingResolver
+from src.application.services.tax_resolver import TaxLineInput, TaxResolver
 from src.config import settings
 from src.core.checkout_fields import (
     resolve_config as resolve_checkout_config,
@@ -608,16 +608,12 @@ async def checkout(
 
     currency = store.default_currency.value if store.default_currency else "EGP"
 
-    dto = CreateOrderDTO(
-        customer_id=current_customer.id,
-        line_items=line_items,
-        shipping_address=shipping_address,
-        billing_address=billing_address,
-        currency=currency,
-        payment_method=request.payment_method,
-        shipping_method=request.shipping_method,
-        customer_notes=request.customer_notes,
-    )
+    # NB: We previously built a CreateOrderDTO here and read dto.tax_amount
+    # downstream. Tax is now resolved server-side via TaxResolver below
+    # (see resolved_tax_cents) so the DTO became a dead assignment. The
+    # Order entity is built directly from line_items + addresses + the
+    # resolved tax/shipping. If the existing CreateOrderUseCase ever gets
+    # wired in here, re-introduce the DTO at that point.
 
     # Create order via the existing use case
     # We pass store.owner_id to satisfy the authorization check inside
@@ -810,7 +806,26 @@ async def checkout(
         resolved_rate_id = resolution.rate_id
         resolved_label = resolution.label
 
-    total = subtotal + shipping_cost_cents + dto.tax_amount - discount_amount
+    # Server-side tax resolution. The DTO's `tax_amount=0` default is
+    # intentionally untrusted — we recompute from store settings here
+    # so a tampered request can't zero out VAT. The resolver respects
+    # the store's `tax_settings.included_in_price` flag: when prices
+    # are tax-inclusive, `tax_to_add_cents` is 0 (the customer's total
+    # is unchanged) and `included_tax_cents` is recorded for the
+    # invoice / e-invoice trail.
+    tax_resolver = TaxResolver()
+    tax_resolution = tax_resolver.resolve(
+        store_settings=store.settings,
+        line_items=[
+            TaxLineInput(unit_price_cents=li.unit_price, quantity=li.quantity)
+            for li in line_items
+        ],
+        discount_amount_cents=discount_amount,
+        destination_governorate=(shipping_address.state or shipping_address.city),
+    )
+    resolved_tax_cents = tax_resolution.tax_to_add_cents
+
+    total = subtotal + shipping_cost_cents + resolved_tax_cents - discount_amount
 
     order = Order(
         store_id=store_id,
@@ -824,7 +839,7 @@ async def checkout(
         payment_status=PaymentStatus.PENDING,
         subtotal=subtotal,
         shipping_cost=shipping_cost_cents,
-        tax_amount=dto.tax_amount,
+        tax_amount=resolved_tax_cents,
         discount_amount=discount_amount,
         coupon_code=coupon_code,
         coupon_id=coupon_id,
@@ -840,6 +855,21 @@ async def checkout(
             **(
                 {"custom_fields": accepted_custom_fields}
                 if accepted_custom_fields
+                else {}
+            ),
+            # Preserve the resolved tax shape so downstream consumers
+            # (e-invoice / ETA, refund calculator, export reports) can
+            # reconcile the order without re-running the resolver.
+            **(
+                {
+                    "tax_breakdown": {
+                        "rate": tax_resolution.rate,
+                        "inclusive": tax_resolution.inclusive,
+                        "added_cents": tax_resolution.tax_to_add_cents,
+                        "included_cents": tax_resolution.included_tax_cents,
+                    }
+                }
+                if tax_resolution.rate > 0
                 else {}
             ),
         },

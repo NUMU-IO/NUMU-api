@@ -64,9 +64,15 @@ class MarketplaceThemeVersion(BaseEntity):
     version_string: str = Field(max_length=50)  # Semver: "1.0.0"
     bundle_url: str | None = None
     css_url: str | None = None
-    settings_schema: dict[str, Any] = Field(default_factory=dict)
-    section_schemas: dict[str, Any] = Field(default_factory=dict)
-    presets: dict[str, Any] = Field(default_factory=dict)
+    # Shopify-style theme schemas are arrays of section/setting
+    # definitions, NOT objects keyed by id. Type as `list | dict` so
+    # we can accept both shapes — matches the SettingsSchemaShape alias
+    # used elsewhere. The strict `dict[str, Any]` typing was causing
+    # the build worker's MarketplaceThemeVersion validation to reject
+    # legitimate theme schemas with a `dict_type` Pydantic error.
+    settings_schema: list[Any] | dict[str, Any] = Field(default_factory=dict)
+    section_schemas: list[Any] | dict[str, Any] = Field(default_factory=dict)
+    presets: list[Any] | dict[str, Any] = Field(default_factory=dict)
     release_notes: str | None = None
     status: MarketplaceVersionStatus = MarketplaceVersionStatus.PENDING_BUILD
     build_log: str | None = None
@@ -86,3 +92,61 @@ class MarketplaceThemeInstallation(BaseEntity):
     is_active: bool = False
     installed_at: datetime | None = None
     uninstalled_at: datetime | None = None
+
+
+class MarketplacePurchaseStatus(StrEnum):
+    """Lifecycle of a marketplace purchase row."""
+
+    # Created via /checkout-session, before Stripe confirms.
+    PENDING = "pending"
+    # Stripe webhook confirmed payment. Buyer can install across stores.
+    SUCCEEDED = "succeeded"
+    # Stripe webhook reported failed/canceled charge.
+    FAILED = "failed"
+    # Full refund processed.
+    REFUNDED = "refunded"
+    # Partial refund processed; buyer's install rights are still revoked
+    # for new installs (we don't half-grant the right to install).
+    PARTIALLY_REFUNDED = "partially_refunded"
+
+
+class MarketplaceThemeReview(BaseEntity):
+    """A merchant-written review for a marketplace theme.
+
+    `is_verified_purchase` is set at insert time when the reviewer has
+    a succeeded purchase row (paid theme) or an active install (free
+    theme). Editing a review keeps the existing flag — verifying after
+    purchase is a one-shot decision.
+    """
+
+    marketplace_theme_id: UUID
+    user_id: UUID
+    rating: int
+    title: str | None = None
+    body: str | None = None
+    is_verified_purchase: bool = False
+    developer_response: str | None = None
+    developer_response_at: datetime | None = None
+    helpful_count: int = 0
+
+
+class MarketplaceThemePurchase(BaseEntity):
+    """Records a single paid-theme purchase.
+
+    A succeeded, non-refunded row grants the buyer (`user_id`) the
+    right to install `marketplace_theme_id` across every store they
+    own. Refunds keep the row but flip status — existing installs are
+    *not* auto-uninstalled (best customer experience), but new
+    install/activate calls for the same theme are blocked.
+    """
+
+    user_id: UUID
+    marketplace_theme_id: UUID
+    amount_cents: int
+    currency: str = "USD"
+    stripe_payment_intent_id: str | None = None
+    stripe_charge_id: str | None = None
+    status: MarketplacePurchaseStatus = MarketplacePurchaseStatus.PENDING
+    refunded_amount_cents: int = 0
+    refund_reason: str | None = None
+    purchase_metadata: dict[str, Any] = Field(default_factory=dict)

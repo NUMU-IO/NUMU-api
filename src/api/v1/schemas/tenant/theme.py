@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from src.api.v1.schemas.tenant.common import SettingsSchemaShape
+
 
 class ThemeBuildStatus(StrEnum):
     """Status of an external theme build."""
@@ -121,7 +123,9 @@ class StoreThemeListItem(BaseModel):
     css_url: str | None = None
     version: str | None = None
     source_repo: str | None = None
-    settings_schema: dict | None = None  # The full schema for the customizer UI
+    # Shape covered by SettingsSchemaShape — see common.py for why this is
+    # always list-or-dict.
+    settings_schema: SettingsSchemaShape | None = None
     # Optional sections.json manifest extracted from the bundle. Each entry
     # describes a section type the bundle ships — either an OVERRIDE of an
     # existing shared section type or a brand-NEW type with its own schema.
