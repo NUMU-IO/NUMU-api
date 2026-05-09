@@ -1,7 +1,8 @@
 """Notification service for configuration events.
 
 This service handles sending notifications via multiple channels:
-- Email (via SMTP or SendGrid/Mailgun)
+- Email (via Resend by default; legacy SendGrid/Mailgun branches
+  still routable by setting ``EMAIL_PROVIDER`` explicitly)
 - Real-time WebSocket (via Redis pub/sub)
 - In-app notifications (stored in database)
 """
@@ -17,6 +18,7 @@ from uuid import UUID
 import httpx
 
 from src.config.settings import settings
+from src.core.interfaces.services.email_service import EmailMessage, IEmailService
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +97,19 @@ class NotificationService:
         self,
         redis_client=None,
         db_session=None,
+        email_service: IEmailService | None = None,
     ):
         self.redis_client = redis_client
         self.db_session = db_session
+        # Default provider is now Resend; the legacy "smtp" / "sendgrid"
+        # / "mailgun" branches still apply when EMAIL_PROVIDER is set
+        # explicitly. Keeps backwards compatibility for ops who haven't
+        # migrated env files yet.
         self._email_provider = (
-            settings.EMAIL_PROVIDER if hasattr(settings, "EMAIL_PROVIDER") else "smtp"
+            settings.EMAIL_PROVIDER if hasattr(settings, "EMAIL_PROVIDER") else "resend"
         )
+        # Tests inject a fake; production constructs lazily on first send.
+        self._email_service = email_service
 
     async def send_notification(
         self,
@@ -256,19 +265,30 @@ class NotificationService:
         elif self._email_provider == "mailgun":
             await self._send_via_mailgun(payload)
         else:
-            await self._send_via_smtp(payload)
+            # Default + "smtp" + "resend" all route through Resend.
+            # The legacy "smtp" branch was a TODO that silently dropped
+            # mail; we treat it as an alias for Resend so existing
+            # config files continue to work.
+            await self._send_via_resend(payload)
 
-    async def _send_via_smtp(self, payload: NotificationPayload) -> None:
-        """Send email via SMTP.
+    async def _send_via_resend(self, payload: NotificationPayload) -> None:
+        """Send email via Resend using the standard ``IEmailService``."""
+        service = self._email_service
+        if service is None:
+            from src.infrastructure.external_services.resend.email_service import (
+                ResendEmailService,
+            )
 
-        Args:
-            payload: The notification payload
-        """
-        # Implementation would use aiosmtplib
-        logger.info(
-            f"[SMTP] Sending email to {payload.recipient_email}: {payload.title}"
+            service = ResendEmailService()
+            self._email_service = service
+
+        message = EmailMessage(
+            to=payload.recipient_email or "",
+            subject=payload.title,
+            html_content=f"<p>{payload.message}</p>",
+            text_content=payload.message,
         )
-        # TODO: Implement actual SMTP sending
+        await service.send_email(message)
 
     async def _send_via_sendgrid(self, payload: NotificationPayload) -> None:
         """Send email via SendGrid.
