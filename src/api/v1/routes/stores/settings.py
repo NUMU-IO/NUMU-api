@@ -2663,3 +2663,541 @@ async def delete_instapay_qr_image(
         ),
         message="InstaPay QR image removed",
     )
+
+
+# ============================================================================
+# Meta Tracking (Pixel + Conversions API) — plan §13.2 / Wave 1C
+# ============================================================================
+#
+# These endpoints back the merchant-hub "Marketing & Tracking → Meta" panel.
+# Convention: PUT request preserves the existing CAPI access token when the
+# body omits ``capi_access_token``; **422** when ``capi_enabled = true`` and
+# no token is on file AND none is provided.
+#
+# The CAPI token is stored as a ``ServiceCredential`` row (encrypted via
+# SecretsManager); ``store.settings.tracking.meta`` carries the public bits
+# (pixel_id, flags, debug-mode expiry, domain-verification token).
+# ============================================================================
+
+import secrets as _stdlib_secrets  # noqa: E402 — alias avoids name clash
+from datetime import timedelta  # noqa: E402
+
+from sqlalchemy import select as _select  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: E402
+from sqlalchemy.orm.attributes import flag_modified as _flag_modified  # noqa: E402
+
+from src.api.dependencies.database import get_db as _get_db  # noqa: E402
+from src.api.v1.schemas.tenant.tracking import (  # noqa: E402
+    MetaEventLogEntry,
+    MetaTrackingResponse,
+    MetaTrackingStatusResponse,
+    SaveMetaTrackingRequest,
+    SendMetaTestEventRequest,
+    SendMetaTestEventResponse,
+    TrackingSettingsResponse,
+)
+from src.application.services.meta_tracking_resolver import (  # noqa: E402
+    resolve_mode,
+)
+
+_DEBUG_MODE_TTL_MINUTES = 60
+
+
+def _meta_cfg(store: Store) -> dict:
+    """Read the ``store.settings.tracking.meta`` sub-object (or empty)."""
+    return ((store.settings or {}).get("tracking") or {}).get("meta") or {}
+
+
+async def _has_active_capi_credential(db: _AsyncSession, tenant_id: uuid.UUID) -> bool:
+    """Check whether a META_CAPI ServiceCredential row exists + is active."""
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+
+    q = (
+        _select(ServiceCredential)
+        .where(ServiceCredential.tenant_id == tenant_id)
+        .where(ServiceCredential.service_type == ServiceType.TRACKING)
+        .where(ServiceCredential.service_name == ServiceName.META_CAPI)
+        .where(ServiceCredential.is_active.is_(True))
+    )
+    return (await db.execute(q)).scalar_one_or_none() is not None
+
+
+async def _get_capi_credential(db: _AsyncSession, tenant_id: uuid.UUID):
+    """Return the META_CAPI ``ServiceCredential`` row (active or not), or None."""
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+
+    q = (
+        _select(ServiceCredential)
+        .where(ServiceCredential.tenant_id == tenant_id)
+        .where(ServiceCredential.service_type == ServiceType.TRACKING)
+        .where(ServiceCredential.service_name == ServiceName.META_CAPI)
+    )
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+async def _build_meta_response(
+    db: _AsyncSession,
+    store: Store,
+) -> MetaTrackingResponse:
+    """Compose the public settings shape from store + credential row."""
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    cfg = _meta_cfg(store)
+    cred = await _get_capi_credential(db, store.tenant_id)
+    has_token = cred is not None and cred.is_active
+    mode = resolve_mode(cfg, has_token)
+
+    masked = None
+    if cred and cred.is_active:
+        try:
+            sm = get_secrets_manager()
+            decrypted = await sm.decrypt(
+                cred.credentials_encrypted, cred.encryption_key_id
+            )
+            raw = decrypted.get("access_token") or ""
+            masked = sm.mask_credential(raw) if raw else None
+        except Exception:
+            logger.warning(
+                "meta_capi_token_decrypt_failed_for_mask store_id=%s",
+                store.id,
+            )
+
+    # Status: connected / configured_no_events / failing / disabled.
+    status_label: str = "disabled"
+    if mode != "off":
+        from src.infrastructure.repositories.meta_event_log_repository import (
+            MetaEventLogRepository,
+        )
+
+        log_repo = MetaEventLogRepository(db)
+        recent = await log_repo.recent_for_store(store.id, limit=20)
+        if not recent:
+            status_label = "configured_no_events"
+        else:
+            last_5_failed = sum(
+                1
+                for r in recent[:5]
+                if r.response_status is None or r.response_status >= 400
+            ) == min(5, len(recent[:5]))
+            if last_5_failed and len(recent) >= 5:
+                status_label = "failing"
+            else:
+                status_label = "connected"
+
+    debug_expires_at = cfg.get("debug_mode_expires_at")
+    debug_expires_dt = None
+    if debug_expires_at:
+        try:
+            debug_expires_dt = datetime.fromisoformat(
+                debug_expires_at.replace("Z", "+00:00")
+            )
+        except (ValueError, AttributeError):
+            debug_expires_dt = None
+    debug_active = bool(debug_expires_dt and debug_expires_dt > datetime.now(UTC))
+
+    last_validated_dt = None
+    if cred and cred.last_validated_at:
+        last_validated_dt = cred.last_validated_at
+
+    return MetaTrackingResponse(
+        pixel_id=cfg.get("pixel_id"),
+        pixel_enabled=bool(cfg.get("pixel_enabled", False)),
+        capi_enabled=bool(cfg.get("capi_enabled", False)),
+        mode=mode,
+        capi_access_token_masked=masked,
+        domain_verification_token=cfg.get("domain_verification_token"),
+        test_event_code=cfg.get("test_event_code"),
+        consent_required=bool(cfg.get("consent_required", False)),
+        debug_mode=debug_active,
+        debug_mode_expires_at=debug_expires_dt,
+        last_validated_at=last_validated_dt,
+        status=status_label,
+    )
+
+
+@router.get(
+    "/tracking",
+    response_model=SuccessResponse[TrackingSettingsResponse],
+    summary="Get all tracking settings",
+    operation_id="get_tracking_settings",
+)
+async def get_tracking_settings(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Return the per-channel tracking config — only Meta today."""
+    meta = await _build_meta_response(db, store)
+    return SuccessResponse(
+        data=TrackingSettingsResponse(meta=meta),
+        message="Tracking settings retrieved",
+    )
+
+
+@router.put(
+    "/tracking/meta",
+    response_model=SuccessResponse[MetaTrackingResponse],
+    summary="Save Meta Pixel + CAPI settings",
+    operation_id="save_meta_tracking",
+)
+async def save_meta_tracking(
+    request: SaveMetaTrackingRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Upsert the per-store Meta tracking config and (optional) CAPI token.
+
+    422 if ``capi_enabled = true`` and no token is on file AND none is
+    supplied in the body — see plan §13.2.
+    """
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    settings_dict: dict = store.settings or {}
+    tracking = settings_dict.get("tracking") or {}
+    meta_cfg = tracking.get("meta") or {}
+
+    # ── Validation: capi_enabled requires a token ──────────────────────
+    existing_cred = await _get_capi_credential(db, store.tenant_id)
+    has_existing_active_token = existing_cred is not None and existing_cred.is_active
+    if request.capi_enabled and not (
+        request.capi_access_token or has_existing_active_token
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "capi_access_token is required when capi_enabled=true "
+                "and no token is on file"
+            ),
+        )
+
+    # ── Persist / update credential when a new token was supplied ─────
+    if request.capi_access_token:
+        sm = get_secrets_manager()
+        key_id = await sm.get_current_key_id()
+        encrypted = await sm.encrypt(
+            {"access_token": request.capi_access_token},
+            key_id,
+        )
+
+        if existing_cred:
+            existing_cred.credentials_encrypted = encrypted
+            existing_cred.encryption_key_id = key_id
+            existing_cred.is_active = True
+            existing_cred.is_validated = False
+            existing_cred.extra_metadata = {"pixel_id": request.pixel_id}
+        else:
+            new_cred = ServiceCredential(
+                tenant_id=store.tenant_id,
+                service_type=ServiceType.TRACKING,
+                service_name=ServiceName.META_CAPI,
+                credentials_encrypted=encrypted,
+                encryption_key_id=key_id,
+                is_active=True,
+                is_validated=False,
+                extra_metadata={"pixel_id": request.pixel_id},
+            )
+            db.add(new_cred)
+        await db.flush()
+
+    # ── Update store.settings.tracking.meta in place ──────────────────
+    domain_token = meta_cfg.get(
+        "domain_verification_token"
+    ) or _stdlib_secrets.token_urlsafe(24)
+
+    # Debug-mode expiry math lives server-side (per scope §C).
+    debug_expires_iso: str | None = None
+    if request.debug_mode:
+        debug_expires_iso = (
+            datetime.now(UTC) + timedelta(minutes=_DEBUG_MODE_TTL_MINUTES)
+        ).isoformat()
+
+    new_meta_cfg = {
+        **meta_cfg,
+        "pixel_id": request.pixel_id,
+        "pixel_enabled": bool(request.pixel_enabled),
+        "capi_enabled": bool(request.capi_enabled),
+        "test_event_code": request.test_event_code,
+        "consent_required": bool(request.consent_required),
+        "domain_verification_token": domain_token,
+        "debug_mode_expires_at": debug_expires_iso,
+    }
+    tracking["meta"] = new_meta_cfg
+    settings_dict["tracking"] = tracking
+    store.settings = settings_dict
+    # SQLAlchemy needs to know the JSONB blob mutated.
+    if hasattr(store, "__class__") and "settings" in getattr(
+        store.__class__, "__dict__", {}
+    ):
+        try:
+            _flag_modified(store, "settings")
+        except Exception:
+            pass
+    await store_repo.update(store)
+
+    logger.info(
+        "meta_tracking_saved store_id=%s pixel_enabled=%s capi_enabled=%s "
+        "token_updated=%s debug_mode=%s",
+        store.id,
+        request.pixel_enabled,
+        request.capi_enabled,
+        bool(request.capi_access_token),
+        request.debug_mode,
+    )
+
+    response = await _build_meta_response(db, store)
+    return SuccessResponse(data=response, message="Meta tracking saved")
+
+
+@router.delete(
+    "/tracking/meta",
+    response_model=SuccessResponse[MetaTrackingResponse],
+    summary="Disconnect Meta tracking",
+    operation_id="delete_meta_tracking",
+)
+async def delete_meta_tracking(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Disconnect: both flags off, soft-delete CAPI credential, keep history.
+
+    The ``meta_event_log`` rows are intentionally retained — they're
+    audit data that the merchant might still need to debug a past
+    campaign or chase a fbtrace_id with Meta support.
+    """
+    settings_dict: dict = store.settings or {}
+    tracking = settings_dict.get("tracking") or {}
+    meta_cfg = tracking.get("meta") or {}
+    meta_cfg["pixel_enabled"] = False
+    meta_cfg["capi_enabled"] = False
+    meta_cfg["debug_mode_expires_at"] = None
+    tracking["meta"] = meta_cfg
+    settings_dict["tracking"] = tracking
+    store.settings = settings_dict
+    try:
+        _flag_modified(store, "settings")
+    except Exception:
+        pass
+    await store_repo.update(store)
+
+    cred = await _get_capi_credential(db, store.tenant_id)
+    if cred is not None:
+        cred.is_active = False
+        await db.flush()
+
+    logger.info("meta_tracking_disconnected store_id=%s", store.id)
+
+    response = await _build_meta_response(db, store)
+    return SuccessResponse(data=response, message="Meta tracking disconnected")
+
+
+@router.post(
+    "/tracking/meta/test-event",
+    response_model=SuccessResponse[SendMetaTestEventResponse],
+    summary="Send a synthetic Purchase test event to Meta",
+    operation_id="send_meta_test_event",
+)
+async def send_meta_test_event(
+    request: SendMetaTestEventRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Fire a synthetic Purchase via the Celery fan-out task.
+
+    Rejects with 422 when the resolved mode is ``off`` or ``pixel_only``
+    (no CAPI to test). This is intentional — the test-event flow only
+    makes sense for modes that have a CAPI fan-out path.
+    """
+    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+
+    cfg = _meta_cfg(store)
+    has_token = await _has_active_capi_credential(db, store.tenant_id)
+    mode = resolve_mode(cfg, has_token)
+    if mode in ("off", "pixel_only"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(f"Test events require CAPI to be enabled. Current mode: {mode}"),
+        )
+
+    pixel_id = cfg.get("pixel_id")
+    if not pixel_id:  # defensive — resolve_mode would have returned 'off'
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="pixel_id is required to send a test event",
+        )
+
+    event_id = f"test-{uuid.uuid4()}"
+    currency = (
+        store.default_currency.value
+        if hasattr(store.default_currency, "value")
+        else str(store.default_currency)
+    )
+
+    meta_capi_send_event.delay(
+        store_id=str(store.id),
+        pixel_id=pixel_id,
+        event_name="Purchase",
+        event_id=event_id,
+        event_time=int(datetime.now(UTC).timestamp()),
+        event_source_url=None,
+        user_data={},
+        custom_data={
+            "value": 0.01,
+            "currency": currency,
+            "order_id": event_id,
+        },
+        test_event_code=request.test_event_code,
+        action_source="website",
+    )
+
+    logger.info(
+        "meta_capi_test_event_enqueued store_id=%s event_id=%s test_event_code=%s",
+        store.id,
+        event_id,
+        request.test_event_code,
+    )
+
+    return SuccessResponse(
+        data=SendMetaTestEventResponse(
+            enqueued=True,
+            test_event_code=request.test_event_code,
+            queued_event_id=event_id,
+        ),
+        message="Test event enqueued",
+    )
+
+
+@router.get(
+    "/tracking/meta/events",
+    response_model=SuccessResponse[list[MetaEventLogEntry]],
+    summary="Get recent Meta CAPI events",
+    operation_id="get_meta_events",
+)
+async def get_meta_events(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+    limit: int = 20,
+):
+    """Return last N ``meta_event_log`` rows, redacted.
+
+    The ``request_payload.user_data`` sub-object is dropped entirely;
+    only boolean indicators ("had_email": true) survive.
+    """
+    from src.infrastructure.repositories.meta_event_log_repository import (
+        MetaEventLogRepository,
+    )
+
+    limit = min(max(limit, 1), 100)
+    repo = MetaEventLogRepository(db)
+    rows = await repo.recent_for_store(store.id, limit=limit)
+
+    out: list[MetaEventLogEntry] = []
+    for r in rows:
+        # Redact the request payload — drop user_data entirely; replace
+        # it with hashed-presence indicators.
+        redacted = dict(r.request_payload or {})
+        ud = redacted.pop("user_data", None) or {}
+        redacted["user_data_indicators"] = {
+            "had_email": bool(ud.get("em")),
+            "had_phone": bool(ud.get("ph")),
+            "had_first_name": bool(ud.get("fn")),
+            "had_last_name": bool(ud.get("ln")),
+            "had_city": bool(ud.get("ct")),
+            "had_country": bool(ud.get("country")),
+            "had_zip": bool(ud.get("zp")),
+            "had_external_id": bool(ud.get("external_id")),
+            "had_fbp": bool(ud.get("fbp")),
+            "had_fbc": bool(ud.get("fbc")),
+        }
+        out.append(
+            MetaEventLogEntry(
+                id=str(r.id),
+                event_id=r.event_id,
+                event_name=r.event_name,
+                event_time=r.event_time,
+                pixel_id=r.pixel_id,
+                response_status=r.response_status,
+                fbtrace_id=r.fbtrace_id,
+                attempt_count=r.attempt_count,
+                last_error=r.last_error,
+                sent_at=r.sent_at,
+                created_at=r.created_at,
+                channel="server",
+                request_payload_redacted=redacted,
+            )
+        )
+
+    return SuccessResponse(data=out, message="Recent Meta events retrieved")
+
+
+@router.get(
+    "/tracking/meta/status",
+    response_model=SuccessResponse[MetaTrackingStatusResponse],
+    summary="Get Meta tracking status",
+    operation_id="get_meta_tracking_status",
+)
+async def get_meta_tracking_status(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Live status badge data — see plan §7.5."""
+    from src.infrastructure.repositories.meta_event_log_repository import (
+        MetaEventLogRepository,
+    )
+
+    cfg = _meta_cfg(store)
+    cred = await _get_capi_credential(db, store.tenant_id)
+    has_token = cred is not None and cred.is_active
+    mode = resolve_mode(cfg, has_token)
+
+    repo = MetaEventLogRepository(db)
+    recent = await repo.recent_for_store(store.id, limit=20)
+    failed = sum(
+        1 for r in recent if r.response_status is None or r.response_status >= 400
+    )
+    failure_rate = (failed / len(recent)) if recent else 0.0
+
+    if mode == "off":
+        status_label = "disabled"
+    elif not recent:
+        status_label = "configured_no_events"
+    elif (
+        len(recent) >= 5
+        and sum(
+            1
+            for r in recent[:5]
+            if r.response_status is None or r.response_status >= 400
+        )
+        == 5
+    ):
+        status_label = "failing"
+    else:
+        status_label = "connected"
+
+    return SuccessResponse(
+        data=MetaTrackingStatusResponse(
+            status=status_label,
+            mode=mode,
+            last_validated_at=cred.last_validated_at if cred else None,
+            recent_failure_rate=round(failure_rate, 4),
+            recent_event_count=len(recent),
+        ),
+        message="Meta tracking status retrieved",
+    )

@@ -33,6 +33,7 @@ from src.infrastructure.database.models.tenant.instapay_intent import (
 )
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
+from src.infrastructure.database.models.tenant.meta_event_log import MetaEventLogModel
 from src.infrastructure.database.models.tenant.network_contribution_log import (
     NetworkContributionLogModel,
 )
@@ -115,6 +116,7 @@ __all__ = [
     "CustomerModel",
     "InvoiceModel",
     "MessageLogModel",
+    "MetaEventLogModel",
     "NetworkContributionLogModel",
     "NetworkReputationModel",
     "InstapayIntentModel",

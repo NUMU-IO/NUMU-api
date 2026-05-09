@@ -203,8 +203,7 @@ class InvoicePDFGenerator:
         WARNING = _hex_to_rgb(_s["warning"])  # #E8A430 — Saffron
         DANGER = _hex_to_rgb(_s["danger"])  # #C14A1C — Terracotta
         INFO = _hex_to_rgb(_s["info"])  # #1F4A7A — Navy 600
-        # Aliases for the few sites in this method that still reference
-        # the previous palette names.
+        # Aliases kept for code that previously used semantic names.
         DARK = INK
         GREY = INK_SOFT
         BG_LIGHT = SURFACE

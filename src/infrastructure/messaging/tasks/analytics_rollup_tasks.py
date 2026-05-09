@@ -65,6 +65,73 @@ def calculate_analytics_rollups_task(self, backfill_days: int = DEFAULT_BACKFILL
         raise self.retry(exc=exc)
 
 
+@celery_app.task(
+    name="tasks.backfill_analytics_rollups",
+    bind=True,
+    max_retries=1,
+)
+def backfill_analytics_rollups_task(
+    self,
+    store_id: str | None = None,
+    days: int = 90,
+):
+    """Re-aggregate the last ``days`` days of rollups.
+
+    Idempotent entry point for ad-hoc backfills (e.g. after a deploy that
+    changes rollup aggregation logic). Delegates to the same path as the
+    nightly task so corrected metrics show up without waiting for the
+    incremental window to catch up.
+
+    Args:
+        store_id: UUID string. When None, backfills all active stores.
+        days: How far back to recompute (default 90).
+    """
+    try:
+        if store_id:
+            from uuid import UUID
+
+            result = run_async(_backfill_single_store(UUID(store_id), days))
+        else:
+            result = run_async(_calculate_all_rollups(days))
+        logger.info(
+            f"Analytics rollup backfill complete: {result} "
+            f"(store_id={store_id}, days={days})"
+        )
+        return result
+    except Exception as exc:
+        logger.exception("Analytics rollup backfill failed")
+        raise self.retry(exc=exc)
+
+
+async def _backfill_single_store(store_id, days: int) -> dict:
+    """Run the standard backfill path for one store across ``days`` days."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.store import StoreModel
+
+    today = date.today()
+    dates_to_process = [today - timedelta(days=i) for i in range(0, days + 1)]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(StoreModel.id, StoreModel.tenant_id).where(
+                StoreModel.id == store_id, StoreModel.status == "ACTIVE"
+            )
+        )
+        row = result.first()
+
+    if row is None:
+        return {"processed": 0, "days_written": 0, "errors": 0}
+
+    out = await _backfill_store(row.tenant_id, row.id, dates_to_process)
+    return {
+        "processed": 1,
+        "days_written": out["days_written"],
+        "errors": out["errors"],
+    }
+
+
 async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> dict:
     """Calculate and persist daily rollups for all active stores."""
     from sqlalchemy import select
@@ -255,13 +322,11 @@ async def _aggregate_day(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            # Exclude statuses that don't represent realized demand:
-            # cancelled (killed), refunded (returned), payment_failed
-            # (customer never completed payment). Cast to text because
-            # the orderstatus enum has lowercase storage values from an
-            # early migration; SQLAlchemy's default binding would send
-            # the uppercase Python member names, which PG rejects with
-            # `invalid input value for enum`.
+            # The orderstatus enum has lowercase values from an early
+            # migration. SQLAlchemy's default enum binding would send the
+            # uppercase member name (e.g. `PAYMENT_FAILED`), which PG
+            # rejects with `invalid input value for enum`. Cast to text
+            # so the comparison runs against the actual enum value.
             cast(OrderModel.status, String).notin_((
                 "cancelled",
                 "refunded",
