@@ -42,6 +42,15 @@ class Promotion(BaseEntity):
     ends_at: datetime | None = None
     version: int = 1
 
+    # Per-promotion usage caps. Both nullable; null = uncapped. The
+    # eligibility checker stops the promotion once `convert` events
+    # for this promotion meet the cap (total or per-customer). The
+    # legacy `Coupon.usage_limit` only constrains code-based promos;
+    # this pair covers automatic ones too (BOGO, tiered, percent-off
+    # cart, etc.) where there's no coupon row.
+    usage_limit_total: int | None = None
+    usage_limit_per_customer: int | None = None
+
     created_by: UUID | None = None
     updated_by: UUID | None = None
 

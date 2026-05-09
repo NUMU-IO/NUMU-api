@@ -465,6 +465,9 @@ async def calculate_cart_discounts(
     ],
     coupon_repo: Annotated[Any, Depends(get_coupon_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    event_repo: Annotated[
+        PromotionEventRepository, Depends(get_promotion_event_repository)
+    ],
     customer: Annotated[Customer | None, Depends(get_optional_customer)] = None,
 ) -> SuccessResponse[CartDiscountsOutput]:
     """Stateless cart-discount calculator.
@@ -505,6 +508,7 @@ async def calculate_cart_discounts(
                 product_name="",  # not needed for math
                 quantity=li.quantity,
                 unit_price=li.unit_price_cents,
+                category_id=li.category_id,
             )
             for li in body.items
         ],
@@ -516,6 +520,7 @@ async def calculate_cart_discounts(
         coupon_repo=coupon_repo,
         eligibility_checker=PromotionEligibilityChecker(),
         calculator=DiscountCalculator(),
+        event_repo=event_repo,
     )
     out = await use_case.execute(
         store_id=store_id,

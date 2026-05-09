@@ -75,6 +75,56 @@ def test_bogo_buy_2_get_1_free_on_cheapest():
     assert rule.calculate(ctx).discount_cents == 80
 
 
+def test_bogo_set_filtered_applies_only_to_get_set():
+    # Phase B: customer must buy from set A (the "buy_set"), but the
+    # discount only goes to set B (the "get_set"). The buy-set lines
+    # never get touched even though they're cheaper.
+    buy_pid = uuid4()
+    get_pid = uuid4()
+    rule = DiscountRule(
+        kind=DiscountRuleKind.BOGO,
+        buy_quantity=2,
+        get_quantity=1,
+        get_discount_percent=100,
+    )
+    ctx = DiscountContext(
+        subtotal_cents=2 * 50 + 200,
+        line_items=[
+            CartLine(product_id=buy_pid, quantity=2, unit_price_cents=50),
+            CartLine(product_id=get_pid, quantity=1, unit_price_cents=200),
+        ],
+    )
+    buy_filter = lambda li: li.product_id == buy_pid  # noqa: E731
+    get_filter = lambda li: li.product_id == get_pid  # noqa: E731
+    # 1 bundle: 2 from buy_set + 1 free from get_set → 200 cents off,
+    # NOT 50 cents (buy_set is cheaper but excluded from the get-side).
+    out = rule.calculate(ctx, buy_filter=buy_filter, get_filter=get_filter)
+    assert out.discount_cents == 200
+
+
+def test_bogo_set_filtered_skips_when_buy_set_qty_short():
+    # Only 1 in the buy_set — can't form a bundle that needs 2.
+    buy_pid = uuid4()
+    get_pid = uuid4()
+    rule = DiscountRule(
+        kind=DiscountRuleKind.BOGO,
+        buy_quantity=2,
+        get_quantity=1,
+        get_discount_percent=100,
+    )
+    ctx = DiscountContext(
+        subtotal_cents=50 + 200,
+        line_items=[
+            CartLine(product_id=buy_pid, quantity=1, unit_price_cents=50),
+            CartLine(product_id=get_pid, quantity=1, unit_price_cents=200),
+        ],
+    )
+    buy_filter = lambda li: li.product_id == buy_pid  # noqa: E731
+    get_filter = lambda li: li.product_id == get_pid  # noqa: E731
+    out = rule.calculate(ctx, buy_filter=buy_filter, get_filter=get_filter)
+    assert out.discount_cents == 0
+
+
 def test_tiered_picks_highest_threshold_met():
     rule = DiscountRule(
         kind=DiscountRuleKind.TIERED,
