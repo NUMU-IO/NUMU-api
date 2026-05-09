@@ -15,6 +15,7 @@ Authenticated customer routes:
 - /storefront/me/orders - Order history
 """
 
+from src.api.v1.routes.storefront.apps import router as apps_router
 from src.api.v1.routes.storefront.bundles import router as bundles_router
 from src.api.v1.routes.storefront.cart import router as cart_router
 from src.api.v1.routes.storefront.checkout import router as checkout_router
@@ -22,6 +23,7 @@ from src.api.v1.routes.storefront.checkout_config import (
     router as checkout_config_router,
 )
 from src.api.v1.routes.storefront.coupon import router as coupon_router
+from src.api.v1.routes.storefront.currencies import router as currencies_router
 from src.api.v1.routes.storefront.customer import router as customer_router
 from src.api.v1.routes.storefront.geocode import router as geocode_router
 from src.api.v1.routes.storefront.order_tracking import router as order_tracking_router
@@ -44,6 +46,8 @@ from src.api.v1.routes.storefront.tracking import router as tracking_router
 from src.api.v1.routes.storefront.upsell import router as upsell_router
 
 __all__ = [
+    "apps_router",
+    "currencies_router",
     "public_router",
     "reviews_router",
     "storefront_lookup_router",
