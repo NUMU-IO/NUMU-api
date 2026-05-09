@@ -34,13 +34,12 @@ _CASES = [
         DiscountCodeContent(),
         CouponPromotionLinkError,
     ),
-    (
-        PromotionSurface.DISCOUNT_CODE,
-        True,
-        _PCT,
-        DiscountCodeContent(),
-        InvalidDiscountRule,
-    ),
+    # `discount_code` + rule is now allowed: BOGO / tiered codes need
+    # the rule on the promotion since legacy Coupon can't represent
+    # those kinds. Plain percentage / fixed codes can either provide a
+    # rule (preferred — single calculation path) or rely on the linked
+    # coupon's calculate_discount.
+    (PromotionSurface.DISCOUNT_CODE, True, _PCT, DiscountCodeContent(), None),
     # automatic
     (PromotionSurface.AUTOMATIC, False, _PCT, AutomaticContent(), None),
     (PromotionSurface.AUTOMATIC, False, None, AutomaticContent(), InvalidDiscountRule),

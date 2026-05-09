@@ -4,12 +4,20 @@ Single source of truth for:
 
 | Surface           | coupon_id | discount_rule | content.surface  |
 |-------------------|-----------|---------------|------------------|
-| discount_code     | required  | forbidden     | discount_code    |
+| discount_code     | required  | optional *    | discount_code    |
 | automatic         | forbidden | required      | automatic        |
 | announcement_bar  | forbidden | optional      | announcement_bar |
 | popup             | forbidden | optional      | popup            |
 | floating_widget   | forbidden | optional      | floating_widget  |
 | cookie_banner     | forbidden | forbidden     | cookie_banner    |
+
+\\* `discount_code` rule rules:
+- Without a `discount_rule`, the legacy `Coupon.calculate_discount()`
+  is used (handles only percentage / fixed / free_shipping).
+- With a `discount_rule`, the unified `DiscountCalculator` is used,
+  which additionally supports BOGO and tiered. The merchant types a
+  code; the cart looks up the linked promotion and dispatches to the
+  rule. The coupon row is just the human-typeable handle in this case.
 """
 
 from src.core.enums.promotion_enums import PromotionSurface
@@ -29,8 +37,9 @@ _FORBIDS_COUPON = {
     PromotionSurface.COOKIE_BANNER,
 }
 _REQUIRES_RULE = {PromotionSurface.AUTOMATIC}
+# `DISCOUNT_CODE` removed — code-based BOGO / tiered need a rule on the
+# promotion since the legacy Coupon entity can't represent those kinds.
 _FORBIDS_RULE = {
-    PromotionSurface.DISCOUNT_CODE,
     PromotionSurface.COOKIE_BANNER,
 }
 
