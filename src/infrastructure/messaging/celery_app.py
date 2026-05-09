@@ -243,6 +243,7 @@ celery_app.conf.beat_schedule = {
     "meta-capi-sweep-orphaned-purchases": {
         "task": "tasks.meta_capi_sweep_orphaned_purchases",
         "schedule": crontab(minute=10),  # hourly at :10
+    },
     # ─── offers-v2: promotion lifecycle ─────────────────────────────────
     # Sweeping the promotion table every 5 min keeps the storefront and
     # the merchant list in sync with `starts_at` / `ends_at` without

@@ -150,7 +150,7 @@ class AutomationRuleResponse(BaseModel):
     is_active: bool = True
     priority: int = 0
     trigger_event: str
-    conditions: list[dict] = Field(default_factory=list)
+    conditions: dict = Field(default_factory=dict)
     actions: list[dict] = Field(default_factory=list)
     times_triggered: int = 0
     last_triggered_at: datetime | None = None
@@ -162,7 +162,7 @@ class AutomationRuleUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     priority: int | None = None
-    conditions: list[dict] | None = None
+    conditions: dict | None = None
     actions: list[dict] | None = None
 
 
