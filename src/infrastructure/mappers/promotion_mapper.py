@@ -85,6 +85,8 @@ class PromotionMapper:
             starts_at=e.starts_at,
             ends_at=e.ends_at,
             version=e.version,
+            usage_limit_total=e.usage_limit_total,
+            usage_limit_per_customer=e.usage_limit_per_customer,
             created_by=e.created_by,
             updated_by=e.updated_by,
         )
@@ -114,6 +116,8 @@ class PromotionMapper:
             starts_at=m.starts_at,
             ends_at=m.ends_at,
             version=m.version,
+            usage_limit_total=m.usage_limit_total,
+            usage_limit_per_customer=m.usage_limit_per_customer,
             created_by=m.created_by,
             updated_by=m.updated_by,
             created_at=m.created_at,
@@ -164,9 +168,15 @@ class PromotionMapper:
             target_kind=t.target_kind.value,
             target_value=t.target_value,
             inclusion=t.inclusion,
+            role=t.role,
         )
 
     def target_to_entity(self, m: PromotionTargetModel) -> PromotionTarget:
+        # `role` is `"buy_set" | "get_set" | None`. The entity uses
+        # `Literal[...]` so cast through `Any` rather than tighten the
+        # column type with a Postgres enum — that lets us add roles
+        # later without a migration.
+        role = m.role if m.role in ("buy_set", "get_set") else None
         return PromotionTarget(
             id=m.id,
             tenant_id=m.tenant_id,
@@ -174,6 +184,7 @@ class PromotionMapper:
             target_kind=TargetKind(m.target_kind),
             target_value=m.target_value or {},
             inclusion=m.inclusion,
+            role=role,  # type: ignore[arg-type]
             created_at=m.created_at,
             updated_at=m.updated_at,
         )

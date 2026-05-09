@@ -15,7 +15,7 @@ class EligibilityContext:
     """Everything the checker needs to decide.
 
     Pure data — never reads from a repo. Callers (the resolver) prefetch
-    customer tags, dismissed ids, etc., and pass them in.
+    customer tags, dismissed ids, usage counts, etc., and pass them in.
     """
 
     customer_id: UUID | None = None
@@ -29,6 +29,12 @@ class EligibilityContext:
     is_first_visit: bool = False
     is_logged_in: bool = False
     dismissed_promotion_ids: set[UUID] = field(default_factory=set)
+    # Usage counts for per-promotion caps. Both default to 0 so a
+    # caller that doesn't query event counts gets the legacy "always
+    # allow" behavior; the checker enforces caps only when the
+    # promotion itself has a non-null limit configured.
+    convert_count_total: int = 0
+    convert_count_per_customer: int = 0
 
 
 @dataclass(frozen=True)
@@ -65,8 +71,11 @@ class PromotionEligibilityChecker:
         if promotion.id in context.dismissed_promotion_ids:
             return EligibilityResult(False, ["dismissed by visitor"])
 
-        # 3. Targets
+        # 3. Targets — skip role-tagged ones (those drive BOGO line
+        # filters in the discount calculator, not eligibility).
         for target in targets:
+            if target.role is not None:
+                continue
             matches = self._target_matches(target, context)
             if target.inclusion and not matches:
                 reasons.append(
@@ -76,6 +85,20 @@ class PromotionEligibilityChecker:
             if not target.inclusion and matches:
                 reasons.append(f"exclude target {target.target_kind.value} matched")
                 return EligibilityResult(False, reasons)
+
+        # 4. Per-promotion usage caps. Caller pre-loaded the convert
+        # counts; we only check when the promotion has the cap set.
+        if (
+            promotion.usage_limit_total is not None
+            and context.convert_count_total >= promotion.usage_limit_total
+        ):
+            return EligibilityResult(False, ["total usage cap reached"])
+        if (
+            promotion.usage_limit_per_customer is not None
+            and context.customer_id is not None
+            and context.convert_count_per_customer >= promotion.usage_limit_per_customer
+        ):
+            return EligibilityResult(False, ["per-customer usage cap reached"])
 
         return EligibilityResult(True, [])
 

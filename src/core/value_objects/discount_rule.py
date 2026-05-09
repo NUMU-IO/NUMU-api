@@ -8,12 +8,20 @@ The application layer composes multiple `DiscountResult`s via
 `services.discount_calculator.DiscountCalculator`.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+# Used by `_bogo` to decide which cart lines participate in the
+# "customer buys" set vs the "customer gets" set when the merchant has
+# tagged PromotionTarget rows with `role="buy_set"` / `"get_set"`. The
+# filter is a plain predicate over `CartLine` so the rule object stays
+# free of repository / target-shape knowledge.
+LineFilter = Callable[["CartLine"], bool]
 
 
 class DiscountRuleKind(StrEnum):
@@ -117,12 +125,25 @@ class DiscountRule(BaseModel):
     # Public API                                                          #
     # ------------------------------------------------------------------ #
 
-    def calculate(self, context: DiscountContext) -> DiscountResult:
+    def calculate(
+        self,
+        context: DiscountContext,
+        *,
+        buy_filter: LineFilter | None = None,
+        get_filter: LineFilter | None = None,
+    ) -> DiscountResult:
         """Compute the discount for the given context.
 
         Never returns a negative `discount_cents`; capping below zero is
         handled here so callers can sum results without worrying about
         signs. The `max_discount_cents` cap is also applied.
+
+        `buy_filter` / `get_filter` only affect BOGO and only restrict
+        which cart lines participate in the "customer buys" / "customer
+        gets" sets. When omitted, BOGO falls back to the original
+        "any-product, cheapest-unit free" semantics so existing rules
+        without role-tagged targets keep their behavior. Both filters
+        are ignored for percentage / fixed / free_shipping / tiered.
         """
         if self._below_minimum(context):
             return DiscountResult(
@@ -144,7 +165,7 @@ class DiscountRule(BaseModel):
             case DiscountRuleKind.FIXED:
                 return self._fixed(context)
             case DiscountRuleKind.BOGO:
-                return self._bogo(context)
+                return self._bogo(context, buy_filter, get_filter)
             case DiscountRuleKind.TIERED:
                 return self._tiered(context)
 
@@ -183,24 +204,71 @@ class DiscountRule(BaseModel):
             explanation=f"{self.value_cents} cents off",
         )
 
-    def _bogo(self, context: DiscountContext) -> DiscountResult:
+    def _bogo(
+        self,
+        context: DiscountContext,
+        buy_filter: LineFilter | None,
+        get_filter: LineFilter | None,
+    ) -> DiscountResult:
         assert self.buy_quantity is not None and self.get_quantity is not None
         assert self.get_discount_percent is not None
-        # Walk lines from cheapest unit-price upward — discount is applied
-        # to the cheapest qualifying units (standard BOGO behavior).
+
+        # Sort once, cheapest first. Both buy-side and get-side scans
+        # walk this ordering — the cheapest qualifying unit gets the
+        # discount, matching the standard BOGO behavior.
         sorted_lines = sorted(context.line_items, key=lambda li: li.unit_price_cents)
-        bundle_size = self.buy_quantity + self.get_quantity
-        total_units = sum(li.quantity for li in sorted_lines)
-        bundles = total_units // bundle_size
+
+        # Build the buy-side and get-side line lists. When filters are
+        # absent (the legacy / no-targeting case) both sets are the
+        # whole cart — every line counts toward both the buy threshold
+        # and the get-side discount, which keeps the existing
+        # "any-product, cheapest-unit free" semantics intact.
+        buy_lines = (
+            [li for li in sorted_lines if buy_filter(li)]
+            if buy_filter is not None
+            else sorted_lines
+        )
+        get_lines = (
+            [li for li in sorted_lines if get_filter(li)]
+            if get_filter is not None
+            else sorted_lines
+        )
+
+        # Bundle math runs on whichever side defines the threshold.
+        # The buy side decides how many bundles the cart unlocks; the
+        # get side caps how many discounted units we can hand out
+        # (because we never discount past the customer's actual cart).
+        buy_units = sum(li.quantity for li in buy_lines)
+        get_units = sum(li.quantity for li in get_lines)
+
+        # Disjoint sets (buy ≠ get): bundles = buy_units / buy_qty.
+        # Same set (no filters or overlapping): the bundle has to come
+        # out of the same pool, so we use the standard total /
+        # (buy + get) form. We detect overlap by identity of the input
+        # line lists, not value-equality, since the calculator passes
+        # in fresh filters per call.
+        if buy_filter is None and get_filter is None:
+            bundle_size = self.buy_quantity + self.get_quantity
+            total_units = sum(li.quantity for li in sorted_lines)
+            bundles = total_units // bundle_size
+        else:
+            # With explicit sets we treat them as disjoint for the
+            # threshold check (Shopify's mental model) and clamp the
+            # actual discount handed out by the get-side stock.
+            bundles_from_buy = buy_units // self.buy_quantity
+            bundles_from_get = get_units // self.get_quantity
+            bundles = min(bundles_from_buy, bundles_from_get)
+
         if bundles == 0:
             return DiscountResult(discount_cents=0, explanation="bogo not met")
 
-        # Number of units that get the discount.
+        # Discount is applied to up to (bundles × get_quantity) cheapest
+        # units from the get-side pool.
         discounted_units = bundles * self.get_quantity
         discount_total = 0
         affected: list[UUID] = []
         remaining = discounted_units
-        for line in sorted_lines:
+        for line in get_lines:
             if remaining <= 0:
                 break
             take = min(line.quantity, remaining)
@@ -210,12 +278,17 @@ class DiscountRule(BaseModel):
             remaining -= take
 
         capped = self._cap(discount_total, context)
+        scope = (
+            "scoped"
+            if (buy_filter is not None or get_filter is not None)
+            else "any-product"
+        )
         return DiscountResult(
             discount_cents=capped,
             affected_line_item_ids=affected,
             explanation=(
                 f"buy {self.buy_quantity} get {self.get_quantity} "
-                f"@ {self.get_discount_percent}% off — {bundles} bundle(s)"
+                f"@ {self.get_discount_percent}% off — {bundles} bundle(s) ({scope})"
             ),
         )
 

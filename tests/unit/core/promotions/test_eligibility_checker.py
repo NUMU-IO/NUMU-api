@@ -149,3 +149,59 @@ def test_exclusion_target_blocks_when_match():
     assert chk.is_eligible(
         p, [target], EligibilityContext(cart_product_ids=[uuid4()])
     ).eligible
+
+
+# -------- Phase B: usage caps + role-tagged target skipping ------------------
+
+
+def test_usage_limit_total_blocks_when_reached():
+    p = _promo(usage_limit_total=5)
+    chk = PromotionEligibilityChecker()
+    # Under the cap → eligible.
+    assert chk.is_eligible(p, [], EligibilityContext(convert_count_total=4)).eligible
+    # At the cap → blocked.
+    assert not chk.is_eligible(
+        p, [], EligibilityContext(convert_count_total=5)
+    ).eligible
+
+
+def test_usage_limit_per_customer_only_applies_when_known():
+    p = _promo(usage_limit_per_customer=2)
+    chk = PromotionEligibilityChecker()
+    # Anonymous visitor (no customer_id) → per-customer cap is skipped,
+    # only the total cap matters; with no total cap set, it's eligible.
+    assert chk.is_eligible(
+        p, [], EligibilityContext(convert_count_per_customer=10)
+    ).eligible
+    # Logged-in visitor at the cap → blocked.
+    cid = uuid4()
+    assert not chk.is_eligible(
+        p,
+        [],
+        EligibilityContext(customer_id=cid, convert_count_per_customer=2),
+    ).eligible
+
+
+def test_role_tagged_targets_are_skipped_for_eligibility():
+    # A role-tagged target (buy_set / get_set) feeds the BOGO discount
+    # calculator only — the eligibility checker must not gate on it.
+    p = _promo()
+    pid_in_cart = uuid4()
+    pid_in_buy_set = uuid4()
+    role_target = PromotionTarget(
+        tenant_id=p.tenant_id,
+        promotion_id=p.id,
+        target_kind=TargetKind.PRODUCT,
+        target_value={"product_ids": [str(pid_in_buy_set)]},
+        inclusion=True,
+        role="buy_set",
+    )
+    chk = PromotionEligibilityChecker()
+    # Cart doesn't contain the buy_set product, but eligibility should
+    # still pass because role-tagged targets aren't eligibility rules.
+    res = chk.is_eligible(
+        p,
+        [role_target],
+        EligibilityContext(cart_product_ids=[pid_in_cart]),
+    )
+    assert res.eligible
