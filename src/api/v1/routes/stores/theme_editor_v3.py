@@ -41,6 +41,7 @@ from src.api.v1.schemas.tenant.theme_v3 import (
     PublishResponse,
     SchemaResponse,
     VersionListResponse,
+    VersionPayloadResponse,
     customization_payload_size,
 )
 from src.application.services.theme_v3_service import StaleEtagError, ThemeV3Service
@@ -244,6 +245,34 @@ async def restore_version(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return SuccessResponse(
         data=AutosaveDraftResponse(draft=data), message="Version restored"
+    )
+
+
+@router.get(
+    "/versions/{version_id}",
+    response_model=SuccessResponse[VersionPayloadResponse],
+)
+async def get_version_payload(
+    store_id: UUID,
+    version_id: UUID,
+    svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
+):
+    """Return a single version's stored payload (read-only).
+
+    Used by the merchant hub's Version-Diff dialog to load two snapshots
+    side-by-side without touching the live draft. 404s when the
+    version doesn't belong to this store — same shape as
+    /versions/{id}/restore so version ids can't be probed across stores.
+    """
+    try:
+        payload = await svc.get_version_payload(
+            store_id=store_id, version_id=version_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return SuccessResponse(
+        data=VersionPayloadResponse(payload=payload),
+        message="Version payload retrieved",
     )
 
 

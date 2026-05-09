@@ -94,6 +94,17 @@ class VersionListResponse(BaseModel):
     per_page: int
 
 
+class VersionPayloadResponse(BaseModel):
+    """Single-version payload for read-only inspection (e.g. diff view).
+
+    Distinct from `RestoreVersionResponse` in that it doesn't mutate the
+    draft — used by the merchant hub's Version-Diff dialog to load two
+    snapshots side by side without touching the live state.
+    """
+
+    payload: dict[str, Any]
+
+
 class DiscardDraftResponse(BaseModel):
     published: dict[str, Any]
 

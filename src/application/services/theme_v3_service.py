@@ -299,6 +299,23 @@ class ThemeV3Service:
             change_summary=f"Restored from version {version_id}",
         )
 
+    async def get_version_payload(
+        self,
+        store_id: UUID,
+        version_id: UUID,
+    ) -> dict[str, Any]:
+        """Return a single version's stored payload (read-only).
+
+        Used by the merchant hub's diff view to load two snapshots
+        side-by-side without touching the draft. The store-id check
+        mirrors `restore_version` so versions can't be enumerated
+        across stores by guessing UUIDs.
+        """
+        version = await self._version_repo.get_by_id(version_id)
+        if not version or version.store_id != store_id:
+            raise ValueError(f"Version {version_id} not found for store {store_id}")
+        return version.settings_blob
+
     async def discard_draft(self, store_id: UUID) -> dict[str, Any]:
         """Discard V3 draft and revert to published state."""
         store_theme = await self._store_theme_repo.get_active_for_store(store_id)
