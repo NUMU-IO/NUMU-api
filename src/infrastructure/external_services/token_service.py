@@ -189,7 +189,12 @@ class TokenService(ITokenService):
         token_type: str,
         expires_delta: timedelta,
     ) -> str:
-        """Create a JWT token for a customer."""
+        """Create a JWT token for a customer.
+
+        Phase 5.1 — refresh tokens carry a `jti` claim so the
+        rotation blacklist can detect reuse. Access tokens stay
+        jti-less (short-lived; rotation isn't meaningful for them).
+        """
         expire = datetime.utcnow() + expires_delta
         payload = {
             "sub": str(customer.id),
@@ -200,6 +205,8 @@ class TokenService(ITokenService):
             "exp": expire,
             "iat": datetime.utcnow(),
         }
+        if token_type == "refresh":
+            payload["jti"] = secrets.token_hex(16)
         return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_customer_access_token(self, customer) -> str:
@@ -226,6 +233,7 @@ class TokenService(ITokenService):
                 email=payload["email"],
                 exp=payload["exp"],
                 token_type=payload.get("token_type", "access"),
+                jti=payload.get("jti"),
             )
         except ExpiredSignatureError:
             raise TokenExpiredError()

@@ -104,6 +104,9 @@ from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
 )
 from src.api.v1.routes.storefront import (
+    data_rights_router as storefront_data_rights_router,
+)
+from src.api.v1.routes.storefront import (
     geocode_router as storefront_geocode_router,
 )
 from src.api.v1.routes.storefront import (
@@ -332,6 +335,13 @@ api_router.include_router(
     storefront_wishlist_router,
     prefix="/storefront/me",
     tags=["Storefront - Wishlist"],
+)
+
+# Storefront - GDPR data rights (Phase 5.6; authed customer)
+api_router.include_router(
+    storefront_data_rights_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Data Rights"],
 )
 
 # Storefront - upsell offers (public, scoped to store)

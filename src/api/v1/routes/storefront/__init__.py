@@ -23,6 +23,7 @@ from src.api.v1.routes.storefront.checkout_config import (
 )
 from src.api.v1.routes.storefront.coupon import router as coupon_router
 from src.api.v1.routes.storefront.customer import router as customer_router
+from src.api.v1.routes.storefront.data_rights import router as data_rights_router
 from src.api.v1.routes.storefront.geocode import router as geocode_router
 from src.api.v1.routes.storefront.order_tracking import router as order_tracking_router
 from src.api.v1.routes.storefront.otp import router as otp_router
@@ -51,6 +52,7 @@ __all__ = [
     "reviews_router",
     "search_router",
     "wishlist_router",
+    "data_rights_router",
     "storefront_lookup_router",
     "customer_router",
     "cart_router",
