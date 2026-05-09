@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.dependencies.auth import require_admin
+from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.repositories import get_marketplace_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.marketplace import (
@@ -50,6 +50,11 @@ async def list_pending_reviews(
 @router.post(
     "/versions/{version_id}/review",
     response_model=SuccessResponse[ReviewDecisionResponse],
+    # Step-up gate: approval publishes a theme to every merchant on
+    # the platform. A stale admin session shouldn't be able to ship
+    # third-party JS storewide. 5-minute freshness window matches the
+    # other CRITICAL-tier actions in the codebase.
+    dependencies=[Depends(require_admin_2fa(max_age_seconds=300))],
 )
 async def submit_review(
     version_id: UUID,

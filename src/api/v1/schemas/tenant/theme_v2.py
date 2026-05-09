@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.api.v1.schemas.tenant.common import SettingsSchemaShape
+
 # ── Shared sub-schemas ─────────────────────────────────────────────────────────
 
 
@@ -87,7 +89,7 @@ class ThemeDetailResponse(BaseModel):
     thumbnail_url: str | None = None
     is_public: bool
     status: str
-    settings_schema: dict[str, Any]
+    settings_schema: SettingsSchemaShape
     section_schemas: dict[str, Any] | None = None
     supported_features: dict[str, Any] | None = None
     versions: list[ThemeVersionSummary]
@@ -226,7 +228,7 @@ class StorefrontThemeResponse(BaseModel):
     # V3-shaped customization. Always populated — when no V3 row exists,
     # it's the normalized in-memory view of the legacy data.
     customization_v3: dict[str, Any]
-    settings_schema: dict[str, Any]
+    settings_schema: SettingsSchemaShape
     section_schemas: dict[str, Any] | None = None
     installation_id: str
     # Optional integrity hint for the Next.js BYOT loader's SRI check.

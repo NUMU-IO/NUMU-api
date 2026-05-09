@@ -20,7 +20,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from pydantic import ValidationError
 
 from src.api.dependencies import (
@@ -34,14 +34,16 @@ from src.api.dependencies.repositories import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.theme_v3 import (
+    MAX_CUSTOMIZATION_BYTES,
     AutosaveDraftRequest,
     AutosaveDraftResponse,
     DiscardDraftResponse,
     PublishResponse,
     SchemaResponse,
     VersionListResponse,
+    customization_payload_size,
 )
-from src.application.services.theme_v3_service import ThemeV3Service
+from src.application.services.theme_v3_service import StaleEtagError, ThemeV3Service
 from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_customization_version_repository import (
@@ -81,14 +83,20 @@ def _get_v3_service(
 async def get_draft(
     store_id: UUID,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
+    response: Response,
 ):
     """Get the current V3 draft for the active theme.
 
-    If no V3 draft exists yet, prefer V3 published; otherwise normalize
-    V1/V2 legacy data to V3 in memory (Dual-Read).
+    Returns the draft as the response data and emits an HTTP `ETag`
+    header so the client can echo it on the next autosave (`If-Match`).
+    Mismatch on autosave → 409. This is the standard optimistic-
+    concurrency pattern; using a real header keeps the JSON payload
+    backwards compatible with older hub builds.
     """
-    data = await svc.get_draft(store_id)
-    return SuccessResponse(data=data, message="Draft retrieved")
+    data = await svc.get_draft_with_etag(store_id)
+    if data["etag"]:
+        response.headers["ETag"] = data["etag"]
+    return SuccessResponse(data=data["draft"], message="Draft retrieved")
 
 
 @router.put(
@@ -100,19 +108,59 @@ async def autosave_draft(
     body: AutosaveDraftRequest,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
     user_id: Annotated[UUID, Depends(get_current_user_id)],
+    response: Response,
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
 ):
     """Auto-save V3 draft with Dual-Write to legacy columns.
 
     Idempotent if the payload is unchanged from the last draft.
     Pydantic re-validates the payload (incl. external_theme URL allowlist)
     before any DB write.
+
+    Rejects oversized payloads with 413 (Payload Too Large) before the
+    service layer touches the DB. JSONB can technically hold ~1 GB, but
+    a customization that big means runaway preset duplication or embedded
+    data URLs and the autosave debouncer can't keep up.
+
+    Optimistic concurrency: when the client sends `If-Match: <etag>`
+    (the etag from the most recent /draft fetch or a previous
+    autosave), we compare to the current store_theme.updated_at. On
+    mismatch → 409 with the current etag + draft so the client can
+    surface "another tab is editing; reload to continue". When the
+    request body carries `expected_etag`, that wins over the header
+    (kept for clients that prefer body-only payloads).
     """
+    size = customization_payload_size(body.payload)
+    if size > MAX_CUSTOMIZATION_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"customization payload too large: {size} bytes "
+                f"(limit {MAX_CUSTOMIZATION_BYTES}). "
+                "Reduce embedded asset sizes (consider image_picker URLs "
+                "instead of inline data: URIs) or split into more sections."
+            ),
+        )
+    expected_etag = body.expected_etag or if_match
     try:
         data = await svc.autosave_draft(
             store_id=store_id,
             payload=body.payload,
             user_id=user_id,
             change_summary=body.change_summary or "Auto-save",
+            expected_etag=expected_etag,
+        )
+    except StaleEtagError as e:
+        # Surface current draft + new etag so the client can prompt the
+        # merchant to reload, or (in future) merge.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "stale_etag",
+                "message": str(e),
+                "current_etag": e.current_etag,
+                "current_draft": e.current_draft,
+            },
         )
     except ValidationError as e:
         raise HTTPException(
@@ -121,6 +169,11 @@ async def autosave_draft(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    # Echo the new etag so the client uses it for the next autosave.
+    new_state = await svc.get_draft_with_etag(store_id)
+    if new_state["etag"]:
+        response.headers["ETag"] = new_state["etag"]
     return SuccessResponse(
         data=AutosaveDraftResponse(draft=data), message="Draft saved"
     )

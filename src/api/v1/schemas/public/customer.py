@@ -1,8 +1,21 @@
 """Customer API schemas for requests and responses."""
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from src.api.dependencies.sanitization import SanitizedStr
+from src.api.v1.schemas._address_validation import (
+    POSTAL_PATTERNS,
+    check_postal_for_country,
+    normalize_country,
+    normalize_phone,
+)
 
 # ============== Request Schemas ==============
 
@@ -173,6 +186,39 @@ class CreateAddressRequest(BaseModel):
         description="Provider-normalized formatted address",
     )
 
+    # Format validators — same shape as OrderAddressRequest. Customer
+    # address book entries are reused at checkout, so the two schemas
+    # MUST agree on what's accepted; otherwise a saved address that
+    # passes the address-book PUT can fail on the order POST.
+    @field_validator("country")
+    @classmethod
+    def _validate_country(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Country is required.")
+        return normalize_country(v)
+
+    @field_validator("postal_code")
+    @classmethod
+    def _trim_postal(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+    @field_validator("phone")
+    @classmethod
+    def _validate_phone(cls, v: str | None) -> str | None:
+        return normalize_phone(v)
+
+    @model_validator(mode="after")
+    def _check_postal_against_country(self) -> "CreateAddressRequest":
+        if self.postal_code is None:
+            return self
+        if self.country not in POSTAL_PATTERNS:
+            return self
+        check_postal_for_country(self.country, self.postal_code)
+        return self
+
 
 class UpdateAddressRequest(BaseModel):
     """Update address request schema."""
@@ -203,6 +249,45 @@ class UpdateAddressRequest(BaseModel):
     label: str | None = Field(
         None, pattern="^(home|work|other)$", description="Address label"
     )
+
+    # Same validators as CreateAddressRequest, but country can be None
+    # (a partial update that doesn't touch the country). Postal-code
+    # validation needs both fields together — when the customer updates
+    # only one of country/postal_code we can't pattern-check until the
+    # update is merged with the persisted row at the route level.
+    # We still trim whitespace + normalize the country alone.
+    @field_validator("country")
+    @classmethod
+    def _validate_country(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_country(v)
+
+    @field_validator("postal_code")
+    @classmethod
+    def _trim_postal(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+    @field_validator("phone")
+    @classmethod
+    def _validate_phone(cls, v: str | None) -> str | None:
+        return normalize_phone(v)
+
+    @model_validator(mode="after")
+    def _check_postal_against_country(self) -> "UpdateAddressRequest":
+        # Only pattern-check when both fields are present in the update.
+        # Cross-field check against the persisted row happens at the
+        # repository layer after the merge — this layer just rejects
+        # client-supplied combinations that can't possibly succeed.
+        if self.country is None or self.postal_code is None:
+            return self
+        if self.country not in POSTAL_PATTERNS:
+            return self
+        check_postal_for_country(self.country, self.postal_code)
+        return self
 
 
 # ============== Response Schemas ==============

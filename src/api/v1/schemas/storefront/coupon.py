@@ -13,13 +13,19 @@ class ApplyCouponRequest(BaseModel):
 
 
 class ApplyCouponResponse(BaseModel):
-    """Response with calculated coupon discount."""
+    """Response with calculated coupon discount.
+
+    `promotion_id` is set when the coupon is wrapped in an active
+    promotion (offers-v2). Storefronts can use it to record a `convert`
+    event after the order completes; older clients ignore the field.
+    """
 
     coupon_id: str
     code: str
     coupon_type: str
     discount_amount: str
     free_shipping: bool
+    promotion_id: str | None = None
 
     class Config:
         from_attributes = True

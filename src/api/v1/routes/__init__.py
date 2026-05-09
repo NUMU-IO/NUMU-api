@@ -47,11 +47,13 @@ from src.api.v1.routes.demo import router as demo_router
 # Public routes (no auth)
 from src.api.v1.routes.health import router as health_router
 
-# Marketplace V3 routes (catalog, developer, admin, store install)
+# Marketplace V3 routes (catalog, developer, admin, purchases, reviews, store install)
 from src.api.v1.routes.marketplace import (
     marketplace_admin_router,
     marketplace_catalog_router,
     marketplace_developer_router,
+    marketplace_purchases_router,
+    marketplace_reviews_router,
     marketplace_store_install_router,
 )
 
@@ -112,6 +114,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     payment_proofs_router as storefront_payment_proofs_router,
+)
+from src.api.v1.routes.storefront import (
+    promotions_router as storefront_promotions_router,
 )
 
 # Storefront routes (customer-facing)
@@ -295,6 +300,13 @@ api_router.include_router(
     tags=["Storefront - Coupons"],
 )
 
+# Storefront - offers-v2 promotions (active list, events, dismiss)
+api_router.include_router(
+    storefront_promotions_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Promotions"],
+)
+
 # Storefront - product reviews (GET public, POST requires customer auth)
 api_router.include_router(
     storefront_reviews_router,
@@ -360,6 +372,10 @@ api_router.include_router(
     marketplace_developer_router, tags=["Marketplace - Developer"]
 )
 api_router.include_router(marketplace_admin_router, tags=["Marketplace - Admin"])
+api_router.include_router(
+    marketplace_purchases_router, tags=["Marketplace - Purchases"]
+)
+api_router.include_router(marketplace_reviews_router, tags=["Marketplace - Reviews"])
 api_router.include_router(
     marketplace_store_install_router,
     prefix="/stores/{store_id}",

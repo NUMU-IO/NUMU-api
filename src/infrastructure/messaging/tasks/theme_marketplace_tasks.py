@@ -20,12 +20,17 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import tempfile
-from datetime import UTC, datetime
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, TypeVar
 from uuid import UUID
 
 from src.core.entities.marketplace_theme import MarketplaceVersionStatus
+from src.core.interfaces.services.storage_service import StorageBucket
 from src.infrastructure.messaging.celery_app import celery_app
 from src.infrastructure.messaging.tasks.theme_upload_tasks import (
     MAX_BUNDLE_SIZE,
@@ -38,16 +43,101 @@ from src.infrastructure.messaging.tasks.theme_upload_tasks import (
     _validate_theme_contract,
 )
 
+T = TypeVar("T")
+
+
+def _retry_with_backoff(
+    operation: Callable[[], T],
+    *,
+    label: str,
+    attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 8.0,
+) -> T:
+    """Retry an idempotent operation with exponential backoff + jitter.
+
+    R2 / S3 occasionally returns 5xx during reroll periods; without retry
+    the worker crashes mid-build, leaves the marketplace_theme_versions
+    row in `building` forever, and the developer's only signal is the
+    poll endpoint timing out. A trio of retries (1s, 2s, 4s + jitter)
+    rides through nearly every transient.
+
+    Re-raises the final exception on terminal failure so the calling
+    task transitions to `build_failed` with a clear log entry.
+    """
+    last: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as e:  # noqa: BLE001 — we re-raise after attempts
+            last = e
+            if attempt == attempts:
+                logger.error(
+                    "%s: terminal failure after %d attempts: %s",
+                    label,
+                    attempts,
+                    e,
+                )
+                raise
+            delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            delay = delay * (0.5 + random.random())  # ±50% jitter
+            logger.warning(
+                "%s: attempt %d/%d failed (%s) — retrying in %.1fs",
+                label,
+                attempt,
+                attempts,
+                e,
+                delay,
+            )
+            time.sleep(delay)
+    # Unreachable — loop either returns or raises.
+    raise last  # type: ignore[misc]
+
+
 logger = logging.getLogger(__name__)
 
 
+import threading
+
+_loop_lock = threading.Lock()
+_thread_loops: dict[int, asyncio.AbstractEventLoop] = {}
+
+
+def _get_or_create_thread_loop() -> asyncio.AbstractEventLoop:
+    """Return a persistent event loop for the current worker thread.
+
+    Why this exists: a Celery task calls `_run_async()` many times
+    (load_version → mark_building → upload → mark_done). Creating a
+    fresh `new_event_loop()` per call breaks asyncpg, which pins each
+    connection to the loop that opened it — the engine's pool returns
+    a connection from the previous (now-closed) loop and the next
+    `await connection.send(...)` blows up with
+    `'NoneType' object has no attribute 'send'`.
+
+    Sharing one loop across calls keeps all asyncpg connections valid
+    for the duration of the task (and the worker thread). The OS
+    reaps the loop when the worker process exits — we never explicitly
+    close it because closing it is what caused the original bug.
+    """
+    tid = threading.get_ident()
+    with _loop_lock:
+        loop = _thread_loops.get(tid)
+        if loop is None or loop.is_closed():
+            loop = asyncio.new_event_loop()
+            _thread_loops[tid] = loop
+        return loop
+
+
 def _run_async(coro):
-    """Run an async coroutine from within a sync Celery task."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    """Run an async coroutine from within a sync Celery task.
+
+    Reuses a thread-local event loop so multiple `_run_async()` calls
+    within the same task share one loop — required by asyncpg's
+    loop-pinning. See `_get_or_create_thread_loop` for the why.
+    """
+    loop = _get_or_create_thread_loop()
+    asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 async def _update_version_status(version_id: UUID, **fields) -> None:
@@ -120,22 +210,65 @@ def build_marketplace_theme(self, version_id: str) -> dict:
         # ── Validate contract ─────────────────────────────────────────────
         manifest = _validate_theme_contract(theme_dir)
         manifest_version = manifest.get("version")
-        if manifest_version != version.version_string:
+        # Accept three shapes:
+        #   1. Exact match — production submissions via `numu-theme submit`
+        #      land here and require the developer to have bumped
+        #      theme.json before publishing.
+        #   2. Submitted version is `<theme.json.version>-dev.<X>` —
+        #      `numu-theme install` auto-suffixes a `-dev.<timestamp>`
+        #      tag so dev iterations never collide on the
+        #      (theme_id, version_string) unique index. The base version
+        #      stays the developer's intent.
+        #   3. Submitted version is `<theme.json.version>+<X>` — semver
+        #      build metadata; same intent as the dev suffix, kept for
+        #      future tooling.
+        # Anything else is a true mismatch and we abort.
+        if manifest_version != version.version_string and not (
+            isinstance(manifest_version, str)
+            and (
+                version.version_string.startswith(f"{manifest_version}-dev.")
+                or version.version_string.startswith(f"{manifest_version}+")
+            )
+        ):
             raise ThemeBuildError(
                 f"theme.json version ({manifest_version!r}) does not match "
-                f"submitted version_string ({version.version_string!r})"
+                f"submitted version_string ({version.version_string!r}). "
+                f"Allowed: exact match, '<base>-dev.<tag>', or '<base>+<tag>'."
             )
 
         # ── Build ─────────────────────────────────────────────────────────
+        # Pre-built path: if the developer's CLI shipped a usable
+        # dist/theme.js inside the ZIP, skip the worker's own build.
+        # The dev-install loop relies on this because their package.json
+        # uses `link:../numu-theme-sdk` (workspace-style references)
+        # that the worker's vanilla `npm install` can't resolve. They
+        # built locally where pnpm/links work; we trust that artifact
+        # for *developer-self-install* use.
+        #
+        # Production marketplace submissions (`numu-theme submit`)
+        # don't ship dist/, so this branch is bypassed and the worker
+        # rebuilds from clean source — preserving the security property
+        # that we never trust developer-machine-produced bundles for
+        # public distribution.
         dist = theme_dir / "dist"
-        dist.mkdir(exist_ok=True)
-        result = (
-            _run_in_docker(theme_dir) if USE_DOCKER else _run_local_build(theme_dir)
-        )
-        if result.returncode != 0:
-            raise ThemeBuildError(
-                f"build command failed: {result.stderr.strip()[:500]}"
+        prebuilt_bundle = dist / "theme.js"
+        if prebuilt_bundle.exists() and prebuilt_bundle.stat().st_size > 0:
+            logger.info(
+                "marketplace_build_using_prebuilt",
+                extra={
+                    "version_id": version_id,
+                    "size_bytes": prebuilt_bundle.stat().st_size,
+                },
             )
+        else:
+            dist.mkdir(exist_ok=True)
+            result = (
+                _run_in_docker(theme_dir) if USE_DOCKER else _run_local_build(theme_dir)
+            )
+            if result.returncode != 0:
+                raise ThemeBuildError(
+                    f"build command failed: {result.stderr.strip()[:500]}"
+                )
 
         bundle_path: Path | None = None
         for name in ("theme.js", "theme.mjs", "theme.esm.js"):
@@ -163,11 +296,14 @@ def build_marketplace_theme(self, version_id: str) -> dict:
         checksum = hashlib.sha256(bundle_bytes).hexdigest()
         version_hash = checksum[:8]
 
-        from src.infrastructure.external_services.cloudflare_r2.storage_service import (
-            CloudflareR2StorageService,
-        )
+        # Go through the factory so the local-filesystem fallback kicks
+        # in when S3/R2 isn't configured (common for local dev — the
+        # CloudflareR2StorageService class throws "Storage not configured"
+        # otherwise). Production sets the s3_* vars and gets the real
+        # R2 client transparently.
+        from src.api.dependencies.services import get_storage_service
 
-        storage = CloudflareR2StorageService()
+        storage = get_storage_service()
 
         bundle_key = (
             f"marketplace/{version.theme_id}/"
@@ -179,10 +315,15 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 file_content=bundle_bytes,
                 filename=bundle_key,
                 content_type="application/javascript",
-                bucket="themes",
+                bucket=StorageBucket.THEMES,
             )
 
-        bundle_uploaded = _run_async(_upload_bundle())
+        # R2 occasionally 5xxs during reroll; retry with backoff so a
+        # transient outage doesn't strand the build in `building` state.
+        bundle_uploaded = _retry_with_backoff(
+            lambda: _run_async(_upload_bundle()),
+            label=f"R2 upload theme.js for version {version.id}",
+        )
         bundle_url = bundle_uploaded.url
 
         css_url: str | None = None
@@ -198,16 +339,22 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                     file_content=css_path.read_bytes(),
                     filename=css_key,
                     content_type="text/css",
-                    bucket="themes",
+                    bucket=StorageBucket.THEMES,
                 )
 
-            css_uploaded = _run_async(_upload_css())
+            css_uploaded = _retry_with_backoff(
+                lambda: _run_async(_upload_css()),
+                label=f"R2 upload theme.css for version {version.id}",
+            )
             css_url = css_uploaded.url
 
         # ── Extract schemas + presets ─────────────────────────────────────
-        settings_schema: dict = {}
-        section_schemas: dict = {}
-        presets: dict = {}
+        # Theme schemas are Shopify-style arrays (a list of setting/section
+        # definitions). The columns are JSONB so they accept either shape;
+        # type the locals broadly to match.
+        settings_schema: list | dict = {}
+        section_schemas: list | dict = {}
+        presets: list | dict = {}
 
         for fname, target in (
             ("settings_schema.json", "settings_schema"),
@@ -303,3 +450,77 @@ def build_marketplace_theme(self, version_id: str) -> dict:
             import shutil
 
             shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ── Watchdog: fail builds that have been "building" too long ─────────────────
+#
+# A worker can die mid-build (OOM, host reboot, R2 retry storm exhausted)
+# in ways the try/except above can't catch. The marketplace_theme_versions
+# row stays in `building` forever and the developer's poll endpoint never
+# resolves. This beat task runs every few minutes and transitions any
+# version that's been `building` for > BUILD_TIMEOUT_MINUTES into
+# `build_failed` with a clear reason. The developer can then fix and
+# resubmit.
+#
+# Schedule via celery beat:
+#   "theme_marketplace_watchdog": {
+#       "task": "theme_marketplace_watchdog",
+#       "schedule": 300.0,  # every 5 min
+#   }
+
+BUILD_TIMEOUT_MINUTES = 15
+
+
+@celery_app.task(name="theme_marketplace_watchdog")
+def theme_marketplace_watchdog() -> dict[str, Any]:
+    """Mark stale `building` marketplace versions as failed.
+
+    Returns a small summary dict for logging / metrics. Idempotent — a
+    version flipped to BUILD_FAILED here stays there; future runs skip
+    it. Safe to run on every beat tick.
+    """
+    cutoff = datetime.now(UTC) - timedelta(minutes=BUILD_TIMEOUT_MINUTES)
+
+    async def _sweep() -> dict[str, Any]:
+        from sqlalchemy import select
+
+        from src.infrastructure.database.connection import get_session
+        from src.infrastructure.database.models.tenant.marketplace_theme import (
+            MarketplaceThemeVersionModel,
+        )
+
+        async with get_session() as session:
+            # Pick everything that's been BUILDING since before the cutoff.
+            # `updated_at` advances on every status transition so this
+            # excludes versions that are progressing.
+            result = await session.execute(
+                select(MarketplaceThemeVersionModel).where(
+                    MarketplaceThemeVersionModel.status
+                    == MarketplaceVersionStatus.BUILDING.value,
+                    MarketplaceThemeVersionModel.updated_at < cutoff,
+                )
+            )
+            stale = result.scalars().all()
+            for row in stale:
+                row.status = MarketplaceVersionStatus.BUILD_FAILED.value
+                row.build_log = (
+                    f"Build watchdog: version was in `building` for more "
+                    f"than {BUILD_TIMEOUT_MINUTES} minutes and is presumed "
+                    f"orphaned (worker crash, R2 outage, or process kill). "
+                    f"Resubmit to retry."
+                )
+                row.updated_at = datetime.now(UTC)
+            if stale:
+                await session.commit()
+            return {
+                "swept": len(stale),
+                "version_ids": [str(r.id) for r in stale],
+            }
+
+    summary = _run_async(_sweep())
+    if summary["swept"]:
+        logger.warning(
+            "marketplace_watchdog_swept_orphans",
+            extra=summary,
+        )
+    return summary

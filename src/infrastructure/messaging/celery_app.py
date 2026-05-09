@@ -68,6 +68,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
         # Meta Conversions — per-event fan-out + orphan-purchase sweep
         "src.infrastructure.messaging.tasks.meta_capi",
+        # offers-v2 — promotion lifecycle + analytics maintenance.
+        "src.infrastructure.messaging.tasks.promotion_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -139,6 +141,13 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.retry_stuck_preliminary_scores",
         "schedule": 300.0,  # Every 5 minutes
         "kwargs": {"max_age_minutes": 5, "batch_size": 50},
+    },
+    # Marketplace theme build watchdog — fail orphan builds whose worker
+    # died mid-build (R2 outage, OOM, etc.) so versions don't sit in
+    # `building` forever. The task itself is idempotent.
+    "theme-marketplace-watchdog": {
+        "task": "theme_marketplace_watchdog",
+        "schedule": 300.0,  # Every 5 minutes
     },
     "cleanup-expired-payment-links": {
         "task": "tasks.cleanup_expired_payment_links",
@@ -234,6 +243,23 @@ celery_app.conf.beat_schedule = {
     "meta-capi-sweep-orphaned-purchases": {
         "task": "tasks.meta_capi_sweep_orphaned_purchases",
         "schedule": crontab(minute=10),  # hourly at :10
+    # ─── offers-v2: promotion lifecycle ─────────────────────────────────
+    # Sweeping the promotion table every 5 min keeps the storefront and
+    # the merchant list in sync with `starts_at` / `ends_at` without
+    # waiting for the 60s cache TTL on every active surface.
+    "expire-promotions": {
+        "task": "tasks.expire_promotions",
+        "schedule": crontab(minute="*/5"),
+    },
+    # Daily prune of raw promotion_events past the 90-day retention.
+    "prune-promotion-events": {
+        "task": "tasks.prune_promotion_events",
+        "schedule": crontab(hour=2, minute=45),
+    },
+    # Daily rollup target — the aggregate table itself ships in step 13.
+    "rollup-promotion-events-daily": {
+        "task": "tasks.rollup_promotion_events_daily",
+        "schedule": crontab(hour=2, minute=15),
     },
 }
 

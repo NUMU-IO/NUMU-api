@@ -56,11 +56,11 @@ async def _providers_in_use() -> set[str]:
     """
     from sqlalchemy import select, text
 
-    from src.infrastructure.database.connection import get_db_session
+    from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.store import StoreModel
 
     in_use: set[str] = set()
-    async with get_db_session() as session:
+    async with AsyncSessionLocal() as session:
         # Direct JSONB path read — much faster than fetching every
         # store row and inspecting in Python. Postgres ``->>`` returns
         # a text scalar; we group by it to dedupe.

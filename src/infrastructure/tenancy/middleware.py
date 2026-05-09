@@ -36,6 +36,11 @@ RESERVED_HOST_SUBDOMAINS = frozenset({
     "merchant",
     "dashboard",
     "app",
+    # Environment apex hosts: test.numueg.app and staging.numueg.app serve
+    # the landing page + control-plane API, not a per-tenant storefront.
+    # Tenant storefronts live one level deeper: <store>.test.numueg.app.
+    "test",
+    "staging",
 })
 
 

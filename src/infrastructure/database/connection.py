@@ -29,6 +29,13 @@ _tenant_schema: ContextVar[str] = ContextVar("tenant_schema", default="public")
 # Context variable to store current tenant ID for RLS
 _tenant_id: ContextVar[str | None] = ContextVar("tenant_id", default=None)
 
+# Context variable to store current user ID for marketplace user-scoped RLS.
+# Distinct from tenant_id because marketplace tables (purchases, reviews)
+# are NOT tenant-scoped — they belong to a user across all the stores
+# they own. Set by the auth middleware after JWT validation; cleared
+# at request end. Consumed by `app.current_user` Postgres session var.
+_user_id: ContextVar[str | None] = ContextVar("user_id", default=None)
+
 
 def set_tenant_schema(schema_name: str) -> None:
     """Set the current tenant schema."""
@@ -70,6 +77,31 @@ def reset_tenant_id() -> None:
     _tenant_id.set(None)
 
 
+def set_user_id(user_id: UUID | str | None) -> None:
+    """Set the current user ID for marketplace user-scoped RLS.
+
+    Should be set by the auth middleware after JWT verification.
+    Marketplace RLS policies (purchases, reviews) compare the row's
+    `user_id` against this value. Public/anonymous requests pass None,
+    which is fine for read-only marketplace catalog queries (the
+    reviews SELECT policy is `USING (true)`; the purchases SELECT
+    policy correctly returns zero rows for anonymous callers).
+    """
+    if user_id is None:
+        _user_id.set(None)
+    else:
+        _user_id.set(str(user_id))
+
+
+def get_user_id() -> str | None:
+    """Get the current user ID for marketplace RLS."""
+    return _user_id.get()
+
+
+def reset_user_id() -> None:
+    _user_id.set(None)
+
+
 class Base(DeclarativeBase):
     """SQLAlchemy declarative base."""
 
@@ -99,16 +131,17 @@ _max_overflow = (
     settings.celery_db_max_overflow if _is_celery else settings.db_max_overflow
 )
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,
-    pool_pre_ping=True,
-    pool_use_lifo=True,
-    pool_size=_pool_size,
-    max_overflow=_max_overflow,
-    pool_timeout=settings.db_pool_timeout,
-    pool_recycle=settings.db_pool_recycle,
-    connect_args={
+# Celery tasks call `_run_async()` multiple times, each creating its own
+# fresh event loop. asyncpg connections are pinned to the loop that
+# opened them — a pooled connection from a closed loop blows up on
+# reuse with "'NoneType' object has no attribute 'send'" the moment a
+# subsequent task tries to ping it. NullPool sidesteps this by opening
+# a fresh connection per session and never holding any across loops.
+# The trade-off is a few extra ms per task to reconnect, which is
+# negligible compared to the marketplace build pipeline's overall cost.
+_engine_kwargs: dict = {
+    "echo": settings.debug,
+    "connect_args": {
         "server_settings": {
             "statement_timeout": str(settings.db_statement_timeout_ms),
             # Kill connections whose client has gone away (e.g. uvicorn
@@ -121,7 +154,22 @@ engine = create_async_engine(
             "application_name": f"numu-{settings.process_role}",
         },
     },
-)
+}
+if _is_celery:
+    from sqlalchemy.pool import NullPool
+
+    _engine_kwargs["poolclass"] = NullPool
+else:
+    _engine_kwargs.update(
+        pool_pre_ping=True,
+        pool_use_lifo=True,
+        pool_size=_pool_size,
+        max_overflow=_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_recycle=settings.db_pool_recycle,
+    )
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +269,29 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             # Clear any existing tenant context when no tenant is set
             await session.execute(
                 text("SELECT set_config('app.current_tenant', '', true)")
+            )
+
+        # Set the user context for marketplace user-scoped RLS. The
+        # marketplace policies fall back to admin_bypass for sessions
+        # without a user (cron jobs, admin reads); strict policies are
+        # only triggered when the auth middleware populated the
+        # contextvar. Validate UUID format identical to tenant_id —
+        # never interpolate the raw contextvar value.
+        user_id = get_user_id()
+        if user_id:
+            try:
+                UUID(user_id)
+                await session.execute(
+                    text("SELECT set_config('app.current_user', :user_id, true)"),
+                    {"user_id": user_id},
+                )
+            except ValueError:
+                logger.warning(
+                    f"Invalid user_id format: {user_id}, skipping user RLS context"
+                )
+        else:
+            await session.execute(
+                text("SELECT set_config('app.current_user', '', true)")
             )
 
         try:

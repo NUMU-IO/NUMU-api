@@ -2,9 +2,15 @@
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.api.dependencies.sanitization import SanitizedStr
+from src.api.v1.schemas._address_validation import (
+    POSTAL_PATTERNS,
+    check_postal_for_country,
+    normalize_country,
+    normalize_phone,
+)
 
 
 class OrderLineItemRequest(BaseModel):
@@ -94,6 +100,50 @@ class OrderAddressRequest(BaseModel):
         max_length=500,
         description="Provider-normalized formatted address (from reverse geocoding)",
     )
+
+    # ─── Format validators ──────────────────────────────────────────
+    # We validate the bare-minimum shape (country code, postal pattern
+    # for the major delivery markets, phone E.164-ish) so a typo'd
+    # address doesn't slip through to the carrier. Geocoding (Google
+    # Places API) is a separate workstream — these validators stop the
+    # obvious mis-entries without an external network call.
+
+    @field_validator("country")
+    @classmethod
+    def _validate_country(cls, v: str) -> str:
+        """Normalize country to ISO 3166-1 alpha-2."""
+        if not v or not v.strip():
+            raise ValueError("Country is required.")
+        return normalize_country(v)
+
+    @field_validator("postal_code")
+    @classmethod
+    def _trim_postal(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+    @field_validator("phone")
+    @classmethod
+    def _validate_phone(cls, v: str | None) -> str | None:
+        return normalize_phone(v)
+
+    @field_validator("state")
+    @classmethod
+    def _trim_state(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip() or None
+
+    @model_validator(mode="after")
+    def _check_postal_against_country(self) -> "OrderAddressRequest":
+        if self.postal_code is None:
+            return self
+        if self.country not in POSTAL_PATTERNS:
+            return self
+        check_postal_for_country(self.country, self.postal_code)
+        return self
 
 
 class CreateOrderRequest(BaseModel):

@@ -88,6 +88,16 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     plan: Mapped[str] = mapped_column(String(50), default="trial", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    # Per-tenant feature flags. Read-mostly map of flag name -> boolean.
+    # Used to gate offers-v2 routes during phased rollout per the plan
+    # (`ff_promotions_v2`, `ff_storefront_promo_render`,
+    # `ff_onboarding_tour_v1`). Default `{}` means "all flags off".
+    feature_flags: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="'{}'::jsonb",
+        default=dict,
+    )
 
     # ─── Lifecycle state machine (Stream 0.3 of NUMU plan) ───────────────
     lifecycle_state: Mapped[str] = mapped_column(
