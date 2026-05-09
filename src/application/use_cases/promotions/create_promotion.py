@@ -14,7 +14,12 @@ from src.application.use_cases.promotions._validation import (
 from src.core.entities.promotion import Promotion
 from src.core.entities.promotion_display import PromotionDisplay
 from src.core.entities.promotion_target import PromotionTarget
-from src.core.enums.promotion_enums import PromotionStatus
+from src.core.enums.promotion_enums import (
+    DisplayFrequency,
+    DisplayTrigger,
+    PromotionStatus,
+    PromotionSurface,
+)
 from src.core.events.base import EventBus
 from src.core.events.promotion_events import PromotionCreatedEvent
 from src.core.exceptions import EntityNotFoundError
@@ -109,19 +114,52 @@ class CreatePromotionUseCase:
 
         # 6. Persist atomically — promotion → displays → targets → translations.
         created = await self._promotion_repo.create(promo)
-        displays = [
-            PromotionDisplay(
-                tenant_id=tenant_id,
-                promotion_id=created.id,
-                trigger=d.trigger,
-                trigger_value=d.trigger_value,
-                frequency=d.frequency,
-                pages=d.pages,
-                device_targets=d.device_targets,
-                is_enabled=d.is_enabled,
-            )
-            for d in payload.displays
-        ]
+
+        # Inject a sane default display when the merchant didn't configure
+        # one for a visual surface. Without this, the resolver filters
+        # the promo out (see _first_matching_display in PromotionResolver)
+        # and the merchant ends up with an "Active" promo that never
+        # actually renders on the storefront.
+        #
+        # The current merchant builder doesn't expose Display config at
+        # all — every visual promotion ships with `displays=[]`, so this
+        # fallback effectively powers all of them. Defaults match the
+        # most common case: "show on every page, every device, every
+        # visit, fired immediately on page load".
+        VISUAL_SURFACES = {
+            PromotionSurface.ANNOUNCEMENT_BAR,
+            PromotionSurface.POPUP,
+            PromotionSurface.FLOATING_WIDGET,
+            PromotionSurface.COOKIE_BANNER,
+        }
+        display_inputs = list(payload.displays)
+        if not display_inputs and created.surface in VISUAL_SURFACES:
+            displays = [
+                PromotionDisplay(
+                    tenant_id=tenant_id,
+                    promotion_id=created.id,
+                    trigger=DisplayTrigger.ALWAYS,
+                    trigger_value={},
+                    frequency=DisplayFrequency.EVERY_VISIT,
+                    pages=[],
+                    device_targets=["desktop", "mobile", "tablet"],
+                    is_enabled=True,
+                )
+            ]
+        else:
+            displays = [
+                PromotionDisplay(
+                    tenant_id=tenant_id,
+                    promotion_id=created.id,
+                    trigger=d.trigger,
+                    trigger_value=d.trigger_value,
+                    frequency=d.frequency,
+                    pages=d.pages,
+                    device_targets=d.device_targets,
+                    is_enabled=d.is_enabled,
+                )
+                for d in display_inputs
+            ]
         targets = [
             PromotionTarget(
                 tenant_id=tenant_id,
