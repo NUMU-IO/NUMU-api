@@ -39,6 +39,29 @@ class Coupon(BaseEntity):
     is_active: bool = True
     applicable_product_ids: list[UUID] | None = None
     applicable_category_ids: list[UUID] | None = None
+    # Phase 3.8 — auto-apply + stack rules.
+    is_auto_apply: bool = Field(
+        default=False,
+        description=(
+            "When true, the coupon is applied at checkout without the "
+            "customer entering a code, provided the order meets all "
+            "other conditions (min_order_amount, applicable_products, "
+            "validity window). Used for site-wide promos like "
+            "'Free shipping over EGP 500' that the merchant wants to "
+            "advertise as automatic."
+        ),
+    )
+    stackable: bool = Field(
+        default=False,
+        description=(
+            "When true, this coupon can combine with one other coupon "
+            "(typically a manual code on top of an auto-apply promo). "
+            "When ALL active coupons on the order are stackable, all "
+            "apply; otherwise only the highest-discount one wins. "
+            "Defaults to false to preserve pre-Phase-3.8 single-coupon "
+            "behavior."
+        ),
+    )
 
     @field_validator("code", mode="before")
     @classmethod

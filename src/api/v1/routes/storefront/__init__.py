@@ -33,6 +33,7 @@ from src.api.v1.routes.storefront.public import (
     lookup_router as storefront_lookup_router,
 )
 from src.api.v1.routes.storefront.public import router as public_router
+from src.api.v1.routes.storefront.returns import router as returns_router
 from src.api.v1.routes.storefront.reviews import router as reviews_router
 from src.api.v1.routes.storefront.shipping import router as shipping_router
 from src.api.v1.routes.storefront.shipping_quote import router as shipping_quote_router
@@ -44,6 +45,7 @@ from src.api.v1.routes.storefront.upsell import router as upsell_router
 
 __all__ = [
     "public_router",
+    "returns_router",
     "reviews_router",
     "storefront_lookup_router",
     "customer_router",
