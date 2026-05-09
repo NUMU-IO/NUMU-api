@@ -86,6 +86,9 @@ from src.api.v1.routes.staff.overrides import router as staff_overrides_router
 from src.api.v1.routes.staff.policies import router as staff_policies_router
 from src.api.v1.routes.staff.sessions import router as staff_sessions_router
 from src.api.v1.routes.storefront import (
+    apps_router as storefront_apps_router,
+)
+from src.api.v1.routes.storefront import (
     bundles_router as storefront_bundles_router,
 )
 from src.api.v1.routes.storefront import (
@@ -99,6 +102,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     coupon_router as storefront_coupon_router,
+)
+from src.api.v1.routes.storefront import (
+    currencies_router as storefront_currencies_router,
 )
 from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
@@ -391,6 +397,20 @@ api_router.include_router(
     storefront_payment_proofs_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Payment Proofs"],
+)
+
+# Storefront - app platform discovery (Phase 6, public, scoped to store)
+api_router.include_router(
+    storefront_apps_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Apps"],
+)
+
+# Storefront - currency presentment config (Phase 6, public, scoped to store)
+api_router.include_router(
+    storefront_currencies_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Currencies"],
 )
 
 # Theme marketplace (public browsing of published themes)

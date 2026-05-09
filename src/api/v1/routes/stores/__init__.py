@@ -24,11 +24,13 @@ from fastapi import APIRouter
 from src.api.v1.routes.stores import ai as ai_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
+from src.api.v1.routes.stores import apps as apps_module
 from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customers as customers_module
+from src.api.v1.routes.stores import customizer_undo as customizer_undo_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
 from src.api.v1.routes.stores import email_templates as email_templates_module
 from src.api.v1.routes.stores import feedback as feedback_module
@@ -110,6 +112,8 @@ router.include_router(ai_module.router, tags=["Store AI"])
 router.include_router(themes_module.router, tags=["Store Themes"])
 router.include_router(theme_installations_module.router, tags=["Store Themes V2"])
 router.include_router(theme_editor_v3_module.router, tags=["Theme Editor V3"])
+router.include_router(customizer_undo_module.router, tags=["Theme Editor V3 — Undo"])
+router.include_router(apps_module.router, tags=["Store Apps"])
 router.include_router(whatsapp_module.router, tags=["Store WhatsApp"])
 router.include_router(
     whatsapp_templates_module.router, tags=["Store WhatsApp Templates"]

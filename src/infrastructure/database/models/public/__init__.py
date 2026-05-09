@@ -8,6 +8,14 @@ They include:
 - FeedbackModel: Beta merchant feedback
 """
 
+from src.infrastructure.database.models.public.app import (
+    AppInstallationModel,
+    AppModel,
+)
+from src.infrastructure.database.models.public.currency_rate import CurrencyRateModel
+from src.infrastructure.database.models.public.customizer_undo_entry import (
+    CustomizerUndoEntryModel,
+)
 from src.infrastructure.database.models.public.feedback import FeedbackModel
 from src.infrastructure.database.models.public.omnichannel import (
     CapiEventModel,
@@ -31,6 +39,10 @@ from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.public.waitlist import WaitlistModel
 
 __all__ = [
+    "AppModel",
+    "AppInstallationModel",
+    "CurrencyRateModel",
+    "CustomizerUndoEntryModel",
     "FeedbackModel",
     "PaymentReconciliationRunModel",
     "ReconciliationMismatchModel",
