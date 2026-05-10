@@ -35,7 +35,9 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # ── apps (global registry) ─────────────────────────────────────
-    app_status = sa.Enum("draft", "published", "suspended", name="appstatus")
+    app_status = sa.Enum(
+        "draft", "published", "suspended", name="appstatus", create_type=False
+    )
     app_status.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
