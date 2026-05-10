@@ -146,6 +146,15 @@ class PromotionModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         DateTime(timezone=True), nullable=True
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # Per-promotion usage caps. Both nullable; null means uncapped.
+    # `usage_limit_total` is the platform-wide budget — once N convert
+    # events fire for this promotion the eligibility checker stops it.
+    # `usage_limit_per_customer` is enforced per `customer_id` — same
+    # mechanism, scoped. The legacy `Coupon.usage_limit` only covers
+    # code-based promos; this column covers automatic ones (BOGO,
+    # tiered, percent-off cart, etc.) where there's no coupon row.
+    usage_limit_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_limit_per_customer: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_by: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.users.id", ondelete="SET NULL"),
@@ -224,6 +233,19 @@ class PromotionTargetModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     inclusion: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true"
     )
+    # BOGO targeting role. NULL = global eligibility filter (the
+    # existing semantics every existing row keeps unchanged). Non-null
+    # values restrict the role within a BOGO calculation:
+    #   • "buy_set" — products / categories that count toward the
+    #     buy_quantity threshold ("customer buys X").
+    #   • "get_set" — products / categories the discount is applied to
+    #     ("customer gets Y at Z% off").
+    # The eligibility checker ignores these (they're rule-side, not
+    # eligibility-side); the discount calculator reads them when
+    # building the BOGO line filters. We store as a free-form string
+    # rather than a Postgres enum so adding a future role doesn't need
+    # a migration. The application layer enforces the allow-list.
+    role: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class PromotionTranslationModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
