@@ -39,7 +39,11 @@ from src.api.dependencies.repositories import (
 from src.api.responses import SuccessResponse
 from src.application.dto.promotion_resolution import (
     ActivePromotionsOutput,
+    CartDiscountsOutput,
     VisitorContextInput,
+)
+from src.application.use_cases.promotions.calculate_cart_discounts import (
+    CalculateCartDiscountsUseCase,
 )
 from src.application.use_cases.promotions.dismiss_promotion import (
     DismissPromotionUseCase,
@@ -50,13 +54,16 @@ from src.application.use_cases.promotions.record_promotion_event import (
 from src.application.use_cases.promotions.resolve_active_promotions import (
     ResolveActivePromotionsUseCase,
 )
+from src.core.entities.cart import Cart
 from src.core.entities.customer import Customer
 from src.core.enums.promotion_enums import PromotionEventType
 from src.core.exceptions import EntityNotFoundError
+from src.core.services.discount_calculator import DiscountCalculator
 from src.core.services.promotion_eligibility_checker import (
     PromotionEligibilityChecker,
 )
 from src.core.services.promotion_resolver import PromotionResolver
+from src.core.value_objects.cart_item import CartItem
 from src.infrastructure.repositories import StoreRepository
 from src.infrastructure.repositories.promotion_dismissal_repository import (
     PromotionDismissalRepository,
@@ -398,3 +405,128 @@ async def submit_form(
         ),
         message="Submission received",
     )
+
+
+# --------------------------------------------------------------------------- #
+# POST /cart/discounts                                                        #
+# --------------------------------------------------------------------------- #
+
+
+class CartDiscountsLineItem(BaseModel):
+    """A single cart line for discount evaluation.
+
+    Carries just enough to drive `DiscountRule.calculate()` —
+    `unit_price_cents` is integer-cents because every discount math
+    (BOGO cheapest-unit, tiered threshold, percentage rounding) is
+    integer-only on the server side. The storefront sends the price
+    it already shows the customer, so the math the customer sees in
+    the cart matches what the server records on the order.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: UUID
+    quantity: int = Field(ge=1, le=999)
+    unit_price_cents: int = Field(ge=0)
+    category_id: UUID | None = None
+
+
+class CartDiscountsRequest(BaseModel):
+    """Body of `POST /storefront/store/{id}/cart/discounts`.
+
+    The storefront calls this every time the cart changes — it's the
+    single source of truth for the discount line shown in the cart
+    drawer, the checkout summary, and (re-evaluated) at order-create.
+    Stateless: line items + applied codes in, totals + applied promos
+    out. The server is the authoritative computation; the client never
+    runs its own copy of the rule engine.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[CartDiscountsLineItem] = Field(default_factory=list, max_length=200)
+    applied_codes: list[str] = Field(default_factory=list, max_length=10)
+    visitor: VisitorContextInput | None = None
+
+
+@router.post(
+    "/cart/discounts",
+    response_model=SuccessResponse[CartDiscountsOutput],
+    summary="Recompute the cart's discount totals",
+    operation_id="storefront_calculate_cart_discounts",
+)
+async def calculate_cart_discounts(
+    request: Request,
+    store_id: Annotated[UUID, Path()],
+    body: CartDiscountsRequest,
+    promo_repo: Annotated[PromotionRepository, Depends(get_promotion_repository)],
+    target_repo: Annotated[
+        PromotionTargetRepository, Depends(get_promotion_target_repository)
+    ],
+    coupon_repo: Annotated[Any, Depends(get_coupon_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    event_repo: Annotated[
+        PromotionEventRepository, Depends(get_promotion_event_repository)
+    ],
+    customer: Annotated[Customer | None, Depends(get_optional_customer)] = None,
+) -> SuccessResponse[CartDiscountsOutput]:
+    """Stateless cart-discount calculator.
+
+    The storefront fires this whenever the cart contents change so the
+    UI shows the same number the server will charge. BOGO + tiered
+    rules need full line-item context to compute (cheapest-unit,
+    bundle-counting, threshold matching), so the price-only
+    `/coupons/apply` path can't replace this — that route stays for
+    legacy percentage / fixed coupons but the cart-side total now
+    flows through here.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if store is None:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    visitor = body.visitor or VisitorContextInput(
+        customer_id=customer.id if customer else None,
+        visitor_token=_visitor_token(request),
+        is_logged_in=customer is not None,
+        cart_subtotal_cents=sum(li.unit_price_cents * li.quantity for li in body.items),
+        cart_product_ids=[li.product_id for li in body.items],
+        cart_category_ids=[
+            li.category_id for li in body.items if li.category_id is not None
+        ],
+    )
+
+    # Hydrate a Cart entity from the request payload. We don't persist
+    # anything — the entity is just the shape the use case expects so
+    # we can reuse the same path the order-create flow uses.
+    cart = Cart(
+        session_id=_visitor_token(request) or "anon",
+        store_id=store_id,
+        customer_id=customer.id if customer else None,
+        items=[
+            CartItem(
+                product_id=li.product_id,
+                product_name="",  # not needed for math
+                quantity=li.quantity,
+                unit_price=li.unit_price_cents,
+                category_id=li.category_id,
+            )
+            for li in body.items
+        ],
+    )
+
+    use_case = CalculateCartDiscountsUseCase(
+        promotion_repo=promo_repo,
+        target_repo=target_repo,
+        coupon_repo=coupon_repo,
+        eligibility_checker=PromotionEligibilityChecker(),
+        calculator=DiscountCalculator(),
+        event_repo=event_repo,
+    )
+    out = await use_case.execute(
+        store_id=store_id,
+        tenant_id=store.tenant_id,
+        cart=cart,
+        applied_coupon_codes=body.applied_codes,
+        visitor=visitor,
+    )
+    return SuccessResponse(data=out)
