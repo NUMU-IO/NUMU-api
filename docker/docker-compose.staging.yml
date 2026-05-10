@@ -32,6 +32,8 @@ services:
       - /opt/numu/merchant-hub-test:/var/www/merchant-hub-test:ro
       - /opt/numu/merchant-hub-stage:/var/www/merchant-hub-stage:ro
       - /opt/numu/landing-page:/var/www/landing-page:ro
+      - /opt/numu/landing-page-test:/var/www/landing-page-test:ro
+      - /opt/numu/landing-page-stage:/var/www/landing-page-stage:ro
     depends_on:
       - api
     networks:
