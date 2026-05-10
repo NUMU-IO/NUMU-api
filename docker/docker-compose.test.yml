@@ -186,6 +186,12 @@ services:
       - "3000"
     environment:
       - NODE_ENV=production
+      # Storefront Next.js SSR app fails to boot without this. Calls
+      # land at the same `test.numueg.app` host that proxies /api to
+      # numu-api-test, so relative `/api/v1` works at the edge — but
+      # the SSR app builds absolute URLs for its server-side data
+      # fetches and needs the full base here.
+      - NUMU_API_URL=https://test.numueg.app/api/v1
     networks:
       - numu-edge
     deploy:

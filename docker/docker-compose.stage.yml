@@ -165,6 +165,9 @@ services:
       - "3000"
     environment:
       - NODE_ENV=production
+      # Required by the Next.js SSR storefront (it fails to boot
+      # without this). See docker-compose.test.yml for the rationale.
+      - NUMU_API_URL=https://staging.numueg.app/api/v1
     networks:
       - numu-edge
     deploy:
