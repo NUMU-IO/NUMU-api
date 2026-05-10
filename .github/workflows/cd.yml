@@ -86,23 +86,23 @@ jobs:
       - name: Install SSH key
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.STAGE_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           echo "StrictHostKeyChecking no" >> ~/.ssh/config
 
       - name: Sync files to test server
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker/postgres"
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} \
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/postgres"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "rm -rf /opt/numu/docker/postgres/postgresql.conf /opt/numu/docker/postgres/init-wal-archiving.sh"
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.test.yml \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/docker-compose.test.yml
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.test.yml
           scp -i ~/.ssh/deploy_key docker/postgres/postgresql.conf \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/postgresql.conf
           scp -i ~/.ssh/deploy_key docker/postgres/init-wal-archiving.sh \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "test -f /opt/numu/.env.test || { echo 'ERROR: /opt/numu/.env.test not found'; exit 1; }"
 
       - name: Deploy to test DO Droplet
@@ -111,7 +111,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} << DEPLOY_SCRIPT
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
             set -e
             cd /opt/numu
 
@@ -178,23 +178,23 @@ jobs:
       - name: Install SSH key
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.STAGE_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           echo "StrictHostKeyChecking no" >> ~/.ssh/config
 
       - name: Sync files to stage server
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker/postgres"
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} \
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/postgres"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "rm -rf /opt/numu/docker/postgres/postgresql.conf /opt/numu/docker/postgres/init-wal-archiving.sh"
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.stage.yml \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/docker-compose.stage.yml
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.stage.yml
           scp -i ~/.ssh/deploy_key docker/postgres/postgresql.conf \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/postgresql.conf
           scp -i ~/.ssh/deploy_key docker/postgres/init-wal-archiving.sh \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "test -f /opt/numu/.env.stage || { echo 'ERROR: /opt/numu/.env.stage not found'; exit 1; }"
 
       - name: Deploy to stage DO Droplet
@@ -203,7 +203,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} << DEPLOY_SCRIPT
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
             set -e
             cd /opt/numu
 
@@ -269,30 +269,30 @@ jobs:
       - name: Install SSH key
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.STAGE_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           echo "StrictHostKeyChecking no" >> ~/.ssh/config
 
       # Push the latest compose file, nginx, and postgres configs to the DO machine.
       - name: Sync files to apex server
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker/nginx/ssl"
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} "mkdir -p /opt/numu/docker/postgres"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/nginx/ssl"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/postgres"
           # Docker may have created directories at these paths if files were missing on a previous run — remove them.
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} \
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "rm -rf /opt/numu/docker/postgres/postgresql.conf /opt/numu/docker/postgres/init-wal-archiving.sh"
           scp -i ~/.ssh/deploy_key \
             docker/docker-compose.staging.yml \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/docker-compose.staging.yml
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.staging.yml
           scp -i ~/.ssh/deploy_key \
             docker/nginx/Dockerfile docker/nginx/nginx.conf \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/nginx/
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/nginx/
           scp -i ~/.ssh/deploy_key docker/postgres/postgresql.conf \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/postgresql.conf
           scp -i ~/.ssh/deploy_key docker/postgres/init-wal-archiving.sh \
-            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
           # Ensure .env.staging exists (created once on server, never overwritten by deploys)
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} \
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "test -f /opt/numu/.env.staging || { echo 'ERROR: /opt/numu/.env.staging not found — create it from .env.staging.example'; exit 1; }"
 
       - name: Deploy to apex DO Droplet
@@ -303,7 +303,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGE_HOST }} << DEPLOY_SCRIPT
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
             set -e
             cd /opt/numu
 
