@@ -23,7 +23,7 @@ currency, which matches today's behavior).
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 
 from alembic import op
 
@@ -35,7 +35,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # ── apps (global registry) ─────────────────────────────────────
-    app_status = sa.Enum(
+    app_status = ENUM(
         "draft", "published", "suspended", name="appstatus", create_type=False
     )
     app_status.create(op.get_bind(), checkfirst=True)
@@ -300,4 +300,4 @@ def downgrade() -> None:
     op.drop_index("ix_apps_status", table_name="apps", schema="public")
     op.drop_table("apps", schema="public")
 
-    sa.Enum(name="appstatus").drop(op.get_bind(), checkfirst=True)
+    ENUM(name="appstatus").drop(op.get_bind(), checkfirst=True)
