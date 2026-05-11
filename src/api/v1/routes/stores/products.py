@@ -122,6 +122,25 @@ async def create_product(
         user_id=store.owner_id,
     )
 
+    # Phase 8.1 — materialize options + variants. The use case doesn't
+    # know about either today (kept scoped to the legacy single-SKU
+    # path); we layer variants on top via the variant repo + a
+    # patch-options write on the product row. When the request omits
+    # variants the migration's default-variant pattern kicks in: we
+    # create one row carrying the product's price + quantity, so the
+    # cart's variant-id resolution always finds a row.
+    variant_summaries = await _materialize_product_variants(
+        product_id=result.id,
+        store_id=store.id,
+        tenant_id=store.tenant_id,
+        options=request.options,
+        variants=request.variants,
+        default_price=str(result.price),
+        default_currency=result.price_currency,
+        default_quantity=result.quantity,
+        default_sku=result.sku,
+    )
+
     return SuccessResponse(
         data=ProductResponse(
             id=str(result.id),
@@ -147,11 +166,158 @@ async def create_product(
             images=result.images,
             tags=result.tags,
             attributes=result.attributes,
+            options=[o.model_dump() for o in request.options],
+            variants=variant_summaries,
             created_at=str(result.created_at),
             updated_at=str(result.updated_at),
         ),
         message="Product created successfully",
     )
+
+
+async def _materialize_product_variants(
+    *,
+    product_id: UUID,
+    store_id: UUID,
+    tenant_id: UUID,
+    options,
+    variants,
+    default_price: str,
+    default_currency: str,
+    default_quantity: int,
+    default_sku: str | None,
+) -> list[dict]:
+    """Persist options + variants for a product (create + update).
+
+    Logic:
+    1. Write `options` JSONB onto the product row.
+    2. If `variants` is empty → ensure a single default variant exists
+       carrying the product's headline price + quantity + SKU.
+    3. Otherwise, upsert each variant in the list: rows whose `id` is
+       present get updated in-place; rows without an `id` are created.
+    4. Variants present in the DB but absent from the request are
+       hard-deleted (the merchant intends them gone).
+    """
+    from src.core.value_objects.money import Money
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.product import ProductModel
+    from src.infrastructure.repositories.variant_repository import VariantRepository
+
+    async with AsyncSessionLocal() as session:
+        # 1. Patch options onto the product row.
+        prod_row = await session.get(ProductModel, product_id)
+        if prod_row is not None:
+            prod_row.options = [o.model_dump() for o in (options or [])]
+            await session.flush()
+
+        repo = VariantRepository(session)
+        existing = await repo.list_for_product(product_id)
+        existing_by_id = {v.id: v for v in existing}
+
+        if not variants:
+            # No variants in the request: keep the existing default
+            # variant if there's exactly one and it has no option_values.
+            if any(v.option_values for v in existing):
+                # Multi-axis product but no variants submitted — drop
+                # them all. The caller will have to submit explicit
+                # variants on the next update to recreate them.
+                for v in existing:
+                    await repo.delete_by_id(v.id)
+            if not existing or any(v.option_values for v in existing):
+                # Create a single default variant if none remains.
+                v = await repo.create(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    product_id=product_id,
+                    position=0,
+                    option_values={},
+                    price=Money(
+                        amount=int(float(default_price)), currency=default_currency
+                    ),
+                    sku=default_sku,
+                    inventory_quantity=default_quantity,
+                )
+            else:
+                v = existing[0]
+            await session.commit()
+            return [_variant_to_summary_dict(v)]
+
+        # 4. Delete variants the request omitted.
+        keep_ids = {v.id for v in variants if v.id is not None}
+        for existing_v in existing:
+            if existing_v.id not in keep_ids:
+                await repo.delete_by_id(existing_v.id)
+
+        # 3. Upsert each variant in the request.
+        result_variants = []
+        for idx, vin in enumerate(variants):
+            price = Money(
+                amount=int(float(vin.price)),
+                currency=vin.price_currency or default_currency,
+            )
+            compare_at = (
+                Money(amount=int(float(vin.compare_at_price)), currency=price.currency)
+                if vin.compare_at_price is not None
+                else None
+            )
+            cost = (
+                Money(amount=int(float(vin.cost_price)), currency=price.currency)
+                if vin.cost_price is not None
+                else None
+            )
+            if vin.id and vin.id in existing_by_id:
+                v = existing_by_id[vin.id]
+                v.position = vin.position if vin.position is not None else idx
+                v.option_values = vin.option_values or {}
+                v.price = price
+                v.compare_at_price = compare_at
+                v.cost_price = cost
+                v.sku = vin.sku
+                v.barcode = vin.barcode
+                v.inventory_quantity = vin.inventory_quantity
+                v.image_url = vin.image_url
+                v.weight = vin.weight
+                v = await repo.update(v)
+            else:
+                v = await repo.create(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    product_id=product_id,
+                    position=vin.position if vin.position is not None else idx,
+                    option_values=vin.option_values or {},
+                    price=price,
+                    compare_at_price=compare_at,
+                    cost_price=cost,
+                    sku=vin.sku,
+                    barcode=vin.barcode,
+                    inventory_quantity=vin.inventory_quantity,
+                    image_url=vin.image_url,
+                    weight=vin.weight,
+                )
+            result_variants.append(v)
+        await session.commit()
+        return [_variant_to_summary_dict(v) for v in result_variants]
+
+
+def _variant_to_summary_dict(v) -> dict:
+    return {
+        "id": str(v.id),
+        "position": v.position,
+        "option_values": v.option_values or {},
+        "price": str(v.price.amount),
+        "price_currency": v.price.currency.value
+        if hasattr(v.price.currency, "value")
+        else str(v.price.currency),
+        "compare_at_price": (
+            str(v.compare_at_price.amount) if v.compare_at_price else None
+        ),
+        "sku": v.sku,
+        "barcode": v.barcode,
+        "inventory_quantity": v.inventory_quantity,
+        "is_in_stock": v.is_in_stock,
+        "image_url": v.image_url,
+        "weight": v.weight,
+    }
 
 
 @router.get(
@@ -396,6 +562,35 @@ async def update_product(
         user_id=store.owner_id,
     )
 
+    # Phase 8.1 — only re-materialize variants/options when the
+    # merchant explicitly sent them. Partial-update on other fields
+    # leaves the variant matrix alone.
+    variant_summaries: list[dict] | None = None
+    if request.options is not None or request.variants is not None:
+        variant_summaries = await _materialize_product_variants(
+            product_id=result.id,
+            store_id=store.id,
+            tenant_id=store.tenant_id,
+            options=request.options or [],
+            variants=request.variants or [],
+            default_price=str(result.price),
+            default_currency=result.price_currency,
+            default_quantity=result.quantity,
+            default_sku=result.sku,
+        )
+    else:
+        # Just hydrate the existing variants for the response.
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.repositories.variant_repository import (
+            VariantRepository,
+        )
+
+        async with AsyncSessionLocal() as _s:
+            variant_summaries = [
+                _variant_to_summary_dict(v)
+                for v in await VariantRepository(_s).list_for_product(result.id)
+            ]
+
     return SuccessResponse(
         data=ProductResponse(
             id=str(result.id),
@@ -421,6 +616,12 @@ async def update_product(
             images=result.images,
             tags=result.tags,
             attributes=result.attributes,
+            options=(
+                [o.model_dump() for o in request.options]
+                if request.options is not None
+                else (getattr(result, "options", None) or [])
+            ),
+            variants=variant_summaries or [],
             created_at=str(result.created_at),
             updated_at=str(result.updated_at),
         ),

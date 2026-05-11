@@ -59,6 +59,18 @@ class CreateCouponRequest(BaseModel):
     applicable_category_ids: list[str] | None = Field(
         None, description="List of category UUIDs this coupon applies to (null = all)"
     )
+    # Phase 8.4 — type-specific config for BUY_X_GET_Y + TIERED. Null
+    # for simple types.
+    #   buy_x_get_y: {buy_quantity, get_quantity, get_discount_percentage,
+    #                 buy_product_ids?, get_product_ids?}
+    #   tiered:      {tiers: [{min_subtotal_cents, discount_percentage}, ...]}
+    config: dict | None = Field(
+        None,
+        description=(
+            "Type-specific configuration. Required for buy_x_get_y "
+            "and tiered; ignored for simple types."
+        ),
+    )
 
 
 class UpdateCouponRequest(BaseModel):
@@ -95,6 +107,10 @@ class UpdateCouponRequest(BaseModel):
     )
     applicable_category_ids: list[str] | None = Field(
         None, description="Category UUIDs this coupon applies to (null = all)"
+    )
+    # Phase 8.4 — replace type-specific config (Null = no change).
+    config: dict | None = Field(
+        None, description="Type-specific config for buy_x_get_y / tiered"
     )
 
 

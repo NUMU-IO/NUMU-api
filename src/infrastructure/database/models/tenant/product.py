@@ -82,6 +82,16 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
+    # Phase 8.1 — option axes (Size / Color / Material / ...). List of
+    # `{name, position, values: []}`. Variant.option_values references
+    # the names. JSONB rather than a separate table — options are
+    # tightly coupled to their product, cardinality is small
+    # (Shopify caps at 3 axes), and embedding avoids a join on every
+    # PDP read.
+    options: Mapped[list[dict] | None] = mapped_column(
+        JSONB, nullable=True, default=list
+    )
+
     # Phase 4.1 — Postgres tsvector for full-text search. Maintained
     # by the database via GENERATED ALWAYS AS (...) STORED — see
     # alembic/versions/20260508_add_product_search_tsvector.py.

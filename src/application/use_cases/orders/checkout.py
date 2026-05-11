@@ -241,6 +241,31 @@ class CheckoutUseCase:
             if coupon.coupon_type == CouponType.FREE_SHIPPING:
                 free_shipping = True
                 shipping_cost = 0
+            elif coupon.coupon_type in (
+                CouponType.BUY_X_GET_Y,
+                CouponType.TIERED,
+            ):
+                # Phase 8.4 — BOGO + tiered calculators work in
+                # dollars-decimal (matching the convention used for
+                # config tier thresholds + line unit_prices). Convert
+                # the cents-Decimal subtotal back to dollars for the
+                # call, then back to cents for the order field. Simple
+                # types (PERCENTAGE / FIXED) keep working in raw cents
+                # because their math is unit-invariant under a single
+                # scale.
+                bogo_lines: list[dict] = [
+                    {
+                        "product_id": str(line.product_id),
+                        "unit_price": Decimal(line.unit_price) / Decimal(100),
+                        "quantity": line.quantity,
+                    }
+                    for line in line_items
+                ]
+                subtotal_dollars = subtotal_decimal / Decimal(100)
+                discount_dollars = coupon.calculate_discount(
+                    subtotal_dollars, line_items=bogo_lines
+                )
+                discount_amount = int(discount_dollars * Decimal(100))
             else:
                 discount_amount = int(coupon.calculate_discount(subtotal_decimal))
 

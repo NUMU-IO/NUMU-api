@@ -58,6 +58,13 @@ class Product(BaseEntity):
     cost_price: Money | None = None
     seo_title: str | None = None
     seo_description: str | None = None
+    # Phase 8.1 — option axes (size / color / material / ...). Each
+    # entry is `{"name": "Size", "position": 0, "values": ["S","M","L"]}`.
+    # Variants reference these by name (`variant.option_values["Size"] = "M"`).
+    # Stored as JSONB to keep options tightly coupled to the product
+    # without a join; capped at 3 axes by the validation layer
+    # (Shopify-parity).
+    options: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("compare_at_price", "cost_price", mode="before")
     @classmethod

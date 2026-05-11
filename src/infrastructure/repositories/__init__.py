@@ -27,6 +27,13 @@ from src.infrastructure.repositories.email_template_repository import (
     EmailTemplateRepositoryImpl,
 )
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
+from src.infrastructure.repositories.gift_card_repository import (
+    GiftCardRepository,
+)
+from src.infrastructure.repositories.inventory_repository import (
+    InventoryLevelRepository,
+    InventoryTransferRepository,
+)
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
 from src.infrastructure.repositories.marketplace_repository import (
     MarketplaceRepository,
@@ -66,6 +73,7 @@ from src.infrastructure.repositories.theme_version_repository import (
 from src.infrastructure.repositories.two_factor_repository import TwoFactorRepository
 from src.infrastructure.repositories.upsell_rule_repository import UpsellRuleRepository
 from src.infrastructure.repositories.user_repository import UserRepository
+from src.infrastructure.repositories.variant_repository import VariantRepository
 from src.infrastructure.repositories.waitlist_repository import WaitlistRepository
 from src.infrastructure.repositories.webhook_delivery_log_repository import (
     WebhookDeliveryLogRepository,
@@ -100,6 +108,9 @@ __all__ = [
     "EmailTemplateRepository",
     "EmailTemplateRepositoryImpl",
     "FeedbackRepository",
+    "GiftCardRepository",
+    "InventoryLevelRepository",
+    "InventoryTransferRepository",
     "InvoiceRepository",
     "MessageLogRepository",
     "OnboardingRepository",
@@ -108,6 +119,7 @@ __all__ = [
     "ProductBundleRepository",
     "ProductRepository",
     "ProductReviewRepository",
+    "VariantRepository",
     "RedisCartRepository",
     "RefundRepository",
     "ShipmentRepository",

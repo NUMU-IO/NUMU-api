@@ -28,8 +28,18 @@ from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.email_log import EmailLogModel
 from src.infrastructure.database.models.tenant.email_template import EmailTemplateModel
 from src.infrastructure.database.models.tenant.funnel_event import FunnelEventModel
+from src.infrastructure.database.models.tenant.gift_card import (
+    GiftCardModel,
+    GiftCardTransactionModel,
+)
 from src.infrastructure.database.models.tenant.instapay_intent import (
     InstapayIntentModel,
+)
+from src.infrastructure.database.models.tenant.inventory_level import (
+    InventoryLevelModel,
+)
+from src.infrastructure.database.models.tenant.inventory_transfer import (
+    InventoryTransferModel,
 )
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.location import LocationModel
@@ -90,6 +100,7 @@ from src.infrastructure.database.models.tenant.theme import (
     ThemeVersionModel,
 )
 from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
+from src.infrastructure.database.models.tenant.variant import VariantModel
 from src.infrastructure.database.models.tenant.webhook import (
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
@@ -114,8 +125,12 @@ __all__ = [
     "EmailLogModel",
     "EmailTemplateModel",
     "FunnelEventModel",
+    "GiftCardModel",
+    "GiftCardTransactionModel",
     "CustomerAddressModel",
     "CustomerModel",
+    "InventoryLevelModel",
+    "InventoryTransferModel",
     "InvoiceModel",
     "LocationModel",
     "MessageLogModel",
@@ -142,6 +157,7 @@ __all__ = [
     "AuditAction",
     "ProductModel",
     "ProductReviewModel",
+    "VariantModel",
     "PromotionModel",
     "PromotionDismissalModel",
     "PromotionDisplayModel",

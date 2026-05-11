@@ -801,6 +801,12 @@ async def get_product_by_slug(
     if not product:
         raise EntityNotFoundError("Product", product_slug, identifier_name="slug")
 
+    # Phase 8.1 — fetch variants for the PDP. Empty array possible
+    # only on products that haven't been backfilled yet (shouldn't
+    # happen post-migration); theme code branches on
+    # `variants.length === 0` to fall back to product-level price.
+    variant_summaries = await _resolve_variants_for_product(product.id)
+
     return SuccessResponse(
         data=ProductResponse(
             id=str(product.id),
@@ -826,11 +832,49 @@ async def get_product_by_slug(
             images=product.images,
             tags=product.tags,
             attributes=product.attributes,
+            options=getattr(product, "options", None) or [],
+            variants=variant_summaries,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         ),
         message="Product retrieved successfully",
     )
+
+
+async def _resolve_variants_for_product(product_id: UUID) -> list[dict]:
+    """Helper — load variants and shape into ProductVariantSummary dicts.
+
+    Pydantic accepts dict-of-fields for nested model_validate; we
+    return dicts rather than the schema class itself to keep the call
+    site simple (no extra import).
+    """
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.variant_repository import VariantRepository
+
+    async with AsyncSessionLocal() as session:
+        repo = VariantRepository(session)
+        variants = await repo.list_for_product(product_id)
+    return [
+        {
+            "id": str(v.id),
+            "position": v.position,
+            "option_values": v.option_values or {},
+            "price": str(v.price.amount),
+            "price_currency": v.price.currency.value
+            if hasattr(v.price.currency, "value")
+            else str(v.price.currency),
+            "compare_at_price": (
+                str(v.compare_at_price.amount) if v.compare_at_price else None
+            ),
+            "sku": v.sku,
+            "barcode": v.barcode,
+            "inventory_quantity": v.inventory_quantity,
+            "is_in_stock": v.is_in_stock,
+            "image_url": v.image_url,
+            "weight": v.weight,
+        }
+        for v in variants
+    ]
 
 
 class BackInStockSubscribeRequest(BaseModel):
