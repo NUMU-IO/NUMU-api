@@ -1,0 +1,220 @@
+# =============================================================================
+# NUMU API - Test Environment (test.numueg.app)
+# =============================================================================
+# Triggered by pushes to the `dev` branch.
+# Runs alongside docker-compose.staging.yml on the same droplet:
+#   - No host port bindings (Postgres/Redis/MinIO stay container-internal)
+#   - Joined to the external `numu-edge` network so the shared nginx in the
+#     staging stack can reach `numu-api-test:8000` / `numu-storefront-test:3000`.
+#   - Volumes are namespaced so they never collide with the staging stack.
+
+services:
+  # ===========================================================================
+  # NUMU API
+  # ===========================================================================
+  api:
+    image: ${NUMU_API_IMAGE:?NUMU_API_IMAGE must be set}
+    container_name: numu-api-test
+    restart: unless-stopped
+    env_file:
+      - ../.env.test
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=false
+      - LOG_FORMAT=json
+    expose:
+      - "8000"
+    volumes:
+      - api_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - numu-test
+      - numu-edge
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ===========================================================================
+  # PostgreSQL
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: numu-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-numu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-numu_test}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_wal_archive:/var/lib/postgresql/wal_archive
+      - ./postgres/init-wal-archiving.sh:/docker-entrypoint-initdb.d/init-wal-archiving.sh:ro
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    networks:
+      - numu-test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-numu} -d ${POSTGRES_DB:-numu_test}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ===========================================================================
+  # MinIO Object Storage
+  # ===========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: numu-minio-test
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - numu-test
+      - numu-edge
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # ===========================================================================
+  # Redis
+  # ===========================================================================
+  redis-master:
+    image: redis:7-alpine
+    container_name: numu-redis-master-test
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_master_data:/data
+    networks:
+      - numu-test
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # Celery Worker
+  # ===========================================================================
+  celery-worker:
+    image: ${NUMU_API_IMAGE:?NUMU_API_IMAGE must be set}
+    container_name: numu-celery-worker-test
+    restart: unless-stopped
+    command: celery -A src.infrastructure.messaging.celery_app worker --loglevel=info
+    env_file:
+      - ../.env.test
+    environment:
+      - ENVIRONMENT=development
+      - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
+    depends_on:
+      - redis-master
+      - postgres
+    networks:
+      - numu-test
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ===========================================================================
+  # Celery Beat
+  # ===========================================================================
+  celery-beat:
+    image: ${NUMU_API_IMAGE:?NUMU_API_IMAGE must be set}
+    container_name: numu-celery-beat-test
+    restart: unless-stopped
+    command: celery -A src.infrastructure.messaging.celery_app beat --loglevel=info
+    env_file:
+      - ../.env.test
+    environment:
+      - ENVIRONMENT=development
+      - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
+    depends_on:
+      - redis-master
+      - postgres
+    networks:
+      - numu-test
+
+  # ===========================================================================
+  # Storefront (Next.js)
+  # ===========================================================================
+  storefront:
+    image: ${NUMU_STOREFRONT_IMAGE:?NUMU_STOREFRONT_IMAGE must be set}
+    container_name: numu-storefront-test
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      # SSR base for store-by-subdomain + product lookups. Storefront code
+      # appends `/api/v1`, so this must be the **root** (no `/api/v1`).
+      # Internal Docker DNS hop — skips CF + nginx, keeps SSR fetches in-cluster.
+      - NUMU_API_URL=http://numu-api-test:8000
+    networks:
+      - numu-edge
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  numu-test:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
+  numu-edge:
+    external: true
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_wal_archive:
+    driver: local
+  redis_master_data:
+    driver: local
+  minio_data:
+    driver: local
+  api_logs:
+    driver: local

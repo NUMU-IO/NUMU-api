@@ -35,6 +35,18 @@ from src.infrastructure.repositories import (
     WebhookDeliveryLogRepository,
     WebhookSubscriptionRepository,
 )
+from src.infrastructure.repositories.promotion_dismissal_repository import (
+    PromotionDismissalRepository,
+)
+from src.infrastructure.repositories.promotion_event_repository import (
+    PromotionEventRepository,
+)
+from src.infrastructure.repositories.promotion_repository import (
+    PromotionDisplayRepository,
+    PromotionRepository,
+    PromotionTargetRepository,
+    PromotionTranslationRepository,
+)
 
 
 def get_user_repository(
@@ -123,6 +135,42 @@ def get_coupon_repository(
 ) -> CouponRepository:
     """Get coupon repository dependency."""
     return CouponRepository(session)
+
+
+def get_promotion_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionRepository:
+    return PromotionRepository(session)
+
+
+def get_promotion_display_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionDisplayRepository:
+    return PromotionDisplayRepository(session)
+
+
+def get_promotion_target_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionTargetRepository:
+    return PromotionTargetRepository(session)
+
+
+def get_promotion_translation_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionTranslationRepository:
+    return PromotionTranslationRepository(session)
+
+
+def get_promotion_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionEventRepository:
+    return PromotionEventRepository(session)
+
+
+def get_promotion_dismissal_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionDismissalRepository:
+    return PromotionDismissalRepository(session)
 
 
 def get_onboarding_repository(

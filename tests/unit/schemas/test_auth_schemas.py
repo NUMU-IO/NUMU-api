@@ -8,7 +8,6 @@ from src.api.v1.schemas.public.auth import (
     LoginRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
-    RefreshTokenRequest,
     RegisterRequest,
     TokenResponse,
     UserResponse,
@@ -225,24 +224,6 @@ class TestUserResponse:
 
         assert response.phone is None
         assert response.avatar_url is None
-
-
-class TestRefreshTokenRequest:
-    """Tests for RefreshTokenRequest schema."""
-
-    def test_valid_refresh_request(self):
-        """Test valid refresh token request."""
-        data = {
-            "refresh_token": "eyJ0eXAiOiJSRF...",
-        }
-        request = RefreshTokenRequest(**data)
-
-        assert request.refresh_token == "eyJ0eXAiOiJSRF..."
-
-    def test_missing_refresh_token(self):
-        """Test validation fails for missing refresh token."""
-        with pytest.raises(ValidationError):
-            RefreshTokenRequest()
 
 
 class TestPasswordResetRequest:

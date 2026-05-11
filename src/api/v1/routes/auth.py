@@ -775,6 +775,7 @@ async def get_current_user(
                 expires_at=tenant.expires_at.isoformat() if tenant.expires_at else None,
                 days_remaining=tenant.days_remaining,
                 demo_email=tenant.demo_email,
+                feature_flags=tenant.feature_flags or {},
             )
     except Exception:
         pass  # Non-critical — old tenants without lifecycle columns still work

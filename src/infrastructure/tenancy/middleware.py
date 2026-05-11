@@ -36,6 +36,20 @@ RESERVED_HOST_SUBDOMAINS = frozenset({
     "merchant",
     "dashboard",
     "app",
+    # Environment apex hosts (level-1 flat URL scheme):
+    #   test.numueg.app, staging.numueg.app — env apex landing/API
+    #   merchant-{test,staging}.numueg.app — merchant-hub control plane per env
+    #   admin-{test,staging}.numueg.app    — admin dashboard per env
+    # Per-tenant storefronts on test/staging live alongside, e.g.
+    # `<store>-test.numueg.app` — those DO go through tenant resolution
+    # with subdomain="<store>-test" (the env suffix is part of the saved
+    # tenant subdomain; see numo-merchant-hub `withEnvSuffix`).
+    "test",
+    "staging",
+    "merchant-test",
+    "merchant-staging",
+    "admin-test",
+    "admin-staging",
 })
 
 

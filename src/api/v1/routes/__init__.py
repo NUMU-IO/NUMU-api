@@ -127,6 +127,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     pickup_locations_router as storefront_pickup_locations_router,
 )
+from src.api.v1.routes.storefront import (
+    promotions_router as storefront_promotions_router,
+)
 
 # Storefront routes (customer-facing)
 from src.api.v1.routes.storefront import (
@@ -333,6 +336,13 @@ api_router.include_router(
     storefront_coupon_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Coupons"],
+)
+
+# Storefront - offers-v2 promotions (active list, events, dismiss)
+api_router.include_router(
+    storefront_promotions_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Promotions"],
 )
 
 # Storefront - product reviews (GET public, POST requires customer auth)

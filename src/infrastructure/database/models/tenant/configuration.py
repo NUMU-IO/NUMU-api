@@ -47,6 +47,8 @@ class ServiceType(StrEnum):
     WHATSAPP = "whatsapp"
     SMS = "sms"
     EMAIL = "email"
+    # Ad-attribution / analytics integrations (Meta CAPI, Google Ads, TikTok)
+    TRACKING = "tracking"
 
 
 class ServiceName(StrEnum):
@@ -70,6 +72,10 @@ class ServiceName(StrEnum):
     # Communication
     WHATSAPP_BUSINESS = "whatsapp_business"
     TWILIO = "twilio"
+
+    # Tracking / ad attribution
+    # Holds the encrypted Meta Conversions API access token.
+    META_CAPI = "meta_capi"
 
 
 class RequestStatus(StrEnum):

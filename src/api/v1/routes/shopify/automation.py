@@ -84,7 +84,7 @@ def _rule_to_response(m) -> AutomationRuleResponse:  # noqa: ANN001
         is_active=m.is_active,
         priority=m.priority,
         trigger_event=m.trigger_event,
-        conditions=m.conditions or {},
+        conditions=m.conditions if isinstance(m.conditions, dict) else {},
         actions=m.actions or [],
         times_triggered=m.times_triggered,
         last_triggered_at=m.last_triggered_at,
