@@ -118,6 +118,7 @@ async def get_shipping_options(
         cart_subtotal_cents=request.cart_subtotal_cents,
         cart_weight_g=request.cart_weight_g,
         cod_requested=request.cod_requested,
+        location_id=request.location_id,
     )
 
     return SuccessResponse(

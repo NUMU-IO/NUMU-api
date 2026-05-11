@@ -211,6 +211,11 @@ class ShippingOptionsRequest(BaseModel):
     cart_weight_g: int = Field(default=0, ge=0)
     cod_requested: bool = False
     coupon_code: str | None = None
+    # Phase 8.2 — multi-location stores can specify the fulfilling
+    # location to drive origin-aware rate selection (when configured).
+    # Today the resolver is destination-only; this is forward-compat
+    # for the eventual ex-Cairo vs. ex-Alex rate split.
+    location_id: UUID | None = None
 
 
 class ShippingOptionResponse(BaseModel):

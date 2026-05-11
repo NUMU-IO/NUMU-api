@@ -35,6 +35,8 @@ from src.api.v1.routes.stores import dashboard as dashboard_module
 from src.api.v1.routes.stores import email_templates as email_templates_module
 from src.api.v1.routes.stores import feedback as feedback_module
 from src.api.v1.routes.stores import inventory as inventory_module
+from src.api.v1.routes.stores import inventory_levels as inventory_levels_module
+from src.api.v1.routes.stores import inventory_transfers as inventory_transfers_module
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import locations as locations_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
@@ -87,6 +89,8 @@ router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(inventory_module.router, tags=["Store Inventory"])
+router.include_router(inventory_levels_module.router, tags=["Inventory Levels"])
+router.include_router(inventory_transfers_module.router, tags=["Inventory Transfers"])
 router.include_router(locations_module.router, tags=["Store Locations"])
 router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(
