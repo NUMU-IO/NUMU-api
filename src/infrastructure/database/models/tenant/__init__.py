@@ -35,6 +35,12 @@ from src.infrastructure.database.models.tenant.funnel_event import FunnelEventMo
 from src.infrastructure.database.models.tenant.instapay_intent import (
     InstapayIntentModel,
 )
+from src.infrastructure.database.models.tenant.inventory_level import (
+    InventoryLevelModel,
+)
+from src.infrastructure.database.models.tenant.inventory_transfer import (
+    InventoryTransferModel,
+)
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.location import LocationModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
@@ -118,6 +124,8 @@ __all__ = [
     "FunnelEventModel",
     "CustomerAddressModel",
     "CustomerModel",
+    "InventoryLevelModel",
+    "InventoryTransferModel",
     "InvoiceModel",
     "LocationModel",
     "MessageLogModel",

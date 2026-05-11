@@ -95,11 +95,23 @@ class ShippingResolver:
         cart_subtotal_cents: int,
         cart_weight_g: int,
         cod_requested: bool = False,
+        location_id: UUID | None = None,
     ) -> ResolverOutput:
         """Return every available rate option for this cart+destination.
 
         Used by `GET/POST /storefront/.../shipping/options`.
+
+        Phase 8.2 — accepts an optional `location_id` for multi-
+        location stores. Today rates are keyed only on destination
+        governorate, so this parameter is forward-compat: when we add
+        origin-by-origin rate configs (different price ex-Cairo vs.
+        ex-Alex), the resolver can pick the right ones without
+        breaking callers. Single-location stores leave it None.
         """
+        # Touch the param so static analyzers don't flag it unused —
+        # the documentation above commits to the surface, and rate
+        # evaluation has a hook for it later.
+        _ = location_id
         zone = await self.repository.get_zone_for_governorate(
             store_id, governorate_code
         )
@@ -152,6 +164,7 @@ class ShippingResolver:
         cart_subtotal_cents: int,
         cart_weight_g: int,
         cod_requested: bool = False,
+        location_id: UUID | None = None,
     ) -> ResolvedOption | None:
         """Re-resolve a specific rate for server-side verification.
 
@@ -159,7 +172,11 @@ class ShippingResolver:
         customer picked. Returns None if the rate is no longer available
         (deactivated, moved to a different zone, or the destination
         governorate changed and is no longer covered by the rate's zone).
+
+        Phase 8.2 — `location_id` accepted for forward-compat; today
+        rate evaluation is destination-only.
         """
+        _ = location_id
         rate = await self.repository.get_rate(rate_id)
         if rate is None or not rate.is_active:
             return None
