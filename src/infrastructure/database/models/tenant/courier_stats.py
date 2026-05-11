@@ -28,13 +28,19 @@ class CourierStatsModel(Base, TenantMixin, TimestampMixin):
     """Per-store / per-carrier / per-period delivery outcome rollup."""
 
     __tablename__ = "courier_stats"
-
     __table_args__ = (
-        Index("ix_courier_stats_store_period", "store_id", "period_start"),
+        Index(
+            "ix_courier_stats_store_period",
+            "store_id",
+            "period_start",
+        ),
         {"schema": "public"},
     )
 
-    store_id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    store_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
     carrier: Mapped[str] = mapped_column(
         String(50),
         primary_key=True,
@@ -46,38 +52,64 @@ class CourierStatsModel(Base, TenantMixin, TimestampMixin):
         comment="Inclusive start of the rolling-30d window (snapshot date - 30d)",
     )
     period_end: Mapped[date] = mapped_column(
-        Date, nullable=False, comment="Exclusive end (snapshot date)"
+        Date,
+        nullable=False,
+        comment="Exclusive end (snapshot date)",
     )
     total_shipments: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
     delivered_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
     returned_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
     failed_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
     in_progress_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
+    # Spec 013 FR-001 — sample-size gate (recommendations require ≥30).
+    # Stored on the row so the read endpoint can apply it without joining.
     cod_collected_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
     cod_total_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
+    # Pre-computed rates persisted as `Numeric` so the API doesn't have to
+    # compute them on every read. Both are 0.0..1.0 (multiply by 100 for %).
     delivery_success_rate: Mapped[float | None] = mapped_column(
-        Numeric(5, 4), nullable=True
+        Numeric(5, 4),
+        nullable=True,
     )
     cod_collection_rate: Mapped[float | None] = mapped_column(
-        Numeric(5, 4), nullable=True
+        Numeric(5, 4),
+        nullable=True,
     )
+    # Average hours from `shipped_at` → `delivered_at` for delivered shipments
+    # in the window. NULL if no deliveries yet.
     avg_delivery_hours: Mapped[float | None] = mapped_column(
-        Numeric(7, 2), nullable=True
+        Numeric(7, 2),
+        nullable=True,
     )
     last_refreshed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )

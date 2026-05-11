@@ -12,9 +12,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-DELIVERED_STATUSES: frozenset[str] = frozenset({"delivered"})
-RETURNED_STATUSES: frozenset[str] = frozenset({"returned", "rto"})
-FAILED_STATUSES: frozenset[str] = frozenset({"failed", "cancelled"})
+# Terminal statuses we group into outcome buckets. Strings come from
+# `ShipmentModel.status` which is intentionally a String not Enum so
+# new carriers can add new statuses without migrations.
+DELIVERED_STATUSES = frozenset({"delivered"})
+RETURNED_STATUSES = frozenset({"returned", "rto"})
+FAILED_STATUSES = frozenset({"failed", "cancelled"})
 
 
 @dataclass
@@ -99,6 +102,7 @@ def aggregate_shipments(
             agg.failed_count += 1
         else:
             agg.in_progress_count += 1
+        # COD bucket — count any shipment with cod_amount > 0 as COD-bearing.
         if s.cod_amount > 0:
             agg.cod_total_count += 1
             if s.cod_collected:
@@ -116,6 +120,9 @@ def rolling_window(end: date | None = None, days: int = 30) -> tuple[date, date]
     return (end_date - timedelta(days=days), end_date)
 
 
+# Spec 013 FR-002 — recommendations require ≥30 sample shipments per cell
+# to avoid statistical noise. Read-side helper exposed here so the API
+# applies the same threshold.
 RECOMMENDATION_MIN_SAMPLE = 30
 
 

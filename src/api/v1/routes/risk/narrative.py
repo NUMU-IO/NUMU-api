@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Annotated  # noqa: F401  (kept for future Depends type annotations)
-
 from fastapi import APIRouter, Depends
 
 from src.api.dependencies.shopify import verify_internal_key
 from src.api.responses import SuccessResponse
-from src.api.v1.schemas.risk_narrative import NarrativeRequest, NarrativeResponse
+from src.api.v1.schemas.risk_narrative import (
+    NarrativeRequest,
+    NarrativeResponse,
+)
 from src.application.services.risk_narrative_service import (
     EntityValuesForTokenization,
     NarrativeFactor,
@@ -27,7 +28,7 @@ router = APIRouter(dependencies=[Depends(verify_internal_key)])
 )
 async def post_risk_narrative(
     request: NarrativeRequest,
-) -> SuccessResponse[NarrativeResponse]:
+):
     entities = (
         EntityValuesForTokenization(
             customer_first_name=request.entities.customer_first_name,
@@ -56,7 +57,7 @@ async def post_risk_narrative(
     ]
 
     result = await generate_narrative(
-        factors=factors,
+        factors,
         purpose=request.purpose,
         language=request.language,
         entities=entities,

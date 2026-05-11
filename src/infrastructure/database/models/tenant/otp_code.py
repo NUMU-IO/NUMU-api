@@ -25,7 +25,6 @@ class OtpCodeModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     """One issuance of a 6-digit WhatsApp OTP."""
 
     __tablename__ = "otp_codes"
-
     __table_args__ = (
         Index("ix_otp_codes_phone_hash", "phone_hash"),
         Index("ix_otp_codes_store_phone", "store_id", "phone_hash"),
@@ -33,22 +32,31 @@ class OtpCodeModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
 
     store_id: Mapped[PyUUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
     )
     phone_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     language: Mapped[str] = mapped_column(
-        String(2), nullable=False, server_default="'ar'"
+        String(2),
+        nullable=False,
+        server_default="'ar'",
     )
     expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
     attempts_left: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="3"
+        Integer,
+        nullable=False,
+        server_default="3",
     )
     verified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )
     failed_send_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )

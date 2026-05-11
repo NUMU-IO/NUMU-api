@@ -94,3 +94,15 @@ def get_shopify_subscription_repo(
     session: AsyncSession = Depends(get_db),
 ) -> ShopifySubscriptionRepository:
     return ShopifySubscriptionRepository(session)
+
+
+def get_recovery_flow_repo(
+    session: AsyncSession = Depends(get_db),
+):
+    """Dependency factory for the recovery-flow repository (backend-021)."""
+    # Local import avoids a circular dependency at module load time.
+    from src.infrastructure.repositories.recovery_flow_repository import (
+        RecoveryFlowRepository,
+    )
+
+    return RecoveryFlowRepository(session)

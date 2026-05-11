@@ -46,12 +46,15 @@ RECOVERY_FLOW_TERMINAL_STATES: frozenset[RecoveryFlowState] = frozenset({
 })
 
 
+# Valid transitions per the spec's state diagram. Any payment-success event from
+# any non-terminal state may transition to SUCCEEDED / SUCCEEDED_DEPOSIT — that
+# breadth is intentional because the customer can pay at any point in the cadence,
+# not only when the next step fires.
 _PAYMENT_SUCCESS_TARGETS = (
     RecoveryFlowState.SUCCEEDED,
     RecoveryFlowState.SUCCEEDED_DEPOSIT,
     RecoveryFlowState.ABANDONED_PARTIAL,
 )
-
 _GLOBAL_TERMINATION_TARGETS = (
     RecoveryFlowState.ABANDONED,
     RecoveryFlowState.ABANDONED_BY_MERCHANT,
@@ -59,21 +62,22 @@ _GLOBAL_TERMINATION_TARGETS = (
     RecoveryFlowState.BLOCKED_NO_TEMPLATE,
 )
 
-
 VALID_RECOVERY_TRANSITIONS: dict[RecoveryFlowState, tuple[RecoveryFlowState, ...]] = {
-    RecoveryFlowState.PENDING_STEP_1: tuple(
-        [RecoveryFlowState.PENDING_STEP_2]
-        + list(_PAYMENT_SUCCESS_TARGETS)
-        + list(_GLOBAL_TERMINATION_TARGETS)
+    RecoveryFlowState.PENDING_STEP_1: (
+        RecoveryFlowState.PENDING_STEP_2,
+        *_PAYMENT_SUCCESS_TARGETS,
+        *_GLOBAL_TERMINATION_TARGETS,
     ),
-    RecoveryFlowState.PENDING_STEP_2: tuple(
-        [RecoveryFlowState.PENDING_STEP_3]
-        + list(_PAYMENT_SUCCESS_TARGETS)
-        + list(_GLOBAL_TERMINATION_TARGETS)
+    RecoveryFlowState.PENDING_STEP_2: (
+        RecoveryFlowState.PENDING_STEP_3,
+        *_PAYMENT_SUCCESS_TARGETS,
+        *_GLOBAL_TERMINATION_TARGETS,
     ),
-    RecoveryFlowState.PENDING_STEP_3: tuple(
-        list(_PAYMENT_SUCCESS_TARGETS) + list(_GLOBAL_TERMINATION_TARGETS)
+    RecoveryFlowState.PENDING_STEP_3: (
+        *_PAYMENT_SUCCESS_TARGETS,
+        *_GLOBAL_TERMINATION_TARGETS,
     ),
+    # Terminal states have no outgoing transitions.
     RecoveryFlowState.SUCCEEDED: (),
     RecoveryFlowState.SUCCEEDED_DEPOSIT: (),
     RecoveryFlowState.ABANDONED: (),
@@ -90,7 +94,7 @@ class InvalidRecoveryStateTransition(Exception):
 
     def __init__(self, current: RecoveryFlowState, target: RecoveryFlowState) -> None:
         super().__init__(
-            f"Invalid recovery transition: {current.value} -> {target.value}"
+            f"Invalid recovery flow state transition: {current.value} → {target.value}"
         )
         self.current = current
         self.target = target
@@ -104,6 +108,8 @@ def assert_can_transition(
         raise InvalidRecoveryStateTransition(current, target)
 
 
+# Default recovery cadence per backend-021 spec + spec 009 CL-001 (1-hour minimum
+# delay between steps; terminal action does NOT count toward 5-step send ceiling).
 DEFAULT_RECOVERY_CADENCE: list[dict[str, Any]] = [
     {
         "delay_seconds": 0,
@@ -120,6 +126,8 @@ DEFAULT_RECOVERY_CADENCE: list[dict[str, Any]] = [
         "template_key": "recovery_step_3_deposit",
         "fallback_action": "deposit_only",
     },
+    # Terminal action — fired as auto_cancel or auto_hold per the constitution's
+    # safe-defaults gate (first 30d post-install + 5 manual cancels per CL-005).
     {
         "delay_seconds": 172800,
         "template_key": None,
@@ -128,8 +136,9 @@ DEFAULT_RECOVERY_CADENCE: list[dict[str, Any]] = [
 ]
 
 
+# Cadence-override validation bounds per spec 009 CL-001.
 CADENCE_MAX_SEND_STEPS = 5
-CADENCE_MAX_TOTAL_SECONDS = 604800  # 7 days
+CADENCE_MAX_TOTAL_SECONDS = 7 * 24 * 3600  # 7 days
 CADENCE_MIN_INTER_STEP_SECONDS = 3600  # 1 hour
 
 
@@ -142,19 +151,23 @@ def validate_cadence(cadence: list[dict[str, Any]]) -> None:
     """
     if not cadence:
         raise ValueError("recovery.cadence.empty")
-
+    # Strip the terminal action for the send-step ceiling check.
     send_steps = [s for s in cadence if s.get("template_key")]
     if len(send_steps) > CADENCE_MAX_SEND_STEPS:
         raise ValueError("recovery.cadence.too_many_steps")
-
     total = sum(s.get("delay_seconds", 0) for s in cadence)
     if total > CADENCE_MAX_TOTAL_SECONDS:
         raise ValueError("recovery.cadence.exceeds_total_window")
-
+    # Inter-step minimum applies to non-zero delays only (step 0 fires immediately).
     for step in cadence:
         d = step.get("delay_seconds", 0)
         if 0 < d < CADENCE_MIN_INTER_STEP_SECONDS:
             raise ValueError("recovery.cadence.inter_step_too_short")
+
+
+# ---------------------------------------------------------------------------
+# Aggregate root
+# ---------------------------------------------------------------------------
 
 
 class RecoveryFlow(BaseModel):
@@ -197,7 +210,7 @@ class RecoveryFlow(BaseModel):
         return self.state in RECOVERY_FLOW_TERMINAL_STATES
 
     def mark_succeeded(
-        self, rail: str, amount_cents: int, *, deposit: bool = False
+        self, *, rail: str, amount_cents: int, deposit: bool = False
     ) -> None:
         """Capture a payment success — choose the right terminal state.
 
@@ -218,6 +231,11 @@ class RecoveryFlow(BaseModel):
         self.recovered_via_rail = rail
 
 
+# ---------------------------------------------------------------------------
+# Step (child of RecoveryFlow)
+# ---------------------------------------------------------------------------
+
+
 class RecoveryStep(BaseModel):
     """A single scheduled / sent / failed step within a flow."""
 
@@ -235,6 +253,11 @@ class RecoveryStep(BaseModel):
     failed_reason: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# Monthly rollup (per-merchant aggregate)
+# ---------------------------------------------------------------------------
+
+
 class RecoveryMonthlyRollup(BaseModel):
     """Per-store, per-month aggregate keyed by ``(store_id, month_key)``.
 
@@ -247,10 +270,15 @@ class RecoveryMonthlyRollup(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     store_id: UUID
-    month_key: datetime
+    month_key: datetime  # Date-aligned to first-of-month at 00:00 store-local TZ
     recovered_cents: int = 0
     recovered_count: int = 0
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+# ---------------------------------------------------------------------------
+# Rollup ledger (idempotency gate per spec 009 CL-006)
+# ---------------------------------------------------------------------------
 
 
 class RecoveryRollupLedgerEventType(StrEnum):

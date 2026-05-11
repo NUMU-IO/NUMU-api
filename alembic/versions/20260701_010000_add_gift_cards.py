@@ -24,7 +24,7 @@ No backfill — gift cards are net-new in Phase 8.3.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ENUM, UUID
 
 from alembic import op
 
@@ -36,22 +36,24 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # ── 1. Status + transaction-kind enums ────────────────────────
-    gift_card_status = sa.Enum(
+    gift_card_status = ENUM(
         "active",
         "depleted",
         "expired",
         "voided",
         name="giftcardstatus",
+        create_type=False,
     )
     gift_card_status.create(op.get_bind(), checkfirst=True)
 
-    gift_card_tx_kind = sa.Enum(
+    gift_card_tx_kind = ENUM(
         "issue",
         "redeem",
         "refund",
         "adjust",
         "void",
         name="giftcardtransactionkind",
+        create_type=False,
     )
     gift_card_tx_kind.create(op.get_bind(), checkfirst=True)
 

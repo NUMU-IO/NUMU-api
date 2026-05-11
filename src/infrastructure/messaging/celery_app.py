@@ -76,6 +76,16 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.subscription_renewal_task",
         # backend-017 — daily Shopify-side verification overage relay.
         "src.infrastructure.messaging.tasks.usage_overage_task",
+        # backend-021 — RecoveryFlow cadence Celery worker + Shopify outbox.
+        "src.infrastructure.messaging.tasks.recovery_tasks",
+        # backend-020 — Shopify Flow trigger emitter (idempotent per
+        # (store, dedup_key, trigger_handle)).
+        "src.infrastructure.messaging.tasks.flow_trigger_tasks",
+        # backend-022 / spec 010 — daily kill-switch evaluator for the
+        # trust-driven auto-approve toggle.
+        "src.infrastructure.messaging.tasks.trust_kill_switch_tasks",
+        # backend-023 — nightly per-store courier stats rollup.
+        "src.infrastructure.messaging.tasks.courier_stats_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -251,6 +261,25 @@ celery_app.conf.beat_schedule = {
     "auto-rto-stale-shipped-orders": {
         "task": "tasks.auto_rto_stale_shipped_orders",
         "schedule": crontab(hour=3, minute=0),
+    },
+    # ─── backend-023: Courier delivery stats nightly rollup ──────────
+    # Aggregates the trailing 30-day shipment outcomes per (store,
+    # carrier) for the Courier Intelligence dashboard (spec 013).
+    # Daily at 03:15 UTC — after the auto-RTO sweeper, so terminal
+    # statuses are settled before we compute rates.
+    "refresh-courier-stats-all-stores": {
+        "task": "tasks.courier_stats.refresh_all",
+        "schedule": crontab(hour=3, minute=15),
+    },
+    # ─── backend-022 / spec 010 CL-002: trust auto-approve kill-switch ─
+    # Evaluates every store with `auto_approve_on_trust_enabled=true`
+    # against the trailing 30-day RTO rate; disables the toggle if the
+    # cohort meets the ≥20-sample minimum AND >5% RTO threshold.
+    # Daily at 04:15 UTC (after courier_stats so the same shipment
+    # rows are seen consistently).
+    "evaluate-trust-kill-switch": {
+        "task": "tasks.trust_kill_switch.evaluate_all_stores",
+        "schedule": crontab(hour=4, minute=15),
     },
     # ─── Phase C: keep HF OCR Spaces warm for opted-in stores ──────────
     # Free HF Spaces sleep on inactivity → 30–60s cold-start. Pinging

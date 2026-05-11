@@ -42,11 +42,14 @@ class RecoveryFlowModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     """Aggregate root for one COD-to-prepaid recovery flow."""
 
     __tablename__ = "recovery_flows"
-
     __table_args__ = (
+        # Idempotency gate per spec 009 CL-006 — only one flow per (store, order).
         UniqueConstraint(
-            "store_id", "shopify_order_id", name="uq_recovery_flow_per_order"
+            "store_id",
+            "shopify_order_id",
+            name="uq_recovery_flow_per_order",
         ),
+        # Main listing query: by store + state + recency.
         Index(
             "ix_recovery_flow_store_state_created",
             "store_id",
@@ -57,10 +60,14 @@ class RecoveryFlowModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
 
     store_id: Mapped[PyUUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
     )
     shopify_order_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
+        String(64),
+        nullable=False,
+        index=True,
     )
     state: Mapped[RecoveryFlowState] = mapped_column(
         Enum(
@@ -72,18 +79,30 @@ class RecoveryFlowModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
         nullable=False,
     )
     cadence: Mapped[list[dict]] = mapped_column(
-        JSONB, nullable=False, server_default="'[]'"
+        JSONB,
+        nullable=False,
+        server_default="'[]'",
     )
     current_step_index: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
     payment_link_session_id: Mapped[PyUUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
+        UUID(as_uuid=True),
+        nullable=True,
     )
-    recovered_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    recovered_via_rail: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    recovered_amount_cents: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    recovered_via_rail: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
     refunded_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )
 
 
@@ -91,10 +110,13 @@ class RecoveryStepModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     """One step (send attempt) within a recovery flow."""
 
     __tablename__ = "recovery_steps"
-
     __table_args__ = (
+        # Each (flow, step_index) tuple is unique — prevents duplicate step rows
+        # if the Celery handler is invoked twice for the same step.
         UniqueConstraint(
-            "flow_id", "step_index", name="uq_recovery_step_per_flow_index"
+            "flow_id",
+            "step_index",
+            name="uq_recovery_step_per_flow_index",
         ),
         Index("ix_recovery_step_flow_id", "flow_id"),
         {"schema": "public"},
@@ -108,21 +130,30 @@ class RecoveryStepModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     step_index: Mapped[int] = mapped_column(Integer, nullable=False)
     template_key: Mapped[str] = mapped_column(String(128), nullable=False)
     channel: Mapped[str] = mapped_column(
-        String(16), nullable=False, server_default="'whatsapp'"
+        String(16),
+        nullable=False,
+        server_default="'whatsapp'",
     )
     scheduled_for: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
     sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )
     opened_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )
     delivered_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )
-    failed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failed_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
 
 class RecoveryMonthlyRollupModel(Base, TenantMixin, TimestampMixin):
@@ -136,21 +167,31 @@ class RecoveryMonthlyRollupModel(Base, TenantMixin, TimestampMixin):
 
     __tablename__ = "recovery_monthly_rollups"
     __table_args__ = (
-        Index("ix_recovery_rollup_updated_at", "updated_at"),
+        Index(
+            "ix_recovery_rollup_updated_at",
+            "updated_at",
+        ),
         {"schema": "public"},
     )
 
-    store_id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    store_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
     month_key: Mapped[date] = mapped_column(
         Date,
         primary_key=True,
         comment="First day of store-local calendar month per constitution v1.2.0 FR-011",
     )
     recovered_cents: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
     recovered_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
+        Integer,
+        nullable=False,
+        server_default="0",
     )
 
 
@@ -166,8 +207,14 @@ class RecoveryRollupLedgerModel(Base, TenantMixin):
     __tablename__ = "recovery_rollup_ledger"
     __table_args__ = ({"schema": "public"},)
 
-    store_id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    shopify_order_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    store_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
+    shopify_order_id: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
     event_type: Mapped[RecoveryRollupLedgerEventType] = mapped_column(
         Enum(
             RecoveryRollupLedgerEventType,
@@ -178,6 +225,10 @@ class RecoveryRollupLedgerModel(Base, TenantMixin):
         primary_key=True,
     )
     applied_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
-    applied_amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    applied_amount_cents: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )

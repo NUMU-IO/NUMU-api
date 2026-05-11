@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.order import FulfillmentStatus, OrderStatus, PaymentStatus
+from src.core.entities.platform_source import OrderSource
 from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import (
     TenantMixin,
@@ -34,6 +35,22 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         index=True,
     )
     order_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+
+    # Backend-026 — platform source discriminator. Defaults to Shopify so
+    # existing rows + Shopify-only callers don't change behaviour. Future
+    # platform adapters (Salla, Zid, WooCommerce, TikTok) set their own.
+    source: Mapped[OrderSource] = mapped_column(
+        Enum(
+            OrderSource,
+            name="ordersource",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
+        default=OrderSource.SHOPIFY,
+        server_default="'shopify'",
+        index=True,
+    )
 
     # Status
     status: Mapped[OrderStatus] = mapped_column(

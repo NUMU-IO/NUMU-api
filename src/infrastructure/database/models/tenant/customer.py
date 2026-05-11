@@ -1,9 +1,10 @@
 """Customer database model (public schema with tenant_id discriminator)."""
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.entities.platform_source import OrderSource
 from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import (
     TenantMixin,
@@ -27,6 +28,18 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         ForeignKey("public.stores.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    # Backend-026 — platform source (default Shopify; future adapters override).
+    source: Mapped[OrderSource] = mapped_column(
+        Enum(
+            OrderSource,
+            name="ordersource",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
+        default=OrderSource.SHOPIFY,
+        server_default="'shopify'",
     )
     user_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),

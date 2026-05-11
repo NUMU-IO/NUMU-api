@@ -25,7 +25,6 @@ class FlowTriggerEmissionLogModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     """One row per flowTriggerReceive emission attempt."""
 
     __tablename__ = "flow_trigger_emission_log"
-
     __table_args__ = (
         UniqueConstraint(
             "store_id",
@@ -38,21 +37,31 @@ class FlowTriggerEmissionLogModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
 
     store_id: Mapped[PyUUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
     )
     source_event_id: Mapped[str] = mapped_column(String(64), nullable=False)
     trigger_handle: Mapped[str] = mapped_column(String(64), nullable=False)
     dedup_key: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default="'pending'"
+        String(32),
+        nullable=False,
+        # 'pending' | 'succeeded' | 'failed_retryable' | 'failed_terminal'
+        # | 'terminated_uninstall' | 'skipped_not_subscribed'
+        server_default="'pending'",
     )
     attempted_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True),
+        nullable=False,
     )
     succeeded_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True),
+        nullable=True,
     )
     error_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_snapshot: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default="'{}'"
+        JSONB,
+        nullable=False,
+        server_default="'{}'",
     )

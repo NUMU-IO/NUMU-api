@@ -40,7 +40,7 @@ is safe.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 
 from alembic import op
 
@@ -144,13 +144,14 @@ def upgrade() -> None:
     )
 
     # ── 2. inventory_transfers ────────────────────────────────────
-    transfer_status = sa.Enum(
+    transfer_status = ENUM(
         "draft",
         "requested",
         "in_transit",
         "received",
         "canceled",
         name="transferstatus",
+        create_type=False,
     )
     transfer_status.create(op.get_bind(), checkfirst=True)
 
