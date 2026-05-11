@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from src.api.dependencies.sanitization import SanitizedStr
 from src.api.v1.schemas.tenant.product import _validate_size_chart
+from src.application.dto.phone_field import PhoneField
 
 
 class CreateStoreRequest(BaseModel):
@@ -45,8 +46,12 @@ class CreateStoreRequest(BaseModel):
         default="en", pattern="^(en|ar)$", description="Default language: en or ar"
     )
     contact_email: EmailStr | None = Field(None, description="Public contact email")
-    contact_phone: str | None = Field(
-        None, max_length=20, description="Public contact phone number"
+    contact_phone: PhoneField = Field(
+        None,
+        description=(
+            "Public contact phone. Accepts E.164 or {country_code, local}; "
+            "stored as canonical E.164."
+        ),
     )
 
 
@@ -74,8 +79,12 @@ class UpdateStoreRequest(BaseModel):
         None, max_length=500, description="Store banner image URL"
     )
     contact_email: EmailStr | None = Field(None, description="Public contact email")
-    contact_phone: str | None = Field(
-        None, max_length=20, description="Public contact phone"
+    contact_phone: PhoneField = Field(
+        None,
+        description=(
+            "Public contact phone. Accepts E.164 or {country_code, local}; "
+            "stored as canonical E.164."
+        ),
     )
     address: dict | None = Field(None, description="Store physical address")
     social_links: dict | None = Field(

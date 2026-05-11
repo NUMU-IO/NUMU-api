@@ -7,6 +7,15 @@ from phonenumbers import NumberParseException
 from pydantic import BaseModel, ConfigDict, model_validator
 
 
+class InvalidPhoneError(ValueError):
+    """Raised when a phone number can't be parsed or fails validation.
+
+    Distinct from the lenient ``PhoneNumber(value=...)`` constructor — use
+    ``PhoneNumber.parse`` when you want strict E.164 normalisation and want
+    bad input to be rejected (e.g. at API boundaries).
+    """
+
+
 class PhoneNumber(BaseModel):
     """Phone number value object with validation."""
 
@@ -14,6 +23,37 @@ class PhoneNumber(BaseModel):
 
     value: str
     country_code: str = "EG"
+
+    @classmethod
+    def parse(cls, raw: str, default_region: str = "EG") -> "PhoneNumber":
+        """Strictly parse ``raw`` into a canonical E.164 ``PhoneNumber``.
+
+        ``default_region`` is the ISO 3166-1 alpha-2 hint used when ``raw``
+        lacks a country code (e.g. ``01001234567`` + ``EG`` → ``+201001234567``).
+
+        Raises ``InvalidPhoneError`` if the input can't be parsed or fails
+        ``is_valid_number``. Unlike the lenient default constructor, this
+        method never silently returns a non-E.164 value.
+        """
+        if raw is None:
+            raise InvalidPhoneError("Phone number is required.")
+        cleaned = raw.strip()
+        if not cleaned:
+            raise InvalidPhoneError("Phone number is required.")
+        try:
+            parsed = phonenumbers.parse(cleaned, (default_region or "EG").upper())
+        except NumberParseException as exc:
+            raise InvalidPhoneError(
+                f"Could not parse phone number '{raw}': {exc}"
+            ) from exc
+        if not phonenumbers.is_valid_number(parsed):
+            raise InvalidPhoneError(
+                f"Phone number '{raw}' is not a valid number for region "
+                f"'{default_region}'."
+            )
+        e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        region = phonenumbers.region_code_for_number(parsed) or default_region
+        return cls(value=e164, country_code=region.upper())
 
     @model_validator(mode="before")
     @classmethod
@@ -95,3 +135,30 @@ class PhoneNumber(BaseModel):
             return phonenumbers.is_valid_number(parsed)
         except NumberParseException:
             return False
+
+    @property
+    def e164(self) -> str:
+        """Canonical E.164 string (e.g. ``+201001234567``).
+
+        Falls back to ``self.value`` if the stored value can't be re-parsed
+        (only possible on legacy rows that bypassed ``.parse``).
+        """
+        try:
+            parsed = phonenumbers.parse(self.value, self.country_code)
+            if phonenumbers.is_valid_number(parsed):
+                return phonenumbers.format_number(
+                    parsed, phonenumbers.PhoneNumberFormat.E164
+                )
+        except NumberParseException:
+            pass
+        return self.value
+
+    @property
+    def formatted_international(self) -> str:
+        """Pretty international format (e.g. ``+20 100 123 4567``).
+
+        Alias of :pyattr:`international_format` so the public API matches the
+        wording in the Part 1 plan. Read-only consumers use this; mutation
+        paths should round-trip via ``.e164``.
+        """
+        return self.international_format
