@@ -186,6 +186,10 @@ services:
       - "3000"
     environment:
       - NODE_ENV=production
+      # SSR base for store-by-subdomain + product lookups. Storefront code
+      # appends `/api/v1`, so this must be the **root** (no `/api/v1`).
+      # Internal Docker DNS hop — skips CF + nginx, keeps SSR fetches in-cluster.
+      - NUMU_API_URL=http://numu-api-test:8000
     networks:
       - numu-edge
     deploy:
