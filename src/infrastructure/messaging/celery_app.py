@@ -86,6 +86,10 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.trust_kill_switch_tasks",
         # backend-023 — nightly per-store courier stats rollup.
         "src.infrastructure.messaging.tasks.courier_stats_tasks",
+        # Meta Conversions — per-event fan-out + orphan-purchase sweep
+        "src.infrastructure.messaging.tasks.meta_capi",
+        # offers-v2 — promotion lifecycle + analytics maintenance.
+        "src.infrastructure.messaging.tasks.promotion_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -313,6 +317,32 @@ celery_app.conf.beat_schedule = {
     "report-verification-overages": {
         "task": "tasks.report_verification_overages",
         "schedule": crontab(hour=4, minute=0),
+    },
+    # ─── Meta Conversions: catch orphaned Purchase events ─────────────
+    # Hourly sweep finds paid orders without a Purchase row in the
+    # event log and re-enqueues them. Recovers from webhook failures
+    # (Paymob/Fawry blip, worker crash mid-fanout, Meta down).
+    "meta-capi-sweep-orphaned-purchases": {
+        "task": "tasks.meta_capi_sweep_orphaned_purchases",
+        "schedule": crontab(minute=10),  # hourly at :10
+    },
+    # ─── offers-v2: promotion lifecycle ─────────────────────────────────
+    # Sweeping the promotion table every 5 min keeps the storefront and
+    # the merchant list in sync with `starts_at` / `ends_at` without
+    # waiting for the 60s cache TTL on every active surface.
+    "expire-promotions": {
+        "task": "tasks.expire_promotions",
+        "schedule": crontab(minute="*/5"),
+    },
+    # Daily prune of raw promotion_events past the 90-day retention.
+    "prune-promotion-events": {
+        "task": "tasks.prune_promotion_events",
+        "schedule": crontab(hour=2, minute=45),
+    },
+    # Daily rollup target — the aggregate table itself ships in step 13.
+    "rollup-promotion-events-daily": {
+        "task": "tasks.rollup_promotion_events_daily",
+        "schedule": crontab(hour=2, minute=15),
     },
 }
 

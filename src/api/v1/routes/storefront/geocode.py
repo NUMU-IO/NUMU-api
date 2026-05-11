@@ -19,16 +19,20 @@ browser so we can:
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
+from redis.exceptions import RedisError
 
 from src.api.responses import SuccessResponse
 from src.config import settings
 from src.infrastructure.cache.redis_cache import RedisCacheService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -252,8 +256,15 @@ async def reverse_geocode(
     cache = _get_cache()
     key = _cache_key(lat, lng, lang)
 
+    # Redis is a soft dependency — connection errors must NOT 500 the
+    # endpoint, since cache is purely an optimization. Both .get and .set
+    # are wrapped to fall through cleanly when Redis is unreachable.
     if cache is not None:
-        cached = await cache.get(key)
+        try:
+            cached = await cache.get(key)
+        except (RedisError, ConnectionError, OSError) as exc:
+            logger.warning("Redis unreachable on geocode cache read: %s", exc)
+            cached = None
         if cached is not None:
             return SuccessResponse(data=GeocodeResult(**cached), message="cache")
 
@@ -267,6 +278,9 @@ async def reverse_geocode(
     result = _normalize_response(raw, lat, lng)
 
     if cache is not None:
-        await cache.set(key, result.model_dump(), expire=CACHE_TTL_SECONDS)
+        try:
+            await cache.set(key, result.model_dump(), expire=CACHE_TTL_SECONDS)
+        except (RedisError, ConnectionError, OSError) as exc:
+            logger.warning("Redis unreachable on geocode cache write: %s", exc)
 
     return SuccessResponse(data=result, message="ok")

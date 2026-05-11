@@ -18,6 +18,11 @@ from src.core.events.product_events import (
     ProductDeletedEvent,
     ProductUpdatedEvent,
 )
+from src.core.events.promotion_events import (
+    PromotionCreatedEvent,
+    PromotionDeletedEvent,
+    PromotionUpdatedEvent,
+)
 from src.core.events.recovery_events import (
     RecoveryAbandonedEvent,
     RecoveryStartedEvent,
@@ -58,6 +63,12 @@ from src.infrastructure.events.handlers.invoice_on_paid_handler import (
 )
 from src.infrastructure.events.handlers.otp_trust_handler import (
     handle_otp_verified_trust_signal,
+)
+from src.infrastructure.events.handlers.promotion_cache_invalidator import (
+    PromotionCacheInvalidator,
+)
+from src.infrastructure.events.handlers.promotion_convert_handler import (
+    handle_promotion_convert_on_order_paid,
 )
 from src.infrastructure.events.handlers.recovery_event_handler import (
     handle_recovery_started_for_celery,
@@ -120,6 +131,10 @@ def create_event_bus() -> EventBus:
     # Order lifecycle webhooks
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
+    # offers-v2: emit `convert` PromotionEvent for every promotion
+    # attributable to a paid order so merchant analytics show real
+    # conversion totals (not just redemptions).
+    bus.subscribe(OrderPaidEvent, handle_promotion_convert_on_order_paid)
     # Issue the ETA invoice + email PDF when the merchant marks a COD
     # order paid (or a future payment-gateway webhook fires OrderPaidEvent).
     bus.subscribe(OrderPaidEvent, handle_invoice_on_order_paid)
@@ -156,6 +171,33 @@ def create_event_bus() -> EventBus:
     from src.core.events.otp_events import OtpVerifiedEvent
 
     bus.subscribe(OtpVerifiedEvent, handle_otp_verified_trust_signal)
+
+    # Promotions — cache invalidation. The Redis client is fetched lazily
+    # so import-time test environments without Redis don't crash.
+    try:
+        import redis.asyncio as _redis_async
+
+        from src.config import settings as _settings
+        from src.infrastructure.cache.promotion_cache import PromotionCache
+
+        _promo_cache = PromotionCache(
+            _redis_async.from_url(
+                _settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+        )
+        _promo_invalidator = PromotionCacheInvalidator(_promo_cache)
+        bus.subscribe(PromotionCreatedEvent, _promo_invalidator.on_created)
+        bus.subscribe(PromotionUpdatedEvent, _promo_invalidator.on_updated)
+        bus.subscribe(PromotionDeletedEvent, _promo_invalidator.on_deleted)
+    except Exception as exc:  # noqa: BLE001 — startup tolerates missing Redis
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(
+            "promotion_cache_invalidator_disabled error=%r — promo cache will only "
+            "self-expire on TTL",
+            exc,
+        )
 
     # Staff events - invalidate cache + activity log + notifications
     bus.subscribe(StaffInvitedEvent, handle_staff_invited)

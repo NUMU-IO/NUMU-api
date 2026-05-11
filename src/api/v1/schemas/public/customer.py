@@ -16,6 +16,7 @@ from src.api.v1.schemas._address_validation import (
     normalize_country,
     normalize_phone,
 )
+from src.application.dto.phone_field import PhoneField
 
 # ============== Request Schemas ==============
 
@@ -46,7 +47,10 @@ class CustomerRegisterRequest(BaseModel):
     last_name: SanitizedStr = Field(
         ..., min_length=1, max_length=100, description="Last name"
     )
-    phone: str | None = Field(None, max_length=20, description="Phone number")
+    phone: PhoneField = Field(
+        None,
+        description=("Phone. Accepts E.164 or {country_code, local}; stored as E.164."),
+    )
     accepts_marketing: bool = Field(
         False, description="Whether the customer opts in to marketing"
     )
@@ -86,7 +90,10 @@ class CustomerUpdateProfileRequest(BaseModel):
     last_name: SanitizedStr | None = Field(
         None, min_length=1, max_length=100, description="Last name"
     )
-    phone: str | None = Field(None, max_length=20, description="Phone number")
+    phone: PhoneField = Field(
+        None,
+        description=("Phone. Accepts E.164 or {country_code, local}; stored as E.164."),
+    )
     accepts_marketing: bool | None = Field(
         None, description="Marketing opt-in preference"
     )

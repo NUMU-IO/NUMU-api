@@ -50,7 +50,7 @@ class AutomationRuleModel(Base, UUIDMixin, TimestampMixin):
         String(50),
         nullable=False,
     )
-    conditions: Mapped[list[dict]] = mapped_column(
+    conditions: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
         server_default="'[]'",

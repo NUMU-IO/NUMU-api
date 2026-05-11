@@ -38,6 +38,13 @@ from src.core.exceptions import (
     TokenExpiredError,
     ValidationError,
 )
+from src.core.exceptions.promotion_exceptions import (
+    CouponPromotionLinkError,
+    InvalidDiscountRule,
+    PromotionConflict,
+    PromotionNotFound,
+    PromotionStateError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +211,52 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content=_error_body(
                 "EXTERNAL_SERVICE_ERROR", "External service operation failed"
             ),
+        )
+
+    # ── offers-v2: promotion-specific domain errors ──────────────────────
+    # Must be registered BEFORE the generic DomainException handler so
+    # the more-specific subclass handlers win.
+
+    @app.exception_handler(PromotionNotFound)
+    async def promotion_not_found_handler(request: Request, exc: PromotionNotFound):
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=_error_body("PROMOTION_NOT_FOUND", str(exc)),
+        )
+
+    @app.exception_handler(PromotionConflict)
+    async def promotion_conflict_handler(request: Request, exc: PromotionConflict):
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=_safe_error_body(
+                "PROMOTION_VERSION_CONFLICT",
+                str(exc),
+                {
+                    "current_version": exc.current_version,
+                    "attempted_version": exc.attempted_version,
+                },
+            ),
+        )
+
+    @app.exception_handler(PromotionStateError)
+    async def promotion_state_handler(request: Request, exc: PromotionStateError):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=_error_body("PROMOTION_STATE_INVALID", str(exc)),
+        )
+
+    @app.exception_handler(InvalidDiscountRule)
+    async def invalid_discount_rule_handler(request: Request, exc: InvalidDiscountRule):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=_error_body("PROMOTION_DISCOUNT_RULE_INVALID", str(exc)),
+        )
+
+    @app.exception_handler(CouponPromotionLinkError)
+    async def coupon_link_handler(request: Request, exc: CouponPromotionLinkError):
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=_error_body("PROMOTION_COUPON_ALREADY_LINKED", str(exc)),
         )
 
     @app.exception_handler(DomainException)

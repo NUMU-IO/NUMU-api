@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import httpx
+import phonenumbers
+from phonenumbers import NumberParseException
 
 from src.config import settings
 from src.core.interfaces.services.messaging_service import (
@@ -91,30 +93,51 @@ class WhatsAppMessagingService(IMessagingService):
         }
 
     def _format_phone_number(self, phone: str) -> str:
-        """Format phone number for WhatsApp API.
+        """Format a stored phone number for the WhatsApp Cloud API.
 
-        WhatsApp requires numbers in international format without + or spaces.
+        Inbound contract: ``phone`` is the canonical E.164 string
+        (``"+201001234567"``) written by the ``PhoneField`` Pydantic type at
+        the API boundary. WhatsApp Cloud API expects the same digits
+        **without** the leading ``+`` (e.g. ``"201001234567"``).
+
+        For tolerance against any legacy rows that bypassed the new field
+        (raw ``01...`` strings predating the backfill migration), we fall
+        back to parsing against ``EG`` so existing Egyptian customers
+        keep getting messages.
 
         Args:
-            phone: Phone number (various formats accepted)
+            phone: Phone number — ideally already E.164.
 
         Returns:
-            Formatted phone number (e.g., "201234567890")
+            Country-coded digits with no ``+`` (e.g. ``"201001234567"``).
+
+        Raises:
+            ValueError: If the input can't be parsed into a valid number.
         """
-        # Remove common separators and prefixes
-        cleaned = (
-            phone.replace("+", "")
-            .replace(" ", "")
-            .replace("-", "")
-            .replace("(", "")
-            .replace(")", "")
-        )
+        if not phone or not phone.strip():
+            raise ValueError("Phone number is required for WhatsApp delivery.")
 
-        # Handle Egyptian numbers without country code
-        if cleaned.startswith("0") and len(cleaned) == 11:
-            cleaned = "2" + cleaned  # Add Egypt country code
+        try:
+            # Empty default region — relies on E.164 ``+`` to identify the
+            # country. The ``"EG"`` fallback covers legacy rows that were
+            # saved as raw national format before the backfill migration.
+            parsed = phonenumbers.parse(phone, None)
+        except NumberParseException:
+            try:
+                parsed = phonenumbers.parse(phone, "EG")
+            except NumberParseException as exc:
+                raise ValueError(
+                    f"Could not parse phone '{phone}' for WhatsApp delivery."
+                ) from exc
 
-        return cleaned
+        if not phonenumbers.is_valid_number(parsed):
+            raise ValueError(
+                f"Phone '{phone}' is not a valid number; WhatsApp would reject it."
+            )
+
+        e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        # E.164 always starts with '+'; WA Cloud wants it stripped.
+        return e164.lstrip("+")
 
     def _build_template_message(
         self,

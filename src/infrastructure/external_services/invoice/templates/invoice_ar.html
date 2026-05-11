@@ -4,331 +4,213 @@
     <meta charset="UTF-8">
     <style>
         /* ================================================================
-         * NUMU Bilingual Invoice PDF Template (Arabic/English)
-         * Arabic RTL primary with English labels alongside.
-         * Rendered by WeasyPrint (HTML/CSS -> PDF).
-         * Font: Noto Sans Arabic (installed via fontconfig in Docker).
+         * NUMU Tax Invoice — Arabic primary, English secondary.
+         * Rendered by WeasyPrint (Linux/Docker) with fpdf2 fallback (Windows
+         * / no Cairo). Both paths read colors from brand/tokens.json so the
+         * two outputs match. Brand kit v1.0 — Numu Navy on Cream/Paper.
          * ================================================================ */
 
         @page {
             size: A4;
-            margin: 1.5cm 1.5cm 2.5cm 1.5cm;
-
+            margin: 1.6cm 1.6cm 2.4cm 1.6cm;
             @bottom-center {
                 content: "صفحة / Page " counter(page) " / " counter(pages);
                 font-size: 8pt;
-                color: #999;
+                color: #8AA5C2;
             }
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'Noto Sans Arabic', 'Noto Sans', Arial, sans-serif;
+            font-family: 'Tajawal', 'Reem Kufi', 'Noto Sans Arabic', 'Noto Sans', Arial, sans-serif;
             font-size: 10pt;
-            line-height: 1.6;
-            color: #1a1a2e;
+            line-height: 1.55;
+            color: #0F1624;
+            background: #FBF6ED;
             direction: rtl;
         }
 
-        /* --- Header with Logo --- */
+        /* ── Header ─────────────────────────────────────────────── */
         .invoice-header {
-            border-bottom: 3px solid #1034A6;
-            padding-bottom: 12px;
-            margin-bottom: 20px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
+            border-bottom: 3px solid #003366;
+            padding-bottom: 14px;
+            margin-bottom: 22px;
         }
-
-        .header-logo {
-            flex-shrink: 0;
-        }
-
-        .header-logo img {
-            max-height: 55px;
-            max-width: 180px;
-        }
-
-        .header-center {
-            text-align: center;
-            flex-grow: 1;
-        }
-
+        .header-logo { flex-shrink: 0; }
+        .header-logo img { max-height: 64px; max-width: 220px; }
+        .header-center { text-align: center; flex-grow: 1; padding: 0 16px; }
         .invoice-title-ar {
-            font-size: 20pt;
-            font-weight: bold;
-            color: #1034A6;
+            font-size: 22pt;
+            font-weight: 700;
+            color: #003366;
+            font-family: 'Reem Kufi', 'Tajawal', sans-serif;
+            letter-spacing: -0.5px;
         }
-
         .invoice-title-en {
-            font-size: 12pt;
-            font-weight: bold;
-            color: #1034A6;
+            font-size: 10pt;
+            font-weight: 700;
+            color: #003366;
             direction: ltr;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-top: 2px;
         }
-
         .header-meta {
             text-align: left;
             direction: ltr;
             font-size: 9pt;
-            color: #555;
+            color: #2B3344;
             flex-shrink: 0;
+            min-width: 165px;
         }
+        .header-meta .meta-row { margin-bottom: 4px; }
+        .meta-label { color: #8AA5C2; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6px; }
+        .meta-value { color: #0F1624; font-weight: 700; font-size: 10pt; }
 
-        .header-meta .meta-row {
-            margin-bottom: 2px;
-        }
-
-        .meta-label-ar {
-            color: #1a1a2e;
-            font-weight: bold;
-        }
-
-        .meta-label-en {
-            color: #6c757d;
-            font-size: 8pt;
-        }
-
-        .meta-value {
-            color: #1a1a2e;
-            font-weight: bold;
-        }
-
-        /* --- Party boxes (seller / buyer) --- */
-        .parties {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 20px;
-        }
-
+        /* ── Party boxes ────────────────────────────────────────── */
+        .parties { display: flex; gap: 14px; margin-bottom: 22px; }
         .party-box {
             flex: 1;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            padding: 12px 14px;
-            background: #fafbfc;
+            border: 1px solid #EAE0CE;
+            background: #F5EFE6;
+            border-radius: 8px;
+            padding: 14px 16px;
         }
-
         .party-label {
             font-size: 8pt;
-            color: #6c757d;
+            color: #003366;
             text-transform: uppercase;
             letter-spacing: 0.8px;
-            margin-bottom: 6px;
-            border-bottom: 1px solid #e9ecef;
-            padding-bottom: 4px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #EAE0CE;
+            padding-bottom: 6px;
+            font-weight: 700;
         }
+        .party-name-ar { font-size: 12pt; font-weight: 700; margin-bottom: 2px; color: #0F1624; }
+        .party-name-en { font-size: 9pt; color: #2B3344; direction: ltr; text-align: left; margin-bottom: 4px; }
+        .party-detail { font-size: 9pt; color: #2B3344; margin-bottom: 3px; }
+        .party-detail-label { color: #8AA5C2; }
 
-        .party-name-ar {
-            font-size: 12pt;
-            font-weight: bold;
-            margin-bottom: 2px;
-        }
-
-        .party-name-en {
-            font-size: 9pt;
-            color: #6c757d;
-            direction: ltr;
-            text-align: left;
-            margin-bottom: 4px;
-        }
-
-        .party-detail {
-            font-size: 9pt;
-            color: #495057;
-            margin-bottom: 2px;
-        }
-
-        .party-detail-label {
-            color: #6c757d;
-        }
-
-        /* --- Line items table --- */
-        table.items {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-        }
-
+        /* ── Line items ─────────────────────────────────────────── */
+        table.items { width: 100%; border-collapse: collapse; margin: 22px 0 14px; }
         table.items th {
-            background: #f1f3f5;
-            padding: 8px 6px;
-            border-bottom: 2px solid #1034A6;
-            font-size: 8pt;
-            font-weight: bold;
-            color: #495057;
+            background: #003366;
+            color: #FBF6ED;
+            padding: 10px 8px;
+            font-size: 8.5pt;
+            font-weight: 700;
             text-align: right;
+            letter-spacing: 0.3px;
         }
-
-        table.items th .th-ar {
-            display: block;
-            font-size: 8pt;
-        }
-
         table.items th .th-en {
             display: block;
-            font-size: 7pt;
-            color: #868e96;
+            font-size: 6.5pt;
+            color: #8AA5C2;
             direction: ltr;
+            font-weight: 400;
+            margin-top: 2px;
         }
-
-        table.items th.num {
-            text-align: center;
-            width: 30px;
-        }
-
+        table.items th.num { text-align: center; width: 32px; }
+        table.items th.money { text-align: left; }
         table.items td {
-            padding: 7px 6px;
-            border-bottom: 1px solid #eee;
-            font-size: 9pt;
+            padding: 9px 8px;
+            border-bottom: 1px solid #EAE0CE;
+            font-size: 9.5pt;
             text-align: right;
             vertical-align: top;
+            color: #0F1624;
         }
+        table.items td.num { text-align: center; color: #8AA5C2; font-weight: 700; }
+        table.items td.money { font-variant-numeric: tabular-nums; text-align: left; white-space: nowrap; }
+        table.items td .desc-en { display: block; font-size: 8pt; color: #2B3344; direction: ltr; text-align: left; margin-top: 2px; }
+        table.items tbody tr:nth-child(even) td { background: #F5EFE6; }
 
-        table.items td.num {
-            text-align: center;
-        }
-
-        table.items td.money {
-            font-variant-numeric: tabular-nums;
-            text-align: left;
-            white-space: nowrap;
-        }
-
-        table.items th.money {
-            text-align: left;
-        }
-
-        table.items td .desc-ar {
-            display: block;
-        }
-
-        table.items td .desc-en {
-            display: block;
-            font-size: 8pt;
-            color: #868e96;
-            direction: ltr;
-            text-align: left;
-        }
-
-        table.items tbody tr:nth-child(even) {
-            background: #fafbfc;
-        }
-
-        /* --- Totals --- */
-        .totals-wrapper {
-            display: flex;
-            justify-content: flex-start;
-            margin-top: 10px;
-        }
-
-        .totals {
-            width: 45%;
-        }
-
-        .totals table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .totals td {
-            padding: 5px 8px;
-            font-size: 9pt;
-        }
-
-        .totals td.label {
-            text-align: right;
-            color: #6c757d;
-        }
-
-        .totals td.label .label-en {
-            font-size: 7pt;
-            color: #adb5bd;
-            direction: ltr;
-        }
-
-        .totals td.value {
-            text-align: left;
-            font-variant-numeric: tabular-nums;
-        }
-
+        /* ── Totals ─────────────────────────────────────────────── */
+        .totals-wrapper { display: flex; justify-content: flex-start; margin-top: 8px; }
+        .totals { width: 48%; }
+        .totals table { width: 100%; border-collapse: collapse; }
+        .totals td { padding: 6px 10px; font-size: 10pt; }
+        .totals td.label { text-align: right; color: #2B3344; }
+        .totals td.label .label-en { font-size: 7pt; color: #8AA5C2; direction: ltr; }
+        .totals td.value { text-align: left; font-variant-numeric: tabular-nums; color: #0F1624; font-weight: 600; }
         .totals tr.grand-total td {
-            font-size: 13pt;
-            font-weight: bold;
-            color: #1034A6;
-            border-top: 2px solid #1034A6;
-            padding-top: 8px;
+            font-size: 14pt;
+            font-weight: 700;
+            color: #003366;
+            border-top: 2px solid #003366;
+            padding-top: 10px;
+            padding-bottom: 6px;
         }
 
-        /* --- QR Code section --- */
-        .qr-section {
-            text-align: center;
-            margin-top: 30px;
-            padding-top: 16px;
-            border-top: 1px solid #e9ecef;
+        /* ── Payment status stamp ───────────────────────────────── */
+        .payment-wrap { display: flex; justify-content: flex-start; margin-top: 14px; }
+        .payment-stamp {
+            display: inline-block;
+            padding: 9px 22px;
+            border: 2.5px solid currentColor;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 12pt;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            transform: rotate(-2deg);
         }
-
-        .qr-section img {
-            width: 110px;
-            height: 110px;
+        .payment-stamp small {
+            display: block;
+            font-size: 7pt;
+            font-weight: 400;
+            margin-top: 2px;
+            opacity: 0.85;
+            text-transform: none;
+            letter-spacing: 0;
         }
+        .payment-stamp--paid               { color: #6B8E68; }
+        .payment-stamp--pending,
+        .payment-stamp--unpaid             { color: #E8A430; }
+        .payment-stamp--refunded,
+        .payment-stamp--partially_refunded,
+        .payment-stamp--failed             { color: #C14A1C; }
+        .payment-stamp--authorized         { color: #1F4A7A; }
 
-        .qr-section p {
-            font-size: 8pt;
-            color: #999;
-            margin-top: 4px;
-        }
+        /* ── QR / notes / footer ────────────────────────────────── */
+        .qr-section { text-align: center; margin-top: 28px; padding-top: 18px; border-top: 1px solid #EAE0CE; }
+        .qr-section img { width: 110px; height: 110px; }
+        .qr-section p { font-size: 8pt; color: #8AA5C2; margin-top: 6px; }
 
-        /* --- Notes --- */
         .notes {
-            margin-top: 16px;
-            padding: 10px 12px;
-            background: #f8f9fa;
+            margin-top: 18px;
+            padding: 12px 14px;
+            background: #F5EFE6;
+            border-right: 3px solid #E8A430;
             border-radius: 4px;
             font-size: 9pt;
-            color: #495057;
+            color: #2B3344;
         }
+        .notes-label { font-weight: 700; margin-bottom: 4px; color: #0F1624; }
 
-        .notes-label {
-            font-weight: bold;
-            margin-bottom: 4px;
-        }
+        .eta-footer { margin-top: 22px; padding-top: 12px; border-top: 1px solid #EAE0CE; text-align: center; }
+        .eta-footer .eta-ar { font-size: 8pt; color: #2B3344; margin-bottom: 2px; }
+        .eta-footer .eta-en { font-size: 7pt; color: #8AA5C2; direction: ltr; }
 
-        /* --- ETA compliance footer --- */
-        .eta-footer {
-            margin-top: 24px;
-            padding-top: 12px;
-            border-top: 1px solid #e9ecef;
+        .powered-by {
+            margin-top: 16px;
             text-align: center;
-        }
-
-        .eta-footer .eta-ar {
-            font-size: 8pt;
-            color: #6c757d;
-            margin-bottom: 2px;
-        }
-
-        .eta-footer .eta-en {
             font-size: 7pt;
-            color: #adb5bd;
-            direction: ltr;
+            color: #8AA5C2;
+            letter-spacing: 0.6px;
         }
+        .powered-by strong { color: #003366; font-weight: 700; }
     </style>
 </head>
 <body>
 
-    <!-- Invoice Header with Logo -->
     <div class="invoice-header">
         <div class="header-logo">
-            {% if logo_url %}
-            <img src="{{ logo_url }}" alt="Logo">
-            {% endif %}
+            {% if logo_url %}<img src="{{ logo_url }}" alt="NUMU">{% endif %}
         </div>
         <div class="header-center">
             <div class="invoice-title-ar">فاتورة ضريبية</div>
@@ -336,42 +218,37 @@
         </div>
         <div class="header-meta">
             <div class="meta-row">
-                <span class="meta-label-ar">رقم الفاتورة</span>
-                <span class="meta-label-en">/ Invoice No.</span><br>
-                <span class="meta-value">{{ invoice.invoice_number }}</span>
+                <div class="meta-label">Invoice No.</div>
+                <div class="meta-value">{{ invoice.invoice_number }}</div>
             </div>
             <div class="meta-row">
-                <span class="meta-label-ar">التاريخ</span>
-                <span class="meta-label-en">/ Date</span><br>
-                <span class="meta-value">{{ invoice.date_issued.strftime('%Y-%m-%d') }}</span>
+                <div class="meta-label">Date</div>
+                <div class="meta-value">{{ invoice.date_issued.strftime('%Y-%m-%d') }}</div>
             </div>
             <div class="meta-row">
-                <span class="meta-label-ar">العملة</span>
-                <span class="meta-label-en">/ Currency</span><br>
-                <span class="meta-value">{{ currency }}</span>
+                <div class="meta-label">Currency</div>
+                <div class="meta-value">{{ currency }}</div>
             </div>
             {% if invoice.invoice_type.value != 'I' %}
             <div class="meta-row">
-                <span class="meta-label-ar">النوع</span>
-                <span class="meta-label-en">/ Type</span><br>
-                <span class="meta-value">{{ invoice.invoice_type.value }}</span>
+                <div class="meta-label">Type</div>
+                <div class="meta-value">{{ invoice.invoice_type.value }}</div>
             </div>
             {% endif %}
         </div>
     </div>
 
-    <!-- Seller & Buyer -->
     <div class="parties">
         <div class="party-box">
-            <div class="party-label">البائع / SELLER</div>
-            {% if seller.name_ar %}
-            <div class="party-name-ar">{{ seller.name_ar }}</div>
-            {% endif %}
+            <div class="party-label">البائع &middot; SELLER</div>
+            {% if seller.name_ar %}<div class="party-name-ar">{{ seller.name_ar }}</div>{% endif %}
             <div class="party-name-en">{{ seller.name }}</div>
+            {% if seller.tax_id %}
             <div class="party-detail">
                 <span class="party-detail-label">الرقم الضريبي / Tax ID:</span>
                 {{ seller.tax_id }}
             </div>
+            {% endif %}
             {% if seller.street or seller.city %}
             <div class="party-detail">
                 <span class="party-detail-label">العنوان / Address:</span>
@@ -383,10 +260,8 @@
             {% endif %}
         </div>
         <div class="party-box">
-            <div class="party-label">المشتري / BUYER</div>
-            {% if buyer.name_ar %}
-            <div class="party-name-ar">{{ buyer.name_ar }}</div>
-            {% endif %}
+            <div class="party-label">المشتري &middot; BUYER</div>
+            {% if buyer.name_ar %}<div class="party-name-ar">{{ buyer.name_ar }}</div>{% endif %}
             <div class="party-name-en">{{ buyer.name }}</div>
             {% if buyer.tax_id %}
             <div class="party-detail">
@@ -408,49 +283,20 @@
                 {% if buyer.governorate %}، {{ buyer.governorate }}{% endif %}
             </div>
             {% endif %}
-            {% if buyer.phone %}
-            <div class="party-detail">{{ buyer.phone }}</div>
-            {% endif %}
+            {% if buyer.phone %}<div class="party-detail">{{ buyer.phone }}</div>{% endif %}
         </div>
     </div>
 
-    <!-- Line Items -->
     <table class="items">
         <thead>
             <tr>
                 <th class="num">#</th>
-                <th>
-                    <span class="th-ar">الوصف</span>
-                    <span class="th-en">Description</span>
-                </th>
-                <th>
-                    <span class="th-ar">الكود</span>
-                    <span class="th-en">Code</span>
-                </th>
-                <th class="money">
-                    <span class="th-ar">الكمية</span>
-                    <span class="th-en">Qty</span>
-                </th>
-                <th class="money">
-                    <span class="th-ar">سعر الوحدة</span>
-                    <span class="th-en">Unit Price</span>
-                </th>
-                <th class="money">
-                    <span class="th-ar">الخصم</span>
-                    <span class="th-en">Discount</span>
-                </th>
-                <th class="money">
-                    <span class="th-ar">الصافي</span>
-                    <span class="th-en">Net</span>
-                </th>
-                <th class="money">
-                    <span class="th-ar">الضريبة</span>
-                    <span class="th-en">Tax</span>
-                </th>
-                <th class="money">
-                    <span class="th-ar">الإجمالي</span>
-                    <span class="th-en">Total</span>
-                </th>
+                <th>الوصف <span class="th-en">Description</span></th>
+                <th>الكود <span class="th-en">Code</span></th>
+                <th class="money">الكمية <span class="th-en">Qty</span></th>
+                <th class="money">سعر الوحدة <span class="th-en">Unit Price</span></th>
+                <th class="money">الخصم <span class="th-en">Discount</span></th>
+                <th class="money">الإجمالي <span class="th-en">Total</span></th>
             </tr>
         </thead>
         <tbody>
@@ -458,90 +304,74 @@
             <tr>
                 <td class="num">{{ item.number }}</td>
                 <td>
-                    {% if item.description_ar %}
-                    <span class="desc-ar">{{ item.description_ar }}</span>
-                    {% endif %}
-                    <span class="desc-en">{{ item.description }}</span>
+                    {% if item.description_ar %}<span>{{ item.description_ar }}</span>{% endif %}
+                    {% if item.description %}<span class="desc-en">{{ item.description }}</span>{% endif %}
                 </td>
                 <td>{{ item.item_code }}</td>
                 <td class="money">{{ item.quantity }}</td>
                 <td class="money">{{ item.unit_price }}</td>
                 <td class="money">{{ item.discount }}</td>
                 <td class="money">{{ item.net_total }}</td>
-                <td class="money">{{ item.tax_amount }}</td>
-                <td class="money">{{ item.total }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 
-    <!-- Totals -->
     <div class="totals-wrapper">
         <div class="totals">
             <table>
                 <tr>
-                    <td class="label">
-                        المجموع الفرعي
-                        <span class="label-en">/ Subtotal</span>
-                    </td>
+                    <td class="label">المجموع الفرعي <span class="label-en">/ Subtotal</span></td>
                     <td class="value">{{ subtotal }} {{ currency }}</td>
                 </tr>
                 {% if total_discount != '0.00' %}
                 <tr>
-                    <td class="label">
-                        إجمالي الخصم
-                        <span class="label-en">/ Discount</span>
-                    </td>
+                    <td class="label">إجمالي الخصم <span class="label-en">/ Discount</span></td>
                     <td class="value">-{{ total_discount }} {{ currency }}</td>
                 </tr>
                 {% endif %}
-                <tr>
-                    <td class="label">
-                        إجمالي الضريبة (14%)
-                        <span class="label-en">/ Tax</span>
-                    </td>
-                    <td class="value">{{ total_taxes }} {{ currency }}</td>
-                </tr>
                 <tr class="grand-total">
-                    <td class="label">
-                        الإجمالي الكلي
-                        <span class="label-en">/ Grand Total</span>
-                    </td>
+                    <td class="label">الإجمالي الكلي <span class="label-en">/ Grand Total</span></td>
                     <td class="value">{{ grand_total }} {{ currency }}</td>
                 </tr>
             </table>
         </div>
     </div>
 
-    <!-- Notes -->
+    {% if payment_status_key %}
+    <div class="payment-wrap">
+        <div class="payment-stamp payment-stamp--{{ payment_status_key }}">
+            <span>{{ labels_ar.payment[payment_status_key] }} / {{ labels_en.payment[payment_status_key] }}</span>
+            {% if paid_at %}<small>{{ paid_at }}{% if payment_method %} &middot; {{ payment_method }}{% endif %}</small>
+            {% elif payment_method %}<small>{{ payment_method }}</small>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     {% if invoice.notes or invoice.notes_ar %}
     <div class="notes">
         <div class="notes-label">ملاحظات / Notes</div>
-        {% if invoice.notes_ar %}
-            {{ invoice.notes_ar }}
-        {% endif %}
-        {% if invoice.notes and invoice.notes_ar %}
-            <br>
-        {% endif %}
+        {% if invoice.notes_ar %}{{ invoice.notes_ar }}{% endif %}
         {% if invoice.notes %}
-            <span style="direction: ltr; text-align: left; display: block; color: #6c757d;">{{ invoice.notes }}</span>
+            {% if invoice.notes_ar %}<br>{% endif %}
+            <span style="direction: ltr; text-align: left; display: block; color: #2B3344;">{{ invoice.notes }}</span>
         {% endif %}
     </div>
     {% endif %}
 
-    <!-- QR Code -->
     {% if qr_data_uri %}
     <div class="qr-section">
         <img src="{{ qr_data_uri }}" alt="ETA QR Code">
-        <p>رمز QR للفاتورة الإلكترونية — ETA e-Invoice QR Code</p>
+        <p>رمز QR للفاتورة الإلكترونية &mdash; ETA e-Invoice QR Code</p>
     </div>
     {% endif %}
 
-    <!-- ETA Compliance Footer -->
     <div class="eta-footer">
         <div class="eta-ar">هذه فاتورة إلكترونية صادرة وفقاً لمتطلبات مصلحة الضرائب المصرية</div>
-        <div class="eta-en">This is an electronic invoice issued per Egyptian Tax Authority requirements</div>
+        <div class="eta-en">Electronic invoice issued per Egyptian Tax Authority requirements</div>
     </div>
+
+    <div class="powered-by">Powered by <strong>NUMU</strong> &middot; numuegapp</div>
 
 </body>
 </html>

@@ -29,11 +29,16 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
       - /opt/numu/merchant-hub:/var/www/merchant-hub:ro
+      - /opt/numu/merchant-hub-test:/var/www/merchant-hub-test:ro
+      - /opt/numu/merchant-hub-stage:/var/www/merchant-hub-stage:ro
       - /opt/numu/landing-page:/var/www/landing-page:ro
     depends_on:
       - api
     networks:
       - numu-staging
+      # Shared edge bridge so this nginx can reach the test/stage stacks'
+      # api/storefront containers (numu-api-test, numu-api-stage, etc.) by DNS.
+      - numu-edge
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -257,6 +262,10 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16
+  # Shared edge bridge for the test/stage stacks. Created once on the host
+  # via `docker network create numu-edge` before bringing this stack up.
+  numu-edge:
+    external: true
 
 # =============================================================================
 # Volumes

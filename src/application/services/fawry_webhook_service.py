@@ -328,7 +328,96 @@ class FawryWebhookService:
             fawry_reference=reference_number,
             amount=payment_amount,
         )
+
+        # Meta CAPI Purchase fan-out — server-side authoritative for
+        # Purchase per plan §5.4. Best-effort: a failed enqueue should
+        # never fail the webhook (the hourly orphan-purchase sweep
+        # picks up missed events).
+        try:
+            await self._enqueue_meta_purchase(order)
+        except Exception:
+            logger.warning(
+                "meta_capi_purchase_enqueue_failed",
+                order_id=str(order.id),
+                exc_info=True,
+            )
+
         return order
+
+    async def _enqueue_meta_purchase(self, order: OrderModel) -> None:
+        """Enqueue a Purchase CAPI event for ``order``, gated on store config.
+
+        Same shape as the Paymob webhook hook (NUMU-api/src/api/v1/routes/
+        webhooks/paymob.py). Lazy imports so unrelated webhook tests
+        don't load Celery / repository stacks they don't need.
+        """
+        from src.infrastructure.messaging.tasks.meta_capi import (
+            meta_capi_send_event,
+        )
+        from src.infrastructure.repositories.store_repository import (
+            StoreRepository,
+        )
+
+        sr = StoreRepository(self.db)
+        store_id_uuid = (
+            order.store_id
+            if isinstance(order.store_id, UUID)
+            else UUID(str(order.store_id))
+        )
+        store = await sr.get_by_id(store_id_uuid)
+        if store is None:
+            return
+        meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
+        pixel_id = meta_cfg.get("pixel_id")
+        if not (meta_cfg.get("capi_enabled") and pixel_id):
+            return
+
+        line_items = order.line_items or []
+        contents = [
+            {
+                "id": str(li.get("product_id", "")),
+                "quantity": int(li.get("quantity", 1)),
+                "item_price": int(li.get("unit_price", 0)) / 100,
+            }
+            for li in line_items
+            if li.get("product_id")
+        ]
+        shipping = order.shipping_address or {}
+        user_data = {
+            "email": shipping.get("email"),
+            "phone": shipping.get("phone"),
+            "first_name": shipping.get("first_name"),
+            "last_name": shipping.get("last_name"),
+            "city": shipping.get("city"),
+            "country_code": shipping.get("country") or shipping.get("country_code"),
+            "zip": shipping.get("postal_code") or shipping.get("zip"),
+            "customer_id": str(order.customer_id) if order.customer_id else None,
+        }
+        paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
+
+        meta_capi_send_event.delay(
+            store_id=str(order.store_id),
+            pixel_id=pixel_id,
+            event_name="Purchase",
+            event_id=str(order.id),
+            event_time=int(paid_at.timestamp()),
+            event_source_url=None,
+            user_data=user_data,
+            custom_data={
+                "value": (order.total or 0) / 100,
+                "currency": order.currency or "EGP",
+                "content_ids": [
+                    str(li.get("product_id"))
+                    for li in line_items
+                    if li.get("product_id")
+                ],
+                "content_type": "product",
+                "contents": contents,
+                "num_items": sum(int(li.get("quantity", 1)) for li in line_items),
+                "order_id": str(order.id),
+            },
+            action_source="website",
+        )
 
     async def handle_expired(
         self,

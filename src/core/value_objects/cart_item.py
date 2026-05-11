@@ -25,6 +25,12 @@ class CartItem(BaseModel):
     unit_price: int = Field(default=0, ge=0)
     image_url: str | None = None
     weight: Decimal | None = None
+    # Optional — populated when the cart is reconstructed from a
+    # storefront request that carries category metadata. The discount
+    # calculator's BOGO set-filter reads this for "Customer gets from
+    # collection X" rules. Persisted carts (CartRepository) typically
+    # leave it None; the field is non-breaking on serialize/deserialize.
+    category_id: UUID | None = None
     properties: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("quantity")
