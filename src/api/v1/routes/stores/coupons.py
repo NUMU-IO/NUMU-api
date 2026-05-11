@@ -100,6 +100,7 @@ async def create_coupon(
         applicable_category_ids=[UUID(cid) for cid in request.applicable_category_ids]
         if request.applicable_category_ids
         else None,
+        config=request.config,
     )
 
     result = await use_case.execute(dto=dto, store_id=store.id, user_id=store.owner_id)

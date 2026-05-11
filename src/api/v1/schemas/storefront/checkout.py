@@ -84,6 +84,17 @@ class CheckoutRequest(BaseModel):
         None,
         description="ID of a Location with fulfills_pickup=true on this store.",
     )
+    # Phase 8.3 — gift card redemption codes. Each code reduces
+    # amount_due as TENDER (a payment method), NOT a discount.
+    # Tax math is unaffected (the gift card is cash-equivalent); the
+    # gateway charges only the remainder after gift card debits.
+    # Multiple codes can stack — the backend debits them in order
+    # and stops once the order total is covered.
+    gift_card_codes: list[str] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Gift card codes to redeem as tender against this order.",
+    )
     # UTM attribution (captured from URL on storefront)
     utm_source: str | None = Field(None, max_length=200)
     utm_medium: str | None = Field(None, max_length=200)

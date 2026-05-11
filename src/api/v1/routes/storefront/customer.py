@@ -14,11 +14,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, status
 
+# Pydantic + Field used for the Phase 8.5 reorder response schemas.
+from pydantic import BaseModel, Field
+
 from src.api.dependencies.auth import get_current_customer
 from src.api.dependencies.repositories import (
     get_customer_address_repository,
     get_customer_repository,
     get_order_repository,
+    get_product_repository,
     get_store_repository,
 )
 from src.api.dependencies.services import get_password_service
@@ -56,6 +60,7 @@ from src.infrastructure.repositories import (
     CustomerAddressRepository,
     CustomerRepository,
     OrderRepository,
+    ProductRepository,
     StoreRepository,
 )
 
@@ -706,4 +711,202 @@ async def get_customer_order(
     return SuccessResponse(
         data=_order_to_response(order_dto),
         message="Order retrieved successfully",
+    )
+
+
+# ── Phase 8.5 — reorder / buy-again ──────────────────────────────
+
+
+class ReorderSkippedItem(BaseModel):
+    """One line item that couldn't be re-added (deleted / out of stock /
+    moved to a different store)."""
+
+    product_id: str
+    product_name: str | None = None
+    variant_id: str | None = None
+    quantity: int
+    reason: str
+
+
+class ReorderResponse(BaseModel):
+    added_count: int = Field(description="Number of line items successfully added")
+    skipped: list[ReorderSkippedItem] = Field(
+        default_factory=list,
+        description="Line items that couldn't be re-added (with reasons)",
+    )
+    cart_total_items: int = Field(
+        description="Total quantity in the cart after the reorder"
+    )
+
+
+@router.post(
+    "/orders/{order_id}/reorder",
+    response_model=SuccessResponse[ReorderResponse],
+    summary="Reorder — clone an old order's items into the cart",
+    operation_id="reorder_customer_order",
+)
+async def reorder_customer_order(
+    order_id: Annotated[UUID, Path(description="Order ID to clone from")],
+    current_customer: Annotated[Customer, Depends(get_current_customer)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+):
+    """Clone the line items of a previous order into the customer's
+    active cart — Phase 8.5.
+
+    Behaviour:
+      * Only orders belonging to the authenticated customer can be
+        reordered (404 otherwise — same response shape as a missing
+        order).
+      * Each line is re-validated against the live catalog: items
+        whose product is missing, archived, out of stock, or moved to
+        a different store are silently skipped and reported in the
+        response's `skipped` list with a reason. Themes use this to
+        surface a "we couldn't add 2 items — see why" banner without
+        blocking the rest of the cart.
+      * Items still on sale are added at their *current* price
+        (snapshotted on the cart line), NOT the price the customer
+        originally paid. Themes that want to show "price changed"
+        UX can branch on the storefront-shipped current_price vs.
+        cart_item.unit_price (the existing Phase 3.9 path).
+      * Variant-bound lines (Phase 8.1) re-resolve the variant by id;
+        a deleted variant is skipped same as a deleted product.
+    """
+    from src.api.v1.routes.storefront.cart import (
+        _cart_repo,
+        _get_or_create_cart,
+    )
+    from src.core.entities.cart import CartItem
+    from src.core.entities.product import ProductStatus
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.customer_id != current_customer.id:
+        raise EntityNotFoundError("Order", str(order_id))
+
+    cart = await _get_or_create_cart(
+        current_customer.id, current_customer.store_id
+    )
+
+    added = 0
+    skipped: list[ReorderSkippedItem] = []
+
+    for line in order.line_items or []:
+        product = await product_repo.get_by_id(line.product_id)
+
+        if product is None:
+            skipped.append(
+                ReorderSkippedItem(
+                    product_id=str(line.product_id),
+                    product_name=line.product_name,
+                    variant_id=str(line.variant_id) if line.variant_id else None,
+                    quantity=line.quantity,
+                    reason="Product no longer exists.",
+                )
+            )
+            continue
+
+        if product.store_id != current_customer.store_id:
+            skipped.append(
+                ReorderSkippedItem(
+                    product_id=str(line.product_id),
+                    product_name=product.name,
+                    variant_id=str(line.variant_id) if line.variant_id else None,
+                    quantity=line.quantity,
+                    reason="Product moved to a different store.",
+                )
+            )
+            continue
+
+        if product.status != ProductStatus.ACTIVE:
+            skipped.append(
+                ReorderSkippedItem(
+                    product_id=str(line.product_id),
+                    product_name=product.name,
+                    variant_id=str(line.variant_id) if line.variant_id else None,
+                    quantity=line.quantity,
+                    reason="Product is no longer available for sale.",
+                )
+            )
+            continue
+
+        # Resolve variant when the original line carried one
+        # (Phase 8.1). Missing or different-product variant = skip.
+        unit_price_cents = product.price.cents
+        variant_sku = product.sku
+        variant_image = product.images[0] if product.images else None
+        if line.variant_id:
+            from src.infrastructure.database.connection import AsyncSessionLocal
+            from src.infrastructure.repositories.variant_repository import (
+                VariantRepository,
+            )
+
+            async with AsyncSessionLocal() as _s:
+                variant = await VariantRepository(_s).get_by_id(line.variant_id)
+            if variant is None or variant.product_id != product.id:
+                skipped.append(
+                    ReorderSkippedItem(
+                        product_id=str(line.product_id),
+                        product_name=product.name,
+                        variant_id=str(line.variant_id),
+                        quantity=line.quantity,
+                        reason="Selected option combination is no longer available.",
+                    )
+                )
+                continue
+            if not variant.is_in_stock:
+                skipped.append(
+                    ReorderSkippedItem(
+                        product_id=str(line.product_id),
+                        product_name=product.name,
+                        variant_id=str(line.variant_id),
+                        quantity=line.quantity,
+                        reason="Selected option is out of stock.",
+                    )
+                )
+                continue
+            unit_price_cents = int(variant.price.amount)
+            variant_sku = variant.sku or product.sku
+            if variant.image_url:
+                variant_image = variant.image_url
+        else:
+            # Product-level stock check for legacy single-variant lines.
+            if not product.is_in_stock:
+                skipped.append(
+                    ReorderSkippedItem(
+                        product_id=str(line.product_id),
+                        product_name=product.name,
+                        variant_id=None,
+                        quantity=line.quantity,
+                        reason="Out of stock.",
+                    )
+                )
+                continue
+
+        cart.add_item(
+            CartItem(
+                product_id=line.product_id,
+                product_name=product.name,
+                variant_id=line.variant_id,
+                quantity=line.quantity,
+                unit_price=unit_price_cents,
+                sku=variant_sku,
+                image_url=variant_image,
+            )
+        )
+        added += 1
+
+    await _cart_repo.save(cart)
+
+    cart_total = sum(item.quantity for item in cart.items)
+    return SuccessResponse(
+        data=ReorderResponse(
+            added_count=added,
+            skipped=skipped,
+            cart_total_items=cart_total,
+        ),
+        message=(
+            f"Reorder complete: {added} added"
+            + (f", {len(skipped)} skipped" if skipped else "")
+            + "."
+        ),
     )
