@@ -95,14 +95,16 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Phase 4.1 — Postgres tsvector for full-text search. Maintained
     # by the database via GENERATED ALWAYS AS (...) STORED — see
     # alembic/versions/20260508_add_product_search_tsvector.py.
-    # Read-only from the ORM's perspective.
+    # Read-only from the ORM's perspective. The `immutable_text_array_to_string`
+    # wrapper is defined in that migration; the built-in `array_to_string` is
+    # rejected as STABLE in a STORED expression on newer Postgres.
     search_vector: Mapped[str | None] = mapped_column(
         TSVECTOR,
         Computed(
             "setweight(to_tsvector('simple', coalesce(name, '')), 'A') || "
             "setweight(to_tsvector('simple', coalesce(sku, '')), 'B') || "
             "setweight(to_tsvector('simple', coalesce(description, '')), 'C') || "
-            "setweight(to_tsvector('simple', coalesce(array_to_string(tags, ' '), '')), 'D')",
+            "setweight(to_tsvector('simple', coalesce(public.immutable_text_array_to_string(tags, ' '), '')), 'D')",
             persisted=True,
         ),
         nullable=True,

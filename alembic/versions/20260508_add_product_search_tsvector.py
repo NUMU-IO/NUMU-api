@@ -47,15 +47,37 @@ depends_on: str | Sequence[str] | None = None
 # Single tsvector built from name (weight A) + sku (B) + description (C) +
 # tags (D). 'simple' config = no stemming, no stop-word removal — good for
 # product catalogs where exact-token match matters more than NLP smarts.
+#
+# Postgres rejects the built-in ``array_to_string(text[], text)`` inside a
+# ``GENERATED ALWAYS AS … STORED`` expression — although the function is
+# nominally IMMUTABLE in the catalog, the planner's volatility check for a
+# stored generation expression treats it as not-strictly-immutable because
+# the output depends on the element type's per-cluster output function. The
+# workaround is a thin SQL wrapper marked ``IMMUTABLE`` ourselves, scoped
+# narrowly to the ``text[]`` overload so we don't hide volatility on other
+# array types.
 SEARCH_VECTOR_EXPR = (
     "setweight(to_tsvector('simple', coalesce(name, '')), 'A') || "
     "setweight(to_tsvector('simple', coalesce(sku, '')), 'B') || "
     "setweight(to_tsvector('simple', coalesce(description, '')), 'C') || "
-    "setweight(to_tsvector('simple', coalesce(array_to_string(tags, ' '), '')), 'D')"
+    "setweight(to_tsvector('simple', coalesce(public.immutable_text_array_to_string(tags, ' '), '')), 'D')"
 )
 
 
 def upgrade() -> None:
+    # Immutable wrapper for ``array_to_string(text[], text)`` — required so the
+    # STORED generated expression below passes Postgres's immutability check.
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION public.immutable_text_array_to_string(text[], text)
+        RETURNS text
+        LANGUAGE sql
+        IMMUTABLE
+        PARALLEL SAFE
+        AS $$ SELECT array_to_string($1, $2) $$
+        """
+    )
+
     # Generated columns require explicit DDL since Alembic's
     # add_column doesn't yet have a clean wrapper for it. We drop down
     # to raw SQL.
@@ -88,3 +110,6 @@ def downgrade() -> None:
         schema="public",
     )
     op.drop_column("products", "search_vector", schema="public")
+    op.execute(
+        "DROP FUNCTION IF EXISTS public.immutable_text_array_to_string(text[], text)"
+    )
