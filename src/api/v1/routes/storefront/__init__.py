@@ -27,6 +27,7 @@ from src.api.v1.routes.storefront.currencies import router as currencies_router
 from src.api.v1.routes.storefront.customer import router as customer_router
 from src.api.v1.routes.storefront.data_rights import router as data_rights_router
 from src.api.v1.routes.storefront.geocode import router as geocode_router
+from src.api.v1.routes.storefront.gift_cards import router as gift_cards_router
 from src.api.v1.routes.storefront.locations import (
     router as pickup_locations_router,
 )
@@ -56,6 +57,7 @@ from src.api.v1.routes.storefront.wishlist import router as wishlist_router
 __all__ = [
     "apps_router",
     "currencies_router",
+    "gift_cards_router",
     "pickup_locations_router",
     "public_router",
     "returns_router",

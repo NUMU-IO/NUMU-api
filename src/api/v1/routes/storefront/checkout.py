@@ -462,6 +462,58 @@ async def checkout(
         # short follow-up commit that touches the order-creation path.
         _ = pickup_location_address
 
+    # ── Phase 8.3 — gift card pre-validation ──────────────────────────
+    # Resolve every submitted code to a gift card row, validate
+    # redeemability, and compute the total tender we can apply. We
+    # only **validate** here — actual debiting happens after the
+    # order total is computed, so we know exactly how much tender
+    # is needed. Pre-validation 400s on bad codes BEFORE the order
+    # is created so the customer doesn't end up with a PENDING order
+    # tied to an unusable code.
+    gift_card_rows: list = []
+    gift_card_tender_available = 0
+    if request.gift_card_codes:
+        from src.application.services.gift_card_service import GiftCardService
+        from src.infrastructure.database.connection import (
+            AsyncSessionLocal as _AsyncSessionLocal_gc,
+        )
+
+        async with _AsyncSessionLocal_gc() as _s:
+            gc_svc = GiftCardService(_s)
+            for code in request.gift_card_codes:
+                card = await gc_svc.get_by_code(code, store_id)
+                if card is None or not card.is_redeemable():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Gift card ending in •••{(card.last_four if card else '????')} "
+                            "is not redeemable."
+                        ),
+                    )
+                # Currency match — a gift card in USD can't redeem against
+                # an EGP order. Cross-currency conversion is a Phase 9
+                # concern.
+                if card.currency != (
+                    store.currency.value
+                    if hasattr(store.currency, "value")
+                    else str(store.currency)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Gift card currency {card.currency} doesn't match "
+                            "this order's currency."
+                        ),
+                    )
+                gift_card_rows.append(card)
+                gift_card_tender_available += card.current_balance_cents
+        # noqa: F841 — pre-validation only; the actual redeem happens in a
+        # follow-up commit that wires gift_card_tender_available into the
+        # order's `amount_due_after_tender` computation. For now the
+        # validation prevents bad-code orders from reaching the gateway.
+        _ = gift_card_tender_available
+        _ = gift_card_rows
+
     # ── COD Trust Network check ────────────────────────────────────────
     # Look up customer reputation in the cross-merchant network table.
     # Fails open on any error — fraud filtering must never block legitimate

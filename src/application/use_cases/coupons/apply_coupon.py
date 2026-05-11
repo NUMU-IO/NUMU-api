@@ -1,6 +1,7 @@
 """Apply coupon use case."""
 
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from src.application.dto.coupon import ApplyCouponDTO
@@ -25,6 +26,7 @@ class ApplyCouponUseCase:
         code: str,
         order_amount: Decimal,
         for_update: bool = False,
+        line_items: list[dict[str, Any]] | None = None,
     ) -> ApplyCouponDTO:
         """Apply a coupon and record its usage.
 
@@ -33,6 +35,9 @@ class ApplyCouponUseCase:
             code: The coupon code.
             order_amount: The order subtotal.
             for_update: If True, lock the coupon row to prevent concurrent usage.
+            line_items: Optional cart line items (each with product_id /
+                unit_price / quantity). Required for BUY_X_GET_Y
+                coupons (Phase 8.4); ignored for simpler types.
 
         Returns:
             ApplyCouponDTO with the calculated discount details.
@@ -57,8 +62,9 @@ class ApplyCouponUseCase:
                 f"to use this coupon"
             )
 
-        # Calculate discount
-        discount_amount = coupon.calculate_discount(order_amount)
+        # Calculate discount — line_items is only consulted for
+        # BUY_X_GET_Y; simple types pass through identically.
+        discount_amount = coupon.calculate_discount(order_amount, line_items=line_items)
         free_shipping = coupon.coupon_type == CouponType.FREE_SHIPPING
 
         # Record usage atomically

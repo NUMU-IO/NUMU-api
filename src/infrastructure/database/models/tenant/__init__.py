@@ -28,6 +28,10 @@ from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.email_log import EmailLogModel
 from src.infrastructure.database.models.tenant.email_template import EmailTemplateModel
 from src.infrastructure.database.models.tenant.funnel_event import FunnelEventModel
+from src.infrastructure.database.models.tenant.gift_card import (
+    GiftCardModel,
+    GiftCardTransactionModel,
+)
 from src.infrastructure.database.models.tenant.instapay_intent import (
     InstapayIntentModel,
 )
@@ -121,6 +125,8 @@ __all__ = [
     "EmailLogModel",
     "EmailTemplateModel",
     "FunnelEventModel",
+    "GiftCardModel",
+    "GiftCardTransactionModel",
     "CustomerAddressModel",
     "CustomerModel",
     "InventoryLevelModel",
