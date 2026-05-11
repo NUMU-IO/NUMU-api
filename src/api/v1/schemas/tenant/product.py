@@ -1,5 +1,7 @@
 """Product Pydantic schemas."""
 
+from __future__ import annotations
+
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -157,11 +159,54 @@ class CreateProductRequest(BaseModel):
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
+    # Phase 8.1 — option axes + variant matrix. Both default to empty,
+    # in which case the product CRUD creates a single "default variant"
+    # automatically (matching the migration's backfill behavior).
+    options: list[ProductOptionInput] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Up to 3 option axes (Size, Color, Material, ...)",
+    )
+    variants: list[VariantInput] = Field(
+        default_factory=list,
+        description="Per-variant price/SKU/inventory rows",
+    )
 
     @field_validator("attributes", mode="after")
     @classmethod
     def _normalize_attributes(cls, v: dict) -> dict:
         return _validate_size_chart(v)
+
+
+class ProductOptionInput(BaseModel):
+    """One option axis on the create/update payload."""
+
+    name: SanitizedStr = Field(..., min_length=1, max_length=64)
+    position: int = Field(default=0, ge=0, le=2)
+    values: list[SanitizedStr] = Field(default_factory=list, max_length=50)
+
+
+class VariantInput(BaseModel):
+    """One purchasable variant on the create/update payload.
+
+    On create, `id` is omitted; on update, an existing id preserves the
+    row (otherwise a fresh variant is created and any variant whose id
+    isn't present in the request gets soft-deleted via FK cascade when
+    its product changes).
+    """
+
+    id: UUID | None = None
+    position: int = Field(default=0, ge=0)
+    option_values: dict[str, str] = Field(default_factory=dict)
+    price: Decimal = Field(..., ge=0)
+    price_currency: str = Field(default="EGP", max_length=3)
+    compare_at_price: Decimal | None = Field(None, ge=0)
+    cost_price: Decimal | None = Field(None, ge=0)
+    sku: str | None = Field(None, max_length=100)
+    barcode: str | None = Field(None, max_length=100)
+    inventory_quantity: int = Field(default=0, ge=0)
+    image_url: str | None = Field(None, max_length=2048)
+    weight: float | None = None
 
     @field_validator("price_currency")
     @classmethod
@@ -229,6 +274,14 @@ class UpdateProductRequest(BaseModel):
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
+    # Phase 8.1 — options + variants on update. Omitted → no change.
+    # Empty list → drop options/variants and recreate the default.
+    options: list[ProductOptionInput] | None = Field(
+        None, max_length=3, description="Replace option axes (None = no change)"
+    )
+    variants: list[VariantInput] | None = Field(
+        None, description="Replace variant matrix (None = no change)"
+    )
 
     @field_validator("attributes", mode="after")
     @classmethod
@@ -293,8 +346,47 @@ class ProductResponse(BaseModel):
     category_id: str | None = Field(description="Category UUID")
     tags: list[str] = Field(description="Searchable tags")
     attributes: dict = Field(description="Key-value attributes")
+    # Phase 8.1 — option axes (e.g. [{name:"Size",values:["S","M","L"]}]).
+    # Empty list when the product has no variants (single SKU). Themes
+    # branch on `options.length > 0` to render a variant picker.
+    options: list[dict] = Field(
+        default_factory=list, description="Option axes for variants"
+    )
+    # Phase 8.1 — purchasable variants. Always at least one row per
+    # product (the migration backfills a default variant for legacy
+    # data); for single-axis products this is exactly the product's
+    # own price + inventory normalized. Theme code keys off `variants[i].id`
+    # for cart line items.
+    variants: list[ProductVariantSummary] = Field(
+        default_factory=list,
+        description="Purchasable variants — at least one per product",
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
+
+
+class ProductVariantSummary(BaseModel):
+    """Per-variant payload nested in ProductResponse.
+
+    Themes read this to render a variant picker + bind the chosen
+    variant_id on add-to-cart. Cost price omitted — same reason as
+    on the parent ProductResponse, that's merchant-internal data.
+    """
+
+    id: str = Field(description="Variant UUID")
+    position: int = Field(description="Display order within product")
+    option_values: dict[str, str] = Field(
+        default_factory=dict, description="axis-name → chosen-value"
+    )
+    price: str = Field(description="Cents (string for precision)")
+    price_currency: str = Field(description="ISO 4217")
+    compare_at_price: str | None = None
+    sku: str | None = None
+    barcode: str | None = None
+    inventory_quantity: int = Field(description="Available stock for this variant")
+    is_in_stock: bool = Field(description="Whether inventory_quantity > 0")
+    image_url: str | None = None
+    weight: float | None = None
 
 
 class UploadedImageResponse(BaseModel):
