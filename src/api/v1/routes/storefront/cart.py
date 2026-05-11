@@ -214,14 +214,46 @@ async def add_cart_item(
 
     cart = await _get_or_create_cart(current_customer.id, current_customer.store_id)
 
+    # Phase 8.1 — resolve the variant. Add-to-cart now requires a
+    # variant_id; for single-variant products the client sends the
+    # default variant's id (or the storefront /products/{slug} response
+    # surfaces it via `variants[0].id`). Falling back to product.price
+    # is still supported transitionally for clients that haven't
+    # picked up the new shape.
+    variant_price_cents = product.price.cents
+    variant_sku = product.sku
+    variant_image: str | None = product.images[0] if product.images else None
+    if request.variant_id:
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.repositories.variant_repository import (
+            VariantRepository,
+        )
+
+        async with AsyncSessionLocal() as _s:
+            variant = await VariantRepository(_s).get_by_id(request.variant_id)
+        if variant is None or variant.product_id != product.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Variant not found for this product.",
+            )
+        if not variant.is_in_stock:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This variant is out of stock.",
+            )
+        variant_price_cents = int(variant.price.amount)
+        variant_sku = variant.sku or product.sku
+        if variant.image_url:
+            variant_image = variant.image_url
+
     new_item = CartItem(
         product_id=request.product_id,
         product_name=product.name,
         variant_id=request.variant_id,
         quantity=request.quantity,
-        unit_price=product.price.cents,
-        sku=product.sku,
-        image_url=product.images[0] if product.images else None,
+        unit_price=variant_price_cents,
+        sku=variant_sku,
+        image_url=variant_image,
     )
     cart.add_item(new_item)
     await _cart_repo.save(cart)

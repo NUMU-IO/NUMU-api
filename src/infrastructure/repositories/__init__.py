@@ -66,6 +66,7 @@ from src.infrastructure.repositories.theme_version_repository import (
 from src.infrastructure.repositories.two_factor_repository import TwoFactorRepository
 from src.infrastructure.repositories.upsell_rule_repository import UpsellRuleRepository
 from src.infrastructure.repositories.user_repository import UserRepository
+from src.infrastructure.repositories.variant_repository import VariantRepository
 from src.infrastructure.repositories.waitlist_repository import WaitlistRepository
 from src.infrastructure.repositories.webhook_delivery_log_repository import (
     WebhookDeliveryLogRepository,
@@ -108,6 +109,7 @@ __all__ = [
     "ProductBundleRepository",
     "ProductRepository",
     "ProductReviewRepository",
+    "VariantRepository",
     "RedisCartRepository",
     "RefundRepository",
     "ShipmentRepository",

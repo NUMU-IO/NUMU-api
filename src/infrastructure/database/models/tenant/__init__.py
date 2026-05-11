@@ -90,6 +90,7 @@ from src.infrastructure.database.models.tenant.theme import (
     ThemeVersionModel,
 )
 from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
+from src.infrastructure.database.models.tenant.variant import VariantModel
 from src.infrastructure.database.models.tenant.webhook import (
     WebhookDeliveryLogModel,
     WebhookSubscriptionModel,
@@ -142,6 +143,7 @@ __all__ = [
     "AuditAction",
     "ProductModel",
     "ProductReviewModel",
+    "VariantModel",
     "RefundModel",
     "UpsellRuleModel",
     "ShipmentModel",
