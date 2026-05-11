@@ -49,6 +49,7 @@ class CouponRepository(ICouponRepository):
             stackable=model.stackable,
             applicable_product_ids=model.applicable_product_ids,
             applicable_category_ids=model.applicable_category_ids,
+            config=model.config,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -73,6 +74,7 @@ class CouponRepository(ICouponRepository):
             stackable=entity.stackable,
             applicable_product_ids=entity.applicable_product_ids,
             applicable_category_ids=entity.applicable_category_ids,
+            config=entity.config,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -118,6 +120,7 @@ class CouponRepository(ICouponRepository):
             model.stackable = entity.stackable
             model.applicable_product_ids = entity.applicable_product_ids
             model.applicable_category_ids = entity.applicable_category_ids
+            model.config = entity.config
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)
