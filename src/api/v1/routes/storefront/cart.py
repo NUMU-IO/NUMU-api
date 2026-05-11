@@ -223,6 +223,7 @@ async def add_cart_item(
     variant_price_cents = product.price.cents
     variant_sku = product.sku
     variant_image: str | None = product.images[0] if product.images else None
+    variant_name: str | None = None
     if request.variant_id:
         from src.infrastructure.database.connection import AsyncSessionLocal
         from src.infrastructure.repositories.variant_repository import (
@@ -245,11 +246,33 @@ async def add_cart_item(
         variant_sku = variant.sku or product.sku
         if variant.image_url:
             variant_image = variant.image_url
+        # Format the option_values dict as a human-readable label —
+        # ordered by the product.options[].position so the rendering is
+        # stable across stores ("Size: M / Color: Red", never
+        # "Color: Red / Size: M"). Falls back to the alphabetical key
+        # order when product.options is missing positions or empty.
+        ov = variant.option_values or {}
+        if ov:
+            order = product.options or []
+            if order:
+                positioned = sorted(
+                    order,
+                    key=lambda a: (a.get("position", 0) or 0, a.get("name", "")),
+                )
+                keys = [a["name"] for a in positioned if a.get("name") in ov]
+                # Any axis that's in option_values but missing from the
+                # product.options metadata gets appended alphabetically
+                # so we don't silently drop labels.
+                keys += sorted(set(ov.keys()) - set(keys))
+            else:
+                keys = sorted(ov.keys())
+            variant_name = " / ".join(f"{k}: {ov[k]}" for k in keys)
 
     new_item = CartItem(
         product_id=request.product_id,
         product_name=product.name,
         variant_id=request.variant_id,
+        variant_name=variant_name,
         quantity=request.quantity,
         unit_price=variant_price_cents,
         sku=variant_sku,
