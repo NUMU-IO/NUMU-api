@@ -47,6 +47,9 @@ from src.infrastructure.database.models.tenant.inventory_transfer import (
 )
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.location import LocationModel
+from src.infrastructure.database.models.tenant.marketing_campaign import (
+    MarketingCampaignModel,
+)
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.network_contribution_log import (
     NetworkContributionLogModel,
@@ -134,6 +137,7 @@ __all__ = [
     "InventoryTransferModel",
     "InvoiceModel",
     "LocationModel",
+    "MarketingCampaignModel",
     "MessageLogModel",
     "NetworkContributionLogModel",
     "NetworkReputationModel",

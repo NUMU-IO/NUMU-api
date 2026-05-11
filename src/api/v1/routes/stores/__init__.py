@@ -40,6 +40,9 @@ from src.api.v1.routes.stores import inventory_levels as inventory_levels_module
 from src.api.v1.routes.stores import inventory_transfers as inventory_transfers_module
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import locations as locations_module
+from src.api.v1.routes.stores import (
+    marketing_campaigns as marketing_campaigns_module,
+)
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
@@ -93,6 +96,9 @@ router.include_router(inventory_module.router, tags=["Store Inventory"])
 router.include_router(inventory_levels_module.router, tags=["Inventory Levels"])
 router.include_router(inventory_transfers_module.router, tags=["Inventory Transfers"])
 router.include_router(locations_module.router, tags=["Store Locations"])
+router.include_router(
+    marketing_campaigns_module.router, tags=["Marketing Campaigns"]
+)
 router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(
     analytics_realtime_module.router, tags=["Store Analytics Realtime"]

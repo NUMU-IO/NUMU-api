@@ -35,6 +35,9 @@ from src.infrastructure.repositories.inventory_repository import (
     InventoryTransferRepository,
 )
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
+from src.infrastructure.repositories.marketing_campaign_repository import (
+    MarketingCampaignRepository,
+)
 from src.infrastructure.repositories.marketplace_repository import (
     MarketplaceRepository,
 )
@@ -112,6 +115,7 @@ __all__ = [
     "InventoryLevelRepository",
     "InventoryTransferRepository",
     "InvoiceRepository",
+    "MarketingCampaignRepository",
     "MessageLogRepository",
     "OnboardingRepository",
     "OrderRepository",
