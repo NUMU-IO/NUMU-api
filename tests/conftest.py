@@ -79,9 +79,10 @@ def _patch_metadata_for_sqlite(metadata):
         return
     _metadata_patched = True
 
-    from sqlalchemy import JSON
+    from sqlalchemy import JSON, LargeBinary, Text
     from sqlalchemy import Enum as SAEnum
-    from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+    from sqlalchemy.dialects.postgresql import ARRAY, BYTEA, JSONB
+    from sqlalchemy.dialects.postgresql.base import TSVECTOR
 
     for table in metadata.tables.values():
         # Strip schema from tables (e.g. CREATE TABLE public.users → CREATE TABLE users)
@@ -98,6 +99,17 @@ def _patch_metadata_for_sqlite(metadata):
             # Replace ARRAY with JSON (SQLite doesn't support ARRAY)
             if isinstance(column.type, ARRAY):
                 column.type = JSON()
+            # Replace BYTEA with LargeBinary (SQLite stores BLOB)
+            if isinstance(column.type, BYTEA):
+                column.type = LargeBinary()
+            # Replace TSVECTOR with Text (SQLite has no full-text-search column type).
+            # Also drop the Computed expression — its body references Postgres
+            # functions (to_tsvector, setweight, array_to_string) that SQLite
+            # can't compile.
+            if isinstance(column.type, TSVECTOR):
+                column.type = Text()
+                column.computed = None
+                column.server_default = None
 
     # Strip schema from ForeignKey references that use schema-qualified names
     for table in metadata.tables.values():
