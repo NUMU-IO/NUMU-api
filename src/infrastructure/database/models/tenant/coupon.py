@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.coupon import CouponType
@@ -63,6 +63,9 @@ class CouponModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     applicable_product_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
     applicable_category_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    # Phase 8.4 — type-specific config for BUY_X_GET_Y + TIERED.
+    # NULL for simple types (PERCENTAGE / FIXED / FREE_SHIPPING).
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     store = relationship("StoreModel", lazy="selectin")

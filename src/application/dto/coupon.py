@@ -29,8 +29,9 @@ class CouponDTO(BaseDTO):
     is_usable: bool
     applicable_product_ids: list[UUID] | None
     applicable_category_ids: list[UUID] | None
-    created_at: datetime
-    updated_at: datetime
+    config: dict | None = None
+    created_at: datetime = None
+    updated_at: datetime = None
 
     @classmethod
     def from_entity(cls, entity: Coupon) -> "CouponDTO":
@@ -52,6 +53,7 @@ class CouponDTO(BaseDTO):
             is_usable=entity.is_usable,
             applicable_product_ids=entity.applicable_product_ids,
             applicable_category_ids=entity.applicable_category_ids,
+            config=entity.config,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -71,6 +73,8 @@ class CreateCouponDTO(BaseDTO):
     valid_until: datetime | None = None
     applicable_product_ids: list[UUID] | None = None
     applicable_category_ids: list[UUID] | None = None
+    # Phase 8.4 — type-specific config for BUY_X_GET_Y + TIERED.
+    config: dict | None = None
 
 
 @dataclass
@@ -88,6 +92,8 @@ class UpdateCouponDTO(BaseDTO):
     is_active: bool | None = None
     applicable_product_ids: list[UUID] | None = None
     applicable_category_ids: list[UUID] | None = None
+    # Phase 8.4 — replace type-specific config (None = no change).
+    config: dict | None = None
 
 
 @dataclass
