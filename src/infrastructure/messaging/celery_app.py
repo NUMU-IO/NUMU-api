@@ -76,6 +76,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.subscription_renewal_task",
         # backend-017 — daily Shopify-side verification overage relay.
         "src.infrastructure.messaging.tasks.usage_overage_task",
+        # Phase 8.6 — marketing campaign sweep (email + SMS dispatch).
+        "src.infrastructure.messaging.tasks.marketing_campaign_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -136,6 +138,16 @@ celery_app.conf.beat_schedule = {
     "back-in-stock-sweep": {
         "task": "tasks.product_subscription_sweep",
         "schedule": crontab(minute=15),  # Hourly at :15 past the hour
+    },
+    # Phase 8.6 — pick up campaigns whose scheduled_at has arrived and
+    # transition them through SENDING → SENT. The task takes a per-row
+    # SELECT FOR UPDATE during the SCHEDULED → SENDING transition so
+    # two beat-firings can't double-send the same campaign. 1-minute
+    # cadence matches the minimum schedule granularity merchants pick
+    # in the campaign builder.
+    "marketing-campaign-sweep": {
+        "task": "marketing.campaign.process_scheduled",
+        "schedule": 60.0,
     },
     # Phase 5.8 — beat heartbeat. Every minute, write the current
     # unix timestamp to Redis so /health/detailed can flag stale beat

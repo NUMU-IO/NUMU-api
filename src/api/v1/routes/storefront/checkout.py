@@ -507,12 +507,6 @@ async def checkout(
                     )
                 gift_card_rows.append(card)
                 gift_card_tender_available += card.current_balance_cents
-        # noqa: F841 — pre-validation only; the actual redeem happens in a
-        # follow-up commit that wires gift_card_tender_available into the
-        # order's `amount_due_after_tender` computation. For now the
-        # validation prevents bad-code orders from reaching the gateway.
-        _ = gift_card_tender_available
-        _ = gift_card_rows
 
     # ── COD Trust Network check ────────────────────────────────────────
     # Look up customer reputation in the cross-merchant network table.
@@ -1036,6 +1030,93 @@ async def checkout(
 
     created_order = await order_repo.create(order)
 
+    # ── Phase 8.3 — gift card debit ────────────────────────────────────
+    # Now that the order exists and has a final total, redeem gift cards
+    # FIFO up to `min(tender_available, total)`. Each card's redemption
+    # carries `order_id` so the ledger has a back-reference for refunds.
+    #
+    # Gift cards are a TENDER (not a discount): they don't touch tax /
+    # subtotal — they reduce only what the gateway charges. The applied
+    # amount is persisted on `order.metadata.gift_card_tender_total_cents`
+    # so refund flows know how much went back to which card.
+    gift_card_applied_cents = 0
+    if gift_card_rows and gift_card_tender_available > 0:
+        from src.application.services.gift_card_service import (  # noqa: PLC0415
+            GiftCardService as _GiftCardServiceRedeem,
+        )
+        from src.infrastructure.database.connection import (  # noqa: PLC0415
+            AsyncSessionLocal as _AsyncSessionLocal_redeem,
+        )
+
+        to_apply = min(gift_card_tender_available, created_order.total)
+        remaining_to_apply = to_apply
+        applied_summary: list[dict] = []
+        async with _AsyncSessionLocal_redeem() as _redeem_session:
+            redeem_svc = _GiftCardServiceRedeem(_redeem_session)
+            for card in gift_card_rows:
+                if remaining_to_apply <= 0:
+                    break
+                chunk = min(card.current_balance_cents, remaining_to_apply)
+                if chunk <= 0:
+                    continue
+                try:
+                    await redeem_svc.redeem(
+                        gift_card_id=card.id,
+                        amount_cents=chunk,
+                        order_id=created_order.id,
+                        actor_customer_id=current_customer.id,
+                    )
+                except ValueError as exc:
+                    # Pre-validation should have caught this. If we land
+                    # here the card state changed between validation and
+                    # redemption (race) — log + 500 so the order doesn't
+                    # silently ship without the customer's expected
+                    # discount and the ledger stays consistent (whatever
+                    # partial redemptions already committed stay; the
+                    # caller retries the whole checkout).
+                    logger.error(
+                        "gift_card_redeem_race card=%s order=%s err=%s",
+                        str(card.id),
+                        str(created_order.id),
+                        exc,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "A gift card's balance changed during checkout. "
+                            "Please reload and try again."
+                        ),
+                    ) from exc
+                remaining_to_apply -= chunk
+                gift_card_applied_cents += chunk
+                applied_summary.append(
+                    {
+                        "gift_card_id": str(card.id),
+                        "last_four": card.last_four,
+                        "amount_cents": chunk,
+                    }
+                )
+            await _redeem_session.commit()
+
+        if gift_card_applied_cents > 0:
+            created_order.metadata = {
+                **(created_order.metadata or {}),
+                "gift_cards_applied": applied_summary,
+                "gift_card_tender_total_cents": gift_card_applied_cents,
+            }
+            # If gift cards covered the full total, settle the order now
+            # and skip the gateway dispatch entirely. We use the canonical
+            # `mark_as_paid` transition so order_status → PROCESSING and
+            # payment_status → PAID consistent with every other settled
+            # path.
+            if gift_card_applied_cents >= created_order.total:
+                _gc_ref = ",".join(s["last_four"] for s in applied_summary)
+                created_order.mark_as_paid(
+                    payment_id=f"giftcard:{_gc_ref}",
+                    payment_method="gift_card",
+                )
+            await order_repo.update(created_order)
+
     # ── Persist COD trust assessment for the allowed/warned decision ───
     # Skip non-actionable reasons (disabled, no_phone, lookup_error) —
     # those are noise for the merchant feed. Below-threshold, warned, new
@@ -1165,7 +1246,13 @@ async def checkout(
     # emails, receipts) keeps using the full order total; only the
     # gateway charge sees the deposit amount.
     _dispatch_method: str | None = request.payment_method
-    _gateway_amount: int = created_order.total
+    # Gateway charges the remainder after gift card tender is applied.
+    # The deposit branch below clobbers this with the deposit amount when
+    # a COD-deposit policy is active — gift cards don't reduce the
+    # deposit (it's a fraud-prevention precursor) but they DO reduce the
+    # cash collected at delivery, which is recorded via the metadata
+    # set above and reconciled at the DELIVERED transition.
+    _gateway_amount: int = max(0, created_order.total - gift_card_applied_cents)
 
     _deposit_policy_raw = (store.settings or {}).get("payment", {}).get("cod", {}).get(
         "deposit_policy"
@@ -1231,6 +1318,18 @@ async def checkout(
             else request.deposit_gateway
         )
         _gateway_amount = _deposit_amount
+
+    # If gift cards covered the full total, the order is already settled
+    # via `mark_as_paid` above. Short-circuit gateway dispatch so we don't
+    # try to charge a 0-amount intent (which most gateways reject) and so
+    # the response carries `payment_url=None` — the storefront's payment
+    # step interprets that as "skip to thank-you".
+    if gift_card_applied_cents >= created_order.total and not (
+        request.payment_method == "cod"
+        and _deposit_policy_raw.get("enabled")
+        and int(_deposit_policy_raw.get("amount_cents", 0) or 0) > 0
+    ):
+        _dispatch_method = None
 
     if _dispatch_method and _dispatch_method.startswith("paymob"):
         # Paymob payment initiation (per-merchant via store.settings)
