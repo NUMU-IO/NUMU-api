@@ -65,6 +65,25 @@ class CheckoutRequest(BaseModel):
     )
     customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
+    # Phase 7.5 — pay with a previously-saved card. When present, the
+    # gateway service skips the new-card capture form and charges the
+    # stored token directly. Must belong to the authenticated customer
+    # for the same store; the backend re-resolves and rejects on
+    # mismatch (never trust client-supplied tokens).
+    saved_payment_method_id: UUID | None = Field(
+        None,
+        description="ID of a SavedPaymentMethod row owned by the authenticated customer.",
+    )
+    # Phase 7.2 — when set, the order is fulfilled as in-store pickup
+    # rather than shipped. Shipping rate is forced to zero, the
+    # location's address becomes the fulfillment origin on the order,
+    # and the storefront shows "Pick up at <location.name>" on the
+    # thank-you page. Mutually exclusive with selected_shipping_rate_id;
+    # the backend rejects requests that set both.
+    pickup_location_id: UUID | None = Field(
+        None,
+        description="ID of a Location with fulfills_pickup=true on this store.",
+    )
     # UTM attribution (captured from URL on storefront)
     utm_source: str | None = Field(None, max_length=200)
     utm_medium: str | None = Field(None, max_length=200)

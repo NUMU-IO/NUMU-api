@@ -124,6 +124,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     payment_proofs_router as storefront_payment_proofs_router,
 )
+from src.api.v1.routes.storefront import (
+    pickup_locations_router as storefront_pickup_locations_router,
+)
 
 # Storefront routes (customer-facing)
 from src.api.v1.routes.storefront import (
@@ -134,6 +137,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     reviews_router as storefront_reviews_router,
+)
+from src.api.v1.routes.storefront import (
+    saved_cards_router as storefront_saved_cards_router,
 )
 from src.api.v1.routes.storefront import (
     search_router as storefront_search_router,
@@ -277,6 +283,13 @@ api_router.include_router(
     tags=["Storefront - Returns"],
 )
 
+# Storefront - saved cards (authenticated customer; Phase 7.5)
+api_router.include_router(
+    storefront_saved_cards_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Saved Cards"],
+)
+
 # Storefront - cart (authenticated customer)
 api_router.include_router(
     storefront_cart_router,
@@ -399,6 +412,13 @@ api_router.include_router(
     tags=["Storefront - Payment Proofs"],
 )
 
+# Storefront - pickup locations (public, Phase 7.2)
+api_router.include_router(
+    storefront_pickup_locations_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Pickup Locations"],
+)
+
 # Storefront - app platform discovery (Phase 6, public, scoped to store)
 api_router.include_router(
     storefront_apps_router,
@@ -452,6 +472,12 @@ api_router.include_router(referrals_router, tags=["Referrals"])
 
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)
 api_router.include_router(shopify_router, prefix="/shopify")
+
+# Risk narrative endpoint (backend-024 / spec 011) — generates EN+AR
+# explanations on top of the deterministic factor list.
+from src.api.v1.routes.risk import router as risk_narrative_router
+
+api_router.include_router(risk_narrative_router, prefix="/risk", tags=["Risk"])
 
 # Staff management routes (prefixes defined on the routers themselves).
 #

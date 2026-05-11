@@ -26,6 +26,8 @@ def generate_initial_v3_customization(
     settings_schema: dict[str, Any] | None = None,
     section_schemas: dict[str, Any] | None = None,
     mode: str = "production",
+    error_template_url: str | None = None,
+    loading_template_url: str | None = None,
 ) -> ThemeSettingsV3:
     """Generate a V3 customization payload from theme presets.
 
@@ -130,6 +132,8 @@ def generate_initial_v3_customization(
             settings_schema=settings_schema,
             section_schemas=section_schemas,
             mode="development" if mode == "development" else "production",
+            error_template_url=error_template_url,
+            loading_template_url=loading_template_url,
         )
 
     return ThemeSettingsV3(

@@ -687,6 +687,8 @@ class MarketplaceService:
                         css_url=version.css_url,
                         settings_schema=version.settings_schema,
                         section_schemas=version.section_schemas,
+                        error_template_url=version.error_template_url,
+                        loading_template_url=version.loading_template_url,
                     )
                     store_theme.draft_customization_v3 = v3.model_dump()
                 await self._store_theme_repo.update(store_theme)
