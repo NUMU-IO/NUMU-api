@@ -45,6 +45,8 @@ class CouponRepository(ICouponRepository):
             valid_from=model.valid_from,
             valid_until=model.valid_until,
             is_active=model.is_active,
+            is_auto_apply=model.is_auto_apply,
+            stackable=model.stackable,
             applicable_product_ids=model.applicable_product_ids,
             applicable_category_ids=model.applicable_category_ids,
             created_at=model.created_at,
@@ -67,6 +69,8 @@ class CouponRepository(ICouponRepository):
             valid_from=entity.valid_from,
             valid_until=entity.valid_until,
             is_active=entity.is_active,
+            is_auto_apply=entity.is_auto_apply,
+            stackable=entity.stackable,
             applicable_product_ids=entity.applicable_product_ids,
             applicable_category_ids=entity.applicable_category_ids,
             created_at=entity.created_at,
@@ -110,6 +114,8 @@ class CouponRepository(ICouponRepository):
             model.valid_from = entity.valid_from
             model.valid_until = entity.valid_until
             model.is_active = entity.is_active
+            model.is_auto_apply = entity.is_auto_apply
+            model.stackable = entity.stackable
             model.applicable_product_ids = entity.applicable_product_ids
             model.applicable_category_ids = entity.applicable_category_ids
             await self.session.flush()
@@ -195,6 +201,34 @@ class CouponRepository(ICouponRepository):
             .where(
                 CouponModel.store_id == store_id,
                 CouponModel.is_active.is_(True),
+            )
+            .where(or_(CouponModel.valid_from.is_(None), CouponModel.valid_from <= now))
+            .where(
+                or_(CouponModel.valid_until.is_(None), CouponModel.valid_until > now)
+            )
+        )
+        result = await self.session.execute(query)
+        return [self._to_entity(m) for m in result.scalars().all()]
+
+    async def get_auto_apply_for_store(
+        self,
+        store_id: UUID,
+        now: datetime | None = None,
+    ) -> list[Coupon]:
+        """Phase 3.8 — coupons that should auto-apply at checkout.
+
+        Returns active + within-validity coupons with `is_auto_apply=true`.
+        Caller filters further by per-cart eligibility (min_order_amount,
+        applicable products) and stack rules; the index
+        `ix_coupons_store_auto_apply` makes this query cheap.
+        """
+        now = now or datetime.now(UTC)
+        query = (
+            select(CouponModel)
+            .where(
+                CouponModel.store_id == store_id,
+                CouponModel.is_active.is_(True),
+                CouponModel.is_auto_apply.is_(True),
             )
             .where(or_(CouponModel.valid_from.is_(None), CouponModel.valid_from <= now))
             .where(

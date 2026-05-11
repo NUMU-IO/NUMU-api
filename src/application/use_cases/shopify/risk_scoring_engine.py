@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 @dataclass
@@ -163,6 +165,151 @@ def _score_address_quality(address: str | None) -> RiskFactor:
         score = 8.0
         reason = "Address appears complete and valid"
     return RiskFactor(factor="address_quality", score=score, weight=0.15, reason=reason)
+
+
+def _score_payment_method(payment_method: str | None) -> RiskFactor:
+    """Score based on payment method risk profile (backend-016).
+
+    Pre-paid methods (paymob/card/wallet/InstaPay) carry near-zero
+    delivery risk because the cash is already collected — the delivery
+    failure does not also produce a revenue loss. COD is the high-risk
+    case the rest of the model exists to manage. ``unknown`` falls in
+    the middle so a misconfigured gateway alias doesn't dominate the
+    score either way.
+    """
+    if not payment_method:
+        return RiskFactor(
+            factor="payment_method",
+            score=50.0,
+            weight=0.07,
+            reason="Payment method not provided",
+        )
+    pm = payment_method.lower().replace("-", "_").replace(" ", "_")
+    cod_aliases = {"cod", "cash_on_delivery", "cash", "manual"}
+    prepaid_aliases = {
+        "paymob",
+        "card",
+        "credit_card",
+        "wallet",
+        "instapay",
+        "fawry",
+        "kashier",
+        "fawaterak",
+        "stripe",
+    }
+    if pm in cod_aliases:
+        return RiskFactor(
+            factor="payment_method",
+            score=80.0,
+            weight=0.07,
+            reason="COD — collection risk applies",
+        )
+    if pm in prepaid_aliases:
+        return RiskFactor(
+            factor="payment_method",
+            score=5.0,
+            weight=0.07,
+            reason=f"Pre-paid via {payment_method} — collection risk eliminated",
+        )
+    return RiskFactor(
+        factor="payment_method",
+        score=45.0,
+        weight=0.07,
+        reason=f"Payment method '{payment_method}' not recognized",
+    )
+
+
+def _score_time_pattern(created_at: datetime | None) -> RiskFactor:
+    """Score based on the time-of-day the order was placed.
+
+    MENA merchants report a strong concentration of fraudulent /
+    cancelled COD orders in the 1–5 AM Cairo window — bots, idle
+    spam orders, and "I'll deal with it tomorrow" placement that
+    almost always cancels. We bump the score for that window and
+    leave normal hours at a low baseline.
+    """
+    if created_at is None:
+        return RiskFactor(
+            factor="time_pattern",
+            score=20.0,
+            weight=0.05,
+            reason="Order timestamp unavailable — using neutral baseline",
+        )
+    cairo = ZoneInfo("Africa/Cairo")
+    if created_at.tzinfo is None:
+        from datetime import UTC
+
+        created_at = created_at.replace(tzinfo=UTC)
+    cairo_hour = created_at.astimezone(cairo).hour
+    if 1 <= cairo_hour < 5:
+        return RiskFactor(
+            factor="time_pattern",
+            score=70.0,
+            weight=0.05,
+            reason=f"Placed at {cairo_hour:02d}:xx Cairo — late-night risk window",
+        )
+    return RiskFactor(
+        factor="time_pattern",
+        score=10.0,
+        weight=0.05,
+        reason=f"Placed at {cairo_hour:02d}:xx Cairo — normal hours",
+    )
+
+
+# Tag tokens that flag a product as elevated-risk. Match is
+# case-insensitive substring on each tag string. Conservative list —
+# tags that are *demonstrably* high-RTO in MENA COD studies.
+_HIGH_RISK_PRODUCT_TAGS: frozenset[str] = frozenset({
+    "electronics",
+    "phone",
+    "laptop",
+    "jewelry",
+    "watch",
+    "luxury",
+    "perfume",
+    "high_value",
+})
+
+
+def _score_product_risk(product_tags: list[str] | None) -> RiskFactor:
+    """Score based on product-tag-derived risk.
+
+    The merchant tags products in Shopify; we look for tags matching
+    the high-risk list (electronics, jewelry, luxury, etc.) which
+    correlate with COD fraud + RTO patterns in MENA. When no tag data
+    is available the factor returns 0 with a documented reason — being
+    honest that it can't apply, rather than smearing every order with a
+    middle-of-the-road "neutral" guess.
+    """
+    if not product_tags:
+        return RiskFactor(
+            factor="product_risk",
+            score=0.0,
+            weight=0.05,
+            reason="no_tag_data — store has not tagged products",
+        )
+    matched = []
+    for tag in product_tags:
+        if not isinstance(tag, str):
+            continue
+        normalized = tag.strip().lower().replace("-", "_").replace(" ", "_")
+        for risky in _HIGH_RISK_PRODUCT_TAGS:
+            if risky in normalized:
+                matched.append(tag)
+                break
+    if matched:
+        return RiskFactor(
+            factor="product_risk",
+            score=70.0,
+            weight=0.05,
+            reason=f"High-risk product tags: {', '.join(matched[:3])}",
+        )
+    return RiskFactor(
+        factor="product_risk",
+        score=10.0,
+        weight=0.05,
+        reason="No high-risk product tags detected",
+    )
 
 
 def _score_phone_validation(phone: str | None) -> RiskFactor:
@@ -336,37 +483,51 @@ def score_order(
     avg_order_cents: int = 80_000,
     network_score: int = 55,
     network_label: str = "new_to_network",
+    created_at: datetime | None = None,
+    product_tags: list[str] | None = None,
 ) -> RiskResult:
     """Score an order for risk and return a RiskResult.
 
-    Full 5-factor scoring with weights:
-    - network_reputation: 0.30
-    - customer_history:   0.25
-    - order_value:        0.20
-    - cancellation_rate:  0.15
-    - address_quality:    0.05
-    - phone_validation:   0.05
+    Full 8-factor scoring (backend-016) with weights summing to 1.00:
+      - network_reputation: 0.25
+      - customer_history:   0.20
+      - order_value:        0.15
+      - cancellation_rate:  0.13
+      - payment_method:     0.07
+      - address_quality:    0.05
+      - phone_validation:   0.05
+      - time_pattern:       0.05
+      - product_risk:       0.05
 
-    Only COD orders should be scored — callers should check payment_method
-    before invoking.
+    Callers may still gate on COD up-front; the model handles non-COD
+    payment methods correctly via `_score_payment_method` (collection
+    risk drops out for prepaid).
     """
     network_factor = RiskFactor(
         factor="network_reputation",
         score=float(network_score),
-        weight=0.30,
+        weight=0.25,
         reason=f"Network reputation: {network_label}",
     )
     history = _score_customer_history(customer_total_orders, customer_cod_success_rate)
     history = RiskFactor(
-        factor=history.factor, score=history.score, weight=0.25, reason=history.reason
+        factor=history.factor, score=history.score, weight=0.20, reason=history.reason
     )
 
-    value = _score_order_value(total_cents, avg_order_cents)
+    raw_value = _score_order_value(total_cents, avg_order_cents)
+    value = RiskFactor(
+        factor=raw_value.factor,
+        score=raw_value.score,
+        weight=0.15,
+        reason=raw_value.reason,
+    )
 
     cancel = _score_cancellation_rate(customer_cancellation_rate, customer_total_orders)
     cancel = RiskFactor(
-        factor=cancel.factor, score=cancel.score, weight=0.15, reason=cancel.reason
+        factor=cancel.factor, score=cancel.score, weight=0.13, reason=cancel.reason
     )
+
+    pm_factor = _score_payment_method(payment_method)
 
     addr = _score_address_quality(address)
     addr = RiskFactor(
@@ -378,7 +539,20 @@ def score_order(
         factor=phone_f.factor, score=phone_f.score, weight=0.05, reason=phone_f.reason
     )
 
-    factors: list[RiskFactor] = [network_factor, history, value, cancel, addr, phone_f]
+    time_factor = _score_time_pattern(created_at)
+    product_factor = _score_product_risk(product_tags)
+
+    factors: list[RiskFactor] = [
+        network_factor,
+        history,
+        value,
+        cancel,
+        pm_factor,
+        addr,
+        phone_f,
+        time_factor,
+        product_factor,
+    ]
 
     weighted_score = sum(f.score * f.weight for f in factors)
     risk_score = int(_clamp(weighted_score))

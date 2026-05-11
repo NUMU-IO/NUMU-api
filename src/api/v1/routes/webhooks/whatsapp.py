@@ -202,7 +202,15 @@ async def get_message_status(
 
 
 async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> None:
-    """Create/update WhatsApp conversations from inbound webhook messages."""
+    """Create/update WhatsApp conversations from inbound webhook messages.
+
+    Also feeds short single-token replies through the verification-reply
+    parser (backend-015) so a customer's "yes"/"no" actually closes the
+    risk loop instead of getting buried in the conversation log.
+    """
+    from src.application.use_cases.shopify.handle_verification_reply import (
+        apply_reply,
+    )
     from src.infrastructure.repositories.whatsapp_conversation_repository import (
         WhatsAppConversationRepository,
     )
@@ -250,6 +258,25 @@ async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> N
                 from_number,
             )
             continue
+
+        # Verification reply path (backend-015). Only text messages can
+        # carry a yes/no token; button replies are still handled here
+        # since the WhatsApp template offers buttons too.
+        reply_text = text_content if msg_type in ("text", "button") else None
+        if reply_text:
+            try:
+                reply_result = await apply_reply(
+                    session=db, phone=from_number, text=reply_text
+                )
+                if reply_result.get("matched"):
+                    logger.info(
+                        "whatsapp_verification_reply",
+                        extra=reply_result,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "verification_reply_apply_failed for %s: %s", from_number, e
+                )
 
         try:
             await conv_repo.upsert_on_message(

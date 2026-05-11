@@ -21,6 +21,7 @@ from src.api.dependencies import (
 )
 from src.api.dependencies.auth import get_current_customer_payload
 from src.api.responses import SuccessResponse
+from src.application.services.review_moderation import decide_review_visibility
 from src.core.entities.product_review import ProductReview
 from src.core.exceptions import EntityNotFoundError
 from src.core.interfaces.services.token_service import CustomerTokenPayload
@@ -187,6 +188,17 @@ async def create_product_review(
         else str(customer.email)
     )
 
+    # Apply the merchant's moderation policy (auto / manual / auto_with_filter).
+    # Pre-Phase-3 we hardcoded is_approved=True, which let spam through
+    # on every store regardless of merchant preference. Now the policy
+    # comes from store.settings.review_moderation; the default is still
+    # "auto" so existing stores see no behavior change until they opt in.
+    decision = decide_review_visibility(
+        store_settings=store.settings,
+        title=body_in.title,
+        body=body_in.body,
+    )
+
     review = ProductReview(
         id=uuid4(),
         tenant_id=store.tenant_id or store_id,
@@ -197,11 +209,17 @@ async def create_product_review(
         rating=body_in.rating,
         title=body_in.title,
         body=body_in.body,
-        is_approved=True,
+        is_approved=decision.is_approved,
     )
     saved = await review_repo.create(review)
 
-    return SuccessResponse(
-        data=_to_item(saved),
-        message="Review posted successfully",
+    # Surface the moderation outcome so the storefront can show the
+    # right confirmation copy. "Awaiting approval" reads more clearly
+    # than "Posted!" when the review is actually held.
+    msg = (
+        "Review posted successfully"
+        if decision.is_approved
+        else "Review submitted — awaiting moderator approval."
     )
+
+    return SuccessResponse(data=_to_item(saved), message=msg)

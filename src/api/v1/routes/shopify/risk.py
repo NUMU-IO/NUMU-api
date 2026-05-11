@@ -32,8 +32,21 @@ async def list_risk_orders(
     repo: Annotated[RiskAssessmentRepository, Depends(get_risk_assessment_repo)],
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    shopify_order_id: str | None = Query(
+        None,
+        max_length=255,
+        description=(
+            "Filter to a single Shopify order. Used by the order-risk-card "
+            "admin block extension to fetch one record per order page render."
+        ),
+    ),
 ):
-    models = await repo.list_by_store(store_id, limit=limit, offset=offset)
+    models = await repo.list_by_store(
+        store_id,
+        limit=limit,
+        offset=offset,
+        shopify_order_id=shopify_order_id,
+    )
     items = [
         RiskOrderResponse(
             id=str(m.id),

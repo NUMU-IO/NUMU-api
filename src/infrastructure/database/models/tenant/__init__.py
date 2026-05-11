@@ -32,6 +32,7 @@ from src.infrastructure.database.models.tenant.instapay_intent import (
     InstapayIntentModel,
 )
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
+from src.infrastructure.database.models.tenant.location import LocationModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.meta_event_log import MetaEventLogModel
 from src.infrastructure.database.models.tenant.network_contribution_log import (
@@ -41,6 +42,7 @@ from src.infrastructure.database.models.tenant.network_reputation import (
     NetworkReputationModel,
 )
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.otp_code import OtpCodeModel
 from src.infrastructure.database.models.tenant.page_view import PageViewModel
 from src.infrastructure.database.models.tenant.payment_link_session import (
     PaymentLinkSessionModel,
@@ -115,6 +117,7 @@ __all__ = [
     "CustomerAddressModel",
     "CustomerModel",
     "InvoiceModel",
+    "LocationModel",
     "MessageLogModel",
     "MetaEventLogModel",
     "NetworkContributionLogModel",
@@ -166,4 +169,5 @@ __all__ = [
     "WhatsAppConversationModel",
     "WhatsAppCampaignModel",
     "WhatsAppCampaignRecipientModel",
+    "OtpCodeModel",
 ]

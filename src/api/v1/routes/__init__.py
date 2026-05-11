@@ -110,6 +110,9 @@ from src.api.v1.routes.storefront import (
     customer_router as storefront_customer_router,
 )
 from src.api.v1.routes.storefront import (
+    data_rights_router as storefront_data_rights_router,
+)
+from src.api.v1.routes.storefront import (
     geocode_router as storefront_geocode_router,
 )
 from src.api.v1.routes.storefront import (
@@ -122,6 +125,9 @@ from src.api.v1.routes.storefront import (
     payment_proofs_router as storefront_payment_proofs_router,
 )
 from src.api.v1.routes.storefront import (
+    pickup_locations_router as storefront_pickup_locations_router,
+)
+from src.api.v1.routes.storefront import (
     promotions_router as storefront_promotions_router,
 )
 
@@ -130,7 +136,16 @@ from src.api.v1.routes.storefront import (
     public_router as storefront_public_router,
 )
 from src.api.v1.routes.storefront import (
+    returns_router as storefront_returns_router,
+)
+from src.api.v1.routes.storefront import (
     reviews_router as storefront_reviews_router,
+)
+from src.api.v1.routes.storefront import (
+    saved_cards_router as storefront_saved_cards_router,
+)
+from src.api.v1.routes.storefront import (
+    search_router as storefront_search_router,
 )
 from src.api.v1.routes.storefront import (
     shipping_quote_router as storefront_shipping_quote_router,
@@ -149,6 +164,9 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
+)
+from src.api.v1.routes.storefront import (
+    wishlist_router as storefront_wishlist_router,
 )
 from src.api.v1.routes.storefront.cart_sdk_aliases import (
     router as storefront_cart_sdk_router,
@@ -261,6 +279,20 @@ api_router.include_router(
     tags=["Storefront - Customer"],
 )
 
+# Storefront - returns (authenticated customer; Phase 3.1)
+api_router.include_router(
+    storefront_returns_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Returns"],
+)
+
+# Storefront - saved cards (authenticated customer; Phase 7.5)
+api_router.include_router(
+    storefront_saved_cards_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Saved Cards"],
+)
+
 # Storefront - cart (authenticated customer)
 api_router.include_router(
     storefront_cart_router,
@@ -320,6 +352,27 @@ api_router.include_router(
     tags=["Storefront - Reviews"],
 )
 
+# Storefront - search (Phase 4.1; public, store-scoped, tsvector-backed)
+api_router.include_router(
+    storefront_search_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Search"],
+)
+
+# Storefront - wishlist (Phase 4.5; authed customer OR guest session)
+api_router.include_router(
+    storefront_wishlist_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Wishlist"],
+)
+
+# Storefront - GDPR data rights (Phase 5.6; authed customer)
+api_router.include_router(
+    storefront_data_rights_router,
+    prefix="/storefront/me",
+    tags=["Storefront - Data Rights"],
+)
+
 # Storefront - upsell offers (public, scoped to store)
 api_router.include_router(
     storefront_upsell_router,
@@ -367,6 +420,13 @@ api_router.include_router(
     storefront_payment_proofs_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Payment Proofs"],
+)
+
+# Storefront - pickup locations (public, Phase 7.2)
+api_router.include_router(
+    storefront_pickup_locations_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Pickup Locations"],
 )
 
 # Storefront - app platform discovery (Phase 6, public, scoped to store)
@@ -422,6 +482,12 @@ api_router.include_router(referrals_router, tags=["Referrals"])
 
 # Shopify app integration (register-shop, lookup, dashboard, risk, payments, etc.)
 api_router.include_router(shopify_router, prefix="/shopify")
+
+# Risk narrative endpoint (backend-024 / spec 011) — generates EN+AR
+# explanations on top of the deterministic factor list.
+from src.api.v1.routes.risk import router as risk_narrative_router
+
+api_router.include_router(risk_narrative_router, prefix="/risk", tags=["Risk"])
 
 # Staff management routes (prefixes defined on the routers themselves).
 #

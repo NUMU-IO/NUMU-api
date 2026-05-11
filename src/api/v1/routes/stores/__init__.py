@@ -36,6 +36,7 @@ from src.api.v1.routes.stores import email_templates as email_templates_module
 from src.api.v1.routes.stores import feedback as feedback_module
 from src.api.v1.routes.stores import inventory as inventory_module
 from src.api.v1.routes.stores import invoices as invoices_module
+from src.api.v1.routes.stores import locations as locations_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
@@ -48,6 +49,7 @@ from src.api.v1.routes.stores import products as products_module
 from src.api.v1.routes.stores import promotions as promotions_module
 from src.api.v1.routes.stores import reconciliation as reconciliation_module
 from src.api.v1.routes.stores import refunds as refunds_module
+from src.api.v1.routes.stores import returns as returns_module
 from src.api.v1.routes.stores import settings as settings_module
 from src.api.v1.routes.stores import shipments as shipments_module
 from src.api.v1.routes.stores import shipping as shipping_module
@@ -85,6 +87,7 @@ router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(inventory_module.router, tags=["Store Inventory"])
+router.include_router(locations_module.router, tags=["Store Locations"])
 router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(
     analytics_realtime_module.router, tags=["Store Analytics Realtime"]
@@ -99,6 +102,7 @@ router.include_router(
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
 router.include_router(refunds_module.router, tags=["Store Refunds"])
+router.include_router(returns_module.router, tags=["Store Returns"])
 router.include_router(webhooks_module.router, tags=["Store Webhooks"])
 router.include_router(reconciliation_module.router, tags=["Store Reconciliation"])
 router.include_router(shipments_module.router, tags=["Store Shipments"])

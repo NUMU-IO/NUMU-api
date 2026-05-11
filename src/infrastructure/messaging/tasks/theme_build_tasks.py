@@ -309,6 +309,46 @@ def build_external_theme(
             except Exception as e:
                 logger.warning("Failed to parse sections.json: %s", e)
 
+        # ── Phase 7.3: upload static error + loading templates ───────────
+        # The theme's `theme.json` declares `error_template` /
+        # `loading_template` relative paths (conventionally
+        # `templates/error.html` and `templates/loading.html`). The
+        # storefront fetches the URLs we store here and injects the
+        # HTML on the client-side error boundary / streaming loading
+        # skeleton — neither has access to the React tree at render
+        # time, which is why these are static HTML files instead of
+        # SDK components.
+        loop3 = asyncio.new_event_loop()
+
+        def _upload_static_template(rel_path: str | None, suffix: str) -> str | None:
+            if not rel_path:
+                return None
+            tpl_path = theme_dir / rel_path
+            if not tpl_path.exists():
+                return None
+            try:
+                content = tpl_path.read_bytes()
+                uploaded = loop3.run_until_complete(
+                    storage.upload_file(
+                        file_content=content,
+                        filename=f"{theme_id}-{build_id[:8]}-{suffix}.html",
+                        content_type="text/html; charset=utf-8",
+                        bucket="themes",
+                    )
+                )
+                return uploaded.url
+            except Exception as e:
+                logger.warning("Failed to upload static template %s: %s", rel_path, e)
+                return None
+
+        error_template_url = _upload_static_template(
+            manifest.get("error_template"), "error"
+        )
+        loading_template_url = _upload_static_template(
+            manifest.get("loading_template"), "loading"
+        )
+        loop3.close()
+
         # ── Step 8: Update store theme_settings ──────────────────────────
         logger.info("Updating store theme_settings with CDN URLs")
 
@@ -357,6 +397,11 @@ def build_external_theme(
                     # consumed by the dashboard's section picker. None when the
                     # bundle ships no custom sections.
                     "section_schemas": sections_manifest,
+                    # Phase 7.3 — static BYOT templates. None when the theme
+                    # didn't declare them; storefront falls back to platform
+                    # chrome gracefully.
+                    "error_template_url": error_template_url,
+                    "loading_template_url": loading_template_url,
                 }
                 if preserved_merchant_settings is not None:
                     theme_settings["external_theme"]["merchant_settings"] = (

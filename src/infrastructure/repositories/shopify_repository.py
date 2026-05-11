@@ -35,6 +35,9 @@ from src.infrastructure.database.models.tenant.shopify_app_settings import (
 from src.infrastructure.database.models.tenant.shopify_installation import (
     ShopifyInstallationModel,
 )
+from src.infrastructure.database.models.tenant.shopify_subscription import (
+    ShopifySubscriptionModel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -247,15 +250,32 @@ class RiskAssessmentRepository:
         return result.scalar_one_or_none()
 
     async def list_by_store(
-        self, store_id: UUID, *, limit: int = 50, offset: int = 0
+        self,
+        store_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        shopify_order_id: str | None = None,
     ) -> list[RiskAssessmentModel]:
-        result = await self.session.execute(
-            select(RiskAssessmentModel)
-            .where(RiskAssessmentModel.store_id == store_id)
-            .order_by(RiskAssessmentModel.created_at.desc())
+        """List risk assessments for a store.
+
+        When `shopify_order_id` is supplied, results are filtered to
+        that single Shopify order — used by the order-risk-card admin
+        block extension (Shopify-app feature 003) to fetch one record
+        per order page render instead of the full ~50-item dashboard
+        list.
+        """
+        stmt = select(RiskAssessmentModel).where(
+            RiskAssessmentModel.store_id == store_id
+        )
+        if shopify_order_id is not None:
+            stmt = stmt.where(RiskAssessmentModel.shopify_order_id == shopify_order_id)
+        stmt = (
+            stmt.order_by(RiskAssessmentModel.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def update_action(
@@ -380,13 +400,58 @@ class PaymentTransactionRepository:
         await self.session.flush()
         return model
 
-    async def aggregate_channels(self, store_id: UUID, *, days: int = 30) -> list[dict]:
-        """Aggregate payment transactions by channel for analytics."""
-        since = datetime.utcnow() - timedelta(days=days)
+    async def aggregate_channels(
+        self,
+        store_id: UUID,
+        *,
+        days: int = 30,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+    ) -> list[dict]:
+        """Aggregate payment transactions by channel for analytics.
+
+        ``days`` is the legacy "last N days" mode. ``period_start`` +
+        ``period_end`` is the explicit-window mode used by trend
+        computation (backend-019) where we need to compare last-30
+        vs previous-30 deltas. Either / both are accepted; explicit
+        bounds take precedence.
+
+        Also returns ``avg_processing_ms`` for the channel — the
+        average of (`processing_completed_at - processing_started_at`)
+        in milliseconds for completed transactions, or ``None`` when
+        the channel has no completion timestamps.
+        """
+        if period_start is None and period_end is None:
+            period_end = datetime.utcnow()
+            period_start = period_end - timedelta(days=days)
+        elif period_end is None:
+            period_end = datetime.utcnow()
+        elif period_start is None:
+            period_start = period_end - timedelta(days=days)
 
         success_case = case(
             (PaymentTransactionModel.status == "completed", 1),
             else_=0,
+        )
+
+        # Processing-time average (in milliseconds). Only computed
+        # for completed transactions with both timestamps present.
+        # extract('epoch', ...) gives seconds; * 1000 for ms.
+        proc_diff_seconds = func.extract(
+            "epoch",
+            PaymentTransactionModel.processing_completed_at
+            - PaymentTransactionModel.processing_started_at,
+        )
+        avg_proc_ms = func.avg(
+            case(
+                (
+                    (PaymentTransactionModel.status == "completed")
+                    & PaymentTransactionModel.processing_started_at.is_not(None)
+                    & PaymentTransactionModel.processing_completed_at.is_not(None),
+                    proc_diff_seconds * 1000,
+                ),
+                else_=None,
+            )
         )
 
         result = await self.session.execute(
@@ -405,10 +470,12 @@ class PaymentTransactionRepository:
                         else_=0,
                     )
                 ).label("revenue_cents"),
+                avg_proc_ms.label("avg_processing_ms"),
             )
             .where(
                 PaymentTransactionModel.store_id == store_id,
-                PaymentTransactionModel.created_at >= since,
+                PaymentTransactionModel.created_at >= period_start,
+                PaymentTransactionModel.created_at < period_end,
             )
             .group_by(
                 PaymentTransactionModel.channel,
@@ -728,6 +795,125 @@ class NetworkReputationRepository:
             .values(network_risk_score=score, confidence_level=confidence)
         )
 
+    async def list_customer_contributions(
+        self, *, store_id: UUID, phone_hash: str
+    ) -> list[NetworkContributionLogModel]:
+        """Return the contribution-log rows for one customer at one store.
+
+        Used by the GDPR ``customers/data_request`` export so a customer
+        can see exactly what cross-merchant signal numu-api has recorded
+        for them. Scoped to a single store because the requesting merchant
+        only has standing to see the data they've themselves contributed.
+        """
+        result = await self.session.execute(
+            select(NetworkContributionLogModel).where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+        )
+        return list(result.scalars().all())
+
+    async def delete_customer_network_data(
+        self, *, store_id: UUID, phone_hash: str
+    ) -> dict[str, int]:
+        """GDPR ``customers/redact`` — remove one customer from the network.
+
+        Replays the contribution log for ``(store_id, phone_hash)`` to
+        decrement the matching ``network_reputation`` aggregates, deletes
+        the contribution rows, and recomputes the cached score so the next
+        risk lookup reflects the erasure.
+
+        This mirrors the per-store erasure logic in ``delete_store_data``
+        but scoped to one phone hash so a single customer's request
+        doesn't wipe the rest of the merchant's contribution history.
+        """
+        deleted_counts: dict[str, int] = {
+            "contributions_replayed": 0,
+            "contribution_rows_deleted": 0,
+        }
+
+        # 1) Replay the contribution log to compute decrements per event_type
+        contrib_rows = await self.session.execute(
+            select(
+                NetworkContributionLogModel.event_type,
+                func.count().label("cnt"),
+            )
+            .where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+            .group_by(NetworkContributionLogModel.event_type)
+        )
+        col_map = {
+            "order": "total_network_orders",
+            "rto": "total_network_rtos",
+            "delivery": "total_successful_deliveries",
+            "refund": "total_refunds",
+        }
+        replayed = 0
+        for row in contrib_rows.all():
+            event_type = row.event_type
+            cnt = row.cnt
+            col_name = col_map.get(event_type)
+            if not col_name:
+                continue
+            col = getattr(NetworkReputationModel, col_name)
+            await self.session.execute(
+                update(NetworkReputationModel)
+                .where(NetworkReputationModel.phone_hash == phone_hash)
+                .values(**{col_name: func.greatest(col - cnt, 0)})
+            )
+            replayed += cnt
+        deleted_counts["contributions_replayed"] = replayed
+
+        # 2) Recompute contributing_store_count after this store's
+        #    contributions disappear. If the store had any rows for this
+        #    phone hash, removing them may drop the network's
+        #    multi-store-attestation count by 1.
+        existed = await self.session.execute(
+            select(func.count())
+            .select_from(NetworkContributionLogModel)
+            .where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+        )
+        had_rows = (existed.scalar_one() or 0) > 0
+
+        # 3) Delete the contribution log rows
+        delete_result = await self.session.execute(
+            delete(NetworkContributionLogModel).where(
+                NetworkContributionLogModel.store_id == store_id,
+                NetworkContributionLogModel.phone_hash == phone_hash,
+            )
+        )
+        deleted_counts["contribution_rows_deleted"] = delete_result.rowcount or 0
+
+        # 4) Recompute store count from the remaining log rows
+        if had_rows:
+            await self.update_store_count(phone_hash)
+
+        # 5) Recompute the cached score so the next risk lookup is honest
+        await self.recompute_cached_score(phone_hash)
+
+        # 6) If aggregates have all reached zero, anonymize the row so it
+        #    can no longer be linked back to a person via the hash.
+        await self.session.execute(
+            update(NetworkReputationModel)
+            .where(
+                NetworkReputationModel.phone_hash == phone_hash,
+                NetworkReputationModel.total_network_orders <= 0,
+                NetworkReputationModel.total_network_rtos <= 0,
+                NetworkReputationModel.total_successful_deliveries <= 0,
+                NetworkReputationModel.total_refunds <= 0,
+                NetworkReputationModel.anonymized_at.is_(None),
+            )
+            .values(anonymized_at=func.now())
+        )
+
+        await self.session.flush()
+        return deleted_counts
+
 
 # ---------------------------------------------------------------------------
 # PaymentLinkSessionRepository
@@ -806,3 +992,114 @@ class PaymentLinkSessionRepository:
             ),
             "conversion_revenue_cents": revenue,
         }
+
+
+# ---------------------------------------------------------------------------
+# ShopifySubscriptionRepository (backend-001)
+# ---------------------------------------------------------------------------
+
+
+_TERMINAL_STATUSES = ("CANCELLED", "EXPIRED", "FROZEN", "DECLINED")
+
+
+class ShopifySubscriptionRepository:
+    """CRUD for shopify_subscriptions table.
+
+    Source of truth is Shopify; the Shopify-app's syncSubscriptionToNumu
+    helper upserts a row here on every subscription create/cancel/upgrade.
+    The Numu dashboard + admin tools read from this table to display the
+    merchant's plan + cycle without re-querying Shopify on every page
+    load.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def upsert(
+        self,
+        *,
+        store_id: UUID,
+        shopify_subscription_id: str,
+        status: str,
+        plan_id: str,
+        is_trial: bool,
+        trial_ends_at: datetime | None,
+        current_period_end: datetime | None,
+        tenant_id: UUID | None = None,
+    ) -> ShopifySubscriptionModel:
+        """Insert-or-update by (store_id, shopify_subscription_id).
+
+        cancelled_at is set the first time `status` transitions to a
+        terminal state and preserved on retries via COALESCE so the
+        audit timestamp is always the earliest one.
+        """
+        now = datetime.now()
+        becomes_terminal = status in _TERMINAL_STATUSES
+        stmt = (
+            pg_insert(ShopifySubscriptionModel)
+            .values(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                shopify_subscription_id=shopify_subscription_id,
+                status=status,
+                plan_id=plan_id,
+                is_trial=is_trial,
+                trial_ends_at=trial_ends_at,
+                current_period_end=current_period_end,
+                cancelled_at=now if becomes_terminal else None,
+                synced_at=now,
+            )
+            .on_conflict_do_update(
+                constraint="uq_shopify_subscription_store_sub",
+                set_={
+                    "status": status,
+                    "plan_id": plan_id,
+                    "is_trial": is_trial,
+                    "trial_ends_at": trial_ends_at,
+                    "current_period_end": current_period_end,
+                    "cancelled_at": (
+                        # Earliest timestamp wins so retries don't churn it.
+                        # COALESCE(existing, now-if-now-terminal-else-NULL).
+                        func.coalesce(
+                            ShopifySubscriptionModel.cancelled_at,
+                            now if becomes_terminal else None,
+                        )
+                    ),
+                    "synced_at": now,
+                    # tenant_id is intentionally not updated — once set it
+                    # belongs to that tenant for the row's lifetime.
+                },
+            )
+            .returning(ShopifySubscriptionModel)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.scalar_one()
+
+    async def get_active(self, store_id: UUID) -> ShopifySubscriptionModel | None:
+        """Return the most recent non-terminal subscription for a store.
+
+        "Most recent" = highest synced_at among rows whose status is not
+        in the terminal set. Returns None if the store has none.
+        """
+        stmt = (
+            select(ShopifySubscriptionModel)
+            .where(
+                ShopifySubscriptionModel.store_id == store_id,
+                ShopifySubscriptionModel.status.notin_(_TERMINAL_STATUSES),
+            )
+            .order_by(ShopifySubscriptionModel.synced_at.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_subscription_id(
+        self, store_id: UUID, shopify_subscription_id: str
+    ) -> ShopifySubscriptionModel | None:
+        stmt = select(ShopifySubscriptionModel).where(
+            ShopifySubscriptionModel.store_id == store_id,
+            ShopifySubscriptionModel.shopify_subscription_id == shopify_subscription_id,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()

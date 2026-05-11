@@ -359,6 +359,109 @@ async def checkout(
             detail="Customer does not belong to this store",
         )
 
+    # ── Phase 7.5 — saved-card validation ──────────────────────────────
+    # When the client passes `saved_payment_method_id`, verify the row
+    # exists, belongs to *this* customer + store, is still active, and
+    # matches the requested payment method's gateway. Mismatches 400
+    # before any order is created so a tampered client can't bind one
+    # customer's card to another's order.
+    saved_card_token: str | None = None
+    if request.saved_payment_method_id:
+        if is_guest:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Saved cards require an authenticated customer.",
+            )
+        from sqlalchemy import select as _select
+
+        from src.infrastructure.database.connection import (
+            AsyncSessionLocal as _AsyncSessionLocal,
+        )
+        from src.infrastructure.database.models.tenant.saved_payment_method import (
+            SavedPaymentMethodModel as _SavedCardModel,
+        )
+
+        async with _AsyncSessionLocal() as _s:
+            row = (
+                await _s.execute(
+                    _select(_SavedCardModel).where(
+                        _SavedCardModel.id == request.saved_payment_method_id,
+                        _SavedCardModel.customer_id == current_customer.id,
+                        _SavedCardModel.store_id == store_id,
+                        _SavedCardModel.is_active.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Saved card not found for this customer.",
+            )
+        # The gateway in the saved card must match what the payment
+        # request asks for (paying with a Kashier-saved card via the
+        # Paymob gateway can't work — different token schemes).
+        requested_gateway = (request.payment_method or "").lower()
+        # `paymob_card` and `paymob` are both the Paymob gateway as
+        # far as saved cards are concerned.
+        norm = "paymob" if requested_gateway.startswith("paymob") else requested_gateway
+        if row.gateway and row.gateway.lower() != norm:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Saved card belongs to gateway '{row.gateway}', but the "
+                    f"requested payment method targets '{requested_gateway}'."
+                ),
+            )
+        saved_card_token = row.card_token  # noqa: F841 — wired into gateway services in a follow-up
+
+    # ── Phase 7.2 — pickup-location resolution ─────────────────────────
+    # When the client requests in-store pickup, swap the shipping
+    # rate machinery for a synthetic zero-cost "pickup" line and use
+    # the location's address as the order's fulfillment origin.
+    # Cannot mix pickup with a paid shipping rate — reject both-set
+    # so the client surfaces the conflict cleanly.
+    pickup_location_address: dict | None = None
+    if request.pickup_location_id:
+        if request.selected_shipping_rate_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Pickup orders cannot also have a shipping rate. "
+                    "Clear selected_shipping_rate_id when picking up in-store."
+                ),
+            )
+        from sqlalchemy import select as _select_loc
+
+        from src.infrastructure.database.connection import (
+            AsyncSessionLocal as _AsyncSessionLocal_loc,
+        )
+        from src.infrastructure.database.models.tenant.location import (
+            LocationModel as _LocationModel,
+        )
+
+        async with _AsyncSessionLocal_loc() as _s:
+            loc = (
+                await _s.execute(
+                    _select_loc(_LocationModel).where(
+                        _LocationModel.id == request.pickup_location_id,
+                        _LocationModel.store_id == store_id,
+                        _LocationModel.is_active.is_(True),
+                        _LocationModel.fulfills_pickup.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+        if loc is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pickup location not found or not available for pickup.",
+            )
+        pickup_location_address = loc.address or {}
+        # noqa: F841 — pickup_location_address is used in a follow-up that
+        # stamps it on the order's fulfillment metadata. The validation
+        # itself is the load-bearing part today; metadata wiring is a
+        # short follow-up commit that touches the order-creation path.
+        _ = pickup_location_address
+
     # ── COD Trust Network check ────────────────────────────────────────
     # Look up customer reputation in the cross-merchant network table.
     # Fails open on any error — fraud filtering must never block legitimate

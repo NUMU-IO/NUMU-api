@@ -1,0 +1,74 @@
+# Phase 5.9 — weekly load test against staging.
+#
+# Runs every Sunday 02:00 UTC (low-traffic window) and posts the
+# summary to Slack #perf. Manual trigger via workflow_dispatch lets
+# anyone re-run before a release.
+#
+# Failure (any threshold breached) opens an issue in this repo with
+# the k6 summary attached so the on-call has a paper trail.
+
+name: load-test-weekly
+
+on:
+  schedule:
+    # 02:00 UTC every Sunday = 04:00 Cairo. Keeps the test off
+    # peak storefront hours (07:00–22:00 Cairo for typical merchants).
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Target API base URL"
+        required: false
+        default: "https://staging.numueg.app"
+      duration:
+        description: "Test duration override (e.g. 5m, 10m)"
+        required: false
+        default: ""
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Run storefront load test
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://staging.numueg.app' }}
+          # Stable test stores seeded once in staging. If the staging
+          # DB is reset, recreate via the seed-demo endpoints (see
+          # scripts/load/README.md).
+          TEST_STORES: "load-store-1,load-store-2,load-store-3,load-store-4,load-store-5,load-store-6,load-store-7,load-store-8,load-store-9,load-store-10"
+        run: |
+          k6 run \
+            --summary-export load-summary.json \
+            ${{ github.event.inputs.duration && format('--duration {0}', github.event.inputs.duration) || '' }} \
+            scripts/load/storefront_load.js
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-summary-${{ github.run_id }}
+          path: load-summary.json
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          # SLACK_WEBHOOK_URL points at #perf in the workspace.
+          payload: |
+            {
+              "text": "load-test failed against ${{ github.event.inputs.base_url || 'staging' }} — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_PERF }}

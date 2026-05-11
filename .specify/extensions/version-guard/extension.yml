@@ -1,0 +1,54 @@
+schema_version: "1.0"
+
+extension:
+  id: "version-guard"
+  name: "Version Guard"
+  version: "1.2.0"
+  description: "Verify tech stack versions against live registries before planning"
+  author: "KevinBrown5280"
+  repository: "https://github.com/KevinBrown5280/spec-kit-version-guard"
+  license: "MIT"
+  homepage: "https://github.com/KevinBrown5280/spec-kit-version-guard"
+
+requires:
+  speckit_version: ">=0.2.0"
+
+provides:
+  commands:
+    - name: "speckit.version-guard.check"
+      file: "commands/speckit.version-guard.check.md"
+      description: "Check locked tech stack versions against live npm registry and official docs"
+
+    - name: "speckit.version-guard.load"
+      file: "commands/speckit.version-guard.load.md"
+      description: "Load existing version guard constraints into agent context before task generation or implementation"
+
+    - name: "speckit.version-guard.validate"
+      file: "commands/speckit.version-guard.validate.md"
+      description: "Scan generated code for version-incompatible API patterns flagged by version guard"
+
+hooks:
+  before_plan:
+    command: "speckit.version-guard.check"
+    optional: false
+    description: "Verify tech stack versions and write constraints before planning"
+
+  before_implement:
+    command: "speckit.version-guard.load"
+    optional: false
+    description: "Load version guard constraints into context before code generation"
+
+  before_tasks:
+    command: "speckit.version-guard.load"
+    optional: false
+    description: "Load version guard constraints into context before task generation"
+
+  after_implement:
+    command: "speckit.version-guard.validate"
+    optional: false
+    description: "Scan generated code for version-incompatible API patterns"
+
+tags:
+  - "version"
+  - "verification"
+  - "quality"

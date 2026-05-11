@@ -107,6 +107,13 @@ class MarketplaceThemeVersionModel(Base, UUIDMixin):
     version_string: Mapped[str] = mapped_column(String(50), nullable=False)
     bundle_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     css_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Phase 7.3 — static BYOT templates served alongside the bundle.
+    # NULL when the theme didn't declare them; storefront falls back
+    # to the platform's hardcoded chrome.
+    error_template_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    loading_template_url: Mapped[str | None] = mapped_column(
+        String(1024), nullable=True
+    )
     settings_schema: Mapped[dict] = mapped_column(
         JSONB, server_default="{}", nullable=False
     )

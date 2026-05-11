@@ -21,6 +21,7 @@ from src.infrastructure.repositories.shopify_repository import (
     RiskAssessmentRepository,
     ShopifyAppSettingsRepository,
     ShopifyInstallationRepository,
+    ShopifySubscriptionRepository,
 )
 
 
@@ -87,3 +88,9 @@ def get_payment_link_session_repo(
     session: AsyncSession = Depends(get_db),
 ) -> PaymentLinkSessionRepository:
     return PaymentLinkSessionRepository(session)
+
+
+def get_shopify_subscription_repo(
+    session: AsyncSession = Depends(get_db),
+) -> ShopifySubscriptionRepository:
+    return ShopifySubscriptionRepository(session)

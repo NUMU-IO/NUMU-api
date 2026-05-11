@@ -1,8 +1,9 @@
 """Subscribe a tenant — trial or read-only → active paid plan.
 
-Validates the payment method via Paymob recurring API (or accepts a
-discount code that covers the first period), creates an invoice,
-flips the tenant lifecycle to active.
+Charges the merchant's Paymob card token via
+``PaymobRecurringBillingService`` (or accepts a discount code that
+covers the first period), creates an invoice, flips the tenant
+lifecycle to active. Failure raises — no silent activation.
 """
 
 import logging
@@ -12,6 +13,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.paymob_recurring_billing_service import (
+    PaymobRecurringBillingService,
+    RecurringChargeFailure,
+    RecurringChargeSuccess,
+)
 from src.infrastructure.database.models.public.billing import (
     BillingInvoiceModel,
     DiscountCodeModel,
@@ -29,11 +35,23 @@ class SubscribeUseCase:
     """Activate a paying subscription for a tenant.
 
     Handles trial→active and read_only→active transitions.
+
+    Args:
+        db: Async session.
+        recurring_service: Optional injected
+            ``PaymobRecurringBillingService``. When omitted, the
+            production singleton is constructed on demand using the
+            platform's Paymob credentials from ``settings``.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        recurring_service: PaymobRecurringBillingService | None = None,
+    ) -> None:
         self.db = db
         self.tenant_repo = TenantRepository(db)
+        self._recurring = recurring_service
 
     async def execute(
         self,
@@ -72,15 +90,44 @@ class SubscribeUseCase:
 
         final_amount = max(0, amount - discount_amount)
 
-        # TODO: Charge via Paymob recurring API using paymob_card_token
-        # For v1, we accept the subscription if a valid discount covers it
-        # or if the card token is provided (mocked as success for now).
-        paymob_tx_id = None
-        if final_amount > 0 and not paymob_card_token:
-            raise ValueError("Payment method required for this plan.")
-
-        # Create invoice
+        # Charge via Paymob (real call). Free first period via discount → skip.
+        paymob_tx_id: str | None = None
+        encrypted_token: str | None = None
         now = datetime.now(UTC)
+        if final_amount > 0:
+            if not paymob_card_token:
+                raise ValueError("Payment method required for this plan.")
+
+            recurring = self._recurring or self._build_recurring_service()
+            from src.config.settings import get_settings
+
+            settings = get_settings()
+            key_id = getattr(settings, "credential_encryption_key_id", "v1")
+
+            encrypted_token = await recurring.encrypt_card_token(
+                paymob_card_token, key_id
+            )
+
+            charge = await recurring.charge_subscription(
+                tenant_id=tenant_id,
+                amount_cents=final_amount,
+                currency="EGP",
+                encrypted_card_token=encrypted_token,
+                key_id=key_id,
+                idempotency_ref=f"first-period-{tenant_id}-{now.isoformat()}",
+            )
+            if isinstance(charge, RecurringChargeFailure):
+                logger.warning(
+                    "subscribe_charge_failed",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "reason": charge.reason,
+                    },
+                )
+                raise ValueError(f"payment_failed: {charge.reason}")
+            assert isinstance(charge, RecurringChargeSuccess)
+            paymob_tx_id = charge.transaction_id
+
         period_end = now + (
             timedelta(days=365) if billing_cycle == "annual" else timedelta(days=30)
         )
@@ -108,6 +155,9 @@ class SubscribeUseCase:
         tenant.expires_at = None
         tenant.read_only_at = None
         tenant.delete_at = None
+        tenant.renewal_retry_count = 0
+        if encrypted_token:
+            tenant.paymob_card_token_encrypted = encrypted_token
         if not tenant.trial_converted_at:
             tenant.trial_converted_at = now
 
@@ -159,3 +209,26 @@ class SubscribeUseCase:
         self.db.add(dc)
 
         return discount, dc.id
+
+    def _build_recurring_service(self) -> PaymobRecurringBillingService:
+        """Construct the production recurring service from settings.
+
+        Lazy import + lazy build so unit tests that inject their own
+        ``recurring_service`` don't need the platform Paymob secrets
+        configured.
+        """
+        from src.config.settings import get_settings
+        from src.infrastructure.external_services.paymob.payment_service import (
+            PaymobPaymentService,
+        )
+
+        settings = get_settings()
+        paymob = PaymobPaymentService(
+            secret_key=getattr(settings, "platform_paymob_secret_key", None),
+            public_key=getattr(settings, "platform_paymob_public_key", None),
+            hmac_secret=getattr(settings, "platform_paymob_hmac_secret", None),
+            card_integration_id=getattr(
+                settings, "platform_paymob_card_integration_id", None
+            ),
+        )
+        return PaymobRecurringBillingService(paymob_service=paymob)

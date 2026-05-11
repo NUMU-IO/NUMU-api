@@ -4,6 +4,8 @@ These live in the public schema (not tenant-scoped) because billing is
 a platform-level concern between NUMU and the tenant owner.
 """
 
+from datetime import datetime
+
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -65,10 +67,10 @@ class DiscountCodeModel(Base, UUIDMixin, TimestampMixin):
     applies_to_plans: Mapped[list[str] | None] = mapped_column(
         ARRAY(String), nullable=True
     )
-    valid_from: Mapped[str | None] = mapped_column(
+    valid_from: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    valid_until: Mapped[str | None] = mapped_column(
+    valid_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     stackable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

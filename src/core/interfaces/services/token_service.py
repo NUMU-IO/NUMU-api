@@ -44,12 +44,18 @@ class CustomerTokenPayload:
         email: str,
         exp: int,
         token_type: str = "access",
+        # Phase 5.1 — per-token unique id used by the refresh-token
+        # rotation blacklist to detect reuse. Populated only on refresh
+        # tokens (access tokens are short-lived and rotation isn't
+        # meaningful for them).
+        jti: str | None = None,
     ) -> None:
         self.customer_id = customer_id
         self.store_id = store_id
         self.email = email
         self.exp = exp
         self.token_type = token_type
+        self.jti = jti
 
 
 class ITokenService(ABC):

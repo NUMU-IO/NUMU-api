@@ -66,6 +66,16 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
+        # Phase 3.5 — back-in-stock subscription sweep + email dispatch.
+        "src.infrastructure.messaging.tasks.back_in_stock_tasks",
+        # Phase 4.4 — smart-collection membership sweep.
+        "src.infrastructure.messaging.tasks.smart_collection_tasks",
+        # Phase 5.8 — beat scheduler heartbeat for /health/detailed.
+        "src.infrastructure.messaging.tasks.beat_heartbeat",
+        # backend-005 — Paymob recurring subscription renewals.
+        "src.infrastructure.messaging.tasks.subscription_renewal_task",
+        # backend-017 — daily Shopify-side verification overage relay.
+        "src.infrastructure.messaging.tasks.usage_overage_task",
         # Meta Conversions — per-event fan-out + orphan-purchase sweep
         "src.infrastructure.messaging.tasks.meta_capi",
         # offers-v2 — promotion lifecycle + analytics maintenance.
@@ -121,6 +131,31 @@ celery_app.conf.beat_schedule = {
     "detect-abandoned-carts": {
         "task": "tasks.detect_abandoned_carts",
         "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    # Phase 3.5 — sweep pending back-in-stock subscriptions and notify
+    # subscribers of products that came back in stock since the last
+    # sweep. Hourly cadence matches Shopify's documented behavior;
+    # smaller intervals risk emailing during transient stock flips
+    # caused by refund-window decrements.
+    "back-in-stock-sweep": {
+        "task": "tasks.product_subscription_sweep",
+        "schedule": crontab(minute=15),  # Hourly at :15 past the hour
+    },
+    # Phase 5.8 — beat heartbeat. Every minute, write the current
+    # unix timestamp to Redis so /health/detailed can flag stale beat
+    # processes (workers up but scheduler stuck). The task is tiny
+    # and idempotent.
+    "beat-heartbeat": {
+        "task": "tasks.beat_heartbeat",
+        "schedule": 60.0,
+    },
+    # Phase 4.4 — smart-collection membership recompute. Hourly at :30
+    # so it doesn't pile onto the back-in-stock sweep at :15. Inline
+    # invalidation (on every product save) is too expensive at scale;
+    # hourly batch matches Shopify's documented cadence.
+    "smart-collection-sweep": {
+        "task": "tasks.smart_collection_sweep",
+        "schedule": crontab(minute=30),
     },
     "daily-analytics-rollup": {
         "task": "tasks.calculate_analytics_rollups",
@@ -235,6 +270,24 @@ celery_app.conf.beat_schedule = {
     "purge-analytics-events": {
         "task": "tasks.purge_analytics_events",
         "schedule": crontab(hour=2, minute=30),
+    },
+    # ─── backend-005: Paymob recurring renewals (hourly) ─────────────
+    # Walks tenants whose ``next_renewal_at`` has passed and re-charges
+    # the stored card token. Hourly cadence is fine: failures push
+    # ``next_renewal_at`` +24h so a tenant in dunning isn't re-tried
+    # every minute.
+    "process-due-renewals": {
+        "task": "tasks.process_due_renewals",
+        "schedule": crontab(minute=20),  # Hourly at :20
+    },
+    # ─── backend-017: Shopify verification-overage relay (daily) ─────
+    # Daily at 04:00 UTC (~06:00 Cairo) — after the 03:30 reconciliation
+    # so message counts are settled. Idempotency on the
+    # store_id+period key means re-running the same period within the
+    # day never double-charges.
+    "report-verification-overages": {
+        "task": "tasks.report_verification_overages",
+        "schedule": crontab(hour=4, minute=0),
     },
     # ─── Meta Conversions: catch orphaned Purchase events ─────────────
     # Hourly sweep finds paid orders without a Purchase row in the

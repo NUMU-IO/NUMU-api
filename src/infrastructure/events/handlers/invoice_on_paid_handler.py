@@ -178,22 +178,56 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                         internal_code=li.sku,
                     )
 
-                try:
-                    qr_data, qr_image = generate_eta_qr_code(
-                        seller_name=seller.name_ar or seller.name,
-                        tax_number=seller.tax_id or "",
-                        invoice_date=invoice.date_issued,
-                        total_with_vat=invoice.total / 100,
-                        vat_amount=invoice.total_taxes / 100,
-                    )
-                    invoice.qr_code_data = qr_data
-                    invoice.qr_code_image = qr_image
-                except Exception as qr_exc:
-                    log.warning("eta_qr_generation_failed", error=str(qr_exc))
+                # Phase 5.5 — submit the invoice to ETA's e-Invoicing
+                # API when the merchant has it configured. Falls back
+                # to the pre-Phase-5 simulated path when ETA is
+                # disabled in settings (dev / staging without
+                # credentials, merchants below the registration
+                # threshold). We never raise on submission failure —
+                # the invoice still lands as DRAFT/REJECTED in our
+                # DB so the merchant can manually retry from the hub.
+                from src.infrastructure.external_services.eta.invoice_service import (
+                    ETAInvoiceService,
+                )
 
-                invoice.eta_uuid = f"simulated-{uuid4().hex[:12]}"
-                invoice.eta_long_id = f"simulated-long-{uuid4().hex[:20]}"
-                invoice.eta_status_code = "accepted"
+                eta_svc = ETAInvoiceService()
+                if eta_svc.enabled:
+                    try:
+                        invoice = await eta_svc.process_invoice_submission(invoice)
+                        log.info(
+                            "eta_submitted",
+                            eta_uuid=invoice.eta_uuid,
+                            eta_status=invoice.eta_status_code,
+                        )
+                    except Exception as eta_exc:
+                        # ETA portal outage / network failure / cert
+                        # rejection. Log + fall through with a
+                        # REJECTED status so the merchant sees it in
+                        # their "needs attention" feed.
+                        log.warning("eta_submission_failed", error=str(eta_exc))
+                        invoice.status = InvoiceStatus.REJECTED
+                        invoice.eta_status_code = "error"
+                        invoice.eta_status_message = str(eta_exc)[:500]
+                else:
+                    # ETA disabled — keep the simulated identifiers so
+                    # the rest of the platform (PDF, QR display, hub
+                    # filters) treats this row consistently with
+                    # successfully submitted invoices.
+                    try:
+                        qr_data, qr_image = generate_eta_qr_code(
+                            seller_name=seller.name_ar or seller.name,
+                            tax_number=seller.tax_id or "",
+                            invoice_date=invoice.date_issued,
+                            total_with_vat=invoice.total / 100,
+                            vat_amount=invoice.total_taxes / 100,
+                        )
+                        invoice.qr_code_data = qr_data
+                        invoice.qr_code_image = qr_image
+                    except Exception as qr_exc:
+                        log.warning("eta_qr_generation_failed", error=str(qr_exc))
+                    invoice.eta_uuid = f"simulated-{uuid4().hex[:12]}"
+                    invoice.eta_long_id = f"simulated-long-{uuid4().hex[:20]}"
+                    invoice.eta_status_code = "accepted"
 
                 created = await invoice_repo.create(invoice)
                 store_name = store.name

@@ -77,6 +77,38 @@ def get_product_review_repository(
     return ProductReviewRepository(session)
 
 
+def get_product_subscription_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get back-in-stock subscription repository dependency (Phase 3.5).
+
+    Imports the class at call time — repositories/__init__.py doesn't
+    re-export the new class yet (avoiding a churn diff on the package
+    init), and this dependency is only constructed per-request anyway.
+    """
+    from src.infrastructure.repositories.product_subscription_repository import (
+        ProductSubscriptionRepository,
+    )
+
+    return ProductSubscriptionRepository(session)
+
+
+def get_order_return_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get order-return repository dependency (Phase 3.1).
+
+    Same lazy-import pattern as `get_product_subscription_repository`
+    so the new repo doesn't force a re-export churn on
+    `repositories/__init__.py` for this PR.
+    """
+    from src.infrastructure.repositories.order_return_repository import (
+        OrderReturnRepository,
+    )
+
+    return OrderReturnRepository(session)
+
+
 def get_customer_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> CustomerRepository:

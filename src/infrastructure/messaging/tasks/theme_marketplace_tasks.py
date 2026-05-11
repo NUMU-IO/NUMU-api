@@ -348,6 +348,56 @@ def build_marketplace_theme(self, version_id: str) -> dict:
             )
             css_url = css_uploaded.url
 
+        # ── Phase 7.3 — static BYOT templates ─────────────────────────────
+        # The theme's `theme.json` may declare `error_template` and
+        # `loading_template` (conventionally `templates/error.html`
+        # and `templates/loading.html`). The storefront fetches these
+        # URLs at error/loading time and injects the HTML; absent →
+        # falls back to platform chrome. Same R2 path scheme as the
+        # bundle so the allowlist already covers them.
+        def _upload_static_template(rel_path: str | None, suffix: str) -> str | None:
+            if not rel_path or not isinstance(rel_path, str):
+                return None
+            tpl_path = theme_dir / rel_path
+            if not tpl_path.exists():
+                return None
+            key = (
+                f"marketplace/{version.theme_id}/"
+                f"{version.version_string}-{version_hash}/templates/{suffix}.html"
+            )
+
+            async def _upload():
+                return await storage.upload_file(
+                    file_content=tpl_path.read_bytes(),
+                    filename=key,
+                    content_type="text/html; charset=utf-8",
+                    bucket=StorageBucket.THEMES,
+                )
+
+            try:
+                uploaded = _retry_with_backoff(
+                    lambda: _run_async(_upload()),
+                    label=f"R2 upload {suffix}.html for version {version.id}",
+                )
+                return uploaded.url
+            except Exception as exc:
+                logger.warning(
+                    "marketplace_build_static_template_upload_failed",
+                    extra={
+                        "version_id": version_id,
+                        "template": suffix,
+                        "error": str(exc),
+                    },
+                )
+                return None
+
+        error_template_url = _upload_static_template(
+            manifest.get("error_template"), "error"
+        )
+        loading_template_url = _upload_static_template(
+            manifest.get("loading_template"), "loading"
+        )
+
         # ── Extract schemas + presets ─────────────────────────────────────
         # Theme schemas are Shopify-style arrays (a list of setting/section
         # definitions). The columns are JSONB so they accept either shape;
@@ -385,6 +435,8 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 status=MarketplaceVersionStatus.PENDING_REVIEW.value,
                 bundle_url=bundle_url,
                 css_url=css_url,
+                error_template_url=error_template_url,
+                loading_template_url=loading_template_url,
                 size_bytes=size,
                 checksum=checksum,
                 settings_schema=settings_schema,

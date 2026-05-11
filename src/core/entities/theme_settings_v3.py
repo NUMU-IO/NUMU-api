@@ -167,6 +167,14 @@ class ExternalThemeMetadata(BaseModel):
     manifest: dict[str, Any] | None = None
     mode: Literal["production", "development"] | None = "production"
     dev_url: str | None = None  # Local Vite dev server URL
+    # Phase 7.3 — static BYOT templates for the streaming loading
+    # skeleton and the client-side error boundary. These render
+    # outside the React tree (the bundle may be the thing that
+    # crashed), so they're plain HTML the storefront fetches and
+    # injects. Same allowlist as bundle_url; built-in fallback when
+    # absent or fetch fails.
+    error_template_url: str | None = None
+    loading_template_url: str | None = None
 
     @model_validator(mode="after")
     def _enforce_bundle_allowlist(self) -> ExternalThemeMetadata:
@@ -182,6 +190,23 @@ class ExternalThemeMetadata(BaseModel):
             )
         if self.dev_url and not _is_allowed_bundle_url(self.dev_url, "development"):
             raise ValueError(f"dev_url must be a localhost URL: {self.dev_url!r}")
+        # Phase 7.3 — same allowlist enforcement for the static
+        # templates. We never want a leaked merchant token to swap
+        # the error/loading HTML to attacker-controlled content.
+        if self.error_template_url and not _is_allowed_bundle_url(
+            self.error_template_url, mode
+        ):
+            raise ValueError(
+                f"error_template_url is not on the allowlist for mode={mode}: "
+                f"{self.error_template_url!r}"
+            )
+        if self.loading_template_url and not _is_allowed_bundle_url(
+            self.loading_template_url, mode
+        ):
+            raise ValueError(
+                f"loading_template_url is not on the allowlist for mode={mode}: "
+                f"{self.loading_template_url!r}"
+            )
         return self
 
 

@@ -221,6 +221,21 @@ class Settings(BaseSettings):
                         "Wildcard (*) is not allowed in production."
                     )
 
+                # PLATFORM_SECRET_SALT gates phone hashing for the
+                # cross-merchant trust network. Without it, every
+                # write_network_event silently no-ops (phone_hash is
+                # None) and the network table stays empty — the
+                # strategic moat becomes marketing copy. Fail loud at
+                # startup instead.
+                if not self.platform_secret_salt:
+                    raise ValueError(
+                        "CRITICAL: PLATFORM_SECRET_SALT must be set in production. "
+                        "Without it, the cross-merchant trust network cannot record "
+                        "events and risk scoring falls back to baseline. "
+                        'Generate a secret: python -c "import secrets; '
+                        'print(secrets.token_urlsafe(32))"'
+                    )
+
                 if not self.resend_api_key:
                     logger.warning(
                         "RESEND_API_KEY is not set. Email delivery will fail in production."
@@ -353,6 +368,19 @@ class Settings(BaseSettings):
             "numu_api_internal_key",
             "SHOPIFY_INTERNAL_KEY",
             "NUMU_API_INTERNAL_KEY",
+        ),
+    )
+
+    # Base URL of the Shopify-app companion (numu-payments-intelligence).
+    # Used by the verification-overage relay (backend-004) to POST usage
+    # events to the Shopify-app's /api/billing/usage-record endpoint.
+    # Default: empty string; must be set in production for backend-004
+    # to function.  Example: "https://shopify.numu.app".
+    shopify_app_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "shopify_app_url",
+            "SHOPIFY_APP_URL",
         ),
     )
 

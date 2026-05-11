@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -211,9 +212,14 @@ class UpdateSettingsRequest(BaseModel):
 
 
 class ConnectPaymobRequest(BaseModel):
-    api_key: str
-    integration_id: str
-    hmac_secret: str
+    """Full Paymob credential set, validated against the live Paymob
+    intention API before persistence (backend-018)."""
+
+    secret_key: str = Field(..., min_length=1, max_length=512)
+    public_key: str = Field(..., min_length=1, max_length=512)
+    hmac_secret: str = Field(..., min_length=1, max_length=512)
+    card_integration_id: str = Field(..., min_length=1, max_length=64)
+    wallet_integration_id: str | None = Field(default=None, max_length=64)
 
 
 # ---------------------------------------------------------------------------
@@ -280,3 +286,54 @@ class WebhookProcessRequest(BaseModel):
     shop_domain: str
     payload: dict = Field(default_factory=dict)
     webhook_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Billing (backend-001)
+# ---------------------------------------------------------------------------
+
+# Plan IDs match the Shopify-app's PlanId literal type
+# (numu-payments-intelligence/app/lib/billing/plans.ts).
+PlanIdLiteral = Literal["starter", "growth", "scale"]
+
+# Status values mirror Shopify's AppSubscription.status enum.
+SubscriptionStatusLiteral = Literal[
+    "ACTIVE",
+    "ACCEPTED",
+    "PENDING",
+    "DECLINED",
+    "EXPIRED",
+    "CANCELLED",
+    "FROZEN",
+]
+
+
+class BillingSyncRequest(BaseModel):
+    """Body of POST /shopify/{store_id}/billing/sync.
+
+    Shape matches the Shopify-app's syncSubscriptionToNumu payload at
+    numu-payments-intelligence/app/lib/billing/billing.server.ts.
+    """
+
+    subscription_id: str = Field(..., max_length=255)
+    status: SubscriptionStatusLiteral
+    plan_id: PlanIdLiteral
+    is_trial: bool = False
+    trial_ends_at: datetime | None = None
+    current_period_end: datetime | None = None
+
+
+class BillingSubscriptionResponse(BaseModel):
+    """Synced subscription record. Mirrors the ShopifySubscription entity."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    store_id: str
+    shopify_subscription_id: str
+    status: SubscriptionStatusLiteral
+    plan_id: PlanIdLiteral
+    is_trial: bool
+    trial_ends_at: datetime | None = None
+    current_period_end: datetime | None = None
+    cancelled_at: datetime | None = None
+    synced_at: datetime
