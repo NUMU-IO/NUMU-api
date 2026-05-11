@@ -1,7 +1,7 @@
 """Add Phase 6 platform tables — apps + app_installations + customizer_undo_entries + currency_rates.
 
 Revision ID: phase_6_platform_20260509
-Revises: trust_network_consent_20260509
+Revises: merge_heads_20260509
 Create Date: 2026-05-09
 
 Phase 6 of the Shopify-parity audit. Four new tables, all in the
@@ -23,19 +23,21 @@ currency, which matches today's behavior).
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 
 from alembic import op
 
 revision: str = "phase_6_platform_20260509"
-down_revision: str | None = "trust_network_consent_20260509"
+down_revision: str | None = "merge_heads_20260509"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     # ── apps (global registry) ─────────────────────────────────────
-    app_status = sa.Enum("draft", "published", "suspended", name="appstatus")
+    app_status = ENUM(
+        "draft", "published", "suspended", name="appstatus", create_type=False
+    )
     app_status.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
@@ -298,4 +300,4 @@ def downgrade() -> None:
     op.drop_index("ix_apps_status", table_name="apps", schema="public")
     op.drop_table("apps", schema="public")
 
-    sa.Enum(name="appstatus").drop(op.get_bind(), checkfirst=True)
+    ENUM(name="appstatus").drop(op.get_bind(), checkfirst=True)

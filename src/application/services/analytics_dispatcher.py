@@ -121,12 +121,16 @@ class AnalyticsDispatcher:
 
     @property
     def enabled_providers(self) -> list[str]:
-        """Names of providers with non-empty credentials."""
+        """Names of providers with non-empty credentials.
+
+        Meta CAPI is intentionally excluded — it ships via the Celery
+        task (`tasks.meta_capi_send_event`) enqueued from
+        `track_page_view`. Routing it through both paths would
+        double-fire every Purchase event.
+        """
         out: list[str] = []
         if self._has_creds("ga4", "measurement_id", "api_secret"):
             out.append("ga4")
-        if self._has_creds("meta_capi", "pixel_id", "access_token"):
-            out.append("meta_capi")
         if self._has_creds("tiktok", "pixel_id", "access_token"):
             out.append("tiktok")
         return out
@@ -150,8 +154,6 @@ class AnalyticsDispatcher:
             try:
                 if provider == "ga4":
                     await self._send_ga4(event)
-                elif provider == "meta_capi":
-                    await self._send_meta_capi(event)
                 elif provider == "tiktok":
                     await self._send_tiktok(event)
                 results.append(DispatchResult(provider=provider, delivered=True))
@@ -193,23 +195,6 @@ class AnalyticsDispatcher:
                 "client_id": event.client_id,
                 # Don't log api_secret. logger.info auto-redacts at the
                 # observability layer but be explicit anyway.
-            },
-        )
-
-    async def _send_meta_capi(self, event: AnalyticsEvent) -> None:
-        """POST to Meta Conversions API.
-
-        Endpoint: https://graph.facebook.com/v18.0/<pixel_id>/events
-                  ?access_token=<token>
-
-        v1 stub; same pattern as GA4.
-        """
-        cfg = self._cfg.get("meta_capi", {})
-        logger.info(
-            "meta_capi_event",
-            extra={
-                "pixel_id": cfg.get("pixel_id"),
-                "event_name": event.event_name,
             },
         )
 

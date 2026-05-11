@@ -6,6 +6,7 @@ from typing import Annotated
 from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
 
 from src.api.dependencies.sanitization import SanitizedStr
+from src.application.dto.phone_field import PhoneField
 from src.config import settings as _app_settings
 
 # Special-use TLDs (RFC 2606 / RFC 6761) that pydantic's EmailStr rejects by default.
@@ -57,7 +58,14 @@ class RegisterRequest(BaseModel):
     last_name: SanitizedStr = Field(
         ..., min_length=1, max_length=100, description="Last name"
     )
-    phone: str | None = Field(None, max_length=20, description="Phone number")
+    phone: PhoneField = Field(
+        None,
+        description=(
+            "Phone number. Accepts E.164 (e.g. '+201001234567') or an "
+            "object {'country_code': 'EG', 'local': '01001234567'}. "
+            "Always stored as E.164."
+        ),
+    )
 
 
 class LoginRequest(BaseModel):
@@ -141,6 +149,10 @@ class TenantInfoResponse(BaseModel):
     # Captured email from the Try-a-Demo form, so the merchant hub can
     # prefill the demo\u2192trial upgrade form. Only populated for demo tenants.
     demo_email: str | None = None
+    # Per-tenant feature flags. Read by the merchant hub to gate the
+    # `/marketing/promotions` nav and offers-v2 surfaces during phased
+    # rollout. Empty `{}` means no flags enabled (legacy default).
+    feature_flags: dict[str, bool] = {}
 
 
 # Keep TokenResponse for internal use / backward compat with use-case DTOs
@@ -220,7 +232,13 @@ class UpdateProfileRequest(BaseModel):
     last_name: SanitizedStr | None = Field(
         None, min_length=1, max_length=100, description="Last name"
     )
-    phone: str | None = Field(None, max_length=20, description="Phone number")
+    phone: PhoneField = Field(
+        None,
+        description=(
+            "Phone number. Accepts E.164 or {country_code, local}; stored "
+            "as canonical E.164."
+        ),
+    )
     avatar_url: str | None = Field(
         None, max_length=500, description="Profile avatar URL"
     )

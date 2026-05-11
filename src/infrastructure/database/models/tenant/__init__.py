@@ -24,13 +24,9 @@ from src.infrastructure.database.models.tenant.configuration import (
     ServiceType,
 )
 from src.infrastructure.database.models.tenant.coupon import CouponModel
-from src.infrastructure.database.models.tenant.courier_stats import CourierStatsModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.email_log import EmailLogModel
 from src.infrastructure.database.models.tenant.email_template import EmailTemplateModel
-from src.infrastructure.database.models.tenant.flow_trigger_emission_log import (
-    FlowTriggerEmissionLogModel,
-)
 from src.infrastructure.database.models.tenant.funnel_event import FunnelEventModel
 from src.infrastructure.database.models.tenant.instapay_intent import (
     InstapayIntentModel,
@@ -38,6 +34,7 @@ from src.infrastructure.database.models.tenant.instapay_intent import (
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.database.models.tenant.location import LocationModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
+from src.infrastructure.database.models.tenant.meta_event_log import MetaEventLogModel
 from src.infrastructure.database.models.tenant.network_contribution_log import (
     NetworkContributionLogModel,
 )
@@ -56,11 +53,14 @@ from src.infrastructure.database.models.tenant.payment_transaction import (
 )
 from src.infrastructure.database.models.tenant.product import ProductModel
 from src.infrastructure.database.models.tenant.product_review import ProductReviewModel
-from src.infrastructure.database.models.tenant.recovery_flow import (
-    RecoveryFlowModel,
-    RecoveryMonthlyRollupModel,
-    RecoveryRollupLedgerModel,
-    RecoveryStepModel,
+from src.infrastructure.database.models.tenant.promotion import (
+    PromotionDismissalModel,
+    PromotionDisplayModel,
+    PromotionEventDailyModel,
+    PromotionEventModel,
+    PromotionModel,
+    PromotionTargetModel,
+    PromotionTranslationModel,
 )
 from src.infrastructure.database.models.tenant.refund import RefundModel
 from src.infrastructure.database.models.tenant.risk_assessment import (
@@ -112,7 +112,6 @@ __all__ = [
     "AutomationRuleModel",
     "CategoryModel",
     "CouponModel",
-    "CourierStatsModel",
     "EmailLogModel",
     "EmailTemplateModel",
     "FunnelEventModel",
@@ -121,6 +120,7 @@ __all__ = [
     "InvoiceModel",
     "LocationModel",
     "MessageLogModel",
+    "MetaEventLogModel",
     "NetworkContributionLogModel",
     "NetworkReputationModel",
     "InstapayIntentModel",
@@ -144,6 +144,13 @@ __all__ = [
     "ProductModel",
     "ProductReviewModel",
     "VariantModel",
+    "PromotionModel",
+    "PromotionDismissalModel",
+    "PromotionDisplayModel",
+    "PromotionEventDailyModel",
+    "PromotionEventModel",
+    "PromotionTargetModel",
+    "PromotionTranslationModel",
     "RefundModel",
     "UpsellRuleModel",
     "ShipmentModel",
@@ -164,10 +171,5 @@ __all__ = [
     "WhatsAppConversationModel",
     "WhatsAppCampaignModel",
     "WhatsAppCampaignRecipientModel",
-    "FlowTriggerEmissionLogModel",
     "OtpCodeModel",
-    "RecoveryFlowModel",
-    "RecoveryMonthlyRollupModel",
-    "RecoveryRollupLedgerModel",
-    "RecoveryStepModel",
 ]

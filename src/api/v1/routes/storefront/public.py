@@ -22,6 +22,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     CursorParams,
@@ -38,6 +39,8 @@ from src.api.dependencies import (
     get_store_repository,
     get_token_service,
 )
+from src.api.dependencies.database import get_db
+from src.api.dependencies.feature_flags import _read_feature_flags
 from src.api.dependencies.repositories import get_product_subscription_repository
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import (
@@ -210,6 +213,13 @@ AVAILABLE_THEMES = [
         "nameAr": "بازار",
         "layout": "bazar",
         "description": "Bold streetwear aesthetic — vibrant amber/yellow palette, chunky uppercase typography, organic wavy shapes, and split product layouts",
+    },
+    {
+        "id": "vionne",
+        "name": "Vionne",
+        "nameAr": "فيون",
+        "layout": "vionne",
+        "description": "Refined grayscale storefront for modest fashion. Crisp typography, slow fade slideshow, draggable before/after, and motion-led product cards.",
     },
     {
         "id": "saw-saw",
@@ -398,11 +408,20 @@ async def get_theme_schemas(
 # ============================================================================
 
 
-def _serialize_public_store(store) -> dict:
+def _serialize_public_store(
+    store,
+    *,
+    tenant_feature_flags: dict[str, bool] | None = None,
+) -> dict:
     """Common payload returned by `/store-by-subdomain` and `/store-by-domain`.
 
     The Next.js storefront and the @numu/theme-sdk both consume this shape;
     keep new fields here additive so older client builds keep working.
+
+    `tenant_feature_flags` is the per-tenant flag map loaded by the route
+    (via `_read_feature_flags`). The storefront reads flags like
+    `ff_storefront_promo_render` to skip rendering work for tenants that
+    aren't in the offers-v2 phased rollout yet.
     """
     return {
         "id": str(store.id),
@@ -425,6 +444,7 @@ def _serialize_public_store(store) -> dict:
         "default_language": store.default_language,
         "social_links": store.social_links,
         "use_nextjs_storefront": getattr(store, "use_nextjs_storefront", False),
+        "tenant_feature_flags": tenant_feature_flags or {},
     }
 
 
@@ -437,6 +457,7 @@ def _serialize_public_store(store) -> dict:
 async def get_store_by_subdomain(
     subdomain: Annotated[str, Path(description="Store subdomain")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Look up a store by its subdomain (public). Used by the Next.js
     storefront when the inbound hostname is `*.numueg.app`."""
@@ -447,8 +468,9 @@ async def get_store_by_subdomain(
     if store.status == StoreStatus.PENDING_APPROVAL:
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
+    flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
     return SuccessResponse(
-        data=_serialize_public_store(store),
+        data=_serialize_public_store(store, tenant_feature_flags=flags),
         message="Store retrieved successfully",
     )
 
@@ -462,6 +484,7 @@ async def get_store_by_subdomain(
 async def get_store_by_domain(
     domain: Annotated[str, Path(description="Custom hostname, e.g. shop.brand.com")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Look up a store by its custom domain (public).
 
@@ -479,8 +502,9 @@ async def get_store_by_domain(
     if store.status == StoreStatus.PENDING_APPROVAL:
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
 
+    flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
     return SuccessResponse(
-        data=_serialize_public_store(store),
+        data=_serialize_public_store(store, tenant_feature_flags=flags),
         message="Store retrieved successfully",
     )
 

@@ -103,6 +103,11 @@ migrate-down:
 seed:
 	python scripts/seed_data.py
 
+# Recompute the analytics_daily_rollups for the last DAYS days. Idempotent.
+# Usage: make backfill-rollups STORE=<uuid> DAYS=90  (STORE is optional)
+backfill-rollups:
+	python -c "from src.infrastructure.messaging.tasks.analytics_rollup_tasks import backfill_analytics_rollups_task; print(backfill_analytics_rollups_task.delay(store_id='$(STORE)' or None, days=$(DAYS) or 90).id)"
+
 # Docker (Development)
 docker-up:
 	docker-compose -f docker/docker-compose.yml up -d
