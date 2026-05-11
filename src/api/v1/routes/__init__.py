@@ -116,6 +116,9 @@ from src.api.v1.routes.storefront import (
     geocode_router as storefront_geocode_router,
 )
 from src.api.v1.routes.storefront import (
+    gift_cards_router as storefront_gift_cards_router,
+)
+from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
 )
 from src.api.v1.routes.storefront import (
@@ -417,6 +420,13 @@ api_router.include_router(
     storefront_pickup_locations_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Pickup Locations"],
+)
+
+# Storefront - gift card balance check (public, Phase 8.3)
+api_router.include_router(
+    storefront_gift_cards_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Gift Cards"],
 )
 
 # Storefront - app platform discovery (Phase 6, public, scoped to store)

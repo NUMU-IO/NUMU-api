@@ -27,6 +27,9 @@ from src.infrastructure.repositories.email_template_repository import (
     EmailTemplateRepositoryImpl,
 )
 from src.infrastructure.repositories.feedback_repository import FeedbackRepository
+from src.infrastructure.repositories.gift_card_repository import (
+    GiftCardRepository,
+)
 from src.infrastructure.repositories.inventory_repository import (
     InventoryLevelRepository,
     InventoryTransferRepository,
@@ -105,6 +108,7 @@ __all__ = [
     "EmailTemplateRepository",
     "EmailTemplateRepositoryImpl",
     "FeedbackRepository",
+    "GiftCardRepository",
     "InventoryLevelRepository",
     "InventoryTransferRepository",
     "InvoiceRepository",
