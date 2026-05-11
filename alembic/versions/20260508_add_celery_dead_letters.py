@@ -23,7 +23,7 @@ Schema decisions:
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 
 from alembic import op
 
@@ -34,13 +34,14 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    dl_status = sa.Enum(
+    dl_status = ENUM(
         "pending",
         "retried",
         "resolved",
         "abandoned",
         name="deadletterstatus",
         schema="public",
+        create_type=False,
     )
     dl_status.create(op.get_bind(), checkfirst=True)
 

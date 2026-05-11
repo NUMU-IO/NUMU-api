@@ -27,7 +27,7 @@ Schema decisions:
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 
 from alembic import op
 
@@ -40,7 +40,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # Postgres enums for status + reason. Lowercase values for parity
     # with other StrEnum-backed enums in the schema.
-    return_status = sa.Enum(
+    return_status = ENUM(
         "requested",
         "approved",
         "rejected",
@@ -49,8 +49,9 @@ def upgrade() -> None:
         "canceled",
         name="returnstatus",
         schema="public",
+        create_type=False,
     )
-    return_reason = sa.Enum(
+    return_reason = ENUM(
         "defective",
         "wrong_item",
         "not_as_described",
@@ -59,6 +60,7 @@ def upgrade() -> None:
         "other",
         name="returnreason",
         schema="public",
+        create_type=False,
     )
     return_status.create(op.get_bind(), checkfirst=True)
     return_reason.create(op.get_bind(), checkfirst=True)

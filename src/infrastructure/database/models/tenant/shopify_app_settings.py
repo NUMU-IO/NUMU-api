@@ -1,8 +1,9 @@
 """Shopify app settings model — per-store settings for risk scoring thresholds."""
 
+from datetime import datetime
 from uuid import UUID as PyUUID
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -71,6 +72,42 @@ class ShopifyAppSettingsModel(Base, UUIDMixin, TimestampMixin):
     # false, write_network_event is a no-op for this store, satisfying
     # the GDPR Recital 47 legitimate-interest opt-out path.
     trust_network_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="true",
+    )
+    # Backend-022 / spec 010 — positive trust signals + auto-approve.
+    # Default OFF per safe-defaults posture (constitution v1.1.0).
+    auto_approve_on_trust_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
+    # Threshold gate for trust-driven auto-approve. Slider 70-95 in the UI
+    # per spec 010 FR-011 (default 80 per FR-002).
+    auto_approve_trust_threshold: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="80",
+    )
+    # Set when the kill-switch fires (spec 010 CL-002 — RTO rate > 5%).
+    auto_disabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # Trigger context for the interstitial re-enable modal per CL-002.
+    auto_disabled_reason: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+    )
+    # Spec 009 CL-012 — first-success in-app celebration card (one-shot).
+    first_recovery_celebration_dismissed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
+    # Spec 009 FR-015 — gates whether new RecoveryFlows actually fire.
+    recovery_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         server_default="true",

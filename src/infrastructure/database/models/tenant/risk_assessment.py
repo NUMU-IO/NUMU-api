@@ -101,3 +101,26 @@ class RiskAssessmentModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Backend-022: positive trust signals
+    # Populated only on `score_type='final'`; preliminary scores leave NULL.
+    customer_trust: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    trust_tier: Mapped[str | None] = mapped_column(
+        String(10),  # 'none' | 'new' | 'bronze' | 'silver' | 'gold'
+        nullable=True,
+    )
+    negative_adjustment_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    # HMAC hash of the customer's phone, persisted so downstream signal-write
+    # paths (trust signal handler, future spec 010 contribution) don't have to
+    # re-derive it from the raw phone (which is never stored on this row per
+    # constitution Principle II).
+    customer_phone_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )

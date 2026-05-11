@@ -2,10 +2,11 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.entities.platform_source import OrderSource
 from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import (
     TenantMixin,
@@ -35,6 +36,19 @@ class ShipmentModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         ForeignKey("public.orders.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+
+    # Backend-026 — platform source (default Shopify; future adapters override).
+    source: Mapped[OrderSource] = mapped_column(
+        Enum(
+            OrderSource,
+            name="ordersource",
+            create_type=False,
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
+        default=OrderSource.SHOPIFY,
+        server_default="'shopify'",
     )
 
     # Carrier info

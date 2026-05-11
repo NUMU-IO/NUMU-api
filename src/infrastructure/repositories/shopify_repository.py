@@ -202,8 +202,38 @@ class ShopifyInstallationRepository:
         )
         counts["contribution_logs"] = r.rowcount or 0
 
-        # 3) Delete all store-scoped data
+        # 3) Delete all store-scoped data.
+        # Order matters where FKs exist — child tables BEFORE parents:
+        #   - recovery_steps (FK → recovery_flows, ON DELETE CASCADE; the
+        #     cascade triggers when we delete recovery_flows, so we don't
+        #     need a separate DELETE here — but we count via cascade.)
+        # The new tables (backend-020, 021, 022, 023, 025, 026) are all
+        # store-scoped; each adds a per-store erasure path per the
+        # respective spec's Principle III declaration.
+        from src.infrastructure.database.models.tenant.courier_stats import (
+            CourierStatsModel,
+        )
+        from src.infrastructure.database.models.tenant.flow_trigger_emission_log import (
+            FlowTriggerEmissionLogModel,
+        )
+        from src.infrastructure.database.models.tenant.otp_code import OtpCodeModel
+        from src.infrastructure.database.models.tenant.recovery_flow import (
+            RecoveryFlowModel,
+            RecoveryMonthlyRollupModel,
+            RecoveryRollupLedgerModel,
+        )
+
         for label, model_cls in [
+            # New (backend-020/021/022/023/025) — deleted first so any
+            # later FK cascade on the parent doesn't double-count.
+            ("recovery_rollup_ledger", RecoveryRollupLedgerModel),
+            ("recovery_monthly_rollups", RecoveryMonthlyRollupModel),
+            # recovery_flows: child recovery_steps cascade via ON DELETE CASCADE
+            ("recovery_flows", RecoveryFlowModel),
+            ("flow_trigger_emission_log", FlowTriggerEmissionLogModel),
+            ("courier_stats", CourierStatsModel),
+            ("otp_codes", OtpCodeModel),
+            # Pre-existing per-store tables
             ("payment_link_sessions", PaymentLinkSessionModel),
             ("risk_assessments", RiskAssessmentModel),
             ("payment_transactions", PaymentTransactionModel),

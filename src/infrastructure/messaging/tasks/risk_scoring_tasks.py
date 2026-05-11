@@ -228,7 +228,54 @@ def compute_full_risk_score(
             for f in full_result.factors
         ]
 
-        # ── 4. Persist final score ─────────────────────────────────────────
+        # ── 4. Persist final score + customer_trust (backend-022) ─────────
+        # Compute the deterministic trust factor from local + network signals.
+        from src.application.services.customer_trust_formula import (
+            TrustInputs,
+            compute_customer_trust,
+        )
+
+        net_pos = 0
+        net_neg = 0
+        if phone:
+            salt = get_settings().platform_secret_salt
+            if salt:
+                ph = normalize_and_hash(phone, salt)
+                if ph:
+                    async with AsyncSessionLocal() as trust_session:
+                        await trust_session.execute(text("SET search_path TO public"))
+                        rep_result = await trust_session.execute(
+                            select(NetworkReputationModel).where(
+                                NetworkReputationModel.phone_hash == ph
+                            )
+                        )
+                        rep_row = rep_result.scalar_one_or_none()
+                        if rep_row is not None:
+                            net_pos = rep_row.total_successful_deliveries or 0
+                            net_neg = (rep_row.total_network_rtos or 0) + (
+                                rep_row.total_refunds or 0
+                            )
+
+        local_lifetime_refusals = int(cancel_count) if "cancel_count" in dir() else 0
+
+        trust_result = compute_customer_trust(
+            TrustInputs(
+                successful_deliveries=net_pos,
+                prepaid_orders=0,
+                whatsapp_response_rate_pct=0.0,
+                network_positive_events=net_pos,
+                network_negative_events=net_neg,
+                local_recent_refusals=0,
+                local_lifetime_refusals=local_lifetime_refusals,
+            )
+        )
+
+        persisted_phone_hash: str | None = None
+        if phone:
+            salt = get_settings().platform_secret_salt
+            if salt:
+                persisted_phone_hash = normalize_and_hash(phone, salt)
+
         async with AsyncSessionLocal() as session:
             await session.execute(text("SET search_path TO public"))
             await session.execute(
@@ -241,6 +288,10 @@ def compute_full_risk_score(
                     factors=factors_json,
                     score_type="final",
                     scored_at=datetime.now(UTC),
+                    customer_trust=trust_result.customer_trust,
+                    trust_tier=trust_result.trust_tier,
+                    negative_adjustment_count=trust_result.negative_adjustment_count,
+                    customer_phone_hash=persisted_phone_hash,
                 )
             )
 
@@ -408,6 +459,61 @@ def compute_full_risk_score(
                             )
 
             await session.commit()
+
+        # ── 7. Publish RiskAssessmentFinalisedEvent (backend-021 dependency) ──
+        # Recovery flow handler subscribes to this; gates on score >=
+        # threshold, recovery_enabled, has_payment_gateway, subscription_active.
+        try:
+            from src.core.events.risk_events import RiskAssessmentFinalisedEvent
+            from src.infrastructure.database.models.tenant.store import StoreModel
+            from src.infrastructure.events.setup import get_event_bus
+
+            tenant_uuid = (
+                assessment.tenant_id if (assessment and assessment.tenant_id) else None
+            )
+            if tenant_uuid is None:
+                async with AsyncSessionLocal() as ts:
+                    await ts.execute(text("SET search_path TO public"))
+                    tenant_row = await ts.execute(
+                        select(StoreModel.tenant_id).where(StoreModel.id == sid)
+                    )
+                    tenant_uuid = tenant_row.scalar_one_or_none()
+
+            if tenant_uuid is not None and assessment is not None:
+                has_gateway = True
+                recovery_on = True
+                if settings is not None:
+                    if hasattr(settings, "paymob_connected"):
+                        has_gateway = bool(
+                            getattr(settings, "paymob_connected", False)
+                            or getattr(settings, "fawry_connected", False)
+                            or getattr(settings, "kashier_connected", False)
+                            or getattr(settings, "instapay_connected", False)
+                        )
+                    if hasattr(settings, "recovery_enabled"):
+                        recovery_on = bool(getattr(settings, "recovery_enabled", True))
+
+                event = RiskAssessmentFinalisedEvent(
+                    assessment_id=UUID(assessment_id),
+                    tenant_id=tenant_uuid,
+                    store_id=sid,
+                    shopify_order_id=str(assessment.shopify_order_id)
+                    if assessment.shopify_order_id
+                    else None,
+                    order_id=assessment.order_id,
+                    customer_phone=phone,
+                    risk_score=full_result.risk_score,
+                    risk_level=full_result.risk_level,
+                    score_type="final",
+                    recovery_enabled=recovery_on,
+                    has_payment_gateway=has_gateway,
+                    subscription_active=True,  # TODO(spec-002): query subscription
+                )
+                get_event_bus().publish(event)
+        except Exception as publish_exc:
+            logger.warning(
+                "RiskAssessmentFinalisedEvent publish failed: %s", publish_exc
+            )
 
         logger.info(
             "Full risk score computed: assessment=%s store=%s score=%d level=%s",

@@ -23,6 +23,12 @@ from src.core.events.promotion_events import (
     PromotionDeletedEvent,
     PromotionUpdatedEvent,
 )
+from src.core.events.recovery_events import (
+    RecoveryAbandonedEvent,
+    RecoveryStartedEvent,
+    RecoverySucceededEvent,
+)
+from src.core.events.risk_events import RiskAssessmentFinalisedEvent
 from src.core.events.staff_events import (
     AccessRequestApprovedEvent,
     AccessRequestCreatedEvent,
@@ -41,6 +47,11 @@ from src.infrastructure.events.handlers.activity_log_handler import handle_activ
 from src.infrastructure.events.handlers.email_notification_handler import (
     handle_email_notification,
 )
+from src.infrastructure.events.handlers.flow_trigger_handler import (
+    handle_recovery_abandoned_for_flow_trigger,
+    handle_recovery_succeeded_for_flow_trigger,
+    handle_risk_finalised_for_flow_trigger,
+)
 from src.infrastructure.events.handlers.instapay_notification_handler import (
     handle_payment_proof_approved,
     handle_payment_proof_rejected,
@@ -50,11 +61,19 @@ from src.infrastructure.events.handlers.instapay_notification_handler import (
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
 )
+from src.infrastructure.events.handlers.otp_trust_handler import (
+    handle_otp_verified_trust_signal,
+)
 from src.infrastructure.events.handlers.promotion_cache_invalidator import (
     PromotionCacheInvalidator,
 )
 from src.infrastructure.events.handlers.promotion_convert_handler import (
     handle_promotion_convert_on_order_paid,
+)
+from src.infrastructure.events.handlers.recovery_event_handler import (
+    handle_recovery_started_for_celery,
+    handle_recovery_succeeded_outbox,
+    handle_risk_finalised_for_recovery,
 )
 from src.infrastructure.events.handlers.shipment_handler import (
     handle_order_status_for_shipment,
@@ -72,6 +91,9 @@ from src.infrastructure.events.handlers.staff_event_handlers import (
     handle_staff_role_revoked,
     handle_temporary_access_granted,
     handle_temporary_access_revoked,
+)
+from src.infrastructure.events.handlers.trust_signal_handler import (
+    handle_recovery_succeeded_trust_signal,
 )
 from src.infrastructure.events.handlers.webhook_handler import (
     handle_webhook_order_created,
@@ -131,6 +153,24 @@ def create_event_bus() -> EventBus:
     bus.subscribe(ProductCreatedEvent, handle_webhook_product_created)
     bus.subscribe(ProductUpdatedEvent, handle_webhook_product_updated)
     bus.subscribe(ProductDeletedEvent, handle_webhook_product_deleted)
+
+    # Recovery flow (backend-021): risk-finalised → spawn flow; flow-started →
+    # schedule first Celery send-step; flow-succeeded → outbox the Shopify
+    # additive mutation.
+    bus.subscribe(RiskAssessmentFinalisedEvent, handle_risk_finalised_for_recovery)
+    bus.subscribe(RecoveryStartedEvent, handle_recovery_started_for_celery)
+    bus.subscribe(RecoverySucceededEvent, handle_recovery_succeeded_outbox)
+    # Backend-022: positive network signal contribution when a recovery succeeds.
+    bus.subscribe(RecoverySucceededEvent, handle_recovery_succeeded_trust_signal)
+    # Backend-020: Shopify Flow trigger emissions (idempotent via Celery task).
+    bus.subscribe(RiskAssessmentFinalisedEvent, handle_risk_finalised_for_flow_trigger)
+    bus.subscribe(RecoverySucceededEvent, handle_recovery_succeeded_for_flow_trigger)
+    bus.subscribe(RecoveryAbandonedEvent, handle_recovery_abandoned_for_flow_trigger)
+    # Backend-025 / spec 015: WhatsApp OTP success contributes a positive
+    # network signal (lifts customer_trust on subsequent risk assessments).
+    from src.core.events.otp_events import OtpVerifiedEvent
+
+    bus.subscribe(OtpVerifiedEvent, handle_otp_verified_trust_signal)
 
     # Promotions — cache invalidation. The Redis client is fetched lazily
     # so import-time test environments without Redis don't crash.

@@ -492,77 +492,181 @@ async def process_webhook(
         result = {"redacted": True, "deleted": counts}
     elif topic == "customers/redact":
         # GDPR: Delete all data associated with a specific customer.
-        # Two halves:
-        #   1. risk_assessments — keyed on customer email (Shopify's key)
-        #   2. network contribution log + reputation aggregates — keyed
-        #      on the HMAC of the customer's phone. Without this second
-        #      half, the cross-merchant signal would retain that
-        #      customer's history indefinitely.
+        # Halves:
+        #   1. risk_assessments — keyed on customer email (Shopify's key).
+        #      Captures shopify_order_ids first so we can cascade to
+        #      recovery_flows (which has no email/phone column).
+        #   2. recovery_flows + child steps (steps cascade via FK).
+        #   3. otp_codes — keyed on phone_hash (backend-025 FR-008).
+        #   4. network contribution log + reputation aggregates — keyed
+        #      on phone_hash. Without this, the cross-merchant signal
+        #      would retain that customer's history indefinitely.
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import select as sa_select
+
+        from src.application.services.network_reputation_service import (
+            extract_phone_hash_from_string,
+        )
+        from src.infrastructure.database.models.tenant.otp_code import (
+            OtpCodeModel,
+        )
+        from src.infrastructure.database.models.tenant.recovery_flow import (
+            RecoveryFlowModel,
+        )
+        from src.infrastructure.database.models.tenant.risk_assessment import (
+            RiskAssessmentModel,
+        )
+
         customer = body.payload.get("customer", {})
         email = customer.get("email", "")
         phone = customer.get("phone") or ""
+        phone_hash = extract_phone_hash_from_string(phone) if phone else None
+
         risk_deleted = 0
+        recovery_flows_deleted = 0
+        otp_codes_deleted = 0
         network_result: dict[str, int] = {
             "contributions_replayed": 0,
             "contribution_rows_deleted": 0,
         }
+
+        session = risk_repo.session  # repo + handler share the request session
+
+        # Step 1: collect shopify_order_ids before deleting risk_assessments
+        # so we can cascade to recovery_flows (no email/phone column there).
+        shopify_order_ids: list[str] = []
+        if email:
+            order_id_rows = await session.execute(
+                sa_select(RiskAssessmentModel.shopify_order_id).where(
+                    RiskAssessmentModel.store_id == store_id,
+                    RiskAssessmentModel.customer_email == email,
+                    RiskAssessmentModel.shopify_order_id.is_not(None),
+                )
+            )
+            shopify_order_ids = [r[0] for r in order_id_rows.all() if r[0]]
+
+        # Step 2: delete risk_assessments (existing behaviour).
         if email:
             risk_deleted = await risk_repo.delete_by_customer_email(store_id, email)
-        if phone:
-            from src.application.services.network_reputation_service import (
-                extract_phone_hash_from_string,
+
+        # Step 3: delete recovery_flows for the collected order_ids.
+        # recovery_steps cascade via ON DELETE CASCADE on flow_id.
+        if shopify_order_ids:
+            r = await session.execute(
+                sa_delete(RecoveryFlowModel).where(
+                    RecoveryFlowModel.store_id == store_id,
+                    RecoveryFlowModel.shopify_order_id.in_(shopify_order_ids),
+                )
+            )
+            recovery_flows_deleted = r.rowcount or 0
+
+        # Step 4: delete otp_codes by phone_hash (backend-025 FR-008).
+        # Scoped to this store — Shopify's customers/redact is per-merchant.
+        if phone_hash:
+            r = await session.execute(
+                sa_delete(OtpCodeModel).where(
+                    OtpCodeModel.store_id == store_id,
+                    OtpCodeModel.phone_hash == phone_hash,
+                )
+            )
+            otp_codes_deleted = r.rowcount or 0
+
+        # Step 5: existing network reputation decrement.
+        if phone_hash:
+            network_result = await network_repo.delete_customer_network_data(
+                store_id=store_id, phone_hash=phone_hash
             )
 
-            phone_hash = extract_phone_hash_from_string(phone)
-            if phone_hash:
-                network_result = await network_repo.delete_customer_network_data(
-                    store_id=store_id, phone_hash=phone_hash
-                )
+        await session.commit()
+
         logger.info(
-            "GDPR customers/redact for %s (%s): risk=%d network=%s",
+            "GDPR customers/redact for %s (%s): risk=%d flows=%d otp=%d network=%s",
             body.shop_domain,
             email,
             risk_deleted,
+            recovery_flows_deleted,
+            otp_codes_deleted,
             network_result,
         )
         result = {
             "redacted": True,
             "records_deleted": risk_deleted,
+            "recovery_flows_deleted": recovery_flows_deleted,
+            "otp_codes_deleted": otp_codes_deleted,
             "network": network_result,
             "note": (
-                "no phone in payload — network signal preserved" if not phone else None
+                "no phone in payload — OTP/network signal preserved"
+                if not phone
+                else None
             ),
         }
     elif topic == "customers/data_request":
-        # GDPR: Report what data we hold for a specific customer. Now
-        # includes the cross-merchant network contributions when the
-        # payload provides a phone number, so the DSAR export is
-        # complete (not just risk_assessments).
+        # GDPR: Report what data we hold for a specific customer.
+        # Reports across: risk_assessments (email-keyed), recovery_flows
+        # (collected via the same risk_assessment.shopify_order_ids), OTP
+        # codes (phone-hash-keyed, backend-025 FR-008), and network
+        # contributions (phone-hash-keyed). DSAR export is complete.
+        from sqlalchemy import select as sa_select
+
+        from src.application.services.network_reputation_service import (
+            extract_phone_hash_from_string,
+        )
+        from src.infrastructure.database.models.tenant.otp_code import (
+            OtpCodeModel,
+        )
+        from src.infrastructure.database.models.tenant.recovery_flow import (
+            RecoveryFlowModel,
+        )
+
         customer = body.payload.get("customer", {})
         email = customer.get("email", "")
         phone = customer.get("phone") or ""
+        phone_hash = extract_phone_hash_from_string(phone) if phone else None
+
         risk_records = (
             await risk_repo.list_by_customer_email(store_id, email) if email else []
         )
-        network_contributions: list[dict] = []
-        if phone:
-            from src.application.services.network_reputation_service import (
-                extract_phone_hash_from_string,
-            )
+        session = risk_repo.session
 
-            phone_hash = extract_phone_hash_from_string(phone)
-            if phone_hash:
-                rows = await network_repo.list_customer_contributions(
-                    store_id=store_id, phone_hash=phone_hash
+        # Recovery flows for the customer's orders.
+        recovery_flow_rows = []
+        if risk_records:
+            order_ids = [r.shopify_order_id for r in risk_records if r.shopify_order_id]
+            if order_ids:
+                rf_rows = await session.execute(
+                    sa_select(RecoveryFlowModel).where(
+                        RecoveryFlowModel.store_id == store_id,
+                        RecoveryFlowModel.shopify_order_id.in_(order_ids),
+                    )
                 )
-                network_contributions = [
-                    {
-                        "type": "network_contribution",
-                        "event_type": r.event_type,
-                        "recorded_at": str(r.created_at),
-                    }
-                    for r in rows
-                ]
+                recovery_flow_rows = list(rf_rows.scalars().all())
+
+        # OTP codes by phone_hash.
+        otp_rows = []
+        if phone_hash:
+            o_rows = await session.execute(
+                sa_select(OtpCodeModel).where(
+                    OtpCodeModel.store_id == store_id,
+                    OtpCodeModel.phone_hash == phone_hash,
+                )
+            )
+            otp_rows = list(o_rows.scalars().all())
+
+        # Existing network contributions.
+        network_contributions: list[dict] = []
+        if phone_hash:
+            rows = await network_repo.list_customer_contributions(
+                store_id=store_id, phone_hash=phone_hash
+            )
+            network_contributions = [
+                {
+                    "type": "network_contribution",
+                    "event_type": r.event_type,
+                    "recorded_at": str(r.created_at),
+                }
+                for r in rows
+            ]
+
         result = {
             "customer_email": email,
             "data_held": [
@@ -573,6 +677,28 @@ async def process_webhook(
                     "created_at": str(r.created_at),
                 }
                 for r in risk_records
+            ]
+            + [
+                {
+                    "type": "recovery_flow",
+                    "shopify_order_id": f.shopify_order_id,
+                    "state": (
+                        f.state.value if hasattr(f.state, "value") else str(f.state)
+                    ),
+                    "recovered_amount_cents": f.recovered_amount_cents,
+                    "created_at": str(f.created_at),
+                }
+                for f in recovery_flow_rows
+            ]
+            + [
+                {
+                    "type": "otp_code",
+                    "verified": o.verified_at is not None,
+                    "language": o.language,
+                    "created_at": str(o.created_at),
+                    "expires_at": str(o.expires_at),
+                }
+                for o in otp_rows
             ]
             + network_contributions,
         }
