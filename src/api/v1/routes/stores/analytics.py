@@ -23,7 +23,10 @@ from src.api.dependencies.repositories import (
     get_page_view_repository,
 )
 from src.api.responses import SuccessResponse
-from src.application.services.health_score_service import calculate_store_health_score
+from src.application.services.health_score_service import (
+    build_recommendations,
+    calculate_store_health_score,
+)
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.entities.store import Store
 from src.infrastructure.repositories import (
@@ -602,14 +605,36 @@ class HealthScoreMetrics(BaseModel):
 
 
 class HealthScoreResponse(BaseModel):
-    score: int
+    score: int | None
     grade: str
+    insufficient_data: bool = False
+    insufficient_metrics: list[str] = []
     metrics: HealthScoreMetrics
     sub_scores: dict[str, int]
     recommendations: list[str]
     orders_analyzed: int
     shipments_analyzed: int
     calculated_at: str | None
+
+
+# How long a cached score is allowed to be served before we recompute live.
+# Celery refreshes every 24h, so 26h gives a small grace window for late
+# task runs without ever serving genuinely stale numbers.
+HEALTH_SCORE_CACHE_TTL_HOURS = 26
+
+
+def _cache_is_fresh(cached: dict) -> bool:
+    """Return True if the cached score was computed within the TTL window."""
+    raw = cached.get("calculated_at")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(raw)
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - ts) < timedelta(hours=HEALTH_SCORE_CACHE_TTL_HOURS)
 
 
 @router.get(
@@ -630,34 +655,53 @@ async def get_health_score(
 
     On first call (no cache), calculates live and persists in store.settings
     so subsequent calls are instant. Celery refreshes the cache daily.
+    Recommendations are regenerated per-request so they always match the
+    user's current language.
     """
-    # Try cached score first (from daily Celery task)
+    normalized_lang = lang if lang in ("ar", "en") else "ar"
+
+    # Try cached score first (from daily Celery task) — but only if fresh.
     if not live and store.settings:
         cached = store.settings.get("health_score")
-        if cached:
+        if cached and _cache_is_fresh(cached):
+            # Backfill flags for caches written before this field existed.
+            cached.setdefault("insufficient_data", False)
+            cached.setdefault("insufficient_metrics", [])
+            # Regenerate recommendations in the requested language so the
+            # merchant sees Arabic/English consistently with their UI.
+            cached["recommendations"] = build_recommendations(
+                sub_scores=cached.get("sub_scores", {}),
+                final_score=cached.get("score") or 0,
+                insufficient_metrics=set(cached.get("insufficient_metrics", [])),
+                lang=normalized_lang,
+            )
             return SuccessResponse(
                 data=HealthScoreResponse(**cached),
                 message="Health score retrieved (cached)",
             )
 
-    # Live calculation (first visit or explicit live=true)
+    # Live calculation (first visit, stale cache, or explicit live=true)
 
     score_data = await calculate_store_health_score(
         session=order_repo.session,
         store_id=store.id,
         days=30,
-        lang=lang if lang in ("ar", "en") else "ar",
+        lang=normalized_lang,
     )
 
-    # Cache the result in store.settings for next time
-    try:
-        store_repo = StoreRepository(order_repo.session)
-        current_settings = dict(store.settings) if store.settings else {}
-        current_settings["health_score"] = score_data
-        store.settings = current_settings
-        await store_repo.update(store)
-    except Exception:
-        pass  # Non-critical — score still returned even if caching fails
+    # Cache the result in store.settings for next time. We don't cache
+    # "insufficient_data" snapshots — a brand-new store could get its
+    # first orders in minutes, and we don't want to serve a stale empty
+    # state for 24h until Celery overwrites it.
+    if not score_data.get("insufficient_data"):
+        try:
+            store_repo = StoreRepository(order_repo.session)
+            current_settings = dict(store.settings) if store.settings else {}
+            current_settings["health_score"] = score_data
+            store.settings = current_settings
+            await store_repo.update(store)
+        except Exception:
+            pass  # Non-critical — score still returned even if caching fails
 
     return SuccessResponse(
         data=HealthScoreResponse(**score_data),
