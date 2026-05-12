@@ -1,5 +1,8 @@
 """Repository implementations module."""
 
+from src.infrastructure.repositories.abandoned_checkout_repository import (
+    AbandonedCheckoutRepository,
+)
 from src.infrastructure.repositories.address_repository import CustomerAddressRepository
 from src.infrastructure.repositories.analytics_rollup_repository import (
     AnalyticsRollupRepository,
@@ -46,6 +49,9 @@ from src.infrastructure.repositories.message_thread_repository import (
     MessageThreadRepositoryImpl,
 )
 from src.infrastructure.repositories.onboarding_repository import OnboardingRepository
+from src.infrastructure.repositories.order_activity_repository import (
+    OrderActivityRepository,
+)
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
 from src.infrastructure.repositories.product_bundle_repository import (
@@ -92,6 +98,7 @@ from src.infrastructure.repositories.whatsapp_template_repository import (
 )
 
 __all__ = [
+    "AbandonedCheckoutRepository",
     "AnalyticsRollupRepository",
     "UserRepository",
     "StoreRepository",
@@ -118,6 +125,7 @@ __all__ = [
     "MarketingCampaignRepository",
     "MessageLogRepository",
     "OnboardingRepository",
+    "OrderActivityRepository",
     "OrderRepository",
     "PageViewRepository",
     "ProductBundleRepository",

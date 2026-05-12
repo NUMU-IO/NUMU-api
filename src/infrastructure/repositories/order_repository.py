@@ -323,6 +323,7 @@ class OrderRepository(IOrderRepository):
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         customer_id: UUID | None = None,
+        exclude_statuses: list[OrderStatus] | None = None,
     ) -> list[Order]:
         """Get all orders for a store with optional filters."""
         query = select(OrderModel).where(OrderModel.store_id == store_id)
@@ -330,6 +331,8 @@ class OrderRepository(IOrderRepository):
             query = query.where(OrderModel.customer_id == customer_id)
         if status:
             query = query.where(OrderModel.status == status)
+        if exclude_statuses:
+            query = query.where(OrderModel.status.notin_(exclude_statuses))
         if payment_status:
             query = query.where(OrderModel.payment_status == payment_status)
         if fulfillment_status:

@@ -11,8 +11,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from src.api.dependencies import (
+    get_current_user_id,
     get_customer_repository,
     get_onboarding_repository,
+    get_order_activity_repository,
     get_order_repository,
     get_store_repository,
     verify_store_ownership,
@@ -59,6 +61,7 @@ from src.infrastructure.events.setup import get_event_bus
 from src.infrastructure.repositories import (
     CustomerRepository,
     OnboardingRepository,
+    OrderActivityRepository,
     OrderRepository,
     StoreRepository,
 )
@@ -404,6 +407,167 @@ async def create_order(
     )
 
 
+# ============================================================================
+# Draft orders — merchant-saved orders not yet billable / customer-visible
+# ============================================================================
+
+
+@router.post(
+    "/drafts",
+    response_model=SuccessResponse[OrderResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a draft order",
+    operation_id="create_draft_order",
+    dependencies=[Depends(require_order_limit())],
+)
+async def create_draft_order(
+    request: CreateOrderRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save an order as a draft (status=DRAFT).
+
+    Drafts:
+    - Skip the COD trust network check (no shipping commitment yet).
+    - Suppress the OrderCreatedEvent — no notifications, no shipment
+      auto-create, no webhooks, no analytics rollup.
+    - Use the same record shape as a real order so 'Convert' is a single
+      status transition rather than a re-write.
+    """
+    use_case = CreateOrderUseCase(
+        order_repository=order_repo,
+        store_repository=store_repo,
+        customer_repository=customer_repo,
+        onboarding_repository=onboarding_repo,
+        event_bus=get_event_bus(),
+    )
+
+    line_items = [
+        CreateOrderLineItemDTO(
+            product_id=item.product_id,
+            product_name=item.product_name,
+            variant_id=item.variant_id,
+            variant_name=item.variant_name,
+            sku=item.sku,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+        )
+        for item in request.line_items
+    ]
+
+    shipping_address = CreateOrderAddressDTO(
+        first_name=request.shipping_address.first_name,
+        last_name=request.shipping_address.last_name,
+        address_line1=request.shipping_address.address_line1,
+        address_line2=request.shipping_address.address_line2,
+        city=request.shipping_address.city,
+        state=request.shipping_address.state,
+        postal_code=request.shipping_address.postal_code,
+        country=request.shipping_address.country,
+        phone=request.shipping_address.phone,
+    )
+
+    billing_address = None
+    if request.billing_address:
+        billing_address = CreateOrderAddressDTO(
+            first_name=request.billing_address.first_name,
+            last_name=request.billing_address.last_name,
+            address_line1=request.billing_address.address_line1,
+            address_line2=request.billing_address.address_line2,
+            city=request.billing_address.city,
+            state=request.billing_address.state,
+            postal_code=request.billing_address.postal_code,
+            country=request.billing_address.country,
+            phone=request.billing_address.phone,
+        )
+
+    dto = CreateOrderDTO(
+        customer_id=request.customer_id,
+        line_items=line_items,
+        shipping_address=shipping_address,
+        billing_address=billing_address,
+        shipping_cost=request.shipping_cost,
+        tax_amount=request.tax_amount,
+        discount_amount=request.discount_amount,
+        currency=request.currency,
+        payment_method=request.payment_method,
+        shipping_method=request.shipping_method,
+        customer_notes=request.customer_notes,
+    )
+
+    result = await use_case.execute(
+        dto=dto,
+        store_id=store.id,
+        user_id=store.owner_id,
+        as_draft=True,
+    )
+
+    return SuccessResponse(
+        data=_order_to_response(result),
+        message="Draft order saved successfully",
+    )
+
+
+@router.post(
+    "/{order_id}/convert",
+    response_model=SuccessResponse[OrderResponse],
+    summary="Convert draft order to a real order",
+    operation_id="convert_draft_order",
+)
+async def convert_draft_order(
+    order_id: Annotated[UUID, Path(description="Draft order ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
+):
+    """Convert a draft order to a live PENDING order.
+
+    Drives the usual `UpdateOrderStatusUseCase` so all the existing
+    side-effects (webhooks, notifications, OrderActivity rows) fire as if
+    the order had just been created.
+    """
+    from src.core.exceptions import EntityNotFoundError
+
+    existing = await order_repo.get_by_id(order_id)
+    if not existing or existing.store_id != store.id:
+        raise EntityNotFoundError("Order", str(order_id))
+    if existing.status.value != "draft":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Only draft orders can be converted (current status: {existing.status.value})",
+        )
+
+    use_case = UpdateOrderStatusUseCase(
+        order_repository=order_repo,
+        store_repository=store_repo,
+        customer_repository=customer_repo,
+        event_bus=get_event_bus(),
+        network_repository=network_repo,
+        funnel_repository=funnel_repo,
+    )
+
+    dto = UpdateOrderStatusDTO(status="pending", reason="Converted from draft")
+    result = await use_case.execute(
+        order_id=order_id,
+        dto=dto,
+        store_id=store.id,
+        user_id=store.owner_id,
+    )
+
+    return SuccessResponse(
+        data=_order_to_response(result),
+        message="Draft converted to order",
+    )
+
+
 @router.get(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[OrderListItemResponse]],
@@ -447,6 +611,13 @@ async def list_orders(
         customer_repository=customer_repo,
     )
 
+    # Drafts only surface through the dedicated /orders/drafts page (or
+    # `?status=draft`). The main orders list excludes them so a half-saved
+    # WhatsApp draft doesn't muddy the merchant's fulfillment queue.
+    from src.core.entities.order import OrderStatus as _OS
+
+    exclude_statuses = [_OS.DRAFT] if order_status is None else None
+
     result = await use_case.execute(
         store_id=store.id,
         user_id=store.owner_id,
@@ -459,6 +630,7 @@ async def list_orders(
         date_to=date_to,
         search=search,
         customer_id=UUID(customer_id) if customer_id else None,
+        exclude_statuses=exclude_statuses,
     )
 
     orders = [_order_list_item_to_response(order) for order in result.orders]
@@ -725,6 +897,9 @@ async def mark_order_paid(
 from src.api.v1.schemas.tenant.order import (
     BulkUpdateOrderStatusRequest,
     BulkUpdateOrderStatusResponse,
+    CreateOrderCommentRequest,
+    OrderActivitiesResponse,
+    OrderActivityResponse,
     OrderTimelineEvent,
     OrderTimelineResponse,
 )
@@ -845,6 +1020,134 @@ async def get_order_timeline(
             events=timeline,
         ),
         message="Order timeline retrieved successfully",
+    )
+
+
+# ============================================================================
+# Order activity stream (staff comments + persisted system events)
+# ============================================================================
+
+
+async def _serialize_activity(
+    activity,
+    user_repo_session,
+) -> OrderActivityResponse:
+    """Hydrate an OrderActivity entity with the author's user info."""
+    user_name: str | None = None
+    user_avatar_url: str | None = None
+
+    if activity.user_id is not None:
+        from sqlalchemy import select as _select
+
+        from src.infrastructure.database.models.public.user import UserModel
+
+        row = await user_repo_session.execute(
+            _select(UserModel).where(UserModel.id == activity.user_id)
+        )
+        user = row.scalar_one_or_none()
+        if user is not None:
+            user_name = f"{user.first_name} {user.last_name}".strip() or user.email
+            user_avatar_url = user.avatar_url
+
+    kind = (
+        activity.kind.value
+        if hasattr(activity.kind, "value")
+        else str(activity.kind).lower()
+    )
+
+    return OrderActivityResponse(
+        id=str(activity.id),
+        order_id=str(activity.order_id),
+        kind=kind,
+        event_type=activity.event_type,
+        body=activity.body,
+        user_id=str(activity.user_id) if activity.user_id else None,
+        user_name=user_name,
+        user_avatar_url=user_avatar_url,
+        metadata=activity.metadata or None,
+        created_at=activity.created_at.isoformat() if activity.created_at else "",
+    )
+
+
+@router.get(
+    "/{order_id}/activities",
+    response_model=SuccessResponse[OrderActivitiesResponse],
+    summary="List order activity stream (staff comments + system events)",
+    operation_id="list_order_activities",
+)
+async def list_order_activities(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    activity_repo: Annotated[
+        OrderActivityRepository, Depends(get_order_activity_repository)
+    ],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    """Return the persisted activity stream for an order, newest first."""
+    from src.core.exceptions import EntityNotFoundError
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        raise EntityNotFoundError("Order", str(order_id))
+
+    offset = (page - 1) * limit
+    activities, total = await activity_repo.list_by_order(
+        order_id=order_id, store_id=store.id, limit=limit, offset=offset
+    )
+
+    items = [await _serialize_activity(a, activity_repo.session) for a in activities]
+
+    return SuccessResponse(
+        data=OrderActivitiesResponse(
+            items=items, total=total, page=page, page_size=limit
+        ),
+        message="Order activities retrieved successfully",
+    )
+
+
+@router.post(
+    "/{order_id}/comments",
+    response_model=SuccessResponse[OrderActivityResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a staff comment to an order",
+    operation_id="create_order_comment",
+)
+async def create_order_comment(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    request: CreateOrderCommentRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    activity_repo: Annotated[
+        OrderActivityRepository, Depends(get_order_activity_repository)
+    ],
+):
+    """Post a staff comment on an order. Visible only to merchant staff."""
+    from src.core.entities.order_activity import OrderActivity, OrderActivityKind
+    from src.core.exceptions import EntityNotFoundError
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        raise EntityNotFoundError("Order", str(order_id))
+
+    activity = OrderActivity(
+        order_id=order_id,
+        store_id=store.id,
+        tenant_id=order.tenant_id,
+        user_id=user_id,
+        kind=OrderActivityKind.COMMENT,
+        event_type="comment",
+        body=request.content,
+    )
+    created = await activity_repo.create(activity)
+
+    response = await _serialize_activity(created, activity_repo.session)
+
+    return SuccessResponse(
+        data=response,
+        message="Comment posted successfully",
     )
 
 

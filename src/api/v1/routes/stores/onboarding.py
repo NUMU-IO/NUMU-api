@@ -16,7 +16,10 @@ from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_store_repository, verify_store_ownership
-from src.api.dependencies.repositories import get_onboarding_repository
+from src.api.dependencies.repositories import (
+    get_onboarding_repository,
+    get_order_repository,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.stores.niche_templates import COUNTRY_DEFAULTS, NICHE_TEMPLATES
 from src.api.v1.schemas.tenant.onboarding import (
@@ -39,7 +42,11 @@ from src.core.entities.onboarding import (
     StoreOnboarding,
 )
 from src.core.entities.store import Store
-from src.infrastructure.repositories import OnboardingRepository, StoreRepository
+from src.infrastructure.repositories import (
+    OnboardingRepository,
+    OrderRepository,
+    StoreRepository,
+)
 
 router = APIRouter(prefix="/{store_id}/onboarding")
 
@@ -87,12 +94,19 @@ async def get_onboarding(
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
 ):
     """Get onboarding progress for a store.
 
     Returns the current onboarding state including all steps,
     completion percentage, and current step. Lazily initializes
     onboarding on first access with create_store already completed.
+
+    Also reconciles steps whose completion can be derived from other
+    tables (e.g. FIRST_ORDER ← orders table) — historically these
+    steps were only ever flipped by the manual order endpoint, so
+    stores whose first order came in via the storefront checkout were
+    stuck at 5/6 forever.
     """
     use_case = GetOnboardingUseCase(
         onboarding_repository=onboarding_repo,
@@ -100,6 +114,23 @@ async def get_onboarding(
     )
 
     result = await use_case.execute(store_id=store.id, user_id=store.owner_id)
+
+    # Lazy reconciliation: if FIRST_ORDER is still pending but the store
+    # has at least one order, complete it. Fire-and-forget; never raises.
+    try:
+        first_order_step = result.steps.get(OnboardingStepKey.FIRST_ORDER.value, {})
+        if first_order_step.get("status") != "completed":
+            order_count = await order_repo.count_by_store(store.id)
+            if order_count > 0:
+                await try_complete_onboarding_step(
+                    onboarding_repo, store.id, OnboardingStepKey.FIRST_ORDER
+                )
+                # Re-read so the response reflects the freshly-completed step.
+                result = await use_case.execute(
+                    store_id=store.id, user_id=store.owner_id
+                )
+    except Exception:
+        pass  # Reconciliation must never block the read.
 
     return SuccessResponse(
         data=_build_onboarding_response(result),

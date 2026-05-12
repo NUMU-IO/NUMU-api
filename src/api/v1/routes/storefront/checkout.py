@@ -9,6 +9,7 @@ using live product prices, and optionally initiates payment.
 import base64
 import json
 import logging
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
@@ -23,13 +24,16 @@ from fastapi import (
     Response,
     status,
 )
+from pydantic import BaseModel, Field
 
 from src.api.dependencies.auth import get_optional_customer
 from src.api.dependencies.repositories import (
+    get_abandoned_checkout_repository,
     get_coupon_repository,
     get_customer_repository,
     get_funnel_event_repository,
     get_network_reputation_repository,
+    get_onboarding_repository,
     get_order_repository,
     get_product_repository,
     get_shipping_zone_repository,
@@ -59,14 +63,17 @@ from src.core.checkout_fields import (
 from src.core.checkout_fields import (
     validate_custom_field_values,
 )
+from src.core.entities.abandoned_checkout import AbandonedCheckout
 from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
 from src.core.value_objects.geography import resolve_governorate
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.repositories import (
+    AbandonedCheckoutRepository,
     CouponRepository,
     CustomerRepository,
+    OnboardingRepository,
     OrderRepository,
     ProductRepository,
     ShippingZoneRepository,
@@ -209,6 +216,13 @@ async def checkout(
     ],
     shipping_repo: Annotated[
         ShippingZoneRepository, Depends(get_shipping_zone_repository)
+    ],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+    abandoned_repo: Annotated[
+        AbandonedCheckoutRepository,
+        Depends(get_abandoned_checkout_repository),
     ],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
@@ -1772,6 +1786,10 @@ async def checkout(
     # src/infrastructure/events/handlers/invoice_on_paid_handler.py.
 
     # Merchant onboarding: send first-order email if this is order #1
+    # AND mark the FIRST_ORDER onboarding step complete. The manual order
+    # endpoint already does this via CreateOrderUseCase, but the storefront
+    # checkout path didn't — so stores whose first order came from a real
+    # customer were stuck at 5/6 "waiting for first order" forever.
     try:
         total_orders = await order_repo.count_by_store(store_id)
         if total_orders == 1:
@@ -1788,8 +1806,42 @@ async def checkout(
                     total=f"{currency} {created_order.total / 100:.2f}",
                     language=store.default_language,
                 )
+
+        # Always try to complete the step (idempotent inside the helper).
+        # Covers the edge case where order #1 came in before this code
+        # was deployed but later orders arrive afterwards.
+        from src.application.use_cases.onboarding.auto_complete import (
+            try_complete_onboarding_step,
+        )
+        from src.core.entities.onboarding import OnboardingStepKey
+
+        await try_complete_onboarding_step(
+            onboarding_repo, store_id, OnboardingStepKey.FIRST_ORDER
+        )
     except Exception as e:
         logger.warning(f"Failed to dispatch first-order onboarding email: {e}")
+
+    # ── Abandoned-checkout reconciliation ────────────────────────────────
+    # The storefront writes an `abandoned_checkouts` row when the customer
+    # adds items to the cart (POST /cart/track). If we find a matching
+    # un-recovered row for this (session_fingerprint, email) pair, mark it
+    # recovered with the resulting order_id so it disappears from the
+    # merchant's Abandoned Checkouts page. Fire-and-forget on failure.
+    try:
+        candidate_email = (
+            current_customer.email if current_customer else request.guest_email
+        )
+        active_cart = await abandoned_repo.find_active_for_session(
+            store_id=store_id,
+            session_fingerprint=request.session_fingerprint,
+            email=candidate_email,
+        )
+        if active_cart is not None:
+            await abandoned_repo.mark_recovered(
+                active_cart.id, order_id=created_order.id
+            )
+    except Exception as e:
+        logger.warning(f"Failed to mark abandoned checkout as recovered: {e}")
 
     # Dispatch async fraud check (fire-and-forget via Celery)
     try:
@@ -1867,3 +1919,154 @@ async def checkout(
         data=checkout_response,
         message="Order created successfully",
     )
+
+
+# ============================================================================
+# Cart tracking — feeds the merchant hub's Abandoned Checkouts page.
+# ============================================================================
+
+
+class CartTrackLineItem(BaseModel):
+    """Snapshot of a single cart line item sent from the storefront."""
+
+    product_id: UUID | None = None
+    product_name: str | None = None
+    variant_id: UUID | None = None
+    variant_name: str | None = None
+    sku: str | None = None
+    quantity: int = 1
+    unit_price: int = 0  # cents
+    total_price: int = 0  # cents
+
+
+class CartTrackRequest(BaseModel):
+    """Payload the storefront sends on cart changes.
+
+    Identity is established by `session_fingerprint` (always present on the
+    storefront — it's the same value used for funnel events) and optionally
+    `email` once the customer fills it in. Both are matched on upsert so the
+    same cart is updated as the customer progresses.
+    """
+
+    session_fingerprint: str = Field(..., min_length=1, max_length=64)
+    line_items: list[CartTrackLineItem] = Field(default_factory=list)
+    email: str | None = Field(None, max_length=254)
+    phone: str | None = Field(None, max_length=32)
+    shipping_address: dict | None = None
+    subtotal: int = 0
+    shipping_cost: int = 0
+    tax_amount: int = 0
+    discount_amount: int = 0
+    total: int = 0
+    currency: str = Field("EGP", min_length=3, max_length=3)
+    coupon_code: str | None = Field(None, max_length=50)
+    utm_source: str | None = Field(None, max_length=200)
+    utm_medium: str | None = Field(None, max_length=200)
+    utm_campaign: str | None = Field(None, max_length=200)
+
+
+@router.post(
+    "/cart/track",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Track storefront cart state for abandoned-checkout recovery",
+    operation_id="cart_track",
+)
+async def cart_track(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    request: CartTrackRequest,
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    abandoned_repo: Annotated[
+        AbandonedCheckoutRepository,
+        Depends(get_abandoned_checkout_repository),
+    ],
+    optional_customer: Annotated[Customer | None, Depends(get_optional_customer)],
+) -> Response:
+    """Upsert the customer's current cart into `abandoned_checkouts`.
+
+    Called by the storefront on every cart change (add/remove/quantity,
+    contact-form blur, etc.). Idempotent: matches the row by
+    `extra_data->>session_fingerprint` OR email, ordered by recency. New
+    rows are created when no match is found.
+
+    Returns 204 — the storefront doesn't need any response body. Failures
+    here are best-effort: the customer can still check out even if we lose
+    a tracking write.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        # Don't 404 here — a 404 on this hot path would spam Sentry from
+        # storefronts that briefly hit a wrong store ID. Silently no-op.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # Skip empty carts — nothing to recover.
+    if not request.line_items:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    candidate_email = optional_customer.email if optional_customer else request.email
+
+    try:
+        existing = await abandoned_repo.find_active_for_session(
+            store_id=store_id,
+            session_fingerprint=request.session_fingerprint,
+            email=candidate_email,
+        )
+
+        now = datetime.now(UTC)
+        line_items_payload = [li.model_dump(mode="json") for li in request.line_items]
+        extra = {
+            "session_fingerprint": request.session_fingerprint,
+        }
+
+        if existing:
+            existing.line_items = line_items_payload
+            existing.email = candidate_email or existing.email
+            existing.phone = request.phone or existing.phone
+            if request.shipping_address is not None:
+                existing.shipping_address = request.shipping_address
+            existing.subtotal = request.subtotal
+            existing.shipping_cost = request.shipping_cost
+            existing.tax_amount = request.tax_amount
+            existing.discount_amount = request.discount_amount
+            existing.total = request.total
+            existing.currency = request.currency
+            if request.coupon_code is not None:
+                existing.coupon_code = request.coupon_code
+            if request.utm_source is not None:
+                existing.utm_source = request.utm_source
+            if request.utm_medium is not None:
+                existing.utm_medium = request.utm_medium
+            if request.utm_campaign is not None:
+                existing.utm_campaign = request.utm_campaign
+            existing.last_activity_at = now
+            existing.extra_data = {**(existing.extra_data or {}), **extra}
+            # Re-activate if it had been auto-marked abandoned: the customer
+            # came back to the cart, so it's in-progress again.
+            existing.abandoned_at = None
+            await abandoned_repo.update(existing)
+        else:
+            new_cart = AbandonedCheckout(
+                store_id=store_id,
+                tenant_id=store.tenant_id,
+                customer_id=optional_customer.id if optional_customer else None,
+                line_items=line_items_payload,
+                email=candidate_email,
+                phone=request.phone,
+                shipping_address=request.shipping_address,
+                subtotal=request.subtotal,
+                shipping_cost=request.shipping_cost,
+                tax_amount=request.tax_amount,
+                discount_amount=request.discount_amount,
+                total=request.total,
+                currency=request.currency,
+                coupon_code=request.coupon_code,
+                utm_source=request.utm_source,
+                utm_medium=request.utm_medium,
+                utm_campaign=request.utm_campaign,
+                last_activity_at=now,
+                extra_data=extra,
+            )
+            await abandoned_repo.create(new_cart)
+    except Exception as e:
+        logger.warning(f"cart_track upsert failed for store={store_id}: {e}")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

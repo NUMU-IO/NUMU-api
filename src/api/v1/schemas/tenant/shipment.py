@@ -66,6 +66,8 @@ class ShipmentListItemResponse(BaseModel):
     id: UUID
     order_id: UUID
     tracking_number: str | None = None
+    tracking_url: str | None = None
+    awb_url: str | None = None
     carrier: str
     status: str
     shipment_type: str

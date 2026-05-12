@@ -46,12 +46,20 @@ class CreateOrderUseCase:
         dto: CreateOrderDTO,
         store_id: UUID,
         user_id: UUID,
+        as_draft: bool = False,
     ) -> OrderDTO:
-        """Create a new order."""
+        """Create a new order.
+
+        When ``as_draft=True`` the order is stored with status=DRAFT and the
+        OrderCreatedEvent is suppressed. Draft orders skip the fulfillment /
+        notification pipeline; they're merchant-only until converted via
+        the dedicated convert endpoint.
+        """
         log = logger.bind(
             store_id=str(store_id),
             user_id=str(user_id),
             customer_id=str(dto.customer_id),
+            as_draft=as_draft,
         )
         log.info("order_create_attempt", item_count=len(dto.line_items))
 
@@ -136,7 +144,7 @@ class CreateOrderUseCase:
             line_items=line_items,
             shipping_address=shipping_address,
             billing_address=billing_address,
-            status=OrderStatus.PENDING,
+            status=OrderStatus.DRAFT if as_draft else OrderStatus.PENDING,
             payment_status=PaymentStatus.PENDING,
             subtotal=subtotal,
             shipping_cost=dto.shipping_cost,
@@ -176,7 +184,10 @@ class CreateOrderUseCase:
             except Exception:
                 pass  # Never block order creation for onboarding
 
-        if self.event_bus:
+        # Drafts are merchant-only; no email, no webhook, no shipment auto-create.
+        # The convert endpoint emits a fresh OrderCreatedEvent when the draft
+        # is promoted to PENDING.
+        if self.event_bus and not as_draft:
             try:
                 self.event_bus.publish(
                     OrderCreatedEvent(

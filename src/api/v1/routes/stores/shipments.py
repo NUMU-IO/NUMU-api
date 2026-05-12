@@ -72,6 +72,8 @@ def _shipment_to_list_item(s: Shipment) -> ShipmentListItemResponse:
         id=s.id,
         order_id=s.order_id,
         tracking_number=s.tracking_number,
+        tracking_url=s.tracking_url,
+        awb_url=s.awb_url,
         carrier=s.carrier,
         status=s.status.value if isinstance(s.status, ShipmentStatus) else s.status,
         shipment_type=s.shipment_type,
@@ -317,6 +319,10 @@ async def list_shipments(
     date_from: datetime | None = Query(None),
     date_to: datetime | None = Query(None),
     has_cod: bool | None = Query(None),
+    order_id: UUID | None = Query(None, description="Filter by order ID"),
+    has_label: bool | None = Query(
+        None, description="Filter by whether AWB / shipping label exists"
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
 ):
@@ -330,6 +336,8 @@ async def list_shipments(
         date_from=date_from,
         date_to=date_to,
         has_cod=has_cod,
+        order_id=order_id,
+        has_label=has_label,
     )
     return SuccessResponse(
         data=[_shipment_to_list_item(s) for s in shipments],

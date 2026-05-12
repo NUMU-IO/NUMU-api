@@ -338,6 +338,28 @@ class CustomerResponse(BaseModel):
     created_at: str | None = Field(None, description="ISO 8601 creation timestamp")
     updated_at: str | None = Field(None, description="ISO 8601 last-update timestamp")
 
+    # Pydantic v2 is strict about str typing — passing a UUID / Email /
+    # PhoneNumber value object straight from the ORM fails with "Input
+    # should be a valid string". Callers in the routes pass
+    # `customer.id` (UUID), `customer.email` (Email VO), `customer.phone`
+    # (PhoneNumber VO) directly into these fields. Coerce here once
+    # instead of touching every call site.
+    @field_validator(
+        "id",
+        "store_id",
+        "default_address_id",
+        "email",
+        "phone",
+        mode="before",
+    )
+    @classmethod
+    def _stringify(cls, v: object) -> object:
+        if v is None:
+            return v
+        # UUID, Email, PhoneNumber all have a sensible `__str__`. Strings
+        # pass through unchanged.
+        return str(v)
+
 
 class CustomerTokenResponse(BaseModel):
     """Customer token response schema."""

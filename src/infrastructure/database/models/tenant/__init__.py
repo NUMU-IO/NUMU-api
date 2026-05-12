@@ -4,6 +4,9 @@ These models use tenant_id discriminator for multi-tenancy.
 They include all e-commerce related data that is specific to a store.
 """
 
+from src.infrastructure.database.models.tenant.abandoned_checkout import (
+    AbandonedCheckoutModel,
+)
 from src.infrastructure.database.models.tenant.address import CustomerAddressModel
 from src.infrastructure.database.models.tenant.analytics_rollup import (
     AnalyticsDailyRollupModel,
@@ -55,6 +58,7 @@ from src.infrastructure.database.models.tenant.network_reputation import (
     NetworkReputationModel,
 )
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.order_activity import OrderActivityModel
 from src.infrastructure.database.models.tenant.otp_code import OtpCodeModel
 from src.infrastructure.database.models.tenant.page_view import PageViewModel
 from src.infrastructure.database.models.tenant.payment_link_session import (
@@ -120,6 +124,7 @@ from src.infrastructure.database.models.tenant.whatsapp_template import (
 )
 
 __all__ = [
+    "AbandonedCheckoutModel",
     "AnalyticsDailyRollupModel",
     "AutomationLogModel",
     "AutomationRuleModel",
@@ -143,6 +148,7 @@ __all__ = [
     "NetworkReputationModel",
     "InstapayIntentModel",
     "OrderModel",
+    "OrderActivityModel",
     "PageViewModel",
     "PaymentLinkSessionModel",
     "PaymentProofModel",
