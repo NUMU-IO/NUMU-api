@@ -21,6 +21,9 @@ Provides REST endpoints for store CRUD operations and nested resources:
 
 from fastapi import APIRouter
 
+from src.api.v1.routes.stores import (
+    abandoned_checkouts as abandoned_checkouts_module,
+)
 from src.api.v1.routes.stores import ai as ai_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
@@ -88,6 +91,9 @@ router.include_router(products_module.router, tags=["Store Products"])
 # non-UUID literal segment).
 router.include_router(payment_proofs_module.router, tags=["Store InstaPay Proofs"])
 router.include_router(orders_module.router, tags=["Store Orders"])
+router.include_router(
+    abandoned_checkouts_module.router, tags=["Store Abandoned Checkouts"]
+)
 router.include_router(order_import_module.router, tags=["Store Order Import"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(customers_module.router, tags=["Store Customers"])
@@ -97,9 +103,7 @@ router.include_router(inventory_module.router, tags=["Store Inventory"])
 router.include_router(inventory_levels_module.router, tags=["Inventory Levels"])
 router.include_router(inventory_transfers_module.router, tags=["Inventory Transfers"])
 router.include_router(locations_module.router, tags=["Store Locations"])
-router.include_router(
-    marketing_campaigns_module.router, tags=["Marketing Campaigns"]
-)
+router.include_router(marketing_campaigns_module.router, tags=["Marketing Campaigns"])
 router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(
     analytics_realtime_module.router, tags=["Store Analytics Realtime"]

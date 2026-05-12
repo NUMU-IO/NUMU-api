@@ -43,7 +43,10 @@ from src.api.v1.schemas.tenant.onboarding import (
 from src.api.v1.schemas.tenant.order import (
     BulkUpdateOrderStatusRequest,
     BulkUpdateOrderStatusResponse,
+    CreateOrderCommentRequest,
     CreateOrderRequest,
+    OrderActivitiesResponse,
+    OrderActivityResponse,
     OrderAddressRequest,
     OrderAddressResponse,
     OrderDetailEnrichedResponse,
@@ -140,7 +143,10 @@ __all__ = [
     # Order
     "BulkUpdateOrderStatusRequest",
     "BulkUpdateOrderStatusResponse",
+    "CreateOrderCommentRequest",
     "CreateOrderRequest",
+    "OrderActivitiesResponse",
+    "OrderActivityResponse",
     "OrderAddressRequest",
     "OrderAddressResponse",
     "OrderDetailEnrichedResponse",

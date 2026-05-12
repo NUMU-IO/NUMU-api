@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.dependencies import verify_store_ownership
-from src.api.dependencies.feature_flags import require_feature_flag
 from src.api.dependencies.promotion_preview import (
     PREVIEW_TOKEN_TTL,
     issue_preview_token,
@@ -77,11 +76,10 @@ from src.infrastructure.repositories.promotion_repository import (
 
 router = APIRouter(
     prefix="/{store_id}/promotions",
-    # Per the offers-v2 rollout plan (step 14 §2): merchant promotions
-    # endpoints 404 until the tenant has `ff_promotions_v2` enabled.
-    # Returning 404 (not 403) avoids leaking that the feature exists
-    # while it's being rolled out in waves.
-    dependencies=[Depends(require_feature_flag("ff_promotions_v2"))],
+    # `ff_promotions_v2` gate removed — Promotions is now generally
+    # available. Was hiding the entire router (including the preview-token
+    # endpoint the merchant hub calls on every promotion edit), so every
+    # API request 404'd for tenants without the flag.
 )
 
 

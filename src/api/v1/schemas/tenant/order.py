@@ -457,3 +457,41 @@ class BulkUpdateOrderStatusResponse(BaseModel):
     errors: list[dict] = Field(
         default_factory=list, description="Error details for failed updates"
     )
+
+
+class OrderActivityResponse(BaseModel):
+    """Single entry in an order's activity stream (comment or system event)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    order_id: str
+    kind: str  # "comment" | "system_event"
+    event_type: str | None = None
+    body: str
+    user_id: str | None = None
+    user_name: str | None = None
+    user_avatar_url: str | None = None
+    metadata: dict | None = None
+    created_at: str
+
+
+class CreateOrderCommentRequest(BaseModel):
+    """Body for posting a staff comment on an order."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"content": "Customer called to confirm delivery slot."}
+        }
+    )
+
+    content: SanitizedStr = Field(..., min_length=1, max_length=4000)
+
+
+class OrderActivitiesResponse(BaseModel):
+    """Paginated activity feed for a single order."""
+
+    items: list[OrderActivityResponse]
+    total: int
+    page: int
+    page_size: int

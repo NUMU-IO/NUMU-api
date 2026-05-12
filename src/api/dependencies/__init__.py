@@ -35,6 +35,7 @@ from src.api.dependencies.pagination import (
     get_cursor_values,
 )
 from src.api.dependencies.repositories import (
+    get_abandoned_checkout_repository,
     get_category_repository,
     get_coupon_repository,
     get_customer_address_repository,
@@ -43,6 +44,7 @@ from src.api.dependencies.repositories import (
     get_email_template_repository,
     get_feedback_repository,
     get_onboarding_repository,
+    get_order_activity_repository,
     get_order_repository,
     get_product_bundle_repository,
     get_product_repository,
@@ -81,6 +83,7 @@ __all__ = [
     "require_admin_2fa",
     "verify_store_ownership",
     # Repositories
+    "get_abandoned_checkout_repository",
     "get_category_repository",
     "get_coupon_repository",
     "get_email_log_repository",
@@ -94,6 +97,7 @@ __all__ = [
     "get_customer_address_repository",
     "get_feedback_repository",
     "get_onboarding_repository",
+    "get_order_activity_repository",
     "get_order_repository",
     "get_refund_repository",
     "get_shipment_repository",

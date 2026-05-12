@@ -15,6 +15,10 @@ from src.core.value_objects.money import Currency, Money
 class OrderStatus(StrEnum):
     """Order status enumeration."""
 
+    # Merchant-only state. A staff-saved order that isn't billable yet
+    # and is invisible to the customer / fulfillment pipeline. Lives
+    # here until the merchant clicks "convert" → moves to PENDING.
+    DRAFT = "draft"
     # An order awaiting a COD deposit payment. Lives in this state
     # from creation until the gateway webhook confirms the deposit,
     # at which point it transitions to CONFIRMED. If the deposit's
@@ -40,6 +44,12 @@ class OrderStatus(StrEnum):
 # Valid status transitions map
 # Key: current status, Value: list of valid next statuses
 VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
+    OrderStatus.DRAFT: [
+        # Standard conversion path — merchant clicks "convert to order".
+        OrderStatus.PENDING,
+        # Merchant deletes the draft.
+        OrderStatus.CANCELLED,
+    ],
     OrderStatus.PENDING_DEPOSIT: [
         # Deposit paid → order is confirmed; main amount still collected on delivery.
         OrderStatus.CONFIRMED,

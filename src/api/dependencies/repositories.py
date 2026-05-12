@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.infrastructure.repositories import (
+    AbandonedCheckoutRepository,
     CategoryRepository,
     CouponRepository,
     CredentialRepository,
@@ -16,6 +17,7 @@ from src.infrastructure.repositories import (
     InvoiceRepository,
     MessageLogRepository,
     OnboardingRepository,
+    OrderActivityRepository,
     OrderRepository,
     PageViewRepository,
     ProductBundleRepository,
@@ -185,6 +187,20 @@ def get_order_repository(
 ) -> OrderRepository:
     """Get order repository dependency."""
     return OrderRepository(session)
+
+
+def get_order_activity_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> OrderActivityRepository:
+    """Get order activity repository dependency."""
+    return OrderActivityRepository(session)
+
+
+def get_abandoned_checkout_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> AbandonedCheckoutRepository:
+    """Get abandoned-checkout repository dependency."""
+    return AbandonedCheckoutRepository(session)
 
 
 def get_refund_repository(

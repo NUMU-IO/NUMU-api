@@ -61,6 +61,11 @@ from src.infrastructure.events.handlers.instapay_notification_handler import (
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
 )
+from src.infrastructure.events.handlers.order_activity_handler import (
+    handle_order_created_activity,
+    handle_order_paid_activity,
+    handle_order_status_changed_activity,
+)
 from src.infrastructure.events.handlers.otp_trust_handler import (
     handle_otp_verified_trust_signal,
 )
@@ -123,14 +128,17 @@ def create_event_bus() -> EventBus:
     bus.subscribe(OrderStatusChangedEvent, handle_email_notification)
     bus.subscribe(OrderStatusChangedEvent, handle_whatsapp_notification)
     bus.subscribe(OrderStatusChangedEvent, handle_activity_log)
+    bus.subscribe(OrderStatusChangedEvent, handle_order_status_changed_activity)
     bus.subscribe(OrderStatusChangedEvent, handle_webhook_order_status_changed)
 
     # Auto-create shipment on order confirmation
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_shipment)
 
-    # Order lifecycle webhooks
+    # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
+    bus.subscribe(OrderCreatedEvent, handle_order_created_activity)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
+    bus.subscribe(OrderPaidEvent, handle_order_paid_activity)
     # offers-v2: emit `convert` PromotionEvent for every promotion
     # attributable to a paid order so merchant analytics show real
     # conversion totals (not just redemptions).

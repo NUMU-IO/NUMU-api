@@ -49,6 +49,7 @@ class ListOrdersUseCase:
         date_to: datetime | None = None,
         search: str | None = None,
         customer_id: UUID | None = None,
+        exclude_statuses: list[OrderStatus] | None = None,
     ) -> ListOrdersResult:
         """List orders for a store with optional filters."""
         # Verify store exists and user has permission
@@ -101,6 +102,7 @@ class ListOrdersUseCase:
                 date_from=date_from,
                 date_to=date_to,
                 customer_id=customer_id,
+                exclude_statuses=exclude_statuses,
             )
             total = await self.order_repository.count_by_store(
                 store_id,
@@ -110,6 +112,7 @@ class ListOrdersUseCase:
                 date_from=date_from,
                 date_to=date_to,
                 customer_id=customer_id,
+                exclude_statuses=exclude_statuses,
             )
 
         # Get customer names for orders

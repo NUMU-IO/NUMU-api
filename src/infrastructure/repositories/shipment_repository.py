@@ -186,12 +186,20 @@ class ShipmentRepository(IShipmentRepository):
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         has_cod: bool | None = None,
+        order_id: UUID | None = None,
+        has_label: bool | None = None,
     ) -> list[Shipment]:
         query = select(ShipmentModel).where(ShipmentModel.store_id == store_id)
         if status:
             query = query.where(ShipmentModel.status == status)
         if carrier:
             query = query.where(ShipmentModel.carrier == carrier)
+        if order_id:
+            query = query.where(ShipmentModel.order_id == order_id)
+        if has_label is True:
+            query = query.where(ShipmentModel.awb_url.isnot(None))
+        elif has_label is False:
+            query = query.where(ShipmentModel.awb_url.is_(None))
         if date_from:
             query = query.where(ShipmentModel.created_at >= date_from)
         if date_to:
