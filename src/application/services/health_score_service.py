@@ -14,7 +14,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import String as SAString
+from sqlalchemy import and_, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.models.tenant.order import OrderModel
@@ -32,12 +33,16 @@ WEIGHTS = {
     "response_time": 0.10,
 }
 
-# Thresholds for each metric (maps metric value to a 0-100 sub-score)
-# delivery_success_rate: 95%+ = 100, 80% = 50, <60% = 0
-# cod_acceptance_rate: 90%+ = 100, 70% = 50, <50% = 0
-# order_completion_rate: 95%+ = 100, 80% = 50, <60% = 0
-# return_rate: 0% = 100, 5% = 70, 10% = 40, >20% = 0 (inverted - lower is better)
-# response_time: <2h = 100, <12h = 70, <24h = 40, >48h = 0 (inverted - lower is better)
+# Minimum sample sizes before a sub-score is treated as meaningful.
+# Below these counts, the sub-score is excluded from the weighted average
+# (and its weight is redistributed across the remaining metrics). This
+# prevents a brand-new store with one delivered order from getting a
+# perfect grade.
+MIN_SHIPMENTS_FOR_DELIVERY = 5
+MIN_COD_SHIPMENTS = 3
+MIN_ORDERS_FOR_COMPLETION = 5
+MIN_ORDERS_FOR_RETURN_RATE = 5
+MIN_ORDERS_FOR_RESPONSE_TIME = 3
 
 
 def _rate_to_score(rate: float, thresholds: list[tuple[float, int]]) -> int:
@@ -116,6 +121,74 @@ RESPONSE_TIME_THRESHOLDS = [
 ]
 
 
+_RECS = {
+    "delivery": {
+        "ar": "معدل التوصيل الناجح منخفض — تأكد من صحة عناوين العملاء قبل الشحن",
+        "en": "Low delivery success rate — verify customer addresses before shipping",
+    },
+    "cod": {
+        "ar": "معدل رفض الدفع عند الاستلام مرتفع — فعّل تأكيد الطلب عبر OTP",
+        "en": "High COD rejection rate — enable order confirmation via OTP",
+    },
+    "completion": {
+        "ar": "معدل إتمام الطلبات منخفض — تابع الطلبات المعلقة وسرّع التجهيز",
+        "en": "Low order completion rate — follow up on pending orders and speed up fulfillment",
+    },
+    "returns": {
+        "ar": "معدل الإرجاع مرتفع — راجع وصف المنتجات وجودة الصور",
+        "en": "High return rate — review product descriptions and image quality",
+    },
+    "speed": {
+        "ar": "سرعة التجهيز بطيئة — حاول شحن الطلبات خلال 24 ساعة",
+        "en": "Slow fulfillment speed — try to ship orders within 24 hours",
+    },
+    "great": {
+        "ar": "أداء متجرك ممتاز! استمر على هذا المستوى 🎉",
+        "en": "Your store is performing great! Keep it up 🎉",
+    },
+}
+
+
+def build_recommendations(
+    sub_scores: dict[str, int],
+    final_score: int,
+    insufficient_metrics: set[str],
+    lang: str = "ar",
+) -> list[str]:
+    """Build localized recommendations from sub-scores.
+
+    Skips metrics flagged as insufficient_data so we don't nag a new
+    merchant about a metric we can't measure yet.
+    """
+    lang = lang if lang in ("ar", "en") else "ar"
+    recs: list[str] = []
+
+    if (
+        "delivery_success" not in insufficient_metrics
+        and sub_scores["delivery_success"] < 60
+    ):
+        recs.append(_RECS["delivery"][lang])
+    if (
+        "cod_acceptance" not in insufficient_metrics
+        and sub_scores["cod_acceptance"] < 60
+    ):
+        recs.append(_RECS["cod"][lang])
+    if (
+        "order_completion" not in insufficient_metrics
+        and sub_scores["order_completion"] < 60
+    ):
+        recs.append(_RECS["completion"][lang])
+    if "low_return" not in insufficient_metrics and sub_scores["low_return"] < 50:
+        recs.append(_RECS["returns"][lang])
+    if "response_time" not in insufficient_metrics and sub_scores["response_time"] < 50:
+        recs.append(_RECS["speed"][lang])
+
+    if not recs and final_score >= 80 and len(insufficient_metrics) < len(WEIGHTS):
+        recs.append(_RECS["great"][lang])
+
+    return recs
+
+
 async def calculate_store_health_score(
     session: AsyncSession,
     store_id: UUID,
@@ -126,23 +199,15 @@ async def calculate_store_health_score(
 
     Returns:
         {
-            "score": int (0-100),
-            "grade": str (A/B/C/D/F),
-            "metrics": {
-                "delivery_success_rate": float,
-                "cod_acceptance_rate": float,
-                "order_completion_rate": float,
-                "return_rate": float,
-                "avg_response_hours": float,
-            },
-            "sub_scores": {
-                "delivery_success": int,
-                "cod_acceptance": int,
-                "order_completion": int,
-                "low_return": int,
-                "response_time": int,
-            },
+            "score": int | None (0-100, or None when no data at all),
+            "grade": str (A/B/C/D/F or "—" when no data),
+            "insufficient_data": bool,  # True when no orders AND no shipments
+            "insufficient_metrics": list[str],  # metric keys with not enough data
+            "metrics": {...},
+            "sub_scores": {...},
             "recommendations": list[str],
+            "orders_analyzed": int,
+            "shipments_analyzed": int,
             "calculated_at": str (ISO),
         }
     """
@@ -176,7 +241,7 @@ async def calculate_store_health_score(
     total_shipments = ship_row.total or 0
     delivered_shipments = ship_row.delivered or 0
     delivery_success_rate = (
-        (delivered_shipments / total_shipments) if total_shipments > 0 else 1.0
+        (delivered_shipments / total_shipments) if total_shipments > 0 else 0.0
     )
 
     # === 2. COD Acceptance Rate ===
@@ -191,7 +256,7 @@ async def calculate_store_health_score(
                             ShipmentModel.status == "delivered",
                             ShipmentModel.cod_collected.is_(True),
                         ),
-                        1,  # noqa: E712
+                        1,
                     ),
                     else_=0,
                 )
@@ -208,14 +273,11 @@ async def calculate_store_health_score(
     cod_row = cod_stats.one()
     total_cod = cod_row.total_cod or 0
     cod_collected = cod_row.cod_collected or 0
-    cod_acceptance_rate = (cod_collected / total_cod) if total_cod > 0 else 1.0
+    cod_acceptance_rate = (cod_collected / total_cod) if total_cod > 0 else 0.0
 
     # === 3. Order Completion Rate ===
-    # Orders that reached DELIVERED / total orders (excluding very recent)
-    # Cast status to text to bypass SQLAlchemy Enum type mapping issues
-    from sqlalchemy import String as SAString
-    from sqlalchemy import cast
-
+    # Orders that reached DELIVERED / total orders (excluding very recent
+    # in-flight orders that haven't had a chance to reach delivery yet).
     status_text = cast(OrderModel.status, SAString)
     order_stats = await session.execute(
         select(
@@ -227,16 +289,14 @@ async def calculate_store_health_score(
                 case(
                     (
                         status_text.in_([
-                            "CANCELLED",
-                            "cancelled",
-                            "payment_failed",
-                            "PAYMENT_FAILED",
+                            "RETURNED",
+                            "returned",
                         ]),
                         1,
                     ),
                     else_=0,
                 )
-            ).label("cancelled"),
+            ).label("returned"),
         ).where(
             and_(
                 OrderModel.store_id == store_id,
@@ -249,33 +309,48 @@ async def calculate_store_health_score(
     order_row = order_stats.one()
     total_orders = order_row.total or 0
     completed_orders = order_row.completed or 0
+    returned_orders = order_row.returned or 0
     order_completion_rate = (
-        (completed_orders / total_orders) if total_orders > 0 else 1.0
+        (completed_orders / total_orders) if total_orders > 0 else 0.0
     )
 
     # === 4. Return Rate ===
-    # Refunds / total completed orders
+    # Two signals combined:
+    #   (a) Approved/processing/completed refunds via the Refund flow
+    #   (b) Orders that landed in RETURNED status (manual RTO recorded by
+    #       merchants without a connected carrier).
+    # Denominator = delivered orders + returned orders (i.e. all orders
+    # that actually shipped to a customer in the period).
     refund_status_text = cast(RefundModel.status, SAString)
     refund_stats = await session.execute(
         select(func.count().label("total_refunds")).where(
             and_(
                 RefundModel.store_id == store_id,
                 RefundModel.created_at >= period_start,
-                refund_status_text.in_(["APPROVED", "COMPLETED", "PROCESSING"]),
+                or_(
+                    refund_status_text.in_(["APPROVED", "COMPLETED", "PROCESSING"]),
+                    refund_status_text.in_(["approved", "completed", "processing"]),
+                ),
             )
         )
     )
     total_refunds = refund_stats.scalar() or 0
-    return_rate = (total_refunds / completed_orders) if completed_orders > 0 else 0.0
+
+    return_signals = total_refunds + returned_orders
+    return_denominator = completed_orders + returned_orders
+    return_rate = (
+        (return_signals / return_denominator) if return_denominator > 0 else 0.0
+    )
 
     # === 5. Average Response Time ===
     # Time from order creation to fulfillment (fulfilled_at - created_at)
     response_stats = await session.execute(
         select(
+            func.count().label("fulfilled_count"),
             func.avg(
                 func.extract("epoch", OrderModel.fulfilled_at - OrderModel.created_at)
                 / 3600
-            ).label("avg_hours")
+            ).label("avg_hours"),
         ).where(
             and_(
                 OrderModel.store_id == store_id,
@@ -284,7 +359,29 @@ async def calculate_store_health_score(
             )
         )
     )
-    avg_response_hours = float(response_stats.scalar() or 24.0)
+    resp_row = response_stats.one()
+    fulfilled_count = resp_row.fulfilled_count or 0
+    avg_response_hours = float(resp_row.avg_hours or 0.0)
+
+    # === Detect insufficient-data metrics ===
+    # When a metric doesn't have enough samples, we exclude it from the
+    # weighted average and redistribute its weight pro-rata across the
+    # remaining metrics. If everything is below threshold we surface
+    # `insufficient_data: True` so the UI can show a friendly empty state
+    # instead of a misleading grade.
+    insufficient_metrics: set[str] = set()
+    if total_shipments < MIN_SHIPMENTS_FOR_DELIVERY:
+        insufficient_metrics.add("delivery_success")
+    if total_cod < MIN_COD_SHIPMENTS:
+        insufficient_metrics.add("cod_acceptance")
+    if total_orders < MIN_ORDERS_FOR_COMPLETION:
+        insufficient_metrics.add("order_completion")
+    if return_denominator < MIN_ORDERS_FOR_RETURN_RATE:
+        insufficient_metrics.add("low_return")
+    if fulfilled_count < MIN_ORDERS_FOR_RESPONSE_TIME:
+        insufficient_metrics.add("response_time")
+
+    insufficient_data = total_shipments == 0 and total_orders == 0 and total_cod == 0
 
     # === Calculate sub-scores ===
     sub_scores = {
@@ -301,67 +398,48 @@ async def calculate_store_health_score(
         "response_time": _rate_to_score(avg_response_hours, RESPONSE_TIME_THRESHOLDS),
     }
 
-    # === Weighted final score ===
-    final_score = int(sum(sub_scores[key] * WEIGHTS[key] for key in WEIGHTS))
-    final_score = max(0, min(100, final_score))
-
-    # === Grade ===
-    if final_score >= 90:
-        grade = "A"
-    elif final_score >= 75:
-        grade = "B"
-    elif final_score >= 60:
-        grade = "C"
-    elif final_score >= 40:
-        grade = "D"
+    # === Weighted final score over metrics that have enough data ===
+    if insufficient_data:
+        final_score: int | None = None
+        grade = "—"
     else:
-        grade = "F"
+        usable = {k: v for k, v in WEIGHTS.items() if k not in insufficient_metrics}
+        if not usable:
+            # Some samples exist, but none reach the per-metric threshold.
+            # Fall back to a flat average so the merchant still sees a number.
+            usable = WEIGHTS
+            insufficient_metrics.clear()
 
-    # === Recommendations ===
-    _recs = {
-        "delivery": {
-            "ar": "معدل التوصيل الناجح منخفض — تأكد من صحة عناوين العملاء قبل الشحن",
-            "en": "Low delivery success rate — verify customer addresses before shipping",
-        },
-        "cod": {
-            "ar": "معدل رفض الدفع عند الاستلام مرتفع — فعّل تأكيد الطلب عبر OTP",
-            "en": "High COD rejection rate — enable order confirmation via OTP",
-        },
-        "completion": {
-            "ar": "معدل إتمام الطلبات منخفض — تابع الطلبات المعلقة وسرّع التجهيز",
-            "en": "Low order completion rate — follow up on pending orders and speed up fulfillment",
-        },
-        "returns": {
-            "ar": "معدل الإرجاع مرتفع — راجع وصف المنتجات وجودة الصور",
-            "en": "High return rate — review product descriptions and image quality",
-        },
-        "speed": {
-            "ar": "سرعة التجهيز بطيئة — حاول شحن الطلبات خلال 24 ساعة",
-            "en": "Slow fulfillment speed — try to ship orders within 24 hours",
-        },
-        "great": {
-            "ar": "أداء متجرك ممتاز! استمر على هذا المستوى 🎉",
-            "en": "Your store is performing great! Keep it up 🎉",
-        },
-    }
-    recommendations = []
-    if sub_scores["delivery_success"] < 60:
-        recommendations.append(_recs["delivery"][lang])
-    if sub_scores["cod_acceptance"] < 60:
-        recommendations.append(_recs["cod"][lang])
-    if sub_scores["order_completion"] < 60:
-        recommendations.append(_recs["completion"][lang])
-    if sub_scores["low_return"] < 50:
-        recommendations.append(_recs["returns"][lang])
-    if sub_scores["response_time"] < 50:
-        recommendations.append(_recs["speed"][lang])
+        total_weight = sum(usable.values())
+        final_score = int(
+            sum(sub_scores[k] * (usable[k] / total_weight) for k in usable)
+        )
+        final_score = max(0, min(100, final_score))
 
-    if not recommendations and final_score >= 80:
-        recommendations.append(_recs["great"][lang])
+        # === Grade ===
+        if final_score >= 90:
+            grade = "A"
+        elif final_score >= 75:
+            grade = "B"
+        elif final_score >= 60:
+            grade = "C"
+        elif final_score >= 40:
+            grade = "D"
+        else:
+            grade = "F"
+
+    recommendations = build_recommendations(
+        sub_scores=sub_scores,
+        final_score=final_score or 0,
+        insufficient_metrics=insufficient_metrics,
+        lang=lang,
+    )
 
     return {
         "score": final_score,
         "grade": grade,
+        "insufficient_data": insufficient_data,
+        "insufficient_metrics": sorted(insufficient_metrics),
         "metrics": {
             "delivery_success_rate": round(delivery_success_rate * 100, 1),
             "cod_acceptance_rate": round(cod_acceptance_rate * 100, 1),
