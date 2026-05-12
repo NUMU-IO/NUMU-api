@@ -5071,6 +5071,23 @@ THEME_DEFAULT_TEMPLATES["vionne"] = {
                 "slide_3_cta_link": "/about",
             },
         },
+        "marquee_main": {
+            "id": "marquee_main",
+            "type": "marquee",
+            "settings": {
+                "item_1": "FREE SHIPPING ABOVE 1500 EGP",
+                "item_2": "NEW COLLECTION",
+                "item_3": "WORLDWIDE DELIVERY",
+                "separator": "dot",
+                "size": "sm",
+                "color_scheme": "ink",
+                "direction": "left",
+                "speed_seconds": 30,
+                "pause_on_hover": True,
+                "padding_y": 14,
+                "show_borders": False,
+            },
+        },
         "ugc_main": {
             "id": "ugc_main",
             "type": "ugc-carousel",
@@ -5210,6 +5227,7 @@ THEME_DEFAULT_TEMPLATES["vionne"] = {
     },
     "order": [
         "hero_slideshow",
+        "marquee_main",
         "ugc_main",
         "featured_printed",
         "featured_plain",
@@ -5305,6 +5323,235 @@ _PAGE_TEMPLATES: dict[str, dict[str, Any]] = {
     },
 }
 
+# ── Per-theme section schema overrides ───────────────────────────────────────
+# Themes can extend or replace any section type's schema. The merchant hub
+# fetches /storefront/themes/{theme_id}/schemas and builds the editor UI from
+# the returned `sections`, so this is the only place a theme-specific control
+# (e.g. Vionne's marquee items 1..6 / separator / colour scheme) can be made
+# visible and editable in the dashboard.
+#
+# Mapping: {theme_id: {section_type: full_schema_dict}}
+# When a theme + section is present here, it REPLACES the shared schema for
+# that section in this theme's schema bundle. Other themes still see the
+# shared default.
+
+THEME_SECTION_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
+    "vionne": {
+        "marquee": {
+            "type": "marquee",
+            "name": "Scrolling Banner",
+            "nameAr": "شريط متحرك",
+            "settings": [
+                {
+                    "key": "item_1",
+                    "type": "text",
+                    "label": "Item 1",
+                    "labelAr": "عنصر 1",
+                    "default": "FREE SHIPPING ABOVE 1500 EGP",
+                    "group": "Content",
+                    "groupAr": "المحتوى",
+                },
+                {
+                    "key": "item_2",
+                    "type": "text",
+                    "label": "Item 2",
+                    "labelAr": "عنصر 2",
+                    "default": "NEW COLLECTION",
+                    "group": "Content",
+                    "groupAr": "المحتوى",
+                },
+                {
+                    "key": "item_3",
+                    "type": "text",
+                    "label": "Item 3",
+                    "labelAr": "عنصر 3",
+                    "default": "WORLDWIDE DELIVERY",
+                    "group": "Content",
+                    "groupAr": "المحتوى",
+                },
+                {
+                    "key": "item_4",
+                    "type": "text",
+                    "label": "Item 4",
+                    "labelAr": "عنصر 4",
+                    "default": "",
+                    "group": "Content",
+                    "groupAr": "المحتوى",
+                },
+                {
+                    "key": "item_5",
+                    "type": "text",
+                    "label": "Item 5",
+                    "labelAr": "عنصر 5",
+                    "default": "",
+                    "group": "Content",
+                    "groupAr": "المحتوى",
+                },
+                {
+                    "key": "item_6",
+                    "type": "text",
+                    "label": "Item 6",
+                    "labelAr": "عنصر 6",
+                    "default": "",
+                    "group": "Content",
+                    "groupAr": "المحتوى",
+                },
+                {
+                    "key": "separator",
+                    "type": "select",
+                    "label": "Separator",
+                    "labelAr": "الفاصل",
+                    "default": "dot",
+                    "options": [
+                        {"value": "dot", "label": "• Dot"},
+                        {"value": "slash", "label": "/ Slash"},
+                        {"value": "pipe", "label": "| Pipe"},
+                        {"value": "star", "label": "★ Star"},
+                        {"value": "diamond", "label": "◆ Diamond"},
+                        {"value": "arrow", "label": "→ Arrow"},
+                        {"value": "dash", "label": "— Dash"},
+                        {"value": "none", "label": "(none)"},
+                    ],
+                    "group": "Content",
+                    "groupAr": "المحتوى",
+                },
+                {
+                    "key": "size",
+                    "type": "select",
+                    "label": "Text size",
+                    "labelAr": "حجم النص",
+                    "default": "sm",
+                    "options": [
+                        {"value": "sm", "label": "Small"},
+                        {"value": "md", "label": "Medium"},
+                        {"value": "lg", "label": "Large"},
+                        {"value": "xl", "label": "Extra Large"},
+                    ],
+                    "group": "Appearance",
+                    "groupAr": "المظهر",
+                },
+                {
+                    "key": "color_scheme",
+                    "type": "select",
+                    "label": "Color scheme",
+                    "labelAr": "نظام الألوان",
+                    "default": "ink",
+                    "options": [
+                        {"value": "ink", "label": "Dark on light"},
+                        {"value": "light", "label": "Light on dark"},
+                        {"value": "band", "label": "Soft band"},
+                        {"value": "accent", "label": "Accent (sale)"},
+                        {"value": "custom", "label": "Custom"},
+                    ],
+                    "group": "Appearance",
+                    "groupAr": "المظهر",
+                },
+                {
+                    "key": "custom_bg",
+                    "type": "color",
+                    "label": "Custom background",
+                    "labelAr": "خلفية مخصصة",
+                    "default": "#111111",
+                    "group": "Appearance",
+                    "groupAr": "المظهر",
+                },
+                {
+                    "key": "custom_fg",
+                    "type": "color",
+                    "label": "Custom text color",
+                    "labelAr": "لون النص",
+                    "default": "#ffffff",
+                    "group": "Appearance",
+                    "groupAr": "المظهر",
+                },
+                {
+                    "key": "show_borders",
+                    "type": "checkbox",
+                    "label": "Show top & bottom borders",
+                    "labelAr": "إظهار الحدود",
+                    "default": False,
+                    "group": "Appearance",
+                    "groupAr": "المظهر",
+                },
+                {
+                    "key": "padding_y",
+                    "type": "range",
+                    "label": "Vertical padding",
+                    "labelAr": "المسافة العمودية",
+                    "default": 14,
+                    "min": 4,
+                    "max": 40,
+                    "step": 2,
+                    "group": "Appearance",
+                    "groupAr": "المظهر",
+                },
+                {
+                    "key": "direction",
+                    "type": "select",
+                    "label": "Scroll direction",
+                    "labelAr": "اتجاه الحركة",
+                    "default": "left",
+                    "options": [
+                        {"value": "left", "label": "Left ←"},
+                        {"value": "right", "label": "Right →"},
+                    ],
+                    "group": "Motion",
+                    "groupAr": "الحركة",
+                },
+                {
+                    "key": "speed_seconds",
+                    "type": "range",
+                    "label": "Loop duration (s)",
+                    "labelAr": "مدة الدورة (ث)",
+                    "default": 30,
+                    "min": 10,
+                    "max": 120,
+                    "step": 5,
+                    "group": "Motion",
+                    "groupAr": "الحركة",
+                },
+                {
+                    "key": "pause_on_hover",
+                    "type": "checkbox",
+                    "label": "Pause on hover",
+                    "labelAr": "إيقاف عند التمرير",
+                    "default": True,
+                    "group": "Motion",
+                    "groupAr": "الحركة",
+                },
+                {
+                    "key": "link_url",
+                    "type": "url",
+                    "label": "Optional link",
+                    "labelAr": "رابط اختياري",
+                    "default": "",
+                    "group": "Link",
+                    "groupAr": "الرابط",
+                },
+            ],
+            "presets": [
+                {
+                    "name": "Scrolling Banner",
+                    "nameAr": "شريط متحرك",
+                    "category": "Promotional",
+                    "categoryAr": "ترويجي",
+                    "settings": {
+                        "item_1": "FREE SHIPPING ABOVE 1500 EGP",
+                        "item_2": "NEW COLLECTION",
+                        "item_3": "WORLDWIDE DELIVERY",
+                        "separator": "dot",
+                        "size": "sm",
+                        "color_scheme": "ink",
+                        "speed_seconds": 30,
+                        "pause_on_hover": True,
+                    },
+                }
+            ],
+        },
+    },
+}
+
+
 # ── Lookup helpers ───────────────────────────────────────────────────────────
 
 _SECTION_SCHEMA_MAP: dict[str, dict[str, Any]] = {s["type"]: s for s in SECTION_SCHEMAS}
@@ -5313,6 +5560,36 @@ _SECTION_SCHEMA_MAP: dict[str, dict[str, Any]] = {s["type"]: s for s in SECTION_
 def get_section_schemas() -> list[dict[str, Any]]:
     """Return all available section schemas."""
     return SECTION_SCHEMAS
+
+
+def _sections_for_theme(theme_id: str) -> list[dict[str, Any]]:
+    """Merge per-theme section overrides onto the shared SECTION_SCHEMAS.
+
+    Theme overrides REPLACE the matching shared schema (by `type`) so themes
+    can expose richer controls — e.g. Vionne's marquee gets items 1..6 and
+    colour-scheme selectors that don't make sense for the default marquee.
+    """
+    overrides = THEME_SECTION_OVERRIDES.get(theme_id)
+    if not overrides:
+        return SECTION_SCHEMAS
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for s in SECTION_SCHEMAS:
+        section_type = s.get("type")
+        if section_type in overrides:
+            merged.append(overrides[section_type])
+        else:
+            merged.append(s)
+        if isinstance(section_type, str):
+            seen.add(section_type)
+    # Any theme-only section types that don't exist in the shared list yet
+    # still need to surface in the editor (e.g. a brand-new theme-specific
+    # section). Append them after the shared list so ordering of common
+    # sections stays predictable.
+    for section_type, schema in overrides.items():
+        if section_type not in seen:
+            merged.append(schema)
+    return merged
 
 
 def get_theme_schema(theme_id: str) -> dict[str, Any] | None:
@@ -5329,6 +5606,6 @@ def get_theme_schema(theme_id: str) -> dict[str, Any] | None:
     return {
         "theme_id": theme_id,
         "global_settings": global_settings,
-        "sections": SECTION_SCHEMAS,
+        "sections": _sections_for_theme(theme_id),
         "default_templates": default_templates,
     }
