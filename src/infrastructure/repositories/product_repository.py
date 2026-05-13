@@ -404,6 +404,7 @@ class ProductRepository(IProductRepository):
         store_id=None,
         category_id=None,
         is_active=None,
+        status_filter: ProductStatus | None = None,
         search=None,
         sku=None,
         price_min=None,
@@ -415,7 +416,13 @@ class ProductRepository(IProductRepository):
             query = query.where(ProductModel.store_id == store_id)
         if category_id:
             query = query.where(ProductModel.category_id == category_id)
-        if is_active is not None:
+        # status_filter is the 3-state path (active/draft/archived/out_of_stock)
+        # and wins over the legacy `is_active` boolean when both are provided.
+        # The old boolean couldn't represent ARCHIVED at all, so the merchant
+        # hub's Archived tab silently returned every product.
+        if status_filter is not None:
+            query = query.where(ProductModel.status == status_filter)
+        elif is_active is not None:
             target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
             query = query.where(ProductModel.status == target_status)
         if sku:
@@ -459,6 +466,7 @@ class ProductRepository(IProductRepository):
         skip: int = 0,
         limit: int = 100,
         is_active: bool | None = None,
+        status_filter: ProductStatus | None = None,
         search: str | None = None,
         sku: str | None = None,
         price_min: int | None = None,
@@ -473,6 +481,7 @@ class ProductRepository(IProductRepository):
             store_id=store_id,
             category_id=category_id,
             is_active=is_active,
+            status_filter=status_filter,
             search=search,
             sku=sku,
             price_min=price_min,
@@ -488,6 +497,7 @@ class ProductRepository(IProductRepository):
         store_id: UUID | None = None,
         category_id: UUID | None = None,
         is_active: bool | None = None,
+        status_filter: ProductStatus | None = None,
         search: str | None = None,
         sku: str | None = None,
         price_min: int | None = None,
@@ -500,6 +510,7 @@ class ProductRepository(IProductRepository):
             store_id=store_id,
             category_id=category_id,
             is_active=is_active,
+            status_filter=status_filter,
             search=search,
             sku=sku,
             price_min=price_min,

@@ -19,7 +19,18 @@ from src.config import settings
 
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    """Set httpOnly auth cookies on the response."""
+    """Set httpOnly auth cookies on the response.
+
+    Earlier deploys ran without COOKIE_DOMAIN set, which produced host-only
+    cookies (e.g. on `merchant.numueg.app`). The browser keeps those forever
+    alongside any new `.numueg.app` cookie we write here, and since FastAPI
+    returns the first match from request.cookies, the backend can end up
+    reading the stale host-only token and rejecting the request as expired.
+    Issue a Max-Age=0 delete for the host-only variant on every login/refresh
+    so affected sessions self-heal on next auth round-trip.
+    """
+    response.delete_cookie(key="access_token", path="/")
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth/refresh")
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -43,19 +54,29 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
 
 
 def clear_auth_cookies(response: Response) -> None:
-    """Delete auth cookies."""
+    """Delete auth cookies.
+
+    Issues two deletes per cookie: one scoped to COOKIE_DOMAIN (the current
+    deploy's normal cookies) and one host-only (cleans up ghost cookies left
+    behind by earlier deploys that ran without COOKIE_DOMAIN).
+    """
     response.delete_cookie(key="access_token", path="/", domain=settings.COOKIE_DOMAIN)
     response.delete_cookie(
         key="refresh_token",
         path="/api/v1/auth/refresh",
         domain=settings.COOKIE_DOMAIN,
     )
+    response.delete_cookie(key="access_token", path="/")
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth/refresh")
 
 
 def set_customer_auth_cookies(
     response: Response, access_token: str, refresh_token: str
 ) -> None:
-    """Set httpOnly auth cookies for storefront customers."""
+    """Set httpOnly auth cookies for storefront customers. See
+    `set_auth_cookies` for why we pre-clear host-only ghosts."""
+    response.delete_cookie(key="customer_access_token", path="/")
+    response.delete_cookie(key="customer_refresh_token", path="/api/v1/storefront/")
     response.set_cookie(
         key="customer_access_token",
         value=access_token,
@@ -79,7 +100,7 @@ def set_customer_auth_cookies(
 
 
 def clear_customer_auth_cookies(response: Response) -> None:
-    """Delete customer auth cookies."""
+    """Delete customer auth cookies (domain-scoped + host-only ghosts)."""
     response.delete_cookie(
         key="customer_access_token", path="/", domain=settings.COOKIE_DOMAIN
     )
@@ -88,6 +109,8 @@ def clear_customer_auth_cookies(response: Response) -> None:
         path="/api/v1/storefront/",
         domain=settings.COOKIE_DOMAIN,
     )
+    response.delete_cookie(key="customer_access_token", path="/")
+    response.delete_cookie(key="customer_refresh_token", path="/api/v1/storefront/")
 
 
 def set_admin_auth_cookies(
@@ -97,8 +120,11 @@ def set_admin_auth_cookies(
 
     Uses distinct cookie names so admin sessions survive operations that
     mint a regular `access_token` on the same parent domain (notably the
-    "Log in as merchant" impersonation flow).
+    "Log in as merchant" impersonation flow). See `set_auth_cookies` for
+    why we pre-clear host-only ghosts.
     """
+    response.delete_cookie(key="admin_access_token", path="/")
+    response.delete_cookie(key="admin_refresh_token", path="/api/v1/admin/auth/refresh")
     response.set_cookie(
         key="admin_access_token",
         value=access_token,
@@ -122,7 +148,7 @@ def set_admin_auth_cookies(
 
 
 def clear_admin_auth_cookies(response: Response) -> None:
-    """Delete admin auth cookies."""
+    """Delete admin auth cookies (domain-scoped + host-only ghosts)."""
     response.delete_cookie(
         key="admin_access_token", path="/", domain=settings.COOKIE_DOMAIN
     )
@@ -131,3 +157,5 @@ def clear_admin_auth_cookies(response: Response) -> None:
         path="/api/v1/admin/auth/refresh",
         domain=settings.COOKIE_DOMAIN,
     )
+    response.delete_cookie(key="admin_access_token", path="/")
+    response.delete_cookie(key="admin_refresh_token", path="/api/v1/admin/auth/refresh")
