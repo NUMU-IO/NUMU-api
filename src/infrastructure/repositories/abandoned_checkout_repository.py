@@ -305,6 +305,11 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
         a dedicated Celery beat job for Phase 4b. The cron job can be added
         later if we want abandonment to surface even when no merchant is
         actively viewing the page.
+
+        `abandoned_at` is set to `last_activity_at + threshold` — the moment
+        the row crossed the abandonment line — NOT `now()`. Using `now()`
+        made every row look "just abandoned" the first time a merchant
+        opened the page, even if the customer had been idle for hours.
         """
         cutoff = datetime.now(UTC) - timedelta(seconds=threshold_seconds)
         now = datetime.now(UTC)
@@ -316,7 +321,11 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
                 AbandonedCheckoutModel.recovered_at.is_(None),
                 AbandonedCheckoutModel.last_activity_at < cutoff,
             )
-            .values(abandoned_at=now, updated_at=now)
+            .values(
+                abandoned_at=AbandonedCheckoutModel.last_activity_at
+                + timedelta(seconds=threshold_seconds),
+                updated_at=now,
+            )
         )
         # Tenant filter via raw where-clause (update() doesn't go through _tenant_filter)
         from src.infrastructure.database.connection import get_tenant_id
