@@ -82,9 +82,16 @@ class IProductRepository(BaseRepository[Product]):
         skip: int = 0,
         limit: int = 100,
         is_active: bool | None = None,
+        status_filter: ProductStatus | None = None,
         search: str | None = None,
     ) -> list[Product]:
-        """List products with multiple optional filters."""
+        """List products with multiple optional filters.
+
+        `status_filter` takes precedence over `is_active` when both are set —
+        the 3-state status (active/draft/archived/out_of_stock) is strictly
+        more expressive than the legacy boolean. New callers should pass
+        `status_filter`; `is_active` stays for backward compat.
+        """
         ...
 
     @abstractmethod
@@ -93,6 +100,7 @@ class IProductRepository(BaseRepository[Product]):
         store_id: UUID | None = None,
         category_id: UUID | None = None,
         is_active: bool | None = None,
+        status_filter: ProductStatus | None = None,
         search: str | None = None,
     ) -> int:
         """Count products matching the given filters."""

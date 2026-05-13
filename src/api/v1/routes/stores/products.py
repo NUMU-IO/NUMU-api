@@ -47,11 +47,11 @@ from src.application.use_cases.products import (
     ExportProductsUseCase,
     GetProductUseCase,
     ImportProductsUseCase,
-    ListProductsUseCase,
     UpdateProductUseCase,
     UploadProductImageUseCase,
 )
 from src.application.use_cases.products.upload_image import UploadProductImageDTO
+from src.core.entities.product import ProductStatus
 from src.core.entities.store import Store
 from src.infrastructure.events.setup import get_event_bus
 from src.infrastructure.external_services.cloudflare_r2 import (
@@ -357,71 +357,59 @@ async def list_products(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="sort_order must be 'asc' or 'desc'.",
         )
-    use_case = ListProductsUseCase(product_repository=product_repo)
+    # Resolve the 3-state status filter once. Anything outside the enum is
+    # silently ignored — clients sometimes pass the legacy "active" string
+    # which is also the canonical enum value, so that path just works.
+    status_filter: ProductStatus | None = None
+    if product_status:
+        try:
+            status_filter = ProductStatus(product_status)
+        except ValueError:
+            # Unknown status value → treat as "no filter" rather than 400
+            # (the merchant hub's "All" tab sends no status, so a typo on a
+            # bookmarked URL shouldn't blow up the page).
+            status_filter = None
 
-    # Use the advanced filter path when any extended filter is present
-    has_advanced_filters = any([
-        sku,
-        price_min is not None,
-        price_max is not None,
-        sort_by,
-    ])
+    # Single filter path — previously the endpoint branched between an
+    # advanced path, a category path, and a default path. Only the advanced
+    # path consulted `product_status`, so clicking Draft/Archived/Individual
+    # from the merchant hub silently returned every product when no search
+    # or sku/price filter was active. Now every list call goes through
+    # list_with_filters so status + category + sort are always honoured.
+    skip = (page - 1) * limit
+    items = await product_repo.list_with_filters(
+        store_id=store.id,
+        category_id=category_id,
+        skip=skip,
+        limit=limit,
+        status_filter=status_filter,
+        search=search,
+        sku=sku,
+        price_min=price_min,
+        price_max=price_max,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    total = await product_repo.count_with_filters(
+        store_id=store.id,
+        category_id=category_id,
+        status_filter=status_filter,
+        search=search,
+        sku=sku,
+        price_min=price_min,
+        price_max=price_max,
+    )
 
-    if has_advanced_filters or search:
-        skip = (page - 1) * limit
-        is_active = None
-        if product_status == "active":
-            is_active = True
-        elif product_status == "draft":
-            is_active = False
+    from dataclasses import dataclass
 
-        items = await product_repo.list_with_filters(
-            store_id=store.id,
-            category_id=category_id,
-            skip=skip,
-            limit=limit,
-            is_active=is_active,
-            search=search,
-            sku=sku,
-            price_min=price_min,
-            price_max=price_max,
-            sort_by=sort_by,
-            sort_order=sort_order,
-        )
-        total = await product_repo.count_with_filters(
-            store_id=store.id,
-            category_id=category_id,
-            is_active=is_active,
-            search=search,
-            sku=sku,
-            price_min=price_min,
-            price_max=price_max,
-        )
+    from src.application.dto.product import ProductDTO
 
-        from dataclasses import dataclass
+    @dataclass
+    class _Result:
+        items: list
+        total: int
 
-        from src.application.dto.product import ProductDTO
-
-        @dataclass
-        class _Result:
-            items: list
-            total: int
-
-        result = _Result(items=[ProductDTO.from_entity(p) for p in items], total=total)
-
-    elif category_id:
-        result = await use_case.by_category(
-            category_id=category_id,
-            page=page,
-            page_size=limit,
-        )
-    else:
-        skip = (page - 1) * limit
-        result = await use_case.execute(
-            store_id=store.id,
-            skip=skip,
-            limit=limit,
-        )
+    result = _Result(items=[ProductDTO.from_entity(p) for p in items], total=total)
 
     products = [
         ProductResponse(
