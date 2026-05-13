@@ -41,6 +41,35 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y k6
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install seeder deps
+        run: pip install "httpx>=0.27"
+
+      - name: Seed load-test stores
+        id: seed
+        env:
+          NUMU_ADMIN_EMAIL: ${{ secrets.NUMU_ADMIN_EMAIL }}
+          NUMU_ADMIN_PASSWORD: ${{ secrets.NUMU_ADMIN_PASSWORD }}
+        run: |
+          python scripts/load/seed_load_test_stores.py \
+            --base-url "${{ github.event.inputs.base_url || 'https://staging.numueg.app' }}" \
+            --admin-email "$NUMU_ADMIN_EMAIL" \
+            --admin-password "$NUMU_ADMIN_PASSWORD" \
+            --stores "load-store-1,load-store-2,load-store-3,load-store-4,load-store-5,load-store-6,load-store-7,load-store-8,load-store-9,load-store-10" \
+            | tee seed-summary.json
+          python -c "import json,sys; sys.exit(0 if json.load(open('seed-summary.json'))['all_ok'] else 1)"
+
+      - name: Upload seed summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seed-summary-${{ github.run_id }}
+          path: seed-summary.json
+
       - name: Run storefront load test
         env:
           BASE_URL: ${{ github.event.inputs.base_url || 'https://staging.numueg.app' }}
