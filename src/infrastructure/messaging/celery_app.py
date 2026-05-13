@@ -90,6 +90,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.meta_capi",
         # offers-v2 — promotion lifecycle + analytics maintenance.
         "src.infrastructure.messaging.tasks.promotion_tasks",
+        # Step 09 — async funnel-event ingest.
+        "src.infrastructure.messaging.tasks.analytics_ingest_task",
     ],
     # Queue definitions
     task_queues=(
@@ -97,12 +99,17 @@ celery_app.conf.update(
         Queue("images"),
         Queue("messaging"),
         Queue("catalog"),
+        # Step 09 — funnel-event ingest off the request path. Dedicated
+        # queue so a worker pool can be scaled independently and a
+        # backlog here doesn't starve transactional tasks.
+        Queue("analytics"),
     ),
     task_default_queue="default",
     # Route image tasks to dedicated queue
     task_routes={
         "tasks.process_product_image": {"queue": "images"},
         "tasks.process_bulk_product_images": {"queue": "images"},
+        "tasks.ingest_funnel_event": {"queue": "analytics"},
     },
     # Redis broker stability
     broker_transport_options={

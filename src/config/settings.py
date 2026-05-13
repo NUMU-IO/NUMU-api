@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     cache_ttl_theme_seconds: int = 60
     cache_negative_ttl_seconds: int = 10
 
+    # Async analytics ingest (Step 09). When enabled, the storefront
+    # /track and /track-event endpoints push to the Celery `analytics`
+    # queue and return 202 instead of writing funnel_events synchronously.
+    # Flip to False to revert to the legacy synchronous write path.
+    analytics_async_enabled: bool = True
+    analytics_idempotency_ttl_seconds: int = 86_400  # 24h
+
     # JWT Authentication (RS256 asymmetric signing)
     jwt_private_key: str = Field(default="")
     jwt_public_key: str = Field(default="")

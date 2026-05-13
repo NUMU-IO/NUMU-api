@@ -23,8 +23,13 @@ from src.api.dependencies.repositories import (
     get_page_view_repository,
     get_store_repository,
 )
+from src.config import settings
 from src.config.logging_config import get_logger
 from src.core.entities.store import Store
+from src.infrastructure.cache.idempotency_keys import (
+    IdempotencyKeys,
+    get_idempotency_keys,
+)
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
 )
@@ -43,6 +48,71 @@ _VALID_FUNNEL_STEPS = {
     "order_completed",
     "order_delivered",
 }
+
+
+async def _emit_funnel_event(
+    *,
+    funnel_repo: FunnelEventRepository,
+    idempotency: IdempotencyKeys,
+    tenant_id: UUID,
+    store_id: UUID,
+    step: str,
+    session_fingerprint: str | None,
+    customer_id: UUID | None,
+    step_data: dict | None,
+    event_id: UUID | None,
+) -> None:
+    """Persist a funnel event — async via Celery when the kill switch is on.
+
+    Behaviour matrix:
+
+    * ``analytics_async_enabled=True`` (default): client-provided
+      ``event_id`` is run through the Redis SET-NX dedupe; if newly
+      claimed, the event is pushed to the Celery ``analytics`` queue
+      and the task does an ``INSERT … ON CONFLICT DO NOTHING`` on
+      ``funnel_events``. If the event was already claimed, this is a
+      no-op (the previous request already enqueued it).
+    * ``analytics_async_enabled=False`` (kill switch): falls back to a
+      synchronous ``funnel_repo.create(...)`` — the legacy code path.
+
+    Failures here are always swallowed by the caller. Analytics
+    outages must never break the storefront response.
+    """
+    if not settings.analytics_async_enabled:
+        await funnel_repo.create(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            step=step,
+            session_fingerprint=session_fingerprint,
+            customer_id=customer_id,
+            step_data=step_data,
+            event_id=event_id,
+        )
+        return
+
+    effective_event_id = event_id or uuid4()
+    if not await idempotency.claim(f"funnel_event:{effective_event_id}"):
+        # Already claimed by an earlier request — skip the redundant push.
+        return
+
+    from src.infrastructure.messaging.tasks.analytics_ingest_task import (
+        ingest_funnel_event,
+    )
+
+    ingest_funnel_event.apply_async(
+        kwargs={
+            "event": {
+                "event_id": str(effective_event_id),
+                "tenant_id": str(tenant_id),
+                "store_id": str(store_id),
+                "customer_id": str(customer_id) if customer_id else None,
+                "session_fingerprint": session_fingerprint,
+                "step": step,
+                "step_data": step_data,
+            }
+        },
+        queue="analytics",
+    )
 
 
 def _anonymize_ip(raw: str | None) -> str | None:
@@ -106,6 +176,7 @@ async def track_page_view(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
+    idempotency: Annotated[IdempotencyKeys, Depends(get_idempotency_keys)],
 ) -> Response:
     """Record a storefront page view or funnel event. Fire-and-forget, no auth required."""
     store = await store_repo.get_by_id(store_id)
@@ -150,15 +221,26 @@ async def track_page_view(
         except Exception:
             pass
 
-    # Emit funnel event
+    # Emit funnel event — async via Celery when the kill switch is on
+    # (default), otherwise falls back to the legacy synchronous write.
     try:
         step_data = body.step_data or {"path": body.path, "referrer": body.referrer}
-        await funnel_repo.create(
+        funnel_event_id: UUID | None = None
+        if body.event_id:
+            try:
+                funnel_event_id = UUID(body.event_id)
+            except ValueError:
+                funnel_event_id = None
+        await _emit_funnel_event(
+            funnel_repo=funnel_repo,
+            idempotency=idempotency,
             tenant_id=store.tenant_id,
             store_id=store.id,
             step=step,
             session_fingerprint=body.fingerprint,
+            customer_id=None,
             step_data=step_data,
+            event_id=funnel_event_id,
         )
     except Exception:
         pass  # Non-critical — don't break page tracking
@@ -236,6 +318,7 @@ async def track_analytics_event(
     store_id: Annotated[UUID, Path()],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
+    idempotency: Annotated[IdempotencyKeys, Depends(get_idempotency_keys)],
 ):
     """Phase 4.3 — receive a generic analytics event from the SDK.
 
@@ -259,12 +342,16 @@ async def track_analytics_event(
     # add_to_wishlist events did we get last week" without depending
     # on a third-party pixel.
     try:
-        await funnel_repo.create(
+        await _emit_funnel_event(
+            funnel_repo=funnel_repo,
+            idempotency=idempotency,
             tenant_id=store.tenant_id,
             store_id=store.id,
             step=body.event,
             session_fingerprint=body.fingerprint,
+            customer_id=None,
             step_data=body.payload or {},
+            event_id=None,
         )
     except Exception:
         pass
