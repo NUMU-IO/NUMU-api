@@ -72,6 +72,7 @@ jobs:
       env_file: ${{ steps.r.outputs.env_file }}
       api_service_dns: ${{ steps.r.outputs.api_service_dns }}
       api_host_header: ${{ steps.r.outputs.api_host_header }}
+      hub_host_header: ${{ steps.r.outputs.hub_host_header }}
       storefront_image: ${{ steps.r.outputs.storefront_image }}
     steps:
       - id: r
@@ -91,6 +92,7 @@ jobs:
               echo "env_file=/opt/numu/.env.stage"                                  >> "$GITHUB_OUTPUT"
               echo "api_service_dns=numu-api-stage"                                 >> "$GITHUB_OUTPUT"
               echo "api_host_header=staging.numueg.app"                             >> "$GITHUB_OUTPUT"
+              echo "hub_host_header=merchant-staging.numueg.app"                    >> "$GITHUB_OUTPUT"
               echo "storefront_image=ghcr.io/numu-io/numu-egyptian-bazaar:stage"    >> "$GITHUB_OUTPUT"
               ;;
             prod)
@@ -116,6 +118,7 @@ jobs:
               # works as an alias, but matching container_name is unambiguous.)
               echo "api_service_dns=numu-api-staging"                               >> "$GITHUB_OUTPUT"
               echo "api_host_header=numueg.app"                                     >> "$GITHUB_OUTPUT"
+              echo "hub_host_header=merchant.numueg.app"                            >> "$GITHUB_OUTPUT"
               echo "storefront_image=ghcr.io/numu-io/numu-egyptian-bazaar:prod"     >> "$GITHUB_OUTPUT"
               ;;
             *)
@@ -401,39 +404,58 @@ jobs:
           SWAP_SCRIPT
 
       - name: Reload nginx & health check
-        env:
-          API_DNS: ${{ needs.resolve.outputs.api_service_dns }}
-          API_HOST: ${{ needs.resolve.outputs.api_host_header }}
-          COMPOSE_FILE: ${{ needs.resolve.outputs.compose_file }}
-          COMPOSE_PROJECT: ${{ needs.resolve.outputs.compose_project }}
-          ENV_FILE: ${{ needs.resolve.outputs.env_file }}
+        # Heredoc expansion rules in play here:
+        #   ${{ ... }}    — GitHub Actions interpolation; baked in BEFORE
+        #                   ssh ships the script to the droplet. Use this
+        #                   for values from the resolve step.
+        #   \$VAR / \$()  — backslash-escaped, so the runner leaves them
+        #                   literal; the remote shell expands them. Use this
+        #                   for shell vars / command substitution that should
+        #                   evaluate on the droplet.
+        # The previous version used `env:` + \${VAR}, but env vars don't
+        # cross the ssh boundary unless explicitly forwarded — so on the
+        # droplet they expanded to empty strings, producing a curl to
+        # `http://:8000/...` that always failed and a `docker compose` with
+        # all flags empty (yielding the misleading "unknown flag: --tail").
         run: |
           ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << HEALTH_SCRIPT
-            set -e
+            set +e
             echo "==> Reloading shared nginx..."
-            docker exec numu-nginx-staging nginx -s reload
+            docker exec numu-nginx-staging nginx -s reload || { echo "ERROR: nginx reload failed"; exit 1; }
 
             echo "==> Verifying API health..."
             sleep 10
-            docker exec numu-nginx-staging curl -sf -H "Host: \${API_HOST}" -m 8 \
-              http://\${API_DNS}:8000/api/v1/health | grep -q '"success":true' || {
-              echo "ERROR: API health check failed — recent logs:"
-              docker compose -p \${COMPOSE_PROJECT} --env-file \${ENV_FILE} -f \${COMPOSE_FILE} logs --tail=80 api
+            HEALTH_BODY=\$(docker exec numu-nginx-staging curl -sS \
+              -H "Host: ${{ needs.resolve.outputs.api_host_header }}" -m 8 \
+              "http://${{ needs.resolve.outputs.api_service_dns }}:8000/api/v1/health" 2>&1)
+            HEALTH_RC=\$?
+            if [ \$HEALTH_RC -ne 0 ] || ! echo "\$HEALTH_BODY" | grep -q '"success":true'; then
+              echo "ERROR: API health check failed."
+              echo "  URL  : http://${{ needs.resolve.outputs.api_service_dns }}:8000/api/v1/health"
+              echo "  Host : ${{ needs.resolve.outputs.api_host_header }}"
+              echo "  RC   : \$HEALTH_RC"
+              echo "  Body : \$HEALTH_BODY"
+              echo "  Recent API logs:"
+              docker compose -p ${{ needs.resolve.outputs.compose_project }} \
+                --env-file ${{ needs.resolve.outputs.env_file }} \
+                -f /opt/numu/${{ needs.resolve.outputs.compose_file }} \
+                logs --tail=80 api || true
               exit 1
-            }
+            fi
+            echo "    OK"
 
             echo "==> Verifying merchant hub HTML serves..."
-            HUB_HOST="merchant.\${API_HOST}"
-            # Apex domain is bare "numueg.app" → hub is merchant.numueg.app
-            # Stage host is staging.numueg.app → hub is merchant-staging.numueg.app
-            if [ "\${API_HOST}" = "staging.numueg.app" ]; then
-              HUB_HOST="merchant-staging.numueg.app"
-            fi
-            docker exec numu-nginx-staging curl -sf -H "Host: \${HUB_HOST}" -m 8 \
-              http://localhost/ > /dev/null || {
-              echo "ERROR: Hub HTML check failed for \${HUB_HOST}"
+            HUB_BODY=\$(docker exec numu-nginx-staging curl -sS \
+              -H "Host: ${{ needs.resolve.outputs.hub_host_header }}" -m 8 \
+              "http://localhost/" 2>&1 | head -c 300)
+            HUB_RC=\$?
+            if [ \$HUB_RC -ne 0 ]; then
+              echo "ERROR: Hub HTML check failed for ${{ needs.resolve.outputs.hub_host_header }}"
+              echo "  RC   : \$HUB_RC"
+              echo "  Body : \$HUB_BODY"
               exit 1
-            }
+            fi
+            echo "    OK"
 
             echo "==> Deployment to ${{ inputs.environment }} verified."
           HEALTH_SCRIPT
