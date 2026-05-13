@@ -17,7 +17,12 @@ from src.core.interfaces.repositories.email_log_repository import (
 from src.core.interfaces.repositories.email_template_repository import (
     IEmailTemplateRepository,
 )
-from src.infrastructure.cache import ProductCacheService, get_product_cache
+from src.infrastructure.cache import (
+    ProductCacheService,
+    StorefrontCache,
+    get_product_cache,
+    get_storefront_cache,
+)
 from src.infrastructure.external_services import (
     password_service,
     token_service,
@@ -252,3 +257,14 @@ def get_product_cache_service() -> ProductCacheService:
     caching product listings and category trees.
     """
     return get_product_cache()
+
+
+def get_storefront_cache_service() -> StorefrontCache:
+    """Get storefront cache dependency.
+
+    Returns the process-wide :class:`StorefrontCache` singleton used by
+    the storefront read paths (store-by-subdomain / by-domain) and
+    theme settings, with explicit invalidation hooks on the merchant
+    mutation routes.
+    """
+    return get_storefront_cache()

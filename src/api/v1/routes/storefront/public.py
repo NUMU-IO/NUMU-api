@@ -37,6 +37,7 @@ from src.api.dependencies import (
     get_product_field_selector,
     get_product_repository,
     get_store_repository,
+    get_storefront_cache_service,
     get_token_service,
 )
 from src.api.dependencies.database import get_db
@@ -70,7 +71,11 @@ from src.application.use_cases.customers import (
 from src.application.use_cases.products import ListProductsUseCase
 from src.core.entities.store import StoreStatus
 from src.core.exceptions import EntityNotFoundError
-from src.infrastructure.cache import ProductCacheService
+from src.infrastructure.cache import (
+    MISSING_SENTINEL,
+    ProductCacheService,
+    StorefrontCache,
+)
 from src.infrastructure.external_services import PasswordService, TokenService
 from src.infrastructure.repositories import (
     CategoryRepository,
@@ -458,19 +463,30 @@ async def get_store_by_subdomain(
     subdomain: Annotated[str, Path(description="Store subdomain")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Look up a store by its subdomain (public). Used by the Next.js
     storefront when the inbound hostname is `*.numueg.app`."""
-    store = await store_repo.get_by_subdomain(subdomain.lower())
-    if not store:
+    normalized = subdomain.lower()
+    cached = await cache.get_store_by_subdomain(normalized)
+    if cached == MISSING_SENTINEL:
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
+    if isinstance(cached, dict):
+        return SuccessResponse(
+            data=cached,
+            message="Store retrieved successfully",
+        )
 
-    if store.status == StoreStatus.PENDING_APPROVAL:
+    store = await store_repo.get_by_subdomain(normalized)
+    if not store or store.status == StoreStatus.PENDING_APPROVAL:
+        await cache.set_store_missing(subdomain=normalized)
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
+    payload = _serialize_public_store(store, tenant_feature_flags=flags)
+    await cache.set_store(payload)
     return SuccessResponse(
-        data=_serialize_public_store(store, tenant_feature_flags=flags),
+        data=payload,
         message="Store retrieved successfully",
     )
 
@@ -485,6 +501,7 @@ async def get_store_by_domain(
     domain: Annotated[str, Path(description="Custom hostname, e.g. shop.brand.com")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Look up a store by its custom domain (public).
 
@@ -495,16 +512,25 @@ async def get_store_by_domain(
     if not normalized or "." not in normalized:
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
 
-    store = await store_repo.get_by_custom_domain(normalized)
-    if not store:
+    cached = await cache.get_store_by_domain(normalized)
+    if cached == MISSING_SENTINEL:
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
+    if isinstance(cached, dict):
+        return SuccessResponse(
+            data=cached,
+            message="Store retrieved successfully",
+        )
 
-    if store.status == StoreStatus.PENDING_APPROVAL:
+    store = await store_repo.get_by_custom_domain(normalized)
+    if not store or store.status == StoreStatus.PENDING_APPROVAL:
+        await cache.set_store_missing(custom_domain=normalized)
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
+    payload = _serialize_public_store(store, tenant_feature_flags=flags)
+    await cache.set_store(payload)
     return SuccessResponse(
-        data=_serialize_public_store(store, tenant_feature_flags=flags),
+        data=payload,
         message="Store retrieved successfully",
     )
 

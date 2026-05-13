@@ -109,6 +109,13 @@ class Settings(BaseSettings):
         password_part = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
+    # Storefront cache (store + theme reads). Short TTL is the safety net;
+    # explicit invalidation on mutation is the correctness mechanism.
+    storefront_cache_enabled: bool = True
+    cache_ttl_store_seconds: int = 60
+    cache_ttl_theme_seconds: int = 60
+    cache_negative_ttl_seconds: int = 10
+
     # JWT Authentication (RS256 asymmetric signing)
     jwt_private_key: str = Field(default="")
     jwt_public_key: str = Field(default="")
