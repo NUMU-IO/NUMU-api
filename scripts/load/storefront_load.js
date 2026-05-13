@@ -30,6 +30,7 @@ const homeLatency = new Trend("home_latency_ms");
 const pdpLatency = new Trend("pdp_latency_ms");
 const plpLatency = new Trend("plp_latency_ms");
 const cartLatency = new Trend("cart_latency_ms");
+const lookupLatency = new Trend("lookup_latency_ms");
 const errorRate = new Rate("errors");
 
 // ─── Config ────────────────────────────────────────────────────
@@ -37,11 +38,11 @@ const errorRate = new Rate("errors");
 const BASE_URL = __ENV.BASE_URL || "https://staging.numueg.app";
 
 // Test stores. Seed these on staging via:
-//   for s in store-{1..10}; do POST /stores { "name": $s, "subdomain": $s }; done
+//   for s in load-store-{1..10}; do POST /stores { "name": $s, "subdomain": $s }; done
 //   POST /stores/{id}/seed-demo for each
 const TEST_STORES = (
   __ENV.TEST_STORES ||
-  "store-1,store-2,store-3,store-4,store-5,store-6,store-7,store-8,store-9,store-10"
+  "load-store-1,load-store-2,load-store-3,load-store-4,load-store-5,load-store-6,load-store-7,load-store-8,load-store-9,load-store-10"
 ).split(",");
 
 // Demo product slug created by /seed-demo. Stable across stores.
@@ -69,6 +70,7 @@ export const options = {
     pdp_latency_ms: ["p(95)<300"],
     plp_latency_ms: ["p(95)<400"],
     cart_latency_ms: ["p(95)<200"],
+    lookup_latency_ms: ["p(95)<200"],
     errors: ["rate<0.01"],
   },
   // Tag every request with the load-test name so observability tools
@@ -90,6 +92,59 @@ function check200(res, name) {
   return ok;
 }
 
+// ─── Per-VU subdomain → UUID cache ────────────────────────────
+
+// Key: subdomain string. Value: UUID string, or null if the lookup
+// 404'd (we skip the store for the rest of the run in that case).
+//
+// k6 runs each VU as an isolated process, so this Map is naturally
+// per-VU without locking. It survives across iterations of the same
+// VU but not across VUs — which is what we want: one lookup per
+// (VU, store) pair, not one per (iteration, store).
+const storeIdCache = new Map();
+
+function resolveStoreId(subdomain, baseHeaders) {
+  if (storeIdCache.has(subdomain)) {
+    return storeIdCache.get(subdomain);
+  }
+  const res = http.get(
+    `${BASE_URL}/api/v1/storefront/store-by-subdomain/${subdomain}`,
+    { headers: baseHeaders, tags: { route: "store_lookup" } },
+  );
+  lookupLatency.add(res.timings.duration);
+
+  if (res.status !== 200) {
+    if (res.status === 404) {
+      console.warn(`[load] store fixture missing: ${subdomain}`);
+    } else {
+      console.error(
+        `[load] lookup ${subdomain} failed: status=${res.status} body=${res.body?.slice(0, 200)}`,
+      );
+    }
+    storeIdCache.set(subdomain, null);
+    errorRate.add(true);
+    return null;
+  }
+  let body;
+  try {
+    body = JSON.parse(res.body);
+  } catch (err) {
+    console.error(`[load] lookup ${subdomain} bad JSON: ${err.message}`);
+    storeIdCache.set(subdomain, null);
+    errorRate.add(true);
+    return null;
+  }
+  const id = body?.data?.id;
+  if (!id) {
+    console.error(`[load] lookup ${subdomain} missing data.id`);
+    storeIdCache.set(subdomain, null);
+    errorRate.add(true);
+    return null;
+  }
+  storeIdCache.set(subdomain, id);
+  return id;
+}
+
 // ─── Default scenario ────────────────────────────────────────
 
 /**
@@ -101,12 +156,23 @@ function check200(res, name) {
  * batch-flooding any single endpoint.
  */
 export default function () {
-  const store = pickStore();
-  const baseHeaders = { "x-numu-host": `${store}.numueg.app` };
+  const subdomain = pickStore();
+  const baseHeaders = {
+    "x-numu-host": `${subdomain}.numueg.app`,
+    host: `${subdomain}.numueg.app`,
+  };
+
+  // Resolve UUID up front. If the fixture is missing, skip the rest
+  // of this iteration — don't fall through into broken URLs.
+  const storeId = resolveStoreId(subdomain, baseHeaders);
+  if (storeId === null) {
+    sleep(1);
+    return;
+  }
 
   group("home", () => {
     const res = http.get(`${BASE_URL}/`, {
-      headers: { ...baseHeaders, host: `${store}.numueg.app` },
+      headers: baseHeaders,
       tags: { route: "home" },
     });
     homeLatency.add(res.timings.duration);
@@ -116,7 +182,7 @@ export default function () {
 
   group("collection", () => {
     const res = http.get(
-      `${BASE_URL}/api/v1/storefront/store/${store}/products?page=1&limit=20`,
+      `${BASE_URL}/api/v1/storefront/store/${storeId}/products?page=1&limit=20`,
       { headers: baseHeaders, tags: { route: "plp" } },
     );
     plpLatency.add(res.timings.duration);
@@ -126,7 +192,7 @@ export default function () {
 
   group("product", () => {
     const res = http.get(
-      `${BASE_URL}/api/v1/storefront/store/${store}/products/${DEMO_PRODUCT_SLUG}`,
+      `${BASE_URL}/api/v1/storefront/store/${storeId}/products/${DEMO_PRODUCT_SLUG}`,
       { headers: baseHeaders, tags: { route: "pdp" } },
     );
     pdpLatency.add(res.timings.duration);
@@ -150,7 +216,7 @@ export default function () {
 
   group("search", () => {
     const res = http.get(
-      `${BASE_URL}/api/v1/storefront/store/${store}/search/predictive?q=hood&limit=5`,
+      `${BASE_URL}/api/v1/storefront/store/${storeId}/search/predictive?q=hood&limit=5`,
       { headers: baseHeaders, tags: { route: "search" } },
     );
     check200(res, "search");

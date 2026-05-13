@@ -42,6 +42,12 @@ Override the test stores:
 k6 run -e BASE_URL=… -e TEST_STORES=mystore-a,mystore-b scripts/load/storefront_load.js
 ```
 
+### How the script discovers stores
+
+Each VU resolves `subdomain → store_id` once via `GET /api/v1/storefront/store-by-subdomain/{subdomain}` and caches the UUID for the rest of its run. If you change subdomain values in `TEST_STORES`, the script still works — it just does one extra lookup per VU per store.
+
+If a subdomain 404s, the VU **skips** that store for the rest of the run (no retry storm). A warning is printed to the run log; a missing-fixture run will pass the test but the run log makes the data drop obvious.
+
 ## CI integration
 
 The weekly cron in `.github/workflows/load-test.yml` (Phase 5.10
