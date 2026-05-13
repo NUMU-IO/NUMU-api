@@ -102,9 +102,19 @@ jobs:
               echo "hub_remote_path_prev=/opt/numu/merchant-hub.prev"               >> "$GITHUB_OUTPUT"
               echo "sentry_env=production"                                          >> "$GITHUB_OUTPUT"
               echo "compose_file=docker/docker-compose.staging.yml"                 >> "$GITHUB_OUTPUT"
-              echo "compose_project=numu"                                           >> "$GITHUB_OUTPUT"
+              # Project name MUST be `docker` to match the existing apex stack —
+              # the legacy cd.yml apex job runs `docker compose -f docker/...yml`
+              # without `-p`, so compose v2 derives the project from the compose
+              # file's parent dir (`docker`). Using `-p numu` here would spin up
+              # a SECOND, parallel prod stack that fights the live one for the
+              # 172.28.0.0/16 subnet. Verified via `docker inspect` on the
+              # running numu-api-staging container.
+              echo "compose_project=docker"                                         >> "$GITHUB_OUTPUT"
               echo "env_file=/opt/numu/.env.staging"                                >> "$GITHUB_OUTPUT"
-              echo "api_service_dns=numu-api"                                       >> "$GITHUB_OUTPUT"
+              # Container_name from the compose file — what docker DNS resolves
+              # to on the project's bridge network. (The service name `api` also
+              # works as an alias, but matching container_name is unambiguous.)
+              echo "api_service_dns=numu-api-staging"                               >> "$GITHUB_OUTPUT"
               echo "api_host_header=numueg.app"                                     >> "$GITHUB_OUTPUT"
               echo "storefront_image=ghcr.io/numu-io/numu-egyptian-bazaar:prod"     >> "$GITHUB_OUTPUT"
               ;;
@@ -296,26 +306,43 @@ jobs:
               echo "    No running API container found (first deploy?) — no rollback marker written."
             fi
 
-            if [ "${SKIP_MIGRATIONS}" != "true" ]; then
-              echo "==> Step 4: Running migrations in a one-shot container against the LIVE DB..."
-              # --no-deps so postgres/redis/etc. are not restarted; --rm so the
-              # container is discarded after exit. If alembic exits non-zero
-              # we abort here BEFORE swapping the api service — the live API
-              # keeps serving on the old schema + old image. Caveat: this
-              # assumes migrations are backward-compatible with the running
-              # (old) code, which is the project convention.
-              \$COMPOSE run --rm --no-deps -T api alembic upgrade head
+            # ── Step 4 + 5: Migrate & swap (path depends on first-deploy or not) ──
+            # If a previous API container exists, the project's networks are
+            # already on the host. Safe path: migrate in a one-shot container
+            # first (failure = abort, live API unchanged), then swap.
+            #
+            # If there's no previous container (first deploy on this env, or
+            # the stack was torn down), `compose run` would try to create the
+            # project's networks and may hit a subnet-pool collision on this
+            # multi-env droplet. Bring the stack up first (one network-create
+            # attempt only), then exec migrations on the running container.
+            if [ -n "\${PREV_IMAGE}" ]; then
+              if [ "${SKIP_MIGRATIONS}" != "true" ]; then
+                echo "==> Step 4 (existing stack): Pre-swap migration in one-shot container..."
+                \$COMPOSE run --rm --no-deps -T api alembic upgrade head
+              else
+                echo "==> Step 4 (existing stack): Skipping migrations (skip_migrations=true)"
+              fi
+              echo "==> Step 5 (existing stack): Swapping to new API image..."
+              \$COMPOSE up -d --remove-orphans
             else
-              echo "==> Step 4: Skipping migrations (skip_migrations=true)"
+              echo "==> Step 4 (first deploy): Bringing stack up — will create networks if needed..."
+              \$COMPOSE up -d --remove-orphans
+              if [ "${SKIP_MIGRATIONS}" != "true" ]; then
+                echo "==> Step 5 (first deploy): Waiting for postgres + api readiness, then running migrations..."
+                # Poll readiness instead of a flat sleep — first-time image
+                # extraction can be slow on a constrained droplet.
+                for i in \$(seq 1 30); do
+                  if \$COMPOSE exec -T api python -c "import sys; sys.exit(0)" 2>/dev/null; then
+                    break
+                  fi
+                  sleep 2
+                done
+                \$COMPOSE exec -T api alembic upgrade head
+              else
+                echo "==> Step 5 (first deploy): Skipping migrations (skip_migrations=true)"
+              fi
             fi
-
-            echo "==> Step 5: Swapping to new API image (compose up -d)..."
-            # Past this point we ARE mutating live state — only api/celery
-            # containers get recreated (their image changed); postgres/redis
-            # /minio are untouched. If the new api container crash-loops the
-            # health check in a later step will fail and you'll roll back
-            # manually using the PREV_IMAGE captured in step 3.
-            \$COMPOSE up -d --remove-orphans
 
             echo "==> Step 6: Pruning dangling images..."
             docker image prune -f
