@@ -113,9 +113,10 @@ async def list_abandoned_checkouts(
     else:
         recovered_filter = False
 
-    # Lazy abandonment: bulk-flip stale rows before reading. Avoids a
-    # dedicated Celery beat job for Phase 4b — the merchant only ever sees
-    # rows the threshold considers abandoned. Best-effort; ignore failures.
+    # Lazy abandonment: bulk-flip stale rows before reading. The threshold
+    # tells the merchant which rows are *definitely* abandoned; rows newer
+    # than the threshold show as "in progress" via the absence of an
+    # abandoned_at timestamp. Best-effort; ignore failures.
     if not only_recovered:
         try:
             await repo.mark_stale_as_abandoned(
@@ -124,12 +125,17 @@ async def list_abandoned_checkouts(
         except Exception:
             pass
 
+    # Show ALL non-recovered carts (both abandoned_at-flagged and still
+    # in-progress) by default. The merchant wants to see carts they can
+    # potentially recover — waiting an hour for the threshold to flip
+    # them visible is a confusing dead zone. The row's `abandoned_at`
+    # timestamp on the response lets the UI badge each row's state.
     skip = (page - 1) * limit
     items, total = await repo.list_by_store(
         store_id=store.id,
         skip=skip,
         limit=limit,
-        abandoned_only=not only_recovered,
+        abandoned_only=False,
         recovered_only=recovered_filter,
         has_contact=has_contact,
     )

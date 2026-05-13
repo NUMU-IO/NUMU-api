@@ -1,0 +1,450 @@
+name: Deploy All (API + Hub)
+
+# One-click deploy of both the FastAPI backend and the merchant hub bundle
+# to either stage or prod. Lives in NUMU-api because it owns the API image
+# build pipeline; the hub repo is checked out fresh during the run.
+#
+# ──────────────────────────────────────────────────────────────────────────
+# REQUIRED REPO SECRETS
+#   STAGING_SSH_KEY        Private key authorised on the droplet (root@188.166.156.151)
+#   STAGING_SSH_USER       Usually `root`
+#   STAGING_HOST           Usually `188.166.156.151`
+#   VITE_GOOGLE_CLIENT_ID  Google sign-in client ID (used by hub bundle)
+#   VITE_SENTRY_DSN        Sentry DSN for the hub bundle
+#   HUB_REPO_PAT           Fine-grained PAT with `Contents: Read` on
+#                          NUMU-IO/numo-merchant-hub. Needed because
+#                          GITHUB_TOKEN cannot check out a different repo.
+# ──────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [stage, prod]
+      api_ref:
+        description: "API repo branch/tag/SHA (default: branch matching env)"
+        required: false
+        type: string
+      hub_ref:
+        description: "Hub repo branch/tag/SHA (default: branch matching env)"
+        required: false
+        type: string
+      skip_migrations:
+        description: "Skip `alembic upgrade head` on the API container"
+        required: false
+        type: boolean
+        default: false
+
+# Don't run two deploys to the same env at once — Postgres migrations and
+# the docker compose up flow are not safe under concurrent execution.
+concurrency:
+  group: deploy-all-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: numu-io/numu-api
+  HUB_REPO: NUMU-IO/numo-merchant-hub
+  NODE_VERSION: "20"
+
+jobs:
+  # ===========================================================================
+  # Resolve once so every downstream job sees a consistent view of branches,
+  # paths, compose files, and image tags. Saves duplicating the env switch
+  # in three places.
+  # ===========================================================================
+  resolve:
+    name: Resolve deploy targets
+    runs-on: ubuntu-latest
+    outputs:
+      api_ref: ${{ steps.r.outputs.api_ref }}
+      hub_ref: ${{ steps.r.outputs.hub_ref }}
+      image_tag: ${{ steps.r.outputs.image_tag }}
+      hub_remote_path: ${{ steps.r.outputs.hub_remote_path }}
+      hub_remote_path_next: ${{ steps.r.outputs.hub_remote_path_next }}
+      hub_remote_path_prev: ${{ steps.r.outputs.hub_remote_path_prev }}
+      sentry_env: ${{ steps.r.outputs.sentry_env }}
+      compose_file: ${{ steps.r.outputs.compose_file }}
+      compose_project: ${{ steps.r.outputs.compose_project }}
+      env_file: ${{ steps.r.outputs.env_file }}
+      api_service_dns: ${{ steps.r.outputs.api_service_dns }}
+      api_host_header: ${{ steps.r.outputs.api_host_header }}
+      storefront_image: ${{ steps.r.outputs.storefront_image }}
+    steps:
+      - id: r
+        run: |
+          ENV='${{ inputs.environment }}'
+          case "$ENV" in
+            stage)
+              echo "api_ref=${{ inputs.api_ref || 'stage' }}"                       >> "$GITHUB_OUTPUT"
+              echo "hub_ref=${{ inputs.hub_ref || 'stage' }}"                       >> "$GITHUB_OUTPUT"
+              echo "image_tag=stage"                                                >> "$GITHUB_OUTPUT"
+              echo "hub_remote_path=/opt/numu/merchant-hub-stage/"                  >> "$GITHUB_OUTPUT"
+              echo "hub_remote_path_next=/opt/numu/merchant-hub-stage.next/"        >> "$GITHUB_OUTPUT"
+              echo "hub_remote_path_prev=/opt/numu/merchant-hub-stage.prev"         >> "$GITHUB_OUTPUT"
+              echo "sentry_env=staging"                                             >> "$GITHUB_OUTPUT"
+              echo "compose_file=docker/docker-compose.stage.yml"                   >> "$GITHUB_OUTPUT"
+              echo "compose_project=numu-stage"                                     >> "$GITHUB_OUTPUT"
+              echo "env_file=/opt/numu/.env.stage"                                  >> "$GITHUB_OUTPUT"
+              echo "api_service_dns=numu-api-stage"                                 >> "$GITHUB_OUTPUT"
+              echo "api_host_header=staging.numueg.app"                             >> "$GITHUB_OUTPUT"
+              echo "storefront_image=ghcr.io/numu-io/numu-egyptian-bazaar:stage"    >> "$GITHUB_OUTPUT"
+              ;;
+            prod)
+              echo "api_ref=${{ inputs.api_ref || 'prod' }}"                        >> "$GITHUB_OUTPUT"
+              echo "hub_ref=${{ inputs.hub_ref || 'prod' }}"                        >> "$GITHUB_OUTPUT"
+              echo "image_tag=prod"                                                 >> "$GITHUB_OUTPUT"
+              echo "hub_remote_path=/opt/numu/merchant-hub/"                        >> "$GITHUB_OUTPUT"
+              echo "hub_remote_path_next=/opt/numu/merchant-hub.next/"              >> "$GITHUB_OUTPUT"
+              echo "hub_remote_path_prev=/opt/numu/merchant-hub.prev"               >> "$GITHUB_OUTPUT"
+              echo "sentry_env=production"                                          >> "$GITHUB_OUTPUT"
+              echo "compose_file=docker/docker-compose.staging.yml"                 >> "$GITHUB_OUTPUT"
+              echo "compose_project=numu"                                           >> "$GITHUB_OUTPUT"
+              echo "env_file=/opt/numu/.env.staging"                                >> "$GITHUB_OUTPUT"
+              echo "api_service_dns=numu-api"                                       >> "$GITHUB_OUTPUT"
+              echo "api_host_header=numueg.app"                                     >> "$GITHUB_OUTPUT"
+              echo "storefront_image=ghcr.io/numu-io/numu-egyptian-bazaar:prod"     >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Unsupported environment: $ENV"
+              exit 1
+              ;;
+          esac
+
+  # ===========================================================================
+  # Build & push the API Docker image to GHCR. Mirrors `cd.yml`'s
+  # build-and-push job so the resulting image is interchangeable — same tag
+  # convention (`:stage` / `:prod`), same labels.
+  # ===========================================================================
+  build-api:
+    name: Build API image
+    runs-on: ubuntu-latest
+    needs: resolve
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.resolve.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.api_ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=${{ needs.resolve.outputs.image_tag }}
+            type=raw,value=latest,enable=${{ inputs.environment == 'prod' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================================================================
+  # Check out the merchant hub repo and build the production Vite bundle.
+  # Uploads `dist/` as an artifact so the deploy job below can rsync it
+  # without redoing the npm install.
+  # ===========================================================================
+  build-hub:
+    name: Build hub bundle
+    runs-on: ubuntu-latest
+    needs: resolve
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HUB_REPO }}
+          ref: ${{ needs.resolve.outputs.hub_ref }}
+          token: ${{ secrets.HUB_REPO_PAT }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          VITE_API_URL: /api/v1
+          VITE_STOREFRONT_URL: https://{subdomain}.numueg.app
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: ${{ needs.resolve.outputs.sentry_env }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hub-dist-${{ inputs.environment }}
+          path: dist/
+          retention-days: 3
+          if-no-files-found: error
+
+  # ===========================================================================
+  # Single SSH session that pushes both halves of the deploy. Doing API
+  # first so the new backend is up when the hub bundle starts hitting it.
+  # ===========================================================================
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: [resolve, build-api, build-hub]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.api_ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hub-dist-${{ inputs.environment }}
+          path: hub-dist/
+
+      - name: Install SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+
+      # ─── API deploy ───────────────────────────────────────────────────────
+      - name: Sync API compose + postgres assets
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}"
+          SCP="scp -i ~/.ssh/deploy_key"
+          $SSH "mkdir -p /opt/numu/docker/postgres /opt/numu/docker/nginx/ssl"
+          $SSH "rm -rf /opt/numu/docker/postgres/postgresql.conf /opt/numu/docker/postgres/init-wal-archiving.sh"
+          $SCP ${{ needs.resolve.outputs.compose_file }} \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/${{ needs.resolve.outputs.compose_file }}
+          $SCP docker/postgres/postgresql.conf \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+          $SCP docker/postgres/init-wal-archiving.sh \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
+          # Apex (prod) stack also owns the shared nginx — ship its config.
+          if [ '${{ inputs.environment }}' = 'prod' ]; then
+            $SCP docker/nginx/Dockerfile docker/nginx/nginx.conf \
+              ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/nginx/
+          fi
+          $SSH "test -f ${{ needs.resolve.outputs.env_file }} || { echo 'ERROR: ${{ needs.resolve.outputs.env_file }} missing on droplet'; exit 1; }"
+
+      - name: Deploy API on droplet (safe-fail order)
+        # Ordering rationale — every step before the compose swap is non-
+        # destructive: it can fail and the live API keeps serving the old
+        # image. The swap is the single point of no return, and by then
+        # we've already proven the image pulled cleanly and the migration
+        # applied successfully against the live DB.
+        env:
+          NUMU_API_IMAGE: ${{ needs.build-api.outputs.image_ref }}
+          NUMU_STOREFRONT_IMAGE: ${{ needs.resolve.outputs.storefront_image }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          COMPOSE_FILE: ${{ needs.resolve.outputs.compose_file }}
+          COMPOSE_PROJECT: ${{ needs.resolve.outputs.compose_project }}
+          ENV_FILE: ${{ needs.resolve.outputs.env_file }}
+          SKIP_MIGRATIONS: ${{ inputs.skip_migrations }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
+            set -e
+            cd /opt/numu
+
+            echo "==> Authenticating with GHCR..."
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+            export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
+            export NUMU_STOREFRONT_IMAGE="${NUMU_STOREFRONT_IMAGE}"
+
+            COMPOSE="docker compose -p ${COMPOSE_PROJECT} --env-file ${ENV_FILE} -f ${COMPOSE_FILE}"
+
+            echo "==> Step 1: Pruning unused Docker resources (safe — does not touch running containers)..."
+            docker system prune -f --volumes=false
+
+            echo "==> Step 2: Pulling new API image: \${NUMU_API_IMAGE}"
+            # If this fails (registry down, network, OOM), nothing on the
+            # droplet has been mutated yet — old API keeps serving.
+            docker pull "\${NUMU_API_IMAGE}"
+
+            echo "==> Step 3: Recording currently-running API image for rollback..."
+            PREV_IMAGE=""
+            CURRENT_CONTAINER="\$(\$COMPOSE ps -q api 2>/dev/null | head -n1 || true)"
+            if [ -n "\${CURRENT_CONTAINER}" ]; then
+              PREV_IMAGE="\$(docker inspect --format='{{.Config.Image}}' "\${CURRENT_CONTAINER}" 2>/dev/null || echo "")"
+            fi
+            if [ -n "\${PREV_IMAGE}" ]; then
+              echo "    Previous API image: \${PREV_IMAGE}"
+              echo "\${PREV_IMAGE}" > "/opt/numu/.last-api-image-${COMPOSE_PROJECT}"
+            else
+              echo "    No running API container found (first deploy?) — no rollback marker written."
+            fi
+
+            if [ "${SKIP_MIGRATIONS}" != "true" ]; then
+              echo "==> Step 4: Running migrations in a one-shot container against the LIVE DB..."
+              # --no-deps so postgres/redis/etc. are not restarted; --rm so the
+              # container is discarded after exit. If alembic exits non-zero
+              # we abort here BEFORE swapping the api service — the live API
+              # keeps serving on the old schema + old image. Caveat: this
+              # assumes migrations are backward-compatible with the running
+              # (old) code, which is the project convention.
+              \$COMPOSE run --rm --no-deps -T api alembic upgrade head
+            else
+              echo "==> Step 4: Skipping migrations (skip_migrations=true)"
+            fi
+
+            echo "==> Step 5: Swapping to new API image (compose up -d)..."
+            # Past this point we ARE mutating live state — only api/celery
+            # containers get recreated (their image changed); postgres/redis
+            # /minio are untouched. If the new api container crash-loops the
+            # health check in a later step will fail and you'll roll back
+            # manually using the PREV_IMAGE captured in step 3.
+            \$COMPOSE up -d --remove-orphans
+
+            echo "==> Step 6: Pruning dangling images..."
+            docker image prune -f
+
+            echo "==> API deployment complete."
+          DEPLOY_SCRIPT
+
+      # ─── Hub deploy ───────────────────────────────────────────────────────
+      # Two-step deploy: rsync to a parallel `.next` directory, then mv into
+      # place. If rsync dies mid-stream (network blip, disk full, bad bundle)
+      # the live `merchant-hub*/` dir is untouched and nginx keeps serving
+      # the previous bundle.
+      - name: rsync hub bundle to droplet (.next staging dir)
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -avz --delete
+          path: hub-dist/
+          remote_path: ${{ needs.resolve.outputs.hub_remote_path_next }}
+          remote_host: ${{ secrets.STAGING_HOST }}
+          remote_user: ${{ secrets.STAGING_SSH_USER }}
+          remote_key: ${{ secrets.STAGING_SSH_KEY }}
+
+      - name: Atomically swap hub bundle into place
+        env:
+          LIVE_PATH: ${{ needs.resolve.outputs.hub_remote_path }}
+          NEXT_PATH: ${{ needs.resolve.outputs.hub_remote_path_next }}
+          PREV_PATH: ${{ needs.resolve.outputs.hub_remote_path_prev }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << SWAP_SCRIPT
+            set -e
+            # Strip trailing slashes for clean mv semantics.
+            LIVE="\$(echo "${LIVE_PATH}" | sed 's:/*$::')"
+            NEXT="\$(echo "${NEXT_PATH}" | sed 's:/*$::')"
+            PREV="${PREV_PATH}"
+
+            # Sanity check — rsync must have produced a valid bundle.
+            if [ ! -f "\${NEXT}/index.html" ]; then
+              echo "ERROR: rsync did not produce \${NEXT}/index.html — aborting swap; live bundle unchanged."
+              exit 1
+            fi
+
+            # Drop any stale rollback dir from a prior failed deploy.
+            rm -rf "\${PREV}"
+
+            # The swap. Brief (<100ms) window where the live dir doesn't exist
+            # — nginx may 404 a handful of requests; acceptable trade vs.
+            # rsync-in-place's "serves half-old, half-new files for the entire
+            # transfer".
+            if [ -d "\${LIVE}" ]; then
+              mv "\${LIVE}" "\${PREV}"
+            fi
+            mv "\${NEXT}" "\${LIVE}"
+
+            echo "Hub bundle swapped. Previous bundle parked at \${PREV} —"
+            echo "  manual rollback: rm -rf \${LIVE} && mv \${PREV} \${LIVE} && docker exec numu-nginx-staging nginx -s reload"
+          SWAP_SCRIPT
+
+      - name: Reload nginx & health check
+        env:
+          API_DNS: ${{ needs.resolve.outputs.api_service_dns }}
+          API_HOST: ${{ needs.resolve.outputs.api_host_header }}
+          COMPOSE_FILE: ${{ needs.resolve.outputs.compose_file }}
+          COMPOSE_PROJECT: ${{ needs.resolve.outputs.compose_project }}
+          ENV_FILE: ${{ needs.resolve.outputs.env_file }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << HEALTH_SCRIPT
+            set -e
+            echo "==> Reloading shared nginx..."
+            docker exec numu-nginx-staging nginx -s reload
+
+            echo "==> Verifying API health..."
+            sleep 10
+            docker exec numu-nginx-staging curl -sf -H "Host: \${API_HOST}" -m 8 \
+              http://\${API_DNS}:8000/api/v1/health | grep -q '"success":true' || {
+              echo "ERROR: API health check failed — recent logs:"
+              docker compose -p \${COMPOSE_PROJECT} --env-file \${ENV_FILE} -f \${COMPOSE_FILE} logs --tail=80 api
+              exit 1
+            }
+
+            echo "==> Verifying merchant hub HTML serves..."
+            HUB_HOST="merchant.\${API_HOST}"
+            # Apex domain is bare "numueg.app" → hub is merchant.numueg.app
+            # Stage host is staging.numueg.app → hub is merchant-staging.numueg.app
+            if [ "\${API_HOST}" = "staging.numueg.app" ]; then
+              HUB_HOST="merchant-staging.numueg.app"
+            fi
+            docker exec numu-nginx-staging curl -sf -H "Host: \${HUB_HOST}" -m 8 \
+              http://localhost/ > /dev/null || {
+              echo "ERROR: Hub HTML check failed for \${HUB_HOST}"
+              exit 1
+            }
+
+            echo "==> Deployment to ${{ inputs.environment }} verified."
+          HEALTH_SCRIPT
+
+      - name: Summary (with rollback hints)
+        if: always()
+        run: |
+          {
+            echo "### Deploy summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Environment | \`${{ inputs.environment }}\` |"
+            echo "| API ref | \`${{ needs.resolve.outputs.api_ref }}\` |"
+            echo "| Hub ref | \`${{ needs.resolve.outputs.hub_ref }}\` |"
+            echo "| API image | \`${{ needs.build-api.outputs.image_ref }}\` |"
+            echo "| Hub path (live) | \`${{ needs.resolve.outputs.hub_remote_path }}\` |"
+            echo "| Hub path (rollback) | \`${{ needs.resolve.outputs.hub_remote_path_prev }}\` |"
+            echo "| Skip migrations | \`${{ inputs.skip_migrations }}\` |"
+            echo ""
+            echo "### Manual rollback (if health checks failed or you spot a regression)"
+            echo ""
+            echo "SSH to the droplet, then:"
+            echo ""
+            echo "**Roll back API** (uses the marker written in step 3 of the API deploy):"
+            echo '```bash'
+            echo "PREV=\$(cat /opt/numu/.last-api-image-${{ needs.resolve.outputs.compose_project }})"
+            echo "NUMU_API_IMAGE=\"\$PREV\" docker compose -p ${{ needs.resolve.outputs.compose_project }} \\"
+            echo "  --env-file ${{ needs.resolve.outputs.env_file }} \\"
+            echo "  -f /opt/numu/${{ needs.resolve.outputs.compose_file }} up -d api celery-worker celery-beat"
+            echo '```'
+            echo ""
+            echo "**Roll back hub bundle:**"
+            echo '```bash'
+            echo "LIVE='${{ needs.resolve.outputs.hub_remote_path }}'"
+            echo "PREV='${{ needs.resolve.outputs.hub_remote_path_prev }}'"
+            echo "LIVE=\"\${LIVE%/}\""
+            echo "rm -rf \"\$LIVE\" && mv \"\$PREV\" \"\$LIVE\""
+            echo "docker exec numu-nginx-staging nginx -s reload"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
