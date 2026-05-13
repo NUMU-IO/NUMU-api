@@ -4,8 +4,17 @@
 # summary to Slack #perf. Manual trigger via workflow_dispatch lets
 # anyone re-run before a release.
 #
-# Failure (any threshold breached) opens an issue in this repo with
-# the k6 summary attached so the on-call has a paper trail.
+# Step 15 wiring:
+#   - Parse the k6 summary into a Slack-friendly Markdown table
+#   - Compare to the last green run (baseline artifact); flag any
+#     metric that regressed by more than 20%
+#   - Post to Slack with both the table and a "View run" button
+#   - Auto-open a labeled GitHub issue on threshold breach or regression
+#   - Promote the current summary to the new green baseline ONLY when
+#     all thresholds pass AND no regression is detected
+#
+# Failure (threshold breach OR regression) still marks the run red in
+# the Actions UI so it's visible at a glance.
 
 name: load-test-weekly
 
@@ -28,7 +37,10 @@ on:
 jobs:
   k6:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      BASE_URL: ${{ github.event.inputs.base_url || 'https://staging.numueg.app' }}
+      TEST_STORES: "load-store-1,load-store-2,load-store-3,load-store-4,load-store-5,load-store-6,load-store-7,load-store-8,load-store-9,load-store-10"
 
     steps:
       - uses: actions/checkout@v4
@@ -56,10 +68,10 @@ jobs:
           NUMU_ADMIN_PASSWORD: ${{ secrets.NUMU_ADMIN_PASSWORD }}
         run: |
           python scripts/load/seed_load_test_stores.py \
-            --base-url "${{ github.event.inputs.base_url || 'https://staging.numueg.app' }}" \
+            --base-url "$BASE_URL" \
             --admin-email "$NUMU_ADMIN_EMAIL" \
             --admin-password "$NUMU_ADMIN_PASSWORD" \
-            --stores "load-store-1,load-store-2,load-store-3,load-store-4,load-store-5,load-store-6,load-store-7,load-store-8,load-store-9,load-store-10" \
+            --stores "$TEST_STORES" \
             | tee seed-summary.json
           python -c "import json,sys; sys.exit(0 if json.load(open('seed-summary.json'))['all_ok'] else 1)"
 
@@ -70,34 +82,107 @@ jobs:
           name: seed-summary-${{ github.run_id }}
           path: seed-summary.json
 
+      # k6 runs with `continue-on-error: true` so a threshold breach
+      # still produces a summary artifact + Slack post. The "Fail the
+      # workflow if regression" step at the end re-asserts non-zero exit.
       - name: Run storefront load test
-        env:
-          BASE_URL: ${{ github.event.inputs.base_url || 'https://staging.numueg.app' }}
-          # Stable test stores seeded once in staging. If the staging
-          # DB is reset, recreate via the seed-demo endpoints (see
-          # scripts/load/README.md).
-          TEST_STORES: "load-store-1,load-store-2,load-store-3,load-store-4,load-store-5,load-store-6,load-store-7,load-store-8,load-store-9,load-store-10"
+        id: k6
+        continue-on-error: true
         run: |
           k6 run \
             --summary-export load-summary.json \
             ${{ github.event.inputs.duration && format('--duration {0}', github.event.inputs.duration) || '' }} \
             scripts/load/storefront_load.js
 
-      - name: Upload summary
+      - name: Download last green baseline
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: load-test-weekly.yml
+          name: load-summary-green
+          path: baseline/
+          if_no_artifact_found: warn
+
+      - name: Parse summary
+        id: parse
+        continue-on-error: true
+        run: |
+          if [ -f baseline/load-summary.json ]; then
+            python scripts/load/parse_summary.py \
+              --summary load-summary.json \
+              --baseline baseline/load-summary.json \
+              --output slack-summary.md \
+              --regression-threshold-pct 20 \
+              --fail-on-regression
+          else
+            python scripts/load/parse_summary.py \
+              --summary load-summary.json \
+              --output slack-summary.md \
+              --regression-threshold-pct 20 \
+              --fail-on-regression
+          fi
+
+      - name: Upload current summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: load-summary-${{ github.run_id }}
-          path: load-summary.json
+          path: |
+            load-summary.json
+            slack-summary.md
+            seed-summary.json
 
-      - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1.27.0
+      - name: Save as new green baseline
+        if: steps.parse.outcome == 'success' && steps.k6.outcome == 'success'
+        uses: actions/upload-artifact@v4
         with:
-          # SLACK_WEBHOOK_URL points at #perf in the workspace.
-          payload: |
-            {
-              "text": "load-test failed against ${{ github.event.inputs.base_url || 'staging' }} — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }
+          name: load-summary-green
+          path: load-summary.json
+          retention-days: 90
+
+      - name: Post to Slack
+        if: always()
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_PERF }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "SLACK_WEBHOOK_PERF not configured — skipping Slack post"
+            exit 0
+          fi
+          if [ "${{ steps.parse.outcome }}" = "success" ]; then
+            STATUS="✅ green"
+          else
+            STATUS="❌ regression / threshold breach"
+          fi
+          # `slack-summary.md` may not exist if the parse step fell over
+          # before writing it; surface a minimal placeholder so the
+          # Slack post still goes through with the run link.
+          BODY=$(cat slack-summary.md 2>/dev/null || echo "_no parser output — see run artifacts_")
+          curl -sX POST -H 'Content-Type: application/json' \
+            --data "$(jq -nc \
+              --arg t "Load test $STATUS — run ${{ github.run_id }}" \
+              --arg b "$BODY" \
+              --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              '{ text: $t, blocks: [
+                  {type: "section", text: {type: "mrkdwn", text: $t}},
+                  {type: "section", text: {type: "mrkdwn", text: $b}},
+                  {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View run"}, url: $url}]}
+              ]}')" \
+            "$SLACK_WEBHOOK_URL"
+
+      - name: Open issue on regression
+        if: always() && steps.parse.outcome != 'success'
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "🚨 Load test regression — run ${{ github.run_id }}"
+          content-filepath: slack-summary.md
+          labels: |
+            perf
+            load-test
+            P2
+
+      - name: Fail the workflow if regression
+        if: steps.parse.outcome != 'success' || steps.k6.outcome != 'success'
+        run: |
+          echo "Load test regressed, breached a threshold, or k6 failed to run."
+          echo "See the uploaded artifacts and the Slack post for details."
+          exit 1
