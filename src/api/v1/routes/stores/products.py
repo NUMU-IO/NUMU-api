@@ -122,6 +122,21 @@ async def create_product(
         user_id=store.owner_id,
     )
 
+    # Step 12 — flush the storefront's ISR cache for this product so
+    # the new row shows up on the PDP / PLP without waiting out the
+    # 60s revalidate window. Best-effort: failure is logged inside
+    # the helper, never raised.
+    if store.subdomain:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_product_change,
+        )
+
+        await revalidate_on_product_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+            product_slug=result.slug,
+        )
+
     # Phase 8.1 — materialize options + variants. The use case doesn't
     # know about either today (kept scoped to the legacy single-SKU
     # path); we layer variants on top via the variant repo + a
@@ -550,6 +565,22 @@ async def update_product(
         user_id=store.owner_id,
     )
 
+    # Step 12 — flush ISR cache for the updated product. If the slug
+    # was changed in this PATCH, we'd want to also flush the OLD slug
+    # so a customer with the old URL cached doesn't see stale data —
+    # the use case doesn't surface the prior slug today, so we accept
+    # 60s lag on the old URL (TTL fallback). Best-effort.
+    if store.subdomain:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_product_change,
+        )
+
+        await revalidate_on_product_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+            product_slug=result.slug,
+        )
+
     # Phase 8.1 — only re-materialize variants/options when the
     # merchant explicitly sent them. Partial-update on other fields
     # leaves the variant matrix alone.
@@ -630,6 +661,19 @@ async def delete_product(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Delete a product."""
+    # Step 12 — fetch the slug BEFORE the delete so we can flush the
+    # storefront's ISR cache by tag/path post-delete. The row is gone
+    # after use_case.execute returns. Best-effort: a missing pre-fetch
+    # falls through to the 60s TTL safety net.
+    pre_delete_slug: str | None = None
+    if store.subdomain:
+        try:
+            existing = await product_repo.get_by_id(product_id)
+            if existing is not None and existing.store_id == store.id:
+                pre_delete_slug = existing.slug
+        except Exception:  # noqa: BLE001
+            pass
+
     use_case = DeleteProductUseCase(
         product_repository=product_repo,
         store_repository=store_repo,
@@ -637,6 +681,17 @@ async def delete_product(
     )
 
     await use_case.execute(product_id=product_id, user_id=store.owner_id)
+
+    if store.subdomain and pre_delete_slug:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_product_change,
+        )
+
+        await revalidate_on_product_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+            product_slug=pre_delete_slug,
+        )
 
     return None
 
