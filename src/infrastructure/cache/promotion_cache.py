@@ -19,6 +19,11 @@ from src.application.dto.promotion_resolution import (
     ActivePromotionsOutput,
     VisitorContextInput,
 )
+from src.infrastructure.observability.prometheus_metrics import (
+    record_cache_hit,
+    record_cache_invalidate,
+    record_cache_miss,
+)
 
 
 def visitor_fingerprint(visitor: VisitorContextInput) -> str:
@@ -67,7 +72,9 @@ class PromotionCache:
         key = self.KEY_TEMPLATE.format(store_id=store_id, visitor_fp=fp)
         raw = await self._redis.get(key)
         if raw is None:
+            record_cache_miss("promotion")
             return None
+        record_cache_hit("promotion")
         return ActivePromotionsOutput.model_validate_json(raw)
 
     async def set(
@@ -91,3 +98,4 @@ class PromotionCache:
         members = await self._redis.smembers(list_key)
         if members:
             await self._redis.delete(*members, list_key)
+            record_cache_invalidate("promotion", reason="store_mutation")

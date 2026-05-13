@@ -25,6 +25,13 @@ from uuid import UUID
 
 from redis.exceptions import RedisError
 
+from src.infrastructure.observability.prometheus_metrics import (
+    record_cache_hit,
+    record_cache_invalidate,
+    record_cache_miss,
+    record_cache_negative_hit,
+)
+
 if TYPE_CHECKING:  # pragma: no cover
     from redis.asyncio import Redis
 
@@ -177,6 +184,7 @@ class StorefrontCache:
             await self._redis.delete(*keys)
         except RedisError as exc:
             logger.warning("storefront_cache.invalidate_store failed: %s", exc)
+        record_cache_invalidate("storefront", reason="store_mutation")
 
     # ------------------------------------------------------------------ #
     # Theme payload                                                       #
@@ -211,6 +219,7 @@ class StorefrontCache:
             )
         except RedisError as exc:
             logger.warning("storefront_cache.invalidate_theme failed: %s", exc)
+        record_cache_invalidate("storefront", reason="theme_mutation")
 
     # ------------------------------------------------------------------ #
     # Internals                                                           #
@@ -223,17 +232,23 @@ class StorefrontCache:
             raw = await self._redis.get(key)
         except RedisError as exc:
             logger.warning("storefront_cache.get failed (key=%s): %s", key, exc)
+            record_cache_miss("storefront")
             return None
         if raw is None:
+            record_cache_miss("storefront")
             return None
         if isinstance(raw, bytes):
             raw = raw.decode()
         if raw == MISSING_SENTINEL:
+            record_cache_negative_hit("storefront")
             return MISSING_SENTINEL
         try:
-            return json.loads(raw)
+            payload = json.loads(raw)
         except json.JSONDecodeError:
+            record_cache_miss("storefront")
             return None
+        record_cache_hit("storefront")
+        return payload
 
 
 # ----------------------------------------------------------------------

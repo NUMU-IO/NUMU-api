@@ -24,6 +24,11 @@ from typing import Any
 from uuid import UUID
 
 from src.infrastructure.cache.redis_cache import RedisCacheService
+from src.infrastructure.observability.prometheus_metrics import (
+    record_cache_hit,
+    record_cache_invalidate,
+    record_cache_miss,
+)
 
 
 class ProductCacheService:
@@ -74,7 +79,12 @@ class ProductCacheService:
             Cached product list data or None if not cached
         """
         key = self._products_key(store_id, category_id, page, limit, filters)
-        return await self.cache.get(key)
+        value = await self.cache.get(key)
+        if value is None:
+            record_cache_miss("product")
+        else:
+            record_cache_hit("product")
+        return value
 
     async def set_products(
         self,
@@ -113,7 +123,12 @@ class ProductCacheService:
             Cached product data or None if not cached
         """
         key = self._product_detail_key(store_id, product_id)
-        return await self.cache.get(key)
+        value = await self.cache.get(key)
+        if value is None:
+            record_cache_miss("product")
+        else:
+            record_cache_hit("product")
+        return value
 
     async def set_product(self, store_id: UUID, product_id: UUID, data: dict) -> None:
         """Cache product detail.
@@ -140,7 +155,12 @@ class ProductCacheService:
             Cached category tree or None if not cached
         """
         key = self._category_tree_key(store_id)
-        return await self.cache.get(key)
+        value = await self.cache.get(key)
+        if value is None:
+            record_cache_miss("product")
+        else:
+            record_cache_hit("product")
+        return value
 
     async def set_category_tree(self, store_id: UUID, tree: list) -> None:
         """Cache category tree.
@@ -186,6 +206,9 @@ class ProductCacheService:
         pattern = f"{self.PREFIX}:products:store:{store_id}:*"
         keys_deleted += await self.cache.clear_pattern(pattern)
 
+        if keys_deleted:
+            record_cache_invalidate("product", reason="product_mutation")
+
         return keys_deleted
 
     async def invalidate_store_products(self, store_id: UUID) -> int:
@@ -200,7 +223,10 @@ class ProductCacheService:
             Number of cache keys invalidated
         """
         pattern = f"{self.PREFIX}:products:store:{store_id}:*"
-        return await self.cache.clear_pattern(pattern)
+        count = await self.cache.clear_pattern(pattern)
+        if count:
+            record_cache_invalidate("product", reason="store_bulk")
+        return count
 
     async def invalidate_categories(self, store_id: UUID) -> int:
         """Invalidate category caches for a store.

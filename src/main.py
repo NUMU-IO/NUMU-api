@@ -308,6 +308,37 @@ def create_app() -> FastAPI:
     # Setup admin panel (public schema only)
     setup_admin(app)
 
+    # Step 16 — Prometheus /metrics endpoint.
+    # Gated by ``settings.metrics_endpoint_enabled`` so the route is
+    # entirely absent when the flag is off. Additional defence: if
+    # ``settings.metrics_auth_token`` is configured, the handler also
+    # requires a matching Bearer token. nginx is expected to gate
+    # /metrics on an IP allowlist (the Step 14 plan); the token is
+    # defence in depth.
+    if settings.metrics_endpoint_enabled:
+        from fastapi import HTTPException, Request
+        from fastapi.responses import Response as FastAPIResponse
+
+        from src.infrastructure.observability.prometheus_metrics import (
+            render_exposition,
+        )
+
+        @app.get("/metrics", include_in_schema=False)
+        async def metrics_endpoint(request: Request) -> FastAPIResponse:
+            expected = settings.metrics_auth_token
+            if expected:
+                auth = request.headers.get("Authorization") or ""
+                # Constant-time comparison via secrets.compare_digest
+                import secrets
+
+                presented = ""
+                if auth.startswith("Bearer "):
+                    presented = auth[len("Bearer ") :].strip()
+                if not presented or not secrets.compare_digest(presented, expected):
+                    raise HTTPException(status_code=401, detail="unauthorized")
+            body, content_type = render_exposition()
+            return FastAPIResponse(content=body, media_type=content_type)
+
     return app
 
 

@@ -123,6 +123,15 @@ class Settings(BaseSettings):
     analytics_async_enabled: bool = True
     analytics_idempotency_ttl_seconds: int = 86_400  # 24h
 
+    # Prometheus /metrics endpoint (Step 16). Disabled by default; ops
+    # enables in staging/prod via env once nginx is configured to gate
+    # /metrics behind an IP allowlist (or the deploy environment routes
+    # to it from inside the cluster only). `metrics_auth_token`, if set,
+    # is required as a Bearer token on /metrics requests — defence in
+    # depth alongside the network ACL.
+    metrics_endpoint_enabled: bool = False
+    metrics_auth_token: str | None = None
+
     # JWT Authentication (RS256 asymmetric signing)
     jwt_private_key: str = Field(default="")
     jwt_public_key: str = Field(default="")

@@ -1,0 +1,318 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Storefront performance — request latency, cache health, DB pool, host pressure. Source: docker/monitoring/grafana/dashboards/storefront-perf.json. Owned by the platform team. Plan §4.",
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Row 1 — Health pulse",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "RPS (last 5m)",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{route=~\"/api/v1/storefront.*\"}[5m]))",
+          "legendFormat": "rps"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps", "decimals": 1}}
+    },
+    {
+      "id": 3,
+      "title": "5xx rate (last 5m)",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{status=\"5xx\", route=~\"/api/v1/storefront.*\"}[5m])) / sum(rate(http_requests_total{route=~\"/api/v1/storefront.*\"}[5m]))",
+          "legendFormat": "5xx rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 0.01}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "p95 latency (last 5m)",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{route=~\"/api/v1/storefront.*\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 0.5},
+              {"color": "red", "value": 1.0}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Cache hit rate (last 5m)",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cache_hit_total{layer=\"storefront\"}[5m])) / (sum(rate(cache_hit_total{layer=\"storefront\"}[5m])) + sum(rate(cache_miss_total{layer=\"storefront\"}[5m])))",
+          "legendFormat": "hit rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 0.6},
+              {"color": "green", "value": 0.8}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Row 2 — Per-route latency",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 6},
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "title": "Request latency heatmap (30 min)",
+      "type": "heatmap",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_request_duration_seconds_bucket{route=~\"/api/v1/storefront.*\"}[1m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Top 10 slowest routes (p95, 5m)",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route)))",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Top 10 highest-RPS routes (5m)",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (route) (rate(http_requests_total[5m])))",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Requests in flight",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(http_requests_in_progress)",
+          "legendFormat": "in flight"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Row 3 — Database",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "title": "DB connections (in use / pool size / overflow)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "db_connections_in_use", "legendFormat": "in_use"},
+        {"refId": "B", "expr": "db_connections_pool_size", "legendFormat": "pool_size"},
+        {"refId": "C", "expr": "db_connections_overflow", "legendFormat": "overflow"}
+      ]
+    },
+    {
+      "id": 22,
+      "title": "DB pool wait p95",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(db_pool_wait_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 wait"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 30,
+      "title": "Row 4 — Cache",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32},
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "title": "Cache hit rate by layer",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 33},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (layer) (rate(cache_hit_total[5m])) / (sum by (layer) (rate(cache_hit_total[5m])) + sum by (layer) (rate(cache_miss_total[5m])))",
+          "legendFormat": "{{layer}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit"}}
+    },
+    {
+      "id": 32,
+      "title": "Cache invalidations per minute",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 33},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (layer, reason) (rate(cache_invalidate_total[1m]) * 60)",
+          "legendFormat": "{{layer}} / {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "title": "Row 5 — Host",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 41},
+      "collapsed": false
+    },
+    {
+      "id": 41,
+      "title": "Container memory (cadvisor)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 42},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "container_memory_usage_bytes{name=~\".+\"}",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "id": 42,
+      "title": "Swap utilization (node-exporter)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 42},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)",
+          "legendFormat": "swap used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 0.5},
+              {"color": "red", "value": 0.7}
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["perf", "storefront", "load-test"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "Storefront — Performance",
+  "uid": "storefront-perf",
+  "version": 1,
+  "weekStart": ""
+}

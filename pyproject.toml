@@ -41,6 +41,9 @@ dependencies = [
     "celery>=5.3.6",
     "cachetools>=5.3.0",  # In-process TTL cache for hot per-store template lookups
 
+    # Observability — Prometheus exposition for /metrics scrape endpoint
+    "prometheus_client>=0.20",
+
     # HTML sanitization for merchant-edited email templates.
     # We declare ``tinycss2`` directly (instead of via ``bleach[css]``)
     # because pip's resolver for the ``[css]`` extra fights every new

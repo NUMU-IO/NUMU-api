@@ -13,5 +13,26 @@ from src.infrastructure.observability.metrics import (
     counter,
     timer,
 )
+from src.infrastructure.observability.prometheus_metrics import (
+    REGISTRY,
+    record_cache_hit,
+    record_cache_invalidate,
+    record_cache_miss,
+    record_cache_negative_hit,
+    render_exposition,
+    status_bucket,
+)
 
-__all__ = ["Counter", "Timer", "counter", "timer"]
+__all__ = [
+    "Counter",
+    "REGISTRY",
+    "Timer",
+    "counter",
+    "record_cache_hit",
+    "record_cache_invalidate",
+    "record_cache_miss",
+    "record_cache_negative_hit",
+    "render_exposition",
+    "status_bucket",
+    "timer",
+]
