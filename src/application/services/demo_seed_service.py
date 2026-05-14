@@ -181,6 +181,13 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict[str, int]:
             except Exception as exc:
                 logger.info("demo_seed_product_failed: %s (%s)", name_en, exc)
 
+        # AsyncSessionLocal doesn't autocommit; exiting the `with` block
+        # rolls back uncommitted changes. Without this commit the route
+        # returned 200 with `products=5` in-process, but every INSERT was
+        # discarded by the implicit rollback — caller sees 404 on the
+        # storefront product lookup right after a "successful" seed.
+        await session.commit()
+
     logger.info(
         "demo_catalog_seeded",
         extra={

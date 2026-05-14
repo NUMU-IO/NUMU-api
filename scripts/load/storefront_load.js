@@ -30,7 +30,6 @@ const homeLatency = new Trend("home_latency_ms");
 const pdpLatency = new Trend("pdp_latency_ms");
 const plpLatency = new Trend("plp_latency_ms");
 const cartLatency = new Trend("cart_latency_ms");
-const lookupLatency = new Trend("lookup_latency_ms");
 const errorRate = new Rate("errors");
 
 // ─── Config ────────────────────────────────────────────────────
@@ -70,7 +69,6 @@ export const options = {
     pdp_latency_ms: ["p(95)<300"],
     plp_latency_ms: ["p(95)<400"],
     cart_latency_ms: ["p(95)<200"],
-    lookup_latency_ms: ["p(95)<200"],
     errors: ["rate<0.01"],
   },
   // Tag every request with the load-test name so observability tools
@@ -80,8 +78,8 @@ export const options = {
 
 // ─── Helpers ──────────────────────────────────────────────────
 
-function pickStore() {
-  return TEST_STORES[Math.floor(Math.random() * TEST_STORES.length)];
+function pickStore(stores) {
+  return stores[Math.floor(Math.random() * stores.length)];
 }
 
 function check200(res, name) {
@@ -90,59 +88,6 @@ function check200(res, name) {
   });
   errorRate.add(!ok);
   return ok;
-}
-
-// ─── Per-VU subdomain → UUID cache ────────────────────────────
-
-// Key: subdomain string. Value: UUID string, or null if the lookup
-// 404'd (we skip the store for the rest of the run in that case).
-//
-// k6 runs each VU as an isolated process, so this Map is naturally
-// per-VU without locking. It survives across iterations of the same
-// VU but not across VUs — which is what we want: one lookup per
-// (VU, store) pair, not one per (iteration, store).
-const storeIdCache = new Map();
-
-function resolveStoreId(subdomain, baseHeaders) {
-  if (storeIdCache.has(subdomain)) {
-    return storeIdCache.get(subdomain);
-  }
-  const res = http.get(
-    `${BASE_URL}/api/v1/storefront/store-by-subdomain/${subdomain}`,
-    { headers: baseHeaders, tags: { route: "store_lookup" } },
-  );
-  lookupLatency.add(res.timings.duration);
-
-  if (res.status !== 200) {
-    if (res.status === 404) {
-      console.warn(`[load] store fixture missing: ${subdomain}`);
-    } else {
-      console.error(
-        `[load] lookup ${subdomain} failed: status=${res.status} body=${res.body?.slice(0, 200)}`,
-      );
-    }
-    storeIdCache.set(subdomain, null);
-    errorRate.add(true);
-    return null;
-  }
-  let body;
-  try {
-    body = JSON.parse(res.body);
-  } catch (err) {
-    console.error(`[load] lookup ${subdomain} bad JSON: ${err.message}`);
-    storeIdCache.set(subdomain, null);
-    errorRate.add(true);
-    return null;
-  }
-  const id = body?.data?.id;
-  if (!id) {
-    console.error(`[load] lookup ${subdomain} missing data.id`);
-    storeIdCache.set(subdomain, null);
-    errorRate.add(true);
-    return null;
-  }
-  storeIdCache.set(subdomain, id);
-  return id;
 }
 
 // ─── Default scenario ────────────────────────────────────────
@@ -155,20 +100,16 @@ function resolveStoreId(subdomain, baseHeaders) {
  * Random sleep between actions to model human pacing without
  * batch-flooding any single endpoint.
  */
-export default function () {
-  const subdomain = pickStore();
+export default function (data) {
+  // `data` comes from setup() and is k6's standard way to share
+  // immutable, JSON-serialisable values between the setup phase and
+  // the per-VU iterations. We pre-resolved subdomain → UUID once for
+  // all VUs in setup(), so iterations have zero lookup overhead.
+  const { subdomain, storeId } = pickStore(data.stores);
   const baseHeaders = {
     "x-numu-host": `${subdomain}.numueg.app`,
     host: `${subdomain}.numueg.app`,
   };
-
-  // Resolve UUID up front. If the fixture is missing, skip the rest
-  // of this iteration — don't fall through into broken URLs.
-  const storeId = resolveStoreId(subdomain, baseHeaders);
-  if (storeId === null) {
-    sleep(1);
-    return;
-  }
 
   group("home", () => {
     const res = http.get(`${BASE_URL}/`, {
@@ -229,10 +170,64 @@ export default function () {
 
 // ─── Lifecycle hooks ─────────────────────────────────────────
 
+/**
+ * Resolve every configured subdomain to its store UUID exactly once,
+ * before any VU starts. The returned object is passed to every VU's
+ * default() call by k6, so iterations don't do any lookup network I/O.
+ *
+ * Failure modes:
+ *   - 404 for a subdomain → drop that store from the pool and log a
+ *     warning. The test can still run on the remaining stores.
+ *   - Zero stores resolved → throw, aborting the test before VUs spin
+ *     up. This is what we want — running 100 VUs against missing
+ *     fixtures produces a misleading "everything failed" report. Better
+ *     to fail fast with a clear "fixture seeding didn't happen" message.
+ */
 export function setup() {
   console.log(
-    `[load] BASE_URL=${BASE_URL}\n[load] stores=${TEST_STORES.join(",")}\n[load] target: 100 VUs / 10m / p95<500ms`,
+    `[load] BASE_URL=${BASE_URL}\n[load] subdomains=${TEST_STORES.join(",")}\n[load] target: 100 VUs / 10m / p95<500ms`,
   );
+
+  const resolved = [];
+  for (const subdomain of TEST_STORES) {
+    const res = http.get(
+      `${BASE_URL}/api/v1/storefront/store-by-subdomain/${subdomain}`,
+      { tags: { route: "store_lookup", phase: "setup" } },
+    );
+    if (res.status !== 200) {
+      console.warn(
+        `[load] fixture missing for "${subdomain}" (status=${res.status}) — skipping`,
+      );
+      continue;
+    }
+    let id;
+    try {
+      id = JSON.parse(res.body)?.data?.id;
+    } catch (err) {
+      console.warn(`[load] bad JSON resolving "${subdomain}": ${err.message}`);
+      continue;
+    }
+    if (!id) {
+      console.warn(`[load] response for "${subdomain}" missing data.id`);
+      continue;
+    }
+    resolved.push({ subdomain, storeId: id });
+  }
+
+  if (resolved.length === 0) {
+    throw new Error(
+      `[load] no stores resolved — run scripts/load/seed_load_test_stores.py against ${BASE_URL} first`,
+    );
+  }
+
+  console.log(
+    `[load] resolved ${resolved.length}/${TEST_STORES.length} stores:`,
+  );
+  for (const { subdomain, storeId } of resolved) {
+    console.log(`[load]   ${subdomain} → ${storeId}`);
+  }
+
+  return { stores: resolved };
 }
 
 export function teardown(_data) {
