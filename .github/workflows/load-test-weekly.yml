@@ -63,17 +63,34 @@ jobs:
 
       - name: Seed load-test stores
         id: seed
+        # Don't take the whole workflow down if seeding fails — the k6
+        # step will surface the missing stores via 404s and the run report
+        # is still useful. The "Fail the workflow if regression" step at
+        # the end re-asserts exit status anyway.
+        continue-on-error: true
         env:
           NUMU_ADMIN_EMAIL: ${{ secrets.NUMU_ADMIN_EMAIL }}
           NUMU_ADMIN_PASSWORD: ${{ secrets.NUMU_ADMIN_PASSWORD }}
         run: |
+          set -o pipefail
+          if [ -z "${NUMU_ADMIN_EMAIL}" ] || [ -z "${NUMU_ADMIN_PASSWORD}" ]; then
+            echo "::warning::NUMU_ADMIN_EMAIL / NUMU_ADMIN_PASSWORD secrets not set"
+            echo "::warning::Skipping seed step — stores must already exist on $BASE_URL"
+            echo '{"target":"'"$BASE_URL"'","stores":[],"all_ok":false,"auth_error":"secrets not set"}' > seed-summary.json
+            exit 0
+          fi
           python scripts/load/seed_load_test_stores.py \
             --base-url "$BASE_URL" \
             --admin-email "$NUMU_ADMIN_EMAIL" \
             --admin-password "$NUMU_ADMIN_PASSWORD" \
             --stores "$TEST_STORES" \
             | tee seed-summary.json
-          python -c "import json,sys; sys.exit(0 if json.load(open('seed-summary.json'))['all_ok'] else 1)"
+          # Don't fail the step on all_ok=false — that's just "some stores
+          # weren't reconciled". The seeder writes a JSON summary either
+          # way; downstream parsing should never crash on missing file.
+          if ! python -c "import json,sys; d=json.load(open('seed-summary.json')); sys.exit(0 if d.get('all_ok') else 1)"; then
+            echo "::warning::Seed step reported all_ok=false — see seed-summary.json artifact"
+          fi
 
       - name: Upload seed summary
         if: always()

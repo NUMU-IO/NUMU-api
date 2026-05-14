@@ -171,6 +171,27 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+    # Fail fast on empty creds. Without this guard the script hits
+    # /auth/login with `email=""` and gets a 422 VALIDATION_ERROR that's
+    # easy to misread as "the endpoint is broken" — the real fix is to
+    # set NUMU_ADMIN_EMAIL / NUMU_ADMIN_PASSWORD as repo secrets.
+    if not args.admin_email or not args.admin_password:
+        logger.error(
+            "auth failure: --admin-email and --admin-password are required. "
+            "In CI, set NUMU_ADMIN_EMAIL and NUMU_ADMIN_PASSWORD as repo "
+            "secrets (Settings → Secrets and variables → Actions). Use a "
+            "platform admin account WITHOUT 2FA enabled."
+        )
+        # Emit a minimal summary so the workflow's downstream JSON parse
+        # step doesn't crash on an empty file.
+        print(json.dumps({
+            "target": args.base_url,
+            "stores": [],
+            "all_ok": False,
+            "auth_error": "missing credentials",
+        }, indent=2))
+        return 2
+
     subdomains = [s.strip() for s in args.stores.split(",") if s.strip()]
     results: list[StoreResult] = []
 
@@ -179,6 +200,14 @@ def main() -> int:
             login(client, args.admin_email, args.admin_password)
         except Exception as exc:  # noqa: BLE001
             logger.error("auth failure: %s", exc)
+            # Same rationale as above — keep the JSON contract intact
+            # even on the failure path so callers can `jq` safely.
+            print(json.dumps({
+                "target": args.base_url,
+                "stores": [],
+                "all_ok": False,
+                "auth_error": str(exc),
+            }, indent=2))
             return 2
 
         for sd in subdomains:
