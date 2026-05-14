@@ -34,6 +34,7 @@ def target_to_output(t: PromotionTarget) -> PromotionTargetOutput:
         target_kind=t.target_kind,
         target_value=t.target_value,
         inclusion=t.inclusion,
+        role=t.role,
     )
 
 
@@ -65,6 +66,8 @@ def promotion_to_output(
         version=promo.version,
         created_at=promo.created_at,
         updated_at=promo.updated_at,
+        usage_limit_total=promo.usage_limit_total,
+        usage_limit_per_customer=promo.usage_limit_per_customer,
         metrics=metrics or PromotionMetricsBlock(),
     )
 

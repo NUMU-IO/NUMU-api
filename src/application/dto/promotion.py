@@ -6,7 +6,7 @@ discriminated on `surface`, mirroring the entity layer.
 """
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -73,6 +73,11 @@ class PromotionTargetInput(BaseModel):
     target_kind: TargetKind
     target_value: dict[str, Any] = Field(default_factory=dict)
     inclusion: bool = True
+    # BOGO line-set tagging: `buy_set` / `get_set` targets bypass the
+    # eligibility checker and feed the discount calculator's per-line
+    # filters. `None` (default) preserves the legacy global-filter
+    # semantics. Mirrors `PromotionTarget.role` on the entity.
+    role: Literal["buy_set", "get_set"] | None = None
 
 
 class CreatePromotionInput(BaseModel):
@@ -95,6 +100,13 @@ class CreatePromotionInput(BaseModel):
     priority: int = 0
     starts_at: datetime | None = None
     ends_at: datetime | None = None
+
+    # Per-promotion usage caps. Mirrors the fields on the Promotion entity
+    # (`Promotion.usage_limit_total` / `usage_limit_per_customer`); without
+    # them on the DTO, the merchant form's payload tripped Pydantic's
+    # `extra="forbid"` and the create request 422'd.
+    usage_limit_total: int | None = Field(default=None, ge=1)
+    usage_limit_per_customer: int | None = Field(default=None, ge=1)
 
 
 class UpdatePromotionInput(BaseModel):
@@ -119,6 +131,11 @@ class UpdatePromotionInput(BaseModel):
     priority: int | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
+
+    # See `CreatePromotionInput.usage_limit_total` — same fields, also
+    # required on update for the merchant edit form's PATCH to validate.
+    usage_limit_total: int | None = Field(default=None, ge=1)
+    usage_limit_per_customer: int | None = Field(default=None, ge=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -145,6 +162,7 @@ class PromotionTargetOutput(BaseModel):
     target_kind: TargetKind
     target_value: dict[str, Any]
     inclusion: bool
+    role: Literal["buy_set", "get_set"] | None = None
 
 
 class PromotionMetricsBlock(BaseModel):
@@ -185,6 +203,12 @@ class PromotionOutput(BaseModel):
     version: int
     created_at: datetime
     updated_at: datetime
+
+    # Surfaced on the detail response so the merchant edit form can
+    # round-trip the caps (it preloads `promo.usage_limit_total` into
+    # the field state).
+    usage_limit_total: int | None = None
+    usage_limit_per_customer: int | None = None
 
     metrics: PromotionMetricsBlock = Field(default_factory=PromotionMetricsBlock)
 

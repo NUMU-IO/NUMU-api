@@ -86,6 +86,15 @@ class UpdatePromotionUseCase:
             current.translations = payload.translations
         if payload.status is not None:
             current.status = payload.status
+        # NOTE: follows the existing "non-null = patch" convention used by
+        # the other fields on this use case. A merchant can RAISE the cap
+        # or change the per-customer cap, but can't reset an existing cap
+        # back to "uncapped" through this endpoint — same limitation as
+        # `priority`, `coupon_id`, etc.
+        if payload.usage_limit_total is not None:
+            current.usage_limit_total = payload.usage_limit_total
+        if payload.usage_limit_per_customer is not None:
+            current.usage_limit_per_customer = payload.usage_limit_per_customer
 
         # Re-run the cross-field matrix on the resulting state.
         validate_surface_payload(
@@ -126,6 +135,7 @@ class UpdatePromotionUseCase:
                     target_kind=t.target_kind,
                     target_value=t.target_value,
                     inclusion=t.inclusion,
+                    role=t.role,
                 )
                 for t in payload.targets
             ]
