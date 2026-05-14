@@ -123,6 +123,10 @@ async def _ensure_product(
     if row is not None:
         return row["id"]
     product_id = uuid4()
+    # NULL `dimensions` is rejected by the storefront PLP/PDP serializer
+    # (entity mapper expects a dict, not None), causing HTTP 500 on every
+    # smoke request. The column is nullable in the schema so the INSERT
+    # succeeds — the failure surfaces only when the row is read back.
     await conn.execute(
         """
         INSERT INTO public.products (
@@ -130,6 +134,7 @@ async def _ensure_product(
             product_type, status,
             price_amount, price_currency,
             quantity, low_stock_threshold,
+            dimensions,
             images, tags, attributes, extra_data, options,
             created_at, updated_at
         )
@@ -138,6 +143,7 @@ async def _ensure_product(
             'PHYSICAL', 'ACTIVE',
             1000, 'EGP',
             100, 5,
+            '{}'::jsonb,
             $8::text[], $9::text[],
             '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
             NOW(), NOW()
