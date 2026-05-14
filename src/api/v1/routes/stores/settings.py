@@ -13,6 +13,7 @@ from src.api.dependencies import (
     get_current_store,
     get_onboarding_repository,
     get_store_repository,
+    get_storefront_cache_service,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
@@ -64,6 +65,7 @@ from src.application.use_cases.onboarding.auto_complete import (
 )
 from src.core.entities.onboarding import OnboardingStepKey
 from src.core.entities.store import Store
+from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 
 router = APIRouter(prefix="/{store_id}/settings")
@@ -1915,6 +1917,7 @@ async def update_customization(
 async def publish_customization(
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Publish the current customization draft to the live storefront."""
     settings = store.settings or {}
@@ -1958,6 +1961,13 @@ async def publish_customization(
     store.settings = settings
     await store_repo.update(store)
 
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
+    await cache.invalidate_theme(store.id)
+
     # Bust the Next.js storefront cache so merchant edits go live
     # immediately instead of waiting out the 60s per-store revalidate
     # window set on getStoreData().
@@ -1992,6 +2002,7 @@ async def publish_customization(
 async def reset_customization(
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Restore the merchant's customization to the fresh-store defaults.
 
@@ -2020,6 +2031,12 @@ async def reset_customization(
     settings["customization"] = defaults
     store.settings = settings
     await store_repo.update(store)
+
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
 
     return SuccessResponse(
         data=_build_customization_response(

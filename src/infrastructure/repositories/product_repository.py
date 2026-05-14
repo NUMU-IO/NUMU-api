@@ -109,6 +109,24 @@ class ProductRepository(IProductRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_by_ids(self, entity_ids: list[UUID]) -> list[Product]:
+        """Bulk-fetch products by ID.
+
+        Hot-path replacement for callers that previously looped
+        ``get_by_id`` per ID (e.g. ``GET /storefront/me/cart`` building
+        the per-line product snapshot). Single ``WHERE id IN (...)``
+        query instead of N round-trips.
+
+        Returned list is in arbitrary order. Duplicate IDs in the
+        input list yield one entity each in the output. Missing IDs
+        are silently skipped (callers can detect with a set diff).
+        """
+        if not entity_ids:
+            return []
+        query = select(ProductModel).where(ProductModel.id.in_(entity_ids))
+        result = await self.session.execute(self._tenant_filter(query))
+        return [self._to_entity(model) for model in result.scalars().all()]
+
     async def get_all(
         self,
         skip: int = 0,

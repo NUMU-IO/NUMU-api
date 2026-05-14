@@ -70,6 +70,9 @@ class _FakeDisplayRepo:
     async def list_for_promotion(self, promotion_id: UUID):
         return self.displays.get(promotion_id, [])
 
+    async def list_for_promotions(self, promotion_ids: list[UUID]):
+        return {pid: list(self.displays.get(pid, [])) for pid in promotion_ids}
+
     async def replace_for_promotion(self, *a, **k):
         raise NotImplementedError
 
@@ -80,6 +83,9 @@ class _FakeTargetRepo:
 
     async def list_for_promotion(self, promotion_id: UUID):
         return self.targets.get(promotion_id, [])
+
+    async def list_for_promotions(self, promotion_ids: list[UUID]):
+        return {pid: list(self.targets.get(pid, [])) for pid in promotion_ids}
 
     async def replace_for_promotion(self, *a, **k):
         raise NotImplementedError

@@ -31,8 +31,14 @@ class FunnelEventRepository:
         session_fingerprint: str | None = None,
         customer_id: UUID | None = None,
         step_data: dict | None = None,
+        event_id: UUID | None = None,
     ) -> None:
-        """Record a funnel event."""
+        """Record a funnel event.
+
+        ``event_id`` is the optional client-provided idempotency key.
+        Persisted as-is; uniqueness is enforced by the partial UNIQUE
+        index ``ux_funnel_events_event_id`` (Step 09 migration).
+        """
         event = FunnelEventModel(
             id=uuid4(),
             tenant_id=tenant_id,
@@ -41,6 +47,7 @@ class FunnelEventRepository:
             session_fingerprint=session_fingerprint,
             customer_id=customer_id,
             step_data=step_data,
+            event_id=event_id,
         )
         self.session.add(event)
         await self.session.flush()

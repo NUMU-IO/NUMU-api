@@ -7,8 +7,41 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config.logging_config import get_logger
+from src.infrastructure.observability.prometheus_metrics import (
+    http_request_duration_seconds,
+    http_requests_in_progress,
+    http_requests_total,
+    status_bucket,
+)
 
 logger = get_logger(__name__)
+
+
+def _route_label(request: Request) -> str:
+    """Resolve a low-cardinality ``route`` label for Prometheus.
+
+    We can't use ``scope["route"].path`` (the path template) here:
+    Starlette's :class:`BaseHTTPMiddleware` shallow-copies the scope at
+    the middleware boundary, so the router's mutation of
+    ``scope["route"]`` (which happens deeper in the stack) isn't
+    visible after ``call_next`` returns. The endpoint function
+    reference *is* visible — Starlette sets ``scope["endpoint"]`` on
+    the inner scope which our shallow copy points at — so we label by
+    ``endpoint.__name__``.
+
+    This collapses 10 000 distinct interpolated paths (one per UUID)
+    onto one series per handler, which is exactly the cardinality
+    invariant we want. Trade-off: we lose the path shape in the label
+    (use the dashboard's route-template column instead).
+
+    Falls back to ``__unmatched__`` for 404s / OPTIONS-to-no-route so
+    raw URLs never leak as label values.
+    """
+    endpoint = request.scope.get("endpoint")
+    name = getattr(endpoint, "__name__", None)
+    if isinstance(name, str) and name:
+        return name
+    return "__unmatched__"
 
 
 class ResponseTimeMiddleware(BaseHTTPMiddleware):
@@ -52,14 +85,44 @@ class ResponseTimeMiddleware(BaseHTTPMiddleware):
         # Use perf_counter for high-precision timing
         start_time = time.perf_counter()
 
-        # Process the request
-        response = await call_next(request)
+        # In-progress gauge (decrement in finally) — kept low-cardinality
+        # via the path-template label. We resolve the route *after*
+        # call_next because the matched route only lands on the scope
+        # once routing has run, but we want the gauge bracket to span
+        # the whole request. Use a sentinel for the "in flight" window
+        # and overwrite below.
+        in_flight_label = "__pending__"
+        http_requests_in_progress.labels(route=in_flight_label).inc()
+
+        try:
+            # Process the request
+            response = await call_next(request)
+        except Exception:
+            # Record the abandoned in-flight before re-raising; the
+            # request-level histogram is intentionally skipped here
+            # because Sentry / the error-handler middleware owns
+            # exception observability.
+            http_requests_in_progress.labels(route=in_flight_label).dec()
+            raise
+
+        http_requests_in_progress.labels(route=in_flight_label).dec()
 
         # Calculate response time in milliseconds
         process_time_ms = (time.perf_counter() - start_time) * 1000
 
         # Add X-Response-Time header (standard header name)
         response.headers["X-Response-Time"] = f"{process_time_ms:.2f}ms"
+
+        # Prometheus emission — use route TEMPLATE, not raw path, to
+        # keep label cardinality bounded.
+        route_label = _route_label(request)
+        status_label = status_bucket(response.status_code)
+        http_request_duration_seconds.labels(
+            route=route_label, method=request.method, status=status_label
+        ).observe(process_time_ms / 1000.0)
+        http_requests_total.labels(
+            route=route_label, method=request.method, status=status_label
+        ).inc()
 
         # Skip logging for excluded paths
         if request.url.path in self.EXCLUDED_PATHS:

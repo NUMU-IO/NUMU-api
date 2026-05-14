@@ -42,6 +42,29 @@ Override the test stores:
 k6 run -e BASE_URL=… -e TEST_STORES=mystore-a,mystore-b scripts/load/storefront_load.js
 ```
 
+### How the script discovers stores
+
+Each VU resolves `subdomain → store_id` once via `GET /api/v1/storefront/store-by-subdomain/{subdomain}` and caches the UUID for the rest of its run. If you change subdomain values in `TEST_STORES`, the script still works — it just does one extra lookup per VU per store.
+
+If a subdomain 404s, the VU **skips** that store for the rest of the run (no retry storm). A warning is printed to the run log; a missing-fixture run will pass the test but the run log makes the data drop obvious.
+
+### Seeding fixtures
+
+Run automatically before the weekly k6 run by `.github/workflows/load-test-weekly.yml`.
+
+To run manually against staging:
+
+```bash
+python scripts/load/seed_load_test_stores.py \
+  --base-url https://staging.numueg.app \
+  --admin-email "$NUMU_ADMIN_EMAIL" \
+  --admin-password "$NUMU_ADMIN_PASSWORD"
+```
+
+Exit code `0` = all 10 stores ready. The script is idempotent — safe to re-run as many times as you want. It will not delete or overwrite an existing store.
+
+The admin account must be a `SUPER_ADMIN` (or a `STORE_OWNER` who already owns the `load-store-*` subdomains) with 2FA disabled — `POST /api/v1/stores/` requires one of those roles, and 2FA would require an interactive challenge the script cannot complete.
+
 ## CI integration
 
 The weekly cron in `.github/workflows/load-test.yml` (Phase 5.10

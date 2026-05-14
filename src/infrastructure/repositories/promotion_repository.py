@@ -288,6 +288,24 @@ class PromotionDisplayRepository(IPromotionDisplayRepository):
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self.mapper.display_to_entity(m) for m in rows]
 
+    async def list_for_promotions(
+        self, promotion_ids: list[UUID]
+    ) -> dict[UUID, list[PromotionDisplay]]:
+        result: dict[UUID, list[PromotionDisplay]] = {pid: [] for pid in promotion_ids}
+        if not promotion_ids:
+            return result
+        stmt = (
+            select(PromotionDisplayModel)
+            .where(PromotionDisplayModel.promotion_id.in_(promotion_ids))
+            .order_by(PromotionDisplayModel.created_at.asc())
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        for m in rows:
+            result.setdefault(m.promotion_id, []).append(
+                self.mapper.display_to_entity(m)
+            )
+        return result
+
     async def replace_for_promotion(
         self, promotion_id: UUID, displays: list[PromotionDisplay]
     ) -> list[PromotionDisplay]:
@@ -319,6 +337,24 @@ class PromotionTargetRepository(IPromotionTargetRepository):
         )
         rows = (await self.session.execute(stmt)).scalars().all()
         return [self.mapper.target_to_entity(m) for m in rows]
+
+    async def list_for_promotions(
+        self, promotion_ids: list[UUID]
+    ) -> dict[UUID, list[PromotionTarget]]:
+        result: dict[UUID, list[PromotionTarget]] = {pid: [] for pid in promotion_ids}
+        if not promotion_ids:
+            return result
+        stmt = (
+            select(PromotionTargetModel)
+            .where(PromotionTargetModel.promotion_id.in_(promotion_ids))
+            .order_by(PromotionTargetModel.created_at.asc())
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        for m in rows:
+            result.setdefault(m.promotion_id, []).append(
+                self.mapper.target_to_entity(m)
+            )
+        return result
 
     async def replace_for_promotion(
         self, promotion_id: UUID, targets: list[PromotionTarget]

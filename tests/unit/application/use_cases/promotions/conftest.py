@@ -108,6 +108,9 @@ class FakeDisplayRepo:
     async def list_for_promotion(self, promotion_id: UUID):
         return list(self.rows.get(promotion_id, []))
 
+    async def list_for_promotions(self, promotion_ids: list[UUID]):
+        return {pid: list(self.rows.get(pid, [])) for pid in promotion_ids}
+
     async def replace_for_promotion(self, promotion_id, displays):
         self.rows[promotion_id] = list(displays)
         return list(displays)
@@ -119,6 +122,9 @@ class FakeTargetRepo:
 
     async def list_for_promotion(self, promotion_id: UUID):
         return list(self.rows.get(promotion_id, []))
+
+    async def list_for_promotions(self, promotion_ids: list[UUID]):
+        return {pid: list(self.rows.get(pid, [])) for pid in promotion_ids}
 
     async def replace_for_promotion(self, promotion_id, targets):
         self.rows[promotion_id] = list(targets)

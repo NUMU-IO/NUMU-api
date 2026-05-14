@@ -111,6 +111,14 @@ class PromotionResolver:
             dismissed_promotion_ids=context.dismissed_promotion_ids | dismissed_ids,
         )
 
+        # Step 08 N+1 fix: bulk-fetch all displays + targets once,
+        # then index by promotion_id. Previous code looped
+        # ``list_for_promotion`` per promotion, which fanned out to
+        # ``2 * len(promotions)`` extra queries per resolve call.
+        promo_ids = [p.id for p in promotions]
+        displays_by_promo = await self._display_repo.list_for_promotions(promo_ids)
+        targets_by_promo = await self._target_repo.list_for_promotions(promo_ids)
+
         # 3. Filter & group by surface, applying display rules.
         bucket_bars: list[ResolvedPromotion] = []
         bucket_popups: list[ResolvedPromotion] = []
@@ -120,8 +128,8 @@ class PromotionResolver:
         bucket_codes: list[ResolvedPromotion] = []
 
         for promo in promotions:
-            displays = await self._display_repo.list_for_promotion(promo.id)
-            targets = await self._target_repo.list_for_promotion(promo.id)
+            displays = displays_by_promo.get(promo.id, [])
+            targets = targets_by_promo.get(promo.id, [])
 
             verdict = self._checker.is_eligible(promo, targets, ctx, now=moment)
             if not verdict.eligible:

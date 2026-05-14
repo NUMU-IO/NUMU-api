@@ -25,6 +25,7 @@ from src.api.dependencies import (
     get_current_store,
     get_current_user_id,
     get_store_repository,
+    get_storefront_cache_service,
     verify_store_ownership,
 )
 from src.api.dependencies.repositories import (
@@ -43,6 +44,7 @@ from src.api.v1.schemas.tenant.theme_v2 import (
 from src.application.services.theme_service import ThemeService
 from src.core.entities.store import Store
 from src.core.entities.theme import StoreTheme
+from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_repository import ThemeRepository
 from src.infrastructure.repositories.theme_version_repository import (
@@ -198,6 +200,7 @@ async def activate_theme(
     store: Store = Depends(get_current_store),
     svc: ThemeService = Depends(_get_svc),
     store_repo=Depends(get_store_repository),
+    cache: StorefrontCache = Depends(get_storefront_cache_service),
 ) -> SuccessResponse[ActivateThemeResponse]:
     """Make the selected installation the active theme for this store.
 
@@ -209,6 +212,14 @@ async def activate_theme(
         installation_id=UUID(installation_id),
         store_repo=store_repo,
     )
+
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
+    await cache.invalidate_theme(store.id)
+
     return SuccessResponse(
         data=ActivateThemeResponse(
             activated=True,
@@ -260,6 +271,7 @@ async def publish_customization(
     store: Store = Depends(get_current_store),
     svc: ThemeService = Depends(_get_svc),
     store_repo=Depends(get_store_repository),
+    cache: StorefrontCache = Depends(get_storefront_cache_service),
 ) -> SuccessResponse[StoreThemeInstallationResponse]:
     """Promote the draft customization to live.
 
@@ -272,6 +284,14 @@ async def publish_customization(
         installation_id=UUID(installation_id),
         store_repo=store_repo,
     )
+
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
+    await cache.invalidate_theme(store.id)
+
     return SuccessResponse(
         data=_serialize(updated),
         message="Customization published. Changes are now live.",

@@ -84,6 +84,18 @@ class IPromotionDisplayRepository(ABC):
     ) -> list[PromotionDisplay]: ...
 
     @abstractmethod
+    async def list_for_promotions(
+        self, promotion_ids: list[UUID]
+    ) -> dict[UUID, list[PromotionDisplay]]:
+        """Bulk-load displays for many promotions in one query.
+
+        Hot-path replacement for callers that previously looped
+        ``list_for_promotion`` per promotion (storefront active-promotions
+        resolver). Returns a map keyed by promotion_id; promotion ids
+        without any displays are present in the map with an empty list.
+        """
+
+    @abstractmethod
     async def replace_for_promotion(
         self, promotion_id: UUID, displays: list[PromotionDisplay]
     ) -> list[PromotionDisplay]:
@@ -95,6 +107,16 @@ class IPromotionTargetRepository(ABC):
 
     @abstractmethod
     async def list_for_promotion(self, promotion_id: UUID) -> list[PromotionTarget]: ...
+
+    @abstractmethod
+    async def list_for_promotions(
+        self, promotion_ids: list[UUID]
+    ) -> dict[UUID, list[PromotionTarget]]:
+        """Bulk-load targets for many promotions in one query.
+
+        See :meth:`IPromotionDisplayRepository.list_for_promotions` for
+        the same hot-path rationale.
+        """
 
     @abstractmethod
     async def replace_for_promotion(

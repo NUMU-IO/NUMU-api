@@ -91,12 +91,21 @@ async def _build_cart_response(
     Live product data (current price, current inventory) is exposed as
     `current_price` / `available_now` / `sold_out_now` / `price_changed`
     so themes can surface "price changed" or "reduce quantity" nudges.
+
+    Step 08 N+1 fix: a single ``product_repo.get_by_ids(...)`` call
+    replaces the per-item ``get_by_id`` loop that previously emitted
+    one (product + selectin store + selectin category) trio per cart
+    line.
     """
     items: list[CartItemResponse] = []
     subtotal = 0
 
+    unique_product_ids = list({item.product_id for item in cart.items})
+    products = await product_repo.get_by_ids(unique_product_ids)
+    products_by_id = {p.id: p for p in products}
+
     for cart_item in cart.items:
-        product = await product_repo.get_by_id(cart_item.product_id)
+        product = products_by_id.get(cart_item.product_id)
         if not product or product.status != ProductStatus.ACTIVE:
             continue
 
@@ -135,9 +144,9 @@ async def _build_cart_response(
 
     currency = "EGP"
     if items and cart.items:
-        product = await product_repo.get_by_id(cart.items[0].product_id)
-        if product:
-            currency = product.price.currency.value
+        first_product = products_by_id.get(cart.items[0].product_id)
+        if first_product:
+            currency = first_product.price.currency.value
 
     return SuccessResponse(
         data=CartResponse(

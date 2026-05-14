@@ -24,8 +24,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from pydantic import ValidationError
 
 from src.api.dependencies import (
+    get_current_store,
     get_current_user_id,
     get_store_repository,
+    get_storefront_cache_service,
     verify_store_ownership,
 )
 from src.api.dependencies.repositories import (
@@ -44,6 +46,8 @@ from src.api.v1.schemas.tenant.theme_v3 import (
     customization_payload_size,
 )
 from src.application.services.theme_v3_service import StaleEtagError, ThemeV3Service
+from src.core.entities.store import Store
+from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_customization_version_repository import (
@@ -187,6 +191,8 @@ async def publish(
     store_id: UUID,
     svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
     user_id: Annotated[UUID, Depends(get_current_user_id)],
+    store: Annotated[Store, Depends(get_current_store)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Publish V3 draft with Dual-Write to all columns.
 
@@ -202,6 +208,14 @@ async def publish(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
+    await cache.invalidate_theme(store.id)
+
     return SuccessResponse(
         data=PublishResponse(published=data), message="Published successfully"
     )

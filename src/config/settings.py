@@ -109,6 +109,29 @@ class Settings(BaseSettings):
         password_part = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
+    # Storefront cache (store + theme reads). Short TTL is the safety net;
+    # explicit invalidation on mutation is the correctness mechanism.
+    storefront_cache_enabled: bool = True
+    cache_ttl_store_seconds: int = 60
+    cache_ttl_theme_seconds: int = 60
+    cache_negative_ttl_seconds: int = 10
+
+    # Async analytics ingest (Step 09). When enabled, the storefront
+    # /track and /track-event endpoints push to the Celery `analytics`
+    # queue and return 202 instead of writing funnel_events synchronously.
+    # Flip to False to revert to the legacy synchronous write path.
+    analytics_async_enabled: bool = True
+    analytics_idempotency_ttl_seconds: int = 86_400  # 24h
+
+    # Prometheus /metrics endpoint (Step 16). Disabled by default; ops
+    # enables in staging/prod via env once nginx is configured to gate
+    # /metrics behind an IP allowlist (or the deploy environment routes
+    # to it from inside the cluster only). `metrics_auth_token`, if set,
+    # is required as a Bearer token on /metrics requests — defence in
+    # depth alongside the network ACL.
+    metrics_endpoint_enabled: bool = False
+    metrics_auth_token: str | None = None
+
     # JWT Authentication (RS256 asymmetric signing)
     jwt_private_key: str = Field(default="")
     jwt_public_key: str = Field(default="")

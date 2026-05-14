@@ -179,18 +179,38 @@ engine = create_async_engine(settings.database_url, **_engine_kwargs)
 
 @event.listens_for(Pool, "checkout")
 def _pool_checkout(dbapi_conn, connection_record, connection_proxy) -> None:  # type: ignore[misc]
-    """Log when a connection is checked out of the pool."""
+    """Log + emit gauges when a connection is checked out of the pool."""
     pool = connection_proxy._pool
     if not hasattr(pool, "size"):
         return  # NullPool (used by alembic) doesn't support pool stats
+    size = pool.size()
+    checked_out = pool.checkedout()
+    overflow = pool.overflow()
     logger.debug(
         "db_pool_checkout",
         extra={
-            "pool_size": pool.size(),
-            "checked_out": pool.checkedout(),
-            "overflow": pool.overflow(),
+            "pool_size": size,
+            "checked_out": checked_out,
+            "overflow": overflow,
         },
     )
+    # Step 16 — update Prometheus gauges from the same hook. Importing
+    # inside the listener keeps a circular-import risk off the module
+    # load path (the metrics module pulls in prometheus_client, which
+    # is fine, but this function fires for alembic too and the lazy
+    # import keeps that path cold).
+    try:
+        from src.infrastructure.observability.prometheus_metrics import (
+            db_connections_in_use,
+            db_connections_overflow,
+            db_connections_pool_size,
+        )
+
+        db_connections_in_use.set(checked_out)
+        db_connections_pool_size.set(size)
+        db_connections_overflow.set(overflow)
+    except Exception:  # noqa: BLE001 — metrics must never break pool flow
+        pass
 
 
 @event.listens_for(Pool, "connect")

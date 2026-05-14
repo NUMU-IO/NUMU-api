@@ -65,3 +65,81 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Step 15 — per-PR load smoke
+  #
+  # Boots a minimal local stack (api + db + redis from docker-compose.yml
+  # — explicit service list keeps nominatim/celery out of the smoke path),
+  # seeds a single smoke-store row via scripts/seed_smoke_store.py, and
+  # runs k6 at 5 VUs / 30s against http://localhost:8000. Catches
+  # obvious regressions (missing index, broken cache, runaway query)
+  # before merge.
+  #
+  # Skipped automatically for docs-only PRs and for PRs whose title
+  # contains [skip-load] (escape hatch for known-irrelevant changes).
+  # ──────────────────────────────────────────────────────────────────────
+  load-smoke:
+    name: Load Smoke (k6)
+    runs-on: ubuntu-latest
+    needs: docker
+    timeout-minutes: 12
+    if: >-
+      github.event_name == 'pull_request' &&
+      !contains(github.event.pull_request.title, '[skip-load]') &&
+      !startsWith(github.event.pull_request.title, 'docs:')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Start local stack (api + db + redis only)
+        # docker-compose.yml binds api to localhost:8000. We list services
+        # explicitly so the heavyweight nominatim and the celery workers
+        # don't slow the boot — the storefront read paths only need
+        # api+db+redis.
+        run: |
+          docker compose -f docker/docker-compose.yml up -d --wait api db redis
+
+      - name: Apply migrations
+        run: |
+          docker compose -f docker/docker-compose.yml exec -T api \
+            alembic upgrade head
+
+      - name: Seed smoke fixtures
+        run: |
+          docker compose -f docker/docker-compose.yml exec -T api \
+            python scripts/seed_smoke_store.py
+
+      - name: Run smoke k6
+        env:
+          BASE_URL: http://localhost:8000
+          TEST_STORES: smoke-store
+        run: |
+          k6 run \
+            --summary-export load-summary.json \
+            -e BASE_URL=$BASE_URL \
+            -e TEST_STORES=$TEST_STORES \
+            --vus 5 --duration 30s \
+            scripts/load/storefront_load.js
+
+      - name: Upload smoke summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-smoke-${{ github.run_id }}
+          path: load-summary.json
+
+      - name: Dump api logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.yml logs api
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v

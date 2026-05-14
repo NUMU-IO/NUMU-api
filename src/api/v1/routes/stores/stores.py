@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import (
     get_current_user_id,
     get_store_repository,
+    get_storefront_cache_service,
     require_store_owner,
     verify_store_ownership,
 )
@@ -38,6 +39,7 @@ from src.application.use_cases.stores.create_store import (
     validate_subdomain,
 )
 from src.core.entities.store import Store
+from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 from src.infrastructure.tenancy.service import TenantService
 
@@ -250,6 +252,7 @@ async def update_store(
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Update store details."""
     use_case = UpdateStoreUseCase(
@@ -279,6 +282,14 @@ async def update_store(
         user_id=store.owner_id,
     )
 
+    await cache.invalidate_store(
+        store_id=result.id,
+        subdomain=result.subdomain,
+        custom_domain=result.custom_domain,
+    )
+    if request.theme_settings is not None:
+        await cache.invalidate_theme(result.id)
+
     return SuccessResponse(
         data=_build_store_response(result),
         message="Store updated successfully",
@@ -294,11 +305,19 @@ async def update_store(
 async def delete_store(
     store: Annotated[Store, Depends(verify_store_ownership)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Delete a store."""
     use_case = DeleteStoreUseCase(store_repository=store_repo)
 
     await use_case.execute(store_id=store.id, user_id=store.owner_id)
+
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
+    await cache.invalidate_theme(store.id)
 
     return None
 

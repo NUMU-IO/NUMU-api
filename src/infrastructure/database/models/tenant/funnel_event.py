@@ -32,6 +32,11 @@ class FunnelEventModel(Base, UUIDMixin, TenantMixin):
         nullable=False,
         index=True,
     )
+    # Step 09 — client-provided idempotency key. Nullable so legacy
+    # pre-async rows (which never had one) remain valid; uniqueness is
+    # enforced by a partial UNIQUE index (WHERE event_id IS NOT NULL)
+    # added in migration funnel_event_idemp_20260514.
+    event_id: Mapped[PyUUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     session_fingerprint: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
