@@ -13,18 +13,25 @@ per-PR smoke job boots a fresh ``docker-compose.yml`` stack with an
 empty database — no admin user, so the HTTP-auth flow can't bootstrap
 itself.
 
-This seeder instead writes directly to Postgres via asyncpg. It only
-needs three rows:
+This seeder writes via the project's SQLAlchemy ORM models (#290 —
+formerly raw asyncpg INSERTs). Going through the ORM means a future
+migration that adds a NOT NULL column or renames an existing one
+either picks up the new model default automatically or fails loudly
+at import time, instead of silently producing rows the storefront
+serializer chokes on (#294 was the previous version of that bug).
 
-* ``public.tenants``      — for FK + row-level-security gates
+Four rows minimum:
+
+* ``public.users``        — owner_id FK target for stores
+* ``public.tenants``      — for tenant_id FK + RLS gates
 * ``public.stores``       — subdomain ``smoke-store`` so the k6
                             store-by-subdomain lookup resolves
 * ``public.products``     — one ACTIVE row with slug ``demo-tshirt``
 
-The script is idempotent on every row (``ON CONFLICT DO NOTHING`` via
-INSERT-WHERE-NOT-EXISTS) so re-runs are safe.
+The script is idempotent on every row (``WHERE`` lookup before
+``add()``) so re-runs are safe.
 
-Run inside the api container (which has asyncpg + the source tree):
+Run inside the api container:
 
     docker compose -f docker/docker-compose.yml exec -T api \\
         python scripts/seed_smoke_store.py
@@ -33,145 +40,182 @@ Run inside the api container (which has asyncpg + the source tree):
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
-from uuid import UUID, uuid4
+from pathlib import Path
+from uuid import UUID
 
-import asyncpg
+# Ensure src/ is importable when run as a standalone script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from sqlalchemy import select
+from sqlalchemy import text as sql_text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.entities.product import ProductStatus, ProductType
+from src.core.entities.store import StoreStatus
+from src.core.entities.user import UserRole, UserStatus
+from src.core.value_objects.money import Currency
+from src.infrastructure.database import AsyncSessionLocal
+
+
+# UserModel + StoreModel reference TenantMembershipModel / RoleModel /
+# MembershipRoleModel via string-form relationships. None of them are
+# re-exported from `src.infrastructure.database.models`, so the first
+# ORM call (`select(UserModel)`) trips a mapper-resolution chain that
+# bubbles back as "expression failed to locate a name". The fix Celery
+# uses for the same class of bug: walk the models package once at
+# import time so every class registers with the mapper. See
+# `_load_all_models` in `src/infrastructure/messaging/celery_app.py`.
+def _load_all_models() -> None:
+    import importlib
+    import pkgutil
+
+    import src.infrastructure.database.models as _pkg
+
+    for module_info in pkgutil.walk_packages(_pkg.__path__, prefix=_pkg.__name__ + "."):
+        importlib.import_module(module_info.name)
+
+
+_load_all_models()
+
+
+from src.infrastructure.database.models import (  # noqa: E402
+    ProductModel,
+    StoreModel,
+    TenantModel,
+    UserModel,
+)
 
 SMOKE_SUBDOMAIN = "smoke-store"
+SMOKE_TENANT_SUBDOMAIN = "smoke-tenant"
+SMOKE_OWNER_EMAIL = "smoke-owner@example.test"
 SMOKE_PRODUCT_SLUG = "demo-tshirt"
 
-
-def _build_pg_dsn() -> str:
-    """Build a Postgres DSN from the container's env vars.
-
-    Mirrors the docker-compose ``api`` service env block:
-    ``POSTGRES_USER`` / ``POSTGRES_PASSWORD`` / ``POSTGRES_HOST`` /
-    ``POSTGRES_PORT`` / ``POSTGRES_DB``.
-    """
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "postgres")
-    host = os.getenv("POSTGRES_HOST", "db")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    db = os.getenv("POSTGRES_DB", "numu")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+# Bcrypt-shaped placeholder so the column's CHECK / length constraints (if
+# any) are happy; the smoke job never authenticates this user.
+SMOKE_PASSWORD_HASH = (
+    "$2b$12$smoke.placeholder.smoke.placeholder.smoke.placeholder.smoke.."
+)
 
 
-async def _ensure_tenant(conn: asyncpg.Connection) -> UUID:
-    row = await conn.fetchrow(
-        "SELECT id FROM public.tenants WHERE name = $1", "smoke-tenant"
+async def _ensure_owner(session: AsyncSession) -> UserModel:
+    user = await session.scalar(
+        select(UserModel).where(UserModel.email == SMOKE_OWNER_EMAIL)
     )
-    if row is not None:
-        return row["id"]
-    tenant_id = uuid4()
-    await conn.execute(
-        """
-        INSERT INTO public.tenants (id, name, status, plan, created_at, updated_at)
-        VALUES ($1, $2, 'active', 'free', NOW(), NOW())
-        ON CONFLICT DO NOTHING
-        """,
-        tenant_id,
-        "smoke-tenant",
+    if user is not None:
+        return user
+    user = UserModel(
+        email=SMOKE_OWNER_EMAIL,
+        hashed_password=SMOKE_PASSWORD_HASH,
+        first_name="Smoke",
+        last_name="Owner",
+        role=UserRole.STORE_OWNER,
+        status=UserStatus.ACTIVE,
     )
-    # Re-read in case ON CONFLICT skipped (race-free for a single seeder).
-    row = await conn.fetchrow(
-        "SELECT id FROM public.tenants WHERE name = $1", "smoke-tenant"
-    )
-    assert row is not None
-    return row["id"]
+    session.add(user)
+    await session.flush()
+    return user
 
 
-async def _ensure_store(conn: asyncpg.Connection, tenant_id: UUID) -> UUID:
-    row = await conn.fetchrow(
-        "SELECT id FROM public.stores WHERE subdomain = $1", SMOKE_SUBDOMAIN
+async def _ensure_tenant(session: AsyncSession, owner: UserModel) -> TenantModel:
+    tenant = await session.scalar(
+        select(TenantModel).where(TenantModel.subdomain == SMOKE_TENANT_SUBDOMAIN)
     )
-    if row is not None:
-        return row["id"]
-    store_id = uuid4()
-    await conn.execute(
-        """
-        INSERT INTO public.stores (
-            id, tenant_id, name, slug, subdomain,
-            default_currency, default_language, status,
-            created_at, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, 'EGP', 'en', 'ACTIVE', NOW(), NOW())
-        ON CONFLICT (subdomain) DO NOTHING
-        """,
-        store_id,
-        tenant_id,
-        "Smoke Store",
-        SMOKE_SUBDOMAIN,
-        SMOKE_SUBDOMAIN,
+    if tenant is not None:
+        return tenant
+    tenant = TenantModel(
+        name="Smoke Tenant",
+        subdomain=SMOKE_TENANT_SUBDOMAIN,
+        owner_id=owner.id,
+        plan="trial",
+        is_active=True,
     )
-    row = await conn.fetchrow(
-        "SELECT id FROM public.stores WHERE subdomain = $1", SMOKE_SUBDOMAIN
+    session.add(tenant)
+    await session.flush()
+    return tenant
+
+
+async def _ensure_store(
+    session: AsyncSession, tenant: TenantModel, owner: UserModel
+) -> StoreModel:
+    store = await session.scalar(
+        select(StoreModel).where(StoreModel.subdomain == SMOKE_SUBDOMAIN)
     )
-    assert row is not None
-    return row["id"]
+    if store is not None:
+        return store
+    store = StoreModel(
+        tenant_id=tenant.id,
+        owner_id=owner.id,
+        name="Smoke Store",
+        slug=SMOKE_SUBDOMAIN,
+        subdomain=SMOKE_SUBDOMAIN,
+        status=StoreStatus.ACTIVE,
+        default_currency=Currency.EGP,
+        default_language="en",
+    )
+    session.add(store)
+    await session.flush()
+    return store
 
 
 async def _ensure_product(
-    conn: asyncpg.Connection, tenant_id: UUID, store_id: UUID
-) -> UUID:
-    row = await conn.fetchrow(
-        "SELECT id FROM public.products WHERE store_id = $1 AND slug = $2",
-        store_id,
-        SMOKE_PRODUCT_SLUG,
-    )
-    if row is not None:
-        return row["id"]
-    product_id = uuid4()
-    await conn.execute(
-        """
-        INSERT INTO public.products (
-            id, tenant_id, store_id, name, slug, sku, description,
-            product_type, status,
-            price_amount, price_currency,
-            quantity, low_stock_threshold,
-            images, tags, attributes, extra_data, options,
-            created_at, updated_at
+    session: AsyncSession, tenant: TenantModel, store: StoreModel
+) -> ProductModel:
+    product = await session.scalar(
+        select(ProductModel).where(
+            ProductModel.store_id == store.id,
+            ProductModel.slug == SMOKE_PRODUCT_SLUG,
         )
-        VALUES (
-            $1, $2, $3, $4, $5, $6, $7,
-            'PHYSICAL', 'ACTIVE',
-            1000, 'EGP',
-            100, 5,
-            $8::text[], $9::text[],
-            '{}'::jsonb, '{}'::jsonb, '[]'::jsonb,
-            NOW(), NOW()
-        )
-        ON CONFLICT DO NOTHING
-        """,
-        product_id,
-        tenant_id,
-        store_id,
-        "Demo T-shirt",
-        SMOKE_PRODUCT_SLUG,
-        "SKU-DEMO-001",
-        "Smoke-test demo product.",
-        ["https://example.test/shirt.jpg"],
-        [],
     )
-    row = await conn.fetchrow(
-        "SELECT id FROM public.products WHERE store_id = $1 AND slug = $2",
-        store_id,
-        SMOKE_PRODUCT_SLUG,
+    if product is not None:
+        return product
+    # Mapped[...] columns with default=dict / default=list pick up the
+    # empty container at flush time when not set explicitly — that's how
+    # we avoid recurrences of #294 (NULL `dimensions` 500-ing the PLP
+    # serializer) without listing every container column here.
+    product = ProductModel(
+        tenant_id=tenant.id,
+        store_id=store.id,
+        name="Demo T-shirt",
+        slug=SMOKE_PRODUCT_SLUG,
+        sku="SKU-DEMO-001",
+        description="Smoke-test demo product.",
+        product_type=ProductType.PHYSICAL,
+        status=ProductStatus.ACTIVE,
+        price_amount=1000,
+        price_currency="EGP",
+        quantity=100,
+        low_stock_threshold=5,
+        images=["https://example.test/shirt.jpg"],
     )
-    assert row is not None
-    return row["id"]
+    session.add(product)
+    await session.flush()
+    return product
 
 
 async def _seed() -> dict[str, str]:
-    dsn = _build_pg_dsn()
-    conn = await asyncpg.connect(dsn)
-    try:
-        tenant_id = await _ensure_tenant(conn)
-        store_id = await _ensure_store(conn, tenant_id)
-        product_id = await _ensure_product(conn, tenant_id, store_id)
-    finally:
-        await conn.close()
+    async with AsyncSessionLocal() as session:
+        # RLS bypass: tenant / store / product policies require
+        # `app.current_tenant` to match `tenant_id` on INSERT. The
+        # bypass flag short-circuits that check — same pattern as
+        # `get_admin_db_session` in connection.py.
+        await session.execute(
+            sql_text("SELECT set_config('app.rls_bypass', 'true', true)")
+        )
+        try:
+            owner = await _ensure_owner(session)
+            tenant = await _ensure_tenant(session, owner)
+            store = await _ensure_store(session, tenant, owner)
+            product = await _ensure_product(session, tenant, store)
+            await session.commit()
+            tenant_id: UUID = tenant.id
+            store_id: UUID = store.id
+            product_id: UUID = product.id
+        finally:
+            await session.execute(
+                sql_text("SELECT set_config('app.rls_bypass', 'false', true)")
+            )
+
     return {
         "tenant_id": str(tenant_id),
         "store_id": str(store_id),
@@ -183,7 +227,7 @@ async def _seed() -> dict[str, str]:
 def main() -> int:
     try:
         result = asyncio.run(_seed())
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"seed_smoke_store: failed: {exc}", file=sys.stderr)
         return 1
     print(
