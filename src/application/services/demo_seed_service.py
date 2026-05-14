@@ -96,11 +96,14 @@ _DEMO_PRODUCTS: list[tuple[str, str, str, str, int, str]] = [
 ]
 
 
-async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict[str, int]:
+async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict:
     """Insert the demo catalog into the store.
 
-    Returns counts so the caller can log + the storefront onboarding
-    nudge can show "5 demo products added".
+    Returns counts + any per-product errors so the caller can show them
+    in the response body. The historical version returned only counts
+    and logged failures at INFO level, which meant errors were silently
+    swallowed in prod (default log threshold is WARNING in many setups)
+    and the route returned 200 with `products=0` looking like a no-op.
     """
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.repositories.category_repository import (
@@ -110,6 +113,7 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict[str, int]:
 
     products_created = 0
     collections_created = 0
+    errors: list[dict[str, str]] = []
 
     async with AsyncSessionLocal() as session:
         cat_repo = CategoryRepository(session)
@@ -134,14 +138,41 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict[str, int]:
             position=0,
             extra_data={"demo_seed": True},
         )
+        # Nested transaction (SAVEPOINT) so a collection insert failure
+        # — typically a slug collision when reseeding — doesn't poison
+        # the outer session and abort the subsequent product inserts.
         try:
-            await cat_repo.create(collection)
+            async with session.begin_nested():
+                await cat_repo.create(collection)
             collections_created = 1
         except Exception as exc:
-            # Slug collision = re-run; treat as no-op.
-            logger.info("demo_seed_collection_exists: %s", exc)
+            logger.warning(
+                "demo_seed_collection_skipped: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            # Re-fetch the existing collection so products can attach to it.
+            # Without this, products would FK-reference a never-persisted
+            # category id and trip a FK constraint violation themselves.
+            from sqlalchemy import select
 
-        # 2. Products.
+            from src.infrastructure.database.models.tenant.category import (
+                CategoryModel,
+            )
+
+            res = await session.execute(
+                select(CategoryModel).where(
+                    CategoryModel.store_id == store_id,
+                    CategoryModel.slug == "starter-collection",
+                )
+            )
+            existing = res.scalar_one_or_none()
+            if existing is not None:
+                collection.id = existing.id
+
+        # 2. Products. SAVEPOINT per row so one failure (FK violation,
+        #    unique-slug clash, RLS denial) doesn't poison the outer txn
+        #    and silently kill every subsequent insert.
         for idx, (
             name_en,
             name_ar,
@@ -150,43 +181,69 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict[str, int]:
             price_cents,
             slug,
         ) in enumerate(_DEMO_PRODUCTS):
+            product = Product(
+                id=uuid4(),
+                store_id=store_id,
+                tenant_id=tenant_id,
+                name=name_en,
+                slug=f"demo-{slug}",
+                sku=f"DEMO-{idx + 1:03d}",
+                description=desc_en,
+                short_description=desc_en[:120],
+                product_type=ProductType.PHYSICAL,
+                status=ProductStatus.ACTIVE,
+                price=Money(amount=Decimal(price_cents) / 100, currency=Currency.EGP),
+                quantity=10,
+                images=[f"{_STOCK_IMAGE_BASE}/{slug}/public"],
+                tags=["demo"],
+                category_id=collection.id,
+                attributes={
+                    # Phase 3.6 — translated fields live on attributes.
+                    # The SDK's useFieldTranslation pulls these when
+                    # the active locale is `ar`.
+                    "name_ar": name_ar,
+                    "description_ar": desc_ar,
+                    "demo_seed": True,
+                },
+            )
             try:
-                product = Product(
-                    id=uuid4(),
-                    store_id=store_id,
-                    tenant_id=tenant_id,
-                    name=name_en,
-                    slug=f"demo-{slug}",
-                    sku=f"DEMO-{idx + 1:03d}",
-                    description=desc_en,
-                    short_description=desc_en[:120],
-                    product_type=ProductType.PHYSICAL,
-                    status=ProductStatus.ACTIVE,
-                    price=Money(amount=Decimal(price_cents) / 100, currency=Currency.EGP),
-                    quantity=10,
-                    images=[f"{_STOCK_IMAGE_BASE}/{slug}/public"],
-                    tags=["demo"],
-                    category_id=collection.id,
-                    attributes={
-                        # Phase 3.6 — translated fields live on attributes.
-                        # The SDK's useFieldTranslation pulls these when
-                        # the active locale is `ar`.
-                        "name_ar": name_ar,
-                        "description_ar": desc_ar,
-                        "demo_seed": True,
-                    },
-                )
-                await prod_repo.create(product)
+                async with session.begin_nested():
+                    await prod_repo.create(product)
                 products_created += 1
             except Exception as exc:
-                logger.info("demo_seed_product_failed: %s (%s)", name_en, exc)
+                # logger.exception captures the traceback at ERROR level
+                # — what we should have been doing all along. Combined
+                # with the per-product SAVEPOINT, this means a problem
+                # on row 1 no longer cascades through rows 2-5.
+                logger.exception(
+                    "demo_seed_product_failed: %s (slug=%s)", name_en, f"demo-{slug}",
+                )
+                errors.append({
+                    "name": name_en,
+                    "slug": f"demo-{slug}",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:300],
+                })
 
         # AsyncSessionLocal doesn't autocommit; exiting the `with` block
-        # rolls back uncommitted changes. Without this commit the route
-        # returned 200 with `products=5` in-process, but every INSERT was
-        # discarded by the implicit rollback — caller sees 404 on the
-        # storefront product lookup right after a "successful" seed.
-        await session.commit()
+        # rolls back uncommitted changes. Wrap the commit in try/except
+        # so a failure here (rare, but possible if RLS denies the
+        # whole txn at commit-time) surfaces in the response instead of
+        # being hidden by the implicit rollback.
+        try:
+            await session.commit()
+        except Exception as exc:
+            logger.exception("demo_seed_commit_failed")
+            errors.append({
+                "name": "__commit__",
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:300],
+            })
+            # Best-effort rollback so the session closes cleanly.
+            await session.rollback()
+            # Wipe the per-row "created" counters since the commit failed.
+            products_created = 0
+            collections_created = 0
 
     logger.info(
         "demo_catalog_seeded",
@@ -194,9 +251,14 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict[str, int]:
             "store_id": str(store_id),
             "collections": collections_created,
             "products": products_created,
+            "errors": len(errors),
         },
     )
-    return {"products": products_created, "collections": collections_created}
+    return {
+        "products": products_created,
+        "collections": collections_created,
+        "errors": errors,
+    }
 
 
 async def remove_demo_catalog(store_id: UUID) -> int:
