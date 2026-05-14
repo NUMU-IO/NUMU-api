@@ -796,6 +796,7 @@ async def get_product_by_slug(
     product_slug: Annotated[str, Path(description="Product slug or UUID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get a product by slug or UUID (public).
 
@@ -831,7 +832,7 @@ async def get_product_by_slug(
     # only on products that haven't been backfilled yet (shouldn't
     # happen post-migration); theme code branches on
     # `variants.length === 0` to fall back to product-level price.
-    variant_summaries = await _resolve_variants_for_product(product.id)
+    variant_summaries = await _resolve_variants_for_product(session, product.id)
 
     return SuccessResponse(
         data=ProductResponse(
@@ -867,19 +868,23 @@ async def get_product_by_slug(
     )
 
 
-async def _resolve_variants_for_product(product_id: UUID) -> list[dict]:
+async def _resolve_variants_for_product(
+    session: AsyncSession, product_id: UUID
+) -> list[dict]:
     """Helper — load variants and shape into ProductVariantSummary dicts.
 
     Pydantic accepts dict-of-fields for nested model_validate; we
     return dicts rather than the schema class itself to keep the call
     site simple (no extra import).
+
+    Uses the caller's request-scoped session instead of opening a fresh
+    AsyncSessionLocal — saves one pool checkout and connection-bound
+    setup per PDP request.
     """
-    from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.repositories.variant_repository import VariantRepository
 
-    async with AsyncSessionLocal() as session:
-        repo = VariantRepository(session)
-        variants = await repo.list_for_product(product_id)
+    repo = VariantRepository(session)
+    variants = await repo.list_for_product(product_id)
     return [
         {
             "id": str(v.id),
