@@ -277,6 +277,14 @@ class Settings(BaseSettings):
     rate_limit_anon_requests_per_minute: int = 60  # Anonymous general
     rate_limit_auth_requests_per_minute: int = 5  # Login/register/refresh
     rate_limit_checkout_requests_per_minute: int = 10  # Storefront checkout
+    # Load-test bypass: when set, requests carrying header
+    # `X-Load-Test-Token: <this value>` skip rate limiting on the GENERAL
+    # and TRACKING tiers ONLY. Auth, checkout, and coupon-apply are still
+    # rate-limited even with the token — bypassing those would expose
+    # credential-stuffing and order-spam vectors. Empty string disables
+    # the bypass entirely (the default). Rotate the token regularly and
+    # never commit it; set via env in CI only.
+    load_test_bypass_token: str = ""
 
     # Stripe
     stripe_secret_key: str | None = None
