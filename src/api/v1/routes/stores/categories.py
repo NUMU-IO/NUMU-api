@@ -88,6 +88,18 @@ async def create_category(
 
     result = await use_case.execute(dto=dto, store_id=store.id, user_id=store.owner_id)
 
+    # Step 12 — flush ISR cache so new category shows up on home + PLP
+    # without waiting out the 60s revalidate window. Best-effort.
+    if store.subdomain:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_category_change,
+        )
+
+        await revalidate_on_category_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+        )
+
     return SuccessResponse(
         data=_category_response(result),
         message="Category created successfully",
@@ -174,6 +186,18 @@ async def update_category(
         category_id=category_id, dto=dto, user_id=store.owner_id
     )
 
+    # Step 12 — flush ISR cache after rename / image / parent change.
+    # Best-effort.
+    if store.subdomain:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_category_change,
+        )
+
+        await revalidate_on_category_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+        )
+
     return SuccessResponse(
         data=_category_response(result),
         message="Category updated successfully",
@@ -199,6 +223,19 @@ async def delete_category(
     )
 
     await use_case.execute(category_id=category_id, user_id=store.owner_id)
+
+    # Step 12 — flush ISR cache so the deleted category disappears from
+    # the storefront without waiting out the 60s revalidate window.
+    # Best-effort.
+    if store.subdomain:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_category_change,
+        )
+
+        await revalidate_on_category_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+        )
 
     return None
 
@@ -247,6 +284,18 @@ async def upload_category_image(
     updated = await use_case.execute(
         category_id=category_id, dto=dto, user_id=store.owner_id
     )
+
+    # Step 12 — flush ISR cache so the new image appears on home + PLP
+    # without waiting out the 60s revalidate window. Best-effort.
+    if store.subdomain:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_category_change,
+        )
+
+        await revalidate_on_category_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+        )
 
     return SuccessResponse(
         data=_category_response(updated),
