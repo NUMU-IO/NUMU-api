@@ -133,6 +133,21 @@ def seed_demo(client: httpx.Client, store_id: str) -> None:
         raise RuntimeError(
             f"failed to seed demo for {store_id}: {r.status_code} {r.text[:200]}"
         )
+    # The endpoint now returns `errors: [...]` with per-row failure detail.
+    # Surface them so an "all rows failed silently" condition (FK / RLS /
+    # constraint violations) shows up in the CI log instead of looking
+    # like a healthy 200.
+    try:
+        body = r.json()
+        seed_errors = (body.get("errors") or body.get("data", {}).get("errors") or [])
+    except Exception:
+        seed_errors = []
+    if seed_errors:
+        first = seed_errors[0]
+        raise RuntimeError(
+            f"seed for {store_id} returned errors ({len(seed_errors)}): "
+            f"first={first.get('error_type')}: {first.get('error')}"
+        )
 
 
 def reconcile_store(client: httpx.Client, subdomain: str) -> StoreResult:
