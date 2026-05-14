@@ -749,6 +749,30 @@ async def upload_product_image(
         user_id=store.owner_id,
     )
 
+    # Step 12 — flush ISR cache so the new image shows up on PDP / PLP
+    # without waiting out the 60s revalidate window. The use case result
+    # doesn't carry the slug, so fetch it from the product row.
+    # Best-effort: a missing slug fetch falls through to the TTL safety net.
+    if store.subdomain:
+        product_slug: str | None = None
+        try:
+            prod = await product_repo.get_by_id(product_id)
+            if prod is not None and prod.store_id == store.id:
+                product_slug = prod.slug
+        except Exception:  # noqa: BLE001
+            pass
+
+        if product_slug:
+            from src.infrastructure.external_services.nextjs_revalidation import (
+                revalidate_on_product_change,
+            )
+
+            await revalidate_on_product_change(
+                subdomain=store.subdomain,
+                store_id=str(store.id),
+                product_slug=product_slug,
+            )
+
     return SuccessResponse(
         data=UploadedImageResponse(
             url=result.url,
@@ -794,6 +818,29 @@ async def delete_product_image(
         store_id=store.id,
         user_id=store.owner_id,
     )
+
+    # Step 12 — flush ISR cache so the removed image disappears from
+    # PDP / PLP without waiting out the 60s revalidate window. Best-effort:
+    # a missing slug fetch falls through to the TTL safety net.
+    if store.subdomain:
+        product_slug: str | None = None
+        try:
+            prod = await product_repo.get_by_id(product_id)
+            if prod is not None and prod.store_id == store.id:
+                product_slug = prod.slug
+        except Exception:  # noqa: BLE001
+            pass
+
+        if product_slug:
+            from src.infrastructure.external_services.nextjs_revalidation import (
+                revalidate_on_product_change,
+            )
+
+            await revalidate_on_product_change(
+                subdomain=store.subdomain,
+                store_id=str(store.id),
+                product_slug=product_slug,
+            )
 
     return None
 
