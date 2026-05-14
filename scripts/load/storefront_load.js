@@ -36,6 +36,16 @@ const errorRate = new Rate("errors");
 
 const BASE_URL = __ENV.BASE_URL || "https://staging.numueg.app";
 
+// Load-test bypass token — when set on the server side
+// (settings.load_test_bypass_token) AND sent with the same value here,
+// the rate limiter skips the general + tracking tiers for requests
+// carrying this header. Without it, 100 VUs from one runner IP get
+// 429'd after the first ~60 requests and the test measures the rate
+// limiter, not the backend. Auth / checkout still rate-limited even
+// with the token — that's intentional. Set LOAD_TEST_TOKEN as a CI
+// secret; do NOT hardcode it.
+const LOAD_TEST_TOKEN = __ENV.LOAD_TEST_TOKEN || "";
+
 // Test stores. Seed these on staging via:
 //   for s in load-store-{1..10}; do POST /stores { "name": $s, "subdomain": $s }; done
 //   POST /stores/{id}/seed-demo for each
@@ -109,6 +119,10 @@ export default function (data) {
   const baseHeaders = {
     "x-numu-host": `${subdomain}.numueg.app`,
     host: `${subdomain}.numueg.app`,
+    // Bypass rate limiting for general/tracking tiers only when the
+    // server-side token is configured; on a normal deploy this header
+    // is ignored and we'd be back to 60/min anon throttling.
+    ...(LOAD_TEST_TOKEN ? { "x-load-test-token": LOAD_TEST_TOKEN } : {}),
   };
 
   group("home", () => {
@@ -188,11 +202,14 @@ export function setup() {
     `[load] BASE_URL=${BASE_URL}\n[load] subdomains=${TEST_STORES.join(",")}\n[load] target: 100 VUs / 10m / p95<500ms`,
   );
 
+  const setupHeaders = LOAD_TEST_TOKEN
+    ? { "x-load-test-token": LOAD_TEST_TOKEN }
+    : {};
   const resolved = [];
   for (const subdomain of TEST_STORES) {
     const res = http.get(
       `${BASE_URL}/api/v1/storefront/store-by-subdomain/${subdomain}`,
-      { tags: { route: "store_lookup", phase: "setup" } },
+      { headers: setupHeaders, tags: { route: "store_lookup", phase: "setup" } },
     );
     if (res.status !== 200) {
       console.warn(

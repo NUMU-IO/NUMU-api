@@ -258,6 +258,28 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 limit = settings.rate_limit_anon_requests_per_minute
 
         client_ip = _get_client_ip(request)
+
+        # Load-test bypass — controlled by a server-side secret. The
+        # request must carry `X-Load-Test-Token: <secret>` matching
+        # `settings.load_test_bypass_token`. We DELIBERATELY only honour
+        # the bypass on the `general` and `tracking` tiers; auth /
+        # checkout / coupon-apply remain rate-limited even with a valid
+        # token so a leaked token can't be used for credential-stuffing
+        # or order-spam. Empty-string token (the default) disables the
+        # whole mechanism.
+        if (
+            tier in ("general", "tracking")
+            and settings.load_test_bypass_token
+            and request.headers.get("x-load-test-token") == settings.load_test_bypass_token
+        ):
+            logger.info(
+                "rate_limit_bypassed",
+                ip=client_ip,
+                path=path,
+                tier=tier,
+            )
+            return await call_next(request)
+
         is_allowed, count, retry_after = await _check_rate_limit(client_ip, tier, limit)
 
         if not is_allowed:
