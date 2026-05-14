@@ -20,3 +20,16 @@ class LocalizedPromotionContent(BaseModel):
     cta_label: LocalizedString | None = None
     cta_url: str | None = None
     label: LocalizedString | None = None
+
+    # Popup-only labels for the inline lead-capture form. The merchant
+    # dashboard already exposes these fields; without them on the DTO
+    # the form's payload tripped `extra="forbid"` and 422'd promotion
+    # creation. The storefront PopupModal will start reading these
+    # once the email-capture flow is wired up — for now they're stored
+    # and round-tripped to the merchant editor unchanged.
+    email_label: LocalizedString | None = None
+    phone_label: LocalizedString | None = None
+    consent_label: LocalizedString | None = None
+    submit_label: LocalizedString | None = None
+    success_headline: LocalizedString | None = None
+    success_body: LocalizedString | None = None
