@@ -11,10 +11,18 @@ ETA Requirements:
 - VAT calculations (14% standard rate)
 - Digital signature and QR code
 - Submission within 7 days of issuance
+
+VAT-inclusive pricing model (Egyptian retail standard):
+- Merchants enter FINAL prices that already include 14% VAT
+- We do NOT add VAT on top at checkout
+- VAT is extracted from the subtotal for accounting/ETA reporting:
+      vat_amount = subtotal * 14 / 114
+      net_amount_before_vat = subtotal - vat_amount
+- Customer pays: grand_total = subtotal + shipping_fee
 """
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -22,6 +30,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.entities.base import BaseEntity
+
+# Egyptian VAT rate. Applied as VAT-inclusive — merchants enter the
+# final retail price and we extract VAT from it for tax reporting.
+DEFAULT_VAT_RATE = Decimal("14.00")
 
 
 class InvoiceStatus(StrEnum):
@@ -67,6 +79,7 @@ class SellerInfo(BaseModel):
     street: str | None = None
     building_number: str | None = None
     activity_code: str = "4649"  # Business activity code
+    phone: str | None = None
 
 
 class BuyerInfo(BaseModel):
@@ -94,13 +107,19 @@ class TaxLine(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tax_type: TaxType = TaxType.VAT
-    amount: Decimal  # Tax amount in EGP
+    amount: Decimal  # Tax amount in EGP (already included in line total)
     sub_type: str = "V009"  # VAT sub-type code
-    rate: Decimal = Decimal("14.00")  # Tax rate percentage
+    rate: Decimal = DEFAULT_VAT_RATE  # Tax rate percentage
 
 
 class InvoiceLineItem(BaseModel):
-    """Invoice line item with tax details."""
+    """Invoice line item with VAT-inclusive pricing.
+
+    ``unit_price`` is the FINAL retail price including VAT. ``net_total``
+    is the VAT-inclusive line total (what the customer pays for this
+    line). ``taxes`` records the VAT extracted from ``net_total`` for
+    accounting / ETA reporting — VAT is *not* added on top.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -110,26 +129,65 @@ class InvoiceLineItem(BaseModel):
     item_code: str  # Product code (GS1 barcode or EGS code)
     unit_type: str = "EA"  # Unit of measure (EA=Each, KGM=Kilogram, etc.)
     quantity: Decimal
-    unit_price: Decimal  # Price per unit (before tax)
-    discount: Decimal = Decimal("0")  # Discount amount
-    sales_total: Decimal  # quantity * unit_price
-    net_total: Decimal  # sales_total - discount
+    unit_price: Decimal  # VAT-inclusive unit price
+    discount: Decimal = Decimal("0")  # Discount amount (also VAT-inclusive)
+    sales_total: Decimal  # quantity * unit_price (VAT-inclusive)
+    net_total: Decimal  # sales_total - discount (VAT-inclusive line total)
     taxes: list[TaxLine] = Field(default_factory=list)
-    total: Decimal  # net_total + sum(taxes)
+    total: Decimal  # Equals net_total (VAT already inside it)
     internal_code: str | None = None  # Internal SKU
 
 
+def _round_cents(amount: Decimal) -> int:
+    """Round a Decimal EGP amount to cents using banker-safe HALF_UP."""
+    return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def extract_vat_cents(
+    subtotal_cents: int, vat_rate: Decimal = DEFAULT_VAT_RATE
+) -> tuple[int, int]:
+    """Extract VAT from a VAT-inclusive cents amount.
+
+    Returns ``(vat_amount_cents, net_before_vat_cents)``.
+
+    Formula (VAT-inclusive):
+        vat_amount = subtotal * rate / (100 + rate)
+        net_amount_before_vat = subtotal - vat_amount
+
+    Example (rate = 14, subtotal = 10000 cents = 100 EGP):
+        vat_amount       = 10000 * 14 / 114 ≈ 1228 cents (12.28 EGP)
+        net_before_vat   = 10000 - 1228     = 8772 cents (87.72 EGP)
+    """
+    if subtotal_cents <= 0 or vat_rate <= 0:
+        return 0, max(0, subtotal_cents)
+    subtotal = Decimal(subtotal_cents)
+    vat = subtotal * vat_rate / (Decimal(100) + vat_rate)
+    vat_cents = int(vat.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return vat_cents, subtotal_cents - vat_cents
+
+
 class Invoice(BaseEntity):
-    """Invoice entity for Egyptian e-invoicing.
+    """Invoice entity for Egyptian e-invoicing (VAT-inclusive model).
 
     This represents a complete invoice document that can be submitted
     to the Egyptian Tax Authority (ETA) e-invoicing system.
 
+    Pricing model:
+        * ``subtotal`` is the sum of line ``net_total`` values, which are
+          already VAT-inclusive (no VAT added on top).
+        * ``vat_amount`` is the 14% VAT *extracted* from ``subtotal`` —
+          shown on the invoice for tax reporting but never added to the
+          grand total.
+        * ``shipping_fee`` is the shipping cost (not VAT-applicable in
+          this phase).
+        * ``grand_total = subtotal + shipping_fee``  — what the customer
+          actually paid.
+
     Workflow:
-    1. Create invoice (DRAFT)
-    2. Calculate totals and validate
-    3. Submit to ETA (SUBMITTED)
-    4. Receive response (ACCEPTED/REJECTED)
+        1. Create invoice (DRAFT)
+        2. ``calculate_totals()`` derives VAT + net amount + grand total
+        3. Submit to ETA (SUBMITTED)
+        4. Receive response (ACCEPTED/REJECTED)
     """
 
     # Identifiers
@@ -159,12 +217,28 @@ class Invoice(BaseEntity):
     # Line items
     line_items: list[InvoiceLineItem] = Field(default_factory=list)
 
-    # Totals (all in EGP cents for precision)
-    subtotal: int = 0  # Sum of net_total for all items
-    total_discount: int = 0  # Total discounts
-    total_taxes: int = 0  # Total tax amount
-    extra_discount: int = 0  # Additional invoice-level discount
-    total: int = 0  # Final total
+    # ── VAT-inclusive pricing model ──────────────────────────────────
+    # Prices stored on line items already include VAT. ``vat_amount`` is
+    # extracted from ``subtotal`` for tax reporting only — never added
+    # to ``grand_total``.
+    prices_include_vat: bool = True
+    vat_rate: Decimal = DEFAULT_VAT_RATE  # 14% Egyptian standard
+
+    # Totals — all in EGP cents for precision.
+    subtotal: int = 0  # Sum of line net_total (VAT-inclusive)
+    vat_amount: int = 0  # VAT extracted from subtotal (informational)
+    net_amount_before_vat: int = 0  # subtotal - vat_amount
+    total_discount: int = 0  # Total line-level discounts
+    extra_discount: int = 0  # Invoice-level discount applied after subtotal
+    shipping_fee: int = 0  # Shipping cost (VAT-free in current phase)
+    grand_total: int = 0  # subtotal + shipping_fee - extra_discount
+
+    # Legacy aliases retained so existing readers (ETA submission,
+    # PDF generator's old code paths, response serializers) keep
+    # working. ``total_taxes`` mirrors ``vat_amount``; ``total``
+    # mirrors ``grand_total``.
+    total_taxes: int = 0
+    total: int = 0
 
     # ETA submission details
     eta_uuid: str | None = None  # UUID from ETA after acceptance
@@ -197,21 +271,38 @@ class Invoice(BaseEntity):
     notes_ar: str | None = None  # Arabic notes
 
     def calculate_totals(self) -> None:
-        """Recalculate all totals from line items."""
-        subtotal = 0
-        total_discount = 0
-        total_taxes = 0
+        """Recalculate totals from line items (VAT-inclusive model).
+
+        Per Egyptian retail standard: line ``net_total`` is the price
+        the customer actually pays (VAT already inside). We sum those
+        for the subtotal, then *extract* VAT from that subtotal for
+        the invoice's tax-reporting fields. Shipping is added on top.
+        """
+        subtotal_cents = 0
+        total_discount_cents = 0
 
         for item in self.line_items:
-            subtotal += int(item.net_total * 100)
-            total_discount += int(item.discount * 100)
-            for tax in item.taxes:
-                total_taxes += int(tax.amount * 100)
+            subtotal_cents += _round_cents(item.net_total)
+            total_discount_cents += _round_cents(item.discount)
 
-        self.subtotal = subtotal
-        self.total_discount = total_discount
-        self.total_taxes = total_taxes
-        self.total = subtotal + total_taxes - self.extra_discount
+        vat_cents, net_before_vat_cents = extract_vat_cents(
+            subtotal_cents, self.vat_rate
+        )
+
+        self.subtotal = subtotal_cents
+        self.total_discount = total_discount_cents
+        self.vat_amount = vat_cents
+        self.net_amount_before_vat = net_before_vat_cents
+        # Customer-facing total: subtotal already INCLUDES VAT, so
+        # we add ONLY shipping (and subtract any invoice-level extra
+        # discount). VAT is NOT added on top.
+        self.grand_total = subtotal_cents + self.shipping_fee - self.extra_discount
+
+        # Legacy fields kept in sync so any older reader (ETA
+        # submission, dashboards) still gets sensible values.
+        self.total_taxes = vat_cents
+        self.total = self.grand_total
+
         self.touch()
 
     def add_line_item(
@@ -221,37 +312,53 @@ class Invoice(BaseEntity):
         quantity: Decimal,
         unit_price: Decimal,
         discount: Decimal = Decimal("0"),
-        vat_rate: Decimal = Decimal("14.00"),
+        vat_rate: Decimal | None = None,
         description_ar: str | None = None,
         item_type: str = "EGS",
         unit_type: str = "EA",
         internal_code: str | None = None,
     ) -> None:
-        """Add a line item with automatic tax calculation.
+        """Add a line item using VAT-inclusive pricing.
+
+        ``unit_price`` is the FINAL retail price (including VAT). The
+        per-line ``TaxLine.amount`` records the VAT *extracted* from
+        the inclusive line total so ETA submission still has a per-line
+        tax breakdown, but ``total = net_total`` (VAT is *not* added
+        on top).
 
         Args:
             description: Item description in English
             item_code: GS1 or EGS product code
             quantity: Quantity
-            unit_price: Unit price before tax
-            discount: Discount amount
-            vat_rate: VAT rate (default 14%)
+            unit_price: VAT-inclusive unit price
+            discount: Discount amount (also VAT-inclusive)
+            vat_rate: VAT rate (default 14%) — only used for per-line
+                informational breakdown; the invoice-level extraction
+                uses ``self.vat_rate``.
             description_ar: Arabic description
             item_type: Item code type (GS1, EGS)
             unit_type: Unit of measure
             internal_code: Internal SKU
         """
-        sales_total = quantity * unit_price
-        net_total = sales_total - discount
-        vat_amount = net_total * (vat_rate / Decimal("100"))
-        total = net_total + vat_amount
+        effective_rate = vat_rate if vat_rate is not None else self.vat_rate
+
+        sales_total = quantity * unit_price  # VAT-inclusive
+        net_total = sales_total - discount  # VAT-inclusive line total
+
+        # Per-line VAT extracted from the inclusive net_total.
+        if effective_rate > 0 and net_total > 0:
+            vat_amount = net_total * effective_rate / (Decimal(100) + effective_rate)
+        else:
+            vat_amount = Decimal("0")
 
         tax_line = TaxLine(
             tax_type=TaxType.VAT,
             amount=vat_amount,
-            rate=vat_rate,
+            rate=effective_rate,
         )
 
+        # ``total`` mirrors ``net_total`` — prices are VAT-inclusive,
+        # so we don't add VAT on top.
         line_item = InvoiceLineItem(
             description=description,
             description_ar=description_ar,
@@ -264,7 +371,7 @@ class Invoice(BaseEntity):
             sales_total=sales_total,
             net_total=net_total,
             taxes=[tax_line],
-            total=total,
+            total=net_total,
             internal_code=internal_code,
         )
 
@@ -274,11 +381,61 @@ class Invoice(BaseEntity):
     def to_eta_format(self) -> dict[str, Any]:
         """Convert invoice to ETA API format.
 
+        ETA's e-invoicing schema expects pre-tax values: ``salesTotal``,
+        ``netTotal``, and per-line ``taxableItems[].amount``. Because
+        our retail model is VAT-inclusive, we expose the *extracted*
+        pre-tax components so the ETA portal computes consistent
+        figures.
+
         Returns:
-            Dictionary in ETA submission format
+            Dictionary in ETA submission format.
         """
         # Format date-time for ETA
         date_time_issued = self.date_issued.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        invoice_lines = []
+        for item in self.line_items:
+            line_vat = sum((t.amount for t in item.taxes), Decimal("0"))
+            line_net_before_vat = item.net_total - line_vat
+            line_sales_before_vat = item.sales_total - (
+                item.sales_total * self.vat_rate / (Decimal(100) + self.vat_rate)
+                if self.vat_rate > 0
+                else Decimal("0")
+            )
+            unit_price_before_vat = (
+                item.unit_price / (Decimal(1) + self.vat_rate / Decimal(100))
+                if self.vat_rate > 0
+                else item.unit_price
+            )
+
+            invoice_lines.append({
+                "description": item.description,
+                "itemType": item.item_type,
+                "itemCode": item.item_code,
+                "unitType": item.unit_type,
+                "quantity": float(item.quantity),
+                "unitValue": {
+                    "currencySold": self.currency,
+                    "amountEGP": float(unit_price_before_vat),
+                },
+                "salesTotal": float(line_sales_before_vat),
+                "discount": {
+                    "rate": 0,
+                    "amount": float(item.discount),
+                },
+                "netTotal": float(line_net_before_vat),
+                "taxableItems": [
+                    {
+                        "taxType": tax.tax_type.value,
+                        "amount": float(tax.amount),
+                        "subType": tax.sub_type,
+                        "rate": float(tax.rate),
+                    }
+                    for tax in item.taxes
+                ],
+                "total": float(item.total),  # Customer-facing (VAT-inclusive)
+                "internalCode": item.internal_code or "",
+            })
 
         return {
             "issuer": {
@@ -311,47 +468,19 @@ class Invoice(BaseEntity):
             "dateTimeIssued": date_time_issued,
             "taxpayerActivityCode": self.seller.activity_code,
             "internalID": self.internal_id or str(self.id),
-            "invoiceLines": [
-                {
-                    "description": item.description,
-                    "itemType": item.item_type,
-                    "itemCode": item.item_code,
-                    "unitType": item.unit_type,
-                    "quantity": float(item.quantity),
-                    "unitValue": {
-                        "currencySold": self.currency,
-                        "amountEGP": float(item.unit_price),
-                    },
-                    "salesTotal": float(item.sales_total),
-                    "discount": {
-                        "rate": 0,
-                        "amount": float(item.discount),
-                    },
-                    "netTotal": float(item.net_total),
-                    "taxableItems": [
-                        {
-                            "taxType": tax.tax_type.value,
-                            "amount": float(tax.amount),
-                            "subType": tax.sub_type,
-                            "rate": float(tax.rate),
-                        }
-                        for tax in item.taxes
-                    ],
-                    "total": float(item.total),
-                    "internalCode": item.internal_code or "",
-                }
-                for item in self.line_items
-            ],
-            "totalSalesAmount": self.subtotal / 100,
+            "invoiceLines": invoice_lines,
+            # Pre-tax totals for ETA reporting.
+            "totalSalesAmount": self.net_amount_before_vat / 100,
             "totalDiscountAmount": self.total_discount / 100,
-            "netAmount": (self.subtotal - self.total_discount) / 100,
+            "netAmount": (self.net_amount_before_vat - self.total_discount) / 100,
             "taxTotals": [
                 {
                     "taxType": "T1",
-                    "amount": self.total_taxes / 100,
+                    "amount": self.vat_amount / 100,
                 }
             ],
-            "totalAmount": self.total / 100,
+            # Customer-facing grand total (VAT-inclusive + shipping).
+            "totalAmount": self.grand_total / 100,
             "extraDiscountAmount": self.extra_discount / 100,
         }
 

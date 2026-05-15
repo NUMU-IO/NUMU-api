@@ -975,13 +975,13 @@ async def checkout(
         resolved_rate_id = resolution.rate_id
         resolved_label = resolution.label
 
-    # Server-side tax resolution. The DTO's `tax_amount=0` default is
-    # intentionally untrusted — we recompute from store settings here
-    # so a tampered request can't zero out VAT. The resolver respects
-    # the store's `tax_settings.included_in_price` flag: when prices
-    # are tax-inclusive, `tax_to_add_cents` is 0 (the customer's total
-    # is unchanged) and `included_tax_cents` is recorded for the
-    # invoice / e-invoice trail.
+    # Server-side tax resolution under the platform's VAT-INCLUSIVE
+    # pricing policy: merchant-listed prices already include 14% VAT,
+    # so we NEVER add tax on top of the subtotal. The resolver runs in
+    # inclusive mode so ``included_tax_cents`` is back-computed for
+    # invoice/ETA reporting; ``tax_to_add_cents`` is always 0 and is
+    # NOT used in the total formula. The order's ``tax_amount`` field
+    # records the included VAT as informational accounting only.
     tax_resolver = TaxResolver()
     tax_resolution = tax_resolver.resolve(
         store_settings=store.settings,
@@ -991,10 +991,15 @@ async def checkout(
         ],
         discount_amount_cents=discount_amount,
         destination_governorate=(shipping_address.state or shipping_address.city),
+        force_inclusive=True,
     )
-    resolved_tax_cents = tax_resolution.tax_to_add_cents
+    # VAT-inclusive: persist the *included* VAT for accounting, but it
+    # is already inside ``subtotal`` and must not be added again.
+    resolved_tax_cents = tax_resolution.included_tax_cents
 
-    total = subtotal + shipping_cost_cents + resolved_tax_cents - discount_amount
+    # VAT-inclusive total: subtotal + shipping - discount. We do NOT
+    # add `resolved_tax_cents` — VAT is already part of `subtotal`.
+    total = subtotal + shipping_cost_cents - discount_amount
 
     order = Order(
         store_id=store_id,

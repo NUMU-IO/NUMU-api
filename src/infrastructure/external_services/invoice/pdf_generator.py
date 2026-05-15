@@ -199,14 +199,7 @@ class InvoicePDFGenerator:
         MUTED = _hex_to_rgb(_s["muted"])  # #8AA5C2 — Navy 300
         SURFACE = _hex_to_rgb(_s["surface_alt"])  # #F5EFE6 — Cream
         BORDER = _hex_to_rgb(_s["border"])  # #EAE0CE — Bone
-        SUCCESS = _hex_to_rgb(_s["success"])  # #6B8E68 — Sage
-        WARNING = _hex_to_rgb(_s["warning"])  # #E8A430 — Saffron
-        DANGER = _hex_to_rgb(_s["danger"])  # #C14A1C — Terracotta
         INFO = _hex_to_rgb(_s["info"])  # #1F4A7A — Navy 600
-        # Aliases kept for code that previously used semantic names.
-        DARK = INK
-        GREY = INK_SOFT
-        BG_LIGHT = SURFACE
 
         # Font paths
         font_dir = (
@@ -268,6 +261,164 @@ class InvoicePDFGenerator:
             set_font_for(text, current_style, current_size)
             pdf.cell(w, h, text, **kwargs)
 
+        def _script_runs(text: str):
+            """Split a string into ``(chunk, is_arabic)`` runs.
+
+            Punctuation, digits, and ASCII spaces stick to whichever side
+            they are adjacent to so addresses like ``"12، شارع التحرير،
+            Cairo"`` produce three runs rather than character-by-character
+            jitter. Used by ``render_value_right_aligned`` to render mixed-
+            script values without missing-glyph warnings from the Arabic
+            font when it hits Latin chars.
+            """
+            if not text:
+                return []
+            # Whitespace + Arabic-specific punctuation stay with whichever
+            # script they're embedded in. Latin punctuation ( ) % # [ ] etc.
+            # is excluded — it forms its own Latin run so the Arabic font
+            # never has to render an ASCII glyph it doesn't ship.
+            STICKY = set("  ،؛")
+            runs: list[list] = []  # [[chars, is_arabic], ...]
+            for ch in text:
+                is_ar = bool(_ARABIC_RE.search(ch))
+                if not runs:
+                    runs.append([ch, is_ar])
+                    continue
+                last = runs[-1]
+                if ch in STICKY or is_ar == last[1]:
+                    last[0] += ch
+                else:
+                    runs.append([ch, is_ar])
+            return [(r[0], r[1]) for r in runs]
+
+        # Arabic Presentation Forms ranges (post-reshape) + the base
+        # Arabic block — any char in these ranges needs the Arabic font.
+        _ARABIC_FONT_RE = _re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+
+        def _measure_runs(
+            text: str, size: float, style: str = ""
+        ) -> list[tuple[str, bool, float]]:
+            """Process the whole string through arabic-reshaper + python-bidi
+            (which handles RTL reordering AND paren mirroring), then split
+            the bidi-output by *Unicode block* for font selection.
+
+            By doing the bidi pass on the FULL string we get the correct
+            visual order for sequences like ``"إجمالي المنتجات (شامل الضريبة)"``
+            — the parens are mirrored, the Arabic words are reversed, and
+            "14%" stays as a digit group in its proper visual position.
+            Then we just paint each script-uniform chunk left-to-right.
+
+            Returns ``[(chunk_in_visual_order, needs_arabic_font, width_mm), ...]``.
+            """
+            if not text:
+                return []
+            # Run bidi once on the whole string — this is what ``ar()`` does
+            # for a single chunk, but applied at the full-label level so
+            # cross-script ordering / paren mirroring resolve correctly.
+            reshaped = arabic_reshaper.reshape(text)
+            visual = get_display(reshaped)
+
+            # Split by font requirement: consecutive Arabic-block chars
+            # become one chunk (rendered with NotoArabic); consecutive
+            # non-Arabic chars (Latin letters, ASCII digits, ``()``, ``%``)
+            # become another (rendered with Helvetica).
+            out: list[tuple[str, bool, float]] = []
+            cur_chunk: list[str] = []
+            cur_is_ar: bool | None = None
+            for ch in visual:
+                is_ar_char = bool(_ARABIC_FONT_RE.match(ch))
+                if cur_is_ar is None:
+                    cur_is_ar = is_ar_char
+                    cur_chunk.append(ch)
+                elif is_ar_char == cur_is_ar:
+                    cur_chunk.append(ch)
+                else:
+                    chunk_str = "".join(cur_chunk)
+                    if cur_is_ar and has_arabic_font:
+                        pdf.set_font("NotoArabic", style, size)
+                    else:
+                        pdf.set_font("Helvetica", style, size)
+                    out.append((
+                        chunk_str,
+                        bool(cur_is_ar),
+                        pdf.get_string_width(chunk_str),
+                    ))
+                    cur_chunk = [ch]
+                    cur_is_ar = is_ar_char
+            if cur_chunk:
+                chunk_str = "".join(cur_chunk)
+                if cur_is_ar and has_arabic_font:
+                    pdf.set_font("NotoArabic", style, size)
+                else:
+                    pdf.set_font("Helvetica", style, size)
+                out.append((
+                    chunk_str,
+                    bool(cur_is_ar),
+                    pdf.get_string_width(chunk_str),
+                ))
+            return out
+
+        def render_mixed_text(
+            x: float,
+            y: float,
+            w: float,
+            h: float,
+            text: str,
+            size: float = 8,
+            style: str = "",
+            align: str = "L",
+        ) -> None:
+            """Render a (possibly mixed-script) string within
+            ``(x, y, w, h)`` honoring ``align`` in {L, R, C}. Each script
+            run renders with its proper font so Latin punctuation
+            (``(``, ``)``, ``%``) shows up correctly inside otherwise-
+            Arabic phrases.
+
+            BiDi: when *any* Arabic run is present we treat the base
+            direction as RTL and reverse the run order before painting
+            them left-to-right. That way an Arabic reader scanning
+            right-to-left encounters the logical first run first, then
+            the parenthetical, then the closing paren — matching the
+            way the phrase reads on paper. Without this reversal,
+            ``"إجمالي المنتجات (شامل الضريبة)"`` would render with the
+            parenthetical visually displaced to the left of the main
+            phrase, even though it's logically meant to follow it.
+            """
+            measured = _measure_runs(text, size, style)
+            if not measured:
+                return
+
+            # ``_measure_runs`` already returned chunks in visual LTR
+            # order (bidi handled RTL reversal + paren mirroring on the
+            # whole string). We just paint left-to-right at increasing X.
+            total_w = sum(w_ for _, _, w_ in measured)
+            # If we need to truncate, drop from the visually-leftmost
+            # end (which is the *logical end* of an RTL phrase — the
+            # qualifier / parenthetical we can lose first).
+            while total_w > w and len(measured) > 1:
+                _, _, drop_w = measured.pop(0)
+                total_w -= drop_w
+            if align == "R":
+                cur_x = x + w - total_w
+            elif align == "C":
+                cur_x = x + (w - total_w) / 2
+            else:
+                cur_x = x
+            for chunk, is_ar, chunk_w in measured:
+                if is_ar:
+                    pdf.set_font("NotoArabic", style, size)
+                else:
+                    pdf.set_font("Helvetica", style, size)
+                pdf.set_xy(cur_x, y)
+                pdf.cell(chunk_w + 0.2, h, chunk)
+                cur_x += chunk_w
+
+        def render_value_right_aligned(
+            x: float, y: float, w: float, h: float, val: str, size: float = 8
+        ) -> None:
+            """Backwards-compatible shorthand for right-aligned mixed text."""
+            render_mixed_text(x, y, w, h, val, size=size, align="R")
+
         def cell_split_mixed(w, h, ar_text, en_text, sep=" / ", **kwargs):
             """Render an Arabic + Latin label across the cell's width by
             picking the right font for each half. Used for box labels and
@@ -294,152 +445,149 @@ class InvoicePDFGenerator:
             if kwargs.get("new_y") == "NEXT":
                 pdf.set_y(y0 + h)
 
-        # ── Header: NUMU logo (left) + bilingual title (centered) ────
-        # WeasyPrint uses the SVG; fpdf2 needs a raster — embed the PNG
-        # bundled at templates/numu_logo.png. Logo file may be absent in
-        # some unit-test environments — silently skip in that case.
+        # ════════════════════════════════════════════════════════════
+        # ── Header: balanced three-column composition ───────────────
+        # Logo (left) · Bilingual title (center) · Meta (right). Hairline
+        # navy rule below sets the visual horizon for the rest of the page.
+        # ════════════════════════════════════════════════════════════
         logo_png = self._DEFAULT_LOGO_PNG
         header_top_y = pdf.get_y()
-        logo_height = 16  # mm
+        logo_height = 14  # mm
+        logo_max_w = 40
         if logo_png.exists():
             try:
                 pdf.image(str(logo_png), x=pdf.l_margin, y=header_top_y, h=logo_height)
             except Exception:  # pragma: no cover — never fatal
                 logger.warning("fpdf2_logo_embed_failed", extra={"path": str(logo_png)})
 
-        # Title block — pulled down so it visually aligns with the logo
-        pdf.set_y(header_top_y + 2)
-        set_font("B", 22)  # Arabic font for the Arabic title
+        # Title block — Arabic primary, English tracking subtitle below
+        title_y = header_top_y + 1
+        pdf.set_xy(pdf.l_margin + logo_max_w, title_y)
+        set_font("B", 22)
         pdf.set_text_color(*NAVY)
-        pdf.cell(0, 9, ar("فاتورة ضريبية"), new_x="LMARGIN", new_y="NEXT", align="C")
-        # Subtitle in Latin — Helvetica so the glyphs actually exist
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 5, "TAX INVOICE", new_x="LMARGIN", new_y="NEXT", align="C")
+        pdf.cell(pw - logo_max_w * 2, 9, ar("فاتورة ضريبية"), align="C")
+        pdf.set_xy(pdf.l_margin + logo_max_w, title_y + 9)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*MUTED)
+        # Letter-spacing fake: insert thin spaces between chars
+        pdf.cell(pw - logo_max_w * 2, 4, "T A X   I N V O I C E", align="C")
         pdf.set_text_color(*INK)
 
-        # Ensure we cleared the logo before drawing the divider
-        post_header_y = max(pdf.get_y() + 2, header_top_y + logo_height + 4)
-
-        # Navy divider line
-        pdf.set_draw_color(*NAVY)
-        pdf.set_line_width(0.8)
-        pdf.line(pdf.l_margin, post_header_y, pdf.w - pdf.r_margin, post_header_y)
-        pdf.set_y(post_header_y + 4)
-
-        # Invoice meta info (bilingual)
-        date_str = invoice.date_issued.strftime("%Y-%m-%d %H:%M")
-        meta_items = [
-            (ar("رقم الفاتورة"), "Invoice No.", invoice.invoice_number),
-            (ar("التاريخ"), "Date", date_str),
-            (ar("العملة"), "Currency", invoice.currency),
+        # Meta column (top-right) — hairline-separated rows
+        meta_x = pdf.w - pdf.r_margin - 50
+        meta_y = header_top_y
+        meta_rows = [
+            ("INVOICE", invoice.invoice_number),
+            ("DATE", invoice.date_issued.strftime("%Y-%m-%d")),
+            ("CURRENCY", invoice.currency),
         ]
-        if invoice.internal_id:
-            meta_items.append((ar("رقم الطلب"), "Order", invoice.internal_id))
+        if invoice.invoice_type and invoice.invoice_type.value != "I":
+            meta_rows.append(("TYPE", invoice.invoice_type.value))
 
-        for label_ar, label_en, value in meta_items:
-            # Arabic label — NotoArabic
-            set_font("B", 9)
-            pdf.set_text_color(*DARK)
-            pdf.cell(30, 5, label_ar, new_x="RIGHT")
-            # Latin "/ Invoice No." — Helvetica so the slash + Latin glyphs render
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(*GREY)
-            pdf.cell(20, 5, f"/ {label_en}", new_x="RIGHT")
-            # Value (e.g. "INV-2026-000002") — Latin, Helvetica
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.set_text_color(*DARK)
-            pdf.cell(0, 5, str(value), new_x="LMARGIN", new_y="NEXT", align="R")
-        pdf.ln(6)
+        for i, (lbl, val) in enumerate(meta_rows):
+            row_y = meta_y + i * 5
+            # Hairline divider between rows (skip the first)
+            if i > 0:
+                pdf.set_draw_color(*BORDER)
+                pdf.set_line_width(0.15)
+                pdf.line(meta_x, row_y, pdf.w - pdf.r_margin, row_y)
+            pdf.set_xy(meta_x, row_y + 0.8)
+            pdf.set_font("Helvetica", "", 7)
+            pdf.set_text_color(*MUTED)
+            pdf.cell(20, 4, lbl)
+            pdf.set_xy(meta_x + 18, row_y + 0.6)
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(*INK)
+            pdf.cell(32, 4, str(val), align="R")
 
-        # ── Seller & Buyer boxes ────────────────────────────────────
+        # Hairline navy rule under the header
+        header_bottom = max(
+            header_top_y + logo_height + 4,
+            title_y + 14,
+            meta_y + len(meta_rows) * 5 + 1,
+        )
+        pdf.set_draw_color(*NAVY)
+        pdf.set_line_width(0.3)
+        pdf.line(pdf.l_margin, header_bottom, pdf.w - pdf.r_margin, header_bottom)
+        pdf.set_y(header_bottom + 8)
+
+        # ════════════════════════════════════════════════════════════
+        # ── Seller & Buyer cards — equal-weight cream cards with a
+        #    thin navy accent rail on the RIGHT edge (RTL convention).
+        # ════════════════════════════════════════════════════════════
         seller = invoice.seller
         buyer = invoice.buyer
 
-        box_w = (pw - 6) / 2  # 6mm gap between boxes
-        box_x_left = pdf.l_margin
-        box_x_right = pdf.l_margin + box_w + 6
-        box_y_start = pdf.get_y()
+        card_gap = 8
+        card_w = (pw - card_gap) / 2
+        card_h = 44
+        card_x_left = pdf.l_margin
+        card_x_right = pdf.l_margin + card_w + card_gap
+        card_y = pdf.get_y()
 
-        for side, party, box_x, label_ar, label_en in [
-            ("seller", seller, box_x_left, ar("البائع"), "SELLER"),
-            ("buyer", buyer, box_x_right, ar("المشتري"), "BUYER"),
-        ]:
-            pdf.set_xy(box_x, box_y_start)
+        def _draw_party_card(
+            cx: float,
+            cy: float,
+            party,
+            eyebrow_ar: str,
+            eyebrow_en: str,
+        ) -> None:
+            inner_x = cx + 5
+            inner_w = card_w - 10
+            inner_y = cy + 5
 
-            # Box background — cream surface, bone border (brand kit)
+            # Card background + thin border
             pdf.set_fill_color(*SURFACE)
             pdf.set_draw_color(*BORDER)
-            pdf.rect(box_x, box_y_start, box_w, 38, style="DF")
+            pdf.set_line_width(0.2)
+            pdf.rect(cx, cy, card_w, card_h, style="DF")
+            # Navy accent rail on the right edge (RTL "leading edge")
+            pdf.set_fill_color(*NAVY)
+            pdf.rect(cx + card_w - 1.5, cy + 4, 1.5, 8, style="F")
 
-            # Box label — Arabic part with NotoArabic, " / SELLER" with Helvetica
-            cx = box_x + 3
-            cy = box_y_start + 2
-            pdf.set_xy(cx, cy)
+            # Eyebrow ("البائع · SELLER")
+            pdf.set_xy(inner_x, inner_y)
             set_font("B", 7)
             pdf.set_text_color(*NAVY)
-            ar_label_w = pdf.get_string_width(label_ar)
-            pdf.cell(ar_label_w, 4, label_ar)
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.cell(
-                box_w - 6 - ar_label_w,
-                4,
-                f" / {label_en}",
-                new_x="LMARGIN",
-                new_y="NEXT",
-            )
+            ar_label = ar(eyebrow_ar)
+            ar_w = pdf.get_string_width(ar_label)
+            pdf.cell(ar_w, 3.5, ar_label)
+            pdf.set_font("Helvetica", "", 7)
+            pdf.set_text_color(*MUTED)
+            pdf.cell(inner_w - ar_w, 3.5, f"  ·  {eyebrow_en}")
 
-            # Divider inside box
-            pdf.set_draw_color(*BORDER)
-            pdf.line(cx, cy + 5, box_x + box_w - 3, cy + 5)
-
-            # Primary name line. If name_ar holds Arabic, render with the
-            # Arabic font; otherwise treat both name fields as Latin.
-            cy += 7
-            pdf.set_xy(cx, cy)
+            # Primary name (large, ink)
+            name_y = inner_y + 5
+            primary = party.name_ar or party.name or ""
+            pdf.set_xy(inner_x, name_y)
             pdf.set_text_color(*INK)
-            primary_name = party.name_ar or party.name or ""
-            if has_arabic(primary_name):
+            if has_arabic(primary):
                 set_font("B", 11)
-                pdf.cell(box_w - 6, 5, ar(primary_name), new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(inner_w, 5, ar(primary))
             else:
                 pdf.set_font("Helvetica", "B", 11)
-                pdf.cell(box_w - 6, 5, primary_name, new_x="LMARGIN", new_y="NEXT")
-            cy += 5
+                pdf.cell(inner_w, 5, primary)
 
-            # Secondary line: the OTHER of {name, name_ar} when they differ.
-            secondary = (
-                party.name if party.name and party.name != primary_name else None
-            )
+            # Secondary name (smaller, soft)
+            secondary = party.name if party.name and party.name != primary else None
+            rows_y = name_y + 5.5
             if secondary:
-                pdf.set_xy(cx, cy)
+                pdf.set_xy(inner_x, rows_y)
                 pdf.set_text_color(*INK_SOFT)
                 if has_arabic(secondary):
                     set_font("", 8)
-                    pdf.cell(box_w - 6, 4, ar(secondary), new_x="LMARGIN", new_y="NEXT")
+                    pdf.cell(inner_w, 4, ar(secondary))
                 else:
                     pdf.set_font("Helvetica", "", 8)
-                    pdf.cell(box_w - 6, 4, secondary, new_x="LMARGIN", new_y="NEXT")
-                cy += 5
+                    pdf.cell(inner_w, 4, secondary)
+                rows_y += 4.5
 
-            # Tax ID — Arabic label + Latin number, split fonts so both render
+            # Detail rows — label (muted, small) on the left, value (ink) on the right
+            details = []
             if party.tax_id:
-                pdf.set_xy(cx, cy)
-                pdf.set_text_color(*INK_SOFT)
-                set_font("", 8)
-                ar_lbl = ar("الرقم الضريبي")
-                w_ar = pdf.get_string_width(ar_lbl)
-                pdf.cell(w_ar, 4, ar_lbl)
-                pdf.set_font("Helvetica", "", 8)
-                pdf.cell(
-                    box_w - 6 - w_ar,
-                    4,
-                    f" / Tax ID: {party.tax_id}",
-                    new_x="LMARGIN",
-                    new_y="NEXT",
-                )
-                cy += 5
-
-            # Address — pick font based on whether the joined string has Arabic
+                details.append((ar("الرقم الضريبي"), "Tax ID", party.tax_id))
+            elif getattr(party, "national_id", None):
+                details.append((ar("رقم الهوية"), "National ID", party.national_id))
             addr_parts = []
             if party.building_number:
                 addr_parts.append(str(party.building_number))
@@ -447,246 +595,438 @@ class InvoicePDFGenerator:
                 addr_parts.append(str(party.street))
             if party.city:
                 addr_parts.append(str(party.city))
-            if hasattr(party, "governorate") and party.governorate:
+            if getattr(party, "governorate", None):
                 addr_parts.append(str(party.governorate))
             if addr_parts:
-                addr = ", ".join(addr_parts)
-                pdf.set_xy(cx, cy)
-                pdf.set_text_color(*INK_SOFT)
-                if has_arabic(addr):
-                    set_font("", 8)
-                    pdf.cell(box_w - 6, 4, ar(addr), new_x="LMARGIN", new_y="NEXT")
-                else:
-                    pdf.set_font("Helvetica", "", 8)
-                    pdf.cell(box_w - 6, 4, addr, new_x="LMARGIN", new_y="NEXT")
-                cy += 5
+                details.append((ar("العنوان"), "Address", ", ".join(addr_parts)))
+            if getattr(party, "phone", None):
+                details.append((ar("الهاتف"), "Phone", party.phone))
 
-            # Phone / email (buyer only) — both are pure Latin
-            if side == "buyer":
-                if party.phone:
-                    pdf.set_xy(cx, cy)
-                    pdf.set_font("Helvetica", "", 8)
-                    pdf.set_text_color(*INK_SOFT)
-                    pdf.cell(
-                        box_w - 6, 4, str(party.phone), new_x="LMARGIN", new_y="NEXT"
-                    )
-                    cy += 5
-                if party.email:
-                    pdf.set_xy(cx, cy)
-                    pdf.set_font("Helvetica", "", 8)
-                    pdf.set_text_color(*INK_SOFT)
-                    pdf.cell(
-                        box_w - 6, 4, str(party.email), new_x="LMARGIN", new_y="NEXT"
-                    )
+            for j, (lbl_ar, lbl_en, val) in enumerate(details[:3]):
+                row_y = rows_y + j * 5
+                # Hairline divider between rows (no top rule for the first)
+                if j > 0:
+                    pdf.set_draw_color(*BORDER)
+                    pdf.set_line_width(0.1)
+                    pdf.line(inner_x, row_y - 0.5, inner_x + inner_w, row_y - 0.5)
 
-        pdf.set_y(box_y_start + 40)
+                # ── Label cluster on the LEFT (label_ar · label_en) ─
+                pdf.set_xy(inner_x, row_y + 0.6)
+                pdf.set_text_color(*MUTED)
+                set_font("", 7)
+                lbl_ar_w = pdf.get_string_width(lbl_ar) + 0.5
+                pdf.cell(lbl_ar_w, 4, lbl_ar)
+                pdf.set_font("Helvetica", "", 6.5)
+                sep_text = f"  ·  {lbl_en}"
+                sep_w = pdf.get_string_width(sep_text) + 0.5
+                pdf.cell(sep_w, 4, sep_text)
 
+                # ── Value on the RIGHT, mixed-script aware ──────────
+                pdf.set_text_color(*INK)
+                value_w = max(8.0, inner_w - lbl_ar_w - sep_w)
+                value_x = inner_x + lbl_ar_w + sep_w
+                render_value_right_aligned(
+                    x=value_x,
+                    y=row_y + 0.4,
+                    w=value_w,
+                    h=4,
+                    val=str(val),
+                    size=8,
+                )
+
+        _draw_party_card(card_x_left, card_y, seller, "البائع", "SELLER")
+        _draw_party_card(card_x_right, card_y, buyer, "المشتري", "BUYER")
+
+        pdf.set_y(card_y + card_h + 10)
+
+        # ════════════════════════════════════════════════════════════
         # ── Line items table ────────────────────────────────────────
-        # Tax-free invoice — no Tax column. Width totals 180mm = printable
-        # A4 width minus margins. Description column gets the freed space
-        # so longer product names fit comfortably.
-        col_w = [10, 80, 20, 30, 20, 20]
-        headers_ar = [
-            "#",
-            ar("الوصف"),
-            ar("الكمية"),
-            ar("سعر الوحدة"),
-            ar("الخصم"),
-            ar("الإجمالي"),
-        ]
-        headers_en = [
-            "#",
-            "Description",
-            "Qty",
-            "Unit Price",
-            "Discount",
-            "Total",
-        ]
+        # Premium table: 12mm navy header band with AR primary + uppercase
+        # EN subtitle in tracking; cream alternating rows; thin bone-
+        # color separators; no border on the outer frame (the navy band
+        # carries the visual weight).
+        # ════════════════════════════════════════════════════════════
+        col_w = [10, 78, 22, 26, 20, 18]  # sums to 174 (= pw with 18mm margins)
+        col_names_ar = ["#", "المنتج", "الكمية", "سعر الوحدة", "الخصم", "الإجمالي"]
+        col_names_en = ["", "Product", "Qty", "Unit Price", "Discount", "Total"]
+        col_align = ["C", "R", "C", "R", "R", "R"]
 
-        # Table header row (bilingual)
-        pdf.set_fill_color(*BG_LIGHT)
-        set_font("B", 8)
-        pdf.set_text_color(73, 80, 87)
-        for i, (h_ar, h_en) in enumerate(zip(headers_ar, headers_en)):
-            x = pdf.get_x()
-            y_h = pdf.get_y()
-            # Navy header bar (matches WeasyPrint template)
-            pdf.set_fill_color(*NAVY)
-            pdf.rect(x, y_h, col_w[i], 10, style="F")
-            # Arabic label — NotoArabic, on navy
-            set_font("B", 8)
+        table_x = pdf.l_margin
+        table_top = pdf.get_y()
+        header_h = 13
+
+        # Navy header band (full width)
+        pdf.set_fill_color(*NAVY)
+        pdf.rect(table_x, table_top, pw, header_h, style="F")
+
+        # Header text — AR primary (top), EN tracking subtitle (bottom)
+        x_cursor = table_x
+        for i, (h_ar, h_en) in enumerate(zip(col_names_ar, col_names_en)):
+            cell_w = col_w[i]
             pdf.set_text_color(*SURFACE)
-            pdf.set_xy(x, y_h + 0.5)
-            pdf.cell(col_w[i], 4, h_ar, align="C")
-            # English label — Helvetica so e.g. "Description" actually renders
-            pdf.set_font("Helvetica", "", 6)
-            pdf.set_text_color(*MUTED)
-            pdf.set_xy(x, y_h + 5)
-            pdf.cell(col_w[i], 4, h_en, align="C")
-            # Move to next column
-            pdf.set_xy(x + col_w[i], y_h)
+            # Arabic primary (centered vertically in top half). The
+            # ``#`` column has no Arabic glyph so it renders with
+            # Helvetica via the script-aware renderer.
+            if h_ar == "#":
+                pdf.set_xy(x_cursor, table_top + 3.6)
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.cell(cell_w, 4.5, "#", align=col_align[i])
+            else:
+                pdf.set_xy(x_cursor, table_top + 1.6)
+                set_font("B", 8.5)
+                pdf.cell(cell_w, 4.5, ar(h_ar), align=col_align[i])
+            # English subtitle, uppercase + tracked
+            if h_en:
+                pdf.set_xy(x_cursor, table_top + 7.2)
+                pdf.set_font("Helvetica", "", 6)
+                pdf.set_text_color(196, 210, 225)  # Navy 200 — soft on navy bg
+                # Insert thin spaces to fake letter-spacing
+                tracked = "  ".join(h_en.upper())
+                pdf.cell(cell_w, 4, tracked, align=col_align[i])
+            x_cursor += cell_w
 
-        # Spacer below header — no need for the extra blue rule, the navy
-        # bar carries the visual weight
-        y_after_header = pdf.get_y() + 10
-        pdf.set_y(y_after_header + 1)
-
-        # Table rows
+        # Rows
+        row_h = 12
+        cursor_y = table_top + header_h
         for idx, item in enumerate(invoice.line_items, 1):
-            # Alternate row background — cream/surface
+            # Subtle zebra
             if idx % 2 == 0:
                 pdf.set_fill_color(*SURFACE)
-                pdf.rect(pdf.l_margin, pdf.get_y(), pw, 7, style="F")
+                pdf.rect(table_x, cursor_y, pw, row_h, style="F")
 
+            # Row separator (bone hairline)
+            if idx > 1:
+                pdf.set_draw_color(*BORDER)
+                pdf.set_line_width(0.15)
+                pdf.line(table_x, cursor_y, table_x + pw, cursor_y)
+
+            x_cursor = table_x
             pdf.set_text_color(*INK)
 
-            # # column — Latin digit
+            # #
+            pdf.set_xy(x_cursor, cursor_y + 4)
             pdf.set_font("Helvetica", "", 9)
-            pdf.cell(col_w[0], 7, str(idx), border=0, align="C")
-
-            # Description column — pick font based on language. Truncate to
-            # avoid spilling into the next column. The wider description
-            # column (80mm vs the old 55mm) lets us bump the cap to 42 chars.
-            desc = item.description_ar or item.description or ""
-            if len(desc) > 42:
-                desc = desc[:39] + "..."
-            if has_arabic(desc):
-                set_font("", 9)
-                pdf.cell(col_w[1], 7, ar(desc), border=0, align="R")
-            else:
-                pdf.set_font("Helvetica", "", 9)
-                pdf.cell(col_w[1], 7, desc, border=0, align="L")
-
-            # Numeric columns — Helvetica. Total = net_total (tax-free)
-            # so the figures match the no-tax totals block below.
-            pdf.set_font("Helvetica", "", 9)
-            pdf.cell(col_w[2], 7, f"{item.quantity:,.0f}", border=0, align="C")
-            pdf.cell(col_w[3], 7, f"{item.unit_price:,.2f}", border=0, align="R")
-            pdf.cell(col_w[4], 7, f"{item.discount:,.2f}", border=0, align="R")
-            pdf.cell(col_w[5], 7, f"{item.net_total:,.2f}", border=0, align="R")
-            pdf.ln()
-
-            # Light separator line
-            pdf.set_draw_color(*BORDER)
-            pdf.set_line_width(0.2)
-            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-
-        pdf.ln(6)
-
-        # ── Totals ──────────────────────────────────────────────────
-        totals_x = 115
-
-        def _total_row(label_ar: str, label_en: str, value: str, bold: bool = False):
-            pdf.set_x(totals_x)
-            style = "B" if bold else ""
-            size = 11 if bold else 9
-            # Arabic label — NotoArabic
-            set_font(style, size)
-            pdf.set_text_color(*INK_SOFT)
-            pdf.cell(30, 7, ar(label_ar), align="R")
-            # Latin slug — Helvetica
-            pdf.set_font("Helvetica", "", 7)
             pdf.set_text_color(*MUTED)
-            pdf.cell(15, 7, f"/ {label_en}", align="R")
-            set_font(style, size)
-            # Value (e.g. "38.00 EGP") — Latin, Helvetica
-            pdf.set_font("Helvetica", style, size)
-            if bold:
-                pdf.set_text_color(*NAVY)
-            else:
+            pdf.cell(col_w[0], 4, str(idx), align="C")
+            x_cursor += col_w[0]
+
+            # Product (AR primary, EN sub-line if both)
+            desc_ar = item.description_ar or ""
+            desc_en = item.description or ""
+            if desc_ar and desc_en and desc_ar != desc_en:
+                # Stack: AR top, EN below in smaller muted
+                pdf.set_xy(x_cursor + 2, cursor_y + 2.5)
                 pdf.set_text_color(*INK)
-            pdf.cell(30, 7, value, new_x="LMARGIN", new_y="NEXT", align="R")
+                if has_arabic(desc_ar):
+                    set_font("B", 9.5)
+                    text = ar(desc_ar)
+                    if len(text) > 40:
+                        text = text[:37] + "..."
+                    pdf.cell(col_w[1] - 4, 4, text, align="R")
+                else:
+                    pdf.set_font("Helvetica", "B", 9.5)
+                    text = desc_ar
+                    if len(text) > 40:
+                        text = text[:37] + "..."
+                    pdf.cell(col_w[1] - 4, 4, text, align="L")
+                # EN sub-line
+                pdf.set_xy(x_cursor + 2, cursor_y + 6.5)
+                pdf.set_font("Helvetica", "", 7.5)
+                pdf.set_text_color(*MUTED)
+                en_text = desc_en
+                if len(en_text) > 50:
+                    en_text = en_text[:47] + "..."
+                pdf.cell(col_w[1] - 4, 4, en_text, align="L")
+            else:
+                # Single-language line, vertically centered
+                desc = desc_ar or desc_en
+                pdf.set_xy(x_cursor + 2, cursor_y + 4)
+                pdf.set_text_color(*INK)
+                if has_arabic(desc):
+                    set_font("B", 9.5)
+                    text = ar(desc)
+                    if len(text) > 40:
+                        text = text[:37] + "..."
+                    pdf.cell(col_w[1] - 4, 4, text, align="R")
+                else:
+                    pdf.set_font("Helvetica", "B", 9.5)
+                    text = desc
+                    if len(text) > 40:
+                        text = text[:37] + "..."
+                    pdf.cell(col_w[1] - 4, 4, text, align="L")
+            x_cursor += col_w[1]
 
-        # Tax-free totals: skip the Tax row and base both Subtotal and
-        # Grand Total on the pre-tax subtotal so the math is internally
-        # consistent. The underlying entity still carries total_taxes for
-        # ETA submission elsewhere — we just don't render it.
-        _total_row(
-            "المجموع الفرعي",
-            "Subtotal",
+            # Numeric columns (qty / unit_price / discount / total)
+            pdf.set_text_color(*INK)
+            pdf.set_font("Helvetica", "", 9.5)
+            numeric_cols = [
+                (f"{item.quantity:,.0f}", col_w[2], "C"),
+                (f"{item.unit_price:,.2f}", col_w[3], "R"),
+                (f"{item.discount:,.2f}", col_w[4], "R"),
+                (f"{item.net_total:,.2f}", col_w[5], "R"),
+            ]
+            for text, w, align in numeric_cols:
+                pdf.set_xy(x_cursor, cursor_y + 4)
+                pdf.cell(w, 4, text, align=align)
+                x_cursor += w
+
+            cursor_y += row_h
+
+        # Bottom rule of the table
+        pdf.set_draw_color(*NAVY)
+        pdf.set_line_width(0.3)
+        pdf.line(table_x, cursor_y, table_x + pw, cursor_y)
+        pdf.set_y(cursor_y + 10)
+
+        # ════════════════════════════════════════════════════════════
+        # ── Totals — premium card on the LEFT (RTL: "end" side) ────
+        # Rounded-look cream card with hairline row separators. Grand
+        # total sits above a thicker navy rule. Subtotal · VAT · Ship·
+        # Discount rows in soft grey; Grand Total in deep navy.
+        # ════════════════════════════════════════════════════════════
+        totals_w = 96
+        totals_x = pdf.l_margin
+        totals_y = pdf.get_y()
+
+        # Build rows first so we can size the card height precisely
+        rows: list[tuple[str, str, str, bool]] = []
+        rows.append((
+            "إجمالي المنتجات (شامل الضريبة)",
+            "Products Total (VAT incl.)",
             f"{invoice.subtotal / 100:,.2f} {invoice.currency}",
-        )
-
+            False,
+        ))
+        rows.append((
+            "ض.ق.م 14% (مضمنة)",
+            "VAT 14% (Included)",
+            f"{invoice.vat_amount / 100:,.2f} {invoice.currency}",
+            False,
+        ))
         if invoice.total_discount:
-            _total_row(
+            rows.append((
                 "إجمالي الخصم",
                 "Discount",
                 f"-{invoice.total_discount / 100:,.2f} {invoice.currency}",
+                False,
+            ))
+        rows.append((
+            "رسوم الشحن",
+            "Shipping",
+            f"{invoice.shipping_fee / 100:,.2f} {invoice.currency}",
+            False,
+        ))
+        rows.append((
+            "الإجمالي النهائي",
+            "GRAND TOTAL",
+            f"{invoice.grand_total / 100:,.2f} {invoice.currency}",
+            True,
+        ))
+
+        row_h = 11
+        card_pad = 4
+        card_h = card_pad * 2 + row_h * len(rows)
+
+        # Card surface
+        pdf.set_fill_color(*SURFACE)
+        pdf.set_draw_color(*BORDER)
+        pdf.set_line_width(0.2)
+        pdf.rect(totals_x, totals_y, totals_w, card_h, style="DF")
+
+        for i, (lbl_ar, lbl_en, val, is_grand) in enumerate(rows):
+            ry = totals_y + card_pad + i * row_h
+            inner_x = totals_x + 8
+            inner_w = totals_w - 16
+
+            # Row divider above (skip first; thicker rule above grand total)
+            if i > 0:
+                if is_grand:
+                    pdf.set_draw_color(*NAVY)
+                    pdf.set_line_width(0.4)
+                else:
+                    pdf.set_draw_color(*BORDER)
+                    pdf.set_line_width(0.15)
+                pdf.line(totals_x + 6, ry, totals_x + totals_w - 6, ry)
+
+            # ── Label cluster: AR primary (top), EN sub-line (below) ─
+            label_color = NAVY if is_grand else INK_SOFT
+            en_color = NAVY if is_grand else MUTED
+            ar_size = 10 if is_grand else 9
+            en_size = 7.5 if is_grand else 6.5
+
+            # Mixed-script aware: labels like "ض.ق.م 14% (مضمنة)" have
+            # ASCII punctuation that the Arabic font can't render — split
+            # by script and render each run with its proper font.
+            pdf.set_text_color(*label_color)
+            label_style = "B" if is_grand else ""
+            render_mixed_text(
+                x=inner_x,
+                y=ry + 1,
+                w=inner_w * 0.7,
+                h=4.5,
+                text=lbl_ar,
+                size=ar_size,
+                style=label_style,
+                align="L",
             )
 
-        # Grand total divider
-        pdf.set_draw_color(*NAVY)
-        pdf.set_line_width(0.5)
-        pdf.line(totals_x, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(1)
+            # ── Value, right-aligned ─────────────────────────────────
+            val_color = NAVY if is_grand else INK
+            val_size = 13 if is_grand else 10
+            pdf.set_font("Helvetica", "B" if is_grand else "", val_size)
+            pdf.set_text_color(*val_color)
+            pdf.set_xy(inner_x, ry + 1)
+            pdf.cell(inner_w, 4.5, val, align="R")
 
-        grand_total_cents = invoice.subtotal - (invoice.total_discount or 0)
-        _total_row(
-            "الإجمالي الكلي",
-            "Grand Total",
-            f"{grand_total_cents / 100:,.2f} {invoice.currency}",
-            bold=True,
+            # EN sub-line directly under the AR label
+            pdf.set_xy(inner_x, ry + 6)
+            pdf.set_font("Helvetica", "B" if is_grand else "", en_size)
+            pdf.set_text_color(*en_color)
+            en_label = lbl_en
+            if is_grand:
+                en_label = "  ".join(en_label)  # fake letter-spacing
+            pdf.cell(inner_w, 3.5, en_label)
+
+        # ── VAT-included notice — sits right under the totals card ──
+        notice_w = totals_w
+        notice_y = totals_y + card_h + 4
+        notice_h = 11
+        pdf.set_fill_color(*SURFACE)
+        pdf.set_draw_color(*BORDER)
+        pdf.set_line_width(0.2)
+        pdf.rect(totals_x, notice_y, notice_w, notice_h, style="DF")
+        # Navy accent rail on the right (RTL leading edge)
+        pdf.set_fill_color(*NAVY)
+        pdf.rect(totals_x + notice_w - 1.5, notice_y + 2, 1.5, notice_h - 4, style="F")
+        # Arabic primary — render via mixed-script helper so the "14"
+        # and "%" land in Helvetica rather than the Arabic font.
+        pdf.set_text_color(*NAVY)
+        render_mixed_text(
+            x=totals_x,
+            y=notice_y + 1.5,
+            w=notice_w - 3,
+            h=4,
+            text="الأسعار شاملة ضريبة القيمة المضافة 14%",
+            size=8.5,
+            style="B",
+            align="C",
         )
+        # English subtitle, tracked
+        pdf.set_xy(totals_x, notice_y + 5.8)
+        pdf.set_font("Helvetica", "", 6.5)
+        pdf.set_text_color(*MUTED)
+        pdf.cell(notice_w - 3, 3.5, "  ".join("PRICES INCLUDE 14% VAT"), align="C")
 
-        # ── Payment status stamp (optional) ─────────────────────────
+        # ════════════════════════════════════════════════════════════
+        # ── Payment pill — rounded capsule (no rotation) on the RIGHT
+        # ════════════════════════════════════════════════════════════
         if payment and payment.get("status"):
             raw_status = payment.get("status")
             status_key = str(raw_status).split(".")[-1].lower()
 
-            stamp_color_map = {
-                "paid": SUCCESS,
-                "pending": WARNING,
-                "unpaid": WARNING,
+            pill_color_map = {
+                "paid": (92, 123, 90),  # Sage
+                "pending": (197, 138, 31),  # Saffron
+                "unpaid": (197, 138, 31),
                 "authorized": INFO,
-                "partially_refunded": DANGER,
-                "refunded": DANGER,
-                "failed": DANGER,
+                "partially_refunded": (180, 66, 24),
+                "refunded": (180, 66, 24),
+                "failed": (180, 66, 24),
             }
-            stamp_rgb = stamp_color_map.get(status_key, GREY)
+            pill_rgb = pill_color_map.get(status_key, MUTED)
             label_ar = _LABELS_AR["payment"].get(status_key, status_key)
             label_en = _LABELS_EN["payment"].get(status_key, status_key)
 
-            # Render the stamp by composing two cells: Arabic part with
-            # NotoArabic, " / Latin" with Helvetica. Width is computed from
-            # both pieces so the box wraps the text snugly.
-            pdf.ln(8)
-            ar_part = ar(label_ar)
-            en_part = f" / {label_en}"
-            set_font("B", 11)
-            ar_w = pdf.get_string_width(ar_part)
-            pdf.set_font("Helvetica", "B", 11)
-            en_w = pdf.get_string_width(en_part)
-            text_w = ar_w + en_w + 14
-            stamp_x = pdf.l_margin
-            stamp_y = pdf.get_y()
-            pdf.set_draw_color(*stamp_rgb)
-            pdf.set_text_color(*stamp_rgb)
-            pdf.set_line_width(0.7)
-            pdf.rect(stamp_x, stamp_y, text_w, 10, style="D")
-            # Arabic chunk
-            pdf.set_xy(stamp_x + 7, stamp_y + 2)
-            set_font("B", 11)
-            pdf.cell(ar_w, 6, ar_part)
-            # Latin chunk
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.cell(en_w, 6, en_part)
-            pdf.set_y(stamp_y + 12)
+            # Measure widths
+            ar_text = ar(label_ar)
+            set_font("B", 10)
+            ar_w = pdf.get_string_width(ar_text)
+            pdf.set_font("Helvetica", "", 7)
+            en_w = pdf.get_string_width(label_en.upper())
+            text_w = max(ar_w, en_w)
 
+            # Optional metadata (paid_at + method) on the right of the pill
             paid_at = payment.get("paid_at")
             method = payment.get("method")
-            sub_bits = []
+            meta_bits = []
             if paid_at:
-                sub_bits.append(str(paid_at))
+                meta_bits.append(str(paid_at))
             if method:
-                sub_bits.append(str(method))
-            if sub_bits:
+                meta_bits.append(str(method))
+            meta_text = " · ".join(meta_bits)
+            pdf.set_font("Helvetica", "", 7)
+            meta_w = pdf.get_string_width(meta_text) if meta_text else 0
+
+            # Layout: [dot] [AR / EN stack] [hairline] [meta]
+            dot_d = 3
+            pad = 6
+            gap = 4
+            divider_w = 1 if meta_text else 0
+            pill_w = (
+                pad
+                + dot_d
+                + gap
+                + text_w
+                + (gap + divider_w + gap + meta_w if meta_text else 0)
+                + pad
+            )
+            pill_h = 11
+            pill_x = pdf.w - pdf.r_margin - pill_w
+            pill_y = notice_y + notice_h + 8
+
+            # Capsule body — fake rounded look with cream fill + colored stroke
+            pdf.set_fill_color(*SURFACE)
+            pdf.set_draw_color(*pill_rgb)
+            pdf.set_line_width(0.4)
+            pdf.rect(pill_x, pill_y, pill_w, pill_h, style="DF")
+            # End caps (semicircles approximated by small dark filled rects)
+            cap_size = 1
+            pdf.set_fill_color(*pill_rgb)
+            pdf.rect(
+                pill_x - cap_size,
+                pill_y + pill_h / 2 - cap_size,
+                cap_size,
+                cap_size * 2,
+                style="F",
+            )
+            pdf.rect(
+                pill_x + pill_w,
+                pill_y + pill_h / 2 - cap_size,
+                cap_size,
+                cap_size * 2,
+                style="F",
+            )
+
+            # Status dot (filled circle)
+            dot_x = pill_x + pad
+            dot_y = pill_y + (pill_h - dot_d) / 2
+            pdf.set_fill_color(*pill_rgb)
+            pdf.ellipse(dot_x, dot_y, dot_d, dot_d, style="F")
+
+            # AR / EN stack
+            text_x = dot_x + dot_d + gap
+            pdf.set_xy(text_x, pill_y + 1.5)
+            set_font("B", 9.5)
+            pdf.set_text_color(*pill_rgb)
+            pdf.cell(text_w, 4, ar_text, align="L")
+            pdf.set_xy(text_x, pill_y + 5.8)
+            pdf.set_font("Helvetica", "B", 6.5)
+            pdf.cell(text_w, 3.5, "  ".join(label_en.upper()), align="L")
+
+            # Optional meta on the right
+            if meta_text:
+                div_x = text_x + text_w + gap
+                pdf.set_draw_color(*BORDER)
+                pdf.set_line_width(0.2)
+                pdf.line(div_x, pill_y + 2, div_x, pill_y + pill_h - 2)
+                pdf.set_xy(div_x + gap, pill_y + (pill_h - 3) / 2)
                 pdf.set_font("Helvetica", "", 7)
                 pdf.set_text_color(*INK_SOFT)
-                pdf.set_x(stamp_x)
-                pdf.cell(text_w, 4, " - ".join(sub_bits), align="L")
-                pdf.ln(5)
+                pdf.cell(meta_w, 3, meta_text, align="L")
 
+            pdf.set_y(pill_y + pill_h + 4)
             pdf.set_text_color(*INK)
+        else:
+            pdf.set_y(notice_y + notice_h + 8)
 
         # ── QR Code ─────────────────────────────────────────────────
         if invoice.qr_code_image:
@@ -718,60 +1058,55 @@ class InvoicePDFGenerator:
             except Exception:
                 logger.warning("fpdf2_qr_code_render_failed")
 
-        # ── ETA Footer ──────────────────────────────────────────────
-        pdf.ln(6)
-        # Separator
-        pdf.set_draw_color(233, 236, 239)
-        pdf.set_line_width(0.3)
+        # ════════════════════════════════════════════════════════════
+        # ── ETA compliance footer + Powered by ──────────────────────
+        # ════════════════════════════════════════════════════════════
+        pdf.ln(10)
+        pdf.set_draw_color(*BORDER)
+        pdf.set_line_width(0.2)
         pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-        pdf.ln(4)
+        pdf.ln(5)
 
-        # Arabic compliance line — NotoArabic
-        set_font("", 8)
+        # Arabic compliance line
+        set_font("", 8.5)
         pdf.set_text_color(*INK_SOFT)
         pdf.cell(
             0,
             4,
-            ar("هذه فاتورة إلكترونية صادرة وفقاً لمتطلبات مصلحة الضرائب المصرية"),
+            ar("فاتورة إلكترونية معتمدة من مصلحة الضرائب المصرية"),
             align="C",
             new_x="LMARGIN",
             new_y="NEXT",
         )
-        # English compliance line — Helvetica so the Latin glyphs render
-        pdf.set_font("Helvetica", "", 7)
+        # English compliance line — uppercase + tracked
+        pdf.ln(1.5)
+        pdf.set_font("Helvetica", "", 6.5)
         pdf.set_text_color(*MUTED)
         pdf.cell(
             0,
             4,
-            "Electronic invoice issued per Egyptian Tax Authority requirements",
+            "  ".join("EGYPTIAN TAX AUTHORITY COMPLIANT E-INVOICE"),
             align="C",
             new_x="LMARGIN",
             new_y="NEXT",
         )
 
-        # ── Powered by NUMU ─────────────────────────────────────────
-        # Pure Latin — Helvetica throughout. "NUMU" gets the navy brand color
-        # in bold, the surrounding text is a soft muted grey.
-        pdf.ln(5)
+        # Powered by NUMU — brand line, tracked
+        pdf.ln(6)
         pdf.set_font("Helvetica", "", 7)
         pdf.set_text_color(*MUTED)
         pre = "Powered by "
-        brand = "NUMU"
-        post = " - numuegapp"
+        brand = "N U M U"
         w_pre = pdf.get_string_width(pre)
-        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_font("Helvetica", "B", 7.5)
         w_brand = pdf.get_string_width(brand)
-        pdf.set_font("Helvetica", "", 7)
-        w_post = pdf.get_string_width(post)
-        total_w = w_pre + w_brand + w_post
+        total_w = w_pre + w_brand
         pdf.set_x((pdf.w - total_w) / 2)
+        pdf.set_font("Helvetica", "", 7)
         pdf.cell(w_pre, 4, pre)
-        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_font("Helvetica", "B", 7.5)
         pdf.set_text_color(*NAVY)
         pdf.cell(w_brand, 4, brand)
-        pdf.set_font("Helvetica", "", 7)
-        pdf.set_text_color(*MUTED)
-        pdf.cell(w_post, 4, post)
 
         return bytes(pdf.output())
 
@@ -871,14 +1206,20 @@ class InvoicePDFGenerator:
             "language": self.language,
             # Logo
             "logo_url": self._resolve_logo_url(),
-            # Formatted totals (cents -> display currency). The invoice
-            # is rendered tax-free, so grand_total = subtotal - discount
-            # (NOT invoice.total, which includes tax). The data layer
-            # still carries total_taxes for ETA submission elsewhere.
+            # Formatted totals (cents -> display currency). Under the
+            # VAT-inclusive model: ``subtotal`` already contains VAT;
+            # ``vat_amount`` is the VAT extracted from it for the
+            # template's "VAT included" line; ``grand_total`` adds
+            # shipping on top of the inclusive subtotal.
+            "prices_include_vat": invoice.prices_include_vat,
+            "vat_rate": f"{invoice.vat_rate:.0f}",
             "subtotal": f"{invoice.subtotal / 100:,.2f}",
+            "vat_amount": f"{invoice.vat_amount / 100:,.2f}",
+            "net_amount_before_vat": f"{invoice.net_amount_before_vat / 100:,.2f}",
+            "shipping_fee": f"{invoice.shipping_fee / 100:,.2f}",
             "total_discount": f"{invoice.total_discount / 100:,.2f}",
-            "total_taxes": f"{invoice.total_taxes / 100:,.2f}",
-            "grand_total": f"{(invoice.subtotal - (invoice.total_discount or 0)) / 100:,.2f}",
+            "total_taxes": f"{invoice.vat_amount / 100:,.2f}",
+            "grand_total": f"{invoice.grand_total / 100:,.2f}",
             "currency": invoice.currency,
             # QR code
             "qr_data_uri": qr_data_uri,

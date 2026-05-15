@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.invoice import (
+    DEFAULT_VAT_RATE,
     BuyerInfo,
     Invoice,
     InvoiceLineItem,
@@ -56,6 +57,12 @@ class InvoiceRepository:
             total_taxes=invoice.total_taxes,
             extra_discount=invoice.extra_discount,
             total=invoice.total,
+            prices_include_vat=invoice.prices_include_vat,
+            vat_rate=invoice.vat_rate,
+            vat_amount=invoice.vat_amount,
+            net_amount_before_vat=invoice.net_amount_before_vat,
+            shipping_fee=invoice.shipping_fee,
+            grand_total=invoice.grand_total,
             eta_uuid=invoice.eta_uuid,
             eta_long_id=invoice.eta_long_id,
             eta_submission_id=invoice.eta_submission_id,
@@ -129,6 +136,12 @@ class InvoiceRepository:
         model.total_taxes = invoice.total_taxes
         model.extra_discount = invoice.extra_discount
         model.total = invoice.total
+        model.prices_include_vat = invoice.prices_include_vat
+        model.vat_rate = invoice.vat_rate
+        model.vat_amount = invoice.vat_amount
+        model.net_amount_before_vat = invoice.net_amount_before_vat
+        model.shipping_fee = invoice.shipping_fee
+        model.grand_total = invoice.grand_total
         model.eta_uuid = invoice.eta_uuid
         model.eta_long_id = invoice.eta_long_id
         model.eta_submission_id = invoice.eta_submission_id
@@ -262,6 +275,20 @@ class InvoiceRepository:
             total_taxes=model.total_taxes or 0,
             extra_discount=model.extra_discount or 0,
             total=model.total or 0,
+            prices_include_vat=(
+                model.prices_include_vat
+                if model.prices_include_vat is not None
+                else True
+            ),
+            vat_rate=(
+                Decimal(str(model.vat_rate))
+                if model.vat_rate is not None
+                else DEFAULT_VAT_RATE
+            ),
+            vat_amount=model.vat_amount or 0,
+            net_amount_before_vat=model.net_amount_before_vat or 0,
+            shipping_fee=model.shipping_fee or 0,
+            grand_total=model.grand_total or model.total or 0,
             eta_uuid=model.eta_uuid,
             eta_long_id=model.eta_long_id,
             eta_submission_id=model.eta_submission_id,

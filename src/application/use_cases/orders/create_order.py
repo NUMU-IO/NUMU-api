@@ -132,8 +132,18 @@ class CreateOrderUseCase:
                 phone=dto.billing_address.phone,
             )
 
-        # Calculate total
-        total = subtotal + dto.shipping_cost + dto.tax_amount - dto.discount_amount
+        # Calculate total — VAT-inclusive pricing. Product prices already
+        # contain the 14% VAT, so we do NOT add ``dto.tax_amount`` on
+        # top. The DTO's ``tax_amount`` field is preserved on the order
+        # record as the *extracted* VAT (informational, used by the
+        # invoice). When the caller didn't pass one, derive it from the
+        # subtotal so dashboards / invoices have a consistent figure.
+        from src.core.entities.invoice import extract_vat_cents
+
+        recorded_tax_amount = dto.tax_amount
+        if not recorded_tax_amount:
+            recorded_tax_amount, _ = extract_vat_cents(subtotal)
+        total = subtotal + dto.shipping_cost - dto.discount_amount
 
         # Create order entity
         order = Order(
@@ -148,7 +158,7 @@ class CreateOrderUseCase:
             payment_status=PaymentStatus.PENDING,
             subtotal=subtotal,
             shipping_cost=dto.shipping_cost,
-            tax_amount=dto.tax_amount,
+            tax_amount=recorded_tax_amount,
             discount_amount=dto.discount_amount,
             total=total,
             currency=dto.currency,

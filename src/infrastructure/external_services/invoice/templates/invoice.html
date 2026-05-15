@@ -266,6 +266,18 @@
             padding-top: 8px;
         }
 
+        .vat-notice {
+            margin-top: 10px;
+            padding: 7px 10px;
+            background: #F5EFE6;
+            border: 1px dashed #1034A6;
+            border-radius: 4px;
+            font-size: 8.5pt;
+            color: #1034A6;
+            text-align: center;
+            font-weight: 600;
+        }
+
         /* --- QR Code section --- */
         .qr-section {
             text-align: center;
@@ -381,6 +393,12 @@
                 {% if seller.governorate %}، {{ seller.governorate }}{% endif %}
             </div>
             {% endif %}
+            {% if seller.phone %}
+            <div class="party-detail">
+                <span class="party-detail-label">الهاتف / Phone:</span>
+                {{ seller.phone }}
+            </div>
+            {% endif %}
         </div>
         <div class="party-box">
             <div class="party-label">{{ labels_ar.buyer }} / {{ labels_en.buyer | upper }}</div>
@@ -475,41 +493,53 @@
         </tbody>
     </table>
 
-    <!-- Totals -->
+    <!-- Totals (VAT-inclusive) — subtotal already contains 14% VAT,
+         shown extracted only for accounting. Grand total = subtotal
+         + shipping (NOT subtotal + VAT + shipping). -->
     <div class="totals-wrapper">
         <div class="totals">
             <table>
                 <tr>
                     <td class="label">
-                        {{ labels_ar.subtotal }}
-                        <span class="label-en">/ {{ labels_en.subtotal }}</span>
+                        إجمالي المنتجات (شامل الضريبة)
+                        <span class="label-en">Products Total (VAT incl.)</span>
                     </td>
                     <td class="value">{{ subtotal }} {{ currency }}</td>
+                </tr>
+                <tr>
+                    <td class="label">
+                        ضريبة القيمة المضافة 14% (مضمنة)
+                        <span class="label-en">VAT 14% (Included)</span>
+                    </td>
+                    <td class="value">{{ vat_amount }} {{ currency }}</td>
                 </tr>
                 {% if total_discount != '0.00' %}
                 <tr>
                     <td class="label">
-                        {{ labels_ar.total_discount }}
-                        <span class="label-en">/ {{ labels_en.total_discount }}</span>
+                        إجمالي الخصم
+                        <span class="label-en">Discount</span>
                     </td>
                     <td class="value">-{{ total_discount }} {{ currency }}</td>
                 </tr>
                 {% endif %}
                 <tr>
                     <td class="label">
-                        {{ labels_ar.total_tax }} (14%)
-                        <span class="label-en">/ {{ labels_en.total_tax }}</span>
+                        رسوم الشحن
+                        <span class="label-en">Shipping</span>
                     </td>
-                    <td class="value">{{ total_taxes }} {{ currency }}</td>
+                    <td class="value">{{ shipping_fee }} {{ currency }}</td>
                 </tr>
                 <tr class="grand-total">
                     <td class="label">
-                        {{ labels_ar.grand_total }}
-                        <span class="label-en">/ {{ labels_en.grand_total }}</span>
+                        الإجمالي النهائي
+                        <span class="label-en">Grand Total</span>
                     </td>
                     <td class="value">{{ grand_total }} {{ currency }}</td>
                 </tr>
             </table>
+            <div class="vat-notice">
+                الأسعار شاملة ضريبة القيمة المضافة 14% &middot; Prices include 14% VAT
+            </div>
         </div>
     </div>
 

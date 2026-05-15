@@ -206,10 +206,15 @@ class CheckoutUseCase:
                 "Stock validation failed:\n" + "\n".join(stock_errors)
             )
 
-        # 4. Calculate totals
+        # 4. Calculate totals — VAT-inclusive pricing (Egyptian retail).
+        # Product prices already include 14% VAT, so we DO NOT add VAT
+        # on top. ``tax_amount`` is the VAT *extracted* from the
+        # subtotal, recorded only for tax reporting / invoice display.
+        from src.core.entities.invoice import extract_vat_cents
+
         subtotal = sum(item.total_price for item in line_items)
         shipping_cost = dto.shipping_cost
-        tax_amount = 0  # TODO: Calculate tax based on address
+        tax_amount, _ = extract_vat_cents(subtotal)
 
         # 4a. Apply coupon discount if provided
         discount_amount = 0
@@ -272,7 +277,9 @@ class CheckoutUseCase:
             applied_coupon_code = coupon.code
             await self.coupon_repository.increment_usage(coupon.id)
 
-        total = subtotal + shipping_cost + tax_amount - discount_amount
+        # VAT is already inside ``subtotal`` — NOT added on top. Customer
+        # pays product subtotal + shipping - any discount.
+        total = subtotal + shipping_cost - discount_amount
 
         # 5. Generate order number
         order_number = await self.order_repository.get_next_order_number(store_id)

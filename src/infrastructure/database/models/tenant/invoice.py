@@ -1,8 +1,19 @@
 """Invoice database model for ETA e-invoicing."""
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -97,12 +108,32 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Line items (stored as JSON array)
     line_items: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
 
-    # Totals (all in cents)
+    # Totals (all in cents) — VAT-inclusive model.
+    # ``subtotal`` is the sum of line totals with VAT already included.
+    # ``vat_amount`` is the VAT *extracted* from ``subtotal`` for tax
+    # reporting (NOT added on top). ``grand_total`` is what the
+    # customer actually pays: ``subtotal + shipping_fee - extra_discount``.
     subtotal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_discount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_taxes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     extra_discount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # VAT-inclusive pricing fields (Phase: Egyptian retail VAT model).
+    # ``prices_include_vat`` flags rows authored under this model so a
+    # future migration to mixed-mode pricing has a clean discriminator.
+    prices_include_vat: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    vat_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("14.00")
+    )
+    vat_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    net_amount_before_vat: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    shipping_fee: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    grand_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # ETA submission details
     eta_uuid: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)

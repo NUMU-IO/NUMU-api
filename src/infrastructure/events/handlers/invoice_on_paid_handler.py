@@ -135,6 +135,7 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                     ),
                     building_number=store_address.get("building_number", ""),
                     activity_code=store_settings.get("activity_code", "4649"),
+                    phone=store_settings.get("phone") or getattr(store, "phone", None),
                 )
 
                 buyer_name = (
@@ -154,6 +155,9 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                 invoice_number = await invoice_repo.get_next_invoice_number(
                     event.store_id
                 )
+                # Carry the order's shipping cost forward so the invoice's
+                # grand_total (subtotal + shipping_fee) matches the amount
+                # the customer paid for the order.
                 invoice = Invoice(
                     id=uuid4(),
                     store_id=event.store_id,
@@ -166,6 +170,8 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                     seller=seller,
                     buyer=buyer,
                     currency=order.currency,
+                    shipping_fee=order.shipping_cost or 0,
+                    prices_include_vat=True,
                 )
 
                 for li in order.line_items:
@@ -218,8 +224,8 @@ async def handle_invoice_on_order_paid(event: OrderPaidEvent) -> None:
                             seller_name=seller.name_ar or seller.name,
                             tax_number=seller.tax_id or "",
                             invoice_date=invoice.date_issued,
-                            total_with_vat=invoice.total / 100,
-                            vat_amount=invoice.total_taxes / 100,
+                            total_with_vat=invoice.grand_total / 100,
+                            vat_amount=invoice.vat_amount / 100,
                         )
                         invoice.qr_code_data = qr_data
                         invoice.qr_code_image = qr_image
