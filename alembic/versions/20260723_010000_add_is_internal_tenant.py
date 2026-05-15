@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "is_internal_20260723"
-down_revision: str = "marketing_campaigns_20260722"
+down_revision: str = "funnel_event_idemp_20260514"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
