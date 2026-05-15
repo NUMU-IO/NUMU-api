@@ -80,6 +80,7 @@ class UpdateTenantRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     plan: str | None = None
     is_active: bool | None = None
+    is_internal: bool | None = None
     settings: dict | None = None
 
 

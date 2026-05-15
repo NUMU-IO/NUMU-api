@@ -199,6 +199,8 @@ async def update_tenant(
         tenant.plan = request.plan
     if request.is_active is not None:
         tenant.is_active = request.is_active
+    if request.is_internal is not None:
+        tenant.is_internal = request.is_internal
     if request.settings is not None:
         tenant.settings = request.settings
 

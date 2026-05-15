@@ -18,6 +18,10 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
+from src.infrastructure.database.models.public.tenant import (
+    TenantLifecycleState,
+    TenantModel,
+)
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 
 logger = logging.getLogger(__name__)
@@ -103,9 +107,22 @@ async def list_customers(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """List all customers across all stores (paginated)."""
-    query = select(CustomerModel).options(selectinload(CustomerModel.store))
-    count_query = select(func.count(CustomerModel.id))
+    """List all customers across all stores (paginated).
+
+    Demo and internal tenants are excluded.
+    """
+    excluded_tenant_ids = (
+        select(TenantModel.id)
+        .where(
+            (TenantModel.lifecycle_state == TenantLifecycleState.DEMO.value)
+            | (TenantModel.is_internal.is_(True))
+        )
+        .scalar_subquery()
+    )
+    not_excluded = CustomerModel.tenant_id.notin_(excluded_tenant_ids)
+
+    query = select(CustomerModel).options(selectinload(CustomerModel.store)).where(not_excluded)
+    count_query = select(func.count(CustomerModel.id)).where(not_excluded)
 
     if store_id:
         query = query.where(CustomerModel.store_id == store_id)

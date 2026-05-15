@@ -99,6 +99,13 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
         default=dict,
     )
 
+    # Admin flag: mark test/sandbox tenants created via normal signup so
+    # they are excluded from all admin dashboard aggregates without
+    # affecting their lifecycle state or triggering the demo cleanup task.
+    is_internal: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+
     # ─── Lifecycle state machine (Stream 0.3 of NUMU plan) ───────────────
     lifecycle_state: Mapped[str] = mapped_column(
         String(20), default="active", nullable=False

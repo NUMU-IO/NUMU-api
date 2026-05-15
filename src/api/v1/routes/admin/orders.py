@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,10 @@ from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.core.entities.order import VALID_STATUS_TRANSITIONS, OrderStatus, PaymentStatus
+from src.infrastructure.database.models.public.tenant import (
+    TenantLifecycleState,
+    TenantModel,
+)
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.order import OrderModel
 
@@ -200,12 +204,25 @@ async def list_orders(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """List all orders across all stores (paginated)."""
+    """List all orders across all stores (paginated).
+
+    Demo and internal tenants are excluded.
+    """
+    excluded_tenant_ids = (
+        select(TenantModel.id)
+        .where(
+            (TenantModel.lifecycle_state == TenantLifecycleState.DEMO.value)
+            | (TenantModel.is_internal.is_(True))
+        )
+        .scalar_subquery()
+    )
+    not_excluded = OrderModel.tenant_id.notin_(excluded_tenant_ids)
+
     query = select(OrderModel).options(
         selectinload(OrderModel.customer),
         selectinload(OrderModel.store),
-    )
-    count_query = select(func.count(OrderModel.id))
+    ).where(not_excluded)
+    count_query = select(func.count(OrderModel.id)).where(not_excluded)
 
     # Filters
     if order_status:
@@ -390,3 +407,42 @@ async def update_order_status(
         data=_order_to_detail(order),
         message=f"Order status updated to {new_status.value}",
     )
+
+
+@router.delete(
+    "/{order_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Hard-delete an order (admin)",
+    operation_id="admin_delete_order",
+)
+async def delete_order(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Permanently delete an order and all its related records.
+
+    Cascades via FK constraints: activities, instapay intents, payment
+    proofs, refunds, shipments, and returns are deleted. Invoices and
+    abandoned checkouts have their order_id set to NULL.
+    """
+    result = await db.execute(
+        select(OrderModel).where(OrderModel.id == order_id)
+    )
+    order = result.scalars().first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    logger.warning(
+        "admin_hard_delete_order order_id=%s order_number=%s admin_id=%s",
+        order.id,
+        order.order_number,
+        admin_id,
+    )
+
+    await db.execute(delete(OrderModel).where(OrderModel.id == order_id))
+    await db.commit()

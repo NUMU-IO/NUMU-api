@@ -48,6 +48,7 @@ router = APIRouter()
 
 class AdminStoreListItem(BaseModel):
     id: str
+    tenant_id: str | None = None
     name: str
     slug: str
     subdomain: str | None = None
@@ -57,6 +58,8 @@ class AdminStoreListItem(BaseModel):
     owner_name: str | None = None
     owner_email: str | None = None
     plan: str | None = None
+    lifecycle_state: str | None = None
+    is_internal: bool = False
     logo_url: str | None = None
     total_revenue: int = 0
     total_orders: int = 0
@@ -94,6 +97,7 @@ def _store_to_list_item(
 ) -> AdminStoreListItem:
     return AdminStoreListItem(
         id=str(store.id),
+        tenant_id=str(store.tenant_id) if store.tenant_id else None,
         name=store.name,
         slug=store.slug,
         subdomain=store.subdomain,
@@ -105,6 +109,8 @@ def _store_to_list_item(
         owner_name=f"{owner.first_name} {owner.last_name}" if owner else None,
         owner_email=owner.email if owner else None,
         plan=tenant.plan if tenant else None,
+        lifecycle_state=tenant.lifecycle_state if tenant else None,
+        is_internal=tenant.is_internal if tenant else False,
         logo_url=store.logo_url,
         total_revenue=total_revenue,
         total_orders=total_orders,
@@ -326,15 +332,18 @@ async def store_stats(
     _admin_id: Annotated[UUID, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Get store counts grouped by status, excluding demo tenants."""
-    demo_tenant_ids = (
+    """Get store counts grouped by status, excluding demo and internal tenants."""
+    excluded_tenant_ids = (
         select(TenantModel.id)
-        .where(TenantModel.lifecycle_state == TenantLifecycleState.DEMO.value)
+        .where(
+            (TenantModel.lifecycle_state == TenantLifecycleState.DEMO.value)
+            | (TenantModel.is_internal.is_(True))
+        )
         .scalar_subquery()
     )
     result = await db.execute(
         select(StoreModel.status, func.count(StoreModel.id))
-        .where(StoreModel.tenant_id.notin_(demo_tenant_ids))
+        .where(StoreModel.tenant_id.notin_(excluded_tenant_ids))
         .group_by(StoreModel.status)
     )
     counts = {row[0]: row[1] for row in result.all()}
@@ -358,6 +367,60 @@ async def store_stats(
             inactive=inactive,
         ),
         message="Store stats retrieved successfully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Toggle internal flag
+# ---------------------------------------------------------------------------
+
+
+class ToggleInternalRequest(BaseModel):
+    is_internal: bool
+
+
+@router.patch(
+    "/{store_id}/internal",
+    response_model=SuccessResponse[dict],
+    summary="Toggle internal flag on a store's tenant (admin)",
+    operation_id="admin_toggle_internal",
+)
+async def toggle_internal(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    request: ToggleInternalRequest,
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Mark or unmark a store's tenant as internal (test/sandbox).
+
+    Internal tenants are excluded from all admin dashboard aggregates.
+    """
+    store_repo = StoreRepository(db)
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Store not found",
+        )
+
+    tenant_repo = TenantRepository(db)
+    tenant = await tenant_repo.get_by_id(store.tenant_id)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found",
+        )
+
+    tenant.is_internal = request.is_internal
+    await tenant_repo.update(tenant)
+
+    return SuccessResponse(
+        data={
+            "store_id": str(store.id),
+            "tenant_id": str(tenant.id),
+            "is_internal": tenant.is_internal,
+        },
+        message=f"Tenant marked as {'internal' if tenant.is_internal else 'real'}",
     )
 
 
