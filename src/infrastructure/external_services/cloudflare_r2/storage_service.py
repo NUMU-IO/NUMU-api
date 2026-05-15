@@ -49,13 +49,26 @@ class CloudflareR2StorageService(IStorageService):
         self.public_url = settings.s3_public_url or settings.r2_public_url
 
         if self.endpoint_url and self.access_key_id and self.secret_access_key:
+            # Tight connect timeout + minimal retries — without these, a
+            # misconfigured endpoint (typical in local dev where the
+            # ``minio`` docker hostname doesn't resolve outside the
+            # compose network) makes every upload hang for ~22 s
+            # before the request fails. 3 s gives us "fast fail" which
+            # the merchant hub surfaces as a clean error instead of a
+            # spinner that looks like a server hang.
+            s3_config = Config(
+                signature_version="s3v4",
+                connect_timeout=3,
+                read_timeout=30,
+                retries={"max_attempts": 1, "mode": "standard"},
+            )
             self.client = boto3.client(
                 "s3",
                 endpoint_url=self.endpoint_url,
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
                 region_name=settings.s3_region,
-                config=Config(signature_version="s3v4"),
+                config=s3_config,
             )
             # A second client used *only* for generating signed URLs.
             # Reasoning: in containerised deployments the API talks to
@@ -76,7 +89,7 @@ class CloudflareR2StorageService(IStorageService):
                     aws_access_key_id=self.access_key_id,
                     aws_secret_access_key=self.secret_access_key,
                     region_name=settings.s3_region,
-                    config=Config(signature_version="s3v4"),
+                    config=s3_config,
                 )
             else:
                 self.signing_client = self.client

@@ -88,7 +88,7 @@ class InvoiceLineItemRequest(BaseModel):
 
 
 class CreateInvoiceRequest(BaseModel):
-    """Create invoice request."""
+    """Create invoice request (VAT-inclusive pricing)."""
 
     model_config = ConfigDict(
         str_strip_whitespace=True,
@@ -110,10 +110,11 @@ class CreateInvoiceRequest(BaseModel):
                         "description": "Egyptian Cotton T-Shirt",
                         "item_code": "EG-001",
                         "quantity": "2",
-                        "unit_price": "250.00",
+                        "unit_price": "100.00",
                         "vat_rate": "14.00",
                     }
                 ],
+                "shipping_fee": 5000,
             }
         },
     )
@@ -133,6 +134,15 @@ class CreateInvoiceRequest(BaseModel):
     )
 
     extra_discount: int = Field(default=0, ge=0, description="Extra discount in cents")
+    # Shipping fee is added on top of the (VAT-inclusive) subtotal to
+    # produce the grand total. VAT-free in this phase.
+    shipping_fee: int = Field(
+        default=0, ge=0, description="Shipping fee in cents (added to subtotal)"
+    )
+    vat_rate: Decimal = Field(
+        default=Decimal("14.00"),
+        description="VAT rate (default 14%). Prices are VAT-inclusive.",
+    )
     notes: str | None = Field(None, description="Notes in English")
     notes_ar: str | None = Field(None, description="Notes in Arabic")
 
@@ -148,6 +158,7 @@ class UpdateInvoiceRequest(BaseModel):
     buyer: BuyerInfoRequest | None = None
     line_items: list[InvoiceLineItemRequest] | None = None
     extra_discount: int | None = None
+    shipping_fee: int | None = None
     notes: str | None = None
     notes_ar: str | None = None
 
@@ -221,7 +232,7 @@ class BuyerInfoResponse(BaseModel):
 
 
 class InvoiceResponse(BaseModel):
-    """Invoice response."""
+    """Invoice response (VAT-inclusive pricing)."""
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -233,12 +244,17 @@ class InvoiceResponse(BaseModel):
                 "invoice_type": "I",
                 "status": "submitted",
                 "currency": "EGP",
-                "subtotal": 50000,
+                "prices_include_vat": True,
+                "vat_rate": "14.00",
+                "subtotal": 10000,
+                "vat_amount": 1228,
+                "net_amount_before_vat": 8772,
                 "total_discount": 0,
-                "total_taxes": 7000,
                 "extra_discount": 0,
-                "total": 57000,
-                "total_formatted": "570.00 EGP",
+                "shipping_fee": 5000,
+                "grand_total": 15000,
+                "total": 15000,
+                "total_formatted": "150.00 EGP",
                 "created_at": "2025-01-20T09:00:00Z",
                 "updated_at": "2025-01-20T09:00:00Z",
             }
@@ -263,15 +279,43 @@ class InvoiceResponse(BaseModel):
     currency: str = Field(description="ISO 4217 currency code")
     line_items: list[InvoiceLineItemResponse] = Field(description="Line items")
 
-    # Totals (in cents)
-    subtotal: int = Field(description="Subtotal in cents")
-    total_discount: int = Field(description="Total discount in cents")
-    total_taxes: int = Field(description="Total taxes in cents")
-    extra_discount: int = Field(description="Extra discount in cents")
-    total: int = Field(description="Grand total in cents")
+    # ── VAT-inclusive totals (all integer cents) ───────────────────
+    # ``subtotal`` already INCLUDES VAT at ``vat_rate``. ``vat_amount``
+    # is the VAT extracted from ``subtotal`` for tax reporting only.
+    # ``grand_total = subtotal + shipping_fee - extra_discount``.
+    prices_include_vat: bool = Field(
+        default=True,
+        description="True when product prices already include VAT",
+    )
+    vat_rate: Decimal = Field(
+        default=Decimal("14.00"), description="VAT rate percentage"
+    )
+    subtotal: int = Field(description="VAT-inclusive subtotal in cents")
+    vat_amount: int = Field(
+        default=0,
+        description="VAT extracted from subtotal in cents (already included)",
+    )
+    net_amount_before_vat: int = Field(
+        default=0, description="Subtotal minus VAT in cents"
+    )
+    total_discount: int = Field(description="Line-level discount in cents")
+    total_taxes: int = Field(description="Total VAT in cents (== vat_amount)")
+    extra_discount: int = Field(description="Invoice-level discount in cents")
+    shipping_fee: int = Field(default=0, description="Shipping fee in cents")
+    grand_total: int = Field(
+        default=0, description="Customer-facing grand total in cents"
+    )
+    total: int = Field(description="Grand total in cents (alias of grand_total)")
 
     # Formatted totals (for display)
     subtotal_formatted: str | None = Field(None, description="Formatted subtotal")
+    vat_amount_formatted: str | None = Field(
+        None, description="Formatted VAT amount (already included)"
+    )
+    shipping_fee_formatted: str | None = Field(
+        None, description="Formatted shipping fee"
+    )
+    grand_total_formatted: str | None = Field(None, description="Formatted grand total")
     total_formatted: str | None = Field(None, description="Formatted total")
 
     # ETA details

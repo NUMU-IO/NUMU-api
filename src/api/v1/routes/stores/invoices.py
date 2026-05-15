@@ -12,6 +12,7 @@ Provides endpoints for:
 
 import asyncio
 import logging
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -39,6 +40,7 @@ from src.core.entities.invoice import (
     InvoiceStatus,
     SellerInfo,
 )
+from src.core.entities.order import Order, PaymentStatus
 from src.core.entities.store import Store
 from src.infrastructure.external_services.eta import ETAInvoiceService
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
@@ -173,6 +175,9 @@ async def create_invoice(
         seller=seller,
         buyer=buyer,
         extra_discount=request.extra_discount,
+        shipping_fee=request.shipping_fee,
+        vat_rate=request.vat_rate,
+        prices_include_vat=True,
         notes=request.notes,
         notes_ar=request.notes_ar,
         original_invoice_number=request.original_invoice_number,
@@ -332,6 +337,10 @@ async def update_invoice(
 
     if request.extra_discount is not None:
         invoice.extra_discount = request.extra_discount
+        invoice.calculate_totals()
+
+    if request.shipping_fee is not None:
+        invoice.shipping_fee = request.shipping_fee
         invoice.calculate_totals()
 
     if request.notes is not None:
@@ -571,8 +580,168 @@ async def download_invoice_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{safe_filename}.pdf"',
+            # Defeat browser + intermediate caches so a template / wording
+            # change is visible on the next click without the merchant
+            # having to clear cache or use incognito.
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
         },
     )
+
+
+async def _build_invoice_from_order(
+    store: Store,
+    order: Order,
+    invoice_repo: InvoiceRepository,
+) -> Invoice:
+    """Build + persist a VAT-inclusive invoice from a paid order.
+
+    Mirrors the logic in ``invoice_on_paid_handler`` so a merchant can
+    download an invoice on demand for orders whose event-bus handler
+    never fired (legacy paid orders, dev-mode without the bus, or a
+    transient handler failure). Idempotent: callers should look up an
+    existing invoice first.
+    """
+    store_address = dict(store.address) if store.address else {}
+    store_settings = dict(store.settings) if store.settings else {}
+    ship = order.shipping_address
+
+    seller = SellerInfo(
+        tax_id=store_settings.get("tax_id", ""),
+        name=store.name,
+        name_ar=store_settings.get("name_ar", store.name),
+        branch_id=store_settings.get("branch_id", "0"),
+        country=store_address.get("country", "EG"),
+        governorate=store_address.get("governorate", store_address.get("state", "")),
+        city=store_address.get("city", ""),
+        street=store_address.get("street", store_address.get("address_line1", "")),
+        building_number=store_address.get("building_number", ""),
+        activity_code=store_settings.get("activity_code", "4649"),
+        phone=store_settings.get("phone") or getattr(store, "phone", None),
+    )
+
+    buyer_name = f"{ship.first_name or ''} {ship.last_name or ''}".strip() or "Customer"
+    buyer = BuyerInfo(
+        buyer_type="P",
+        name=buyer_name,
+        name_ar=buyer_name,
+        city=ship.city or "",
+        street=ship.address_line1 or "",
+        phone=ship.phone or "",
+    )
+
+    invoice_number = await invoice_repo.get_next_invoice_number(store.id)
+    invoice = Invoice(
+        id=uuid4(),
+        store_id=store.id,
+        tenant_id=store.tenant_id,
+        order_id=order.id,
+        customer_id=order.customer_id,
+        invoice_number=invoice_number,
+        internal_id=order.order_number,
+        status=InvoiceStatus.ACCEPTED,
+        seller=seller,
+        buyer=buyer,
+        currency=order.currency,
+        shipping_fee=order.shipping_cost or 0,
+        prices_include_vat=True,
+    )
+
+    for li in order.line_items:
+        invoice.add_line_item(
+            description=li.product_name,
+            description_ar=li.product_name,
+            item_code=li.sku or "EG-0000-0000",
+            quantity=Decimal(str(li.quantity)),
+            unit_price=Decimal(str(li.unit_price)) / 100,
+            internal_code=li.sku,
+        )
+
+    # ETA: simulated identifiers when not enabled, real submission otherwise.
+    if settings.eta_enabled:
+        try:
+            invoice = await ETAInvoiceService().process_invoice_submission(invoice)
+        except Exception as exc:
+            logger.warning(
+                "eta_submission_failed_on_lazy_create",
+                extra={"order_id": str(order.id), "error": str(exc)},
+            )
+            invoice.status = InvoiceStatus.REJECTED
+            invoice.eta_status_message = str(exc)[:500]
+    else:
+        invoice.eta_uuid = f"simulated-{uuid4().hex[:12]}"
+        invoice.eta_long_id = f"simulated-long-{uuid4().hex[:20]}"
+        invoice.eta_status_code = "accepted"
+
+    return await invoice_repo.create(invoice)
+
+
+@router.get(
+    "/by-order/{order_id}",
+    response_model=SuccessResponse[InvoiceResponse],
+    summary="Get (or create) the invoice for an order",
+    operation_id="get_invoice_for_order",
+)
+async def get_invoice_for_order(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    create_if_missing: bool = Query(
+        True,
+        description=(
+            "When true (default), creates the invoice on-the-fly if the "
+            "order is paid but no invoice exists yet (handles the race "
+            "where mark-as-paid completes before the on-paid handler)."
+        ),
+    ),
+):
+    """Return the invoice tied to ``order_id`` for the store.
+
+    Flow:
+        1. Look up the order; 404 if not found or not in this store.
+        2. Look up an existing invoice via ``get_by_order_id``.
+        3. If missing AND ``create_if_missing`` AND the order is paid,
+           build + persist a fresh VAT-inclusive invoice.
+        4. If missing AND not paid, return 409 with a clear message
+           (rather than the previous "No invoice found" which left the
+           merchant guessing).
+    """
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    invoice = await invoice_repo.get_by_order_id(order_id)
+
+    if invoice is None and create_if_missing:
+        if order.payment_status != PaymentStatus.PAID:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Invoice is generated after the order is marked as paid. "
+                    "Mark the order as paid first."
+                ),
+            )
+        invoice = await _build_invoice_from_order(store, order, invoice_repo)
+        logger.info(
+            "invoice_lazy_created",
+            extra={
+                "order_id": str(order_id),
+                "invoice_number": invoice.invoice_number,
+            },
+        )
+
+    if invoice is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No invoice found for this order",
+        )
+
+    return SuccessResponse(data=_build_invoice_response(invoice))
 
 
 def _build_invoice_response(invoice: Invoice) -> InvoiceResponse:
@@ -645,12 +814,21 @@ def _build_invoice_response(invoice: Invoice) -> InvoiceResponse:
             )
             for item in invoice.line_items
         ],
+        prices_include_vat=invoice.prices_include_vat,
+        vat_rate=invoice.vat_rate,
         subtotal=invoice.subtotal,
+        vat_amount=invoice.vat_amount,
+        net_amount_before_vat=invoice.net_amount_before_vat,
         total_discount=invoice.total_discount,
         total_taxes=invoice.total_taxes,
         extra_discount=invoice.extra_discount,
+        shipping_fee=invoice.shipping_fee,
+        grand_total=invoice.grand_total,
         total=invoice.total,
         subtotal_formatted=_format_currency(invoice.subtotal, invoice.currency),
+        vat_amount_formatted=_format_currency(invoice.vat_amount, invoice.currency),
+        shipping_fee_formatted=_format_currency(invoice.shipping_fee, invoice.currency),
+        grand_total_formatted=_format_currency(invoice.grand_total, invoice.currency),
         total_formatted=_format_currency(invoice.total, invoice.currency),
         eta_uuid=invoice.eta_uuid,
         eta_long_id=invoice.eta_long_id,

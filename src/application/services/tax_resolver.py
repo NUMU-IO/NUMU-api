@@ -100,6 +100,7 @@ class TaxResolver:
         line_items: list[TaxLineInput],
         discount_amount_cents: int = 0,
         destination_governorate: str | None = None,
+        force_inclusive: bool = True,
     ) -> ResolvedTax:
         """Compute tax for the given cart against the store's settings.
 
@@ -117,6 +118,11 @@ class TaxResolver:
             destination_governorate: ISO 3166-2 code (e.g. "EG-C"). When
                 a `zone_overrides` entry matches, the override rate
                 applies; otherwise the store default is used.
+            force_inclusive: When True (platform default), VAT is always
+                back-computed from the listed (inclusive) price; nothing
+                is added on top. The merchant's ``included_in_price``
+                setting is ignored. Set to False only for legacy callers
+                that need the exclusive code path.
         """
         tax_settings = (store_settings or {}).get("tax_settings") or {}
 
@@ -131,7 +137,15 @@ class TaxResolver:
         if rate <= 0:
             return ResolvedTax(rate=rate)
 
-        inclusive = bool(tax_settings.get("included_in_price", False))
+        # Platform-wide VAT-inclusive policy: merchants enter the final
+        # retail price; we extract VAT from it instead of adding it.
+        # ``force_inclusive=True`` is the default and overrides the
+        # store-level setting.
+        inclusive = (
+            True
+            if force_inclusive
+            else bool(tax_settings.get("included_in_price", False))
+        )
 
         # Compute pre-tax taxable amount per line, applying the order
         # discount proportionally so per-line breakdowns reconcile to
