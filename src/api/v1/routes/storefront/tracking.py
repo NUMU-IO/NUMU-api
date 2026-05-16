@@ -186,6 +186,11 @@ async def track_page_view(
     raw_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
         request.client.host if request.client else None
     )
+    # `ip` (anonymized to /24) is what we PERSIST — keeps page_views
+    # rows GDPR-compliant while still bucketing analytics by region.
+    # `raw_ip` is what we FORWARD to Meta CAPI further down: Meta's
+    # match-quality model needs the full client IP and refuses to
+    # match on a /24 network address.
     ip = _anonymize_ip(raw_ip)
     ua = request.headers.get("user-agent", "")[:500]
 
@@ -249,12 +254,14 @@ async def track_page_view(
     # Gated on per-store activation booleans. The Celery task re-checks
     # capi_enabled at execution time (plan §5.1) so a mid-flight toggle
     # off doesn't fire stale events.
+    # Forward `raw_ip` (NOT the anonymized form): Meta's match-quality
+    # model keys on full client IP and refuses a /24 network address.
     try:
         _maybe_enqueue_meta_capi(
             store=store,
             step=step,
             body=body,
-            ip=ip,
+            ip=raw_ip,
             user_agent=ua,
         )
     except Exception:

@@ -34,6 +34,11 @@ class ProductDTO(BaseDTO):
     category_id: UUID | None
     tags: list[str]
     attributes: dict
+    # Meta Commerce Catalog product ID — surfaced on the storefront so
+    # fireMetaEvent can use it as `content_ids` (Meta dynamic ads then
+    # match conversions to a Catalog row). Optional; null falls back to
+    # the product UUID in the storefront consumer.
+    meta_catalog_id: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -64,6 +69,7 @@ class ProductDTO(BaseDTO):
             category_id=entity.category_id,
             tags=entity.tags,
             attributes=entity.attributes,
+            meta_catalog_id=getattr(entity, "meta_catalog_id", None),
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
