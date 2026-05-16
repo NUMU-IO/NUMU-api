@@ -1,7 +1,7 @@
 """Add is_internal flag to tenants for excluding test/demo stores from analytics.
 
 Revision ID: is_internal_20260723
-Revises: marketing_campaigns_20260722
+Revises: invoice_vat_inclusive_20260515
 Create Date: 2026-07-23
 
 Adds a boolean ``is_internal`` column (default false) so platform admins
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "is_internal_20260723"
-down_revision: str = "funnel_event_idemp_20260514"
+down_revision: str = "invoice_vat_inclusive_20260515"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
