@@ -334,6 +334,7 @@ async def bosta_callback(
                     delivered_now = True
                     log.info("order_marked_delivered", order_id=str(order.id))
 
+                cod_just_collected = False
                 if cod_amount and not order.is_paid:
                     order.mark_as_paid(
                         payment_id=f"cod-bosta-{tracking_number}",
@@ -342,9 +343,24 @@ async def bosta_callback(
                     order.metadata["cod_amount"] = cod_amount
                     order.metadata["cod_collected_via"] = "bosta_webhook"
                     order.metadata["cod_tracking_number"] = tracking_number
+                    cod_just_collected = True
                     log.info("cod_collected", amount=cod_amount, order_id=str(order.id))
 
                 await order_repo.update(order)
+
+                # Meta CAPI Purchase fan-out — only fire when COD was
+                # actually collected on this webhook (not on every
+                # delivered status — undelivered shipments may transition
+                # through this branch with cod_amount unset). Best-effort.
+                if cod_just_collected:
+                    try:
+                        from src.application.services.meta_capi_purchase_dispatcher import (
+                            enqueue_meta_capi_purchase,
+                        )
+
+                        await enqueue_meta_capi_purchase(session, order)
+                    except Exception:
+                        log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
 
                 if delivered_now:
                     # Idempotent via order.metadata flag — replays and the

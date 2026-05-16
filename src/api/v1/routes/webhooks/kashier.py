@@ -223,6 +223,19 @@ async def kashier_callback(
         except Exception:
             pass
 
+        # Meta CAPI Purchase fan-out — server-side authoritative for
+        # Purchase per plan §5.4. Best-effort: a failed enqueue must
+        # never fail the webhook (the hourly orphan-purchase sweep
+        # picks up missed events).
+        try:
+            from src.application.services.meta_capi_purchase_dispatcher import (
+                enqueue_meta_capi_purchase,
+            )
+
+            await enqueue_meta_capi_purchase(db, order)
+        except Exception:
+            log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
+
         # Fire OrderStatusChangedEvent so shipment auto-creation triggers
         try:
             from src.core.events.order_events import OrderStatusChangedEvent
@@ -353,6 +366,20 @@ async def kashier_redirect(
                     payment_method="kashier",
                 )
                 await order_repo.update(internal_order)
+
+                # Meta CAPI Purchase fan-out — backup path. event_id
+                # = order.id is shared with the webhook callback above
+                # so even if both fire, Meta dedupes them as one event.
+                try:
+                    from src.application.services.meta_capi_purchase_dispatcher import (
+                        enqueue_meta_capi_purchase,
+                    )
+
+                    await enqueue_meta_capi_purchase(db, internal_order)
+                except Exception:
+                    log.warning(
+                        "meta_capi_purchase_enqueue_failed_redirect", exc_info=True
+                    )
 
             if success:
                 # Include the total (in cents) so the receipt can render
