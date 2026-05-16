@@ -15,6 +15,7 @@ from src.api.dependencies import (
     get_store_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.date_range import DateRangeWindow, get_date_range_window
 from src.api.dependencies.repositories import get_page_view_repository
 from src.api.responses import SuccessResponse
 from src.application.use_cases.stores import GetDashboardStatsUseCase
@@ -97,7 +98,7 @@ async def get_dashboard_stats(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    days: int = Query(30, ge=1, le=365, description="Number of days for the period"),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get dashboard statistics for the store."""
     use_case = GetDashboardStatsUseCase(
@@ -110,7 +111,8 @@ async def get_dashboard_stats(
     result = await use_case.execute(
         store_id=store.id,
         user_id=store.owner_id,
-        days=days,
+        period_start=window.start,
+        period_end=window.end,
     )
 
     return SuccessResponse(
@@ -153,7 +155,7 @@ async def get_revenue_chart(
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
-    days: int = Query(30, ge=1, le=365, description="Number of days for the chart"),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get revenue data for chart visualization."""
     use_case = GetDashboardStatsUseCase(
@@ -166,8 +168,9 @@ async def get_revenue_chart(
     result = await use_case.get_revenue_chart(
         store_id=store.id,
         user_id=store.owner_id,
-        days=days,
         page_view_repository=pv_repo,
+        period_start=window.start,
+        period_end=window.end,
     )
 
     return SuccessResponse(

@@ -91,8 +91,15 @@ class GetDashboardStatsUseCase:
         store_id: UUID,
         user_id: UUID,
         days: int = 30,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
     ) -> DashboardStatsDTO:
-        """Get dashboard statistics for a store."""
+        """Get dashboard statistics for a store.
+
+        Accepts either an explicit ``[period_start, period_end]`` window
+        (preferred — produced by the shared date-range dependency) OR a
+        legacy ``days`` count.
+        """
         # Verify store exists and user has permission
         store = await self.store_repository.get_by_id(store_id)
         if not store:
@@ -103,9 +110,14 @@ class GetDashboardStatsUseCase:
                 "You don't have permission to view this store's dashboard"
             )
 
-        now = datetime.now(UTC)
-        period_start = now - timedelta(days=days)
-        previous_period_start = period_start - timedelta(days=days)
+        if period_start is not None and period_end is not None:
+            now = period_end
+            span = period_end - period_start
+            previous_period_start = period_start - span
+        else:
+            now = datetime.now(UTC)
+            period_start = now - timedelta(days=days)
+            previous_period_start = period_start - timedelta(days=days)
 
         # Get current period revenue
         current_revenue = await self.order_repository.get_revenue_by_date_range(
@@ -226,6 +238,8 @@ class GetDashboardStatsUseCase:
         user_id: UUID,
         days: int = 30,
         page_view_repository=None,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
     ) -> list[RevenueDataPoint]:
         """Get revenue data for chart visualization."""
         # Verify permissions
@@ -238,8 +252,13 @@ class GetDashboardStatsUseCase:
                 "You don't have permission to view this store's dashboard"
             )
 
-        now = datetime.now(UTC)
-        period_start = now - timedelta(days=days)
+        if period_start is not None and period_end is not None:
+            now = period_end
+            window_days = max(1, (now - period_start).days + 1)
+        else:
+            now = datetime.now(UTC)
+            period_start = now - timedelta(days=days)
+            window_days = days
 
         # Pre-fetch daily visits in one query if repo available
         daily_visits_map: dict[str, int] = {}
@@ -252,7 +271,7 @@ class GetDashboardStatsUseCase:
         data_points = []
 
         # Get daily data for the period
-        for i in range(days - 1, -1, -1):
+        for i in range(window_days - 1, -1, -1):
             day_end = now - timedelta(days=i)
             day_start = day_end - timedelta(days=1)
 
