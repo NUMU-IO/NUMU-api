@@ -58,6 +58,10 @@ class Product(BaseEntity):
     cost_price: Money | None = None
     seo_title: str | None = None
     seo_description: str | None = None
+    # Meta Commerce Catalog product ID — pinned by merchant in dashboard
+    # so storefront Pixel/CAPI events can reference the Catalog row Meta
+    # has on file (enables dynamic ad matching). Null = use product.id.
+    meta_catalog_id: str | None = None
     # Phase 8.1 — option axes (size / color / material / ...). Each
     # entry is `{"name": "Size", "position": 0, "values": ["S","M","L"]}`.
     # Variants reference these by name (`variant.option_values["Size"] = "M"`).

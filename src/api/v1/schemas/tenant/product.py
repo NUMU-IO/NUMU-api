@@ -159,6 +159,15 @@ class CreateProductRequest(BaseModel):
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
+    meta_catalog_id: str | None = Field(
+        None,
+        max_length=255,
+        description=(
+            "Meta Commerce Catalog product ID. When set, the storefront "
+            "uses this as `content_ids` on Pixel/CAPI events so Meta "
+            "dynamic ads match conversions back to a catalog row."
+        ),
+    )
     # Phase 8.1 — option axes + variant matrix. Both default to empty,
     # in which case the product CRUD creates a single "default variant"
     # automatically (matching the migration's backfill behavior).
@@ -274,6 +283,15 @@ class UpdateProductRequest(BaseModel):
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
+    meta_catalog_id: str | None = Field(
+        None,
+        max_length=255,
+        description=(
+            "Meta Commerce Catalog product ID. When set, the storefront "
+            "uses this as `content_ids` on Pixel/CAPI events so Meta "
+            "dynamic ads match conversions back to a catalog row."
+        ),
+    )
     # Phase 8.1 — options + variants on update. Omitted → no change.
     # Empty list → drop options/variants and recreate the default.
     options: list[ProductOptionInput] | None = Field(
@@ -346,6 +364,15 @@ class ProductResponse(BaseModel):
     category_id: str | None = Field(description="Category UUID")
     tags: list[str] = Field(description="Searchable tags")
     attributes: dict = Field(description="Key-value attributes")
+    meta_catalog_id: str | None = Field(
+        default=None,
+        description=(
+            "Meta Commerce Catalog product ID — used as `content_ids` on "
+            "storefront Pixel events when set, so Meta dynamic ads can "
+            "match the conversion back to a catalog row. Null falls back "
+            "to the product UUID."
+        ),
+    )
     # Phase 8.1 — option axes (e.g. [{name:"Size",values:["S","M","L"]}]).
     # Empty list when the product has no variants (single SKU). Themes
     # branch on `options.length > 0` to render a variant picker.

@@ -84,6 +84,11 @@ class UpdateProductUseCase:
             product.seo_title = dto.seo_title
         if dto.seo_description is not None:
             product.seo_description = dto.seo_description
+        # `meta_catalog_id` uses the same partial-update semantic — only
+        # touched when explicitly provided on the wire. Pass an empty
+        # string to unset (omit to leave alone).
+        if getattr(dto, "meta_catalog_id", None) is not None:
+            product.meta_catalog_id = dto.meta_catalog_id or None
 
         # Save product
         updated_product = await self.product_repository.update(product)

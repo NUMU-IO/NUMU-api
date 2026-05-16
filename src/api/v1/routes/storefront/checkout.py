@@ -342,6 +342,13 @@ async def checkout(
         or (http_request.client.host if http_request.client else None)
     ) or None
 
+    # User-Agent captured for Meta CAPI Purchase match-quality. Meta's
+    # `client_user_agent` field is one of the two highest-signal match
+    # keys when PII is missing — paired with `client_ip_address`. We
+    # snapshot it at order-create time because the payment webhook fires
+    # later from the PSP's server (not the customer's browser).
+    client_user_agent: str | None = http_request.headers.get("user-agent") or None
+
     # Require email verification for registered (non-guest) customers
     if (
         not is_guest
@@ -1059,6 +1066,7 @@ async def checkout(
         customer_notes=request.customer_notes,
         metadata={
             **({"ip_address": client_ip} if client_ip else {}),
+            **({"user_agent": client_user_agent} if client_user_agent else {}),
             **(
                 {"custom_fields": accepted_custom_fields}
                 if accepted_custom_fields

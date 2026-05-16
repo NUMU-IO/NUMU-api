@@ -78,6 +78,15 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     seo_title: Mapped[str | None] = mapped_column(String(60), nullable=True)
     seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
+    # Meta Commerce Catalog product ID — when the merchant has synced
+    # their product catalog to Meta Business Manager, the storefront
+    # uses this value as the `content_ids` field on ViewContent /
+    # AddToCart / Purchase events so Meta's dynamic ads can match the
+    # event back to a Catalog row. Null = falls back to our internal
+    # product UUID, which won't match a Catalog row but still flows
+    # through for other events (PageView, Search, etc.).
+    meta_catalog_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Additional data
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)

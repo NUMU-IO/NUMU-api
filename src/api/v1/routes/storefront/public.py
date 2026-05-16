@@ -647,6 +647,9 @@ async def browse_products(
             "images": product.images,
             "tags": product.tags,
             "attributes": product.attributes,
+            # Meta Catalog product ID — when set, the storefront uses
+            # it as `content_ids` on Pixel events. Null = use product.id.
+            "meta_catalog_id": product.meta_catalog_id,
             "created_at": str(product.created_at),
             "updated_at": str(product.updated_at),
         }
@@ -768,6 +771,7 @@ async def browse_products_cursor(
             images=product.images,
             tags=product.tags,
             attributes=product.attributes,
+            meta_catalog_id=product.meta_catalog_id,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         )
@@ -861,6 +865,7 @@ async def get_product_by_slug(
             attributes=product.attributes,
             options=getattr(product, "options", None) or [],
             variants=variant_summaries,
+            meta_catalog_id=product.meta_catalog_id,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         ),

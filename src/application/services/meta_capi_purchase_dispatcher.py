@@ -77,7 +77,17 @@ async def enqueue_meta_capi_purchase(db: AsyncSession, order: Any) -> None:
     # Match-quality user_data. The Meta CAPI client SHA-256-hashes
     # PII downstream (see ``meta/hashing.py``) — we forward raw values
     # here so the dispatcher stays oblivious to that contract.
+    #
+    # ``ip`` and ``user_agent`` are the two highest-signal match keys
+    # when PII is missing. We snapshot them into ``order.metadata`` at
+    # checkout-create time (storefront/checkout.py) because the payment
+    # webhook fires later from the PSP's server — using the webhook
+    # request's IP would attribute the conversion to Paymob/Fawry's
+    # data centre, not the customer's device. Falling back to None when
+    # the metadata snapshot is missing (legacy orders, COD-via-courier
+    # paths) is fine — Meta drops null fields server-side.
     shipping = order.shipping_address or {}
+    meta = getattr(order, "metadata", None) or {}
     user_data = {
         "email": shipping.get("email"),
         "phone": shipping.get("phone"),
@@ -87,6 +97,8 @@ async def enqueue_meta_capi_purchase(db: AsyncSession, order: Any) -> None:
         "country_code": shipping.get("country") or shipping.get("country_code"),
         "zip": shipping.get("postal_code") or shipping.get("zip"),
         "customer_id": str(order.customer_id) if order.customer_id else None,
+        "ip": meta.get("ip_address"),
+        "user_agent": meta.get("user_agent"),
     }
 
     paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)

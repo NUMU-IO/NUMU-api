@@ -63,6 +63,7 @@ def _make_order(
     currency: str = "EGP",
     paid_at: datetime | None = None,
     customer_id=None,
+    metadata: dict | None = None,
 ):
     """A minimal order record carrying just what the dispatcher reads.
 
@@ -106,6 +107,12 @@ def _make_order(
         if paid_at is not None
         else datetime(2026, 5, 16, 10, 0, tzinfo=UTC),
         customer_id=customer_id,
+        metadata=metadata
+        if metadata is not None
+        else {
+            "ip_address": "192.0.2.42",
+            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)",
+        },
     )
 
 
@@ -243,6 +250,55 @@ class TestPayloadShape:
         assert ud["city"] == "Cairo"
         assert ud["country_code"] == "EG"
         assert ud["zip"] == "11511"
+
+    async def test_user_data_includes_ip_and_user_agent_from_metadata(
+        self, patched_collaborators
+    ):
+        # Snapshot captured at checkout-time (see storefront/checkout.py)
+        # is the customer's real IP+UA, not the webhook caller's. The
+        # dispatcher reads it from order.metadata and forwards to CAPI
+        # so Meta can use the two highest-signal match keys (per plan
+        # §1.1) even when PII isn't available.
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+
+        await enqueue_meta_capi_purchase(MagicMock(), _make_order())
+
+        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        assert ud["ip"] == "192.0.2.42"
+        assert ud["user_agent"].startswith("Mozilla/5.0 (iPhone")
+
+    async def test_user_data_ip_user_agent_none_when_metadata_missing(
+        self, patched_collaborators
+    ):
+        # Legacy orders (created before this PR) won't have ip_address
+        # or user_agent in metadata. Dispatcher must degrade gracefully
+        # — Meta drops None fields, no exception.
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+
+        await enqueue_meta_capi_purchase(MagicMock(), _make_order(metadata={}))
+
+        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        assert ud["ip"] is None
+        assert ud["user_agent"] is None
+
+    async def test_user_data_ip_user_agent_none_when_metadata_attr_missing(
+        self, patched_collaborators
+    ):
+        # Some entity flavors don't carry a `metadata` attribute at all
+        # (older domain dataclasses). getattr(order, "metadata", None)
+        # must not raise.
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+        order = _make_order()
+        del order.metadata  # simulate missing attribute
+
+        await enqueue_meta_capi_purchase(MagicMock(), order)
+
+        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        assert ud["ip"] is None
+        assert ud["user_agent"] is None
 
     async def test_country_code_falls_back_to_country_code_key(
         self, patched_collaborators
