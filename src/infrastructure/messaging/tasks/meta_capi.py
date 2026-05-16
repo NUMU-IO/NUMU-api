@@ -48,6 +48,16 @@ FUNNEL_STEP_TO_META_EVENT: dict[str, str] = {
     # page), we still enqueue Purchase. The UNIQUE constraint dedupes
     # against the webhook fire.
     "order_completed": "Purchase",
+    # Phase 2 standard events — storefront fires these via fireMetaEvent
+    # for search box submissions, newsletter signups, customer registration,
+    # and payment-method selection. Meta uses them for audience building
+    # and funnel optimization (Lead/CompleteRegistration → lookalikes;
+    # Search → "people who searched for X" retargeting; AddPaymentInfo →
+    # checkout-funnel optimization).
+    "search": "Search",
+    "lead": "Lead",
+    "complete_registration": "CompleteRegistration",
+    "add_payment_info": "AddPaymentInfo",
 }
 
 

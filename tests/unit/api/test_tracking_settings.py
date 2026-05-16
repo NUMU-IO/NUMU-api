@@ -145,19 +145,41 @@ class TestFunnelStepMapping:
         # /track will accept it too and the dedup constraint sorts it out.
         assert _funnel_step_to_meta_event("order_completed") == "Purchase"
 
+    def test_search_maps_to_Search(self):
+        assert _funnel_step_to_meta_event("search") == "Search"
+
+    def test_lead_maps_to_Lead(self):
+        assert _funnel_step_to_meta_event("lead") == "Lead"
+
+    def test_complete_registration_maps_to_CompleteRegistration(self):
+        assert (
+            _funnel_step_to_meta_event("complete_registration")
+            == "CompleteRegistration"
+        )
+
+    def test_add_payment_info_maps_to_AddPaymentInfo(self):
+        assert _funnel_step_to_meta_event("add_payment_info") == "AddPaymentInfo"
+
     def test_unknown_step_returns_none(self):
         assert _funnel_step_to_meta_event("garbage") is None
         # An empty string is also a no-op.
         assert _funnel_step_to_meta_event("") is None
 
     def test_full_mapping_keys_match_funnel_vocab(self):
-        # Sanity: every Meta event name is one of the standard 5.
+        # Sanity: every Meta event name in the mapping must be one of
+        # the Meta-supported standard events. Phase 2 added Search,
+        # Lead, CompleteRegistration, AddPaymentInfo on top of the
+        # original 5 conversion-funnel events.
         assert set(FUNNEL_STEP_TO_META_EVENT.values()) == {
             "PageView",
             "ViewContent",
             "AddToCart",
             "InitiateCheckout",
             "Purchase",
+            "Search",
+            "Lead",
+            "CompleteRegistration",
+            "AddPaymentInfo",
         }
 
 
