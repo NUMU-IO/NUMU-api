@@ -28,6 +28,7 @@ from src.api.v1.routes.admin.merchant_hub_nav import (
     router as merchant_hub_nav_router,
 )
 from src.api.v1.routes.admin.orders import router as orders_router
+from src.api.v1.routes.admin.plan_limits import router as plan_limits_router
 from src.api.v1.routes.admin.platform_config import router as platform_config_router
 from src.api.v1.routes.admin.platform_settings import (
     router as platform_settings_router,
@@ -52,6 +53,9 @@ router.include_router(dashboard_router, prefix="/dashboard", tags=["Admin - Dash
 router.include_router(products_router, prefix="/products", tags=["Admin - Products"])
 router.include_router(email_templates_router, tags=["Admin - Email Templates"])
 router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
+router.include_router(
+    plan_limits_router, prefix="/plan-limits", tags=["Admin - Plan Limits"]
+)
 router.include_router(
     landing_page_router, prefix="/landing-config", tags=["Admin - Landing Page"]
 )

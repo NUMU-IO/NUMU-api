@@ -93,8 +93,8 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
         api_access_enabled=False,
         analytics_enabled=True,
         discount_codes_enabled=True,
-        monthly_price_piasters=9_900,  # ج.م 99
-        annual_price_piasters=99_000,  # ج.م 990 (10 months for the price of 12)
+        monthly_price_piasters=25_000,  # ج.م 250
+        annual_price_piasters=250_000,  # ج.م 2,500 (10 months for the price of 12)
     ),
     "pro": PlanFeatures(
         display_name="Pro",
@@ -108,8 +108,8 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
         api_access_enabled=True,
         analytics_enabled=True,
         discount_codes_enabled=True,
-        monthly_price_piasters=29_900,  # ج.م 299
-        annual_price_piasters=299_000,  # ج.م 2,990
+        monthly_price_piasters=49_900,  # ج.م 499
+        annual_price_piasters=499_000,  # ج.م 4,990 (10 months for the price of 12)
     ),
     "enterprise": PlanFeatures(
         display_name="Enterprise",

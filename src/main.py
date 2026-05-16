@@ -29,7 +29,7 @@ from src.api.middleware import (
 from src.api.v1.routes import api_router
 from src.config import settings
 from src.config.logging_config import configure_logging, get_logger
-from src.infrastructure.database import engine
+from src.infrastructure.database import AsyncSessionLocal, engine
 
 # Configure structured logging
 configure_logging()
@@ -107,6 +107,31 @@ async def lifespan(app: FastAPI):
     from src.application.services.email_template_registry import validate_registry
 
     validate_registry()
+
+    # Load plan-limit overrides from DB so admin changes survive restarts.
+    try:
+        from sqlalchemy import select as sa_select
+
+        from src.api.v1.routes.admin.plan_limits import (
+            PLAN_LIMITS_KEY,
+            _apply_overrides,
+        )
+        from src.infrastructure.database.models.public.platform_config import (
+            PlatformConfigModel,
+        )
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                sa_select(PlatformConfigModel).where(
+                    PlatformConfigModel.key == PLAN_LIMITS_KEY
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row and isinstance(row.value, dict):
+                _apply_overrides(row.value)
+                logger.info("plan_limits_loaded_from_db", plans=list(row.value.keys()))
+    except Exception:
+        logger.warning("plan_limits_db_load_failed — using code defaults", exc_info=True)
 
     logger.info(
         "app_startup",
