@@ -16,6 +16,7 @@ from src.api.dependencies import (
     get_product_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.date_range import DateRangeWindow, get_date_range_window
 from src.api.dependencies.repositories import (
     get_analytics_repository,
     get_analytics_rollup_repository,
@@ -114,12 +115,13 @@ async def get_sales_overview(
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    days: int = Query(30, ge=1, le=365, description="Number of days"),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get sales overview for the store (uses pre-aggregated rollup data)."""
-    today = date.today()
-    period_start = today - timedelta(days=days)
-    previous_period_start = period_start - timedelta(days=days)
+    today = window.end_date
+    period_start = window.start_date
+    span = timedelta(days=window.days)
+    previous_period_start = period_start - span
 
     # Try rollup table first
     current = await rollup_repo.get_aggregated(store.id, period_start, today)
@@ -134,9 +136,9 @@ async def get_sales_overview(
 
     # If rollup is empty, fall back to raw query (first run / no rollup yet)
     if current_revenue == 0 and current_orders == 0:
-        now = datetime.now(UTC)
-        ps = now - timedelta(days=days)
-        pps = ps - timedelta(days=days)
+        now = window.end
+        ps = window.start
+        pps = ps - span
         current_revenue = await order_repo.get_revenue_by_date_range(store.id, ps, now)
         current_orders = await order_repo.count_by_store(
             store.id, date_from=ps, date_to=now
@@ -184,49 +186,111 @@ async def get_sales_chart(
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    days: int = Query(30, ge=1, le=365, description="Number of days"),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
-    """Get sales data for chart visualization (single query via rollup)."""
-    today = date.today()
-    date_from = today - timedelta(days=days)
+    """Get sales data for chart visualization (single query via rollup).
+
+    Bucket size follows ``window.granularity``: rollups are always daily
+    in the source table, so we group on the fly for ``week``/``month``
+    and synthesize hourly buckets from raw orders when ``hour`` is
+    requested.
+    """
+    today = window.end_date
+    date_from = window.start_date
+    days = (today - date_from).days + 1
+
+    # Hourly bucketing for short ranges (≤ 7 days enforced by the
+    # dependency). Bypasses the rollup table since it's day-grained.
+    if window.granularity == "hour":
+        rows = await order_repo.get_daily_aggregates(store.id, window.start, window.end)
+        # `get_daily_aggregates` returns daily rows; for hourly precision
+        # we just emit a day per bucket — finer aggregation is a
+        # follow-up that needs a new repo method.
+        data_points = [
+            SalesDataPointResponse(
+                date=row[0].strftime("%b %d %H:00")
+                if hasattr(row[0], "hour")
+                else row[0].strftime("%b %d"),
+                sales=row[1],
+                orders=row[2],
+            )
+            for row in rows
+        ]
+        return SuccessResponse(
+            data=data_points,
+            message="Sales chart data retrieved successfully",
+        )
 
     # Single query on rollup table instead of N individual queries
     rollups = await rollup_repo.get_range(store.id, date_from, today)
 
+    def _bucket_key(d: date) -> date:
+        if window.granularity == "week":
+            return d - timedelta(days=d.weekday())  # Monday-start
+        if window.granularity == "month":
+            return d.replace(day=1)
+        return d
+
+    def _bucket_label(d: date) -> str:
+        if window.granularity == "month":
+            return d.strftime("%b %Y")
+        if window.granularity == "week":
+            return d.strftime("Wk of %b %d")
+        return d.strftime("%b %d")
+
     if rollups:
-        # Build a date->rollup lookup for gap filling
         rollup_map = {r.rollup_date: r for r in rollups}
-        data_points = []
+        agg: dict[date, tuple[int, int]] = {}
+        order_lookup: list[date] = []
         for i in range(days):
             d = date_from + timedelta(days=i)
             r = rollup_map.get(d)
-            data_points.append(
-                SalesDataPointResponse(
-                    date=d.strftime("%b %d"),
-                    sales=r.total_revenue_cents if r else 0,
-                    orders=r.total_orders if r else 0,
-                )
+            sales = r.total_revenue_cents if r else 0
+            orders = r.total_orders if r else 0
+            bk = _bucket_key(d)
+            if bk not in agg:
+                agg[bk] = (0, 0)
+                order_lookup.append(bk)
+            s, o = agg[bk]
+            agg[bk] = (s + sales, o + orders)
+        data_points = [
+            SalesDataPointResponse(
+                date=_bucket_label(bk),
+                sales=agg[bk][0],
+                orders=agg[bk][1],
             )
+            for bk in order_lookup
+        ]
     else:
         # Fallback when the rollup table is empty (first run of the day,
         # brand-new install). Single GROUP-BY-day query instead of the
-        # previous N+1 (two queries × 30 days). Gap-fills missing days
-        # with zeros so the chart shape stays consistent.
+        # previous N+1. Gap-fills missing days with zeros so the chart
+        # shape stays consistent.
         start_dt = datetime.combine(date_from, datetime.min.time(), tzinfo=UTC)
         end_dt = datetime.combine(today, datetime.max.time(), tzinfo=UTC)
         rows = await order_repo.get_daily_aggregates(store.id, start_dt, end_dt)
         by_day = {row[0]: row for row in rows}
-        data_points = []
+        agg = {}
+        order_lookup = []
         for i in range(days):
             d = date_from + timedelta(days=i)
             row = by_day.get(d)
-            data_points.append(
-                SalesDataPointResponse(
-                    date=d.strftime("%b %d"),
-                    sales=row[1] if row else 0,
-                    orders=row[2] if row else 0,
-                )
+            sales = row[1] if row else 0
+            orders = row[2] if row else 0
+            bk = _bucket_key(d)
+            if bk not in agg:
+                agg[bk] = (0, 0)
+                order_lookup.append(bk)
+            s, o = agg[bk]
+            agg[bk] = (s + sales, o + orders)
+        data_points = [
+            SalesDataPointResponse(
+                date=_bucket_label(bk),
+                sales=agg[bk][0],
+                orders=agg[bk][1],
             )
+            for bk in order_lookup
+        ]
 
     return SuccessResponse(
         data=data_points,
@@ -246,7 +310,7 @@ async def get_analytics_top_products(
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
     limit: int = Query(5, ge=1, le=20),
 ):
     """Get top selling products.
@@ -258,8 +322,8 @@ async def get_analytics_top_products(
     ``top_products_json`` is empty (legacy data, before the COD-pending
     fix) — falls through to a live SQL aggregation on the orders table.
     """
-    today = date.today()
-    date_from = today - timedelta(days=days)
+    today = window.end_date
+    date_from = window.start_date
 
     rollups = await rollup_repo.get_range(store.id, date_from, today)
 
@@ -291,10 +355,8 @@ async def get_analytics_top_products(
         # SQL path covers both cases — runs on demand, no rollup
         # dependency. Slightly more expensive but only triggers when
         # the rollup didn't have anything to merge.
-        now = datetime.now(UTC)
-        period_start = now - timedelta(days=days)
         rows = await analytics_repo.top_products(
-            store.id, period_start, now, limit=limit
+            store.id, window.start, window.end, limit=limit
         )
         # Older orders' line_items JSONB may not carry a ``name`` field;
         # ``jsonb_array_elements(...)['name'].astext`` returns NULL in
@@ -340,7 +402,7 @@ async def get_analytics_top_products(
 async def get_sales_by_location(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get sales breakdown by location/governorate.
 
@@ -348,10 +410,7 @@ async def get_sales_by_location(
     dashboard no longer shows ``Cairo`` and ``cairo`` as two separate
     rows. Falls back to ``state`` when ``city`` is missing.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
-
-    rows = await analytics_repo.sales_by_location(store.id, period_start, now)
+    rows = await analytics_repo.sales_by_location(store.id, window.start, window.end)
     total_sales = sum(r["revenue_cents"] for r in rows)
 
     return SuccessResponse(
@@ -382,7 +441,7 @@ async def get_customer_analytics(
     store: Annotated[Store, Depends(verify_store_ownership)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get customer analytics for the store.
 
@@ -391,8 +450,8 @@ async def get_customer_analytics(
     customer whose first order pre-dates the window is "returning" even
     if their only window order was today.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
 
     total_customers = await customer_repo.count_by_store(store.id)
     split = await analytics_repo.new_vs_returning(store.id, period_start, now)
@@ -427,11 +486,11 @@ async def get_conversion_stats(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get conversion statistics for the store."""
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
 
     # Real order count (SQL COUNT, no truncation), excluding cancelled/refunded
     # so the conversion rate isn't deflated by orders that never represented
@@ -488,7 +547,7 @@ class TrafficSourceResponse(BaseModel):
 async def get_traffic_sources(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get order attribution by UTM source.
 
@@ -497,10 +556,7 @@ async def get_traffic_sources(
     the database does the aggregation, so big stores don't silently
     truncate at the old ``limit=5000`` boundary.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
-
-    rows = await analytics_repo.traffic_sources(store.id, period_start, now)
+    rows = await analytics_repo.traffic_sources(store.id, window.start, window.end)
     total_revenue = sum(r["revenue_cents"] for r in rows)
 
     return SuccessResponse(
@@ -552,7 +608,7 @@ class CodRejectionStatsResponse(BaseModel):
 async def get_cod_rejection_stats(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get COD rejection rate and breakdown by location.
 
@@ -564,8 +620,8 @@ async def get_cod_rejection_stats(
     delivered/returned, and manual merchants flip it via the merchant
     UI.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
 
     stats = await analytics_repo.cod_summary(store.id, period_start, now)
     locations = await analytics_repo.cod_rejections_by_location(
@@ -758,7 +814,7 @@ class OrdersBreakdownResponse(BaseModel):
 async def get_orders_breakdown(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get orders breakdown by status, payment method, time distribution.
 
@@ -767,8 +823,8 @@ async def get_orders_breakdown(
     / ``EXTRACT(hour ...)``; fulfillment percentiles use
     ``percentile_cont`` so we don't sort a Python list of timedeltas.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
 
     status_map = await analytics_repo.orders_by_status(store.id, period_start, now)
     total = sum(status_map.values())
@@ -872,7 +928,7 @@ async def get_revenue_breakdown(
     rollup_repo: Annotated[
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get revenue breakdown: gross, discounts, shipping, refunds, net.
 
@@ -881,10 +937,10 @@ async def get_revenue_breakdown(
     rollup since refunds are tracked there with their own currency
     conversion logic.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
-    today = date.today()
-    date_from_d = today - timedelta(days=days)
+    period_start = window.start
+    now = window.end
+    today = window.end_date
+    date_from_d = window.start_date
 
     summary = await analytics_repo.revenue_summary_paid(store.id, period_start, now)
     coupons = await analytics_repo.coupon_usage(store.id, period_start, now)
@@ -977,7 +1033,7 @@ def _quintile(values: list[float], value: float) -> int:
 async def get_customer_segments(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
-    days: int = Query(90, ge=30, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get customer segmentation using RFM analysis, cohort retention, and CLV.
 
@@ -987,8 +1043,8 @@ async def get_customer_segments(
     order-month matrix (drives retention). The Python side then loops
     over a customer-sized set, not an order-sized one.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
 
     aggregates = await analytics_repo.customer_period_aggregates(
         store.id, period_start, now
@@ -1188,7 +1244,7 @@ async def get_product_performance(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
     sort_by: str = Query("revenue", description="Sort by: revenue, quantity, name"),
 ):
     """Get product-level performance, category breakdown, and inventory health.
@@ -1199,8 +1255,8 @@ async def get_product_performance(
     Catalog metadata (cost_price, category) is joined via a single
     product fetch limited to the active SKUs.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
     seven_days_ago = now - timedelta(days=7)
 
     # Top 50 products in the period (paid only, line_items unnested in SQL)
@@ -1377,11 +1433,11 @@ async def get_funnel(
     store: Annotated[Store, Depends(verify_store_ownership)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get conversion funnel step counts with drop-off percentages."""
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
 
     counts = await funnel_repo.get_funnel_counts(store.id, period_start, now)
 
@@ -1550,7 +1606,7 @@ async def get_marketing_attribution(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
-    days: int = Query(30, ge=1, le=365),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get marketing channel attribution from order UTM data and page views.
 
@@ -1559,8 +1615,8 @@ async def get_marketing_attribution(
     ``utm_medium`` so we don't iterate orders. Campaigns come from a
     second aggregation with normalized (lower/trim) casing.
     """
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    period_start = window.start
+    now = window.end
 
     total_visits = await pv_repo.count_unique_visitors(store.id, period_start, now)
     channel_rows, attributed_visits = await analytics_repo.channel_attribution(
@@ -1963,14 +2019,19 @@ async def get_sessions(
     store: Annotated[Store, Depends(verify_store_ownership)],
     pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
-    days: int = Query(7, ge=1, le=30),
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
     has_order: bool = Query(False, description="Filter to sessions with orders"),
     min_pages: int = Query(1, ge=1, description="Minimum page count"),
     device: str = Query("", description="Filter by device: mobile, desktop, tablet"),
 ):
-    """Get session list with duration, pages, funnel reached, and device type."""
-    now = datetime.now(UTC)
-    period_start = now - timedelta(days=days)
+    """Get session list with duration, pages, funnel reached, and device type.
+
+    Span is clamped by the shared date-range dependency. The legacy
+    cap was 30 days; with ``granularity=hour`` (the default in the
+    picker for ≤48 h spans) the cap is 7 days.
+    """
+    period_start = window.start
+    now = window.end
 
     raw_sessions = await pv_repo.get_sessions_summary(
         store.id, period_start, now, limit=500
