@@ -244,6 +244,17 @@ async def fawaterak_callback(
         except Exception:
             pass
 
+        # Meta CAPI Purchase fan-out — server-side authoritative for
+        # Purchase per plan §5.4. Best-effort.
+        try:
+            from src.application.services.meta_capi_purchase_dispatcher import (
+                enqueue_meta_capi_purchase,
+            )
+
+            await enqueue_meta_capi_purchase(db, order)
+        except Exception:
+            log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
+
         # Fire OrderStatusChangedEvent
         try:
             from src.core.events.order_events import OrderStatusChangedEvent
