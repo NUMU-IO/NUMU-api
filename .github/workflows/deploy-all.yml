@@ -289,7 +289,15 @@ jobs:
             COMPOSE="docker compose -p ${COMPOSE_PROJECT} --env-file ${ENV_FILE} -f ${COMPOSE_FILE}"
 
             echo "==> Step 1: Pruning unused Docker resources (safe — does not touch running containers)..."
-            docker system prune -f --volumes=false
+            # Retry: the Docker daemon serializes prune with a global lock
+            # and rejects concurrent callers with "a prune operation is
+            # already running". Without the retry, an overlapping CD job
+            # or nightly prune cron kills the deploy under `set -e`.
+            for i in 1 2 3 4 5; do
+              if docker system prune -f --volumes=false; then break; fi
+              echo "[prune] attempt \$i/5 failed (likely concurrent prune) — sleeping 6s..."
+              sleep 6
+            done
 
             echo "==> Step 2: Pulling new API image: \${NUMU_API_IMAGE}"
             # If this fails (registry down, network, OOM), nothing on the
@@ -348,7 +356,7 @@ jobs:
             fi
 
             echo "==> Step 6: Pruning dangling images..."
-            docker image prune -f
+            docker image prune -f || echo "[image prune] skipped (concurrent prune?) — non-fatal"
 
             echo "==> API deployment complete."
           DEPLOY_SCRIPT

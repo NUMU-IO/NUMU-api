@@ -129,7 +129,18 @@ jobs:
               -f docker/docker-compose.test.yml stop api celery-worker celery-beat || true
 
             echo "==> Pruning unused Docker resources..."
-            docker system prune -f --volumes=false
+            # The Docker daemon serializes prune with a global lock and
+            # rejects concurrent callers with "a prune operation is already
+            # running" — when two env deploys (or a deploy + the nightly
+            # prune cron) overlap, that error kills the run under `set -e`
+            # before the pull even starts. Retry up to 5×6s, then continue
+            # without prune: the pull will surface real OOM on its own if
+            # the box is genuinely out of space.
+            for i in 1 2 3 4 5; do
+              if docker system prune -f --volumes=false; then break; fi
+              echo "[prune] attempt \$i/5 failed (likely concurrent prune) — sleeping 6s..."
+              sleep 6
+            done
 
             echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
             docker pull "${NUMU_API_IMAGE}"
@@ -154,7 +165,7 @@ jobs:
             }
 
             echo "==> Removing dangling images..."
-            docker image prune -f
+            docker image prune -f || echo "[image prune] skipped (concurrent prune?) — non-fatal"
 
             echo "==> Test deployment complete."
           DEPLOY_SCRIPT
@@ -218,7 +229,18 @@ jobs:
               -f docker/docker-compose.stage.yml stop api celery-worker celery-beat || true
 
             echo "==> Pruning unused Docker resources..."
-            docker system prune -f --volumes=false
+            # The Docker daemon serializes prune with a global lock and
+            # rejects concurrent callers with "a prune operation is already
+            # running" — when two env deploys (or a deploy + the nightly
+            # prune cron) overlap, that error kills the run under `set -e`
+            # before the pull even starts. Retry up to 5×6s, then continue
+            # without prune: the pull will surface real OOM on its own if
+            # the box is genuinely out of space.
+            for i in 1 2 3 4 5; do
+              if docker system prune -f --volumes=false; then break; fi
+              echo "[prune] attempt \$i/5 failed (likely concurrent prune) — sleeping 6s..."
+              sleep 6
+            done
 
             echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
             docker pull "${NUMU_API_IMAGE}"
@@ -243,7 +265,7 @@ jobs:
             }
 
             echo "==> Removing dangling images..."
-            docker image prune -f
+            docker image prune -f || echo "[image prune] skipped (concurrent prune?) — non-fatal"
 
             echo "==> Stage deployment complete."
           DEPLOY_SCRIPT
@@ -315,7 +337,18 @@ jobs:
             docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml stop api celery-worker celery-beat nginx || true
 
             echo "==> Pruning unused Docker resources..."
-            docker system prune -f --volumes=false
+            # The Docker daemon serializes prune with a global lock and
+            # rejects concurrent callers with "a prune operation is already
+            # running" — when two env deploys (or a deploy + the nightly
+            # prune cron) overlap, that error kills the run under `set -e`
+            # before the pull even starts. Retry up to 5×6s, then continue
+            # without prune: the pull will surface real OOM on its own if
+            # the box is genuinely out of space.
+            for i in 1 2 3 4 5; do
+              if docker system prune -f --volumes=false; then break; fi
+              echo "[prune] attempt \$i/5 failed (likely concurrent prune) — sleeping 6s..."
+              sleep 6
+            done
 
             echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
             docker pull "${NUMU_API_IMAGE}"
@@ -335,7 +368,7 @@ jobs:
             }
 
             echo "==> Removing dangling images..."
-            docker image prune -f
+            docker image prune -f || echo "[image prune] skipped (concurrent prune?) — non-fatal"
 
             echo "==> Apex deployment complete."
           DEPLOY_SCRIPT
