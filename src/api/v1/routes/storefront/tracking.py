@@ -166,6 +166,12 @@ class TrackPageViewRequest(BaseModel):
     # PII for CAPI matching — Meta hashes nothing on its end; we hash
     # in the Celery task before transmission via meta/hashing.py.
     user_data: dict | None = None
+    # Wave 3 Phase 18 — when true, forwarded to Meta's CAPI `opt_out`
+    # field so the event lands as a modeled conversion (attribution
+    # math only, no first-party data storage on Meta's side). Set by
+    # the storefront when the visitor has explicitly denied marketing
+    # consent.
+    opt_out: bool | None = None
 
 
 @router.post("/track", status_code=204)
@@ -402,7 +408,13 @@ def _maybe_enqueue_meta_capi(
         add_to_cart      → AddToCart
         checkout_started → InitiateCheckout
         order_completed  → Purchase  (defensive — the webhook also fires)
+
+    Wave 2 Phase 13: when the store has multiple pixels configured,
+    fans out one task per capi-enabled pixel. Each pixel is a separate
+    Meta dedup namespace, so the same browser-issued ``event_id`` works
+    across all of them (no per-pixel namespacing needed).
     """
+    from src.application.services.meta_pixel_resolver import resolve_pixels
     from src.infrastructure.messaging.tasks.meta_capi import (
         FUNNEL_STEP_TO_META_EVENT,
         meta_capi_send_event,
@@ -413,8 +425,8 @@ def _maybe_enqueue_meta_capi(
         return
 
     meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
-    pixel_id = meta_cfg.get("pixel_id")
-    if not (meta_cfg.get("capi_enabled") and pixel_id):
+    pixels = resolve_pixels(meta_cfg, mode="capi")
+    if not pixels:
         return
 
     # Don't re-fire Purchase from /track when the webhook is the source
@@ -440,18 +452,24 @@ def _maybe_enqueue_meta_capi(
         user_data["user_agent"] = user_agent
 
     custom_data = dict(body.step_data or {})
+    event_time_int = int(event_time.timestamp())
 
-    meta_capi_send_event.delay(
-        store_id=str(store.id),
-        pixel_id=pixel_id,
-        event_name=meta_event_name,
-        event_id=event_id,
-        event_time=int(event_time.timestamp()),
-        event_source_url=page_url,
-        user_data=user_data,
-        custom_data=custom_data,
-        # The settings-PUT debug_mode ladder auto-attaches a code in the
-        # task itself; passing None here means "let the task decide".
-        test_event_code=None,
-        action_source="website",
-    )
+    # Fan out — one task per capi-enabled pixel.
+    for pixel in pixels:
+        meta_capi_send_event.delay(
+            store_id=str(store.id),
+            pixel_id=pixel.pixel_id,
+            event_name=meta_event_name,
+            event_id=event_id,
+            event_time=event_time_int,
+            event_source_url=page_url,
+            user_data=user_data,
+            custom_data=custom_data,
+            # The settings-PUT debug_mode ladder auto-attaches a code in the
+            # task itself; passing None here means "let the task decide".
+            test_event_code=None,
+            action_source="website",
+            # Wave 3 Phase 18 — opt_out flows through to Meta so denied-
+            # marketing events count as modeled conversions only.
+            opt_out=bool(body.opt_out) if body.opt_out is not None else False,
+        )

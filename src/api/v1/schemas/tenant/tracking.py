@@ -25,6 +25,101 @@ from pydantic import BaseModel, Field, field_validator
 TrackingMode = Literal["off", "pixel_only", "capi_only", "both"]
 TrackingStatus = Literal["disabled", "configured_no_events", "connected", "failing"]
 
+# Wave 2 Phase 12 — COD-aware Purchase / Lead timing. Each is optional
+# (None = legacy behavior: paymob/fawry webhooks remain the sole
+# Purchase source, no Lead from status transitions).
+#
+# Recommended defaults the merchant hub UI should surface:
+#   * Online-only stores: leave both None (current behavior).
+#   * COD-enabled stores: ``purchase_trigger="delivered"`` (Meta sees
+#     real conversions only, not no-show COD placements) +
+#     ``lead_trigger="confirmed"`` (top-of-funnel signal for the algo).
+PurchaseTrigger = Literal["confirmed", "processing", "shipped", "delivered"]
+LeadTrigger = Literal["confirmed", "processing", "shipped", "delivered"]
+
+# Wave 2 Phase 13 — Multi-pixel role assignment. Purely a UI label so
+# the merchant hub can group "primary" pixels visually distinct from
+# "retargeting" or "agency-owned" pixels. Backend treats every entry
+# identically — fans out the same events to each capi-enabled pixel.
+PixelRole = Literal["primary", "retargeting", "agency"]
+
+# Wave 3 Phase 18 — Region default mode for the consent banner. ``auto``
+# means the storefront uses the Cloudflare ``CF-IPCountry`` header (or
+# Accept-Language fallback) to pick opt-in for EU/EEA/UK and opt-out
+# for everywhere else. ``force_*`` overrides for merchants who know
+# their audience is concentrated in one regime.
+ConsentRegionMode = Literal["auto", "force_opt_in", "force_opt_out"]
+
+
+class ConsentSettings(BaseModel):
+    """Wave 3 Phase 18 — Per-store granular consent defaults.
+
+    Mirrors Shopify's Customer Privacy API surface: four boolean
+    categories the merchant can enable + a region-mode selector that
+    drives the banner's default state. The storefront's
+    ``<ConsentBanner>`` reads ``granular_enabled`` to decide whether
+    to render the 4-toggle UI or the legacy 1-toggle UX, and reads
+    ``region_default_mode`` to decide whether to opt-in or opt-out
+    by default.
+
+    Per-user choices are still stored in localStorage on the
+    storefront (``numu_consent_v2``); this struct only carries the
+    *merchant's policy*, not any individual visitor's decision.
+    """
+
+    granular_enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, the storefront banner renders 4 per-category toggles "
+            "(analytics, marketing, preferences, sale_of_data). When false, "
+            "shows the legacy single Accept/Reject pair."
+        ),
+    )
+    region_default_mode: ConsentRegionMode = Field(
+        default="force_opt_out",
+        description=(
+            "Default decision when the user hasn't chosen yet. "
+            "``force_opt_out`` is the conservative MENA default; "
+            "``auto`` enables Cloudflare-header region detection."
+        ),
+    )
+    # Defaults the banner pre-checks when shown in granular mode. The
+    # user can still toggle individual flags before clicking Save.
+    default_analytics: bool = True
+    default_marketing: bool = True
+    default_preferences: bool = True
+    default_sale_of_data: bool = False  # CCPA opt-OUT semantics — never default-on
+
+
+class PixelEntry(BaseModel):
+    """One pixel in a store's multi-pixel configuration.
+
+    Wave 2 Phase 13: a store can register N pixels (EasyOrders parity;
+    beats Shopify which is 1-only natively). Each pixel fires the same
+    event stream; `event_id` is namespaced per-pixel by Meta's own
+    dedup contract (``(pixel_id, event_name, event_id)`` tuple), so
+    the same browser-side `eventID` value works across all pixels.
+
+    All pixels under one store share a single CAPI access token in v1
+    (Option A in the design: "one Business Manager, one System User
+    token, many pixels"). Per-pixel credentials are a v1.1 follow-up.
+    """
+
+    pixel_id: str = Field(..., min_length=1, max_length=32)
+    pixel_enabled: bool = True
+    capi_enabled: bool = True
+    label: str | None = Field(default=None, max_length=64)
+    role: PixelRole | None = None
+
+    @field_validator("pixel_id")
+    @classmethod
+    def _validate_pixel_id(cls, v: str) -> str:
+        import re
+
+        if not re.match(r"^\d{15,16}$", v):
+            raise ValueError("pixel_id must be 15-16 digits (Meta Pixel ID format)")
+        return v
+
 
 class SaveMetaTrackingRequest(BaseModel):
     """Body for ``PUT /stores/{id}/settings/tracking/meta``."""
@@ -44,6 +139,32 @@ class SaveMetaTrackingRequest(BaseModel):
     # ``test_event_code`` to every event until it expires. Frontend just
     # toggles a bool — the expiry math lives server-side.
     debug_mode: bool = False
+
+    # Wave 2 Phase 12 — COD-aware Purchase / Lead firing. Both optional;
+    # None preserves the legacy paymob/fawry-only Purchase path.
+    purchase_trigger: PurchaseTrigger | None = None
+    lead_trigger: LeadTrigger | None = None
+    # Wave 2 Phase 15 — fire a Meta CAPI Lead event when a COD customer
+    # confirms via WhatsApp reply (handle_verification_reply.apply_reply
+    # outcome="confirmed"). Off by default — opt-in. Bridges WhatsApp
+    # commerce into Meta's ad-attribution loop for merchants who drive
+    # Meta ads → WhatsApp chat → manual confirmation.
+    whatsapp_lead_enabled: bool = False
+
+    # Wave 2 Phase 13 — Optional multi-pixel list. When set, every CAPI
+    # fire fans out to each capi_enabled entry; the storefront's
+    # MetaPixel mount iterates and runs ``fbq('init', pid)`` per entry.
+    # Backward-compatible: None preserves legacy single-pixel behavior
+    # (the top-level ``pixel_id`` field above remains authoritative).
+    # The PUT route auto-syncs the top-level pixel_id to pixels[0] so
+    # legacy readers continue to work even when a merchant has 2+ pixels.
+    pixels: list[PixelEntry] | None = Field(default=None, max_length=10)
+
+    # Wave 3 Phase 18 — Granular consent policy. When None, the
+    # storefront falls back to the legacy ``consent_required`` boolean
+    # above and shows the simple 1-toggle banner. When set, the
+    # storefront renders the 4-flag granular banner.
+    consent_settings: ConsentSettings | None = None
 
     @field_validator("pixel_id")
     @classmethod
@@ -87,6 +208,16 @@ class MetaTrackingResponse(BaseModel):
     debug_mode_expires_at: datetime | None = None
     last_validated_at: datetime | None = None
     status: TrackingStatus = "disabled"
+    # Wave 2 Phase 12 — surfaced so the merchant hub UI can pre-populate
+    # the timing-config selectors when the merchant returns to the panel.
+    purchase_trigger: PurchaseTrigger | None = None
+    lead_trigger: LeadTrigger | None = None
+    # Wave 2 Phase 15 — WhatsApp confirmation Lead-fire toggle.
+    whatsapp_lead_enabled: bool = False
+    # Wave 2 Phase 13 — list of pixels (None when legacy single-pixel).
+    pixels: list[PixelEntry] | None = None
+    # Wave 3 Phase 18 — granular consent policy (None = legacy 1-toggle).
+    consent_settings: ConsentSettings | None = None
 
 
 class TrackingSettingsResponse(BaseModel):

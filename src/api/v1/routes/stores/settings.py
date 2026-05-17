@@ -2835,6 +2835,16 @@ async def _build_meta_response(
         domain_verification_token=cfg.get("domain_verification_token"),
         test_event_code=cfg.get("test_event_code"),
         consent_required=bool(cfg.get("consent_required", False)),
+        # Wave 2 Phase 12 — surface the timing config so the UI can
+        # pre-populate. None (legacy) means "fire on payment webhook".
+        purchase_trigger=cfg.get("purchase_trigger"),
+        lead_trigger=cfg.get("lead_trigger"),
+        # Wave 2 Phase 15 — surface WhatsApp Lead toggle.
+        whatsapp_lead_enabled=bool(cfg.get("whatsapp_lead_enabled", False)),
+        # Wave 2 Phase 13 — surface multi-pixel list (None = legacy single).
+        pixels=cfg.get("pixels"),
+        # Wave 3 Phase 18 — surface granular consent policy (None = legacy).
+        consent_settings=cfg.get("consent_settings"),
         debug_mode=debug_active,
         debug_mode_expires_at=debug_expires_dt,
         last_validated_at=last_validated_dt,
@@ -2945,6 +2955,13 @@ async def save_meta_tracking(
             datetime.now(UTC) + timedelta(minutes=_DEBUG_MODE_TTL_MINUTES)
         ).isoformat()
 
+    # Wave 2 Phase 13 — Multi-pixel persistence. When the request carries
+    # an explicit ``pixels`` list, persist it as-is. Auto-sync the
+    # legacy top-level ``pixel_id`` / ``pixel_enabled`` / ``capi_enabled``
+    # to ``pixels[0]`` so older readers (the resolver's legacy fallback,
+    # storefront pre-Phase-13 bundles still in cache) keep working.
+    new_pixels = [p.model_dump() for p in request.pixels] if request.pixels else None
+
     new_meta_cfg = {
         **meta_cfg,
         "pixel_id": request.pixel_id,
@@ -2954,6 +2971,24 @@ async def save_meta_tracking(
         "consent_required": bool(request.consent_required),
         "domain_verification_token": domain_token,
         "debug_mode_expires_at": debug_expires_iso,
+        # Wave 2 Phase 12 — COD-aware Purchase / Lead firing config.
+        # None preserves legacy behavior (paymob/fawry webhooks remain
+        # the sole Purchase source).
+        "purchase_trigger": request.purchase_trigger,
+        "lead_trigger": request.lead_trigger,
+        # Wave 2 Phase 15 — fire Lead when COD customer confirms via
+        # WhatsApp reply. Off by default — opt-in.
+        "whatsapp_lead_enabled": bool(request.whatsapp_lead_enabled),
+        # Wave 2 Phase 13 — store-level multi-pixel list. None when
+        # the merchant is still on the legacy single-pixel path.
+        "pixels": new_pixels,
+        # Wave 3 Phase 18 — granular consent policy. None preserves
+        # the legacy single-toggle behavior gated on consent_required.
+        "consent_settings": (
+            request.consent_settings.model_dump()
+            if request.consent_settings is not None
+            else None
+        ),
     }
     tracking["meta"] = new_meta_cfg
     settings_dict["tracking"] = tracking

@@ -62,6 +62,94 @@ _REPLY_WINDOW_HOURS = 24
 VerificationOutcome = Literal["confirmed", "rejected", "not_a_reply"]
 
 
+async def _maybe_enqueue_meta_capi_whatsapp_lead(
+    *,
+    session,
+    store_id,
+    risk_assessment_id,
+    phone: str,
+) -> None:
+    """Wave 2 Phase 15 — fire Meta CAPI Lead on WhatsApp confirmation.
+
+    Looks up the store's tracking config. Only enqueues when the merchant
+    has explicitly opted in (``whatsapp_lead_enabled=True``) AND has
+    pixel + CAPI configured. Bridges WhatsApp commerce into Meta's
+    ad-attribution loop: customer ad click → WhatsApp confirmation →
+    Lead event lands in Meta Events Manager.
+
+    ``event_id = f"whatsapp-lead-{ra.id}"`` so this Lead dedupes with
+    any future Phase 12 Lead fire on the same risk assessment, but stays
+    distinct from the order's Purchase event_id.
+
+    Fail-open: never raises. A Meta CAPI failure must not block the
+    customer's verification reply flow.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.store import StoreModel
+
+    try:
+        store_row = await session.execute(
+            select(StoreModel).where(StoreModel.id == store_id)
+        )
+        store = store_row.scalar_one_or_none()
+        if store is None:
+            return
+        meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
+        pixel_id = meta_cfg.get("pixel_id")
+        if not (
+            meta_cfg.get("whatsapp_lead_enabled")
+            and meta_cfg.get("capi_enabled")
+            and pixel_id
+        ):
+            return
+
+        from src.infrastructure.messaging.tasks.meta_capi import (
+            meta_capi_send_event,
+        )
+
+        meta_capi_send_event.delay(
+            store_id=str(store_id),
+            pixel_id=pixel_id,
+            event_name="Lead",
+            event_id=f"whatsapp-lead-{risk_assessment_id}",
+            event_time=int(datetime.now(UTC).timestamp()),
+            event_source_url=None,
+            user_data={
+                # WhatsApp Business gives us a verified phone — best
+                # available match key when we don't have a logged-in
+                # customer context. The CAPI hashing layer normalizes
+                # the MENA prefix and SHA-256s before transmission.
+                "phone": phone,
+                # Stable per-customer signal — the same phone confirming
+                # multiple orders lands under one external_id in Meta.
+                "customer_id": phone,
+            },
+            custom_data={
+                "content_name": "WhatsApp COD confirmation",
+                "content_category": "whatsapp_lead",
+            },
+            test_event_code=meta_cfg.get("test_event_code"),
+            action_source="chat",
+        )
+        logger.info(
+            "meta_capi_whatsapp_lead_enqueued",
+            extra={
+                "store_id": str(store_id),
+                "risk_assessment_id": str(risk_assessment_id),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — fail-open per Phase 15 contract
+        logger.warning(
+            "meta_capi_whatsapp_lead_enqueue_failed",
+            extra={
+                "store_id": str(store_id),
+                "risk_assessment_id": str(risk_assessment_id),
+                "error": str(exc),
+            },
+        )
+
+
 def parse_reply(text: str | None) -> VerificationOutcome:
     """Classify an inbound message body as a verification yes/no/none.
 
@@ -214,6 +302,19 @@ async def apply_reply(
         pls.status = "customer_rejected"
 
     await session.flush()
+
+    # 5. Wave 2 Phase 15 — fire Meta CAPI Lead event on confirmation.
+    #    Opt-in per store (whatsapp_lead_enabled flag). Fail-open: any
+    #    Meta CAPI error is swallowed so it can't break the verification
+    #    flow. The merchant gets the Lead signal in their ad audience
+    #    when configured; legacy stores see no change.
+    if outcome == "confirmed":
+        await _maybe_enqueue_meta_capi_whatsapp_lead(
+            session=session,
+            store_id=store_id,
+            risk_assessment_id=ra.id,
+            phone=phone,
+        )
 
     logger.info(
         "verification_reply_applied",

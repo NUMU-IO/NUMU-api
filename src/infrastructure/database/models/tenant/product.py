@@ -87,6 +87,15 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # through for other events (PageView, Search, etc.).
     meta_catalog_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Wave 2 Phase 13.2 — per-product custom pixel overrides.
+    # Shape: ``{"override_mode": "exclusive"|"additive", "pixels": [{"pixel_id": str, "label": str?}]}``
+    # Null = no override (store-level pixels fire as usual). EasyOrders
+    # ships this as their unique differentiator; Shopify doesn't have
+    # an equivalent natively. Used when a media buyer routes a single
+    # SKU to an agency-owned ad account / pixel that's separate from
+    # the store's primary pixel.
+    meta_pixel_overrides: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Additional data
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)

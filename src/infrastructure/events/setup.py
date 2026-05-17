@@ -61,6 +61,9 @@ from src.infrastructure.events.handlers.instapay_notification_handler import (
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
 )
+from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
+    handle_order_status_changed_for_meta_capi,
+)
 from src.infrastructure.events.handlers.order_activity_handler import (
     handle_order_created_activity,
     handle_order_paid_activity,
@@ -133,6 +136,10 @@ def create_event_bus() -> EventBus:
 
     # Auto-create shipment on order confirmation
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_shipment)
+
+    # Wave 2 Phase 12 — fire Meta CAPI Purchase/Lead based on per-store
+    # purchase_trigger / lead_trigger config (COD-aware timing).
+    bus.subscribe(OrderStatusChangedEvent, handle_order_status_changed_for_meta_capi)
 
     # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
