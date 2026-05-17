@@ -122,11 +122,20 @@ class CloudflareR2StorageService(IStorageService):
         try:
             key = self._generate_key(filename, bucket)
 
+            # Keys are content-addressed (uuid4 hex prefix per `_generate_key`),
+            # so the object at a given key is effectively immutable — any edit
+            # produces a new key. Tell Cloudflare + browsers to cache for a
+            # year so repeat product page loads serve from the edge without
+            # revalidation. Without this, CF falls back to its 4h default,
+            # which Lighthouse flags as a short cache lifetime.
             self.client.upload_fileobj(
                 BytesIO(file_content),
                 self.bucket_name,
                 key,
-                ExtraArgs={"ContentType": content_type},
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "CacheControl": "public, max-age=31536000, immutable",
+                },
             )
 
             return UploadedFile(
