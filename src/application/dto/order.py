@@ -212,6 +212,10 @@ class CreateOrderLineItemDTO(BaseDTO):
     variant_id: UUID | None = None
     variant_name: str | None = None
     sku: str | None = None
+    # Customer's per-axis selection (e.g. {"Size": "M", "Color": "Red"}).
+    # Persisted as OrderLineItem.properties so the merchant sees the
+    # exact pick on the order detail without joining a variant catalog.
+    properties: dict | None = None
 
 
 @dataclass

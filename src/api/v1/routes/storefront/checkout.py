@@ -672,10 +672,26 @@ async def checkout(
         allow_negative = bool(product_attrs.get("continue_selling_when_out_of_stock"))
         selections = item.selections or {}
         combos = product_attrs.get("variant_combinations") or []
+        # The storefront PDP writes selections with capitalised axis names
+        # (`{"Size": "M"}` from `setSelection("Size", ...)`) while the
+        # merchant hub stores `variant_combinations[].options` lowercase
+        # (`{"size": "m"}` from `attributes.variants[].name`). Strict `==`
+        # never matched, so per-combo stock deduction silently fell
+        # through to the product-level path. Normalise both sides to
+        # lowercase before comparing so the right combo is found and the
+        # variant-specific stock actually decrements.
+
+        def _norm(d: dict | None) -> dict:
+            return {str(k).lower(): str(v).lower() for k, v in (d or {}).items()}
+
+        normalised_selections = _norm(selections)
         matching_combo = None
-        if selections and isinstance(combos, list):
+        if normalised_selections and isinstance(combos, list):
             for c in combos:
-                if isinstance(c, dict) and c.get("options") == selections:
+                if (
+                    isinstance(c, dict)
+                    and _norm(c.get("options")) == normalised_selections
+                ):
                     matching_combo = c
                     break
 
@@ -723,11 +739,22 @@ async def checkout(
                 unit_price=product.price.cents,
                 variant_id=item.variant_id,
                 variant_name=variant_name,
+                # Persist the raw selection dict so the merchant order-detail
+                # UI can render axis-by-axis (Color: Red / Size: M) without
+                # parsing the joined `variant_name`. Stored regardless of
+                # whether a combo matched — the customer's pick is useful
+                # context even on products that don't have a strict combo
+                # catalog yet (e.g. legacy data).
+                properties=dict(selections) if selections else None,
             )
         )
         line_item_inventory.append({
             "product_id": product.id,
-            "selections": selections if matching_combo is not None else None,
+            # Use the normalised dict for stock deduction so deduct_variant_stock
+            # finds the same combo we matched above. The unnormalised dict is
+            # what we display to the merchant and what gets stored on the order
+            # line — those go through `properties` above.
+            "selections": normalised_selections if matching_combo is not None else None,
             "allow_negative": allow_negative,
             "quantity": item.quantity,
         })
@@ -809,10 +836,16 @@ async def checkout(
                 product_id=li.product_id,
                 product_name=li.product_name,
                 variant_id=li.variant_id,
+                variant_name=li.variant_name,
                 sku=li.sku,
                 quantity=li.quantity,
                 unit_price=li.unit_price,
                 total_price=total_price,
+                # Customer's per-axis pick survives into the order row so the
+                # merchant can render "Color: Red / Size: M" in the order
+                # detail UI without re-deriving from `variant_name`. The DTO
+                # default is None; OrderLineItem's field default is `{}`.
+                properties=li.properties or {},
             )
         )
 
