@@ -31,6 +31,7 @@ from src.api.v1.routes.storefront.gift_cards import router as gift_cards_router
 from src.api.v1.routes.storefront.locations import (
     router as pickup_locations_router,
 )
+from src.api.v1.routes.storefront.meta_feed import router as meta_feed_router
 from src.api.v1.routes.storefront.order_tracking import router as order_tracking_router
 from src.api.v1.routes.storefront.otp import router as otp_router
 from src.api.v1.routes.storefront.payment_proofs import (
@@ -59,6 +60,7 @@ __all__ = [
     "currencies_router",
     "gift_cards_router",
     "pickup_locations_router",
+    "meta_feed_router",
     "public_router",
     "returns_router",
     "reviews_router",

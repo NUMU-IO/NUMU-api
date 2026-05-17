@@ -118,6 +118,14 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     gift_cards_router as storefront_gift_cards_router,
 )
+
+# Storefront theme resolution (internal — Next.js SSR → FastAPI)
+# Wave 3 Phase 16 — meta_feed_router serves the public catalog XML
+from src.api.v1.routes.storefront import (
+    meta_feed_router,
+    storefront_lookup_router,
+    theme_resolution_router,
+)
 from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
 )
@@ -155,12 +163,6 @@ from src.api.v1.routes.storefront import (
 )
 from src.api.v1.routes.storefront import (
     shipping_router as storefront_shipping_router,
-)
-
-# Storefront theme resolution (internal — Next.js SSR → FastAPI)
-from src.api.v1.routes.storefront import (
-    storefront_lookup_router,
-    theme_resolution_router,
 )
 from src.api.v1.routes.storefront import (
     tracking_router as storefront_tracking_router,
@@ -259,6 +261,13 @@ api_router.include_router(
     storefront_lookup_router,
     prefix="/storefront",
     tags=["Storefront - Public"],
+)
+
+# Wave 3 Phase 16 — Meta Commerce Catalog feed (public, scoped by subdomain)
+api_router.include_router(
+    meta_feed_router,
+    prefix="/storefront",
+    tags=["Storefront - Meta Catalog"],
 )
 
 # Storefront - public order tracking (no store_id needed; scoped by order UUID)

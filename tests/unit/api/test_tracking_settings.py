@@ -19,6 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.api.v1.schemas.tenant.tracking import (
+    ConsentSettings,
     SaveMetaTrackingRequest,
     SendMetaTestEventRequest,
 )
@@ -167,20 +168,45 @@ class TestFunnelStepMapping:
 
     def test_full_mapping_keys_match_funnel_vocab(self):
         # Sanity: every Meta event name in the mapping must be one of
-        # the Meta-supported standard events. Phase 2 added Search,
-        # Lead, CompleteRegistration, AddPaymentInfo on top of the
-        # original 5 conversion-funnel events.
+        # Meta's supported standard events. The set grows over time:
+        #   - Wave 1: 5 conversion-funnel events
+        #   - Phase 2 (within Wave 1): +Search, Lead, CompleteRegistration,
+        #     AddPaymentInfo
+        #   - Wave 4 Phase 22: +Subscribe, Contact, AddToWishlist,
+        #     CustomizeProduct
         assert set(FUNNEL_STEP_TO_META_EVENT.values()) == {
+            # Conversion funnel
             "PageView",
             "ViewContent",
             "AddToCart",
             "InitiateCheckout",
             "Purchase",
+            # Phase 2
             "Search",
             "Lead",
             "CompleteRegistration",
             "AddPaymentInfo",
+            # Phase 22
+            "Subscribe",
+            "Contact",
+            "AddToWishlist",
+            "CustomizeProduct",
         }
+
+    # Phase 22 — pin per-event mappings so a future rename can't silently
+    # break a single one without the test summary calling it out.
+
+    def test_subscribe_maps_to_Subscribe(self):
+        assert _funnel_step_to_meta_event("subscribe") == "Subscribe"
+
+    def test_contact_maps_to_Contact(self):
+        assert _funnel_step_to_meta_event("contact") == "Contact"
+
+    def test_add_to_wishlist_maps_to_AddToWishlist(self):
+        assert _funnel_step_to_meta_event("add_to_wishlist") == "AddToWishlist"
+
+    def test_customize_product_maps_to_CustomizeProduct(self):
+        assert _funnel_step_to_meta_event("customize_product") == "CustomizeProduct"
 
 
 # ---------------------------------------------------------------------------
@@ -227,3 +253,87 @@ class TestDebugModeExpiry:
         parsed = datetime.fromisoformat(iso.replace("Z", "+00:00"))
         # Within 1µs of the original
         assert abs((parsed - future).total_seconds()) < 0.001
+
+
+# ===========================================================================
+# Wave 3 Phase 18 — Granular Customer Privacy schema
+# ===========================================================================
+
+
+class TestConsentSettings:
+    """ConsentSettings + SaveMetaTrackingRequest.consent_settings field."""
+
+    def test_default_settings_minimal_construct(self):
+        # Default-construct → opt-out region with all categories
+        # pre-checked except sale_of_data (CCPA opt-OUT semantics).
+        cs = ConsentSettings()
+        assert cs.granular_enabled is False
+        assert cs.region_default_mode == "force_opt_out"
+        assert cs.default_analytics is True
+        assert cs.default_marketing is True
+        assert cs.default_preferences is True
+        assert cs.default_sale_of_data is False
+
+    def test_explicit_eu_strict_config(self):
+        cs = ConsentSettings(
+            granular_enabled=True,
+            region_default_mode="force_opt_in",
+            default_analytics=False,
+            default_marketing=False,
+            default_preferences=False,
+            default_sale_of_data=False,
+        )
+        assert cs.granular_enabled is True
+        assert cs.region_default_mode == "force_opt_in"
+        assert cs.default_marketing is False
+
+    def test_invalid_region_mode_rejected(self):
+        with pytest.raises(ValidationError):
+            ConsentSettings(region_default_mode="invalid_mode")  # type: ignore[arg-type]
+
+    def test_save_request_accepts_consent_settings_when_omitted(self):
+        # Backward-compat: pre-Phase-18 PUT bodies omit the field entirely.
+        req = SaveMetaTrackingRequest(
+            pixel_id="123456789012345",
+            pixel_enabled=True,
+            capi_enabled=False,
+        )
+        assert req.consent_settings is None
+
+    def test_save_request_accepts_consent_settings_with_full_struct(self):
+        req = SaveMetaTrackingRequest(
+            pixel_id="123456789012345",
+            pixel_enabled=True,
+            capi_enabled=False,
+            consent_settings=ConsentSettings(
+                granular_enabled=True,
+                region_default_mode="auto",
+            ),
+        )
+        assert req.consent_settings is not None
+        assert req.consent_settings.granular_enabled is True
+        assert req.consent_settings.region_default_mode == "auto"
+
+    def test_save_request_accepts_consent_settings_as_dict(self):
+        # FastAPI clients (merchant-hub) send JSON dicts; Pydantic must
+        # coerce automatically.
+        req = SaveMetaTrackingRequest.model_validate({
+            "pixel_id": "123456789012345",
+            "pixel_enabled": True,
+            "capi_enabled": False,
+            "consent_settings": {
+                "granular_enabled": True,
+                "region_default_mode": "force_opt_in",
+                "default_analytics": False,
+                "default_marketing": False,
+            },
+        })
+        assert req.consent_settings is not None
+        assert req.consent_settings.granular_enabled is True
+        assert req.consent_settings.default_analytics is False
+
+    def test_sale_of_data_can_be_set_per_store_policy(self):
+        # Merchant in CA might want to default sale_of_data ON to
+        # match an "I want to opt out of sale" pre-check stance.
+        cs = ConsentSettings(default_sale_of_data=True)
+        assert cs.default_sale_of_data is True

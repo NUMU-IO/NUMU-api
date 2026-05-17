@@ -58,6 +58,23 @@ FUNNEL_STEP_TO_META_EVENT: dict[str, str] = {
     "lead": "Lead",
     "complete_registration": "CompleteRegistration",
     "add_payment_info": "AddPaymentInfo",
+    # Wave 4 Phase 22 — additional Meta standard events. Each fires
+    # from a discrete storefront action; backend just routes the
+    # funnel-step name to Meta's canonical event name.
+    # ``subscribe`` distinct from ``lead``: Lead fires on any email-
+    # capture intent; Subscribe is the explicit recurring-newsletter
+    # opt-in (the user checked "send me weekly emails").
+    "subscribe": "Subscribe",
+    # ``contact`` fires on Contact-form submit — Meta uses it as a
+    # high-intent signal distinct from generic Lead.
+    "contact": "Contact",
+    # ``add_to_wishlist`` mirrors the storefront wishlist toggle when
+    # the merchant has the wishlist feature enabled.
+    "add_to_wishlist": "AddToWishlist",
+    # ``customize_product`` fires when the customer interacts with a
+    # variant configurator on multi-axis products (e.g., picks size +
+    # color + engraving). Meta uses it as a checkout-intent signal.
+    "customize_product": "CustomizeProduct",
 }
 
 
@@ -109,6 +126,7 @@ def meta_capi_send_event(
     custom_data: dict[str, Any] | None = None,
     test_event_code: str | None = None,
     action_source: str = "website",
+    opt_out: bool = False,
 ) -> dict[str, Any]:
     """Send one CAPI event with idempotency, retries and redaction.
 
@@ -161,6 +179,7 @@ def meta_capi_send_event(
                 custom_data=custom_data or {},
                 test_event_code=test_event_code,
                 action_source=action_source,
+                opt_out=opt_out,
             )
         )
         sentry_sdk.set_tag("meta_capi.status", result.get("status", "unknown"))
@@ -202,6 +221,7 @@ async def _send_event(
     custom_data: dict[str, Any],
     test_event_code: str | None,
     action_source: str,
+    opt_out: bool = False,
 ) -> dict[str, Any]:
     from sqlalchemy.exc import IntegrityError
 
@@ -265,6 +285,11 @@ async def _send_event(
             "user_data": hash_user_data(user_data),
             "test_event_code": test_event_code,
         }
+        # Wave 3 Phase 18 — opt_out at the event level (Meta's spec).
+        # Only attach when true to keep payloads minimal for the
+        # majority of events (most users haven't denied marketing).
+        if opt_out:
+            request_payload["opt_out"] = True
 
         try:
             log_entity = await log_repo.create(
@@ -344,6 +369,11 @@ async def _send_event(
     }
     if event_source_url:
         capi_payload["data"][0]["event_source_url"] = event_source_url
+    # Wave 3 Phase 18 — Meta's opt_out lives at the event level (per
+    # event in the data[] array), NOT at the top level. Counts the
+    # event as a modeled conversion without storing first-party data.
+    if opt_out:
+        capi_payload["data"][0]["opt_out"] = True
     if test_event_code:
         capi_payload["test_event_code"] = test_event_code
 
