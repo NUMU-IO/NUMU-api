@@ -371,10 +371,21 @@ class ProductRepository(IProductRepository):
         if not isinstance(combos, list):
             return False, "no_matching_variant"
 
+        # Normalise both sides to lowercase before comparing — the
+        # storefront writes selections with capitalised axis names
+        # (`{"Size": "M"}`) while the merchant hub stores combo options
+        # lowercase (`{"size": "m"}`). Without normalisation the strict
+        # `==` never matched and stock was never deducted from the
+        # per-variant counter.
+        def _norm(d: dict | None) -> dict:
+            return {str(k).lower(): str(v).lower() for k, v in (d or {}).items()}
+
+        target = _norm(selections)
+
         for combo in combos:
             if not isinstance(combo, dict):
                 continue
-            if combo.get("options") != selections:
+            if _norm(combo.get("options")) != target:
                 continue
             if combo.get("enabled") is False:
                 return False, "combo_disabled"
