@@ -145,6 +145,7 @@ async def create_product(
     # create one row carrying the product's price + quantity, so the
     # cart's variant-id resolution always finds a row.
     variant_summaries = await _materialize_product_variants(
+        session=product_repo.session,
         product_id=result.id,
         store_id=store.id,
         tenant_id=store.tenant_id,
@@ -192,6 +193,7 @@ async def create_product(
 
 async def _materialize_product_variants(
     *,
+    session,
     product_id: UUID,
     store_id: UUID,
     tenant_id: UUID,
@@ -204,6 +206,11 @@ async def _materialize_product_variants(
 ) -> list[dict]:
     """Persist options + variants for a product (create + update).
 
+    Runs on the caller's request-scoped session so the variant inserts
+    see the product row inserted earlier in the same transaction —
+    opening a separate session here causes a FK violation because the
+    product INSERT hasn't committed yet.
+
     Logic:
     1. Write `options` JSONB onto the product row.
     2. If `variants` is empty → ensure a single default variant exists
@@ -214,104 +221,100 @@ async def _materialize_product_variants(
        hard-deleted (the merchant intends them gone).
     """
     from src.core.value_objects.money import Money
-    from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.product import ProductModel
     from src.infrastructure.repositories.variant_repository import VariantRepository
 
-    async with AsyncSessionLocal() as session:
-        # 1. Patch options onto the product row.
-        prod_row = await session.get(ProductModel, product_id)
-        if prod_row is not None:
-            prod_row.options = [o.model_dump() for o in (options or [])]
-            await session.flush()
+    # 1. Patch options onto the product row.
+    prod_row = await session.get(ProductModel, product_id)
+    if prod_row is not None:
+        prod_row.options = [o.model_dump() for o in (options or [])]
+        await session.flush()
 
-        repo = VariantRepository(session)
-        existing = await repo.list_for_product(product_id)
-        existing_by_id = {v.id: v for v in existing}
+    repo = VariantRepository(session)
+    existing = await repo.list_for_product(product_id)
+    existing_by_id = {v.id: v for v in existing}
 
-        if not variants:
-            # No variants in the request: keep the existing default
-            # variant if there's exactly one and it has no option_values.
-            if any(v.option_values for v in existing):
-                # Multi-axis product but no variants submitted — drop
-                # them all. The caller will have to submit explicit
-                # variants on the next update to recreate them.
-                for v in existing:
-                    await repo.delete_by_id(v.id)
-            if not existing or any(v.option_values for v in existing):
-                # Create a single default variant if none remains.
-                v = await repo.create(
-                    tenant_id=tenant_id,
-                    store_id=store_id,
-                    product_id=product_id,
-                    position=0,
-                    option_values={},
-                    price=Money(
-                        amount=int(float(default_price)), currency=default_currency
-                    ),
-                    sku=default_sku,
-                    inventory_quantity=default_quantity,
-                )
-            else:
-                v = existing[0]
-            await session.commit()
-            return [_variant_to_summary_dict(v)]
-
-        # 4. Delete variants the request omitted.
-        keep_ids = {v.id for v in variants if v.id is not None}
-        for existing_v in existing:
-            if existing_v.id not in keep_ids:
-                await repo.delete_by_id(existing_v.id)
-
-        # 3. Upsert each variant in the request.
-        result_variants = []
-        for idx, vin in enumerate(variants):
-            price = Money(
-                amount=int(float(vin.price)),
-                currency=vin.price_currency or default_currency,
+    if not variants:
+        # No variants in the request: keep the existing default
+        # variant if there's exactly one and it has no option_values.
+        if any(v.option_values for v in existing):
+            # Multi-axis product but no variants submitted — drop
+            # them all. The caller will have to submit explicit
+            # variants on the next update to recreate them.
+            for v in existing:
+                await repo.delete_by_id(v.id)
+        if not existing or any(v.option_values for v in existing):
+            # Create a single default variant if none remains.
+            v = await repo.create(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                product_id=product_id,
+                position=0,
+                option_values={},
+                price=Money(
+                    amount=int(float(default_price)), currency=default_currency
+                ),
+                sku=default_sku,
+                inventory_quantity=default_quantity,
             )
-            compare_at = (
-                Money(amount=int(float(vin.compare_at_price)), currency=price.currency)
-                if vin.compare_at_price is not None
-                else None
+        else:
+            v = existing[0]
+        return [_variant_to_summary_dict(v)]
+
+    # 4. Delete variants the request omitted.
+    keep_ids = {v.id for v in variants if v.id is not None}
+    for existing_v in existing:
+        if existing_v.id not in keep_ids:
+            await repo.delete_by_id(existing_v.id)
+
+    # 3. Upsert each variant in the request.
+    result_variants = []
+    for idx, vin in enumerate(variants):
+        price = Money(
+            amount=int(float(vin.price)),
+            currency=vin.price_currency or default_currency,
+        )
+        compare_at = (
+            Money(amount=int(float(vin.compare_at_price)), currency=price.currency)
+            if vin.compare_at_price is not None
+            else None
+        )
+        cost = (
+            Money(amount=int(float(vin.cost_price)), currency=price.currency)
+            if vin.cost_price is not None
+            else None
+        )
+        if vin.id and vin.id in existing_by_id:
+            v = existing_by_id[vin.id]
+            v.position = vin.position if vin.position is not None else idx
+            v.option_values = vin.option_values or {}
+            v.price = price
+            v.compare_at_price = compare_at
+            v.cost_price = cost
+            v.sku = vin.sku
+            v.barcode = vin.barcode
+            v.inventory_quantity = vin.inventory_quantity
+            v.image_url = vin.image_url
+            v.weight = vin.weight
+            v = await repo.update(v)
+        else:
+            v = await repo.create(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                product_id=product_id,
+                position=vin.position if vin.position is not None else idx,
+                option_values=vin.option_values or {},
+                price=price,
+                compare_at_price=compare_at,
+                cost_price=cost,
+                sku=vin.sku,
+                barcode=vin.barcode,
+                inventory_quantity=vin.inventory_quantity,
+                image_url=vin.image_url,
+                weight=vin.weight,
             )
-            cost = (
-                Money(amount=int(float(vin.cost_price)), currency=price.currency)
-                if vin.cost_price is not None
-                else None
-            )
-            if vin.id and vin.id in existing_by_id:
-                v = existing_by_id[vin.id]
-                v.position = vin.position if vin.position is not None else idx
-                v.option_values = vin.option_values or {}
-                v.price = price
-                v.compare_at_price = compare_at
-                v.cost_price = cost
-                v.sku = vin.sku
-                v.barcode = vin.barcode
-                v.inventory_quantity = vin.inventory_quantity
-                v.image_url = vin.image_url
-                v.weight = vin.weight
-                v = await repo.update(v)
-            else:
-                v = await repo.create(
-                    tenant_id=tenant_id,
-                    store_id=store_id,
-                    product_id=product_id,
-                    position=vin.position if vin.position is not None else idx,
-                    option_values=vin.option_values or {},
-                    price=price,
-                    compare_at_price=compare_at,
-                    cost_price=cost,
-                    sku=vin.sku,
-                    barcode=vin.barcode,
-                    inventory_quantity=vin.inventory_quantity,
-                    image_url=vin.image_url,
-                    weight=vin.weight,
-                )
-            result_variants.append(v)
-        await session.commit()
-        return [_variant_to_summary_dict(v) for v in result_variants]
+        result_variants.append(v)
+    return [_variant_to_summary_dict(v) for v in result_variants]
 
 
 def _variant_to_summary_dict(v) -> dict:
@@ -587,6 +590,7 @@ async def update_product(
     variant_summaries: list[dict] | None = None
     if request.options is not None or request.variants is not None:
         variant_summaries = await _materialize_product_variants(
+            session=product_repo.session,
             product_id=result.id,
             store_id=store.id,
             tenant_id=store.tenant_id,
