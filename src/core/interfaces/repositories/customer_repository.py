@@ -28,6 +28,15 @@ class ICustomerRepository(BaseRepository[Customer]):
         ...
 
     @abstractmethod
+    async def get_by_phone(self, store_id: UUID, phone_e164: str) -> Customer | None:
+        """Get customer by canonical E.164 phone within a store.
+
+        Caller must pre-normalize via ``PhoneNumber.parse`` — this repository
+        does a literal string match.
+        """
+        ...
+
+    @abstractmethod
     async def email_exists(self, store_id: UUID, email: Email) -> bool:
         """Check if email already exists for a store."""
         ...

@@ -1730,8 +1730,6 @@ async def get_insights(
             # cron may have run on an empty store earlier today, then
             # the merchant placed orders — without this guard we'd
             # serve "0 days available" until tomorrow UTC.
-            from datetime import UTC, datetime
-
             cached_signals = cached.get("signals", [])
             cached_metrics = cached.get("metrics_summary") or {}
             # The rule engine emits a single ``insufficient_data``

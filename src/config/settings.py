@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     debug: bool = True
     environment: Literal["development", "staging", "production"] = "development"
 
+    # Cloudflare DNS automation for per-env store subdomains.
+    # Merchant hub stores the env-suffixed subdomain directly (e.g. `yarab-test`),
+    # so the service creates `<subdomain>.numueg.app` -> droplet IP without
+    # touching the name. Disabled on prod (handled by `* CNAME -> Heroku`).
+    cloudflare_api_token: str = ""
+    cloudflare_zone_id: str = ""
+    droplet_ip: str = ""
+    cloudflare_auto_dns_enabled: bool = False
+
     # API
     api_v1_prefix: str = "/api/v1"
     allowed_hosts: list[str] = ["*"]

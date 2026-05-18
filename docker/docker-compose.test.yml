@@ -22,6 +22,9 @@ services:
       - ENVIRONMENT=development
       - DEBUG=false
       - LOG_FORMAT=json
+      - CLOUDFLARE_AUTO_DNS_ENABLED=true
+      - CLOUDFLARE_ZONE_ID=ca7ec5c86512e58a6a0d0729b830b0d1
+      - DROPLET_IP=188.166.156.151
     expose:
       - "8000"
     volumes:
