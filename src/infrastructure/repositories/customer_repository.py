@@ -171,6 +171,27 @@ class CustomerRepository(ICustomerRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_by_phone(self, store_id: UUID, phone_e164: str) -> Customer | None:
+        """Get customer by canonical E.164 phone within a store.
+
+        Returns the most recently created match — duplicates may exist on
+        rows created before phone-based dedup was introduced, and we don't
+        want to enforce a unique constraint (households legitimately share
+        numbers). The newest row wins because it's the one whose order
+        history is still active.
+        """
+        result = await self.session.execute(
+            select(CustomerModel)
+            .where(
+                CustomerModel.store_id == store_id,
+                CustomerModel.phone == phone_e164,
+            )
+            .order_by(CustomerModel.created_at.desc())
+            .limit(1)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def email_exists(self, store_id: UUID, email: Email) -> bool:
         """Check if email already exists for a store."""
         result = await self.session.execute(

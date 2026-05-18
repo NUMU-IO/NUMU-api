@@ -40,6 +40,7 @@ from src.application.use_cases.stores.create_store import (
 )
 from src.core.entities.store import Store
 from src.infrastructure.cache import StorefrontCache
+from src.infrastructure.external_services.cloudflare import cloudflare_dns_service
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 from src.infrastructure.tenancy.service import TenantService
 
@@ -175,6 +176,9 @@ async def create_store(
     )
 
     result = await use_case.execute(dto, owner_id=user_id, plan=plan)
+
+    if result.subdomain:
+        await cloudflare_dns_service.ensure_store_subdomain(result.subdomain)
 
     return SuccessResponse(
         data=_build_store_response(result),

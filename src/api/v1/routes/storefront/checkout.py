@@ -68,6 +68,7 @@ from src.core.entities.customer import Customer
 from src.core.entities.product import ProductStatus
 from src.core.exceptions import EntityNotFoundError
 from src.core.value_objects.geography import resolve_governorate
+from src.core.value_objects.phone import PhoneNumber
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.repositories import (
     AbandonedCheckoutRepository,
@@ -254,15 +255,19 @@ async def checkout(
     is_guest = current_customer is None
 
     if is_guest:
-        # Email requirement follows the merchant's checkout-fields config —
-        # required only if the merchant marked email as required. If email is
-        # disabled entirely, we synthesize a per-order placeholder so the
-        # Customer row (which requires a unique email per store) can be
-        # created; notifications fall back to phone/WhatsApp.
+        # Identity rule for guests: phone is the source of truth. A returning
+        # guest whose phone matches an existing customer (guest or registered)
+        # in the same store reuses that row — otherwise placing 10 orders
+        # would create 10 distinct customer records, since each guest gets a
+        # fresh placeholder email when no real one is supplied.
+        #
+        # Email is only used as a fallback identity key when (a) we have no
+        # canonical phone and (b) the guest provided a real (non-placeholder)
+        # email that already exists for this store.
         from src.core.value_objects.email import Email as EmailVO
+        from src.core.value_objects.phone import InvalidPhoneError
 
         email_cfg = (checkout_config.get("standard_fields") or {}).get("email") or {}
-        email_enabled = bool(email_cfg.get("enabled", True))
         email_required = bool(email_cfg.get("required", False))
 
         guest_email = (request.guest_email or "").strip() or None
@@ -273,6 +278,38 @@ async def checkout(
                 detail="Email is required for guest checkout.",
             )
 
+        addr = request.shipping_address
+
+        # Canonicalize the phone to E.164 so dedup is reliable regardless
+        # of whether the buyer typed "01001234567" or "+201001234567". The
+        # schema validator only strips separators, not country-codes.
+        # Default region "EG" matches the storefront's market — adjust if/when
+        # we expand. If parsing fails (truly invalid input), we fall back to
+        # the lenient VO purely for storage; no phone-based dedup happens.
+        guest_phone_vo: PhoneNumber | None = None
+        canonical_phone: str | None = None
+        if addr.phone:
+            try:
+                guest_phone_vo = PhoneNumber.parse(addr.phone, default_region="EG")
+                canonical_phone = guest_phone_vo.value
+            except InvalidPhoneError:
+                try:
+                    guest_phone_vo = PhoneNumber(value=addr.phone)
+                except Exception:
+                    guest_phone_vo = None
+
+        # Phone lookup first — primary identity key for guests.
+        existing: Customer | None = None
+        if canonical_phone:
+            existing = await customer_repo.get_by_phone(store_id, canonical_phone)
+
+        # Email VO is needed in two cases:
+        #   1. We didn't find an existing customer by phone → may need email
+        #      lookup as a secondary key (only meaningful when the email is
+        #      real, not a placeholder).
+        #   2. We're creating a new customer → need an email to satisfy
+        #      customers.email NOT NULL + unique-per-store.
+        email_vo: EmailVO | None = None
         if guest_email:
             try:
                 email_vo = EmailVO(value=guest_email)
@@ -281,36 +318,33 @@ async def checkout(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid email address.",
                 )
-        elif not email_enabled or not email_required:
-            # Merchant opted out of collecting email. Generate a stable
-            # placeholder so the customers.email uniqueness constraint holds.
-            import uuid as _uuid
 
-            email_vo = EmailVO(
-                value=f"guest+{_uuid.uuid4().hex[:12]}@noemail.numueg.app"
-            )
-        else:
-            # Email was enabled-but-not-required and none was supplied; treat
-            # as opt-out path to keep a consistent placeholder.
-            import uuid as _uuid
+        if existing is None and email_vo is not None:
+            # Real email provided and no phone match — fall back to email dedup.
+            existing = await customer_repo.get_by_email(store_id, email_vo)
 
-            email_vo = EmailVO(
-                value=f"guest+{_uuid.uuid4().hex[:12]}@noemail.numueg.app"
-            )
-
-        # Re-use existing customer record if same email+store, else create.
-        # Placeholder emails never collide (fresh UUID per order).
-        existing = await customer_repo.get_by_email(store_id, email_vo)
         if existing:
             current_customer = existing
+            # Backfill phone on a returning customer who didn't have one
+            # before (e.g. legacy guest row from before this change shipped).
+            if guest_phone_vo and not existing.phone:
+                existing.phone = guest_phone_vo
+                current_customer = await customer_repo.update(existing)
         else:
-            addr = request.shipping_address
+            # New customer — synthesize a placeholder email if the guest
+            # didn't supply one, so the (store_id, email) uniqueness holds.
+            if email_vo is None:
+                import uuid as _uuid
+
+                email_vo = EmailVO(
+                    value=f"guest+{_uuid.uuid4().hex[:12]}@noemail.numueg.app"
+                )
             current_customer = Customer(
                 store_id=store_id,
                 email=email_vo,
                 first_name=addr.first_name or "Guest",
                 last_name=addr.last_name or "",
-                phone=None,
+                phone=guest_phone_vo,
                 is_verified=False,
                 metadata={"guest": True, "has_real_email": guest_email is not None},
             )
