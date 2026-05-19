@@ -39,6 +39,8 @@ class ProductDTO(BaseDTO):
     # match conversions to a Catalog row). Optional; null falls back to
     # the product UUID in the storefront consumer.
     meta_catalog_id: str | None
+    seo_title: str | None
+    seo_description: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -70,6 +72,8 @@ class ProductDTO(BaseDTO):
             tags=entity.tags,
             attributes=entity.attributes,
             meta_catalog_id=getattr(entity, "meta_catalog_id", None),
+            seo_title=getattr(entity, "seo_title", None),
+            seo_description=getattr(entity, "seo_description", None),
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
