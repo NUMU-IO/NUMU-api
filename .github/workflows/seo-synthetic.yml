@@ -1,0 +1,70 @@
+name: SEO synthetic monitor
+
+# Phase 6 §5. Daily GET-probe sweep against a curated list of merchant
+# storefronts. Catches:
+#   - title / description / canonical missing on indexable routes
+#   - noindex regression (Phase 1 robots logic flips for the wrong store)
+#   - robots.txt drift (no Sitemap directive)
+#   - sitemap.xml malformed / 5xx
+#
+# Two ways to invoke:
+#   - schedule: daily at 03:30 UTC = 05:30 Cairo. Off-peak; staggered
+#     after the 03:00 DB backup so a slow backup doesn't fight the
+#     monitor for I/O.
+#   - workflow_dispatch: ad-hoc with custom subdomain list / host
+#     template (useful before / after a CF Cache Rule change).
+#
+# The subdomain list is explicit (NOT pulled from the DB) so the
+# workflow doesn't need DATABASE_URL — keeps the cron self-contained.
+# Add new merchants to the `subdomains` input default below; the
+# droplet-side `_active_subdomains()` codepath still works for ops
+# running the script locally with DB creds.
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+    inputs:
+      subdomains:
+        description: "Comma-separated subdomains to probe."
+        required: false
+        default: "sawsaw"
+      host_template:
+        description: 'Host pattern with `{sub}` placeholder. Override for env probes (e.g. "{sub}.staging.numueg.app").'
+        required: false
+        default: "{sub}.numueg.app"
+
+concurrency:
+  group: seo-synthetic-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  # Default subdomain cohort — update as merchants come online.
+  # Keep short; the suite is asserting a tight contract, not breadth.
+  DEFAULT_SUBDOMAINS: "sawsaw"
+
+jobs:
+  synthetic:
+    name: Probe storefronts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install httpx (only dep the script needs in CI mode)
+        run: pip install "httpx>=0.27,<1.0"
+
+      - name: Run synthetic monitor
+        run: |
+          python scripts/seo_synthetic.py \
+            --subdomains "${SUBDOMAINS}" \
+            --host-template "${HOST_TEMPLATE}"
+        env:
+          SUBDOMAINS: ${{ github.event.inputs.subdomains || env.DEFAULT_SUBDOMAINS }}
+          HOST_TEMPLATE: ${{ github.event.inputs.host_template || '{sub}.numueg.app' }}

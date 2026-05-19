@@ -8,7 +8,7 @@ These routes are publicly accessible without authentication:
 - Customer registration and login
 """
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -427,7 +427,20 @@ def _serialize_public_store(
     (via `_read_feature_flags`). The storefront reads flags like
     `ff_storefront_promo_render` to skip rendering work for tenants that
     aren't in the offers-v2 phased rollout yet.
+
+    The `seo` block surfaces the typed Phase 4 SEO settings — the raw
+    `settings.seo` blob is still returned alongside under `settings` so
+    legacy readers keep working, but the storefront's generateMetadata
+    helper consumes the normalized `seo` field exclusively.
     """
+    from src.api.v1.schemas.tenant.store_seo import StoreSeoSettings
+
+    raw_settings = store.settings or {}
+    raw_seo = raw_settings.get("seo") if isinstance(raw_settings, dict) else None
+    seo_normalized = StoreSeoSettings.model_validate(
+        raw_seo if isinstance(raw_seo, dict) else {}
+    ).model_dump()
+
     return {
         "id": str(store.id),
         "name": store.name,
@@ -440,7 +453,8 @@ def _serialize_public_store(
         "status": store.status.value
         if hasattr(store.status, "value")
         else str(store.status),
-        "settings": store.settings or {},
+        "settings": raw_settings,
+        "seo": seo_normalized,
         "theme_settings": store.theme_settings,
         "business_hours": store.business_hours or {},
         "default_currency": store.default_currency.value
@@ -650,6 +664,8 @@ async def browse_products(
             # Meta Catalog product ID — when set, the storefront uses
             # it as `content_ids` on Pixel events. Null = use product.id.
             "meta_catalog_id": product.meta_catalog_id,
+            "seo_title": product.seo_title,
+            "seo_description": product.seo_description,
             "created_at": str(product.created_at),
             "updated_at": str(product.updated_at),
         }
@@ -772,6 +788,8 @@ async def browse_products_cursor(
             tags=product.tags,
             attributes=product.attributes,
             meta_catalog_id=product.meta_catalog_id,
+            seo_title=product.seo_title,
+            seo_description=product.seo_description,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         )
@@ -863,6 +881,8 @@ async def get_product_by_slug(
             images=product.images,
             tags=product.tags,
             attributes=product.attributes,
+            seo_title=product.seo_title,
+            seo_description=product.seo_description,
             options=getattr(product, "options", None) or [],
             variants=variant_summaries,
             meta_catalog_id=product.meta_catalog_id,
@@ -1109,6 +1129,89 @@ async def browse_categories(
             for r in results
         ],
         message="Categories retrieved successfully",
+    )
+
+
+# ============================================================================
+# Sitemap feed (public, lean payload)
+# ============================================================================
+
+
+@router.get(
+    "/sitemap-feed",
+    response_model=SuccessResponse[dict],
+    summary="Lean product/category feed for sitemap generation",
+    operation_id="storefront_sitemap_feed",
+)
+async def storefront_sitemap_feed(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
+    feed_type: Annotated[
+        Literal["products", "categories"],
+        Query(alias="type", description="Which feed to return"),
+    ] = "products",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=10000)] = 10000,
+):
+    """Lean sitemap feed.
+
+    For `type=products`:
+        `{ items: [{id, slug, updated_at, first_image}], total }`
+
+    For `type=categories`:
+        `{ items: [{id, slug, name, updated_at}], total }`
+
+    Designed to be hit by the storefront's `app/(store)/[subdomain]/sitemap.ts`
+    once per regeneration cycle (`revalidate=600`). Slim payload avoids the
+    full ProductResponse roundtrip — important for tenants with thousands
+    of products where paginating `/products?limit=100` 50+ times would
+    otherwise dominate sitemap latency.
+
+    Cookie-bearing requests fall through to `private, no-store` via the
+    cache_headers middleware allowlist for this exact path pattern.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    skip = (page - 1) * page_size
+
+    if feed_type == "products":
+        items = await product_repo.list_sitemap_feed(
+            store_id=store_id, skip=skip, limit=page_size
+        )
+        total = await product_repo.count_active(store_id=store_id)
+        return SuccessResponse(
+            data={"items": items, "total": total, "page": page, "page_size": page_size},
+            message="Product sitemap feed",
+        )
+
+    from src.application.use_cases.categories import ListCategoriesUseCase
+
+    use_case = ListCategoriesUseCase(category_repository=category_repo)
+    results = await use_case.execute(store_id=store_id, include_inactive=False)
+    category_items = [
+        {
+            "id": str(r.id),
+            "slug": r.slug,
+            "name": r.name,
+            "updated_at": r.updated_at.isoformat()
+            if getattr(r, "updated_at", None)
+            else None,
+        }
+        for r in results
+        if r.slug
+    ]
+    return SuccessResponse(
+        data={
+            "items": category_items,
+            "total": len(category_items),
+            "page": 1,
+            "page_size": len(category_items),
+        },
+        message="Category sitemap feed",
     )
 
 

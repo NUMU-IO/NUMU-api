@@ -135,6 +135,7 @@ async def create_product(
             subdomain=store.subdomain,
             store_id=str(store.id),
             product_slug=result.slug,
+            product_id=str(result.id),
         )
 
     # Phase 8.1 — materialize options + variants. The use case doesn't
@@ -182,6 +183,8 @@ async def create_product(
             images=result.images,
             tags=result.tags,
             attributes=result.attributes,
+            seo_title=result.seo_title,
+            seo_description=result.seo_description,
             options=[o.model_dump() for o in request.options],
             variants=variant_summaries,
             created_at=str(result.created_at),
@@ -456,6 +459,8 @@ async def list_products(
             images=product.images,
             tags=product.tags,
             attributes=product.attributes,
+            seo_title=product.seo_title,
+            seo_description=product.seo_description,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         )
@@ -515,6 +520,8 @@ async def get_product(
             images=result.images,
             tags=result.tags,
             attributes=result.attributes,
+            seo_title=result.seo_title,
+            seo_description=result.seo_description,
             created_at=str(result.created_at),
             updated_at=str(result.updated_at),
         ),
@@ -582,6 +589,7 @@ async def update_product(
             subdomain=store.subdomain,
             store_id=str(store.id),
             product_slug=result.slug,
+            product_id=str(result.id),
         )
 
     # Phase 8.1 — only re-materialize variants/options when the
@@ -639,6 +647,8 @@ async def update_product(
             images=result.images,
             tags=result.tags,
             attributes=result.attributes,
+            seo_title=result.seo_title,
+            seo_description=result.seo_description,
             options=(
                 [o.model_dump() for o in request.options]
                 if request.options is not None
@@ -695,6 +705,7 @@ async def delete_product(
             subdomain=store.subdomain,
             store_id=str(store.id),
             product_slug=pre_delete_slug,
+            product_id=str(product_id),
         )
 
     return None
@@ -775,6 +786,7 @@ async def upload_product_image(
                 subdomain=store.subdomain,
                 store_id=str(store.id),
                 product_slug=product_slug,
+                product_id=str(product_id),
             )
 
     return SuccessResponse(
@@ -844,6 +856,7 @@ async def delete_product_image(
                 subdomain=store.subdomain,
                 store_id=str(store.id),
                 product_slug=product_slug,
+                product_id=str(product_id),
             )
 
     return None
