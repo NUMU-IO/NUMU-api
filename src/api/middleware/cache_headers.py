@@ -119,6 +119,7 @@ _CACHEABLE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/v1/storefront/store/[0-9a-f-]+/products/cursor/?$"),
     re.compile(r"^/api/v1/storefront/store/[0-9a-f-]+/products/[^/]+/?$"),
     re.compile(r"^/api/v1/storefront/store/[0-9a-f-]+/categories(?:/[^/]+)?/?$"),
+    re.compile(r"^/api/v1/storefront/store/[0-9a-f-]+/sitemap-feed/?$"),
     # Theme resolution route is mounted at /storefront/theme/{store_id},
     # NOT /storefront/store/{store_id}/theme. The plan template had it
     # reversed; the regex below matches the actual route registered in

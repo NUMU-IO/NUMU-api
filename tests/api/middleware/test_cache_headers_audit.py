@@ -40,6 +40,7 @@ EXPECTED_CACHEABLE: set[str] = {
     r"^/api/v1/storefront/store/[0-9a-f-]+/products/cursor/?$",
     r"^/api/v1/storefront/store/[0-9a-f-]+/products/[^/]+/?$",
     r"^/api/v1/storefront/store/[0-9a-f-]+/categories(?:/[^/]+)?/?$",
+    r"^/api/v1/storefront/store/[0-9a-f-]+/sitemap-feed/?$",
     r"^/api/v1/storefront/theme/[0-9a-f-]+/?$",
     r"^/api/v1/public/landing-config/?$",
 }

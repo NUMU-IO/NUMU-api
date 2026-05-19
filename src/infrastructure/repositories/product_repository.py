@@ -316,6 +316,72 @@ class ProductRepository(IProductRepository):
         )
         return result.scalar() or 0
 
+    async def count_active(self, store_id: UUID) -> int:
+        """Count of active products. Used by the SEO sitemap-feed endpoint
+        to surface pagination totals without loading rows."""
+        result = await self.session.execute(
+            select(func.count(ProductModel.id)).where(
+                ProductModel.store_id == store_id,
+                ProductModel.status == ProductStatus.ACTIVE.value,
+            )
+        )
+        return result.scalar() or 0
+
+    async def list_sitemap_feed(
+        self,
+        *,
+        store_id: UUID,
+        skip: int,
+        limit: int,
+    ) -> list[dict]:
+        """Lean sitemap feed — slug + updated_at + first image only.
+
+        Returns plain dicts (not Product entities) so we don't pay for the
+        Money/Currency value-object roundtrip we don't need. Used by the
+        storefront's `app/(store)/[subdomain]/sitemap.ts` route to avoid
+        paginating the full `/products` endpoint when generating sitemaps
+        for tenants with thousands of products.
+
+        Ordered by updated_at DESC so the most-recently-edited products
+        show up at the top of the sitemap — Google re-crawls those first.
+        """
+        result = await self.session.execute(
+            select(
+                ProductModel.id,
+                ProductModel.slug,
+                ProductModel.updated_at,
+                ProductModel.images,
+            )
+            .where(
+                ProductModel.store_id == store_id,
+                ProductModel.status == ProductStatus.ACTIVE.value,
+            )
+            .order_by(ProductModel.updated_at.desc().nulls_last())
+            .offset(skip)
+            .limit(limit)
+        )
+        rows = result.all()
+        out: list[dict] = []
+        for row in rows:
+            images = row.images or []
+            first_image: str | None = None
+            for entry in images:
+                if isinstance(entry, str) and entry.strip():
+                    first_image = entry
+                    break
+                if isinstance(entry, dict):
+                    url = entry.get("url") or entry.get("src")
+                    if isinstance(url, str) and url.strip():
+                        first_image = url
+                        break
+            out.append({
+                "id": str(row.id),
+                "slug": row.slug,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "first_image": first_image,
+            })
+        return out
+
     async def deduct_stock(
         self,
         product_id: UUID,
