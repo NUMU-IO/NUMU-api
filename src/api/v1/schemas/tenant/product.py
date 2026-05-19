@@ -373,6 +373,19 @@ class ProductResponse(BaseModel):
             "to the product UUID."
         ),
     )
+    # Per-product SEO overrides. Optional on the response since legacy rows
+    # may have been written before the columns existed; null means
+    # "fall back to product name / short_description" on the storefront.
+    seo_title: str | None = Field(
+        default=None,
+        max_length=70,
+        description="Per-product SEO title override (defaults to product name).",
+    )
+    seo_description: str | None = Field(
+        default=None,
+        max_length=160,
+        description="Per-product SEO description override (defaults to short_description).",
+    )
     # Phase 8.1 — option axes (e.g. [{name:"Size",values:["S","M","L"]}]).
     # Empty list when the product has no variants (single SKU). Themes
     # branch on `options.length > 0` to render a variant picker.

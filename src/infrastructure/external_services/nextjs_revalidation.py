@@ -138,16 +138,40 @@ async def revalidate_store(
 
 
 async def revalidate_on_product_change(
-    subdomain: str, store_id: str, product_slug: str
+    subdomain: str,
+    store_id: str,
+    product_slug: str,
+    product_id: str | None = None,
 ) -> None:
-    """Call when a product is created/updated/deleted."""
+    """Call when a product is created/updated/deleted.
+
+    Posts both slug-keyed and UUID-keyed cache tags + paths so visitors
+    arriving via either URL form get fresh metadata. The storefront tags
+    fetches as `product:{store_id}:{productId}` where `productId` is whatever
+    the visiting URL contained — either could be slug or UUID — so we have
+    to bust both. Also busts the sitemap-products tag for Phase 2.
+
+    The storefront PDP route is `/product/{slug-or-uuid}` (singular). The
+    previous version of this helper posted `/products/{slug}` which doesn't
+    exist on the storefront and silently no-op'd revalidation.
+    """
+    paths: list[str] = [
+        f"/product/{product_slug}",
+        "/products",
+        "/",
+    ]
+    tags: list[str] = [
+        f"products:{store_id}",
+        f"product:{store_id}:{product_slug}",
+        f"sitemap:products:{store_id}",
+    ]
+    if product_id:
+        paths.append(f"/product/{product_id}")
+        tags.append(f"product:{store_id}:{product_id}")
     await revalidate_store(
         subdomain=subdomain,
-        paths=[f"/products/{product_slug}", "/products", "/"],
-        tags=[
-            f"products:{store_id}",
-            f"product:{store_id}:{product_slug}",
-        ],
+        paths=paths,
+        tags=tags,
     )
 
 
@@ -172,9 +196,39 @@ async def revalidate_on_customization_publish(subdomain: str, store_id: str) -> 
 
 
 async def revalidate_on_category_change(subdomain: str, store_id: str) -> None:
-    """Call when a category is created/updated/deleted."""
+    """Call when a category is created/updated/deleted.
+
+    Also busts the categories sitemap tag (Phase 2) so the new/changed
+    category surfaces in `<host>/sitemap.xml` within ~60s of save.
+    """
     await revalidate_store(
         subdomain=subdomain,
         paths=["/", "/products"],
-        tags=[f"categories:{store_id}"],
+        tags=[
+            f"categories:{store_id}",
+            f"sitemap:categories:{store_id}",
+        ],
     )
+
+
+async def revalidate_sitemaps(
+    subdomain: str,
+    store_id: str,
+    *,
+    products: bool = False,
+    categories: bool = False,
+) -> None:
+    """Targeted sitemap-only invalidation.
+
+    Useful for bulk-import flows that touch many products/categories
+    without going through the per-row update path — call once at the end
+    instead of N times during the loop.
+    """
+    tags: list[str] = []
+    if products:
+        tags.append(f"sitemap:products:{store_id}")
+    if categories:
+        tags.append(f"sitemap:categories:{store_id}")
+    if not tags:
+        return
+    await revalidate_store(subdomain=subdomain, paths=["/sitemap.xml"], tags=tags)

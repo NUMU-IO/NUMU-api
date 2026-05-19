@@ -83,6 +83,7 @@ from src.api.v1.schemas.tenant.store import (
     StoreResponse,
     UpdateStoreRequest,
 )
+from src.api.v1.schemas.tenant.store_seo import StoreSeoSettings
 from src.api.v1.schemas.tenant.upsell import (
     CreateUpsellRuleRequest,
     UpdateUpsellRuleRequest,
@@ -136,6 +137,7 @@ __all__ = [
     "CheckSubdomainResponse",
     "CreateStoreRequest",
     "StoreResponse",
+    "StoreSeoSettings",
     "UpdateStoreRequest",
     # Onboarding
     "OnboardingResponse",

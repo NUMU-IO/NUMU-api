@@ -427,7 +427,20 @@ def _serialize_public_store(
     (via `_read_feature_flags`). The storefront reads flags like
     `ff_storefront_promo_render` to skip rendering work for tenants that
     aren't in the offers-v2 phased rollout yet.
+
+    The `seo` block surfaces the typed Phase 4 SEO settings — the raw
+    `settings.seo` blob is still returned alongside under `settings` so
+    legacy readers keep working, but the storefront's generateMetadata
+    helper consumes the normalized `seo` field exclusively.
     """
+    from src.api.v1.schemas.tenant.store_seo import StoreSeoSettings
+
+    raw_settings = store.settings or {}
+    raw_seo = raw_settings.get("seo") if isinstance(raw_settings, dict) else None
+    seo_normalized = StoreSeoSettings.model_validate(
+        raw_seo if isinstance(raw_seo, dict) else {}
+    ).model_dump()
+
     return {
         "id": str(store.id),
         "name": store.name,
@@ -440,7 +453,8 @@ def _serialize_public_store(
         "status": store.status.value
         if hasattr(store.status, "value")
         else str(store.status),
-        "settings": store.settings or {},
+        "settings": raw_settings,
+        "seo": seo_normalized,
         "theme_settings": store.theme_settings,
         "business_hours": store.business_hours or {},
         "default_currency": store.default_currency.value
@@ -650,6 +664,8 @@ async def browse_products(
             # Meta Catalog product ID — when set, the storefront uses
             # it as `content_ids` on Pixel events. Null = use product.id.
             "meta_catalog_id": product.meta_catalog_id,
+            "seo_title": product.seo_title,
+            "seo_description": product.seo_description,
             "created_at": str(product.created_at),
             "updated_at": str(product.updated_at),
         }
@@ -772,6 +788,8 @@ async def browse_products_cursor(
             tags=product.tags,
             attributes=product.attributes,
             meta_catalog_id=product.meta_catalog_id,
+            seo_title=product.seo_title,
+            seo_description=product.seo_description,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         )
@@ -863,6 +881,8 @@ async def get_product_by_slug(
             images=product.images,
             tags=product.tags,
             attributes=product.attributes,
+            seo_title=product.seo_title,
+            seo_description=product.seo_description,
             options=getattr(product, "options", None) or [],
             variants=variant_summaries,
             meta_catalog_id=product.meta_catalog_id,
