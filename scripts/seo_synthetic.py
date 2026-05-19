@@ -1,8 +1,7 @@
 """SEO synthetic monitor — Phase 6.
 
-Pulls the list of active stores from the database, fetches a small set
-of canonical paths from each, and asserts the SEO contract from
-Phases 1 + 2:
+Hits a known list of merchant subdomains and asserts the SEO contract
+from Phases 1 + 2:
 
 - 200 status on every checked path.
 - Non-empty `<title>` and `<meta name="description">`.
@@ -17,10 +16,24 @@ Phases 1 + 2:
 Run from cron or GitHub Actions. Exits 1 on any failure so the
 scheduler can alert.
 
+Two ways to feed the subdomain list:
+
+1. ``--subdomains foo,bar,baz`` — explicit list. Used by the GitHub
+   Actions schedule so the workflow doesn't need DATABASE_URL.
+2. No flag → pull `WHERE status='active'` from the database. Used
+   when running on the droplet beside the API container; the
+   AsyncSessionLocal connection already has DB creds.
+
 Usage:
+    # Subdomain list, no DB access (CI-friendly):
+    python scripts/seo_synthetic.py --subdomains sawsaw,bon-younes,yarab
+
+    # DB-driven (active stores only):
     python scripts/seo_synthetic.py
+
+    # Common variants:
     python scripts/seo_synthetic.py --max-stores 5  # cap during dev
-    python scripts/seo_synthetic.py --host-template "https://{sub}.test.numueg.app"
+    python scripts/seo_synthetic.py --host-template "{sub}.test.numueg.app"
 """
 
 from __future__ import annotations
@@ -32,10 +45,6 @@ import sys
 from collections.abc import Iterable
 
 import httpx
-from sqlalchemy import select
-
-from src.infrastructure.database.connection import AsyncSessionLocal
-from src.infrastructure.database.models.tenant.store import StoreModel
 
 # Paths that must exist + pass the indexable-route checks. Keep this list
 # in sync with the static-sitemap paths in
@@ -110,7 +119,16 @@ async def _check_robots_and_sitemap(client: httpx.AsyncClient, host: str) -> lis
 
 async def _active_subdomains() -> list[str]:
     """Active stores only — suspended/inactive stores are intentionally
-    excluded since they should be serving Disallow: / per Phase 2."""
+    excluded since they should be serving Disallow: / per Phase 2.
+
+    DB-backed; import is deferred so the CI path (subdomain list passed
+    via --subdomains) doesn't need DATABASE_URL or the sqlalchemy stack.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.store import StoreModel
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(StoreModel.subdomain).where(StoreModel.status == "active")
@@ -127,8 +145,15 @@ def _format_failures(failures: dict[str, list[str]]) -> str:
     return "\n".join(lines)
 
 
-async def _run(host_template: str, max_stores: int | None) -> int:
-    subdomains: Iterable[str] = await _active_subdomains()
+async def _run(
+    host_template: str,
+    max_stores: int | None,
+    explicit_subdomains: list[str] | None,
+) -> int:
+    if explicit_subdomains is not None:
+        subdomains: Iterable[str] = explicit_subdomains
+    else:
+        subdomains = await _active_subdomains()
     if max_stores is not None:
         subdomains = list(subdomains)[:max_stores]
 
@@ -150,6 +175,13 @@ async def _run(host_template: str, max_stores: int | None) -> int:
     return 0
 
 
+def _parse_subdomains(raw: str | None) -> list[str] | None:
+    if raw is None:
+        return None
+    items = [s.strip() for s in raw.split(",")]
+    return [s for s in items if s]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -163,8 +195,25 @@ def main() -> None:
         default=None,
         help="Cap merchants checked (useful for dev runs).",
     )
+    parser.add_argument(
+        "--subdomains",
+        default=None,
+        help=(
+            "Comma-separated explicit list of subdomains to check. When set, "
+            "the script skips the DATABASE_URL lookup — required for the "
+            "GitHub Actions schedule (which doesn't have DB access)."
+        ),
+    )
     args = parser.parse_args()
-    sys.exit(asyncio.run(_run(args.host_template, args.max_stores)))
+    sys.exit(
+        asyncio.run(
+            _run(
+                args.host_template,
+                args.max_stores,
+                _parse_subdomains(args.subdomains),
+            )
+        )
+    )
 
 
 if __name__ == "__main__":
