@@ -21,6 +21,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -676,13 +677,35 @@ async def browse_products(
             product_data = field_selector.filter_dict(product_data, requested_fields)
         products.append(product_data)
 
+    total_pages = (result.total + limit - 1) // limit if limit > 0 else 0
+
+    if fields:
+        # Sparse-fieldset response items are stripped dicts and will not satisfy
+        # ProductResponse's required fields, so go around FastAPI's response_model
+        # validation by returning a Response subclass directly. The caller asked
+        # for these specific fields, so the contract is "exactly what you asked
+        # for", not the full schema.
+        return JSONResponse(
+            content={
+                "success": True,
+                "data": {
+                    "items": products,
+                    "total": result.total,
+                    "page": page,
+                    "page_size": limit,
+                    "total_pages": total_pages,
+                },
+                "message": "Products retrieved successfully",
+            }
+        )
+
     return SuccessResponse(
         data=PaginatedListResponse(
             items=products,
             total=result.total,
             page=page,
             page_size=limit,
-            total_pages=(result.total + limit - 1) // limit if limit > 0 else 0,
+            total_pages=total_pages,
         ),
         message="Products retrieved successfully",
     )
