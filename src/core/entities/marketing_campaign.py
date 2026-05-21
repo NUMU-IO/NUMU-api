@@ -103,6 +103,11 @@ class MarketingCampaign(BaseEntity):
     # Free-form merchant note.
     note: str | None = None
     created_by: UUID | None = None
+    # Stable Crockford base32 identifier embedded in trackable-link
+    # utm_campaign values. Generated server-side at create time so links
+    # survive campaign renames. Per-store uniqueness is enforced at the
+    # DB level (see uq_campaigns_store_short_code).
+    short_code: str = Field(min_length=6, max_length=8)
 
     def can_transition_to(self, target: CampaignStatus) -> bool:
         return target in VALID_CAMPAIGN_TRANSITIONS.get(self.status, [])

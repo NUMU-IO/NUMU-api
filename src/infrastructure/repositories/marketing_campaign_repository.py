@@ -45,6 +45,7 @@ def _to_entity(row: MarketingCampaignModel) -> MarketingCampaign:
         failed_count=row.failed_count,
         note=row.note,
         created_by=row.created_by,
+        short_code=row.short_code,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -123,6 +124,7 @@ class MarketingCampaignRepository:
             scheduled_at=campaign.scheduled_at,
             note=campaign.note,
             created_by=campaign.created_by,
+            short_code=campaign.short_code,
         )
         self._session.add(row)
         await self._session.flush()

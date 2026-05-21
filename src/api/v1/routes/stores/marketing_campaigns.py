@@ -18,22 +18,33 @@ via the channel-specific service (Twilio for SMS, Resend for email).
 
 from __future__ import annotations
 
+import base64
+import io
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
+import qrcode
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.api.dependencies import get_current_user_id, verify_store_ownership
-from src.api.dependencies.repositories import get_store_repository
+from src.api.dependencies.repositories import (
+    get_product_repository,
+    get_store_repository,
+)
 from src.api.responses import SuccessResponse
+from src.application.services.link_builder import LinkBuilder
+from src.application.services.short_code_generator import (
+    generate as generate_short_code,
+)
 from src.core.entities.marketing_campaign import (
     CampaignChannel,
     CampaignStatus,
     MarketingCampaign,
 )
 from src.infrastructure.database.connection import AsyncSessionLocal
-from src.infrastructure.repositories import StoreRepository
+from src.infrastructure.repositories import ProductRepository, StoreRepository
 from src.infrastructure.repositories.marketing_campaign_repository import (
     MarketingCampaignRepository,
 )
@@ -178,6 +189,9 @@ async def create_campaign(
 
     async with AsyncSessionLocal() as session:
         repo = MarketingCampaignRepository(session)
+        # Stable trackable-link identifier — generated once, never
+        # regenerated on rename. See research.md R-02.
+        short_code = await generate_short_code(store_id, session)
         created = await repo.create(
             MarketingCampaign(
                 tenant_id=store.tenant_id,
@@ -193,6 +207,7 @@ async def create_campaign(
                 scheduled_at=body.scheduled_at,
                 note=body.note,
                 created_by=user_id,
+                short_code=short_code,
             )
         )
         await session.commit()
@@ -278,9 +293,7 @@ async def update_campaign(
     summary="Schedule a campaign send",
     operation_id="schedule_marketing_campaign",
 )
-async def schedule_campaign(
-    store_id: UUID, campaign_id: UUID, body: ScheduleRequest
-):
+async def schedule_campaign(store_id: UUID, campaign_id: UUID, body: ScheduleRequest):
     async with AsyncSessionLocal() as session:
         repo = MarketingCampaignRepository(session)
         c = await repo.get_by_id(campaign_id)
@@ -353,6 +366,195 @@ async def cancel_campaign(store_id: UUID, campaign_id: UUID):
             )
         updated = await repo.transition(campaign_id, CampaignStatus.CANCELED)
         await session.commit()
+    return SuccessResponse(data=_to_response(updated), message="Campaign canceled")
+
+
+# ── Trackable-link generator (feature 001) ───────────────────────
+
+
+_VALID_SOURCES = {
+    "facebook",
+    "instagram",
+    "whatsapp",
+    "email",
+    "tiktok",
+    "sms",
+    "qr",
+    "other",
+}
+
+
+class TrackableLinkDestination(BaseModel):
+    """Where the trackable link should resolve to.
+
+    For ``custom`` destinations, the caller is responsible for having
+    pre-validated the path via POST ``/storefront/validate-path``. This
+    endpoint composes the URL only — it does not re-validate.
+    """
+
+    kind: Literal["homepage", "collection", "product", "custom"]
+    collection_slug: str | None = Field(default=None, max_length=200)
+    product_id: UUID | None = None
+    custom_path: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _enforce_kind_specific_field(self) -> TrackableLinkDestination:
+        if self.kind == "collection" and not self.collection_slug:
+            raise ValueError("collection_slug is required when kind=collection")
+        if self.kind == "product" and self.product_id is None:
+            raise ValueError("product_id is required when kind=product")
+        if self.kind == "custom" and not self.custom_path:
+            raise ValueError("custom_path is required when kind=custom")
+        return self
+
+
+class TrackableLinkRequest(BaseModel):
+    destination: TrackableLinkDestination
+    source: str = Field(min_length=1, max_length=40)
+    medium: str | None = Field(default=None, max_length=40)
+    term: str | None = Field(default=None, max_length=200)
+    content: str | None = Field(default=None, max_length=200)
+
+
+class TrackableLinkDestinationResponse(BaseModel):
+    kind: str
+    product_id: str | None = None
+    collection_slug: str | None = None
+    resolved_path: str
+
+
+class TrackableLinkResponse(BaseModel):
+    url: str
+    qr_png_base64: str
+    short_code: str
+    campaign_slug: str
+    destination: TrackableLinkDestinationResponse
+
+
+def _render_qr_png_base64(url: str) -> str:
+    """Render the URL as a 512×512 PNG, error-correction level M, base64."""
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+@router.post(
+    "/{campaign_id}/trackable-link",
+    response_model=SuccessResponse[TrackableLinkResponse],
+    summary="Generate a trackable URL + QR for a campaign destination",
+    operation_id="generate_trackable_link",
+)
+async def generate_trackable_link(
+    store_id: UUID,
+    campaign_id: UUID,
+    body: TrackableLinkRequest,
+    store_repo: StoreRepository = Depends(get_store_repository),
+    product_repo: ProductRepository = Depends(get_product_repository),
+):
+    if body.source not in _VALID_SOURCES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown source preset: {body.source!r}",
+        )
+
+    store = await store_repo.get_by_id(store_id)
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
+        )
+
+    # SEC-001: load the campaign filtering by BOTH (id, store_id). 404
+    # (not 403) so cross-tenant probes can't distinguish "exists but
+    # not yours" from "doesn't exist".
+    async with AsyncSessionLocal() as session:
+        repo = MarketingCampaignRepository(session)
+        campaign = await repo.get_by_id(campaign_id)
+    if campaign is None or campaign.store_id != store_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found"
+        )
+
+    builder = LinkBuilder(store)
+    destination = body.destination
+    destination_resp: TrackableLinkDestinationResponse
+
+    if destination.kind == "homepage":
+        url = builder.storefront_url(
+            campaign=campaign,
+            source=body.source,
+            medium=body.medium,
+            term=body.term,
+            content=body.content,
+        )
+        destination_resp = TrackableLinkDestinationResponse(
+            kind="homepage", resolved_path="/"
+        )
+    elif destination.kind == "collection":
+        url = builder.collection_url(
+            collection_slug=destination.collection_slug or "",
+            campaign=campaign,
+            source=body.source,
+            medium=body.medium,
+            term=body.term,
+            content=body.content,
+        )
+        destination_resp = TrackableLinkDestinationResponse(
+            kind="collection",
+            collection_slug=destination.collection_slug,
+            resolved_path=f"/collections?category={destination.collection_slug}",
+        )
+    elif destination.kind == "product":
+        product = await product_repo.get_by_id(destination.product_id)
+        if product is None or product.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Product not found on this store",
+            )
+        url = builder.product_url(
+            product=product,
+            campaign=campaign,
+            source=body.source,
+            medium=body.medium,
+            term=body.term,
+            content=body.content,
+        )
+        slug_or_id = (product.slug or "").strip() or str(product.id)
+        destination_resp = TrackableLinkDestinationResponse(
+            kind="product",
+            product_id=str(product.id),
+            resolved_path=f"/product/{slug_or_id}",
+        )
+    else:  # custom
+        url = builder.custom_url(
+            path=destination.custom_path or "",
+            campaign=campaign,
+            source=body.source,
+            medium=body.medium,
+            term=body.term,
+            content=body.content,
+        )
+        destination_resp = TrackableLinkDestinationResponse(
+            kind="custom", resolved_path=destination.custom_path
+        )
+
+    qr_png_b64 = _render_qr_png_base64(url)
+
     return SuccessResponse(
-        data=_to_response(updated), message="Campaign canceled"
+        data=TrackableLinkResponse(
+            url=url,
+            qr_png_base64=qr_png_b64,
+            short_code=campaign.short_code,
+            campaign_slug=LinkBuilder.slug_from_campaign_name(campaign.name),
+            destination=destination_resp,
+        ),
+        message="Trackable link generated",
     )
