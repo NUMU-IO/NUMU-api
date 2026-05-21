@@ -67,6 +67,16 @@ async def _insert_funnel_event(event: dict[str, Any]) -> bool:
         "customer_id": _coerce_uuid(event.get("customer_id")),
         "step_data": event.get("step_data"),
         "event_id": _coerce_uuid(event.get("event_id")),
+        # Feature 001 — attribution columns. Optional; legacy task
+        # payloads that don't include these keys get NULL columns,
+        # which is the correct fallback.
+        "utm_source": event.get("utm_source"),
+        "utm_medium": event.get("utm_medium"),
+        "utm_campaign": event.get("utm_campaign"),
+        "utm_term": event.get("utm_term"),
+        "utm_content": event.get("utm_content"),
+        "campaign_id": _coerce_uuid(event.get("campaign_id")),
+        "referrer": event.get("referrer"),
     }
 
     stmt = pg_insert(FunnelEventModel).values(**payload)

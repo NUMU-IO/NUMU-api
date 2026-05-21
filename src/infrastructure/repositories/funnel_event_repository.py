@@ -32,6 +32,15 @@ class FunnelEventRepository:
         customer_id: UUID | None = None,
         step_data: dict | None = None,
         event_id: UUID | None = None,
+        # Feature 001 — attribution columns. All optional; null for
+        # visitors who never landed via a campaign-tagged URL.
+        utm_source: str | None = None,
+        utm_medium: str | None = None,
+        utm_campaign: str | None = None,
+        utm_term: str | None = None,
+        utm_content: str | None = None,
+        campaign_id: UUID | None = None,
+        referrer: str | None = None,
     ) -> None:
         """Record a funnel event.
 
@@ -48,6 +57,13 @@ class FunnelEventRepository:
             customer_id=customer_id,
             step_data=step_data,
             event_id=event_id,
+            utm_source=utm_source,
+            utm_medium=utm_medium,
+            utm_campaign=utm_campaign,
+            utm_term=utm_term,
+            utm_content=utm_content,
+            campaign_id=campaign_id,
+            referrer=referrer,
         )
         self.session.add(event)
         await self.session.flush()

@@ -11,20 +11,25 @@ trigger stale fan-outs from queued jobs.
 """
 
 import ipaddress
+import json
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import unquote
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Path, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from src.api.dependencies.repositories import (
     get_funnel_event_repository,
     get_page_view_repository,
     get_store_repository,
 )
+from src.application.services.attribution_sanitizer import sanitize_utm
+from src.application.services.campaign_resolver import resolve_campaign_id
 from src.config import settings
 from src.config.logging_config import get_logger
+from src.core.entities.attribution import AttributionSnapshot
 from src.core.entities.store import Store
 from src.infrastructure.cache.idempotency_keys import (
     IdempotencyKeys,
@@ -61,6 +66,15 @@ async def _emit_funnel_event(
     customer_id: UUID | None,
     step_data: dict | None,
     event_id: UUID | None,
+    # Feature 001 — attribution columns on funnel_events. All optional;
+    # null for visitors who never landed via a campaign-tagged URL.
+    utm_source: str | None = None,
+    utm_medium: str | None = None,
+    utm_campaign: str | None = None,
+    utm_term: str | None = None,
+    utm_content: str | None = None,
+    campaign_id: UUID | None = None,
+    referrer: str | None = None,
 ) -> None:
     """Persist a funnel event — async via Celery when the kill switch is on.
 
@@ -87,6 +101,13 @@ async def _emit_funnel_event(
             customer_id=customer_id,
             step_data=step_data,
             event_id=event_id,
+            utm_source=utm_source,
+            utm_medium=utm_medium,
+            utm_campaign=utm_campaign,
+            utm_term=utm_term,
+            utm_content=utm_content,
+            campaign_id=campaign_id,
+            referrer=referrer,
         )
         return
 
@@ -109,10 +130,56 @@ async def _emit_funnel_event(
                 "session_fingerprint": session_fingerprint,
                 "step": step,
                 "step_data": step_data,
+                "utm_source": utm_source,
+                "utm_medium": utm_medium,
+                "utm_campaign": utm_campaign,
+                "utm_term": utm_term,
+                "utm_content": utm_content,
+                "campaign_id": str(campaign_id) if campaign_id else None,
+                "referrer": referrer,
             }
         },
         queue="analytics",
     )
+
+
+def _read_attribution_envelope(
+    body_attribution: AttributionSnapshot | None,
+    request: Request,
+) -> AttributionSnapshot | None:
+    """Resolve the attribution envelope for a tracking request.
+
+    Preference order (feature 001 SEC-001 + R-01):
+        1. body.attribution — present when the storefront has been
+           updated to send the envelope explicitly.
+        2. Cookie ``numu_attribution`` — legacy clients that don't yet
+           send the envelope but have the cookie set by the visitor's
+           prior landing.
+
+    On parse failure, returns None — never raises. Analytics outages
+    must never break the storefront response.
+    """
+    if body_attribution is not None:
+        return body_attribution
+    raw = request.cookies.get("numu_attribution")
+    if not raw:
+        return None
+    try:
+        decoded = unquote(raw)
+        parsed = json.loads(decoded)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    # Forwards-compatibility hatch: a v2 client talking to a v1 server
+    # degrades silently to "no attribution" rather than mis-parsing the
+    # envelope (per contracts/storefront-attribution-api.md). Check v
+    # BEFORE Pydantic validation since unrelated future fields might
+    # otherwise still validate against the v1 model.
+    if not isinstance(parsed, dict) or parsed.get("v") != 1:
+        return None
+    try:
+        return AttributionSnapshot.model_validate(parsed)
+    except (ValidationError, ValueError):
+        return None
 
 
 def _anonymize_ip(raw: str | None) -> str | None:
@@ -172,6 +239,13 @@ class TrackPageViewRequest(BaseModel):
     # the storefront when the visitor has explicitly denied marketing
     # consent.
     opt_out: bool | None = None
+    # Feature 001 — full attribution envelope (numu_attribution cookie shape).
+    # When present, the route stamps utm_* + campaign_id on the funnel
+    # event so per-campaign funnel reports work even when the URL has
+    # lost the original UTMs after the first hop. Absent for legacy
+    # clients — the route falls back to parsing the cookie from the
+    # Cookie: header automatically.
+    attribution: AttributionSnapshot | None = None
 
 
 @router.post("/track", status_code=204)
@@ -242,6 +316,26 @@ async def track_page_view(
                 funnel_event_id = UUID(body.event_id)
             except ValueError:
                 funnel_event_id = None
+        # Feature 001 — resolve attribution for the funnel row. Prefer the
+        # body envelope; fall back to the cookie. Then sanitize each UTM
+        # (SEC-005 — visitors can craft arbitrary URLs) and look up the
+        # campaign_id via the Crockford short_code (SEC-006 — scoped by
+        # store_id; cross-tenant resolution is impossible).
+        attribution = _read_attribution_envelope(body.attribution, request)
+        last_touch = attribution.last_touch if attribution else None
+        f_utm_source = sanitize_utm(last_touch.utm_source if last_touch else None)
+        f_utm_medium = sanitize_utm(last_touch.utm_medium if last_touch else None)
+        f_utm_campaign = sanitize_utm(last_touch.utm_campaign if last_touch else None)
+        f_utm_term = sanitize_utm(last_touch.utm_term if last_touch else None)
+        f_utm_content = sanitize_utm(last_touch.utm_content if last_touch else None)
+        f_referrer = (
+            last_touch.referrer if last_touch and last_touch.referrer else body.referrer
+        )
+        f_campaign_id = await resolve_campaign_id(
+            session=funnel_repo.session,
+            store_id=store.id,
+            utm_campaign=f_utm_campaign,
+        )
         await _emit_funnel_event(
             funnel_repo=funnel_repo,
             idempotency=idempotency,
@@ -252,6 +346,13 @@ async def track_page_view(
             customer_id=None,
             step_data=step_data,
             event_id=funnel_event_id,
+            utm_source=f_utm_source,
+            utm_medium=f_utm_medium,
+            utm_campaign=f_utm_campaign,
+            utm_term=f_utm_term,
+            utm_content=f_utm_content,
+            campaign_id=f_campaign_id,
+            referrer=f_referrer,
         )
     except Exception:
         pass  # Non-critical — don't break page tracking
@@ -317,6 +418,11 @@ class TrackAnalyticsEventRequest(BaseModel):
     payload: dict | None = None
     fingerprint: str | None = Field(None, max_length=64)
     ts: int | None = None  # client-side ms timestamp; informational
+    # Feature 001 — full attribution envelope. Same behavior as
+    # TrackPageViewRequest: when present, stamps utm_* + campaign_id on
+    # the funnel row; when absent, the route falls back to parsing the
+    # numu_attribution cookie from the Cookie: header.
+    attribution: AttributionSnapshot | None = None
 
 
 @router.post(
@@ -355,6 +461,22 @@ async def track_analytics_event(
     # add_to_wishlist events did we get last week" without depending
     # on a third-party pixel.
     try:
+        # Feature 001 — same attribution resolution as track_page_view:
+        # prefer body.attribution, fall back to cookie, sanitize, resolve
+        # campaign_id (SEC-006 store-scoped).
+        attribution = _read_attribution_envelope(body.attribution, request)
+        last_touch = attribution.last_touch if attribution else None
+        e_utm_source = sanitize_utm(last_touch.utm_source if last_touch else None)
+        e_utm_medium = sanitize_utm(last_touch.utm_medium if last_touch else None)
+        e_utm_campaign = sanitize_utm(last_touch.utm_campaign if last_touch else None)
+        e_utm_term = sanitize_utm(last_touch.utm_term if last_touch else None)
+        e_utm_content = sanitize_utm(last_touch.utm_content if last_touch else None)
+        e_referrer = last_touch.referrer if last_touch else None
+        e_campaign_id = await resolve_campaign_id(
+            session=funnel_repo.session,
+            store_id=store.id,
+            utm_campaign=e_utm_campaign,
+        )
         await _emit_funnel_event(
             funnel_repo=funnel_repo,
             idempotency=idempotency,
@@ -365,6 +487,13 @@ async def track_analytics_event(
             customer_id=None,
             step_data=body.payload or {},
             event_id=None,
+            utm_source=e_utm_source,
+            utm_medium=e_utm_medium,
+            utm_campaign=e_utm_campaign,
+            utm_term=e_utm_term,
+            utm_content=e_utm_content,
+            campaign_id=e_campaign_id,
+            referrer=e_referrer,
         )
     except Exception:
         pass

@@ -45,6 +45,9 @@ from src.core.entities.marketing_campaign import (
 )
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.repositories import ProductRepository, StoreRepository
+from src.infrastructure.repositories.analytics_repository import (
+    AnalyticsRepository,
+)
 from src.infrastructure.repositories.marketing_campaign_repository import (
     MarketingCampaignRepository,
 )
@@ -557,4 +560,112 @@ async def generate_trackable_link(
             destination=destination_resp,
         ),
         message="Trackable link generated",
+    )
+
+
+# ── Per-campaign performance (feature 001 US3) ──────────────────
+
+
+class ConversionRatesResponse(BaseModel):
+    session_to_atc: float
+    atc_to_checkout: float
+    checkout_to_order: float
+    session_to_order: float
+
+
+class TopProductResponse(BaseModel):
+    product_id: str | None = None
+    name: str | None = None
+    orders: int
+    revenue_cents: int
+
+
+class CampaignPerformanceResponse(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    short_code: str
+    date_from: str
+    date_to: str
+    totals: CampaignPerformanceTotals
+
+
+class CampaignPerformanceTotals(BaseModel):
+    sessions: int
+    product_views: int
+    add_to_cart: int
+    checkout_started: int
+    orders: int
+    revenue_cents: int
+    average_order_value_cents: int
+    conversion_rates: ConversionRatesResponse
+    top_products: list[TopProductResponse]
+
+
+CampaignPerformanceResponse.model_rebuild()
+
+
+@router.get(
+    "/{campaign_id}/performance",
+    response_model=SuccessResponse[CampaignPerformanceResponse],
+    summary="Per-campaign performance rollup",
+    operation_id="get_campaign_performance",
+)
+async def get_campaign_performance(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(..., description="Range start (inclusive)"),
+    date_to: datetime = Query(..., description="Range end (inclusive)"),
+):
+    """Sessions, ATCs, checkouts, orders, revenue, AOV, conversion rates,
+    top products for a campaign over a date range.
+
+    SEC-001: load the campaign WHERE id = :campaign_id AND store_id =
+    :store_id; 404 on mismatch (never 403 — avoids leaking campaign
+    existence across tenants). The analytics-repo method is also
+    scoped by (store_id, campaign_id) at the SQL level, so a probe
+    that somehow slipped past the route check cannot leak via the
+    underlying query either.
+    """
+    if date_to < date_from:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="date_to must be >= date_from",
+        )
+
+    async with AsyncSessionLocal() as session:
+        repo = MarketingCampaignRepository(session)
+        campaign = await repo.get_by_id(campaign_id)
+        if campaign is None or campaign.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found",
+            )
+        analytics = AnalyticsRepository(session)
+        totals = await analytics.campaign_performance(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+    return SuccessResponse(
+        data=CampaignPerformanceResponse(
+            campaign_id=str(campaign_id),
+            campaign_name=campaign.name,
+            short_code=campaign.short_code,
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            totals=CampaignPerformanceTotals(
+                sessions=totals["sessions"],
+                product_views=totals["product_views"],
+                add_to_cart=totals["add_to_cart"],
+                checkout_started=totals["checkout_started"],
+                orders=totals["orders"],
+                revenue_cents=totals["revenue_cents"],
+                average_order_value_cents=totals["average_order_value_cents"],
+                conversion_rates=ConversionRatesResponse(**totals["conversion_rates"]),
+                top_products=[TopProductResponse(**p) for p in totals["top_products"]],
+            ),
+        ),
+        message="Campaign performance retrieved",
     )
