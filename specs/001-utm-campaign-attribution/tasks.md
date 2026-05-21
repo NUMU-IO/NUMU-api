@@ -31,9 +31,9 @@ Three repos:
 
 **Purpose**: Minimal feature-specific prerequisites that don't belong to any single user story.
 
-- [ ] T001 [P] Add `qrcode[pil]>=7.0` to `NUMU-api/requirements.in` and recompile `NUMU-api/requirements.txt` via the project's pinned compile workflow.
-- [ ] T002 [P] Create attribution value objects in `NUMU-api/src/core/entities/attribution.py` — `AttributionTouch` and `AttributionSnapshot` Pydantic models matching the cookie schema (v=1 envelope, first_touch + last_touch + session_id). **Size caps (SEC-004)**: enforce per-field `max_length` on every string — utm_* (200), referrer (500), landing_path (500), gclid (256), fbclid (256), session_id (64). Add a model-level validator that rejects envelopes whose serialized form exceeds 4096 bytes (prevents storage blow-up from oversized cookies).
-- [ ] T003 [P] Create attribution request schema in `NUMU-api/src/api/v1/schemas/storefront/attribution.py` — the shape clients post inside `/track` and `/checkout` request bodies (re-exports + validators for the value objects from T002).
+- [X] T001 [P] Add `qrcode[pil]>=7.0` to `NUMU-api/requirements.in` and recompile `NUMU-api/requirements.txt` via the project's pinned compile workflow. — **Already present** at `pyproject.toml:69` (`qrcode[pil]>=7.4.0`); no change needed.
+- [X] T002 [P] Create attribution value objects in `NUMU-api/src/core/entities/attribution.py` — `AttributionTouch` and `AttributionSnapshot` Pydantic models matching the cookie schema (v=1 envelope, first_touch + last_touch + session_id). **Size caps (SEC-004)**: enforce per-field `max_length` on every string — utm_* (200), referrer (500), landing_path (500), gclid (256), fbclid (256), session_id (64). Add a model-level validator that rejects envelopes whose serialized form exceeds 4096 bytes (prevents storage blow-up from oversized cookies).
+- [X] T003 [P] Create attribution request schema in `NUMU-api/src/api/v1/schemas/storefront/attribution.py` — the shape clients post inside `/track` and `/checkout` request bodies (re-exports + validators for the value objects from T002).
 
 ---
 
@@ -43,17 +43,17 @@ Three repos:
 
 **⚠️ CRITICAL**: No user story work can begin until Phase 2 is complete.
 
-- [ ] T004 [P] Implement short-code generator in `NUMU-api/src/application/services/short_code_generator.py` — Crockford base32 (32-char alphabet excluding `I/L/O/U`), 6-char output drawn from `secrets.choice(...)` (NOT `random` — codes must be cryptographically non-predictable per SEC-003), retry-on-conflict generator function with `generate(store_id, session)` signature.
-- [ ] T005 [P] Implement attribution sanitizer in `NUMU-api/src/application/services/attribution_sanitizer.py` — strip control chars (`\x00–\x1F`, `\x7F`), strip `<`, `>`, `"`, length-cap to 200 chars; exposes `sanitize_utm(value: str | None) -> str | None`.
-- [ ] T006 [P] Update `MarketingCampaignModel` in `NUMU-api/src/infrastructure/database/models/tenant/marketing_campaign.py` — add `short_code` String(8) column (nullable initially; migration will backfill + set NOT NULL).
-- [ ] T007 [P] Update `OrderModel` in `NUMU-api/src/infrastructure/database/models/tenant/order.py` — add columns `utm_term`, `utm_content`, `campaign_id` (FK to marketing_campaigns, ON DELETE SET NULL), `attribution` (JSONB), `first_touch_at` (TIMESTAMPTZ).
-- [ ] T008 [P] Update `FunnelEventModel` in `NUMU-api/src/infrastructure/database/models/tenant/funnel_event.py` — add `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `campaign_id` (FK), `referrer` columns.
-- [ ] T009 [P] Update `CustomerModel` in `NUMU-api/src/infrastructure/database/models/tenant/customer.py` — add `first_touch_attribution` (JSONB) and `first_touch_at` (TIMESTAMPTZ) columns.
-- [ ] T010 Create Alembic migration at `NUMU-api/alembic/versions/utm_attribution_20260521_add_campaign_attribution.py` implementing the 12-step upgrade and reverse downgrade per data-model.md. Include deterministic backfill of `short_code` for existing campaigns. Use `op.execute("CREATE INDEX CONCURRENTLY …")` for the two partial indexes on funnel_events. Depends on T004–T009.
-- [ ] T011 Implement campaign resolver in `NUMU-api/src/application/services/campaign_resolver.py` — `resolve_campaign_id(session, store_id, utm_campaign: str | None) -> UUID | None`: split trailing `-<6chars>` from the string, look up `(store_id, short_code)`; if no match, return None (per FR-011). Depends on T006.
-- [ ] T012 [P] Unit test in `NUMU-api/tests/unit/test_short_code_generator.py` — Crockford alphabet only, length, retry-on-conflict behavior. Depends on T004.
-- [ ] T013 [P] Unit test in `NUMU-api/tests/unit/test_attribution_sanitizer.py` — control chars stripped, `<>"` stripped, length cap, null pass-through. Depends on T005.
-- [ ] T014 [P] Unit test in `NUMU-api/tests/unit/test_campaign_resolver.py` — short_code split logic, unknown campaigns return None, malformed strings return None, multi-store isolation. Depends on T011.
+- [X] T004 [P] Implement short-code generator in `NUMU-api/src/application/services/short_code_generator.py` — Crockford base32 (32-char alphabet excluding `I/L/O/U`), 6-char output drawn from `secrets.choice(...)` (NOT `random` — codes must be cryptographically non-predictable per SEC-003), retry-on-conflict generator function with `generate(store_id, session)` signature.
+- [X] T005 [P] Implement attribution sanitizer in `NUMU-api/src/application/services/attribution_sanitizer.py` — strip control chars (`\x00–\x1F`, `\x7F`), strip `<`, `>`, `"`, length-cap to 200 chars; exposes `sanitize_utm(value: str | None) -> str | None`.
+- [X] T006 [P] Update `MarketingCampaignModel` in `NUMU-api/src/infrastructure/database/models/tenant/marketing_campaign.py` — add `short_code` String(8) column (nullable initially; migration will backfill + set NOT NULL).
+- [X] T007 [P] Update `OrderModel` in `NUMU-api/src/infrastructure/database/models/tenant/order.py` — add columns `utm_term`, `utm_content`, `campaign_id` (FK to marketing_campaigns, ON DELETE SET NULL), `attribution` (JSONB), `first_touch_at` (TIMESTAMPTZ).
+- [X] T008 [P] Update `FunnelEventModel` in `NUMU-api/src/infrastructure/database/models/tenant/funnel_event.py` — add `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `campaign_id` (FK), `referrer` columns.
+- [X] T009 [P] Update `CustomerModel` in `NUMU-api/src/infrastructure/database/models/tenant/customer.py` — add `first_touch_attribution` (JSONB) and `first_touch_at` (TIMESTAMPTZ) columns.
+- [X] T010 Create Alembic migration at `NUMU-api/alembic/versions/20260521_010000_add_utm_campaign_attribution.py` (filename adjusted to match the `YYYYMMDD_HHMMSS_*` convention in use) implementing the 12-step upgrade and reverse downgrade per data-model.md. Include deterministic backfill of `short_code` for existing campaigns. Use `op.execute("CREATE INDEX CONCURRENTLY …")` for the two partial indexes on funnel_events. Depends on T004–T009.
+- [X] T011 Implement campaign resolver in `NUMU-api/src/application/services/campaign_resolver.py` — `resolve_campaign_id(session, store_id, utm_campaign: str | None) -> UUID | None`: split trailing `-<6chars>` from the string, look up `(store_id, short_code)`; if no match, return None (per FR-011). Depends on T006.
+- [X] T012 [P] Unit test in `NUMU-api/tests/unit/test_short_code_generator.py` — Crockford alphabet only, length, retry-on-conflict behavior. Depends on T004.
+- [X] T013 [P] Unit test in `NUMU-api/tests/unit/test_attribution_sanitizer.py` — control chars stripped, `<>"` stripped, length cap, null pass-through. Depends on T005.
+- [X] T014 [P] Unit test in `NUMU-api/tests/unit/test_campaign_resolver.py` — short_code split logic, unknown campaigns return None, malformed strings return None, multi-store isolation. Depends on T011.
 
 **Checkpoint**: Migration applied locally and on test env. All four entity models reflect new columns. Short-code generator + sanitizer + resolver are usable. All user-story work can begin.
 
