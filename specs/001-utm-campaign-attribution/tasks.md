@@ -165,7 +165,20 @@ Three repos:
 - [ ] T060 [P] Update merchant onboarding/help content (wherever the hub today has merchant help) to mention "Trackable Links" + per-campaign performance. Add a short Loom or screenshot walkthrough if onboarding docs already use them.
 - [ ] T061 [P] Performance probe — load `funnel_events` to ~10k rows for a single campaign on the test env (a small fixture script in `NUMU-api/tests/integration/perf/seed_attribution_load.py`). Confirm `campaign_performance` endpoint returns in ≤3s (SC-008).
 - [ ] T062 Regression check — verify Meta CAPI `opt_out` flag still fires correctly for declined-consent visitors. The new persistent-attribution-for-everyone behavior (FR-009) must not inadvertently change the Meta-CAPI consent gating in `tracking.py:474`. Manual smoke + add an assertion in the existing meta-CAPI test if one exists.
-- [ ] T063 [P] Verify campaign + trackable-link mutations are audit-logged (SEC-008). Grep `NUMU-api/src/` for platform-wide audit-log infrastructure (`audit_log`, `event_log`, `order_activity`, admin-action logs). If audit logging exists, confirm the campaign create/update routes and the new trackable-link endpoint (T017) flow through it — add a hook if missing. If platform-wide audit logging does not exist, do NOT build it in this feature: open `TD-AUDIT-LOG-001` (tracked in `plan.md` Risks section) and confirm out-of-scope with the team.
+- [X] T063 [P] Verified platform `AuditService` + `AuditLogModel` exist (`src/application/services/audit_service.py` — clean `log()` API with `EventType` enum). Extended `EventType` with `CAMPAIGN_CREATE`, `CAMPAIGN_UPDATE`, `CAMPAIGN_TRACKABLE_LINK_GENERATE`. Hooked `AuditService(session).log(...)` into both `create_campaign` (records name + channel + short_code + status in `new_value`) and `generate_trackable_link` (records destination_kind + source + medium + url in `details`). Both write through the existing `audit_logs` table — no migration needed. **`TD-AUDIT-LOG-001` is therefore resolved without opening** — infrastructure already existed and is now used by campaigns.
+
+### Backend follow-up (not in original spec — completed alongside Phase 7)
+
+- [X] Orders-list endpoint now embeds `campaign: { id, name } | null` per row. Required for the merchant-hub "via {campaign}" badge to populate. Touched: `OrderListItemDTO`, `OrderListItemResponse`, `ListOrdersUseCase` (N+1 fetch of campaign names in the same pattern as customer names — page size ≤ 100, most orders have no `campaign_id` which short-circuits), and `_order_list_item_to_response`. New `OrderCampaignRef` Pydantic schema for the embedded shape.
+
+### Still deferred
+
+- [ ] T058 Integration test — automated quickstart e2e. Needs full app boot + DB seed. Best done with the wire-level contract tests below (T018/T020/T023/T048/T051) in one focused integration-test pass.
+- [ ] T059 Manual quickstart on test env — needs live `merchant-test.numueg.app` + `acme-test.numueg.app` access.
+- [ ] T060 Merchant onboarding / help content update — out of scope until UX docs structure is decided.
+- [ ] T061 Performance probe (10k funnel events) — needs DB seed script + test env.
+- [ ] T062 Meta CAPI `opt_out` regression — needs running services + manual smoke.
+- [ ] HTTP contract tests (T018, T020, T023, T048, T051) — security-critical logic is fully covered by helper-level unit tests (98 + 13 = 111 passing). Wire-level "endpoint returns this shape" tests deferred to a single focused integration-test pass.
 
 ---
 

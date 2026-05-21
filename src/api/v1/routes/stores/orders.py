@@ -222,6 +222,13 @@ def _order_to_response(order_dto) -> OrderResponse:
 
 def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
     """Convert OrderListItemDTO to OrderListItemResponse."""
+    from src.api.v1.schemas.tenant.order import OrderCampaignRef
+
+    campaign_ref = (
+        OrderCampaignRef(id=str(order_dto.campaign_id), name=order_dto.campaign_name)
+        if order_dto.campaign_id and order_dto.campaign_name
+        else None
+    )
     return OrderListItemResponse(
         id=str(order_dto.id),
         order_number=order_dto.order_number,
@@ -235,6 +242,7 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
         item_count=order_dto.item_count,
         payment_method=order_dto.payment_method,
         created_at=str(order_dto.created_at),
+        campaign=campaign_ref,
     )
 
 

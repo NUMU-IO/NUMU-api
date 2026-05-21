@@ -364,6 +364,19 @@ class OrderResponse(BaseModel):
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
 
 
+class OrderCampaignRef(BaseModel):
+    """Embedded campaign ref for the orders list (feature 001).
+
+    Only present when the order has a resolved `campaign_id` — i.e.,
+    the visitor arrived via a campaign-tagged URL whose short_code
+    matched a real MarketingCampaign on this store. Null otherwise
+    (direct / untracked / customer-share traffic).
+    """
+
+    id: str
+    name: str
+
+
 class OrderListItemResponse(BaseModel):
     """Order list item response schema (summary)."""
 
@@ -381,6 +394,13 @@ class OrderListItemResponse(BaseModel):
     item_count: int = Field(description="Total items")
     payment_method: str | None = Field(description="Payment method")
     created_at: str = Field(description="ISO 8601 creation timestamp")
+    # Feature 001 — campaign attribution. Null when this order has no
+    # resolved campaign. Hub renders "via {campaign.name}" subtitle
+    # when present (SEC-009: standard JSX text interpolation only).
+    campaign: OrderCampaignRef | None = Field(
+        default=None,
+        description="Resolved marketing campaign for this order, if any",
+    )
 
 
 # ============================================================================

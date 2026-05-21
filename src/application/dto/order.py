@@ -179,10 +179,21 @@ class OrderListItemDTO(BaseDTO):
     item_count: int
     payment_method: str | None
     created_at: datetime
+    # Feature 001 — attribution surface for the merchant orders list.
+    # Both fields are None when the order has no campaign_id FK
+    # (untracked / direct / customer-share traffic). When the FK is set,
+    # the use case loads the campaign and stamps both fields so the hub
+    # can render the "via {campaign_name}" badge without a second
+    # round-trip.
+    campaign_id: UUID | None = None
+    campaign_name: str | None = None
 
     @classmethod
     def from_entity(
-        cls, entity: Order, customer_name: str | None = None
+        cls,
+        entity: Order,
+        customer_name: str | None = None,
+        campaign_name: str | None = None,
     ) -> "OrderListItemDTO":
         """Create DTO from Order entity."""
         return cls(
@@ -198,6 +209,8 @@ class OrderListItemDTO(BaseDTO):
             item_count=entity.item_count,
             payment_method=entity.payment_method,
             created_at=entity.created_at,
+            campaign_id=entity.campaign_id,
+            campaign_name=campaign_name,
         )
 
 

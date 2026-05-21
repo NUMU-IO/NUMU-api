@@ -89,6 +89,16 @@ class EventType(StrEnum):
     PRODUCT_DELETE = "product.delete"
     PRODUCT_IMAGE_UPLOAD = "product.image_upload"
 
+    # Marketing campaign events (feature 001 — SEC-008)
+    # Recorded for compliance + dispute resolution: a merchant who
+    # later questions which campaign attributed a given order needs a
+    # who/when/what trail of campaign creation + trackable-link
+    # generation. Logged at INFO severity (these are routine merchant
+    # actions, not security-sensitive on their own).
+    CAMPAIGN_CREATE = "campaign.create"
+    CAMPAIGN_UPDATE = "campaign.update"
+    CAMPAIGN_TRACKABLE_LINK_GENERATE = "campaign.trackable_link_generate"
+
 
 class AuditService:
     """Centralized audit logging service.

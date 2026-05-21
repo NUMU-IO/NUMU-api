@@ -34,6 +34,7 @@ from src.api.dependencies.repositories import (
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
+from src.application.services.audit_service import AuditService, EventType
 from src.application.services.link_builder import LinkBuilder
 from src.application.services.short_code_generator import (
     generate as generate_short_code,
@@ -212,6 +213,23 @@ async def create_campaign(
                 created_by=user_id,
                 short_code=short_code,
             )
+        )
+        # SEC-008: audit-log the create so disputes over attribution
+        # ("who created this campaign?") have a definitive trail.
+        await AuditService(session).log(
+            event_type=EventType.CAMPAIGN_CREATE,
+            action="create",
+            resource_type="marketing_campaign",
+            resource_id=str(created.id),
+            user_id=user_id,
+            store_id=store_id,
+            tenant_id=store.tenant_id,
+            new_value={
+                "name": created.name,
+                "channel": created.channel.value,
+                "short_code": created.short_code,
+                "status": created.status.value,
+            },
         )
         await session.commit()
     return SuccessResponse(data=_to_response(created), message="Campaign created")
@@ -460,6 +478,7 @@ async def generate_trackable_link(
     store_id: UUID,
     campaign_id: UUID,
     body: TrackableLinkRequest,
+    user_id: UUID = Depends(get_current_user_id),
     store_repo: StoreRepository = Depends(get_store_repository),
     product_repo: ProductRepository = Depends(get_product_repository),
 ):
@@ -550,6 +569,29 @@ async def generate_trackable_link(
         )
 
     qr_png_b64 = _render_qr_png_base64(url)
+
+    # SEC-008: audit-log the link generation. The URL itself is what
+    # gets shared externally — having a who/when trail per link
+    # answers attribution disputes after the fact. We open a small
+    # session just for this write since the rest of the request path
+    # is read-only.
+    async with AsyncSessionLocal() as audit_session:
+        await AuditService(audit_session).log(
+            event_type=EventType.CAMPAIGN_TRACKABLE_LINK_GENERATE,
+            action="generate",
+            resource_type="marketing_campaign",
+            resource_id=str(campaign_id),
+            user_id=user_id,
+            store_id=store_id,
+            tenant_id=campaign.tenant_id,
+            details={
+                "destination_kind": destination.kind,
+                "source": body.source,
+                "medium": body.medium,
+                "url": url,
+            },
+        )
+        await audit_session.commit()
 
     return SuccessResponse(
         data=TrackableLinkResponse(
