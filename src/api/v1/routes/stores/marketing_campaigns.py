@@ -34,11 +34,13 @@ from src.api.dependencies.repositories import (
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
+from src.application.services import short_link_service
 from src.application.services.audit_service import AuditService, EventType
 from src.application.services.link_builder import LinkBuilder
 from src.application.services.short_code_generator import (
     generate as generate_short_code,
 )
+from src.config import settings
 from src.core.entities.marketing_campaign import (
     CampaignChannel,
     CampaignStatus,
@@ -435,6 +437,11 @@ class TrackableLinkRequest(BaseModel):
     medium: str | None = Field(default=None, max_length=40)
     term: str | None = Field(default=None, max_length=200)
     content: str | None = Field(default=None, max_length=200)
+    # Opt-in to also creating a /r/{code} short link. Defaults to
+    # False so existing callers keep their current behaviour; the
+    # merchant hub flips it to True when the merchant clicks the
+    # "Copy short link" affordance.
+    with_short_link: bool = False
 
 
 class TrackableLinkDestinationResponse(BaseModel):
@@ -450,6 +457,13 @@ class TrackableLinkResponse(BaseModel):
     short_code: str
     campaign_slug: str
     destination: TrackableLinkDestinationResponse
+    # Optional short URL — only set when the request had
+    # ``with_short_link=true``. Shape: ``https://numueg.app/r/{code}``.
+    # The 8-char ``short_url_code`` is the per-link identifier (not the
+    # 6-char campaign short_code above); they live in different
+    # namespaces.
+    short_url: str | None = None
+    short_url_code: str | None = None
 
 
 def _render_qr_png_base64(url: str) -> str:
@@ -570,6 +584,40 @@ async def generate_trackable_link(
 
     qr_png_b64 = _render_qr_png_base64(url)
 
+    # Optional short-link mint. Same session is used for the row +
+    # the audit log so a failed validation rolls everything back. The
+    # short_url is composed against the apex storefront base domain
+    # (numueg.app) — independent of the store's subdomain or custom
+    # domain because the redirector lives at the root host.
+    short_url: str | None = None
+    short_url_code: str | None = None
+    if body.with_short_link:
+        async with AsyncSessionLocal() as link_session:
+            try:
+                short_link_row = await short_link_service.create_short_link(
+                    session=link_session,
+                    store=store,
+                    destination_url=url,
+                    campaign_id=campaign_id,
+                    created_by=user_id,
+                )
+                await link_session.commit()
+                short_url_code = short_link_row.short_code
+                short_url = (
+                    f"https://{settings.storefront_base_domain}/r/{short_url_code}"
+                )
+            except short_link_service.OpenRedirectorError:
+                # The destination didn't pass the host check — should
+                # never happen because the link builder composed it
+                # against this store's canonical origin, but guard
+                # anyway: fail the whole endpoint rather than returning
+                # a long URL silently sans short URL, which would mask
+                # a real bug.
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="short link could not be created for this destination",
+                )
+
     # SEC-008: audit-log the link generation. The URL itself is what
     # gets shared externally — having a who/when trail per link
     # answers attribution disputes after the fact. We open a small
@@ -589,6 +637,7 @@ async def generate_trackable_link(
                 "source": body.source,
                 "medium": body.medium,
                 "url": url,
+                "short_url_code": short_url_code,
             },
         )
         await audit_session.commit()
@@ -600,6 +649,8 @@ async def generate_trackable_link(
             short_code=campaign.short_code,
             campaign_slug=LinkBuilder.slug_from_campaign_name(campaign.name),
             destination=destination_resp,
+            short_url=short_url,
+            short_url_code=short_url_code,
         ),
         message="Trackable link generated",
     )
