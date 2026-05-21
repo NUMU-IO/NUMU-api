@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.order import OrderStatus
 from src.infrastructure.database.connection import get_tenant_id
+from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.funnel_event import (
     FunnelEventModel,
 )
@@ -1191,3 +1192,102 @@ class AnalyticsRepository:
             "conversion_rates": conversion_rates,
             "top_products": top_products,
         }
+
+    # ── LTV-by-channel (first-touch acquisition cohort) ─────────────
+    _LTV_GROUP_FIELDS: dict[str, str] = {
+        "source": "utm_source",
+        "medium": "utm_medium",
+        "campaign": "utm_campaign",
+    }
+
+    async def ltv_by_channel(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        group_by: str = "source",
+    ) -> list[dict]:
+        """Lifetime value cohort by first-touch acquisition channel.
+
+        Customers acquired in ``[date_from, date_to]`` (their
+        ``first_touch_at`` falls inside the window) are bucketed by the
+        ``utm_source`` / ``utm_medium`` / ``utm_campaign`` stored on
+        ``customers.first_touch_attribution`` and aggregated against the
+        full lifetime of their orders. The order side is filtered to
+        non-cancelled / non-refunded but is NOT date-windowed — that's
+        the difference between this and ``traffic_sources`` (period
+        revenue) vs. LTV (lifetime revenue of a cohort).
+
+        Missing first-touch data falls into a ``"direct"`` bucket so
+        organic / direct visitors aren't lost from the rollup. Customers
+        whose every order was cancelled / refunded contribute zero
+        revenue but still count toward ``customer_count`` (the cohort
+        size doesn't depend on order outcomes).
+
+        Returns per-channel rows; the caller derives ``avg_order_value``,
+        ``orders_per_customer``, and ``ltv`` at the route layer where
+        rounding policy lives.
+        """
+        if group_by not in self._LTV_GROUP_FIELDS:
+            raise ValueError(
+                f"group_by={group_by!r}; expected one of {list(self._LTV_GROUP_FIELDS)}"
+            )
+        json_field = self._LTV_GROUP_FIELDS[group_by]
+
+        channel_expr = func.coalesce(
+            func.nullif(
+                func.lower(
+                    func.trim(CustomerModel.first_touch_attribution[json_field].astext)
+                ),
+                "",
+            ),
+            "direct",
+        ).label("channel")
+
+        # LEFT JOIN so customers with zero non-cancelled orders still
+        # contribute to the cohort count; their revenue / order count
+        # come back as 0 from the COALESCE / COUNT.
+        join_clause = (
+            (OrderModel.customer_id == CustomerModel.id)
+            & (OrderModel.store_id == store_id)
+            & (OrderModel.status.notin_(_NON_REVENUE_STATUSES))
+        )
+
+        query = (
+            select(
+                channel_expr,
+                func.count(func.distinct(CustomerModel.id)).label("customer_count"),
+                func.count(OrderModel.id).label("total_orders"),
+                func.coalesce(func.sum(OrderModel.total), 0).label(
+                    "total_revenue_cents"
+                ),
+            )
+            .select_from(CustomerModel)
+            .outerjoin(OrderModel, join_clause)
+            .where(
+                CustomerModel.store_id == store_id,
+                CustomerModel.first_touch_at.isnot(None),
+                CustomerModel.first_touch_at >= date_from,
+                CustomerModel.first_touch_at <= date_to,
+            )
+            .group_by(channel_expr)
+            .order_by(func.coalesce(func.sum(OrderModel.total), 0).desc())
+        )
+
+        # Tenant scoping on the customer side is sufficient: the JOIN
+        # already binds orders to the same store_id, so cross-tenant
+        # rows can't sneak in through the order half.
+        tid = get_tenant_id()
+        if tid:
+            query = query.where(CustomerModel.tenant_id == tid)
+
+        result = await self.session.execute(query)
+        return [
+            {
+                "channel": row.channel,
+                "customer_count": int(row.customer_count or 0),
+                "total_orders": int(row.total_orders or 0),
+                "total_revenue_cents": int(row.total_revenue_cents or 0),
+            }
+            for row in result.all()
+        ]
