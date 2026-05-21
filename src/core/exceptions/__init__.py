@@ -1,8 +1,10 @@
 """Core exceptions module."""
 
 from src.core.exceptions.base import (
+    AccountLockedError,
     AuthenticationError,
     AuthorizationError,
+    BusinessRuleViolationError,
     DomainException,
     EntityAlreadyExistsError,
     EntityNotFoundError,
@@ -11,6 +13,7 @@ from src.core.exceptions.base import (
     InvalidCredentialsError,
     InvalidTokenError,
     PaymentError,
+    PlanLimitExceededError,
     TokenExpiredError,
     ValidationError,
 )
@@ -22,10 +25,13 @@ __all__ = [
     "ValidationError",
     "AuthenticationError",
     "AuthorizationError",
+    "BusinessRuleViolationError",
     "InvalidCredentialsError",
     "TokenExpiredError",
     "InvalidTokenError",
+    "AccountLockedError",
     "InsufficientStockError",
     "PaymentError",
+    "PlanLimitExceededError",
     "ExternalServiceError",
 ]

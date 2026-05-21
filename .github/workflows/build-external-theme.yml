@@ -1,0 +1,199 @@
+name: Build External Theme (BYOT)
+
+# Triggered by repository_dispatch from the NUMU API when a merchant submits a theme.
+# Can also be triggered manually for testing.
+on:
+  repository_dispatch:
+    types: [build-theme]
+  workflow_dispatch:
+    inputs:
+      github_url:
+        description: "Theme repository URL"
+        required: true
+      branch:
+        description: "Branch to build"
+        required: true
+        default: "main"
+      build_id:
+        description: "Build ID from NUMU API"
+        required: true
+      store_id:
+        description: "Store ID"
+        required: true
+
+env:
+  THEME_REPO: ${{ github.event.client_payload.github_url || github.event.inputs.github_url }}
+  THEME_BRANCH: ${{ github.event.client_payload.branch || github.event.inputs.branch }}
+  BUILD_ID: ${{ github.event.client_payload.build_id || github.event.inputs.build_id }}
+  STORE_ID: ${{ github.event.client_payload.store_id || github.event.inputs.store_id }}
+
+jobs:
+  build-theme:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout theme repository
+        run: |
+          git clone --depth=1 --branch=${{ env.THEME_BRANCH }} ${{ env.THEME_REPO }} theme
+        timeout-minutes: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate theme contract
+        working-directory: theme
+        run: |
+          # Check required files exist
+          for file in theme.json settings_schema.json styles.css; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing required file: $file"
+              exit 1
+            fi
+          done
+
+          # Check entry point exists
+          if [ ! -f "index.ts" ] && [ ! -f "index.tsx" ] && [ ! -f "numu.config.ts" ]; then
+            echo "::error::Missing entry point (index.ts or numu.config.ts)"
+            exit 1
+          fi
+
+          # Validate theme.json has required fields
+          node -e "
+            const m = require('./theme.json');
+            const required = ['id', 'name', 'nameAr', 'layout', 'version'];
+            const missing = required.filter(f => !m[f]);
+            if (missing.length) {
+              console.error('theme.json missing fields:', missing.join(', '));
+              process.exit(1);
+            }
+            console.log('Theme ID:', m.id, '| Version:', m.version);
+          "
+
+      - name: Install dependencies
+        working-directory: theme
+        run: |
+          # Use --ignore-scripts to prevent post-install scripts from untrusted code
+          npm install --ignore-scripts
+        timeout-minutes: 3
+
+      - name: Build theme
+        working-directory: theme
+        run: npm run build
+        timeout-minutes: 3
+        env:
+          NODE_ENV: production
+
+      - name: Validate build output
+        working-directory: theme
+        run: |
+          # Find the bundle
+          BUNDLE=""
+          for f in dist/theme.js dist/theme.mjs dist/theme.esm.js; do
+            if [ -f "$f" ]; then
+              BUNDLE="$f"
+              break
+            fi
+          done
+
+          if [ -z "$BUNDLE" ]; then
+            echo "::error::Build produced no output (expected dist/theme.js)"
+            exit 1
+          fi
+
+          # Check bundle size (max 2MB)
+          SIZE=$(stat -f%z "$BUNDLE" 2>/dev/null || stat -c%s "$BUNDLE")
+          MAX_SIZE=2097152
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "::error::Bundle too large: $((SIZE / 1024))KB (max 2048KB)"
+            exit 1
+          fi
+
+          # Security scan: check for dangerous patterns
+          VIOLATIONS=0
+          for pattern in "eval(" "new Function(" "document.cookie" "document.write("; do
+            if grep -q "$pattern" "$BUNDLE"; then
+              echo "::error::Dangerous pattern found: $pattern"
+              VIOLATIONS=$((VIOLATIONS + 1))
+            fi
+          done
+
+          if [ "$VIOLATIONS" -gt 0 ]; then
+            echo "::error::Bundle failed security scan ($VIOLATIONS violations)"
+            exit 1
+          fi
+
+          echo "Bundle OK: $BUNDLE ($((SIZE / 1024))KB)"
+          echo "BUNDLE_PATH=$BUNDLE" >> $GITHUB_ENV
+
+      - name: Upload to R2
+        working-directory: theme
+        run: |
+          THEME_ID=$(node -e "console.log(require('./theme.json').id)")
+          SHORT_BUILD="${BUILD_ID:0:8}"
+
+          # Upload JS bundle
+          aws s3 cp "$BUNDLE_PATH" \
+            "s3://${{ secrets.R2_BUCKET }}/themes/${THEME_ID}-${SHORT_BUILD}.js" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+            --content-type "application/javascript"
+
+          BUNDLE_URL="${{ secrets.R2_PUBLIC_URL }}/themes/${THEME_ID}-${SHORT_BUILD}.js"
+          echo "BUNDLE_URL=$BUNDLE_URL" >> $GITHUB_ENV
+
+          # Upload CSS if exists
+          if [ -f "dist/theme.css" ]; then
+            aws s3 cp "dist/theme.css" \
+              "s3://${{ secrets.R2_BUCKET }}/themes/${THEME_ID}-${SHORT_BUILD}.css" \
+              --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+              --content-type "text/css"
+
+            CSS_URL="${{ secrets.R2_PUBLIC_URL }}/themes/${THEME_ID}-${SHORT_BUILD}.css"
+            echo "CSS_URL=$CSS_URL" >> $GITHUB_ENV
+          fi
+
+          # Upload sections.json if the bundle ships custom sections.
+          # The dashboard's section picker fetches this so merchants can
+          # drop external sections into page templates. Bundles that don't
+          # ship sections won't have the file — that's fine.
+          if [ -f "dist/sections.json" ]; then
+            aws s3 cp "dist/sections.json" \
+              "s3://${{ secrets.R2_BUCKET }}/themes/${THEME_ID}-${SHORT_BUILD}-sections.json" \
+              --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+              --content-type "application/json"
+
+            SECTIONS_URL="${{ secrets.R2_PUBLIC_URL }}/themes/${THEME_ID}-${SHORT_BUILD}-sections.json"
+            echo "SECTIONS_URL=$SECTIONS_URL" >> $GITHUB_ENV
+          fi
+
+          echo "Uploaded: $BUNDLE_URL"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Callback to NUMU API
+        run: |
+          THEME_ID=$(node -e "console.log(require('./theme/theme.json').id)")
+          VERSION=$(node -e "console.log(require('./theme/theme.json').version)")
+
+          # sections_url is null when the bundle ships no custom sections.
+          # The API callback handler is expected to fetch the JSON from this
+          # URL and store it under external_theme.section_schemas, mirroring
+          # how the dev-mode connect endpoint behaves.
+          curl -X POST "${{ secrets.NUMU_API_URL }}/api/v1/internal/theme-build-callback" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.NUMU_INTERNAL_TOKEN }}" \
+            -d "{
+              \"build_id\": \"$BUILD_ID\",
+              \"store_id\": \"$STORE_ID\",
+              \"status\": \"complete\",
+              \"theme_id\": \"$THEME_ID\",
+              \"version\": \"$VERSION\",
+              \"bundle_url\": \"$BUNDLE_URL\",
+              \"css_url\": \"${CSS_URL:-null}\",
+              \"sections_url\": \"${SECTIONS_URL:-null}\",
+              \"source_repo\": \"$THEME_REPO\"
+            }"

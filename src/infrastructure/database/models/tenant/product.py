@@ -1,25 +1,29 @@
-"""Product database model (tenant schema)."""
+"""Product database model (public schema with tenant_id discriminator)."""
 
 from decimal import Decimal
 
-from sqlalchemy import Enum, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy import Computed, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.entities.product import ProductStatus, ProductType
 from src.infrastructure.database.connection import Base
-from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
+from src.infrastructure.database.models.base import (
+    TenantMixin,
+    TimestampMixin,
+    UUIDMixin,
+)
 
 
-class ProductModel(Base, UUIDMixin, TimestampMixin):
-    """Product database model (tenant schema)."""
+class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """Product database model with tenant_id discriminator."""
 
     __tablename__ = "products"
-    # No schema specified - will use the tenant's search_path
+    __table_args__ = {"schema": "public"}
 
     store_id: Mapped[str] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("stores.id", ondelete="CASCADE"),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -29,44 +33,100 @@ class ProductModel(Base, UUIDMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     product_type: Mapped[ProductType] = mapped_column(
-        Enum(ProductType),
+        Enum(ProductType, name="producttype", schema="public"),
         default=ProductType.PHYSICAL,
         nullable=False,
     )
     status: Mapped[ProductStatus] = mapped_column(
-        Enum(ProductStatus),
+        Enum(ProductStatus, name="productstatus", schema="public"),
         default=ProductStatus.DRAFT,
         nullable=False,
         index=True,
     )
-    
+
     # Pricing (stored in cents)
     price_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    price_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    price_currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="EGP"
+    )
     compare_at_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    
+
     # Inventory
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     low_stock_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
-    
+
     # Physical properties
     weight: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     dimensions: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
-    
+
     # Media and categorization
-    images: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
+    images: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True, default=list
+    )
     category_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("categories.id", ondelete="SET NULL"),
+        ForeignKey("public.categories.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True, default=list)
-    
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String), nullable=True, default=list
+    )
+
+    # SEO
+    seo_title: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+    # Meta Commerce Catalog product ID — when the merchant has synced
+    # their product catalog to Meta Business Manager, the storefront
+    # uses this value as the `content_ids` field on ViewContent /
+    # AddToCart / Purchase events so Meta's dynamic ads can match the
+    # event back to a Catalog row. Null = falls back to our internal
+    # product UUID, which won't match a Catalog row but still flows
+    # through for other events (PageView, Search, etc.).
+    meta_catalog_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Wave 2 Phase 13.2 — per-product custom pixel overrides.
+    # Shape: ``{"override_mode": "exclusive"|"additive", "pixels": [{"pixel_id": str, "label": str?}]}``
+    # Null = no override (store-level pixels fire as usual). EasyOrders
+    # ships this as their unique differentiator; Shopify doesn't have
+    # an equivalent natively. Used when a media buyer routes a single
+    # SKU to an agency-owned ad account / pixel that's separate from
+    # the store's primary pixel.
+    meta_pixel_overrides: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Additional data
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+
+    # Phase 8.1 — option axes (Size / Color / Material / ...). List of
+    # `{name, position, values: []}`. Variant.option_values references
+    # the names. JSONB rather than a separate table — options are
+    # tightly coupled to their product, cardinality is small
+    # (Shopify caps at 3 axes), and embedding avoids a join on every
+    # PDP read.
+    options: Mapped[list[dict] | None] = mapped_column(
+        JSONB, nullable=True, default=list
+    )
+
+    # Phase 4.1 — Postgres tsvector for full-text search. Maintained
+    # by the database via GENERATED ALWAYS AS (...) STORED — see
+    # alembic/versions/20260508_add_product_search_tsvector.py.
+    # Read-only from the ORM's perspective. The `immutable_text_array_to_string`
+    # wrapper is defined in that migration; the built-in `array_to_string` is
+    # rejected as STABLE in a STORED expression on newer Postgres.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('simple', coalesce(name, '')), 'A') || "
+            "setweight(to_tsvector('simple', coalesce(sku, '')), 'B') || "
+            "setweight(to_tsvector('simple', coalesce(description, '')), 'C') || "
+            "setweight(to_tsvector('simple', coalesce(public.immutable_text_array_to_string(tags, ' '), '')), 'D')",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     # Relationships
     store = relationship("StoreModel", back_populates="products", lazy="selectin")

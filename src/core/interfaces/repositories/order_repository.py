@@ -4,7 +4,7 @@ from abc import abstractmethod
 from datetime import datetime
 from uuid import UUID
 
-from src.core.entities.order import Order, OrderStatus, PaymentStatus
+from src.core.entities.order import Order, OrderStatus
 from src.core.interfaces.repositories.base import BaseRepository
 
 
@@ -47,6 +47,11 @@ class IOrderRepository(BaseRepository[Order]):
         ...
 
     @abstractmethod
+    async def get_by_tracking_number(self, tracking_number: str) -> Order | None:
+        """Get order by shipping tracking number (cross-store lookup)."""
+        ...
+
+    @abstractmethod
     async def get_by_date_range(
         self,
         store_id: UUID,
@@ -63,6 +68,8 @@ class IOrderRepository(BaseRepository[Order]):
         self,
         store_id: UUID,
         status: OrderStatus | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> int:
         """Get total count of orders for a store."""
         ...
@@ -80,4 +87,20 @@ class IOrderRepository(BaseRepository[Order]):
     @abstractmethod
     async def get_next_order_number(self, store_id: UUID) -> str:
         """Generate next order number for a store."""
+        ...
+
+    @abstractmethod
+    async def count_by_customer(self, customer_id: UUID) -> int:
+        """Get total count of orders for a customer."""
+        ...
+
+    @abstractmethod
+    async def search(
+        self,
+        store_id: UUID,
+        query: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Search orders by order number or customer notes."""
         ...

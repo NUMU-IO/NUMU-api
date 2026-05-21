@@ -1,11 +1,14 @@
 """Address value object."""
 
-from dataclasses import dataclass
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 
-@dataclass(frozen=True)
-class Address:
+class Address(BaseModel):
     """Address value object."""
+
+    model_config = ConfigDict(frozen=True)
 
     address_line1: str
     city: str
@@ -26,25 +29,49 @@ class Address:
         parts.append(self.country)
         return ", ".join(parts)
 
-    def to_dict(self) -> dict:
-        """Convert address to dictionary."""
-        return {
-            "address_line1": self.address_line1,
-            "address_line2": self.address_line2,
-            "city": self.city,
-            "state": self.state,
-            "postal_code": self.postal_code,
-            "country": self.country,
-        }
+    def __hash__(self) -> int:
+        return hash((
+            self.address_line1,
+            self.address_line2,
+            self.city,
+            self.state,
+            self.postal_code,
+            self.country,
+        ))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert address to dictionary.
+
+        Note: Prefer using model_dump() instead. This method is kept for
+        backward compatibility.
+        """
+        return self.model_dump()
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Address":
-        """Create address from dictionary."""
-        return cls(
-            address_line1=data["address_line1"],
-            address_line2=data.get("address_line2"),
-            city=data["city"],
-            state=data.get("state"),
-            postal_code=data.get("postal_code"),
-            country=data["country"],
-        )
+    def from_dict(cls, data: dict[str, Any]) -> "Address":
+        """Create address from dictionary.
+
+        Note: Prefer using model_validate() instead. This method is kept for
+        backward compatibility.
+        """
+        return cls.model_validate(data)
+
+    @property
+    def formatted_single_line(self) -> str:
+        """Get address formatted as a single line."""
+        return str(self)
+
+    @property
+    def formatted_multi_line(self) -> str:
+        """Get address formatted as multiple lines."""
+        lines = [self.address_line1]
+        if self.address_line2:
+            lines.append(self.address_line2)
+        city_line = self.city
+        if self.state:
+            city_line = f"{city_line}, {self.state}"
+        if self.postal_code:
+            city_line = f"{city_line} {self.postal_code}"
+        lines.append(city_line)
+        lines.append(self.country)
+        return "\n".join(lines)

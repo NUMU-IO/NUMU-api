@@ -1,0 +1,4 @@
+10003	IGNORE	(Vulnerable JS Library - not applicable to API-only backend)
+10015	IGNORE	(Re-examine Cache-control Directives - API sets no-store by default)
+10049	IGNORE	(Storable and Cacheable Content - storefront cache headers intentional)
+10109	IGNORE	(Modern Web Application - not applicable to API)

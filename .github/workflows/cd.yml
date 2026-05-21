@@ -1,0 +1,374 @@
+name: CD
+
+on:
+  push:
+    branches: [dev, stage, prod]
+    tags: ["v*"]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: numu-io/numu-api
+
+jobs:
+  # ===========================================================================
+  # Build the Docker image and push to GHCR
+  # Runs on every push to stage, prod, or a version tag.
+  # ===========================================================================
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      # The branch/tag-based image ref used by deploy jobs below.
+      # For branch pushes  → ghcr.io/org/repo:main | ghcr.io/org/repo:stage
+      # For version tags   → ghcr.io/org/repo:v1.0.0
+      image_ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.ref_tag.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: ref_tag
+        # Use the branch name for branch pushes, or the tag name for tag pushes.
+        run: echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_name == 'prod' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================================================================
+  # Deploy to Test (DigitalOcean Droplet — test.numueg.app)
+  # Triggers on push to dev branch.
+  # Test stack: project name `numu-test`, env file /opt/numu/.env.test,
+  # compose file docker/docker-compose.test.yml. Shared nginx in the staging
+  # stack routes test.numueg.app to numu-api-test via the numu-edge network.
+  # ===========================================================================
+  deploy-test:
+    name: Deploy to Test (DO)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/dev'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+
+      - name: Sync files to test server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/postgres"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "rm -rf /opt/numu/docker/postgres/postgresql.conf /opt/numu/docker/postgres/init-wal-archiving.sh"
+          scp -i ~/.ssh/deploy_key \
+            docker/docker-compose.test.yml \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.test.yml
+          scp -i ~/.ssh/deploy_key docker/postgres/postgresql.conf \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+          scp -i ~/.ssh/deploy_key docker/postgres/init-wal-archiving.sh \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "test -f /opt/numu/.env.test || { echo 'ERROR: /opt/numu/.env.test not found'; exit 1; }"
+
+      - name: Deploy to test DO Droplet
+        env:
+          NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
+            set -e
+            cd /opt/numu
+
+            echo "==> Authenticating with GHCR..."
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+            export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
+            # Storefront image is required at compose-parse time even though we
+            # don't restart it here; default to the test storefront image tag
+            # (built by the storefront CD on its own dev push).
+            export NUMU_STOREFRONT_IMAGE="\${NUMU_STOREFRONT_IMAGE:-ghcr.io/numu-io/numu-egyptian-bazaar:dev}"
+
+            echo "==> Stopping test app containers to free memory for pull..."
+            docker compose -p numu-test --env-file /opt/numu/.env.test \
+              -f docker/docker-compose.test.yml stop api celery-worker celery-beat || true
+
+            echo "==> Pruning unused Docker resources..."
+            # The Docker daemon serializes prune with a global lock and
+            # rejects concurrent callers with "a prune operation is already
+            # running" — when two env deploys (or a deploy + the nightly
+            # prune cron) overlap, that error kills the run under `set -e`
+            # before the pull even starts. Retry up to 5×6s, then continue
+            # without prune: the pull will surface real OOM on its own if
+            # the box is genuinely out of space.
+            for i in 1 2 3 4 5; do
+              if docker system prune -f --volumes=false; then break; fi
+              echo "[prune] attempt \$i/5 failed (likely concurrent prune) — sleeping 6s..."
+              sleep 6
+            done
+
+            echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
+            docker pull "${NUMU_API_IMAGE}"
+
+            echo "==> Starting test services..."
+            docker compose -p numu-test --env-file /opt/numu/.env.test \
+              -f docker/docker-compose.test.yml up -d --remove-orphans \
+              postgres redis-master minio celery-worker celery-beat api
+
+            echo "==> Running database migrations..."
+            docker compose -p numu-test --env-file /opt/numu/.env.test \
+              -f docker/docker-compose.test.yml exec -T api alembic upgrade head
+
+            echo "==> Verifying health..."
+            sleep 15
+            docker exec numu-nginx-staging curl -sf -H "Host: test.numueg.app" -m 8 \
+              http://numu-api-test:8000/api/v1/health | grep -q '"success":true' || {
+              echo "ERROR: Test health check failed — dumping recent API logs:"
+              docker compose -p numu-test --env-file /opt/numu/.env.test \
+                -f docker/docker-compose.test.yml logs --tail=80 api
+              exit 1
+            }
+
+            echo "==> Removing dangling images..."
+            docker image prune -f || echo "[image prune] skipped (concurrent prune?) — non-fatal"
+
+            echo "==> Test deployment complete."
+          DEPLOY_SCRIPT
+
+  # ===========================================================================
+  # Deploy to Stage (DigitalOcean Droplet — staging.numueg.app)
+  # Triggers on push to stage branch.
+  # Stage stack: project name `numu-stage`, env file /opt/numu/.env.stage,
+  # compose docker/docker-compose.stage.yml. Shared nginx in the apex stack
+  # routes staging.numueg.app → numu-api-stage via the numu-edge network.
+  # ===========================================================================
+  deploy-stage:
+    name: Deploy to Stage (DO — staging.numueg.app)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/stage'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+
+      - name: Sync files to stage server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/postgres"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "rm -rf /opt/numu/docker/postgres/postgresql.conf /opt/numu/docker/postgres/init-wal-archiving.sh"
+          scp -i ~/.ssh/deploy_key \
+            docker/docker-compose.stage.yml \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.stage.yml
+          scp -i ~/.ssh/deploy_key docker/postgres/postgresql.conf \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+          scp -i ~/.ssh/deploy_key docker/postgres/init-wal-archiving.sh \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "test -f /opt/numu/.env.stage || { echo 'ERROR: /opt/numu/.env.stage not found'; exit 1; }"
+
+      - name: Deploy to stage DO Droplet
+        env:
+          NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
+            set -e
+            cd /opt/numu
+
+            echo "==> Authenticating with GHCR..."
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+            export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
+            export NUMU_STOREFRONT_IMAGE="\${NUMU_STOREFRONT_IMAGE:-ghcr.io/numu-io/numu-egyptian-bazaar:stage}"
+
+            echo "==> Stopping stage app containers..."
+            docker compose -p numu-stage --env-file /opt/numu/.env.stage \
+              -f docker/docker-compose.stage.yml stop api celery-worker celery-beat || true
+
+            echo "==> Pruning unused Docker resources..."
+            # The Docker daemon serializes prune with a global lock and
+            # rejects concurrent callers with "a prune operation is already
+            # running" — when two env deploys (or a deploy + the nightly
+            # prune cron) overlap, that error kills the run under `set -e`
+            # before the pull even starts. Retry up to 5×6s, then continue
+            # without prune: the pull will surface real OOM on its own if
+            # the box is genuinely out of space.
+            for i in 1 2 3 4 5; do
+              if docker system prune -f --volumes=false; then break; fi
+              echo "[prune] attempt \$i/5 failed (likely concurrent prune) — sleeping 6s..."
+              sleep 6
+            done
+
+            echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
+            docker pull "${NUMU_API_IMAGE}"
+
+            echo "==> Starting stage services..."
+            docker compose -p numu-stage --env-file /opt/numu/.env.stage \
+              -f docker/docker-compose.stage.yml up -d --remove-orphans \
+              postgres redis-master minio celery-worker celery-beat api
+
+            echo "==> Running database migrations..."
+            docker compose -p numu-stage --env-file /opt/numu/.env.stage \
+              -f docker/docker-compose.stage.yml exec -T api alembic upgrade head
+
+            echo "==> Verifying health..."
+            sleep 15
+            docker exec numu-nginx-staging curl -sf -H "Host: staging.numueg.app" -m 8 \
+              http://numu-api-stage:8000/api/v1/health | grep -q '"success":true' || {
+              echo "ERROR: Stage health check failed — dumping recent API logs:"
+              docker compose -p numu-stage --env-file /opt/numu/.env.stage \
+                -f docker/docker-compose.stage.yml logs --tail=80 api
+              exit 1
+            }
+
+            echo "==> Removing dangling images..."
+            docker image prune -f || echo "[image prune] skipped (concurrent prune?) — non-fatal"
+
+            echo "==> Stage deployment complete."
+          DEPLOY_SCRIPT
+
+  # ===========================================================================
+  # Deploy to Apex (DigitalOcean Droplet — numueg.app, legacy production stack)
+  # Triggers on push to prod branch.
+  # Lives on the same DO droplet as test/stage but uses the legacy
+  # docker-compose.staging.yml (which also owns the shared nginx + n8n).
+  # NOTE: a separate `deploy-prod` job below also fires on `prod` and pushes
+  # to PROD_HOST via docker-compose.prod.yml — that's a different droplet
+  # path; remove it if you've consolidated everything onto STAGE_HOST.
+  # ===========================================================================
+  deploy-apex:
+    name: Deploy to Apex (DO — numueg.app)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/prod'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+
+      # Push the latest compose file, nginx, and postgres configs to the DO machine.
+      - name: Sync files to apex server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/nginx/ssl"
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} "mkdir -p /opt/numu/docker/postgres"
+          # Docker may have created directories at these paths if files were missing on a previous run — remove them.
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "rm -rf /opt/numu/docker/postgres/postgresql.conf /opt/numu/docker/postgres/init-wal-archiving.sh"
+          scp -i ~/.ssh/deploy_key \
+            docker/docker-compose.staging.yml \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/docker-compose.staging.yml
+          scp -i ~/.ssh/deploy_key \
+            docker/nginx/Dockerfile docker/nginx/nginx.conf \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/nginx/
+          scp -i ~/.ssh/deploy_key docker/postgres/postgresql.conf \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/postgresql.conf
+          scp -i ~/.ssh/deploy_key docker/postgres/init-wal-archiving.sh \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
+          # Ensure .env.staging exists (created once on server, never overwritten by deploys)
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "test -f /opt/numu/.env.staging || { echo 'ERROR: /opt/numu/.env.staging not found — create it from .env.staging.example'; exit 1; }"
+
+      - name: Deploy to apex DO Droplet
+        # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from
+        # the runner environment before being forwarded over SSH.
+        env:
+          NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} << DEPLOY_SCRIPT
+            set -e
+            cd /opt/numu
+
+            echo "==> Authenticating with GHCR..."
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+            echo "==> Stopping apex app containers to free memory for pull..."
+            export NUMU_API_IMAGE="${NUMU_API_IMAGE}"
+            docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml stop api celery-worker celery-beat nginx || true
+
+            echo "==> Pruning unused Docker resources..."
+            # The Docker daemon serializes prune with a global lock and
+            # rejects concurrent callers with "a prune operation is already
+            # running" — when two env deploys (or a deploy + the nightly
+            # prune cron) overlap, that error kills the run under `set -e`
+            # before the pull even starts. Retry up to 5×6s, then continue
+            # without prune: the pull will surface real OOM on its own if
+            # the box is genuinely out of space.
+            for i in 1 2 3 4 5; do
+              if docker system prune -f --volumes=false; then break; fi
+              echo "[prune] attempt \$i/5 failed (likely concurrent prune) — sleeping 6s..."
+              sleep 6
+            done
+
+            echo "==> Pulling API image: ${NUMU_API_IMAGE}..."
+            docker pull "${NUMU_API_IMAGE}"
+
+            echo "==> Starting apex services..."
+            docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml up -d --remove-orphans
+
+            echo "==> Running database migrations..."
+            docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml exec -T api alembic upgrade head
+
+            echo "==> Verifying health..."
+            sleep 15
+            curl -sf http://localhost:80/api/v1/health | grep -q '"success":true' || {
+              echo "ERROR: Apex health check failed — dumping recent API logs:"
+              docker compose --env-file /opt/numu/.env.staging -f docker/docker-compose.staging.yml logs --tail=80 api
+              exit 1
+            }
+
+            echo "==> Removing dangling images..."
+            docker image prune -f || echo "[image prune] skipped (concurrent prune?) — non-fatal"
+
+            echo "==> Apex deployment complete."
+          DEPLOY_SCRIPT

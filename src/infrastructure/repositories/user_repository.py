@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.user import User, UserRole, UserStatus
+from src.core.entities.user import User
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber
@@ -22,16 +22,19 @@ class UserRepository(IUserRepository):
         """Convert database model to domain entity."""
         return User(
             id=model.id,
-            email=Email(model.email),
+            email=Email(value=model.email),
             hashed_password=model.hashed_password,
             first_name=model.first_name,
             last_name=model.last_name,
             role=model.role,
             status=model.status,
-            phone=PhoneNumber(model.phone) if model.phone else None,
+            phone=PhoneNumber(value=model.phone) if model.phone else None,
             avatar_url=model.avatar_url,
             email_verified_at=model.email_verified_at,
             last_login_at=model.last_login_at,
+            trial_ends_at=model.trial_ends_at,
+            auth_provider=model.auth_provider,
+            google_id=model.google_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -50,6 +53,9 @@ class UserRepository(IUserRepository):
             avatar_url=entity.avatar_url,
             email_verified_at=entity.email_verified_at,
             last_login_at=entity.last_login_at,
+            trial_ends_at=entity.trial_ends_at,
+            auth_provider=entity.auth_provider,
+            google_id=entity.google_id,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -68,9 +74,7 @@ class UserRepository(IUserRepository):
         limit: int = 100,
     ) -> list[User]:
         """Get all users with pagination."""
-        result = await self.session.execute(
-            select(UserModel).offset(skip).limit(limit)
-        )
+        result = await self.session.execute(select(UserModel).offset(skip).limit(limit))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def create(self, entity: User) -> User:
@@ -98,6 +102,8 @@ class UserRepository(IUserRepository):
             model.avatar_url = entity.avatar_url
             model.email_verified_at = entity.email_verified_at
             model.last_login_at = entity.last_login_at
+            model.auth_provider = entity.auth_provider
+            model.google_id = entity.google_id
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)
@@ -117,10 +123,16 @@ class UserRepository(IUserRepository):
 
     async def count(self) -> int:
         """Get total count of users."""
-        result = await self.session.execute(
-            select(UserModel)
-        )
+        result = await self.session.execute(select(UserModel))
         return len(result.scalars().all())
+
+    async def get_by_google_id(self, google_id: str) -> User | None:
+        """Get user by Google OAuth sub claim."""
+        result = await self.session.execute(
+            select(UserModel).where(UserModel.google_id == google_id)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
 
     async def get_by_email(self, email: Email) -> User | None:
         """Get user by email."""

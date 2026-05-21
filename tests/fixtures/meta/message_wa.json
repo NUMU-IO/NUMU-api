@@ -1,0 +1,28 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "1234567890",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "+201234567890",
+              "phone_number_id": "1234567890"
+            },
+            "messages": [
+              {
+                "from": "201001234567",
+                "id": "wamid.ABC123",
+                "timestamp": "1234567890",
+                "text": { "body": "Hello from WhatsApp!" }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# Pre-commit hooks for NUMU API
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+# Update hooks: pre-commit autoupdate
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  # Python linting and formatting with Ruff
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.1
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # Security checks (high severity only)
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.2
+    hooks:
+      - id: bandit
+        args: [-c, pyproject.toml, -ll]
+        additional_dependencies: ["bandit[toml]"]
+        files: ^src/
+
+# Note: mypy is run separately in CI with more lenient settings
+# Run manually: mypy src/ --ignore-missing-imports
+
+# CI configuration for pre-commit.ci
+ci:
+  autofix_prs: true
+  autoupdate_schedule: monthly

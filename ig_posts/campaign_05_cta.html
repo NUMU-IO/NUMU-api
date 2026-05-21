@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>نُمو — البيتا مفتوحة</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .post.dark.cta {
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(212,175,55,0.35) 0%, rgba(212,175,55,0.10) 28%, transparent 55%),
+      radial-gradient(circle at 15% 95%, rgba(59,130,246,0.45) 0%, rgba(59,130,246,0.12) 32%, transparent 60%),
+      radial-gradient(circle at 85% 95%, rgba(168,85,247,0.32) 0%, rgba(168,85,247,0.10) 35%, transparent 60%),
+      radial-gradient(rgba(255,255,255,0.06) 1.2px, transparent 1.2px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px;
+    background-repeat: no-repeat, no-repeat, no-repeat, repeat;
+  }
+
+  .top-bar {
+    position: absolute;
+    top: 64px; left: 64px; right: 64px;
+    display: flex; justify-content: space-between; align-items: center;
+    z-index: 5;
+  }
+  .corner-mark {
+    font-size: 12px;
+    letter-spacing: 4px;
+    color: var(--white-35);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .corner-mark .num { color: var(--gold); font-weight: 700; }
+  .top-wordmark .ar {
+    font-family: 'Aref Ruqaa', serif;
+    font-size: 38px;
+    color: #fff;
+    line-height: 1;
+  }
+
+  /* Live indicator */
+  .live-pill {
+    position: absolute;
+    top: 175px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 26px;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #34d399;
+    letter-spacing: 0.5px;
+    z-index: 5;
+  }
+  .live-pill .pulse {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 16px rgba(52, 211, 153, 0.8);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.3); }
+  }
+
+  /* Mega headline */
+  .head {
+    position: absolute;
+    top: 250px;
+    left: 64px; right: 64px;
+    text-align: center;
+    z-index: 5;
+  }
+  .head h1 {
+    font-size: 110px;
+    font-weight: 900;
+    line-height: 1.05;
+    color: #fff;
+    letter-spacing: -2.5px;
+  }
+  .head h1 .gold {
+    color: var(--gold);
+    display: block;
+  }
+  .head .sub {
+    margin-top: 26px;
+    font-size: 22px;
+    color: var(--white-70);
+    line-height: 1.6;
+  }
+
+  /* 3-step row */
+  .steps {
+    position: absolute;
+    top: 565px;
+    left: 64px; right: 64px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 18px;
+    z-index: 5;
+  }
+
+  .step {
+    background: var(--card-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 22px;
+    padding: 26px 24px;
+    text-align: center;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 14px 40px rgba(0,0,0,0.35);
+    position: relative;
+  }
+  .step .num {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 900;
+    margin: 0 auto 14px;
+    box-shadow: 0 8px 20px rgba(212,175,55,0.4);
+  }
+  .step .icon {
+    font-size: 38px;
+    color: var(--gold);
+    margin-bottom: 8px;
+  }
+  .step h3 {
+    font-size: 19px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+  .step p {
+    font-size: 13px;
+    color: var(--white-55);
+    line-height: 1.5;
+  }
+
+  /* Big CTA button */
+  .cta-row {
+    position: absolute;
+    bottom: 220px;
+    left: 64px; right: 64px;
+    text-align: center;
+    z-index: 5;
+  }
+  .big-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 18px;
+    padding: 26px 56px;
+    background: var(--gold);
+    color: var(--ink);
+    border-radius: 999px;
+    font-size: 28px;
+    font-weight: 800;
+    text-decoration: none;
+    box-shadow:
+      0 0 0 1px rgba(212,175,55,0.4),
+      0 24px 60px rgba(212, 175, 55, 0.35),
+      0 8px 20px rgba(0,0,0,0.3);
+    transition: transform 0.2s;
+  }
+  .big-btn .arrow-icon {
+    font-size: 32px;
+    transform: rotate(180deg);
+  }
+  .cta-row .below-text {
+    margin-top: 16px;
+    font-size: 14px;
+    color: var(--white-55);
+    font-weight: 500;
+  }
+  .cta-row .below-text .gold {
+    color: var(--gold);
+    font-weight: 700;
+  }
+
+  /* Bottom info */
+  .bottom-info {
+    position: absolute;
+    bottom: 70px;
+    left: 64px; right: 64px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 5;
+  }
+  .bottom-info .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--white-55);
+    font-weight: 500;
+  }
+  .bottom-info .item i { color: var(--gold); font-size: 18px; }
+
+  .floating-icon {
+    position: absolute;
+    color: var(--gold);
+    opacity: 0.5;
+  }
+  .floating-icon.f1 { top: 200px; right: 80px; font-size: 36px; }
+  .floating-icon.f2 { top: 250px; left: 70px; font-size: 28px; }
+</style>
+</head>
+<body>
+
+<div class="post dark cta">
+  <div class="top-bar">
+    <div class="corner-mark"><span class="num">٠٥</span> / ٠٥</div>
+    <div class="top-wordmark"><div class="ar">نُمو</div></div>
+  </div>
+
+  <i class="ph-fill ph-sparkle floating-icon f1"></i>
+  <i class="ph-fill ph-star-four floating-icon f2"></i>
+
+  <div class="live-pill">
+    <span class="pulse"></span>
+    البيتا مفتوحة دلوقتي
+  </div>
+
+  <div class="head">
+    <h1>
+      ابدأ متجرك
+      <span class="gold">دلوقتي</span>
+    </h1>
+    <p class="sub">٣ خطوات بسيطة، وهتكون شغّال في أقل من ١٠ دقايق</p>
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="num">١</div>
+      <div class="icon"><i class="ph-duotone ph-user-plus"></i></div>
+      <h3>سجّل حسابك</h3>
+      <p>إيميل وباسورد، خلصنا</p>
+    </div>
+    <div class="step">
+      <div class="num">٢</div>
+      <div class="icon"><i class="ph-duotone ph-storefront"></i></div>
+      <h3>جهّز متجرك</h3>
+      <p>اختار تصميم وضيف منتجاتك</p>
+    </div>
+    <div class="step">
+      <div class="num">٣</div>
+      <div class="icon"><i class="ph-duotone ph-rocket-launch"></i></div>
+      <h3>ابدأ تبيع</h3>
+      <p>شارك اللينك وستلم طلبات</p>
+    </div>
+  </div>
+
+  <div class="cta-row">
+    <a class="big-btn" href="#">
+      انضم للبيتا
+      <i class="ph-bold ph-arrow-left arrow-icon"></i>
+    </a>
+    <p class="below-text">
+      <i class="ph-fill ph-shield-check" style="color:#34d399;"></i>
+      <span class="gold">أسعار التجار المؤسسين</span> مثبتة معاك للأبد
+    </p>
+  </div>
+
+  <div class="bottom-info">
+    <div class="item"><i class="ph-bold ph-globe"></i> numueg.app</div>
+    <div class="item"><i class="ph-bold ph-instagram-logo"></i> @numueg</div>
+    <div class="item"><i class="ph-bold ph-envelope"></i> hello@numueg.app</div>
+  </div>
+
+  <div class="accent-line"></div>
+</div>
+
+</body>
+</html>

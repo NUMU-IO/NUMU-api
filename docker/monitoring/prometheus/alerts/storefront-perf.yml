@@ -1,0 +1,117 @@
+# Storefront performance alert rules (Step 16 §5).
+#
+# Naming convention: <Subject><Symptom>. Each alert pairs a labels
+# block (severity + team for routing) with an annotations block
+# (summary for the Slack post + runbook deep-link).
+#
+# Severity levels:
+#   P1  page immediately (PagerDuty) + #numu-alerts-platform
+#   P2  page during business hours + #numu-alerts-platform
+#   P3  #numu-alerts-platform only (no page)
+#
+# Threshold / `for:` rationale lives in the runbook section linked
+# from each alert. Don't tighten without revisiting the runbook.
+
+groups:
+  - name: storefront-perf
+    interval: 30s
+    rules:
+
+      - alert: StorefrontP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket{route=~"/api/v1/storefront.*"}[5m])) by (le)
+          ) > 1.0
+        for: 10m
+        labels:
+          severity: P2
+          team: platform
+        annotations:
+          summary: "Storefront p95 latency > 1s for 10 min"
+          description: "{{ $value | humanizeDuration }} p95 across storefront routes."
+          runbook: "https://github.com/NUMU-IO/NUMU-api/blob/main/docs/runbooks/load-test-incident.md#high-p95-latency"
+
+      - alert: StorefrontErrorRate
+        expr: |
+          sum(rate(http_requests_total{status="5xx", route=~"/api/v1/storefront.*"}[5m]))
+          /
+          sum(rate(http_requests_total{route=~"/api/v1/storefront.*"}[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: P1
+          team: platform
+        annotations:
+          summary: "Storefront 5xx rate > 1% for 5 min"
+          description: "{{ $value | humanizePercentage }} of storefront requests returning 5xx."
+          runbook: "https://github.com/NUMU-IO/NUMU-api/blob/main/docs/runbooks/load-test-incident.md#5xx-rate-spike"
+
+      - alert: CacheHitRateLow
+        expr: |
+          sum(rate(cache_hit_total{layer="storefront"}[5m]))
+          /
+          (
+            sum(rate(cache_hit_total{layer="storefront"}[5m]))
+            + sum(rate(cache_miss_total{layer="storefront"}[5m]))
+          ) < 0.6
+        for: 15m
+        labels:
+          severity: P3
+          team: platform
+        annotations:
+          summary: "Storefront cache hit rate < 60% sustained 15 min"
+          description: "Hit rate {{ $value | humanizePercentage }}."
+          runbook: "https://github.com/NUMU-IO/NUMU-api/blob/main/docs/runbooks/load-test-incident.md#cache-hit-rate-low"
+
+      - alert: DBPoolWaitHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(db_pool_wait_seconds_bucket[5m])) by (le)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: P2
+          team: platform
+        annotations:
+          summary: "DB pool wait p95 > 100ms — pool exhaustion likely"
+          description: "p95 wait {{ $value | humanizeDuration }} on the SQLAlchemy connection pool."
+          runbook: "https://github.com/NUMU-IO/NUMU-api/blob/main/docs/runbooks/load-test-incident.md#db-pool-wait-high"
+
+      - alert: DBPoolAtCapacity
+        expr: db_connections_in_use >= db_connections_pool_size + db_connections_overflow
+        for: 2m
+        labels:
+          severity: P2
+          team: platform
+        annotations:
+          summary: "DB pool fully consumed (in_use ≥ size + overflow) for 2 min"
+          description: "{{ $value }} connections in use, all overflow exhausted."
+          runbook: "https://github.com/NUMU-IO/NUMU-api/blob/main/docs/runbooks/load-test-incident.md#db-pool-wait-high"
+
+      - alert: SwapPressure
+        expr: |
+          (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) < 0.3
+        for: 2m
+        labels:
+          severity: P2
+          team: platform
+        annotations:
+          summary: "Droplet swap < 30% free — system under memory pressure"
+          description: "{{ $value | humanizePercentage }} of swap is free."
+          runbook: "https://github.com/NUMU-IO/NUMU-api/blob/main/docs/runbooks/load-test-incident.md#swap-pressure"
+
+      # ReplicationLagHigh — defined now, but the underlying metric
+      # (replication_lag_seconds) only starts emitting once Step 13
+      # lands the read replica. Pre-replica deploys will see this
+      # alert as "no data" which is the correct behaviour.
+      - alert: ReplicationLagHigh
+        expr: replication_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: P2
+          team: platform
+        annotations:
+          summary: "Postgres replication lag > 30s for 5 min"
+          description: "Replica is {{ $value }}s behind primary."
+          runbook: "https://github.com/NUMU-IO/NUMU-api/blob/main/docs/runbooks/load-test-incident.md#replication-lag"

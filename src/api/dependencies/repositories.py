@@ -7,9 +7,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.infrastructure.repositories import (
+    AbandonedCheckoutRepository,
+    CategoryRepository,
+    CouponRepository,
+    CredentialRepository,
+    CustomerAddressRepository,
+    CustomerRepository,
+    FeedbackRepository,
+    InvoiceRepository,
+    MessageLogRepository,
+    OnboardingRepository,
+    OrderActivityRepository,
+    OrderRepository,
+    PageViewRepository,
+    ProductBundleRepository,
     ProductRepository,
+    ProductReviewRepository,
+    RefundRepository,
+    ShipmentRepository,
+    ShippingZoneRepository,
     StoreRepository,
+    StoreThemeRepository,
+    ThemeRepository,
+    ThemeVersionRepository,
+    TwoFactorRepository,
+    UpsellRuleRepository,
     UserRepository,
+    WaitlistRepository,
+    WebhookDeliveryLogRepository,
+    WebhookSubscriptionRepository,
+)
+from src.infrastructure.repositories.promotion_dismissal_repository import (
+    PromotionDismissalRepository,
+)
+from src.infrastructure.repositories.promotion_event_repository import (
+    PromotionEventRepository,
+)
+from src.infrastructure.repositories.promotion_repository import (
+    PromotionDisplayRepository,
+    PromotionRepository,
+    PromotionTargetRepository,
+    PromotionTranslationRepository,
 )
 
 
@@ -32,3 +70,402 @@ def get_product_repository(
 ) -> ProductRepository:
     """Get product repository dependency."""
     return ProductRepository(session)
+
+
+def get_product_review_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProductReviewRepository:
+    """Get product review repository dependency."""
+    return ProductReviewRepository(session)
+
+
+def get_product_subscription_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get back-in-stock subscription repository dependency (Phase 3.5).
+
+    Imports the class at call time — repositories/__init__.py doesn't
+    re-export the new class yet (avoiding a churn diff on the package
+    init), and this dependency is only constructed per-request anyway.
+    """
+    from src.infrastructure.repositories.product_subscription_repository import (
+        ProductSubscriptionRepository,
+    )
+
+    return ProductSubscriptionRepository(session)
+
+
+def get_order_return_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get order-return repository dependency (Phase 3.1).
+
+    Same lazy-import pattern as `get_product_subscription_repository`
+    so the new repo doesn't force a re-export churn on
+    `repositories/__init__.py` for this PR.
+    """
+    from src.infrastructure.repositories.order_return_repository import (
+        OrderReturnRepository,
+    )
+
+    return OrderReturnRepository(session)
+
+
+def get_customer_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> CustomerRepository:
+    """Get customer repository dependency."""
+    return CustomerRepository(session)
+
+
+def get_customer_address_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> CustomerAddressRepository:
+    """Get customer address repository dependency."""
+    return CustomerAddressRepository(session)
+
+
+def get_category_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> CategoryRepository:
+    """Get category repository dependency."""
+    return CategoryRepository(session)
+
+
+def get_coupon_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> CouponRepository:
+    """Get coupon repository dependency."""
+    return CouponRepository(session)
+
+
+def get_promotion_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionRepository:
+    return PromotionRepository(session)
+
+
+def get_promotion_display_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionDisplayRepository:
+    return PromotionDisplayRepository(session)
+
+
+def get_promotion_target_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionTargetRepository:
+    return PromotionTargetRepository(session)
+
+
+def get_promotion_translation_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionTranslationRepository:
+    return PromotionTranslationRepository(session)
+
+
+def get_promotion_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionEventRepository:
+    return PromotionEventRepository(session)
+
+
+def get_promotion_dismissal_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PromotionDismissalRepository:
+    return PromotionDismissalRepository(session)
+
+
+def get_onboarding_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> OnboardingRepository:
+    """Get onboarding repository dependency."""
+    return OnboardingRepository(session)
+
+
+def get_order_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> OrderRepository:
+    """Get order repository dependency."""
+    return OrderRepository(session)
+
+
+def get_order_activity_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> OrderActivityRepository:
+    """Get order activity repository dependency."""
+    return OrderActivityRepository(session)
+
+
+def get_abandoned_checkout_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> AbandonedCheckoutRepository:
+    """Get abandoned-checkout repository dependency."""
+    return AbandonedCheckoutRepository(session)
+
+
+def get_refund_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> RefundRepository:
+    """Get refund repository dependency."""
+    return RefundRepository(session)
+
+
+def get_waitlist_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> WaitlistRepository:
+    """Get waitlist repository dependency."""
+    return WaitlistRepository(session)
+
+
+def get_feedback_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> FeedbackRepository:
+    """Get feedback repository dependency."""
+    return FeedbackRepository(session)
+
+
+def get_invoice_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> InvoiceRepository:
+    """Get invoice repository dependency."""
+    return InvoiceRepository(session)
+
+
+def get_message_log_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageLogRepository:
+    """Get message log repository dependency."""
+    return MessageLogRepository(session)
+
+
+def get_two_factor_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> TwoFactorRepository:
+    """Get two-factor authentication repository dependency."""
+    return TwoFactorRepository(session)
+
+
+def get_shipping_zone_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ShippingZoneRepository:
+    """Shipping zone + rate repository dependency."""
+    return ShippingZoneRepository(session)
+
+
+def get_webhook_subscription_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> WebhookSubscriptionRepository:
+    """Get webhook subscription repository dependency."""
+    return WebhookSubscriptionRepository(session)
+
+
+def get_webhook_delivery_log_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> WebhookDeliveryLogRepository:
+    """Get webhook delivery log repository dependency."""
+    return WebhookDeliveryLogRepository(session)
+
+
+def get_shipment_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ShipmentRepository:
+    """Get shipment repository dependency."""
+    return ShipmentRepository(session)
+
+
+def get_credential_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> CredentialRepository:
+    """Get credential repository dependency."""
+    return CredentialRepository(session)
+
+
+def get_product_bundle_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProductBundleRepository:
+    """Get product bundle repository dependency."""
+    return ProductBundleRepository(session)
+
+
+def get_upsell_rule_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> UpsellRuleRepository:
+    """Get upsell rule repository dependency."""
+    return UpsellRuleRepository(session)
+
+
+def get_page_view_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PageViewRepository:
+    """Get page view repository dependency."""
+    return PageViewRepository(session)
+
+
+def get_analytics_rollup_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get analytics rollup repository dependency."""
+    from src.infrastructure.repositories.analytics_rollup_repository import (
+        AnalyticsRollupRepository,
+    )
+
+    return AnalyticsRollupRepository(session)
+
+
+def get_funnel_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get funnel event repository dependency."""
+    from src.infrastructure.repositories.funnel_event_repository import (
+        FunnelEventRepository,
+    )
+
+    return FunnelEventRepository(session)
+
+
+def get_analytics_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get the SQL-aggregation analytics repository dependency."""
+    from src.infrastructure.repositories.analytics_repository import (
+        AnalyticsRepository,
+    )
+
+    return AnalyticsRepository(session)
+
+
+def get_network_reputation_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get network reputation repository (cross-merchant trust network).
+
+    Re-exported here so storefront routes don't need to import from the
+    `shopify` dependency module.
+    """
+    from src.infrastructure.repositories.shopify_repository import (
+        NetworkReputationRepository,
+    )
+
+    return NetworkReputationRepository(session)
+
+
+def get_cart_repository():
+    """Get Redis cart repository (no DB session needed)."""
+    from src.infrastructure.repositories.cart_repository import RedisCartRepository
+
+    return RedisCartRepository()
+
+
+def get_theme_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ThemeRepository:
+    """Get theme repository dependency."""
+    return ThemeRepository(session)
+
+
+def get_theme_version_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ThemeVersionRepository:
+    """Get theme version repository dependency."""
+    return ThemeVersionRepository(session)
+
+
+def get_store_theme_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StoreThemeRepository:
+    """Get store-theme installation repository dependency."""
+    return StoreThemeRepository(session)
+
+
+def get_theme_customization_version_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get theme customization version repository dependency (V3)."""
+    from src.infrastructure.repositories.theme_customization_version_repository import (
+        ThemeCustomizationVersionRepository,
+    )
+
+    return ThemeCustomizationVersionRepository(session)
+
+
+def get_marketplace_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get marketplace repository dependency."""
+    from src.infrastructure.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    return MarketplaceRepository(session)
+
+
+def get_channel_connection_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get channel connection repository dependency."""
+    from src.infrastructure.repositories import ChannelConnectionRepositoryImpl
+
+    return ChannelConnectionRepositoryImpl(session)
+
+
+def get_message_thread_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get message thread repository dependency."""
+    from src.infrastructure.repositories import MessageThreadRepositoryImpl
+
+    return MessageThreadRepositoryImpl(session)
+
+
+def get_channel_message_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get channel message repository dependency."""
+    from src.infrastructure.repositories import ChannelMessageRepositoryImpl
+
+    return ChannelMessageRepositoryImpl(session)
+
+
+def get_whatsapp_template_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get WhatsApp template repository dependency."""
+    from src.infrastructure.repositories import WhatsAppTemplateRepositoryImpl
+
+    return WhatsAppTemplateRepositoryImpl(session)
+
+
+def get_email_template_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get email template repository dependency."""
+    from src.infrastructure.repositories import EmailTemplateRepositoryImpl
+
+    return EmailTemplateRepositoryImpl(session)
+
+
+def get_email_log_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get email log repository dependency."""
+    from src.infrastructure.repositories import EmailLogRepositoryImpl
+
+    return EmailLogRepositoryImpl(session)
+
+
+def get_catalog_mapping_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get catalog mapping repository dependency."""
+    from src.infrastructure.repositories import CatalogMappingRepositoryImpl
+
+    return CatalogMappingRepositoryImpl(session)
+
+
+def get_webhook_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get webhook event repository dependency."""
+    from src.infrastructure.repositories import WebhookEventRepositoryImpl
+
+    return WebhookEventRepositoryImpl(session)

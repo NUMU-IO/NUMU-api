@@ -1,43 +1,71 @@
-"""Tenant service for schema provisioning and management."""
+"""Tenant service for tenant lifecycle management.
+
+All tenant data lives in the shared 'public' PostgreSQL schema with a
+tenant_id discriminator column and RLS enforcement. No per-tenant schemas
+are created — isolation is handled entirely by Row-Level Security.
+"""
 
 import hashlib
 import logging
 import re
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.infrastructure.database.connection import Base, engine
+from src.infrastructure.database.models.public.tenant import (
+    TenantLifecycleState,
+    TenantModel,
+)
 from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = logging.getLogger(__name__)
 
 
+# Demo tenants live for 7 days. Trial tenants live for 30 days. Both then
+# enter the read-only state (trials only) for another 30 days before deletion.
+DEMO_LIFETIME_DAYS = 7
+TRIAL_LIFETIME_DAYS = 30
+READ_ONLY_GRACE_DAYS = 30
+
+
 class TenantService:
-    """Service for managing tenants and their database schemas."""
-    
+    """Service for managing tenant registration and lifecycle."""
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.tenant_repo = TenantRepository(db)
-    
+
     async def create_tenant(
         self,
         name: str,
         subdomain: str,
-        owner_id: str = None,
-        plan: str = "free"
+        owner_id: UUID = None,
+        plan: str = "trial",
+        is_active: bool = True,
+        lifecycle_state: str = TenantLifecycleState.ACTIVE,
+        expires_at: datetime | None = None,
+        demo_email: str | None = None,
+        demo_started_at: datetime | None = None,
+        trial_started_at: datetime | None = None,
     ):
-        """Create a new tenant with its own database schema.
-        
+        """Create a new tenant record.
+
         Args:
             name: Display name for the store
-            subdomain: Unique subdomain (e.g., 'mystore' for mystore.octyrafiy.com)
+            subdomain: Unique subdomain (e.g., 'mystore' for mystore.numueg.app)
             owner_id: UUID of the user who owns this store
-            plan: Subscription plan (free, pro, enterprise)
-        
+            plan: Subscription plan (trial, starter, pro, enterprise, demo)
+            is_active: Soft-delete flag
+            lifecycle_state: Initial state in the lifecycle state machine
+            expires_at: When this tenant should be auto-cleaned (demo/trial)
+            demo_email: Captured email for the Try-a-Demo flow
+            demo_started_at: When the demo session started
+            trial_started_at: When the 30-day trial began
+
         Returns:
             Created Tenant object
-        
+
         Raises:
             ValueError: If subdomain is invalid or already exists
         """
@@ -47,88 +75,162 @@ class TenantService:
                 f"Invalid subdomain '{subdomain}'. Must be 3-63 characters, "
                 "lowercase alphanumeric with hyphens, cannot start/end with hyphen."
             )
-        
+
         # Check for existing subdomain
         existing = await self.tenant_repo.get_by_subdomain(subdomain)
         if existing:
             raise ValueError(f"Subdomain '{subdomain}' already exists")
-        
-        # Generate safe schema name
+
+        # Generate a stable identifier for this tenant (used in settings/logs)
         schema_name = self._generate_schema_name(subdomain)
-        
-        try:
-            # Provision schema FIRST (before creating tenant record)
-            await self._provision_schema(schema_name)
-            
-            # Create tenant record in public schema
-            tenant = await self.tenant_repo.create(
-                name=name,
-                subdomain=subdomain,
-                schema_name=schema_name,
-                owner_id=owner_id,
-                plan=plan,
-                is_active=True
+
+        # Create tenant record in public schema
+        tenant = await self.tenant_repo.create(
+            name=name,
+            subdomain=subdomain,
+            owner_id=owner_id,
+            plan=plan,
+            is_active=is_active,
+            settings={"schema_name": schema_name},
+            lifecycle_state=lifecycle_state,
+            expires_at=expires_at,
+            demo_email=demo_email,
+            demo_started_at=demo_started_at,
+            trial_started_at=trial_started_at,
+        )
+
+        await self._clone_system_role_templates(tenant.id)
+
+        logger.info(
+            "tenant_created",
+            extra={
+                "subdomain": subdomain,
+                "tenant_id": str(tenant.id),
+                "lifecycle_state": lifecycle_state,
+                "plan": plan,
+            },
+        )
+        return tenant
+
+    async def _clone_system_role_templates(self, tenant_id: UUID) -> None:
+        """Clone all non-Owner system role templates into a newly created tenant."""
+        from uuid import uuid4
+
+        from sqlalchemy import select
+
+        from src.infrastructure.database.models.public.role import (
+            RoleModel,
+            RolePermissionModel,
+        )
+
+        templates = await self.db.execute(
+            select(RoleModel).where(
+                RoleModel.tenant_id.is_(None),
+                RoleModel.is_system.is_(True),
+                RoleModel.is_owner.is_(False),
+                RoleModel.slug != "custom",
+                RoleModel.deleted_at.is_(None),
             )
-            
-            logger.info(f"Created tenant '{subdomain}' with schema '{schema_name}'")
-            return tenant
-            
-        except Exception as e:
-            # Rollback: drop schema if tenant creation fails
-            logger.error(f"Failed to create tenant '{subdomain}': {e}")
-            await self._drop_schema(schema_name)
-            raise
-    
+        )
+        for template in templates.scalars().all():
+            new_role_id = uuid4()
+            self.db.add(
+                RoleModel(
+                    id=new_role_id,
+                    tenant_id=tenant_id,
+                    name=template.name,
+                    slug=template.slug,
+                    description=template.description,
+                    is_system=False,
+                    is_owner=False,
+                    is_locked=False,
+                    version=1,
+                    cloned_from_id=template.id,
+                )
+            )
+
+            perms = await self.db.execute(
+                select(RolePermissionModel).where(
+                    RolePermissionModel.role_id == template.id
+                )
+            )
+            for rp in perms.scalars().all():
+                self.db.add(
+                    RolePermissionModel(
+                        id=uuid4(),
+                        role_id=new_role_id,
+                        permission_id=rp.permission_id,
+                        scope_qualifier=rp.scope_qualifier,
+                    )
+                )
+
+        await self.db.flush()
+
+    # ─── Lifecycle state transitions ──────────────────────────────────────
+
+    async def transition_to_read_only(
+        self,
+        tenant: TenantModel,
+        reason: str,
+    ) -> TenantModel:
+        """Transition a tenant to the read-only grace state.
+
+        Used when a trial expires without conversion, or when a paying
+        merchant cancels their subscription, or when dunning gives up
+        after the final retry. The tenant has ``READ_ONLY_GRACE_DAYS``
+        before it is purged.
+        """
+        now = datetime.now(UTC)
+        tenant.lifecycle_state = TenantLifecycleState.READ_ONLY
+        tenant.read_only_at = now
+        tenant.delete_at = now + timedelta(days=READ_ONLY_GRACE_DAYS)
+        tenant.expires_at = None  # cleared so the trial sweeper stops picking it up
+        await self.tenant_repo.update(tenant)
+        logger.info(
+            "tenant_transition_read_only",
+            extra={
+                "tenant_id": str(tenant.id),
+                "reason": reason,
+                "delete_at": tenant.delete_at.isoformat(),
+            },
+        )
+        return tenant
+
+    async def transition_to_active(self, tenant: TenantModel) -> TenantModel:
+        """Activate a paying tenant.
+
+        Called by ``SubscribeUseCase`` when a trial → paid conversion
+        succeeds, or by the read-only-to-active path when a previously
+        cancelled merchant resubscribes.
+        """
+        now = datetime.now(UTC)
+        tenant.lifecycle_state = TenantLifecycleState.ACTIVE
+        tenant.expires_at = None
+        tenant.read_only_at = None
+        tenant.delete_at = None
+        if not tenant.trial_converted_at:
+            tenant.trial_converted_at = now
+        await self.tenant_repo.update(tenant)
+        logger.info("tenant_transition_active", extra={"tenant_id": str(tenant.id)})
+        return tenant
+
     def _validate_subdomain(self, subdomain: str) -> bool:
         """Validate subdomain format (RFC 1123 compliant)."""
         if not subdomain or len(subdomain) < 3 or len(subdomain) > 63:
             return False
         # Must be lowercase alphanumeric with hyphens, no start/end with hyphen
-        pattern = r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+        pattern = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
         return bool(re.match(pattern, subdomain.lower()))
-    
+
     def _generate_schema_name(self, subdomain: str) -> str:
-        """Generate a safe PostgreSQL schema name."""
-        # Replace hyphens with underscores (hyphens not allowed in unquoted identifiers)
-        safe_subdomain = subdomain.lower().replace("-", "_")
-        # Add hash for uniqueness and collision avoidance
-        schema_hash = hashlib.md5(subdomain.encode()).hexdigest()[:8]
-        return f"tenant_{safe_subdomain}_{schema_hash}"
-    
-    async def _provision_schema(self, schema_name: str):
-        """Create and initialize a tenant schema with all required tables.
-        
-        Uses the engine directly for DDL operations to avoid transaction issues.
+        """Generate a stable tenant identifier string.
+
+        This is stored in tenant.settings['schema_name'] for logging and
+        identification. No actual PostgreSQL schema is created — all data
+        lives in the public schema with RLS enforcement.
         """
-        # Validate schema name to prevent SQL injection
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema_name):
-            raise ValueError(f"Invalid schema name: {schema_name}")
-        
-        async with engine.begin() as conn:
-            # Create schema
-            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-            
-            # Set search_path and create tables
-            await conn.execute(text(f"SET search_path TO {schema_name}"))
-            
-            # Create all tables defined in Base.metadata
-            # Note: This creates tables for ALL models. In production, you may want
-            # to filter to only tenant-specific models.
-            await conn.run_sync(Base.metadata.create_all)
-            
-            # Reset search_path
-            await conn.execute(text("SET search_path TO public"))
-        
-        logger.info(f"Provisioned schema '{schema_name}' with tables")
-    
-    async def _drop_schema(self, schema_name: str):
-        """Drop a schema (used for rollback on failure)."""
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema_name):
-            return  # Don't attempt to drop invalid schema names
-        
-        try:
-            async with engine.begin() as conn:
-                await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
-            logger.info(f"Dropped schema '{schema_name}'")
-        except Exception as e:
-            logger.error(f"Failed to drop schema '{schema_name}': {e}")
+        safe_subdomain = subdomain.lower().replace("-", "_")
+        schema_hash = hashlib.md5(
+            subdomain.encode(), usedforsecurity=False
+        ).hexdigest()[:8]
+        return f"tenant_{safe_subdomain}_{schema_hash}"

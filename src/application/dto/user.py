@@ -5,7 +5,7 @@ from datetime import datetime
 from uuid import UUID
 
 from src.application.dto.base import BaseDTO
-from src.core.entities.user import User, UserRole, UserStatus
+from src.core.entities.user import User, UserRole
 
 
 @dataclass
@@ -24,6 +24,8 @@ class UserDTO(BaseDTO):
     is_verified: bool
     created_at: datetime
     updated_at: datetime
+    is_active: bool
+    trial_ends_at: datetime | None = None
 
     @classmethod
     def from_entity(cls, entity: User) -> "UserDTO":
@@ -41,6 +43,8 @@ class UserDTO(BaseDTO):
             is_verified=entity.is_verified,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
+            is_active=entity.is_active,
+            trial_ends_at=entity.trial_ends_at,
         )
 
 

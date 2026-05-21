@@ -4,6 +4,8 @@ from uuid import UUID
 
 from src.application.dto.product import ProductDTO, UpdateProductDTO
 from src.core.entities.product import ProductStatus
+from src.core.events.base import EventBus
+from src.core.events.product_events import ProductUpdatedEvent
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
@@ -17,9 +19,11 @@ class UpdateProductUseCase:
         self,
         product_repository: IProductRepository,
         store_repository: IStoreRepository,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.product_repository = product_repository
         self.store_repository = store_repository
+        self.event_bus = event_bus
 
     async def execute(
         self,
@@ -52,9 +56,13 @@ class UpdateProductUseCase:
         if dto.price is not None:
             product.price = Money(amount=dto.price, currency=product.price.currency)
         if dto.compare_at_price is not None:
-            product.compare_at_price = Money(amount=dto.compare_at_price, currency=product.price.currency)
+            product.compare_at_price = Money(
+                amount=dto.compare_at_price, currency=product.price.currency
+            )
         if dto.cost_price is not None:
-            product.cost_price = Money(amount=dto.cost_price, currency=product.price.currency)
+            product.cost_price = Money(
+                amount=dto.cost_price, currency=product.price.currency
+            )
         if dto.quantity is not None:
             product.quantity = dto.quantity
         if dto.low_stock_threshold is not None:
@@ -72,8 +80,29 @@ class UpdateProductUseCase:
                 product.status = ProductStatus(dto.status)
             except ValueError:
                 pass
+        if dto.seo_title is not None:
+            product.seo_title = dto.seo_title
+        if dto.seo_description is not None:
+            product.seo_description = dto.seo_description
+        # `meta_catalog_id` uses the same partial-update semantic — only
+        # touched when explicitly provided on the wire. Pass an empty
+        # string to unset (omit to leave alone).
+        if getattr(dto, "meta_catalog_id", None) is not None:
+            product.meta_catalog_id = dto.meta_catalog_id or None
 
         # Save product
         updated_product = await self.product_repository.update(product)
+
+        if self.event_bus:
+            try:
+                self.event_bus.publish(
+                    ProductUpdatedEvent(
+                        product_id=updated_product.id,
+                        store_id=updated_product.store_id,
+                        name=updated_product.name,
+                    )
+                )
+            except Exception:
+                pass
 
         return ProductDTO.from_entity(updated_product)

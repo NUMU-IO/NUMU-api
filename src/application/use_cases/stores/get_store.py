@@ -24,5 +24,5 @@ class GetStoreUseCase:
         """Get a store by slug."""
         store = await self.store_repository.get_by_slug(slug)
         if not store:
-            raise EntityNotFoundError("Store", slug)
+            raise EntityNotFoundError("Store", slug, identifier_name="slug")
         return StoreDTO.from_entity(store)

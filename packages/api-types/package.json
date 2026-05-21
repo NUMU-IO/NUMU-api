@@ -1,0 +1,22 @@
+{
+    "name": "@numu/api-types",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Auto-generated TypeScript types from the NUMU API OpenAPI spec",
+    "type": "module",
+    "main": "./dist/index.ts",
+    "types": "./dist/index.ts",
+    "exports": {
+        ".": "./dist/index.ts",
+        "./operations": "./dist/operations.ts"
+    },
+    "scripts": {
+        "generate": "openapi-typescript http://localhost:8000/openapi.json -o ./dist/index.ts",
+        "generate:file": "openapi-typescript ../../openapi.json -o ./dist/index.ts",
+        "check": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "openapi-typescript": "^7.8.0",
+        "typescript": "^5.8.3"
+    }
+}

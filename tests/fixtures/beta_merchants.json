@@ -1,0 +1,135 @@
+{
+  "merchants": [
+    {
+      "name": "Cairo Electronics",
+      "name_ar": "إلكترونيات القاهرة",
+      "subdomain": "cairo-electronics",
+      "email": "beta1@numu.test",
+      "category": "Electronics",
+      "products": [
+        { "name": "Wireless Earbuds Pro", "name_ar": "سماعات لاسلكية برو", "price": 45000, "quantity": 120, "code": "EG-ELEC-001" },
+        { "name": "USB-C Hub 7-in-1", "name_ar": "موزع USB-C متعدد", "price": 32000, "quantity": 80, "code": "EG-ELEC-002" },
+        { "name": "Laptop Stand Aluminum", "name_ar": "حامل لابتوب ألومنيوم", "price": 28000, "quantity": 55, "code": "EG-ELEC-003" },
+        { "name": "Mechanical Keyboard AR/EN", "name_ar": "كيبورد ميكانيكي عربي/إنجليزي", "price": 65000, "quantity": 40, "code": "EG-ELEC-004" },
+        { "name": "Phone Case Premium", "name_ar": "جراب موبايل بريميوم", "price": 15000, "quantity": 200, "code": "EG-ELEC-005" }
+      ]
+    },
+    {
+      "name": "Nile Fashion House",
+      "name_ar": "بيت أزياء النيل",
+      "subdomain": "nile-fashion",
+      "email": "beta2@numu.test",
+      "category": "Fashion",
+      "products": [
+        { "name": "Cotton Polo Shirt", "name_ar": "بولو قطن", "price": 35000, "quantity": 150, "code": "EG-FASH-001" },
+        { "name": "Linen Pants Classic", "name_ar": "بنطلون كتان كلاسيك", "price": 42000, "quantity": 90, "code": "EG-FASH-002" },
+        { "name": "Leather Belt Genuine", "name_ar": "حزام جلد طبيعي", "price": 22000, "quantity": 200, "code": "EG-FASH-003" },
+        { "name": "Summer Dress Floral", "name_ar": "فستان صيفي زهري", "price": 55000, "quantity": 60, "code": "EG-FASH-004" }
+      ]
+    },
+    {
+      "name": "Pharaoh Spices",
+      "name_ar": "توابل فرعون",
+      "subdomain": "pharaoh-spices",
+      "email": "beta3@numu.test",
+      "category": "Food & Grocery",
+      "products": [
+        { "name": "Egyptian Dukkah Blend 200g", "name_ar": "خلطة دقة مصرية 200 جرام", "price": 8500, "quantity": 500, "code": "EG-FOOD-001" },
+        { "name": "Organic Hibiscus (Karkade) 500g", "name_ar": "كركديه عضوي 500 جرام", "price": 12000, "quantity": 300, "code": "EG-FOOD-002" },
+        { "name": "Premium Saffron 5g", "name_ar": "زعفران فاخر 5 جرام", "price": 45000, "quantity": 100, "code": "EG-FOOD-003" },
+        { "name": "Mixed Nuts Gift Box 1kg", "name_ar": "علبة مكسرات مشكلة 1 كجم", "price": 65000, "quantity": 80, "code": "EG-FOOD-004" },
+        { "name": "Tahini Artisanal 400g", "name_ar": "طحينة يدوية 400 جرام", "price": 9500, "quantity": 250, "code": "EG-FOOD-005" },
+        { "name": "Molasses (Black Honey) 750ml", "name_ar": "عسل أسود 750 مل", "price": 11000, "quantity": 180, "code": "EG-FOOD-006" }
+      ]
+    },
+    {
+      "name": "Giza Home Living",
+      "name_ar": "جيزة هوم ليفنج",
+      "subdomain": "giza-home",
+      "email": "beta4@numu.test",
+      "category": "Home & Living",
+      "products": [
+        { "name": "Egyptian Cotton Bedsheet Set", "name_ar": "طقم ملايات قطن مصري", "price": 120000, "quantity": 45, "code": "EG-HOME-001" },
+        { "name": "Handmade Ceramic Vase", "name_ar": "فازة سيراميك يدوية", "price": 35000, "quantity": 30, "code": "EG-HOME-002" },
+        { "name": "Scented Candle Set (3 pack)", "name_ar": "طقم شموع معطرة (3 قطع)", "price": 28000, "quantity": 100, "code": "EG-HOME-003" }
+      ]
+    },
+    {
+      "name": "Alexandria Books",
+      "name_ar": "مكتبة الإسكندرية",
+      "subdomain": "alex-books",
+      "email": "beta5@numu.test",
+      "category": "Books & Stationery",
+      "products": [
+        { "name": "Arabic Calligraphy Set", "name_ar": "طقم خط عربي", "price": 55000, "quantity": 40, "code": "EG-BOOK-001" },
+        { "name": "Leather Journal A5", "name_ar": "مفكرة جلد A5", "price": 25000, "quantity": 120, "code": "EG-BOOK-002" },
+        { "name": "Fountain Pen Gift Box", "name_ar": "علبة هدايا قلم حبر", "price": 85000, "quantity": 25, "code": "EG-BOOK-003" },
+        { "name": "Planner 2026 Bilingual", "name_ar": "بلانر 2026 ثنائي اللغة", "price": 18000, "quantity": 200, "code": "EG-BOOK-004" }
+      ]
+    },
+    {
+      "name": "Sinai Wellness",
+      "name_ar": "سيناء ويلنس",
+      "subdomain": "sinai-wellness",
+      "email": "beta6@numu.test",
+      "category": "Health & Beauty",
+      "products": [
+        { "name": "Dead Sea Salt Scrub 500g", "name_ar": "سكراب ملح البحر الميت 500 جرام", "price": 22000, "quantity": 150, "code": "EG-WELL-001" },
+        { "name": "Organic Argan Oil 100ml", "name_ar": "زيت أرجان عضوي 100 مل", "price": 35000, "quantity": 100, "code": "EG-WELL-002" },
+        { "name": "Herbal Tea Detox Box (20 bags)", "name_ar": "شاي أعشاب ديتوكس (20 كيس)", "price": 15000, "quantity": 300, "code": "EG-WELL-003" }
+      ]
+    },
+    {
+      "name": "Delta Sports",
+      "name_ar": "دلتا سبورتس",
+      "subdomain": "delta-sports",
+      "email": "beta7@numu.test",
+      "category": "Sports & Outdoor",
+      "products": [
+        { "name": "Yoga Mat Premium 6mm", "name_ar": "سجادة يوجا بريميوم 6 مم", "price": 35000, "quantity": 80, "code": "EG-SPRT-001" },
+        { "name": "Resistance Bands Set", "name_ar": "طقم أحبال مقاومة", "price": 18000, "quantity": 200, "code": "EG-SPRT-002" },
+        { "name": "Stainless Water Bottle 1L", "name_ar": "زجاجة مياه ستانلس 1 لتر", "price": 15000, "quantity": 250, "code": "EG-SPRT-003" },
+        { "name": "Running Shoes Men", "name_ar": "حذاء جري رجالي", "price": 95000, "quantity": 50, "code": "EG-SPRT-004" }
+      ]
+    },
+    {
+      "name": "Luxor Handcrafts",
+      "name_ar": "حرف يدوية الأقصر",
+      "subdomain": "luxor-crafts",
+      "email": "beta8@numu.test",
+      "category": "Handmade & Crafts",
+      "products": [
+        { "name": "Papyrus Art Print", "name_ar": "لوحة بردي فنية", "price": 45000, "quantity": 30, "code": "EG-CRFT-001" },
+        { "name": "Brass Serving Tray", "name_ar": "صينية تقديم نحاس", "price": 55000, "quantity": 20, "code": "EG-CRFT-002" },
+        { "name": "Handwoven Basket Set", "name_ar": "طقم سلال منسوجة يدويا", "price": 38000, "quantity": 40, "code": "EG-CRFT-003" }
+      ]
+    },
+    {
+      "name": "Maadi Tech Store",
+      "name_ar": "معادي تك ستور",
+      "subdomain": "maadi-tech",
+      "email": "beta9@numu.test",
+      "category": "Electronics",
+      "products": [
+        { "name": "Smart Watch Band", "name_ar": "سوار ساعة ذكية", "price": 12000, "quantity": 300, "code": "EG-TECH-001" },
+        { "name": "Portable Charger 20000mAh", "name_ar": "شاحن متنقل 20000 مللي", "price": 42000, "quantity": 100, "code": "EG-TECH-002" }
+      ]
+    },
+    {
+      "name": "Zamalek Patisserie",
+      "name_ar": "حلويات الزمالك",
+      "subdomain": "zamalek-sweets",
+      "email": "beta10@numu.test",
+      "category": "Food & Grocery",
+      "products": [
+        { "name": "Baklava Box Premium 500g", "name_ar": "علبة بقلاوة فاخرة 500 جرام", "price": 35000, "quantity": 60, "code": "EG-SWTS-001" },
+        { "name": "Kunafa Mix Ready 1kg", "name_ar": "خلطة كنافة جاهزة 1 كجم", "price": 18000, "quantity": 100, "code": "EG-SWTS-002" },
+        { "name": "Basbousa Gift Tin", "name_ar": "علبة بسبوسة هدايا", "price": 28000, "quantity": 50, "code": "EG-SWTS-003" },
+        { "name": "Oriental Sweets Assortment 1kg", "name_ar": "تشكيلة حلويات شرقية 1 كجم", "price": 55000, "quantity": 40, "code": "EG-SWTS-004" }
+      ]
+    }
+  ],
+  "customers_per_store": 5,
+  "orders_per_store": 8,
+  "default_password": "BetaTest2026!"
+}

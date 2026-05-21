@@ -1,0 +1,59 @@
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Promote to which environment?"
+        required: true
+        type: choice
+        options:
+          - stage        # merges dev → stage  (triggers stage deploy)
+          - prod         # merges stage → prod (triggers prod deploy)
+          - stage + prod # merges dev → stage, then stage → prod (both deploys)
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: >-
+      ${{ github.event.inputs.environment == 'stage' && 'dev → stage'
+       || github.event.inputs.environment == 'prod'  && 'stage → prod'
+       || 'dev → stage → prod' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin --prune
+
+      - name: Promote dev → stage
+        if: >-
+          github.event.inputs.environment == 'stage' ||
+          github.event.inputs.environment == 'stage + prod'
+        run: |
+          echo "==> Promoting stage ← dev"
+          git checkout stage
+          git merge --ff-only origin/dev
+          git push origin stage
+
+      - name: Promote stage → prod
+        if: >-
+          github.event.inputs.environment == 'prod' ||
+          github.event.inputs.environment == 'stage + prod'
+        run: |
+          echo "==> Promoting prod ← stage"
+          git checkout prod
+          git merge --ff-only origin/stage
+          git push origin prod

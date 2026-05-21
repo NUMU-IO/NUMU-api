@@ -1,6 +1,7 @@
 """Customer repository interface."""
 
 from abc import abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 from src.core.entities.customer import Customer
@@ -24,6 +25,20 @@ class ICustomerRepository(BaseRepository[Customer]):
     @abstractmethod
     async def get_by_email(self, store_id: UUID, email: Email) -> Customer | None:
         """Get customer by email within a store."""
+        ...
+
+    @abstractmethod
+    async def get_by_phone(self, store_id: UUID, phone_e164: str) -> Customer | None:
+        """Get customer by canonical E.164 phone within a store.
+
+        Caller must pre-normalize via ``PhoneNumber.parse`` — this repository
+        does a literal string match.
+        """
+        ...
+
+    @abstractmethod
+    async def email_exists(self, store_id: UUID, email: Email) -> bool:
+        """Check if email already exists for a store."""
         ...
 
     @abstractmethod
@@ -52,6 +67,29 @@ class ICustomerRepository(BaseRepository[Customer]):
         ...
 
     @abstractmethod
-    async def count_by_store(self, store_id: UUID) -> int:
+    async def count_by_store(
+        self,
+        store_id: UUID,
+        date_from: datetime | None = None,
+    ) -> int:
         """Get total count of customers for a store."""
+        ...
+
+    @abstractmethod
+    async def update_password(
+        self, customer_id: UUID, password_hash: str
+    ) -> Customer | None:
+        """Update customer password hash."""
+        ...
+
+    @abstractmethod
+    async def update_default_address(
+        self, customer_id: UUID, address_id: UUID | None
+    ) -> Customer | None:
+        """Update customer's default address."""
+        ...
+
+    @abstractmethod
+    async def verify_customer(self, customer_id: UUID) -> Customer | None:
+        """Mark customer as verified."""
         ...

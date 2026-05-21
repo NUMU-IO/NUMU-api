@@ -6,6 +6,14 @@ from src.application.use_cases.auth import (
     RefreshTokenUseCase,
     RegisterUserUseCase,
 )
+from src.application.use_cases.coupons import (
+    ApplyCouponUseCase,
+    CreateCouponUseCase,
+    DeleteCouponUseCase,
+    ListCouponsUseCase,
+    UpdateCouponUseCase,
+    ValidateCouponUseCase,
+)
 from src.application.use_cases.products import (
     CreateProductUseCase,
     DeleteProductUseCase,
@@ -33,6 +41,13 @@ __all__ = [
     "ListStoresUseCase",
     "UpdateStoreUseCase",
     "DeleteStoreUseCase",
+    # Coupons
+    "CreateCouponUseCase",
+    "ValidateCouponUseCase",
+    "ApplyCouponUseCase",
+    "ListCouponsUseCase",
+    "UpdateCouponUseCase",
+    "DeleteCouponUseCase",
     # Products
     "CreateProductUseCase",
     "GetProductUseCase",

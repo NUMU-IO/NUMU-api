@@ -1,6 +1,5 @@
-"""Cloudflare R2 storage service implementation."""
+"""S3-compatible storage service implementation (MinIO / Cloudflare R2 / AWS S3)."""
 
-import hashlib
 from io import BytesIO
 from uuid import uuid4
 
@@ -17,31 +16,86 @@ from src.core.interfaces.services.storage_service import (
 
 
 class CloudflareR2StorageService(IStorageService):
-    """Storage service implementation using Cloudflare R2."""
+    """Storage service implementation using any S3-compatible backend."""
 
     def __init__(
         self,
-        account_id: str | None = None,
+        endpoint_url: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
         bucket_name: str | None = None,
     ) -> None:
-        self.account_id = account_id or settings.r2_account_id
-        self.access_key_id = access_key_id or settings.r2_access_key_id
-        self.secret_access_key = secret_access_key or settings.r2_secret_access_key
-        self.bucket_name = bucket_name or settings.r2_bucket_name
-        self.public_url = settings.r2_public_url
+        # Prefer new s3_* settings, fall back to legacy r2_* settings
+        self.endpoint_url = (
+            endpoint_url
+            or settings.s3_endpoint_url
+            or (
+                f"https://{settings.r2_account_id}.r2.cloudflarestorage.com"
+                if settings.r2_account_id
+                else None
+            )
+        )
+        self.access_key_id = (
+            access_key_id or settings.s3_access_key_id or settings.r2_access_key_id
+        )
+        self.secret_access_key = (
+            secret_access_key
+            or settings.s3_secret_access_key
+            or settings.r2_secret_access_key
+        )
+        self.bucket_name = (
+            bucket_name or settings.s3_bucket_name or settings.r2_bucket_name
+        )
+        self.public_url = settings.s3_public_url or settings.r2_public_url
 
-        if self.account_id and self.access_key_id and self.secret_access_key:
+        if self.endpoint_url and self.access_key_id and self.secret_access_key:
+            # Tight connect timeout + minimal retries — without these, a
+            # misconfigured endpoint (typical in local dev where the
+            # ``minio`` docker hostname doesn't resolve outside the
+            # compose network) makes every upload hang for ~22 s
+            # before the request fails. 3 s gives us "fast fail" which
+            # the merchant hub surfaces as a clean error instead of a
+            # spinner that looks like a server hang.
+            s3_config = Config(
+                signature_version="s3v4",
+                connect_timeout=3,
+                read_timeout=30,
+                retries={"max_attempts": 1, "mode": "standard"},
+            )
             self.client = boto3.client(
                 "s3",
-                endpoint_url=f"https://{self.account_id}.r2.cloudflarestorage.com",
+                endpoint_url=self.endpoint_url,
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
-                config=Config(signature_version="s3v4"),
+                region_name=settings.s3_region,
+                config=s3_config,
             )
+            # A second client used *only* for generating signed URLs.
+            # Reasoning: in containerised deployments the API talks to
+            # MinIO via an internal hostname (e.g. ``http://minio:9000``)
+            # which is not browser-reachable. SigV4 includes the Host
+            # header in the signature, so we can't post-process the URL
+            # to swap the host — the signature must be computed against
+            # the host the browser will actually send. When ``public_url``
+            # differs from ``endpoint_url`` (typical in dev / behind a
+            # reverse proxy), we sign against the public URL while
+            # uploads continue to use the internal one. In R2 / single-
+            # endpoint setups they're identical, so we reuse the same
+            # client.
+            if self.public_url and self.public_url != self.endpoint_url:
+                self.signing_client = boto3.client(
+                    "s3",
+                    endpoint_url=self.public_url,
+                    aws_access_key_id=self.access_key_id,
+                    aws_secret_access_key=self.secret_access_key,
+                    region_name=settings.s3_region,
+                    config=s3_config,
+                )
+            else:
+                self.signing_client = self.client
         else:
             self.client = None
+            self.signing_client = None
 
     def _generate_key(
         self,
@@ -61,18 +115,27 @@ class CloudflareR2StorageService(IStorageService):
         content_type: str,
         bucket: StorageBucket = StorageBucket.PRODUCTS,
     ) -> UploadedFile:
-        """Upload a file to Cloudflare R2."""
+        """Upload a file to S3-compatible storage."""
         if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
             key = self._generate_key(filename, bucket)
-            
+
+            # Keys are content-addressed (uuid4 hex prefix per `_generate_key`),
+            # so the object at a given key is effectively immutable — any edit
+            # produces a new key. Tell Cloudflare + browsers to cache for a
+            # year so repeat product page loads serve from the edge without
+            # revalidation. Without this, CF falls back to its 4h default,
+            # which Lighthouse flags as a short cache lifetime.
             self.client.upload_fileobj(
                 BytesIO(file_content),
                 self.bucket_name,
                 key,
-                ExtraArgs={"ContentType": content_type},
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "CacheControl": "public, max-age=31536000, immutable",
+                },
             )
 
             return UploadedFile(
@@ -82,18 +145,18 @@ class CloudflareR2StorageService(IStorageService):
                 content_type=content_type,
             )
         except Exception as e:
-            raise ExternalServiceError("Cloudflare R2", str(e))
+            raise ExternalServiceError("S3 Storage", str(e))
 
     async def delete_file(self, key: str) -> bool:
-        """Delete a file from Cloudflare R2."""
+        """Delete a file from S3-compatible storage."""
         if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
             self.client.delete_object(Bucket=self.bucket_name, Key=key)
             return True
         except Exception as e:
-            raise ExternalServiceError("Cloudflare R2", str(e))
+            raise ExternalServiceError("S3 Storage", str(e))
 
     async def get_signed_url(
         self,
@@ -101,23 +164,45 @@ class CloudflareR2StorageService(IStorageService):
         expires_in: int = 3600,
     ) -> str:
         """Get a signed URL for a file."""
-        if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+        if not self.signing_client:
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
-            url = self.client.generate_presigned_url(
+            url = self.signing_client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self.bucket_name, "Key": key},
                 ExpiresIn=expires_in,
             )
             return url
         except Exception as e:
-            raise ExternalServiceError("Cloudflare R2", str(e))
+            raise ExternalServiceError("S3 Storage", str(e))
+
+    async def get_object_bytes(self, key: str) -> tuple[bytes, str | None]:
+        """Fetch object bytes + content-type for streaming through the API.
+
+        Avoids the signed-URL hostname problem: in containerised
+        deployments where MinIO sits behind a path-rewriting proxy,
+        SigV4 signed URLs fail validation because the canonical path
+        the signature was computed against doesn't match what MinIO
+        receives after the proxy rewrites. Streaming through the API
+        sidesteps all of that — the API container talks to MinIO via
+        the internal endpoint where signing isn't involved.
+        """
+        if not self.client:
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
+
+        try:
+            response = self.client.get_object(Bucket=self.bucket_name, Key=key)
+            body = response["Body"].read()
+            content_type = response.get("ContentType")
+            return body, content_type
+        except Exception as e:
+            raise ExternalServiceError("S3 Storage", str(e))
 
     async def file_exists(self, key: str) -> bool:
-        """Check if a file exists in Cloudflare R2."""
+        """Check if a file exists in S3-compatible storage."""
         if not self.client:
-            raise ExternalServiceError("Cloudflare R2", "Storage not configured")
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
             self.client.head_object(Bucket=self.bucket_name, Key=key)
@@ -129,4 +214,26 @@ class CloudflareR2StorageService(IStorageService):
         """Get the public URL for a file."""
         if self.public_url:
             return f"{self.public_url}/{key}"
-        return f"https://{self.bucket_name}.{self.account_id}.r2.cloudflarestorage.com/{key}"
+        return f"{self.endpoint_url}/{self.bucket_name}/{key}"
+
+    async def list_files(self, prefix: str) -> list[dict]:
+        """List files under a given prefix."""
+        if not self.client:
+            raise ExternalServiceError("S3 Storage", "Storage not configured")
+
+        try:
+            response = self.client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=prefix,
+            )
+            files = []
+            for obj in response.get("Contents", []):
+                files.append({
+                    "key": obj["Key"],
+                    "url": self.get_public_url(obj["Key"]),
+                    "size": obj["Size"],
+                    "last_modified": obj["LastModified"].isoformat(),
+                })
+            return files
+        except Exception as e:
+            raise ExternalServiceError("S3 Storage", str(e))

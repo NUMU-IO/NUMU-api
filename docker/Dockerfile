@@ -1,5 +1,5 @@
 # Build stage
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -7,10 +7,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir build && \
     pip wheel --no-cache-dir --wheel-dir /app/wheels -e .
@@ -24,7 +25,20 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    # WeasyPrint runtime dependencies (HTML/CSS -> PDF generation)
+    # Ref: https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#debian-ubuntu
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libpangoft2-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libcairo2 \
+    libharfbuzz0b \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Arabic fonts for invoice PDF generation (Noto Sans Arabic, OFL license)
+COPY docker/fonts/ /usr/share/fonts/truetype/noto-arabic/
+RUN fc-cache -fv
 
 # Create non-root user
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
@@ -32,6 +46,9 @@ RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 # Copy wheels from builder
 COPY --from=builder /app/wheels /wheels
 RUN pip install --no-cache-dir /wheels/*
+
+# Ensure src is importable (needed by Alembic, Celery, etc.)
+ENV PYTHONPATH=/app
 
 # Copy application code
 COPY . .

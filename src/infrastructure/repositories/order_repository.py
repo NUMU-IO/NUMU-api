@@ -1,0 +1,609 @@
+"""Order repository implementation."""
+
+from datetime import date, datetime
+from uuid import UUID
+
+from sqlalchemy import Date as SqlDate
+from sqlalchemy import cast, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.entities.order import (
+    FulfillmentStatus,
+    Order,
+    OrderLineItem,
+    OrderShippingAddress,
+    OrderStatus,
+    PaymentStatus,
+)
+from src.core.interfaces.repositories.order_repository import IOrderRepository
+from src.infrastructure.database.connection import get_tenant_id
+from src.infrastructure.database.models import OrderModel
+
+
+class OrderRepository(IOrderRepository):
+    """Order repository implementation using SQLAlchemy.
+
+    All queries include an explicit tenant_id filter as a defense-in-depth
+    measure alongside PostgreSQL RLS policies.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    def _tenant_filter(self, query):
+        """Apply tenant_id filter if a tenant context is active."""
+        tid = get_tenant_id()
+        if tid:
+            return query.where(OrderModel.tenant_id == tid)
+        return query
+
+    def _line_item_to_dict(self, item: OrderLineItem) -> dict:
+        """Convert OrderLineItem to dict for storage."""
+        return {
+            "product_id": str(item.product_id),
+            "product_name": item.product_name,
+            "variant_id": str(item.variant_id) if item.variant_id else None,
+            "variant_name": item.variant_name,
+            "sku": item.sku,
+            "quantity": item.quantity,
+            "unit_price": item.unit_price,
+            "total_price": item.total_price,
+            "weight": str(item.weight) if item.weight else None,
+            "properties": item.properties,
+        }
+
+    def _dict_to_line_item(self, data: dict) -> OrderLineItem:
+        """Convert dict to OrderLineItem."""
+        from decimal import Decimal
+
+        return OrderLineItem(
+            product_id=UUID(data["product_id"]),
+            product_name=data.get("product_name") or "",
+            variant_id=UUID(data["variant_id"]) if data.get("variant_id") else None,
+            variant_name=data.get("variant_name"),
+            sku=data.get("sku"),
+            quantity=data.get("quantity", 1),
+            unit_price=data.get("unit_price", 0),
+            total_price=data.get("total_price", 0),
+            weight=Decimal(data["weight"]) if data.get("weight") else None,
+            properties=data.get("properties", {}),
+        )
+
+    def _address_to_dict(self, address: OrderShippingAddress) -> dict:
+        """Convert OrderShippingAddress to dict for storage.
+
+        Persists the geolocation fields (latitude, longitude,
+        location_accuracy, location_source, geocoded_address) too —
+        they're what the COD trust check's teleport detection reads
+        from the customer's previous order.
+        """
+        return {
+            "first_name": address.first_name,
+            "last_name": address.last_name,
+            "address_line1": address.address_line1,
+            "address_line2": address.address_line2,
+            "city": address.city,
+            "state": address.state,
+            "postal_code": address.postal_code,
+            "country": address.country,
+            "phone": address.phone,
+            "latitude": address.latitude,
+            "longitude": address.longitude,
+            "location_accuracy": address.location_accuracy,
+            "location_source": address.location_source,
+            "geocoded_address": address.geocoded_address,
+        }
+
+    def _dict_to_address(self, data: dict) -> OrderShippingAddress:
+        """Convert dict to OrderShippingAddress.
+
+        Every required string field falls back to ``""`` and every
+        optional field to ``None`` when missing. Imported orders (and
+        some legacy rows) carry partial address JSONBs — e.g. Bosta /
+        manual-entry imports occasionally drop ``address_line1`` and
+        provide a free-form ``street`` only, or omit ``country`` for
+        in-Egypt orders. Bracket access on those rows used to
+        ``KeyError`` and 500 every endpoint that rehydrates the order,
+        including ``/dashboard/revenue`` and ``/dashboard/top-products``
+        which iterate the store's whole order list to aggregate.
+        Falling back to ``""`` lets the entity exist — consumers that
+        actually need the address can still detect "unset" by the
+        empty string.
+        """
+        return OrderShippingAddress(
+            first_name=data.get("first_name") or "",
+            last_name=data.get("last_name") or "",
+            address_line1=data.get("address_line1") or "",
+            address_line2=data.get("address_line2"),
+            city=data.get("city") or "",
+            state=data.get("state"),
+            postal_code=data.get("postal_code"),
+            country=data.get("country") or "",
+            phone=data.get("phone"),
+            latitude=data.get("latitude"),
+            longitude=data.get("longitude"),
+            location_accuracy=data.get("location_accuracy"),
+            location_source=data.get("location_source"),
+            geocoded_address=data.get("geocoded_address"),
+        )
+
+    def _to_entity(self, model: OrderModel) -> Order:
+        """Convert database model to domain entity."""
+        return Order(
+            id=model.id,
+            store_id=model.store_id,
+            tenant_id=model.tenant_id,
+            customer_id=model.customer_id,
+            order_number=model.order_number,
+            line_items=[
+                self._dict_to_line_item(item) for item in (model.line_items or [])
+            ],
+            shipping_address=self._dict_to_address(model.shipping_address),
+            billing_address=self._dict_to_address(model.billing_address)
+            if model.billing_address
+            else None,
+            status=model.status,
+            payment_status=model.payment_status,
+            fulfillment_status=model.fulfillment_status,
+            subtotal=model.subtotal,
+            shipping_cost=model.shipping_cost,
+            tax_amount=model.tax_amount,
+            discount_amount=model.discount_amount,
+            total=model.total,
+            currency=model.currency,
+            payment_method=model.payment_method,
+            payment_id=model.payment_id,
+            shipping_method=model.shipping_method,
+            shipping_zone_id=model.shipping_zone_id,
+            shipping_rate_id=model.shipping_rate_id,
+            deposit_required_cents=model.deposit_required_cents,
+            deposit_amount_cents=model.deposit_amount_cents,
+            deposit_paid_at=model.deposit_paid_at,
+            deposit_expires_at=model.deposit_expires_at,
+            deposit_gateway=model.deposit_gateway,
+            deposit_payment_id=model.deposit_payment_id,
+            tracking_number=model.tracking_number,
+            notes=model.notes,
+            customer_notes=model.customer_notes,
+            metadata=model.extra_data or {},
+            utm_source=model.utm_source,
+            utm_medium=model.utm_medium,
+            utm_campaign=model.utm_campaign,
+            session_fingerprint=model.session_fingerprint,
+            version=model.version,
+            cancelled_at=model.cancelled_at,
+            paid_at=model.paid_at,
+            fulfilled_at=model.fulfilled_at,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
+        )
+
+    def _to_model(self, entity: Order) -> OrderModel:
+        """Convert domain entity to database model."""
+        return OrderModel(
+            id=entity.id,
+            store_id=entity.store_id,
+            tenant_id=entity.tenant_id,
+            customer_id=entity.customer_id,
+            order_number=entity.order_number,
+            line_items=[self._line_item_to_dict(item) for item in entity.line_items],
+            shipping_address=self._address_to_dict(entity.shipping_address),
+            billing_address=self._address_to_dict(entity.billing_address)
+            if entity.billing_address
+            else None,
+            status=entity.status,
+            payment_status=entity.payment_status,
+            fulfillment_status=entity.fulfillment_status,
+            subtotal=entity.subtotal,
+            shipping_cost=entity.shipping_cost,
+            tax_amount=entity.tax_amount,
+            discount_amount=entity.discount_amount,
+            total=entity.total,
+            currency=entity.currency,
+            payment_method=entity.payment_method,
+            payment_id=entity.payment_id,
+            shipping_method=entity.shipping_method,
+            shipping_zone_id=entity.shipping_zone_id,
+            shipping_rate_id=entity.shipping_rate_id,
+            deposit_required_cents=entity.deposit_required_cents,
+            deposit_amount_cents=entity.deposit_amount_cents,
+            deposit_paid_at=entity.deposit_paid_at,
+            deposit_expires_at=entity.deposit_expires_at,
+            deposit_gateway=entity.deposit_gateway,
+            deposit_payment_id=entity.deposit_payment_id,
+            tracking_number=entity.tracking_number,
+            notes=entity.notes,
+            customer_notes=entity.customer_notes,
+            extra_data=entity.metadata,
+            utm_source=entity.utm_source,
+            utm_medium=entity.utm_medium,
+            utm_campaign=entity.utm_campaign,
+            session_fingerprint=entity.session_fingerprint,
+            version=entity.version,
+            cancelled_at=entity.cancelled_at,
+            paid_at=entity.paid_at,
+            fulfilled_at=entity.fulfilled_at,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+        )
+
+    async def get_by_id(self, entity_id: UUID) -> Order | None:
+        """Get order by ID."""
+        query = select(OrderModel).where(OrderModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_all(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Get all orders with pagination."""
+        query = (
+            select(OrderModel)
+            .order_by(OrderModel.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def create(self, entity: Order) -> Order:
+        """Create a new order."""
+        model = self._to_model(entity)
+        self.session.add(model)
+        await self.session.flush()
+        await self.session.refresh(model)
+        return self._to_entity(model)
+
+    async def update(self, entity: Order) -> Order:
+        """Update an existing order."""
+        query = select(OrderModel).where(OrderModel.id == entity.id)
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        if model:
+            model.status = entity.status
+            model.payment_status = entity.payment_status
+            model.fulfillment_status = entity.fulfillment_status
+            model.line_items = [
+                self._line_item_to_dict(item) for item in entity.line_items
+            ]
+            model.shipping_address = self._address_to_dict(entity.shipping_address)
+            model.billing_address = (
+                self._address_to_dict(entity.billing_address)
+                if entity.billing_address
+                else None
+            )
+            model.subtotal = entity.subtotal
+            model.shipping_cost = entity.shipping_cost
+            model.tax_amount = entity.tax_amount
+            model.discount_amount = entity.discount_amount
+            model.total = entity.total
+            model.currency = entity.currency
+            model.payment_method = entity.payment_method
+            model.payment_id = entity.payment_id
+            model.shipping_method = entity.shipping_method
+            model.tracking_number = entity.tracking_number
+            model.notes = entity.notes
+            model.customer_notes = entity.customer_notes
+            model.extra_data = entity.metadata
+            model.cancelled_at = entity.cancelled_at
+            model.paid_at = entity.paid_at
+            model.fulfilled_at = entity.fulfilled_at
+            await self.session.flush()
+            await self.session.refresh(model)
+            return self._to_entity(model)
+        raise ValueError(f"Order with id {entity.id} not found")
+
+    async def delete(self, entity_id: UUID) -> bool:
+        """Delete an order by ID."""
+        query = select(OrderModel).where(OrderModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        if model:
+            await self.session.delete(model)
+            await self.session.flush()
+            return True
+        return False
+
+    async def count(self) -> int:
+        """Get total count of orders."""
+        result = await self.session.execute(select(func.count(OrderModel.id)))
+        return result.scalar() or 0
+
+    async def get_by_store(
+        self,
+        store_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        status: OrderStatus | None = None,
+        payment_status: PaymentStatus | None = None,
+        fulfillment_status: FulfillmentStatus | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        customer_id: UUID | None = None,
+        exclude_statuses: list[OrderStatus] | None = None,
+    ) -> list[Order]:
+        """Get all orders for a store with optional filters."""
+        query = select(OrderModel).where(OrderModel.store_id == store_id)
+        if customer_id:
+            query = query.where(OrderModel.customer_id == customer_id)
+        if status:
+            query = query.where(OrderModel.status == status)
+        if exclude_statuses:
+            query = query.where(OrderModel.status.notin_(exclude_statuses))
+        if payment_status:
+            query = query.where(OrderModel.payment_status == payment_status)
+        if fulfillment_status:
+            query = query.where(OrderModel.fulfillment_status == fulfillment_status)
+        if date_from:
+            query = query.where(OrderModel.created_at >= date_from)
+        if date_to:
+            query = query.where(OrderModel.created_at <= date_to)
+        query = query.order_by(OrderModel.created_at.desc()).offset(skip).limit(limit)
+        result = await self.session.execute(self._tenant_filter(query))
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def get_by_customer(
+        self,
+        customer_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Get all orders for a customer."""
+        query = (
+            select(OrderModel)
+            .where(OrderModel.customer_id == customer_id)
+            .order_by(OrderModel.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def get_by_order_number(
+        self,
+        store_id: UUID,
+        order_number: str,
+    ) -> Order | None:
+        """Get order by order number within a store."""
+        query = select(OrderModel).where(
+            OrderModel.store_id == store_id,
+            OrderModel.order_number == order_number,
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_payment_id(self, payment_id: str) -> Order | None:
+        """Get order by external payment ID."""
+        query = select(OrderModel).where(OrderModel.payment_id == payment_id)
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_payment_id_for_update(self, payment_id: str) -> Order | None:
+        """Get order by payment ID with a row-level lock (SELECT ... FOR UPDATE)."""
+        query = (
+            select(OrderModel)
+            .where(OrderModel.payment_id == payment_id)
+            .with_for_update()
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_tracking_number_for_update(
+        self, tracking_number: str
+    ) -> Order | None:
+        """Get order by tracking number with a row-level lock."""
+        query = (
+            select(OrderModel)
+            .where(OrderModel.tracking_number == tracking_number)
+            .with_for_update()
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_tracking_number(self, tracking_number: str) -> Order | None:
+        """Get order by shipping tracking number (cross-store lookup)."""
+        query = select(OrderModel).where(OrderModel.tracking_number == tracking_number)
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_date_range(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Get orders within a date range."""
+        query = (
+            select(OrderModel)
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+            )
+            .order_by(OrderModel.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def count_by_store(
+        self,
+        store_id: UUID,
+        status: OrderStatus | None = None,
+        payment_status: PaymentStatus | None = None,
+        fulfillment_status: FulfillmentStatus | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        customer_id: UUID | None = None,
+        exclude_statuses: list[OrderStatus] | None = None,
+    ) -> int:
+        """Get total count of orders for a store with optional filters."""
+        query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
+        if customer_id:
+            query = query.where(OrderModel.customer_id == customer_id)
+        if status:
+            query = query.where(OrderModel.status == status)
+        if payment_status:
+            query = query.where(OrderModel.payment_status == payment_status)
+        if fulfillment_status:
+            query = query.where(OrderModel.fulfillment_status == fulfillment_status)
+        if exclude_statuses:
+            query = query.where(OrderModel.status.notin_(exclude_statuses))
+        if date_from:
+            query = query.where(OrderModel.created_at >= date_from)
+        if date_to:
+            query = query.where(OrderModel.created_at <= date_to)
+        result = await self.session.execute(self._tenant_filter(query))
+        return result.scalar() or 0
+
+    async def count_by_customer(self, customer_id: UUID) -> int:
+        """Get total count of orders for a customer."""
+        query = select(func.count(OrderModel.id)).where(
+            OrderModel.customer_id == customer_id
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return result.scalar() or 0
+
+    async def get_revenue_by_date_range(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> int:
+        """Get total revenue for a date range (in cents).
+
+        Includes all orders except cancelled and refunded, so COD orders
+        (payment still pending) are counted toward revenue.
+        """
+        query = select(func.coalesce(func.sum(OrderModel.total), 0)).where(
+            OrderModel.store_id == store_id,
+            OrderModel.created_at >= start_date,
+            OrderModel.created_at <= end_date,
+            OrderModel.status.notin_([
+                OrderStatus.CANCELLED,
+                OrderStatus.REFUNDED,
+            ]),
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return result.scalar() or 0
+
+    async def get_daily_aggregates(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[tuple[date, int, int]]:
+        """Daily ``(day, revenue_cents, order_count)`` tuples, one SQL round-trip.
+
+        Replaces the sales-chart fallback that used to issue two queries per
+        day (60 queries for a 30-day window). Cancelled/refunded orders are
+        excluded, matching ``get_revenue_by_date_range``.
+        """
+        day = cast(OrderModel.created_at, SqlDate).label("day")
+        query = (
+            select(
+                day,
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+                func.count(OrderModel.id).label("orders"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+                OrderModel.status.notin_([
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                ]),
+            )
+            .group_by(day)
+            .order_by(day)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            (row.day, int(row.revenue or 0), int(row.orders or 0)) for row in result
+        ]
+
+    async def get_customer_order_stats(
+        self, store_id: UUID
+    ) -> dict[UUID, tuple[int, int]]:
+        """Get (order_count, total_spent) per customer for a store.
+
+        Returns a dict of {customer_id: (order_count, total_spent_cents)}.
+        Only counts non-cancelled/refunded orders.
+        """
+        query = (
+            select(
+                OrderModel.customer_id,
+                func.count(OrderModel.id),
+                func.coalesce(func.sum(OrderModel.total), 0),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.status.notin_([
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                ]),
+            )
+            .group_by(OrderModel.customer_id)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return {row[0]: (row[1], row[2]) for row in result.all()}
+
+    async def exists_by_external_id(self, store_id: UUID, external_id: str) -> bool:
+        """Check if an order in this store was already imported for the given external ID.
+
+        External IDs live under ``OrderModel.extra_data['external_order_id']`` —
+        written by the order-import flow so merchants can re-upload without
+        creating duplicates.
+        """
+        query = select(OrderModel.id).where(
+            OrderModel.store_id == store_id,
+            OrderModel.extra_data["external_order_id"].astext == external_id,
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return result.first() is not None
+
+    async def get_next_order_number(self, store_id: UUID) -> str:
+        """Generate next order number for a store."""
+        query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
+        result = await self.session.execute(self._tenant_filter(query))
+        count = result.scalar() or 0
+        return f"ORD-{count + 1:06d}"
+
+    async def search(
+        self,
+        store_id: UUID,
+        query_str: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Search orders by order number or customer notes."""
+        from sqlalchemy import or_
+
+        search_term = f"%{query_str}%"
+        query = (
+            select(OrderModel)
+            .where(
+                OrderModel.store_id == store_id,
+                or_(
+                    OrderModel.order_number.ilike(search_term),
+                    OrderModel.customer_notes.ilike(search_term),
+                ),
+            )
+            .order_by(OrderModel.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [self._to_entity(model) for model in result.scalars().all()]

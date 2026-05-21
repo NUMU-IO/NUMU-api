@@ -10,12 +10,14 @@ class EmailMessage:
 
     to: str | list[str]
     subject: str
-    html_content: str
+    html_content: str | None = None
     text_content: str | None = None
     from_email: str | None = None
     from_name: str | None = None
     reply_to: str | None = None
     attachments: list[dict] | None = None
+    template_id: str | None = None
+    context: dict | None = None
 
 
 class IEmailService(ABC):
@@ -42,6 +44,7 @@ class IEmailService(ABC):
         email: str,
         order_number: str,
         order_details: dict,
+        language: str = "ar",
     ) -> bool:
         """Send order confirmation email."""
         ...
@@ -53,6 +56,7 @@ class IEmailService(ABC):
         order_number: str,
         tracking_number: str | None,
         carrier: str | None,
+        language: str = "ar",
     ) -> bool:
         """Send shipping notification email."""
         ...

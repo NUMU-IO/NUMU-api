@@ -1,0 +1,349 @@
+version: '3.8'
+
+# =============================================================================
+# NUMU API - Production Environment
+# =============================================================================
+# Features:
+# - Nginx reverse proxy with SSL termination
+# - PostgreSQL with WAL archiving for point-in-time recovery
+# - Redis Sentinel for high availability
+# - API service with production environment variables
+# - Higher resource limits than staging
+
+services:
+  # ===========================================================================
+  # Nginx Reverse Proxy
+  # ===========================================================================
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+      # Rebuilt locally — not pushed to GHCR.  Change nginx config and run
+      # `docker compose build nginx` on the server to apply updates.
+    container_name: numu-nginx-prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - api
+    networks:
+      - numu-prod
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # NUMU API
+  # NUMU_API_IMAGE is set by the CD pipeline, e.g.
+  #   ghcr.io/org/numu-api:prod    (branch-based deploy)
+  #   ghcr.io/org/numu-api:v1.2.3  (tagged release)
+  # ===========================================================================
+  api:
+    image: ${NUMU_API_IMAGE:?NUMU_API_IMAGE must be set}
+    container_name: numu-api-prod
+    restart: unless-stopped
+    env_file:
+      - ../.env.prod
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_FORMAT=json
+    expose:
+      - "8000"
+    volumes:
+      - api_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - numu-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # ===========================================================================
+  # PostgreSQL with WAL Archiving
+  # ===========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: numu-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-numu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-numu_prod}
+      # WAL archiving settings
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_wal_archive:/var/lib/postgresql/wal_archive
+      - ./postgres/init-wal-archiving.sh:/docker-entrypoint-initdb.d/init-wal-archiving.sh:ro
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - numu-prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-numu} -d ${POSTGRES_DB:-numu_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+
+  # ===========================================================================
+  # MinIO Object Storage
+  # ===========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: numu-minio-prod
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - numu-prod
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # ===========================================================================
+  # Redis Master
+  # ===========================================================================
+  redis-master:
+    image: redis:7-alpine
+    container_name: numu-redis-master-prod
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_master_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - numu-prod
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # Redis Sentinel 1
+  # ===========================================================================
+  redis-sentinel-1:
+    image: redis:7-alpine
+    container_name: numu-redis-sentinel-1-prod
+    restart: unless-stopped
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis-master
+    networks:
+      - numu-prod
+    ports:
+      - "26379:26379"
+
+  # ===========================================================================
+  # Redis Sentinel 2
+  # ===========================================================================
+  redis-sentinel-2:
+    image: redis:7-alpine
+    container_name: numu-redis-sentinel-2-prod
+    restart: unless-stopped
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis-master
+    networks:
+      - numu-prod
+    ports:
+      - "26380:26379"
+
+  # ===========================================================================
+  # Redis Sentinel 3
+  # ===========================================================================
+  redis-sentinel-3:
+    image: redis:7-alpine
+    container_name: numu-redis-sentinel-3-prod
+    restart: unless-stopped
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis-master
+    networks:
+      - numu-prod
+    ports:
+      - "26381:26379"
+
+  # ===========================================================================
+  # Nominatim — self-hosted reverse-geocoder for checkout location picker
+  # ---------------------------------------------------------------------------
+  # Replaces LocationIQ once the production server has capacity for the
+  # initial ~30min import. Set NOMINATIM_URL=http://nominatim:8080 in
+  # .env.prod after this service is up and healthy.
+  #
+  # Data freshness is handled automatically — REPLICATION_URL pulls daily
+  # OSM diffs for Egypt, so the DB stays current without operator action.
+  #
+  # First import: ~200MB download, ~5–10GB disk after import, ~40min
+  # runtime on a 4-core box. Subsequent restarts: seconds.
+  # ===========================================================================
+  nominatim:
+    image: mediagis/nominatim:4.4
+    container_name: numu-nominatim-prod
+    restart: unless-stopped
+    environment:
+      - PBF_URL=https://download.geofabrik.de/africa/egypt-latest.osm.pbf
+      - REPLICATION_URL=https://download.geofabrik.de/africa/egypt-updates/
+      - UPDATE_MODE=continuous
+      - IMPORT_WIKIPEDIA=false
+      - IMPORT_US_POSTCODES=false
+      - IMPORT_GB_POSTCODES=false
+      - FREEZE=false
+      - THREADS=4
+      - NOMINATIM_PASSWORD=${NOMINATIM_PASSWORD:?NOMINATIM_PASSWORD must be set}
+    volumes:
+      - nominatim_data:/var/lib/postgresql/14/main
+      - nominatim_flatnode:/nominatim/flatnode
+    expose:
+      - "8080"
+    shm_size: 1gb
+    networks:
+      - numu-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45m
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # ===========================================================================
+  # Celery Worker
+  # ===========================================================================
+  celery-worker:
+    image: ${NUMU_API_IMAGE:?NUMU_API_IMAGE must be set}
+    container_name: numu-celery-worker-prod
+    restart: unless-stopped
+    command: celery -A src.infrastructure.messaging.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - ../.env.prod
+    environment:
+      - ENVIRONMENT=production
+      - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
+    depends_on:
+      - redis-master
+      - postgres
+    networks:
+      - numu-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # ===========================================================================
+  # Celery Beat (Scheduler)
+  # ===========================================================================
+  celery-beat:
+    image: ${NUMU_API_IMAGE:?NUMU_API_IMAGE must be set}
+    container_name: numu-celery-beat-prod
+    restart: unless-stopped
+    command: celery -A src.infrastructure.messaging.celery_app beat --loglevel=info
+    env_file:
+      - ../.env.prod
+    environment:
+      - ENVIRONMENT=production
+      - LOG_FORMAT=json
+      - PROCESS_ROLE=celery
+    depends_on:
+      - redis-master
+      - postgres
+    networks:
+      - numu-prod
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  numu-prod:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  postgres_wal_archive:
+    driver: local
+  redis_master_data:
+    driver: local
+  minio_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  api_logs:
+    driver: local
+  nominatim_data:
+    driver: local
+  nominatim_flatnode:
+    driver: local

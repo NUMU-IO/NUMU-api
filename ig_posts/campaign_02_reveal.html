@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>نُمو — وصلت</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .post.dark.reveal {
+    background-image:
+      radial-gradient(ellipse at center, rgba(212, 175, 55, 0.25) 0%, rgba(212, 175, 55, 0.08) 25%, transparent 55%),
+      radial-gradient(circle at 10% 90%, rgba(59,130,246,0.5) 0%, rgba(59,130,246,0.15) 30%, transparent 60%),
+      radial-gradient(circle at 90% 10%, rgba(168,85,247,0.4) 0%, rgba(168,85,247,0.12) 32%, transparent 62%),
+      radial-gradient(rgba(255,255,255,0.07) 1.2px, transparent 1.2px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px;
+    background-repeat: no-repeat, no-repeat, no-repeat, repeat;
+  }
+
+  .top-bar {
+    position: absolute;
+    top: 64px; left: 64px; right: 64px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  .corner-mark {
+    font-size: 12px;
+    letter-spacing: 4px;
+    color: var(--white-35);
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .corner-mark .num { color: var(--gold); font-weight: 700; }
+
+  .center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+
+  /* Massive wordmark — the hero of this post */
+  .hero-mark {
+    font-family: 'Aref Ruqaa', serif;
+    font-size: 380px;
+    line-height: 0.9;
+    color: #fff;
+    font-weight: 700;
+    text-shadow:
+      0 0 80px rgba(212,175,55,0.5),
+      0 0 160px rgba(59, 130, 246, 0.3),
+      0 30px 100px rgba(0,0,0,0.5);
+    margin-bottom: 24px;
+    position: relative;
+  }
+  .hero-mark::after {
+    content: "";
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 70%;
+    height: 6px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    border-radius: 999px;
+  }
+
+  .latin-mark {
+    font-size: 24px;
+    letter-spacing: 14px;
+    color: var(--gold);
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 50px;
+  }
+
+  .tagline {
+    font-size: 38px;
+    font-weight: 600;
+    color: #fff;
+    line-height: 1.5;
+    max-width: 820px;
+    padding: 0 60px;
+  }
+  .tagline .gold {
+    color: var(--gold);
+    font-weight: 800;
+  }
+
+  .bottom-info {
+    position: absolute;
+    bottom: 90px;
+    left: 64px;
+    right: 64px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .bottom-info .label {
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--white-35);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .bottom-info .value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .bottom-info .value i { color: var(--gold); }
+
+  /* Sparkles */
+  .sparkle {
+    position: absolute;
+    color: var(--gold);
+    opacity: 0.6;
+  }
+  .sparkle.s1 { top: 180px; left: 130px; font-size: 38px; }
+  .sparkle.s2 { top: 220px; right: 150px; font-size: 26px; }
+  .sparkle.s3 { top: 700px; left: 100px; font-size: 30px; }
+  .sparkle.s4 { top: 740px; right: 110px; font-size: 22px; }
+  .sparkle.s5 { top: 320px; right: 70px; font-size: 18px; opacity: 0.4; }
+</style>
+</head>
+<body>
+
+<div class="post dark reveal">
+  <div class="top-bar">
+    <div class="corner-mark"><span class="num">٠٢</span> / ٠٥</div>
+    <div class="corner-mark">
+      <i class="ph-fill ph-circle" style="font-size:8px;color:#34d399;"></i> &nbsp; البيتا متاحة
+    </div>
+  </div>
+
+  <i class="ph-fill ph-sparkle sparkle s1"></i>
+  <i class="ph-fill ph-sparkle sparkle s2"></i>
+  <i class="ph-fill ph-sparkle sparkle s3"></i>
+  <i class="ph-fill ph-sparkle sparkle s4"></i>
+  <i class="ph-fill ph-star-four sparkle s5"></i>
+
+  <div class="center">
+    <div class="hero-mark">نُمو</div>
+    <div class="latin-mark">N U M U</div>
+    <p class="tagline">
+      منصة التجارة الإلكترونية اللي اتعملت<br>
+      <span class="gold">عشان السوق المصري</span>
+    </p>
+  </div>
+
+  <div class="bottom-info">
+    <div>
+      <div class="label">الإطلاق</div>
+      <div class="value"><i class="ph-bold ph-rocket-launch"></i> &nbsp; البيتا الآن</div>
+    </div>
+    <div style="text-align:left;">
+      <div class="label">الموقع</div>
+      <div class="value">numueg.app</div>
+    </div>
+  </div>
+
+  <div class="accent-line"></div>
+</div>
+
+</body>
+</html>

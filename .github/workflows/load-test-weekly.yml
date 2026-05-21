@@ -1,0 +1,238 @@
+# Phase 5.9 — weekly load test against staging.
+#
+# Runs every Sunday 02:00 UTC (low-traffic window) and posts the
+# summary to Slack #perf. Manual trigger via workflow_dispatch lets
+# anyone re-run before a release.
+#
+# Step 15 wiring:
+#   - Parse the k6 summary into a Slack-friendly Markdown table
+#   - Compare to the last green run (baseline artifact); flag any
+#     metric that regressed by more than 20%
+#   - Post to Slack with both the table and a "View run" button
+#   - Auto-open a labeled GitHub issue on threshold breach or regression
+#   - Promote the current summary to the new green baseline ONLY when
+#     all thresholds pass AND no regression is detected
+#
+# Failure (threshold breach OR regression) still marks the run red in
+# the Actions UI so it's visible at a glance.
+
+name: load-test-weekly
+
+on:
+  schedule:
+    # 02:00 UTC every Sunday = 04:00 Cairo. Keeps the test off
+    # peak storefront hours (07:00–22:00 Cairo for typical merchants).
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Target API base URL (DO NOT pick prod unless you really mean it — real shoppers will feel it)"
+        required: false
+        default: "https://staging.numueg.app"
+      duration:
+        description: "Test duration override (e.g. 5m, 10m)"
+        required: false
+        default: ""
+
+# `issues: write` is needed by the "Open issue on regression" step
+# (peter-evans/create-issue-from-file). Without it that step errors
+# with "Resource not accessible by integration" and the workflow
+# fails at the end even when everything else succeeded.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BASE_URL: ${{ github.event.inputs.base_url || 'https://staging.numueg.app' }}
+      TEST_STORES: "load-store-1,load-store-2,load-store-3,load-store-4,load-store-5,load-store-6,load-store-7,load-store-8,load-store-9,load-store-10"
+      # Server-side bypass token; the rate-limit middleware skips
+      # general/tracking tiers when this header value matches.
+      # Configured as a repo secret; never committed.
+      LOAD_TEST_TOKEN: ${{ secrets.LOAD_TEST_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Guard: scheduled runs that target prod are almost certainly a
+      # mistake (the cron job is meant for staging). Manual runs against
+      # prod are allowed but must be deliberate — print a clear warning
+      # so the run shows up in the actions log as "yes, the operator
+      # picked prod on purpose."
+      - name: Pre-flight target check
+        run: |
+          if [[ "$BASE_URL" == *"//numueg.app"* || "$BASE_URL" == "https://numueg.app" ]]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              echo "::error::Scheduled run targeted prod (numueg.app). Refusing — staging only."
+              exit 1
+            fi
+            echo "::warning::Targeting PRODUCTION (numueg.app). Real shoppers will see degraded latency for the next ~10 minutes."
+          fi
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install seeder deps
+        run: pip install "httpx>=0.27"
+
+      - name: Seed load-test stores
+        id: seed
+        # Don't take the whole workflow down if seeding fails — the k6
+        # step will surface the missing stores via 404s and the run report
+        # is still useful. The "Fail the workflow if regression" step at
+        # the end re-asserts exit status anyway.
+        continue-on-error: true
+        env:
+          NUMU_ADMIN_EMAIL: ${{ secrets.NUMU_ADMIN_EMAIL }}
+          NUMU_ADMIN_PASSWORD: ${{ secrets.NUMU_ADMIN_PASSWORD }}
+        run: |
+          set -o pipefail
+          if [ -z "${NUMU_ADMIN_EMAIL}" ] || [ -z "${NUMU_ADMIN_PASSWORD}" ]; then
+            echo "::warning::NUMU_ADMIN_EMAIL / NUMU_ADMIN_PASSWORD secrets not set"
+            echo "::warning::Skipping seed step — stores must already exist on $BASE_URL"
+            echo '{"target":"'"$BASE_URL"'","stores":[],"all_ok":false,"auth_error":"secrets not set"}' > seed-summary.json
+            exit 0
+          fi
+          python scripts/load/seed_load_test_stores.py \
+            --base-url "$BASE_URL" \
+            --admin-email "$NUMU_ADMIN_EMAIL" \
+            --admin-password "$NUMU_ADMIN_PASSWORD" \
+            --stores "$TEST_STORES" \
+            | tee seed-summary.json
+          # Don't fail the step on all_ok=false — that's just "some stores
+          # weren't reconciled". The seeder writes a JSON summary either
+          # way; downstream parsing should never crash on missing file.
+          if ! python -c "import json,sys; d=json.load(open('seed-summary.json')); sys.exit(0 if d.get('all_ok') else 1)"; then
+            echo "::warning::Seed step reported all_ok=false — see seed-summary.json artifact"
+          fi
+
+      - name: Upload seed summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seed-summary-${{ github.run_id }}
+          path: seed-summary.json
+
+      # k6 runs with `continue-on-error: true` so a threshold breach
+      # still produces a summary artifact + Slack post. The "Fail the
+      # workflow if regression" step at the end re-asserts non-zero exit.
+      - name: Run storefront load test
+        id: k6
+        continue-on-error: true
+        run: |
+          # k6 doesn't auto-inherit OS env into __ENV — has to be passed
+          # via `-e` flags. Forward BASE_URL, TEST_STORES, and the load-
+          # test bypass token so the script can read them via __ENV.*.
+          k6 run \
+            -e BASE_URL="$BASE_URL" \
+            -e TEST_STORES="$TEST_STORES" \
+            -e LOAD_TEST_TOKEN="$LOAD_TEST_TOKEN" \
+            --summary-export load-summary.json \
+            ${{ github.event.inputs.duration && format('--duration {0}', github.event.inputs.duration) || '' }} \
+            scripts/load/storefront_load.js
+
+      - name: Download last green baseline
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: load-test-weekly.yml
+          name: load-summary-green
+          path: baseline/
+          if_no_artifact_found: warn
+
+      - name: Parse summary
+        id: parse
+        continue-on-error: true
+        run: |
+          if [ -f baseline/load-summary.json ]; then
+            python scripts/load/parse_summary.py \
+              --summary load-summary.json \
+              --baseline baseline/load-summary.json \
+              --output slack-summary.md \
+              --regression-threshold-pct 20 \
+              --fail-on-regression
+          else
+            python scripts/load/parse_summary.py \
+              --summary load-summary.json \
+              --output slack-summary.md \
+              --regression-threshold-pct 20 \
+              --fail-on-regression
+          fi
+
+      - name: Upload current summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-summary-${{ github.run_id }}
+          path: |
+            load-summary.json
+            slack-summary.md
+            seed-summary.json
+
+      - name: Save as new green baseline
+        if: steps.parse.outcome == 'success' && steps.k6.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-summary-green
+          path: load-summary.json
+          retention-days: 90
+
+      - name: Post to Slack
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_PERF }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "SLACK_WEBHOOK_PERF not configured — skipping Slack post"
+            exit 0
+          fi
+          if [ "${{ steps.parse.outcome }}" = "success" ]; then
+            STATUS="✅ green"
+          else
+            STATUS="❌ regression / threshold breach"
+          fi
+          # `slack-summary.md` may not exist if the parse step fell over
+          # before writing it; surface a minimal placeholder so the
+          # Slack post still goes through with the run link.
+          BODY=$(cat slack-summary.md 2>/dev/null || echo "_no parser output — see run artifacts_")
+          curl -sX POST -H 'Content-Type: application/json' \
+            --data "$(jq -nc \
+              --arg t "Load test $STATUS — run ${{ github.run_id }}" \
+              --arg b "$BODY" \
+              --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              '{ text: $t, blocks: [
+                  {type: "section", text: {type: "mrkdwn", text: $t}},
+                  {type: "section", text: {type: "mrkdwn", text: $b}},
+                  {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View run"}, url: $url}]}
+              ]}')" \
+            "$SLACK_WEBHOOK_URL"
+
+      - name: Open issue on regression
+        if: always() && steps.parse.outcome != 'success'
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "🚨 Load test regression — run ${{ github.run_id }}"
+          content-filepath: slack-summary.md
+          labels: |
+            perf
+            load-test
+            P2
+
+      - name: Fail the workflow if regression
+        if: steps.parse.outcome != 'success' || steps.k6.outcome != 'success'
+        run: |
+          echo "Load test regressed, breached a threshold, or k6 failed to run."
+          echo "See the uploaded artifacts and the Slack post for details."
+          exit 1

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>NUMU — Launch Campaign</title>
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800;900&family=Aref+Ruqaa:wght@400;700&display=swap');
+
+  :root {
+    --hero-bg: #0d1117;
+    --gold: #D4AF37;
+    --ink: #f5f5f5;
+    --muted: rgba(255,255,255,0.55);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #0a0d14;
+    color: var(--ink);
+    font-family: 'Alexandria', sans-serif;
+    direction: rtl;
+    min-height: 100vh;
+  }
+
+  .layout {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  nav {
+    width: 340px;
+    background: linear-gradient(180deg, #0a0d14 0%, #0d1117 100%);
+    padding: 32px 24px;
+    border-left: 1px solid rgba(255,255,255,0.06);
+    overflow-y: auto;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+
+  nav .brand {
+    font-family: 'Aref Ruqaa', serif;
+    font-size: 56px;
+    color: var(--gold);
+    line-height: 1;
+    text-align: center;
+  }
+  nav .brand-en {
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 5px;
+    color: var(--muted);
+    margin-top: 8px;
+    text-transform: uppercase;
+  }
+  nav .campaign-label {
+    margin-top: 28px;
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--gold);
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  nav .campaign-title {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 800;
+    color: #fff;
+    margin-top: 8px;
+    margin-bottom: 24px;
+  }
+  nav hr {
+    border: none;
+    height: 1px;
+    background: rgba(255,255,255,0.08);
+    margin: 24px 0;
+  }
+
+  nav ul { list-style: none; }
+  nav li { margin: 6px 0; }
+  nav a {
+    display: block;
+    padding: 14px 18px;
+    color: rgba(255,255,255,0.85);
+    text-decoration: none;
+    border-radius: 12px;
+    font-size: 14px;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+  }
+  nav a:hover {
+    background: rgba(212,175,55,0.08);
+    border-color: rgba(212,175,55,0.25);
+    color: var(--gold);
+  }
+  nav a.active {
+    background: rgba(212,175,55,0.12);
+    border-color: rgba(212,175,55,0.4);
+    color: var(--gold);
+  }
+  nav a .num {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    color: var(--gold);
+    font-weight: 700;
+    text-align: center;
+    line-height: 28px;
+    font-size: 12px;
+    margin-left: 10px;
+  }
+  nav a .label {
+    font-weight: 600;
+    display: block;
+    font-size: 14px;
+  }
+  nav a .desc {
+    display: block;
+    font-size: 12px;
+    color: rgba(255,255,255,0.45);
+    margin-top: 4px;
+    margin-right: 38px;
+  }
+
+  nav .footer-note {
+    margin-top: 32px;
+    padding: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    line-height: 1.6;
+  }
+  nav .footer-note strong { color: var(--gold); }
+
+  main {
+    flex: 1;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(212,175,55,0.08) 0%, transparent 40%),
+      #0a0d14;
+    overflow-y: auto;
+  }
+
+  .stage {
+    padding: 40px;
+    display: flex;
+    justify-content: center;
+  }
+
+  iframe {
+    border: 0;
+    background: #1a1a1a;
+    width: 1080px;
+    height: 1080px;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.06),
+      0 60px 160px rgba(0,0,0,0.6);
+    border-radius: 24px;
+  }
+
+  .stage-info {
+    text-align: center;
+    margin-bottom: 24px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .stage-info strong { color: var(--gold); font-weight: 700; }
+
+  /* Scaled-down preview thumbnail in nav */
+  @media (max-width: 1400px) {
+    iframe {
+      transform: scale(0.7);
+      transform-origin: top center;
+      margin-bottom: -325px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <nav>
+    <div class="brand">نُمو</div>
+    <div class="brand-en">NUMU</div>
+    <div class="campaign-label">حملة الإطلاق</div>
+    <div class="campaign-title">يلا ندخل السوق</div>
+
+    <hr>
+
+    <ul>
+      <li>
+        <a href="#" data-src="campaign_01_teaser.html" class="active">
+          <span class="num">١</span><span class="label">التشويق</span>
+          <span class="desc">حاجة جديدة جاية للتجار المصريين</span>
+        </a>
+      </li>
+      <li>
+        <a href="#" data-src="campaign_02_reveal.html">
+          <span class="num">٢</span><span class="label">الإعلان</span>
+          <span class="desc">نُمو وصلت — البيتا الآن متاحة</span>
+        </a>
+      </li>
+      <li>
+        <a href="#" data-src="campaign_03_pitch.html">
+          <span class="num">٣</span><span class="label">العرض</span>
+          <span class="desc">متجرك أونلاين في ٥ دقايق</span>
+        </a>
+      </li>
+      <li>
+        <a href="#" data-src="campaign_04_egyptian_proof.html">
+          <span class="num">٤</span><span class="label">الميزة المصرية</span>
+          <span class="desc">ليه نُمو غير أي حاجة قبلها</span>
+        </a>
+      </li>
+      <li>
+        <a href="#" data-src="campaign_05_cta.html">
+          <span class="num">٥</span><span class="label">الدعوة للانضمام</span>
+          <span class="desc">٣ خطوات وتبدأ تبيع</span>
+        </a>
+      </li>
+    </ul>
+
+    <hr>
+
+    <div style="text-align:center; font-size:12px; letter-spacing:2px; color:var(--gold); margin-bottom:12px; text-transform:uppercase; font-weight:600;">
+      منشورات الميزات
+    </div>
+    <ul>
+      <li>
+        <a href="#" data-src="01_payment_methods.html">
+          <span class="num"><i class="ph-bold ph-credit-card"></i></span>
+          <span class="label">وسائل الدفع</span>
+          <span class="desc">كل وسايل الدفع المصرية</span>
+        </a>
+      </li>
+    </ul>
+
+    <div class="footer-note">
+      <strong>ملاحظة:</strong> كل منشور <strong>1080×1080</strong> جاهز للتصدير.<br>
+      للتصدير كصورة: افتح المنشور في تبويب جديد، اضغط <strong>F12</strong> ←
+      اختار العنصر <code>.post</code> ← كليك يمين ← <em>Capture node screenshot</em>.
+    </div>
+  </nav>
+
+  <main>
+    <div class="stage">
+      <iframe id="preview" src="campaign_01_teaser.html"></iframe>
+    </div>
+  </main>
+</div>
+
+<script>
+  const links = document.querySelectorAll('nav a');
+  const frame = document.getElementById('preview');
+  links.forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      links.forEach(l => l.classList.remove('active'));
+      a.classList.add('active');
+      frame.src = a.dataset.src;
+    });
+  });
+</script>
+
+</body>
+</html>

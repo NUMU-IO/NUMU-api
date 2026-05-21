@@ -1,0 +1,146 @@
+name: Notify Slack on Pull Request
+
+on:
+  pull_request:
+    types: [opened, reopened, closed, ready_for_review]
+    branches:
+      - dev
+      - master
+      - stage
+      - prod
+
+jobs:
+  notify-slack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare Slack Payload
+        id: prepare-payload
+        shell: python
+        env:
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          import os
+          import json
+
+          # Read the full event payload safely
+          with open(os.environ['GITHUB_EVENT_PATH'], 'r') as f:
+              event = json.load(f)
+
+          pr = event['pull_request']
+          action = event['action']
+
+          # Determine status and color
+          status = "opened"
+          emoji = "🚀"
+
+          if action == "closed" and pr.get('merged', False):
+              status = "merged"
+              emoji = "✅"
+          elif action == "closed":
+              status = "closed"
+              emoji = "❌"
+          elif action == "ready_for_review":
+              status = "ready for review"
+              emoji = "👀"
+          elif action == "reopened":
+              status = "reopened"
+              emoji = "♻️"
+
+          # Get details
+          title = pr['title']
+          body = pr.get('body') or "No description provided"
+          author = pr['user']['login']
+          head_ref = pr['head']['ref']
+          base_ref = pr['base']['ref']
+          html_url = pr['html_url']
+          pr_number = pr['number']
+          additions = pr['additions']
+          deletions = pr['deletions']
+          changed_files = pr['changed_files']
+          repo_name = os.environ['REPO_NAME']
+
+          payload = {
+              "text": f"{emoji} Pull Request {status}: {title}",
+              "blocks": [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": f"{emoji} PR {status}: {title}"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "fields": [
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Repository:*\n{repo_name}"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Branch:*\n`{head_ref}` → `{base_ref}`"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Author:*\n{author}"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Status:*\n{status}"
+                          }
+                      ]
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*Description:*\n{body}"
+                      }
+                  },
+                  {
+                      "type": "actions",
+                      "elements": [
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View Pull Request"
+                              },
+                              "url": html_url,
+                              "style": "primary"
+                          },
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View Changes"
+                              },
+                              "url": f"{html_url}/files"
+                          }
+                      ]
+                  },
+                  {
+                      "type": "context",
+                      "elements": [
+                          {
+                              "type": "mrkdwn",
+                              "text": f"PR #{pr_number} | +{additions} -{deletions} | {changed_files} files changed"
+                          }
+                      ]
+                  }
+              ]
+          }
+
+          with open('payload-pr.json', 'w') as f:
+              json.dump(payload, f)
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.25.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload-file-path: ./payload-pr.json

@@ -1,21 +1,31 @@
-"""Public API routes (no tenant context required).
+"""Public API routes (no authentication required).
 
-These routes are accessible without a tenant subdomain:
-- Authentication (login, register, refresh)
-- Health checks
-- Tenant registration/management
+URL: /api/v1/public/
+- POST /waitlist             — Join beta waitlist
+- GET  /beta/invite/{code}   — Look up beta invite (prefill)
+- POST /beta/redeem          — Redeem invite: create user + store
+- GET  /stats                — Platform statistics for landing page
+- GET  /features             — Feature list for marketing
+- POST /demo/start           — Try-a-Demo: provision a 7-day demo tenant
+- POST /contact              — Contact form submission
 """
 
-from src.api.v1.routes.public.auth import router as auth_router
-from src.api.v1.routes.public.health import router as health_router
-from src.api.v1.routes.public.tenants import (
-    admin_router as tenants_admin_router,
-    router as tenants_router,
-)
+from fastapi import APIRouter
 
-__all__ = [
-    "auth_router",
-    "health_router",
-    "tenants_router",
-    "tenants_admin_router",
-]
+from src.api.v1.routes.public.beta import router as beta_router
+from src.api.v1.routes.public.contact import router as contact_router
+from src.api.v1.routes.public.demo import router as demo_router
+from src.api.v1.routes.public.landing import router as landing_router
+from src.api.v1.routes.public.reference import router as reference_router
+from src.api.v1.routes.public.waitlist import router as waitlist_router
+
+router = APIRouter()
+
+router.include_router(waitlist_router, tags=["Public - Waitlist"])
+router.include_router(beta_router, tags=["Public - Beta"])
+router.include_router(landing_router, tags=["Public - Landing"])
+router.include_router(demo_router, tags=["Public - Demo"])
+router.include_router(contact_router, tags=["Public - Contact"])
+router.include_router(reference_router, tags=["Public - Reference"])
+
+__all__ = ["router"]

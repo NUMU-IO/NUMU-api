@@ -2,10 +2,14 @@
 
 from src.application.dto.auth import AuthResponseDTO, LoginDTO, TokenDTO
 from src.application.dto.user import UserDTO
-from src.core.exceptions import InvalidCredentialsError
+from src.application.services.lockout_service import AccountLockoutService
+from src.config.logging_config import get_logger
+from src.core.exceptions import AccountLockedError, InvalidCredentialsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
+
+logger = get_logger(__name__)
 
 
 class LoginUserUseCase:
@@ -16,21 +20,45 @@ class LoginUserUseCase:
         user_repository: IUserRepository,
         password_service: IPasswordService,
         token_service: ITokenService,
+        lockout_service: AccountLockoutService,
     ) -> None:
         self.user_repository = user_repository
         self.password_service = password_service
         self.token_service = token_service
+        self.lockout_service = lockout_service
 
     async def execute(self, dto: LoginDTO) -> AuthResponseDTO:
         """Authenticate user and return auth response."""
+        log = logger.bind(email=dto.email)
+        log.info("auth_login_attempt")
+
+        # Check if account is locked before doing any DB work
+        is_locked, retry_after = await self.lockout_service.check_locked(dto.email)
+        if is_locked:
+            log.warning(
+                "auth_login_blocked", reason="account_locked", retry_after=retry_after
+            )
+            raise AccountLockedError(retry_after)
+
         # Find user by email
         user = await self.user_repository.get_by_email_str(dto.email)
         if not user:
+            log.warning("auth_login_failed", reason="user_not_found")
+            await self.lockout_service.record_failure(dto.email)
             raise InvalidCredentialsError()
 
+        log = log.bind(user_id=str(user.id), role=user.role.value)
+
         # Verify password
-        if not self.password_service.verify_password(dto.password, user.hashed_password):
+        if not self.password_service.verify_password(
+            dto.password, user.hashed_password
+        ):
+            log.warning("auth_login_failed", reason="invalid_password")
+            await self.lockout_service.record_failure(dto.email)
             raise InvalidCredentialsError()
+
+        # Successful login — clear any lockout state
+        await self.lockout_service.clear(dto.email)
 
         # Update last login
         user.update_last_login()
@@ -39,6 +67,8 @@ class LoginUserUseCase:
         # Generate tokens
         access_token = self.token_service.create_access_token(user)
         refresh_token = self.token_service.create_refresh_token(user)
+
+        log.info("auth_login_success")
 
         return AuthResponseDTO(
             user=UserDTO.from_entity(user),

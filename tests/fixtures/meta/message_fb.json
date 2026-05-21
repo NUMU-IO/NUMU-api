@@ -1,0 +1,20 @@
+{
+  "object": "page",
+  "entry": [
+    {
+      "id": "123456789",
+      "time": 1234567890,
+      "messaging": [
+        {
+          "sender": { "id": "user_123" },
+          "recipient": { "id": "page_456" },
+          "timestamp": 1234567890,
+          "message": {
+            "mid": "message_abc123",
+            "text": "Hello from Facebook!"
+          }
+        }
+      ]
+    }
+  ]
+}

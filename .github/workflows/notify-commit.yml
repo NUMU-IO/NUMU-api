@@ -1,0 +1,164 @@
+name: Notify Slack on Commit
+
+on:
+  push:
+    branches:
+      - dev
+      - master
+      - stage
+      - prod
+      - 'feat/**'
+      - 'fix/**'
+      - 'hotfix/**'
+
+jobs:
+  notify-slack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Prepare Slack Payload
+        id: prepare-payload
+        shell: python
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
+          PUSHER_NAME: ${{ github.event.pusher.name }}
+          HEAD_COMMIT_URL: ${{ github.event.head_commit.url }}
+          REPO_URL: ${{ github.event.repository.html_url }}
+        run: |
+          import os
+          import json
+          import subprocess
+          import re
+
+          def get_commit_info():
+              # Get commit message safely using subprocess
+              commit_msg = subprocess.check_output(["git", "log", "-1", "--pretty=%B"], text=True).strip()
+              short_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+
+              # Get files changed count
+              try:
+                  files_changed = subprocess.check_output("git diff-tree --no-commit-id --name-only -r HEAD | wc -l", shell=True, text=True).strip()
+              except:
+                  files_changed = "0"
+
+              # Determine type and emoji
+              emoji = "📦"
+              commit_type = "Update"
+
+              msg_lower = commit_msg.lower()
+              if re.search(r"^(feat|feature)", msg_lower):
+                  emoji = "✨"; commit_type = "Feature"
+              elif re.search(r"^fix", msg_lower):
+                  emoji = "🐛"; commit_type = "Bug Fix"
+              elif re.search(r"^(docs|doc)", msg_lower):
+                  emoji = "📝"; commit_type = "Documentation"
+              elif re.search(r"^(refactor|refact)", msg_lower):
+                  emoji = "♻️"; commit_type = "Refactor"
+              elif re.search(r"^test", msg_lower):
+                  emoji = "✅"; commit_type = "Test"
+              elif re.search(r"^(chore|build|ci)", msg_lower):
+                  emoji = "🔧"; commit_type = "Chore"
+              elif re.search(r"^perf", msg_lower):
+                  emoji = "⚡"; commit_type = "Performance"
+              elif re.search(r"^(hotfix|urgent)", msg_lower):
+                  emoji = "🔥"; commit_type = "Hotfix"
+              elif re.search(r"^merge", msg_lower):
+                  emoji = "🔀"; commit_type = "Merge"
+
+              return commit_msg, short_sha, files_changed, emoji, commit_type
+
+          commit_msg, short_sha, files_changed, emoji, commit_type = get_commit_info()
+
+          ref_name = os.environ['REF_NAME']
+          repo_name = os.environ['REPO_NAME']
+          pusher_name = os.environ['PUSHER_NAME']
+          head_commit_url = os.environ['HEAD_COMMIT_URL']
+          repo_url = os.environ['REPO_URL']
+
+          payload = {
+              "text": f"{emoji} New commit pushed to {ref_name}",
+              "blocks": [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": f"{emoji} {commit_type} Commit to {ref_name}"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "fields": [
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Repository:*\n{repo_name}"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Branch:*\n`{ref_name}`"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Author:*\n{pusher_name}"
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Commit:*\n`{short_sha}`"
+                          }
+                      ]
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*Commit Message:*\n```\n{commit_msg}\n```"
+                      }
+                  },
+                  {
+                      "type": "actions",
+                      "elements": [
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View Commit"
+                              },
+                              "url": head_commit_url,
+                              "style": "primary"
+                          },
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View Repository"
+                              },
+                              "url": repo_url
+                          }
+                      ]
+                  },
+                  {
+                      "type": "context",
+                      "elements": [
+                          {
+                              "type": "mrkdwn",
+                              "text": f"{files_changed} files changed"
+                          }
+                      ]
+                  }
+              ]
+          }
+
+          with open('payload-commit.json', 'w') as f:
+              json.dump(payload, f)
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.25.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload-file-path: ./payload-commit.json

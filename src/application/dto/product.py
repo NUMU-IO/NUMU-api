@@ -34,6 +34,13 @@ class ProductDTO(BaseDTO):
     category_id: UUID | None
     tags: list[str]
     attributes: dict
+    # Meta Commerce Catalog product ID — surfaced on the storefront so
+    # fireMetaEvent can use it as `content_ids` (Meta dynamic ads then
+    # match conversions to a Catalog row). Optional; null falls back to
+    # the product UUID in the storefront consumer.
+    meta_catalog_id: str | None
+    seo_title: str | None
+    seo_description: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -52,7 +59,9 @@ class ProductDTO(BaseDTO):
             status=entity.status.value,
             price=entity.price.amount,
             price_currency=entity.price.currency.value,
-            compare_at_price=entity.compare_at_price.amount if entity.compare_at_price else None,
+            compare_at_price=entity.compare_at_price.amount
+            if entity.compare_at_price
+            else None,
             cost_price=entity.cost_price.amount if entity.cost_price else None,
             quantity=entity.quantity,
             is_in_stock=entity.is_in_stock,
@@ -62,6 +71,9 @@ class ProductDTO(BaseDTO):
             category_id=entity.category_id,
             tags=entity.tags,
             attributes=entity.attributes,
+            meta_catalog_id=getattr(entity, "meta_catalog_id", None),
+            seo_title=getattr(entity, "seo_title", None),
+            seo_description=getattr(entity, "seo_description", None),
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -78,6 +90,7 @@ class CreateProductDTO(BaseDTO):
     description: str | None = None
     short_description: str | None = None
     product_type: str = "physical"
+    status: str | None = None
     price_currency: str = "USD"
     compare_at_price: Decimal | None = None
     cost_price: Decimal | None = None
@@ -87,6 +100,8 @@ class CreateProductDTO(BaseDTO):
     category_id: UUID | None = None
     tags: list[str] = field(default_factory=list)
     attributes: dict = field(default_factory=dict)
+    seo_title: str | None = None
+    seo_description: str | None = None
 
 
 @dataclass
@@ -108,3 +123,5 @@ class UpdateProductDTO(BaseDTO):
     tags: list[str] | None = None
     attributes: dict | None = None
     status: str | None = None
+    seo_title: str | None = None
+    seo_description: str | None = None

@@ -40,11 +40,18 @@ venv.bak/
 # Alembic
 alembic.ini.local
 
+# Local theme bundle uploads (built artifacts produced by the
+# theme-marketplace upload pipeline and developer-install flow).
+# Never committed — the canonical artifacts live in R2.
+uploads/themes/
+
 # Environment variables
 .env
 .env.local
 .env.*.local
 *.env
+.env.staging
+!.env.staging.example
 
 # IDE
 .vscode/
@@ -61,6 +68,11 @@ htmlcov/
 .tox/
 .hypothesis/
 
+# Load test results (keep .gitkeep)
+tests/load/results/*.csv
+tests/load/results/*.html
+tests/load/results/*.log
+
 # MyPy
 .mypy_cache/
 .dmypy.json
@@ -71,6 +83,10 @@ dmypy.json
 
 # Docker
 docker-compose.override.yml
+
+# RSA / JWT key files
+*.pem
+*.key
 
 # Cloudflare R2 / AWS
 .aws/
@@ -92,4 +108,13 @@ temp/
 
 # Package manager
 poetry.lock
-Pipfile.lock
+Pipfile.lock.claude/
+
+# claude-specific
+.claude/
+
+# Celery runtime files
+celerybeat-schedule*
+
+# HTTP test files
+app.http

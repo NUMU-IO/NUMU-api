@@ -1,28 +1,41 @@
-"""JWT token service implementation."""
+"""JWT token service implementation using RS256 asymmetric signing."""
 
+import secrets
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import ExpiredSignatureError, PyJWTError
 
 from src.config import settings
 from src.core.entities.user import User
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
-from src.core.interfaces.services.token_service import ITokenService, TokenPayload
+from src.core.interfaces.services.token_service import (
+    CustomerTokenPayload,
+    ITokenService,
+    TokenPayload,
+)
 
 
 class TokenService(ITokenService):
-    """JWT token service implementation."""
+    """JWT token service using RS256 asymmetric key pair.
+
+    Tokens are signed with the private key and verified with the public key.
+    This allows external services to verify tokens using only the public key,
+    without needing access to the signing secret.
+    """
 
     def __init__(
         self,
-        secret_key: str | None = None,
+        private_key: str | None = None,
+        public_key: str | None = None,
         algorithm: str | None = None,
         access_token_expire_minutes: int | None = None,
         refresh_token_expire_days: int | None = None,
     ) -> None:
-        self.secret_key = secret_key or settings.jwt_secret_key
         self.algorithm = algorithm or settings.jwt_algorithm
+        self.private_key = private_key or settings.jwt_private_key
+        self.public_key = public_key or settings.jwt_public_key
         self.access_token_expire_minutes = (
             access_token_expire_minutes or settings.access_token_expire_minutes
         )
@@ -30,56 +43,240 @@ class TokenService(ITokenService):
             refresh_token_expire_days or settings.refresh_token_expire_days
         )
 
+    def _get_signing_key(self) -> str:
+        """Get the key used for signing tokens."""
+        return self.private_key
+
+    def _get_verification_key(self) -> str:
+        """Get the key used for verifying tokens."""
+        return self.public_key
+
     def _create_token(
         self,
         user: User,
         token_type: str,
         expires_delta: timedelta,
+        tenant_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        perm_version: int = 0,
     ) -> str:
-        """Create a JWT token."""
+        """Create a JWT token.
+
+        ``tenant_id`` is optional and, when supplied, is embedded in the
+        payload so downstream code can read the tenant scope directly from
+        the token without re-resolving via subdomain middleware. This is
+        used by the demo provisioning flow.
+
+        ``membership_id`` and ``perm_version`` enable lazy permission cache
+        invalidation when embedded in the token.
+        """
         expire = datetime.utcnow() + expires_delta
-        payload = {
+        role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
+        payload: dict = {
             "sub": str(user.id),
             "email": str(user.email),
-            "role": user.role.value,
+            "role": role_value,
             "token_type": token_type,
             "exp": expire,
             "iat": datetime.utcnow(),
         }
-        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        if tenant_id is not None:
+            payload["tenant_id"] = str(tenant_id)
+        if membership_id is not None:
+            payload["membership_id"] = str(membership_id)
+        if perm_version > 0:
+            payload["perm_version"] = perm_version
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
-    def create_access_token(self, user: User) -> str:
+    def create_access_token(
+        self,
+        user: User,
+        tenant_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        perm_version: int = 0,
+    ) -> str:
         """Create an access token for a user."""
         expires_delta = timedelta(minutes=self.access_token_expire_minutes)
-        return self._create_token(user, "access", expires_delta)
+        return self._create_token(
+            user,
+            "access",
+            expires_delta,
+            tenant_id=tenant_id,
+            membership_id=membership_id,
+            perm_version=perm_version,
+        )
 
-    def create_refresh_token(self, user: User) -> str:
-        """Create a refresh token for a user."""
+    def create_refresh_token(
+        self,
+        user: User,
+        tenant_id: UUID | None = None,
+        membership_id: UUID | None = None,
+        perm_version: int = 0,
+    ) -> str:
+        """Create a refresh token for a user (includes jti for rotation tracking)."""
         expires_delta = timedelta(days=self.refresh_token_expire_days)
-        return self._create_token(user, "refresh", expires_delta)
+        expire = datetime.utcnow() + expires_delta
+        role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
+        payload: dict = {
+            "sub": str(user.id),
+            "email": str(user.email),
+            "role": role_value,
+            "token_type": "refresh",
+            "exp": expire,
+            "iat": datetime.utcnow(),
+            "jti": secrets.token_hex(16),
+        }
+        if tenant_id is not None:
+            payload["tenant_id"] = str(tenant_id)
+        if membership_id is not None:
+            payload["membership_id"] = str(membership_id)
+        if perm_version > 0:
+            payload["perm_version"] = perm_version
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
+
+    def create_reset_token(self, user: User) -> str:
+        """Create a password reset token for a user."""
+        # Reset token valid for 1 hour
+        expires_delta = timedelta(hours=1)
+        return self._create_token(user, "reset", expires_delta)
+
+    def create_email_verification_token(self, user: User) -> str:
+        """Create an email verification token for a user (24 h expiry)."""
+        expires_delta = timedelta(hours=24)
+        return self._create_token(user, "email_verification", expires_delta)
 
     def verify_token(self, token: str) -> TokenPayload:
         """Verify and decode a token. Raises exception if invalid."""
         try:
             payload = jwt.decode(
-                token, self.secret_key, algorithms=[self.algorithm]
+                token, self._get_verification_key(), algorithms=[self.algorithm]
             )
+            iat = payload.get("iat", 0)
+            if hasattr(iat, "timestamp"):
+                iat = int(iat.timestamp())
+            tenant_id_raw = payload.get("tenant_id")
+            membership_id_raw = payload.get("membership_id")
+            perm_version = payload.get("perm_version", 0)
             return TokenPayload(
                 user_id=UUID(payload["sub"]),
                 email=payload["email"],
                 role=payload["role"],
                 exp=payload["exp"],
                 token_type=payload.get("token_type", "access"),
+                iat=int(iat),
+                jti=payload.get("jti"),
+                tenant_id=UUID(tenant_id_raw) if tenant_id_raw else None,
+                membership_id=UUID(membership_id_raw) if membership_id_raw else None,
+                perm_version=perm_version,
             )
-        except JWTError as e:
-            if "expired" in str(e).lower():
-                raise TokenExpiredError()
+        except ExpiredSignatureError:
+            raise TokenExpiredError()
+        except PyJWTError:
             raise InvalidTokenError()
 
     def decode_token(self, token: str) -> TokenPayload | None:
         """Decode a token without raising exceptions."""
         try:
             return self.verify_token(token)
+        except Exception:
+            return None
+
+    # Customer token methods
+
+    def _create_customer_token(
+        self,
+        customer,
+        token_type: str,
+        expires_delta: timedelta,
+    ) -> str:
+        """Create a JWT token for a customer.
+
+        Phase 5.1 — refresh tokens carry a `jti` claim so the
+        rotation blacklist can detect reuse. Access tokens stay
+        jti-less (short-lived; rotation isn't meaningful for them).
+        """
+        expire = datetime.utcnow() + expires_delta
+        payload = {
+            "sub": str(customer.id),
+            "store_id": str(customer.store_id),
+            "email": str(customer.email),
+            "token_type": token_type,
+            "customer": True,  # Flag to identify customer tokens
+            "exp": expire,
+            "iat": datetime.utcnow(),
+        }
+        if token_type == "refresh":
+            payload["jti"] = secrets.token_hex(16)
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
+
+    def create_customer_access_token(self, customer) -> str:
+        """Create an access token for a customer."""
+        expires_delta = timedelta(minutes=self.access_token_expire_minutes)
+        return self._create_customer_token(customer, "access", expires_delta)
+
+    def create_customer_refresh_token(self, customer) -> str:
+        """Create a refresh token for a customer."""
+        expires_delta = timedelta(days=self.refresh_token_expire_days)
+        return self._create_customer_token(customer, "refresh", expires_delta)
+
+    def verify_customer_token(self, token: str) -> CustomerTokenPayload:
+        """Verify and decode a customer token. Raises exception if invalid."""
+        try:
+            payload = jwt.decode(
+                token, self._get_verification_key(), algorithms=[self.algorithm]
+            )
+            if not payload.get("customer"):
+                raise InvalidTokenError()
+            return CustomerTokenPayload(
+                customer_id=UUID(payload["sub"]),
+                store_id=UUID(payload["store_id"]),
+                email=payload["email"],
+                exp=payload["exp"],
+                token_type=payload.get("token_type", "access"),
+                jti=payload.get("jti"),
+            )
+        except ExpiredSignatureError:
+            raise TokenExpiredError()
+        except PyJWTError:
+            raise InvalidTokenError()
+
+    def decode_customer_token(self, token: str) -> CustomerTokenPayload | None:
+        """Decode a customer token without raising exceptions."""
+        try:
+            return self.verify_customer_token(token)
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
+    # 2FA challenge token
+    # ------------------------------------------------------------------
+
+    def create_challenge_token(self, user_id) -> str:
+        """Create a short-lived 2FA challenge token (expires in 5 minutes).
+
+        Issued after successful password login when 2FA is enabled.
+        Must be exchanged at /auth/2fa/complete-login with a valid TOTP code.
+        """
+        expire = datetime.utcnow() + timedelta(minutes=5)
+        payload = {
+            "sub": str(user_id),
+            "token_type": "2fa_challenge",
+            "exp": expire,
+            "iat": datetime.utcnow(),
+        }
+        return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
+
+    def decode_challenge_token(self, token: str):
+        """Decode a 2FA challenge token. Returns user_id UUID or None if invalid/expired."""
+        from uuid import UUID as _UUID
+
+        try:
+            payload = jwt.decode(
+                token, self._get_verification_key(), algorithms=[self.algorithm]
+            )
+            if payload.get("token_type") != "2fa_challenge":
+                return None
+            return _UUID(payload["sub"])
         except Exception:
             return None
 

@@ -1,24 +1,10 @@
 """Database dependency."""
 
-from collections.abc import AsyncGenerator
+from src.infrastructure.database.connection import (
+    get_admin_db_session as get_admin_db_session,
+)
+from src.infrastructure.database.connection import (
+    get_db_session as get_db,
+)
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.infrastructure.database import AsyncSessionLocal
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Get database session dependency."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-
-# Alias for consistency with connection.py naming
-get_db_session = get_db
+__all__ = ["get_admin_db_session", "get_db"]

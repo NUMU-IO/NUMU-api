@@ -13,10 +13,15 @@ class DomainException(Exception):
 class EntityNotFoundError(DomainException):
     """Raised when an entity is not found."""
 
-    def __init__(self, entity_name: str, entity_id: str | None = None) -> None:
+    def __init__(
+        self,
+        entity_name: str,
+        entity_id: str | None = None,
+        identifier_name: str = "id",
+    ) -> None:
         message = f"{entity_name} not found"
         if entity_id:
-            message = f"{entity_name} with id '{entity_id}' not found"
+            message = f"{entity_name} with {identifier_name} '{entity_id}' not found"
         super().__init__(message, code="ENTITY_NOT_FOUND")
 
 
@@ -71,6 +76,17 @@ class InvalidTokenError(AuthenticationError):
         super().__init__("Invalid token")
 
 
+class AccountLockedError(AuthenticationError):
+    """Raised when an account is temporarily locked after too many failed logins."""
+
+    def __init__(self, retry_after: int) -> None:
+        self.retry_after = retry_after
+        super().__init__(
+            f"Account temporarily locked due to too many failed attempts. "
+            f"Try again in {retry_after} seconds."
+        )
+
+
 class InsufficientStockError(DomainException):
     """Raised when there is insufficient stock."""
 
@@ -84,6 +100,36 @@ class PaymentError(DomainException):
 
     def __init__(self, message: str = "Payment failed") -> None:
         super().__init__(message, code="PAYMENT_ERROR")
+
+
+class BusinessRuleViolationError(DomainException):
+    """Raised when a business rule is violated."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="BUSINESS_RULE_VIOLATION")
+
+
+class PlanLimitExceededError(DomainException):
+    """Raised when an action would exceed the tenant's plan limits."""
+
+    def __init__(
+        self,
+        resource: str,
+        limit: int,
+        current: int,
+        plan: str,
+        upgrade_to: str | None = None,
+    ) -> None:
+        self.resource = resource
+        self.limit = limit
+        self.current = current
+        self.plan = plan
+        self.upgrade_to = upgrade_to
+        message = (
+            f"Plan limit reached: your {plan} plan allows {limit} {resource} "
+            f"(currently at {current}). Upgrade to continue."
+        )
+        super().__init__(message, code="PLAN_LIMIT_EXCEEDED")
 
 
 class ExternalServiceError(DomainException):

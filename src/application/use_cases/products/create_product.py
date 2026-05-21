@@ -1,16 +1,31 @@
 """Create product use case."""
 
 import uuid
+from decimal import Decimal
 from uuid import UUID
 
 from slugify import slugify
 
 from src.application.dto.product import CreateProductDTO, ProductDTO
 from src.core.entities.product import Product, ProductStatus, ProductType
-from src.core.exceptions import AuthorizationError, EntityNotFoundError
+from src.core.events.base import EventBus
+from src.core.events.product_events import ProductCreatedEvent
+from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
+from src.core.interfaces.repositories.category_repository import ICategoryRepository
+from src.core.interfaces.repositories.onboarding_repository import (
+    IOnboardingRepository,
+)
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency, Money
+
+# Validation constants
+MIN_PRODUCT_NAME_LENGTH = 1
+MAX_PRODUCT_NAME_LENGTH = 255
+MAX_SKU_LENGTH = 100
+MAX_SHORT_DESCRIPTION_LENGTH = 500
+VALID_PRODUCT_TYPES = {"physical", "digital", "service"}
+VALID_CURRENCIES = {c.value for c in Currency}
 
 
 class CreateProductUseCase:
@@ -20,9 +35,129 @@ class CreateProductUseCase:
         self,
         product_repository: IProductRepository,
         store_repository: IStoreRepository,
+        category_repository: ICategoryRepository | None = None,
+        onboarding_repository: IOnboardingRepository | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.product_repository = product_repository
         self.store_repository = store_repository
+        self.category_repository = category_repository
+        self.onboarding_repository = onboarding_repository
+        self.event_bus = event_bus
+
+    def _validate_product_data(
+        self, dto: CreateProductDTO, store_id: UUID
+    ) -> list[str]:
+        """Validate product data and return list of errors.
+
+        Args:
+            dto: The create product DTO.
+            store_id: The store UUID.
+
+        Returns:
+            List of validation error messages (empty if valid).
+        """
+        errors: list[str] = []
+
+        # Required field: name
+        if not dto.name:
+            errors.append("Product name is required")
+        elif len(dto.name.strip()) < MIN_PRODUCT_NAME_LENGTH:
+            errors.append(
+                f"Product name must be at least {MIN_PRODUCT_NAME_LENGTH} character(s)"
+            )
+        elif len(dto.name) > MAX_PRODUCT_NAME_LENGTH:
+            errors.append(
+                f"Product name must not exceed {MAX_PRODUCT_NAME_LENGTH} characters"
+            )
+
+        # Required field: price (must be > 0)
+        if dto.price is None:
+            errors.append("Product price is required")
+        elif dto.price <= Decimal("0"):
+            errors.append("Product price must be greater than 0")
+
+        # Validate compare_at_price if provided
+        if dto.compare_at_price is not None:
+            if dto.compare_at_price < Decimal("0"):
+                errors.append("Compare at price cannot be negative")
+            elif dto.price is not None and dto.compare_at_price <= dto.price:
+                errors.append("Compare at price must be greater than the regular price")
+
+        # Validate cost_price if provided
+        if dto.cost_price is not None and dto.cost_price < Decimal("0"):
+            errors.append("Cost price cannot be negative")
+
+        # Validate quantity
+        if dto.quantity is not None and dto.quantity < 0:
+            errors.append("Quantity cannot be negative")
+
+        # Validate low_stock_threshold
+        if dto.low_stock_threshold is not None and dto.low_stock_threshold < 0:
+            errors.append("Low stock threshold cannot be negative")
+
+        # Validate SKU length if provided
+        if dto.sku and len(dto.sku) > MAX_SKU_LENGTH:
+            errors.append(f"SKU must not exceed {MAX_SKU_LENGTH} characters")
+
+        # Validate short_description length if provided
+        if (
+            dto.short_description
+            and len(dto.short_description) > MAX_SHORT_DESCRIPTION_LENGTH
+        ):
+            errors.append(
+                f"Short description must not exceed {MAX_SHORT_DESCRIPTION_LENGTH} characters"
+            )
+
+        # Validate product_type
+        if dto.product_type and dto.product_type.lower() not in VALID_PRODUCT_TYPES:
+            errors.append(
+                f"Invalid product type. Valid types: {', '.join(VALID_PRODUCT_TYPES)}"
+            )
+
+        # Validate currency
+        if dto.price_currency and dto.price_currency.upper() not in VALID_CURRENCIES:
+            errors.append(
+                f"Invalid currency. Valid currencies: {', '.join(VALID_CURRENCIES)}"
+            )
+
+        # Validate images are URLs (basic check)
+        if dto.images:
+            for i, image in enumerate(dto.images):
+                if not isinstance(image, str):
+                    errors.append(f"Image at index {i} must be a string URL")
+                elif not image.startswith(("http://", "https://")):
+                    errors.append(
+                        f"Image at index {i} must be a valid URL starting with http:// or https://"
+                    )
+
+        return errors
+
+    async def _validate_category_exists(
+        self, category_id: UUID, store_id: UUID
+    ) -> str | None:
+        """Validate that category exists and belongs to the store.
+
+        Args:
+            category_id: The category UUID.
+            store_id: The store UUID.
+
+        Returns:
+            Error message if validation fails, None if valid.
+        """
+        if not self.category_repository:
+            # Skip validation if no category repository provided
+            return None
+
+        category = await self.category_repository.get_by_id(category_id)
+        if not category:
+            return f"Category with ID {category_id} not found"
+
+        # Verify category belongs to the same store
+        if hasattr(category, "store_id") and category.store_id != store_id:
+            return f"Category with ID {category_id} does not belong to this store"
+
+        return None
 
     async def execute(
         self,
@@ -30,61 +165,174 @@ class CreateProductUseCase:
         store_id: UUID,
         user_id: UUID,
     ) -> ProductDTO:
-        """Create a new product."""
+        """Create a new product.
+
+        Args:
+            dto: The create product DTO.
+            store_id: The store UUID.
+            user_id: The user UUID (for authorization).
+
+        Returns:
+            ProductDTO with created product data.
+
+        Raises:
+            EntityNotFoundError: If store or category not found.
+            AuthorizationError: If user doesn't own the store.
+            ValidationError: If product data is invalid.
+        """
         # Verify store exists and user has permission
         store = await self.store_repository.get_by_id(store_id)
         if not store:
             raise EntityNotFoundError("Store", str(store_id))
-        
+
         if store.owner_id != user_id:
-            raise AuthorizationError("You don't have permission to add products to this store")
+            raise AuthorizationError(
+                "You don't have permission to add products to this store"
+            )
 
-        # Generate slug if not provided
-        slug = dto.slug or slugify(dto.name)
+        # Validate product data
+        validation_errors = self._validate_product_data(dto, store_id)
 
-        # Check if slug already exists in store
-        existing = await self.product_repository.get_by_slug(store_id, slug)
-        if existing:
-            slug = f"{slug}-{str(uuid.uuid4())[:8]}"
+        # Validate category exists if provided
+        if dto.category_id:
+            category_error = await self._validate_category_exists(
+                dto.category_id, store_id
+            )
+            if category_error:
+                validation_errors.append(category_error)
+
+        # Raise validation error if any errors found
+        if validation_errors:
+            raise ValidationError(
+                "Product validation failed:\n• " + "\n• ".join(validation_errors)
+            )
+
+        # Generate slug if not provided.
+        # `slugify` strips most Unicode; for pure-Arabic names it returns an
+        # empty string, which would collide across every untitled product.
+        # Fall back to a random suffix in that case so the collision loop
+        # below has something to work with.
+        slug = dto.slug or slugify(dto.name) or f"product-{uuid.uuid4().hex[:8]}"
+
+        # Check for collisions within the store and walk forward through
+        # `-2`, `-3`, `-4`, … until we find one that's free. Gives pretty
+        # URLs like `linen-dress-2` instead of `linen-dress-a1b2c3d4`.
+        if await self.product_repository.get_by_slug(store_id, slug):
+            base = slug
+            counter = 2
+            candidate = f"{base}-{counter}"
+            while await self.product_repository.get_by_slug(store_id, candidate):
+                counter += 1
+                # Safety valve — abandon the pretty-suffix walk if we've hit
+                # hundreds of dupes (almost certainly a copy-pasted import)
+                # and fall back to a random suffix.
+                if counter > 100:
+                    candidate = f"{base}-{uuid.uuid4().hex[:6]}"
+                    break
+                candidate = f"{base}-{counter}"
+            slug = candidate
 
         # Parse currency and create Money
         try:
-            currency = Currency(dto.price_currency)
+            currency = Currency(dto.price_currency.upper())
         except ValueError:
             currency = Currency.USD
 
         price = Money(amount=dto.price, currency=currency)
-        compare_at_price = Money(amount=dto.compare_at_price, currency=currency) if dto.compare_at_price else None
-        cost_price = Money(amount=dto.cost_price, currency=currency) if dto.cost_price else None
+        compare_at_price = (
+            Money(amount=dto.compare_at_price, currency=currency)
+            if dto.compare_at_price
+            else None
+        )
+        cost_price = (
+            Money(amount=dto.cost_price, currency=currency) if dto.cost_price else None
+        )
 
         # Parse product type
         try:
-            product_type = ProductType(dto.product_type)
+            product_type = ProductType(dto.product_type.lower())
         except ValueError:
             product_type = ProductType.PHYSICAL
+
+        # Parse status
+        try:
+            status = (
+                ProductStatus(dto.status.lower()) if dto.status else ProductStatus.DRAFT
+            )
+        except ValueError:
+            status = ProductStatus.DRAFT
 
         # Create product entity
         product = Product(
             store_id=store_id,
-            name=dto.name,
+            tenant_id=store.tenant_id,
+            name=dto.name.strip(),
             slug=slug,
-            sku=dto.sku,
+            sku=dto.sku.strip() if dto.sku else None,
             description=dto.description,
             short_description=dto.short_description,
             product_type=product_type,
-            status=ProductStatus.DRAFT,
+            status=status,
             price=price,
             compare_at_price=compare_at_price,
             cost_price=cost_price,
-            quantity=dto.quantity,
-            low_stock_threshold=dto.low_stock_threshold,
-            images=dto.images,
+            quantity=dto.quantity or 0,
+            low_stock_threshold=dto.low_stock_threshold or 5,
+            images=dto.images or [],
             category_id=dto.category_id,
-            tags=dto.tags,
-            attributes=dto.attributes,
+            tags=dto.tags or [],
+            attributes=dto.attributes or {},
+            seo_title=dto.seo_title,
+            seo_description=dto.seo_description,
+            meta_catalog_id=getattr(dto, "meta_catalog_id", None),
         )
 
         # Save product
         created_product = await self.product_repository.create(product)
+
+        # Check if this is the merchant's first product -> send onboarding email
+        try:
+            total_products = await self.product_repository.count_by_store(store_id)
+            if total_products == 1:
+                from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                    send_first_product_email_task,
+                )
+
+                merchant_email = store.contact_email or None
+                if merchant_email:
+                    send_first_product_email_task.delay(
+                        email=merchant_email,
+                        merchant_name=store.name,
+                        product_name=dto.name,
+                        language=store.default_language,
+                    )
+        except Exception:
+            pass  # Never block product creation for onboarding emails
+
+        # Auto-complete the add_product onboarding step
+        if self.onboarding_repository:
+            from src.application.use_cases.onboarding.auto_complete import (
+                try_complete_onboarding_step,
+            )
+            from src.core.entities.onboarding import OnboardingStepKey
+
+            await try_complete_onboarding_step(
+                self.onboarding_repository,
+                store_id,
+                OnboardingStepKey.ADD_PRODUCT,
+            )
+
+        if self.event_bus:
+            try:
+                self.event_bus.publish(
+                    ProductCreatedEvent(
+                        product_id=created_product.id,
+                        store_id=created_product.store_id,
+                        name=created_product.name,
+                        sku=created_product.sku,
+                    )
+                )
+            except Exception:
+                pass
 
         return ProductDTO.from_entity(created_product)

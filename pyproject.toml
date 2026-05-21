@@ -1,5 +1,5 @@
 [project]
-name = "octyrafiy-backend"
+name = "NUMU-backend"
 version = "0.1.0"
 description = "Clean Architecture e-commerce backend API"
 readme = "README.md"
@@ -9,37 +9,76 @@ dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
     "python-multipart>=0.0.6",
-    
+    "itsdangerous>=2.1.0",  # Required by starlette session middleware
+
     # Database
     "sqlalchemy[asyncio]>=2.0.25",
     "asyncpg>=0.29.0",
     "alembic>=1.13.1",
-    
+
     # Validation & Settings
     "pydantic>=2.5.3",
     "pydantic-settings>=2.1.0",
     "email-validator>=2.1.0",
-    
+
     # Authentication
-    "python-jose[cryptography]>=3.3.0",
+    "PyJWT[crypto]>=2.9.0",
     "passlib[bcrypt]>=1.7.4",
-    
+    "bcrypt>=4.0.0,<4.1.0",  # Pin to avoid passlib compatibility issue
+    "pyotp>=2.9.0",
+    "google-auth>=2.25.0",  # Google OAuth ID token verification
+
     # External Services
     "stripe>=7.10.0",
     "openai>=1.10.0",
+    "statsmodels>=0.14.0",
     "resend>=0.7.0",
     "httpx>=0.26.0",
     "boto3>=1.34.0",  # For Cloudflare R2 (S3-compatible)
-    
+
     # Caching & Messaging
     "redis>=5.0.1",
     "celery>=5.3.6",
-    
+    "cachetools>=5.3.0",  # In-process TTL cache for hot per-store template lookups
+
+    # Observability — Prometheus exposition for /metrics scrape endpoint
+    "prometheus_client>=0.20",
+
+    # HTML sanitization for merchant-edited email templates.
+    # We declare ``tinycss2`` directly (instead of via ``bleach[css]``)
+    # because pip's resolver for the ``[css]`` extra fights every new
+    # bleach minor — the extra adds a redundant ``bleach==X.Y.Z`` pin
+    # on top of the base requirement and the resolver bails out with
+    # "no matching distributions" once a fresh bleach release lands on
+    # PyPI. ``bleach.css_sanitizer`` activates automatically when
+    # ``tinycss2`` is importable, so the extra is purely a convenience
+    # we don't need.
+    "bleach>=6.1.0",
+    "tinycss2>=1.2.0",
+
+    # Observability
+    "sentry-sdk[fastapi]>=1.40.0",
+    "structlog>=24.1.0",
+
     # Utilities
     "python-slugify>=8.0.1",
     "phonenumbers>=8.13.27",
     "Pillow>=10.2.0",
-    
+    "imagehash>=4.3.1",
+    "gradio_client>=1.0",
+    "qrcode[pil]>=7.4.0",
+
+    # PDF Generation
+    # WeasyPrint 68.0+ includes security fix CVE-2025-68616 (SSRF in url_fetcher).
+    # Requires system libs: pango, cairo, gdk-pixbuf, harfbuzz, fontconfig
+    # (installed in docker/Dockerfile). Uses Jinja2 (already a FastAPI dependency).
+    # Ref: https://doc.courtbouillon.org/weasyprint/stable/changelog.html
+    "weasyprint>=68.0",
+    "Jinja2>=3.1.0",
+    "fpdf2>=2.8.0",
+    "arabic-reshaper>=3.0.0",
+    "python-bidi>=0.6.0",
+
     # Admin Panel
     "sqladmin>=0.16.0",
     "wtforms>=3.1.0",
@@ -50,12 +89,15 @@ dev = [
     "pytest>=7.4.4",
     "pytest-asyncio>=0.23.3",
     "pytest-cov>=4.1.0",
+    "pytest-benchmark>=4.0.0",
     "httpx>=0.26.0",
     "factory-boy>=3.3.0",
     "faker>=22.0.0",
     "ruff>=0.1.14",
     "mypy>=1.8.0",
     "pre-commit>=3.6.0",
+    "locust>=2.20.0",  # Load testing
+    "aiosqlite>=0.19.0",  # SQLite async for tests
 ]
 
 [build-system]
@@ -68,6 +110,9 @@ packages = ["src"]
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+preview = true
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -77,9 +122,19 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
 ]
-ignore = ["E501", "B008", "B905"]
+ignore = [
+    "E501",  # line too long
+    "B008",  # function call in default argument
+    "B905",  # zip without strict
+    "B904",  # raise without from (intentional in some cases)
+    "E402",  # module import not at top (needed for settings-dependent imports)
+    "B017",  # pytest.raises(Exception) - sometimes intentional
+    "B015",  # useless comparison in tests
+    "F403",  # star imports - used for fixture re-exports
+    "B903",  # suggest dataclass - intentional class design
+]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["src"]
 
 [tool.mypy]
@@ -96,3 +151,7 @@ addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+
+[tool.bandit]
+exclude_dirs = ["tests", "alembic/versions"]
+skips = ["B101", "B601"]

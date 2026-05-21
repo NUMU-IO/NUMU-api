@@ -1,0 +1,168 @@
+name: Promote dev → stage + prod (both repos)
+
+# One-click promote: fast-forwards BOTH `stage` and `prod` branches from a
+# source branch (default `dev`) in BOTH NUMU-api and numo-merchant-hub.
+#
+# After the pushes land, the existing automatic deploys take over:
+#   - NUMU-api/cd.yml triggers on push to stage/prod and deploys each env
+#   - numo-merchant-hub/deploy.yml triggers when CI passes on stage/prod
+# So a single click here results in stage + prod (both api + hub) being
+# redeployed in parallel within a few minutes.
+#
+# ──────────────────────────────────────────────────────────────────────────
+# REQUIRED SECRETS
+#   GH_PAT          PAT with `contents: write` on BOTH NUMU-IO/NUMU-api and
+#                   NUMU-IO/numo-merchant-hub. Already used by the existing
+#                   single-repo promote.yml in this repo; if you scoped it
+#                   to NUMU-api only, broaden it to include the hub repo.
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Why ff-only: keeps the branch history linear and refuses to merge if the
+# source has diverged from stage/prod. If you see "not possible to
+# fast-forward", it means stage or prod has commits that aren't on dev
+# (hotfix landed directly on prod, etc.) — merge prod → dev first, then
+# re-run this workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "Branch to promote FROM (default: dev)"
+        required: false
+        default: "dev"
+        type: string
+      promote_api:
+        description: "Promote NUMU-api?"
+        required: false
+        type: boolean
+        default: true
+      promote_hub:
+        description: "Promote merchant-hub?"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+# Don't run two promotes concurrently — they push to the same branches and
+# would race each other.
+concurrency:
+  group: promote-all
+  cancel-in-progress: false
+
+env:
+  HUB_REPO: NUMU-IO/numo-merchant-hub
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────
+  # NUMU-api: ff-merge dev → stage, then dev → prod (sequential within the
+  # same job so prod can't get ahead of stage if something fails midway).
+  # ───────────────────────────────────────────────────────────────────────
+  promote-api:
+    name: Promote NUMU-api
+    if: ${{ inputs.promote_api }}
+    runs-on: ubuntu-latest
+    outputs:
+      stage_sha: ${{ steps.do.outputs.stage_sha }}
+      prod_sha:  ${{ steps.do.outputs.prod_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - id: do
+        name: ff-merge stage + prod from ${{ inputs.source_branch }}
+        run: |
+          set -e
+          git fetch origin --prune
+
+          echo "==> Promoting stage ← ${{ inputs.source_branch }}"
+          git checkout stage
+          git merge --ff-only "origin/${{ inputs.source_branch }}"
+          git push origin stage
+          echo "stage_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+          echo "==> Promoting prod ← ${{ inputs.source_branch }}"
+          git checkout prod
+          git merge --ff-only "origin/${{ inputs.source_branch }}"
+          git push origin prod
+          echo "prod_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # merchant-hub: same flow, cross-repo via PAT. Runs in parallel with the
+  # api promote — the two repos are independent, no ordering needed.
+  # ───────────────────────────────────────────────────────────────────────
+  promote-hub:
+    name: Promote merchant-hub
+    if: ${{ inputs.promote_hub }}
+    runs-on: ubuntu-latest
+    outputs:
+      stage_sha: ${{ steps.do.outputs.stage_sha }}
+      prod_sha:  ${{ steps.do.outputs.prod_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HUB_REPO }}
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - id: do
+        name: ff-merge stage + prod from ${{ inputs.source_branch }}
+        run: |
+          set -e
+          git fetch origin --prune
+
+          echo "==> Promoting hub stage ← ${{ inputs.source_branch }}"
+          git checkout stage
+          git merge --ff-only "origin/${{ inputs.source_branch }}"
+          git push origin stage
+          echo "stage_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+          echo "==> Promoting hub prod ← ${{ inputs.source_branch }}"
+          git checkout prod
+          git merge --ff-only "origin/${{ inputs.source_branch }}"
+          git push origin prod
+          echo "prod_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Summary — shows what got promoted + a reminder about the auto-deploys.
+  # ───────────────────────────────────────────────────────────────────────
+  summary:
+    name: Summary
+    if: always()
+    needs: [promote-api, promote-hub]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          {
+            echo "### Promote dev → stage + prod"
+            echo ""
+            echo "**Source branch:** \`${{ inputs.source_branch }}\`"
+            echo ""
+            echo "| Repo | Status | stage SHA | prod SHA |"
+            echo "| --- | --- | --- | --- |"
+            echo "| NUMU-api | ${{ needs.promote-api.result }} | \`${{ needs.promote-api.outputs.stage_sha }}\` | \`${{ needs.promote-api.outputs.prod_sha }}\` |"
+            echo "| merchant-hub | ${{ needs.promote-hub.result }} | \`${{ needs.promote-hub.outputs.stage_sha }}\` | \`${{ needs.promote-hub.outputs.prod_sha }}\` |"
+            echo ""
+            echo "### What happens next"
+            echo ""
+            echo "The pushes above auto-trigger downstream deploys:"
+            echo "- **NUMU-api/cd.yml** fires on push to \`stage\` and \`prod\` → deploys both envs in parallel"
+            echo "- **merchant-hub/deploy.yml** fires after CI passes on \`stage\` and \`prod\` → deploys both envs"
+            echo ""
+            echo "Watch the [API Actions tab](https://github.com/NUMU-IO/NUMU-api/actions) and [hub Actions tab](https://github.com/NUMU-IO/numo-merchant-hub/actions) for progress."
+            echo ""
+            echo "If you'd rather use Deploy All (richer health checks + safe-fail), run it manually for each env after the pushes complete — but it will overlap with cd.yml's auto-deploy, so usually unnecessary."
+          } >> "$GITHUB_STEP_SUMMARY"

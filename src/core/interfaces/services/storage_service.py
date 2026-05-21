@@ -2,16 +2,19 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class StorageBucket(str, Enum):
+class StorageBucket(StrEnum):
     """Storage bucket types."""
 
     PRODUCTS = "products"
     STORES = "stores"
     AVATARS = "avatars"
     DOCUMENTS = "documents"
+    CATEGORIES = "categories"
+    THEMES = "themes"
+    PAYMENT_PROOFS = "payment-proofs"
 
 
 @dataclass
@@ -60,4 +63,22 @@ class IStorageService(ABC):
     @abstractmethod
     def get_public_url(self, key: str) -> str:
         """Get the public URL for a file."""
+        ...
+
+    @abstractmethod
+    async def get_object_bytes(self, key: str) -> tuple[bytes, str | None]:
+        """Fetch the raw bytes of an object plus its content-type.
+
+        Used to stream private objects (e.g. payment proofs) through the
+        authenticated API without exposing signed URLs that depend on a
+        publicly-reachable storage hostname. Returns
+        ``(content, content_type)``. Raises ``ExternalServiceError`` on
+        backend failures and ``FileNotFoundError`` semantics on missing
+        keys (concrete subclass-specific).
+        """
+        ...
+
+    @abstractmethod
+    async def list_files(self, prefix: str) -> list[dict]:
+        """List files under a given prefix. Returns list of {key, url, size, last_modified}."""
         ...

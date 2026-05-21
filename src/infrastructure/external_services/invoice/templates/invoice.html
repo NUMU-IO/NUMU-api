@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="{{ language }}" dir="{{ direction }}">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        /* ================================================================
+         * NUMU Bilingual Invoice PDF Template (Arabic/English)
+         * Arabic RTL primary with English labels alongside.
+         * Rendered by WeasyPrint (HTML/CSS -> PDF).
+         * Font: Noto Sans Arabic (installed via fontconfig in Docker).
+         * ================================================================ */
+
+        @page {
+            size: A4;
+            margin: 1.5cm 1.5cm 2.5cm 1.5cm;
+
+            @bottom-center {
+                content: "{{ labels.page }} " counter(page) " / " counter(pages);
+                font-size: 8pt;
+                color: #999;
+            }
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans Arabic', 'Noto Sans', Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.6;
+            color: #1a1a2e;
+            direction: {{ direction }};
+        }
+
+        /* --- Header with Logo --- */
+        .invoice-header {
+            border-bottom: 3px solid #1034A6;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-logo {
+            flex-shrink: 0;
+        }
+
+        .header-logo img {
+            max-height: 55px;
+            max-width: 180px;
+        }
+
+        .header-center {
+            text-align: center;
+            flex-grow: 1;
+        }
+
+        .invoice-title-ar {
+            font-size: 20pt;
+            font-weight: bold;
+            color: #1034A6;
+        }
+
+        .invoice-title-en {
+            font-size: 12pt;
+            font-weight: bold;
+            color: #1034A6;
+            direction: ltr;
+        }
+
+        .header-meta {
+            text-align: {{ text_align_opposite }};
+            direction: ltr;
+            font-size: 9pt;
+            color: #555;
+            flex-shrink: 0;
+        }
+
+        .header-meta .meta-row {
+            margin-bottom: 2px;
+        }
+
+        .meta-label-ar {
+            color: #1a1a2e;
+            font-weight: bold;
+        }
+
+        .meta-label-en {
+            color: #6c757d;
+            font-size: 8pt;
+        }
+
+        .meta-value {
+            color: #1a1a2e;
+            font-weight: bold;
+        }
+
+        /* --- Party boxes (seller / buyer) --- */
+        .parties {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .party-box {
+            flex: 1;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 12px 14px;
+            background: #fafbfc;
+        }
+
+        .party-label {
+            font-size: 8pt;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 6px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 4px;
+        }
+
+        .party-name-ar {
+            font-size: 12pt;
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .party-name-en {
+            font-size: 9pt;
+            color: #6c757d;
+            direction: ltr;
+            text-align: {{ text_align_opposite }};
+            margin-bottom: 4px;
+        }
+
+        .party-detail {
+            font-size: 9pt;
+            color: #495057;
+            margin-bottom: 2px;
+        }
+
+        .party-detail-label {
+            color: #6c757d;
+        }
+
+        /* --- Line items table --- */
+        table.items {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        table.items th {
+            background: #f1f3f5;
+            padding: 8px 6px;
+            border-bottom: 2px solid #1034A6;
+            font-size: 8pt;
+            font-weight: bold;
+            color: #495057;
+            text-align: {{ text_align }};
+        }
+
+        table.items th .th-ar {
+            display: block;
+            font-size: 8pt;
+        }
+
+        table.items th .th-en {
+            display: block;
+            font-size: 7pt;
+            color: #868e96;
+            direction: ltr;
+        }
+
+        table.items th.num {
+            text-align: center;
+            width: 30px;
+        }
+
+        table.items td {
+            padding: 7px 6px;
+            border-bottom: 1px solid #eee;
+            font-size: 9pt;
+            text-align: {{ text_align }};
+            vertical-align: top;
+        }
+
+        table.items td.num {
+            text-align: center;
+        }
+
+        table.items td.money {
+            font-variant-numeric: tabular-nums;
+            text-align: {{ text_align_opposite }};
+            white-space: nowrap;
+        }
+
+        table.items th.money {
+            text-align: {{ text_align_opposite }};
+        }
+
+        table.items td .desc-ar {
+            display: block;
+        }
+
+        table.items td .desc-en {
+            display: block;
+            font-size: 8pt;
+            color: #868e96;
+            direction: ltr;
+            text-align: {{ text_align_opposite }};
+        }
+
+        table.items tbody tr:nth-child(even) {
+            background: #fafbfc;
+        }
+
+        /* --- Totals --- */
+        .totals-wrapper {
+            display: flex;
+            justify-content: {{ text_align }};
+            margin-top: 10px;
+        }
+
+        .totals {
+            width: 45%;
+        }
+
+        .totals table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .totals td {
+            padding: 5px 8px;
+            font-size: 9pt;
+        }
+
+        .totals td.label {
+            text-align: {{ text_align }};
+            color: #6c757d;
+        }
+
+        .totals td.label .label-en {
+            font-size: 7pt;
+            color: #adb5bd;
+            direction: ltr;
+        }
+
+        .totals td.value {
+            text-align: {{ text_align_opposite }};
+            font-variant-numeric: tabular-nums;
+        }
+
+        .totals tr.grand-total td {
+            font-size: 13pt;
+            font-weight: bold;
+            color: #1034A6;
+            border-top: 2px solid #1034A6;
+            padding-top: 8px;
+        }
+
+        .vat-notice {
+            margin-top: 10px;
+            padding: 7px 10px;
+            background: #F5EFE6;
+            border: 1px dashed #1034A6;
+            border-radius: 4px;
+            font-size: 8.5pt;
+            color: #1034A6;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        /* --- QR Code section --- */
+        .qr-section {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 16px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .qr-section img {
+            width: 110px;
+            height: 110px;
+        }
+
+        .qr-section p {
+            font-size: 8pt;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        /* --- Notes --- */
+        .notes {
+            margin-top: 16px;
+            padding: 10px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 9pt;
+            color: #495057;
+        }
+
+        .notes-label {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        /* --- ETA compliance footer --- */
+        .eta-footer {
+            margin-top: 24px;
+            padding-top: 12px;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+        }
+
+        .eta-footer .eta-ar {
+            font-size: 8pt;
+            color: #6c757d;
+            margin-bottom: 2px;
+        }
+
+        .eta-footer .eta-en {
+            font-size: 7pt;
+            color: #adb5bd;
+            direction: ltr;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Invoice Header with Logo -->
+    <div class="invoice-header">
+        <div class="header-logo">
+            {% if logo_url %}
+            <img src="{{ logo_url }}" alt="Store Logo">
+            {% endif %}
+        </div>
+        <div class="header-center">
+            <div class="invoice-title-ar">{{ labels_ar.invoice }}</div>
+            <div class="invoice-title-en">{{ labels_en.invoice }}</div>
+        </div>
+        <div class="header-meta">
+            <div class="meta-row">
+                <span class="meta-label-ar">{{ labels_ar.invoice_number }}</span>
+                <span class="meta-label-en">/ {{ labels_en.invoice_number }}</span><br>
+                <span class="meta-value">{{ invoice.invoice_number }}</span>
+            </div>
+            <div class="meta-row">
+                <span class="meta-label-ar">{{ labels_ar.date }}</span>
+                <span class="meta-label-en">/ {{ labels_en.date }}</span><br>
+                <span class="meta-value">{{ invoice.date_issued.strftime('%Y-%m-%d') }}</span>
+            </div>
+            <div class="meta-row">
+                <span class="meta-label-ar">{{ labels_ar.currency }}</span>
+                <span class="meta-label-en">/ {{ labels_en.currency }}</span><br>
+                <span class="meta-value">{{ currency }}</span>
+            </div>
+            {% if invoice.invoice_type.value != 'I' %}
+            <div class="meta-row">
+                <span class="meta-label-ar">النوع</span>
+                <span class="meta-label-en">/ Type</span><br>
+                <span class="meta-value">{{ invoice.invoice_type.value }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Seller & Buyer -->
+    <div class="parties">
+        <div class="party-box">
+            <div class="party-label">{{ labels_ar.seller }} / {{ labels_en.seller | upper }}</div>
+            {% if seller.name_ar %}
+            <div class="party-name-ar">{{ seller.name_ar }}</div>
+            {% endif %}
+            <div class="party-name-en">{{ seller.name }}</div>
+            <div class="party-detail">
+                <span class="party-detail-label">{{ labels_ar.tax_id }} / {{ labels_en.tax_id }}:</span>
+                {{ seller.tax_id }}
+            </div>
+            {% if seller.street or seller.city %}
+            <div class="party-detail">
+                <span class="party-detail-label">{{ labels_ar.address }} / {{ labels_en.address }}:</span>
+                {% if seller.building_number %}{{ seller.building_number }}، {% endif %}
+                {% if seller.street %}{{ seller.street }}، {% endif %}
+                {% if seller.city %}{{ seller.city }}{% endif %}
+                {% if seller.governorate %}، {{ seller.governorate }}{% endif %}
+            </div>
+            {% endif %}
+            {% if seller.phone %}
+            <div class="party-detail">
+                <span class="party-detail-label">الهاتف / Phone:</span>
+                {{ seller.phone }}
+            </div>
+            {% endif %}
+        </div>
+        <div class="party-box">
+            <div class="party-label">{{ labels_ar.buyer }} / {{ labels_en.buyer | upper }}</div>
+            {% if buyer.name_ar %}
+            <div class="party-name-ar">{{ buyer.name_ar }}</div>
+            {% endif %}
+            <div class="party-name-en">{{ buyer.name }}</div>
+            {% if buyer.tax_id %}
+            <div class="party-detail">
+                <span class="party-detail-label">{{ labels_ar.tax_id }} / {{ labels_en.tax_id }}:</span>
+                {{ buyer.tax_id }}
+            </div>
+            {% elif buyer.national_id %}
+            <div class="party-detail">
+                <span class="party-detail-label">ID:</span>
+                {{ buyer.national_id }}
+            </div>
+            {% endif %}
+            {% if buyer.street or buyer.city %}
+            <div class="party-detail">
+                <span class="party-detail-label">{{ labels_ar.address }} / {{ labels_en.address }}:</span>
+                {% if buyer.building_number %}{{ buyer.building_number }}، {% endif %}
+                {% if buyer.street %}{{ buyer.street }}، {% endif %}
+                {% if buyer.city %}{{ buyer.city }}{% endif %}
+                {% if buyer.governorate %}، {{ buyer.governorate }}{% endif %}
+            </div>
+            {% endif %}
+            {% if buyer.phone %}
+            <div class="party-detail">{{ buyer.phone }}</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Line Items -->
+    <table class="items">
+        <thead>
+            <tr>
+                <th class="num">#</th>
+                <th>
+                    <span class="th-ar">{{ labels_ar.description }}</span>
+                    <span class="th-en">{{ labels_en.description }}</span>
+                </th>
+                <th>
+                    <span class="th-ar">{{ labels_ar.code }}</span>
+                    <span class="th-en">{{ labels_en.code }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.qty }}</span>
+                    <span class="th-en">{{ labels_en.qty }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.unit_price }}</span>
+                    <span class="th-en">{{ labels_en.unit_price }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.discount }}</span>
+                    <span class="th-en">{{ labels_en.discount }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.net }}</span>
+                    <span class="th-en">{{ labels_en.net }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.tax }}</span>
+                    <span class="th-en">{{ labels_en.tax }}</span>
+                </th>
+                <th class="money">
+                    <span class="th-ar">{{ labels_ar.total }}</span>
+                    <span class="th-en">{{ labels_en.total }}</span>
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in line_items %}
+            <tr>
+                <td class="num">{{ item.number }}</td>
+                <td>
+                    {% if item.description_ar %}
+                    <span class="desc-ar">{{ item.description_ar }}</span>
+                    {% endif %}
+                    <span class="desc-en">{{ item.description_en }}</span>
+                </td>
+                <td>{{ item.item_code }}</td>
+                <td class="money">{{ item.quantity }}</td>
+                <td class="money">{{ item.unit_price }}</td>
+                <td class="money">{{ item.discount }}</td>
+                <td class="money">{{ item.net_total }}</td>
+                <td class="money">{{ item.tax_amount }}</td>
+                <td class="money">{{ item.total }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Totals (VAT-inclusive) — subtotal already contains 14% VAT,
+         shown extracted only for accounting. Grand total = subtotal
+         + shipping (NOT subtotal + VAT + shipping). -->
+    <div class="totals-wrapper">
+        <div class="totals">
+            <table>
+                <tr>
+                    <td class="label">
+                        إجمالي المنتجات (شامل الضريبة)
+                        <span class="label-en">Products Total (VAT incl.)</span>
+                    </td>
+                    <td class="value">{{ subtotal }} {{ currency }}</td>
+                </tr>
+                <tr>
+                    <td class="label">
+                        ضريبة القيمة المضافة 14% (مضمنة)
+                        <span class="label-en">VAT 14% (Included)</span>
+                    </td>
+                    <td class="value">{{ vat_amount }} {{ currency }}</td>
+                </tr>
+                {% if total_discount != '0.00' %}
+                <tr>
+                    <td class="label">
+                        إجمالي الخصم
+                        <span class="label-en">Discount</span>
+                    </td>
+                    <td class="value">-{{ total_discount }} {{ currency }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td class="label">
+                        رسوم الشحن
+                        <span class="label-en">Shipping</span>
+                    </td>
+                    <td class="value">{{ shipping_fee }} {{ currency }}</td>
+                </tr>
+                <tr class="grand-total">
+                    <td class="label">
+                        الإجمالي النهائي
+                        <span class="label-en">Grand Total</span>
+                    </td>
+                    <td class="value">{{ grand_total }} {{ currency }}</td>
+                </tr>
+            </table>
+            <div class="vat-notice">
+                الأسعار شاملة ضريبة القيمة المضافة 14% &middot; Prices include 14% VAT
+            </div>
+        </div>
+    </div>
+
+    <!-- Notes -->
+    {% if invoice.notes or invoice.notes_ar %}
+    <div class="notes">
+        <div class="notes-label">{{ labels_ar.notes }} / {{ labels_en.notes }}</div>
+        {% if invoice.notes_ar %}
+            {{ invoice.notes_ar }}
+        {% endif %}
+        {% if invoice.notes and invoice.notes_ar %}
+            <br>
+            <span style="direction: ltr; text-align: left; display: block; color: #6c757d;">{{ invoice.notes }}</span>
+        {% elif invoice.notes %}
+            {{ invoice.notes }}
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- QR Code -->
+    {% if qr_data_uri %}
+    <div class="qr-section">
+        <img src="{{ qr_data_uri }}" alt="ETA QR Code">
+        <p>{{ labels_ar.eta_notice }}</p>
+    </div>
+    {% endif %}
+
+    <!-- ETA Compliance Footer -->
+    {% if not qr_data_uri %}
+    <div class="eta-footer">
+        <div class="eta-ar">{{ labels_ar.eta_notice }}</div>
+        <div class="eta-en">{{ labels_en.eta_notice }}</div>
+    </div>
+    {% endif %}
+
+</body>
+</html>
