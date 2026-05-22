@@ -126,6 +126,14 @@ async def _fetch_touches_for_customers(
     One query for the full set; we partition in Python rather than
     issuing N queries. The (customer_id, ts) partial index covers
     this scan.
+
+    SEC: tenant_id filter applied alongside store_id. Defense in
+    depth — store_id already binds to one tenant, but every other
+    read path on customer_touches also enforces tenant_id explicitly
+    (see customer_touch_service + analytics_repository patterns). A
+    future bug elsewhere — e.g. a store_id resolution that briefly
+    crosses tenants — must not turn this hot orchestration path into
+    a cross-tenant leak.
     """
     customer_id_list = [cid for cid in customer_ids if cid is not None]
     if not customer_id_list:
@@ -138,6 +146,9 @@ async def _fetch_touches_for_customers(
         )
         .order_by(CustomerTouchModel.ts.asc())
     )
+    tid = get_tenant_id()
+    if tid:
+        query = query.where(CustomerTouchModel.tenant_id == tid)
     result = await session.execute(query)
     out: dict[UUID, list[CustomerTouchModel]] = {}
     for row in result.scalars().all():
@@ -229,12 +240,21 @@ async def compute_multi_touch_attribution(
     channel_credit: dict[str, int] = {}
     campaign_credit: dict[UUID, int] = {}
     total_revenue = 0
+    # Count only orders that actually contributed to the credit math.
+    # Reporting ``len(orders)`` would over-count: orders with
+    # ``total <= 0`` are skipped from the revenue + attribution loop
+    # below (they have nothing to attribute), and including them in
+    # ``total_orders`` would make the merchant see "X orders /
+    # $Y revenue" with X > the number of orders behind Y. Keeps the
+    # response internally consistent.
+    attributed_orders = 0
 
     for order in orders:
         revenue = int(order.total or 0)
         if revenue <= 0:
             continue
         total_revenue += revenue
+        attributed_orders += 1
         cust_touches = touches_by_customer.get(order.customer_id) or []
         touches = _touches_at_or_before(
             cust_touches,
@@ -298,7 +318,7 @@ async def compute_multi_touch_attribution(
 
     return {
         "model": model,
-        "total_orders": len(orders),
+        "total_orders": attributed_orders,
         "total_revenue_cents": total_revenue,
         "by_channel": by_channel,
         "by_campaign": by_campaign,
