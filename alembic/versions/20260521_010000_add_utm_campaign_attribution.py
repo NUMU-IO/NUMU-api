@@ -1,6 +1,6 @@
 """Add UTM + campaign attribution columns across orders/funnel/customers/campaigns.
 
-Revision ID: utm_campaign_attribution_20260521
+Revision ID: utm_attribution_20260521
 Revises: merge_phone_pixel_20260518
 Create Date: 2026-05-21
 
@@ -38,8 +38,14 @@ import sqlalchemy as sa
 
 from alembic import op
 
-# revision identifiers
-revision: str = "utm_campaign_attribution_20260521"
+# revision identifiers.
+# Renamed from "utm_campaign_attribution_20260521" (33 chars) to fit
+# alembic_version.version_num VARCHAR(32) — Postgres rejects the
+# longer value when alembic UPDATEs the version table after running
+# the DDL, taking the whole transaction with it. Children
+# (short_links, campaign_coupon_fk, customer_touches) reference this
+# id in their `down_revision`; updated to match.
+revision: str = "utm_attribution_20260521"
 down_revision: str = "merge_phone_pixel_20260518"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
