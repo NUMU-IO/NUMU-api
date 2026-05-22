@@ -45,6 +45,8 @@ from src.application.dto.order import (
     CreateOrderAddressDTO,
     CreateOrderLineItemDTO,
 )
+from src.application.services.attribution_sanitizer import sanitize_utm
+from src.application.services.campaign_resolver import resolve_campaign_id
 from src.application.services.cod_trust_service import (
     CodTrustDecision,
     LocationSignals,
@@ -1075,6 +1077,34 @@ async def checkout(
     # add `resolved_tax_cents` — VAT is already part of `subtotal`.
     total = subtotal + shipping_cost_cents - discount_amount
 
+    # ── Feature 001 — resolve UTM + attribution context ───────────────
+    # When the storefront sent a full attribution envelope (the new
+    # path), prefer its last_touch values over the legacy flat utm_*
+    # fields. Run every UTM through the sanitizer regardless of source
+    # — even the legacy flat fields, since clients can put anything in
+    # them. SEC-006: campaign_resolver is scoped by (store_id,
+    # short_code) so cross-tenant attribution is impossible.
+    _last = request.attribution.last_touch if request.attribution else None
+    _first = request.attribution.first_touch if request.attribution else None
+    _eff_utm_source = sanitize_utm(_last.utm_source if _last else request.utm_source)
+    _eff_utm_medium = sanitize_utm(_last.utm_medium if _last else request.utm_medium)
+    _eff_utm_campaign = sanitize_utm(
+        _last.utm_campaign if _last else request.utm_campaign
+    )
+    _eff_utm_term = sanitize_utm(_last.utm_term if _last else request.utm_term)
+    _eff_utm_content = sanitize_utm(_last.utm_content if _last else request.utm_content)
+    _resolved_campaign_id = await resolve_campaign_id(
+        session=order_repo.session,
+        store_id=store_id,
+        utm_campaign=_eff_utm_campaign,
+    )
+    _attribution_dict = (
+        request.attribution.model_dump(mode="json")
+        if request.attribution is not None
+        else None
+    )
+    _first_touch_at = _first.ts if _first is not None else None
+
     order = Order(
         store_id=store_id,
         tenant_id=store.tenant_id,
@@ -1122,13 +1152,44 @@ async def checkout(
                 else {}
             ),
         },
-        utm_source=request.utm_source,
-        utm_medium=request.utm_medium,
-        utm_campaign=request.utm_campaign,
+        utm_source=_eff_utm_source,
+        utm_medium=_eff_utm_medium,
+        utm_campaign=_eff_utm_campaign,
+        utm_term=_eff_utm_term,
+        utm_content=_eff_utm_content,
+        campaign_id=_resolved_campaign_id,
+        attribution=_attribution_dict,
+        first_touch_at=_first_touch_at,
         session_fingerprint=request.session_fingerprint,
     )
 
     created_order = await order_repo.create(order)
+
+    # ── Feature 001 — seed customer's first-touch attribution ─────────
+    # Set once on the first attributed order, never overwritten. Used
+    # by future LTV-by-acquisition-channel analytics. We update via
+    # raw SQL through the order_repo session so the write piggybacks on
+    # the same transaction as the order create — and so we never have
+    # to round-trip the Customer entity through this for one column.
+    if _first is not None:
+        from sqlalchemy import text as _sql_text
+
+        await order_repo.session.execute(
+            _sql_text(
+                "UPDATE public.customers "
+                "SET first_touch_attribution = CAST(:snapshot AS JSONB), "
+                "    first_touch_at = :ts "
+                "WHERE id = :customer_id "
+                "  AND store_id = :store_id "
+                "  AND first_touch_attribution IS NULL"
+            ),
+            {
+                "snapshot": _first.model_dump_json(),
+                "ts": _first_touch_at,
+                "customer_id": current_customer.id,
+                "store_id": store_id,
+            },
+        )
 
     # ── Persist COD trust assessment for the allowed/warned decision ───
     # Skip non-actionable reasons (disabled, no_phone, lookup_error) —

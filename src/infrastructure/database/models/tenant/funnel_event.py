@@ -45,6 +45,25 @@ class FunnelEventModel(Base, UUIDMixin, TenantMixin):
     )
     step: Mapped[str] = mapped_column(String(50), nullable=False)
     step_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Attribution columns — mirror orders.utm_* + campaign_id so funnel
+    # reports can slice by campaign without JSONB extraction. Server
+    # stamps these from the visitor's numu_attribution cookie on
+    # ingest; null for legacy events and for visitors with no cookie.
+    utm_source: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    utm_medium: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    utm_campaign: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    utm_term: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    utm_content: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    campaign_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketing_campaigns.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Top-level referrer — previously stashed in step_data.referrer.
+    # Promoted to a column so we can index it / filter on it without
+    # JSONB extraction. Reader code falls back to step_data.referrer
+    # for legacy rows that never had the column.
+    referrer: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

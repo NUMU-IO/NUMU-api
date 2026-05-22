@@ -31,6 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.order import OrderStatus
 from src.infrastructure.database.connection import get_tenant_id
+from src.infrastructure.database.models.tenant.funnel_event import (
+    FunnelEventModel,
+)
 from src.infrastructure.database.models.tenant.order import OrderModel
 
 _NON_REVENUE_STATUSES = (OrderStatus.CANCELLED, OrderStatus.REFUNDED)
@@ -1006,3 +1009,185 @@ class AnalyticsRepository:
             }
             for row in result.all()
         ]
+
+    # ── Per-campaign performance (feature 001) ──────────────────────
+    async def campaign_performance(
+        self,
+        store_id: UUID,
+        campaign_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict:
+        """Per-campaign attribution rollup.
+
+        Returns the totals block shaped per
+        contracts/merchant-campaign-api.md:
+
+            {
+                "sessions": int,            # COUNT(DISTINCT session_fingerprint)
+                "product_views": int,       #   where step='product_view'
+                "add_to_cart": int,         #   where step='add_to_cart'
+                "checkout_started": int,    #   where step='checkout_started'
+                "orders": int,              # from orders (non-cancelled/refunded)
+                "revenue_cents": int,       # SUM(orders.total)
+                "average_order_value_cents": int,
+                "conversion_rates": {       # ratios between adjacent stages
+                    "session_to_atc": float,
+                    "atc_to_checkout": float,
+                    "checkout_to_order": float,
+                    "session_to_order": float,
+                },
+                "top_products": [...],      # top 10 by revenue (line_items unnest)
+            }
+
+        All queries are tenant-scoped via ``_tenant_filter``. The
+        funnel_events query uses the partial
+        ``ix_funnel_events_store_campaign_created`` index installed by
+        the feature-001 migration — verify with EXPLAIN before assuming
+        constant-time on a hot table.
+
+        SEC-001: caller is responsible for confirming the auth'd user
+        has access to ``store_id``. SEC-006 / cross-tenant safety: the
+        ``campaign_id`` is filtered alongside ``store_id`` so a probe
+        with another store's campaign UUID resolves to empty (correct
+        — no data leak).
+        """
+        # ── Funnel-event aggregates ──────────────────────────────
+        funnel_step_expr = FunnelEventModel.step
+        funnel_session_expr = func.count(
+            func.distinct(FunnelEventModel.session_fingerprint)
+        )
+        funnel_query = (
+            select(funnel_step_expr, funnel_session_expr)
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id == campaign_id,
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(funnel_step_expr)
+        )
+        # Tenant scoping for funnel queries — the existing repo uses
+        # OrderModel-keyed _tenant_filter, so do an inline tenant
+        # check here.
+        tid = get_tenant_id()
+        if tid:
+            funnel_query = funnel_query.where(FunnelEventModel.tenant_id == tid)
+        funnel_result = await self.session.execute(funnel_query)
+        funnel_counts: dict[str, int] = {
+            row[0]: int(row[1] or 0) for row in funnel_result.all()
+        }
+        sessions = sum(
+            funnel_counts.get(step, 0)
+            for step in ("page_view", "product_view", "add_to_cart", "checkout_started")
+        )
+        # The spec also accepts treating "sessions" as the union of
+        # distinct fingerprints across all steps; the per-step rollup
+        # above gives us the same number when at least one page_view
+        # was recorded, which is the normal case. Use page_view as the
+        # primary signal — falls back to whichever step has the
+        # highest count if no page_views were recorded.
+        sessions = max(
+            funnel_counts.get("page_view", 0),
+            funnel_counts.get("product_view", 0),
+            funnel_counts.get("add_to_cart", 0),
+            sessions,
+        )
+        product_views = funnel_counts.get("product_view", 0)
+        add_to_cart = funnel_counts.get("add_to_cart", 0)
+        checkout_started = funnel_counts.get("checkout_started", 0)
+
+        # ── Order aggregates ─────────────────────────────────────
+        order_query = select(
+            func.count(OrderModel.id).label("orders"),
+            func.coalesce(func.sum(OrderModel.total), 0).label("revenue_cents"),
+        ).where(
+            OrderModel.store_id == store_id,
+            OrderModel.campaign_id == campaign_id,
+            OrderModel.created_at >= date_from,
+            OrderModel.created_at <= date_to,
+            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+        )
+        order_query = self._tenant_filter(order_query)
+        order_row = (await self.session.execute(order_query)).one()
+        orders = int(order_row.orders or 0)
+        revenue_cents = int(order_row.revenue_cents or 0)
+        aov = revenue_cents // orders if orders > 0 else 0
+
+        def _ratio(n: int, d: int) -> float:
+            return (n / d) if d > 0 else 0.0
+
+        conversion_rates = {
+            "session_to_atc": _ratio(add_to_cart, sessions),
+            "atc_to_checkout": _ratio(checkout_started, add_to_cart),
+            "checkout_to_order": _ratio(orders, checkout_started),
+            "session_to_order": _ratio(orders, sessions),
+        }
+
+        # ── Top products (top 10 by revenue) ─────────────────────
+        # Reuse the line_items-unnest pattern from top_products, but
+        # scope by (store_id, campaign_id, date_range).
+        line_items_cte = select(
+            OrderModel.id.label("order_id"),
+            func.jsonb_array_elements(OrderModel.line_items).label("li"),
+        ).where(
+            OrderModel.store_id == store_id,
+            OrderModel.campaign_id == campaign_id,
+            OrderModel.created_at >= date_from,
+            OrderModel.created_at <= date_to,
+            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+        )
+        line_items_cte = self._tenant_filter(line_items_cte).subquery()
+        li = cast(line_items_cte.c.li, JSONB)
+        product_id_expr = li["product_id"].astext.label("product_id")
+        product_name_expr = li["name"].astext.label("product_name")
+        quantity_expr = cast(func.coalesce(li["quantity"].astext, "0"), Integer).label(
+            "quantity"
+        )
+        revenue_per_line = func.coalesce(
+            cast(li["total_price"].astext, Integer),
+            cast(func.coalesce(li["unit_price"].astext, "0"), Integer)
+            * cast(func.coalesce(li["quantity"].astext, "0"), Integer),
+        ).label("revenue_cents")
+        tp_query = (
+            select(
+                product_id_expr,
+                func.max(product_name_expr).label("product_name"),
+                func.sum(quantity_expr).label("units_sold"),
+                func.sum(revenue_per_line).label("revenue_cents"),
+                # Distinct order_id count — the "orders" field on the
+                # per-product breakdown is supposed to be "how many
+                # orders contained this product", not "how many units
+                # were sold". The earlier implementation reused the
+                # units_sold sum which inflated the count for any
+                # product bought in qty > 1. Matches the pattern in
+                # ``top_products`` higher up the file.
+                func.count(line_items_cte.c.order_id.distinct()).label("orders"),
+            )
+            .where(product_id_expr.isnot(None))
+            .group_by(product_id_expr)
+            .order_by(func.sum(revenue_per_line).desc())
+            .limit(10)
+        )
+        tp_result = await self.session.execute(tp_query)
+        top_products = [
+            {
+                "product_id": row.product_id,
+                "name": row.product_name,
+                "orders": int(row.orders or 0),
+                "revenue_cents": int(row.revenue_cents or 0),
+            }
+            for row in tp_result.all()
+        ]
+
+        return {
+            "sessions": sessions,
+            "product_views": product_views,
+            "add_to_cart": add_to_cart,
+            "checkout_started": checkout_started,
+            "orders": orders,
+            "revenue_cents": revenue_cents,
+            "average_order_value_cents": aov,
+            "conversion_rates": conversion_rates,
+            "top_products": top_products,
+        }

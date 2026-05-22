@@ -63,6 +63,9 @@ from src.api.v1.routes.stores import settings as settings_module
 from src.api.v1.routes.stores import shipments as shipments_module
 from src.api.v1.routes.stores import shipping as shipping_module
 from src.api.v1.routes.stores import social as social_module
+from src.api.v1.routes.stores import (
+    storefront_validation as storefront_validation_module,
+)
 from src.api.v1.routes.stores import stores as stores_module
 from src.api.v1.routes.stores import theme_editor_v3 as theme_editor_v3_module
 from src.api.v1.routes.stores import theme_installations as theme_installations_module
@@ -128,6 +131,9 @@ router.include_router(plan_module.router, tags=["Store Plan"])
 router.include_router(upsells_module.router, tags=["Store Upsells"])
 router.include_router(bundles_module.router, tags=["Store Bundles"])
 router.include_router(social_module.router, tags=["Store Social Import"])
+router.include_router(
+    storefront_validation_module.router, tags=["Storefront Validation"]
+)
 router.include_router(ai_module.router, tags=["Store AI"])
 router.include_router(themes_module.router, tags=["Store Themes"])
 router.include_router(theme_installations_module.router, tags=["Store Themes V2"])

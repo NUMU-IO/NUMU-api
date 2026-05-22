@@ -125,9 +125,38 @@ class ListOrdersUseCase:
                     f"{customer.first_name} {customer.last_name}"
                 )
 
+        # Feature 001 — campaign names for attributed orders. Same N+1
+        # pattern as customers above (page size is small; most orders
+        # have no campaign_id which short-circuits the loop). Errors
+        # are swallowed — a missing campaign just means the badge
+        # doesn't render, which is an acceptable degradation.
+        campaign_names: dict[UUID, str] = {}
+        campaign_ids = {
+            order.campaign_id for order in orders if order.campaign_id is not None
+        }
+        if campaign_ids:
+            from src.infrastructure.database.connection import AsyncSessionLocal
+            from src.infrastructure.repositories.marketing_campaign_repository import (
+                MarketingCampaignRepository,
+            )
+
+            async with AsyncSessionLocal() as session:
+                repo = MarketingCampaignRepository(session)
+                for cid in campaign_ids:
+                    try:
+                        c = await repo.get_by_id(cid)
+                    except Exception:
+                        continue
+                    if c and c.store_id == store_id:
+                        campaign_names[cid] = c.name
+
         # Convert to DTOs
         order_dtos = [
-            OrderListItemDTO.from_entity(order, customer_names.get(order.customer_id))
+            OrderListItemDTO.from_entity(
+                order,
+                customer_names.get(order.customer_id),
+                campaign_names.get(order.campaign_id) if order.campaign_id else None,
+            )
             for order in orders
         ]
 

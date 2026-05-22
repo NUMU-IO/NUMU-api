@@ -149,6 +149,29 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     utm_campaign: Mapped[str | None] = mapped_column(
         String(200), nullable=True, index=True
     )
+    utm_term: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    utm_content: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Resolved campaign FK. Nullable: unknown utm_campaign strings keep
+    # raw UTMs but get no FK (per FR-011). ON DELETE SET NULL so a
+    # campaign can be soft-removed without orphaning attributed orders.
+    campaign_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketing_campaigns.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Full attribution snapshot: first_touch + last_touch + session_id.
+    # Same shape as the numu_attribution cookie and the customer's
+    # first_touch_attribution column. JSONB keeps the door open for
+    # extra fields without future migrations.
+    attribution: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Convenience timestamp — when this customer was first touched by
+    # the campaign that produced this order. Derived from
+    # attribution.first_touch.ts at insert; null for orders without
+    # attribution.
+    first_touch_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Funnel deduplication: stable per-visitor ID set by the storefront.
     # Persisted on the order so payment webhooks (paymob/kashier) can read
