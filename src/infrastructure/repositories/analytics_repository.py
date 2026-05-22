@@ -1181,6 +1181,74 @@ class AnalyticsRepository:
             for row in tp_result.all()
         ]
 
+        # ── Coupon redemption stats ──────────────────────────────
+        # Counts orders that (a) attribute to this campaign AND
+        # (b) redeemed a coupon — splits out by distinct coupon code
+        # so the merchant can see "EID-AB7K9X did 42 redemptions,
+        # EID-XY2Z11 did 7". Coupons attached to the campaign that
+        # never redeemed don't appear here (they're listed via
+        # /campaigns/{id}/coupons separately).
+        from src.infrastructure.database.models.tenant.coupon import (
+            CouponModel as _CouponModel,
+        )
+
+        coupon_query = (
+            select(
+                OrderModel.coupon_code,
+                func.count(OrderModel.id).label("redemptions"),
+                func.coalesce(func.sum(OrderModel.discount_amount), 0).label(
+                    "discount_value_cents"
+                ),
+                func.coalesce(func.sum(OrderModel.total), 0).label(
+                    "redemption_revenue_cents"
+                ),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id == campaign_id,
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                OrderModel.coupon_code.isnot(None),
+            )
+            .group_by(OrderModel.coupon_code)
+            .order_by(func.count(OrderModel.id).desc())
+        )
+        coupon_query = self._tenant_filter(coupon_query)
+        coupon_rows = (await self.session.execute(coupon_query)).all()
+
+        # Cross-reference against coupons that are explicitly tied to
+        # this campaign so the dashboard knows which redeemed codes
+        # were "campaign-issued" vs. "customer pasted a different
+        # code that happened to attribute". The campaign-issued ones
+        # are the more interesting metric for a merchant.
+        campaign_codes_query = select(_CouponModel.code).where(
+            _CouponModel.store_id == store_id,
+            _CouponModel.campaign_id == campaign_id,
+        )
+        tid = get_tenant_id()
+        if tid:
+            campaign_codes_query = campaign_codes_query.where(
+                _CouponModel.tenant_id == tid
+            )
+        campaign_codes_result = await self.session.execute(campaign_codes_query)
+        campaign_issued_codes: set[str] = {
+            row[0] for row in campaign_codes_result.all() if row[0]
+        }
+
+        coupon_breakdown = [
+            {
+                "code": row.coupon_code,
+                "redemptions": int(row.redemptions or 0),
+                "discount_value_cents": int(row.discount_value_cents or 0),
+                "revenue_cents": int(row.redemption_revenue_cents or 0),
+                "campaign_issued": row.coupon_code in campaign_issued_codes,
+            }
+            for row in coupon_rows
+        ]
+        total_redemptions = sum(c["redemptions"] for c in coupon_breakdown)
+        total_discount_value = sum(c["discount_value_cents"] for c in coupon_breakdown)
+
         return {
             "sessions": sessions,
             "product_views": product_views,
@@ -1191,6 +1259,9 @@ class AnalyticsRepository:
             "average_order_value_cents": aov,
             "conversion_rates": conversion_rates,
             "top_products": top_products,
+            "coupon_redemptions": total_redemptions,
+            "coupon_discount_value_cents": total_discount_value,
+            "coupon_breakdown": coupon_breakdown,
         }
 
     # ── LTV-by-channel (first-touch acquisition cohort) ─────────────

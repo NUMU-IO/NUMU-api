@@ -105,3 +105,7 @@ class ApplyCouponDTO(BaseDTO):
     coupon_type: str
     discount_amount: Decimal
     free_shipping: bool
+    # Set when the coupon was issued under a marketing campaign — the
+    # checkout uses this as a fallback campaign_id when no UTM-resolved
+    # attribution wins. None for standalone coupons (the normal case).
+    campaign_id: UUID | None = None

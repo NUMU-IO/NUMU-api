@@ -76,4 +76,8 @@ class ApplyCouponUseCase:
             coupon_type=coupon.coupon_type.value,
             discount_amount=discount_amount,
             free_shipping=free_shipping,
+            # Surfaces the campaign FK so the checkout can attribute
+            # the resulting order to the campaign when no UTM-resolved
+            # campaign won first. Standalone coupons carry None.
+            campaign_id=coupon.campaign_id,
         )

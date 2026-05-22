@@ -66,6 +66,18 @@ class CouponModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Phase 8.4 — type-specific config for BUY_X_GET_Y + TIERED.
     # NULL for simple types (PERCENTAGE / FIXED / FREE_SHIPPING).
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Optional FK to the marketing_campaigns row that spawned this
+    # coupon (post-feature-001). When set, redeeming the coupon at
+    # checkout attributes the resulting order to this campaign — even
+    # without a UTM hit. SET NULL on campaign delete so the coupon
+    # keeps working; the orders it produced retain their own
+    # campaign_id snapshot.
+    campaign_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketing_campaigns.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
     store = relationship("StoreModel", lazy="selectin")
