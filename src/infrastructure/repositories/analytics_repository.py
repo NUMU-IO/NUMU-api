@@ -1155,6 +1155,14 @@ class AnalyticsRepository:
                 func.max(product_name_expr).label("product_name"),
                 func.sum(quantity_expr).label("units_sold"),
                 func.sum(revenue_per_line).label("revenue_cents"),
+                # Distinct order_id count — the "orders" field on the
+                # per-product breakdown is supposed to be "how many
+                # orders contained this product", not "how many units
+                # were sold". The earlier implementation reused the
+                # units_sold sum which inflated the count for any
+                # product bought in qty > 1. Matches the pattern in
+                # ``top_products`` higher up the file.
+                func.count(line_items_cte.c.order_id.distinct()).label("orders"),
             )
             .where(product_id_expr.isnot(None))
             .group_by(product_id_expr)
@@ -1166,7 +1174,7 @@ class AnalyticsRepository:
             {
                 "product_id": row.product_id,
                 "name": row.product_name,
-                "orders": int(row.units_sold or 0),
+                "orders": int(row.orders or 0),
                 "revenue_cents": int(row.revenue_cents or 0),
             }
             for row in tp_result.all()

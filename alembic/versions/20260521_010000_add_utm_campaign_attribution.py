@@ -87,6 +87,19 @@ def _backfill_short_codes() -> None:
             key = (str(store_id), code)
             if key in assigned:
                 continue
+            # SAVEPOINT around each UPDATE attempt: in Postgres, any
+            # IntegrityError (UNIQUE collision against an existing
+            # row that snuck in concurrently, or any other DB error)
+            # aborts the surrounding transaction. Without this nested
+            # block, the FIRST collision would leave the whole
+            # migration's transaction in a failed state and every
+            # subsequent statement would error with
+            # ``InFailedSqlTransaction`` — the migration could never
+            # complete on a DB with any pre-existing campaigns.
+            # ``begin_nested()`` issues ``SAVEPOINT``; on exception
+            # we explicitly roll back to it so the outer transaction
+            # stays alive.
+            nested = bind.begin_nested()
             try:
                 bind.execute(
                     sa.text(
@@ -95,12 +108,16 @@ def _backfill_short_codes() -> None:
                     ),
                     {"code": code, "id": campaign_id},
                 )
-                assigned.add(key)
-                break
             except Exception:
                 # Collision with an existing row OR the unique index —
-                # try again with a fresh code.
+                # roll back to the savepoint so the outer transaction
+                # can continue, then try again with a fresh code.
+                nested.rollback()
                 continue
+            else:
+                nested.commit()
+                assigned.add(key)
+                break
         else:
             raise RuntimeError(
                 f"backfill: failed to assign short_code for campaign {campaign_id} "
