@@ -2378,3 +2378,104 @@ async def get_session_detail(
         ),
         message="Session detail retrieved",
     )
+
+
+# ── Multi-touch attribution ──────────────────────────────────────────
+
+
+class MultiTouchChannelRow(BaseModel):
+    channel: str
+    credit_cents: int
+    credit_pct: float
+
+
+class MultiTouchCampaignRow(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    credit_cents: int
+    credit_pct: float
+
+
+class MultiTouchAttributionResponse(BaseModel):
+    model: str
+    total_orders: int
+    total_revenue_cents: int
+    by_channel: list[MultiTouchChannelRow]
+    by_campaign: list[MultiTouchCampaignRow]
+
+
+_VALID_ATTRIBUTION_MODELS = (
+    "last_touch",
+    "first_touch",
+    "linear",
+    "time_decay",
+    "position_based",
+)
+
+
+@router.get(
+    "/multi-touch",
+    response_model=SuccessResponse[MultiTouchAttributionResponse],
+    summary="Multi-touch attribution per channel + campaign",
+    operation_id="get_multi_touch_attribution",
+)
+async def get_multi_touch_attribution(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    model: str = Query(
+        "linear",
+        description=(
+            "Attribution model: last_touch, first_touch, linear, "
+            "time_decay, position_based"
+        ),
+    ),
+):
+    """Distribute order revenue across acquisition touches per the selected model.
+
+    Reads ``orders`` × ``customer_touches`` in the date window and
+    runs one of five attribution models:
+
+    * ``last_touch`` — 100% to the last touch (legacy)
+    * ``first_touch`` — 100% to the first touch
+    * ``linear`` — equal split across all touches
+    * ``time_decay`` — exponential decay, 7-day half-life (Google
+      Ads default)
+    * ``position_based`` — Shopify-style U-shape, 40/20/40
+
+    Returns per-channel credit AND per-campaign credit (only for
+    touches that resolved to a known marketing_campaigns row). 400
+    when the window contains too many orders to attribute on demand
+    (5000-order cap — narrow the date range and retry).
+    """
+    if model not in _VALID_ATTRIBUTION_MODELS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"model must be one of {list(_VALID_ATTRIBUTION_MODELS)}; got {model!r}"
+            ),
+        )
+
+    from src.application.services import multi_touch_attribution
+
+    try:
+        result = await multi_touch_attribution.compute_multi_touch_attribution(
+            session=order_repo.session,
+            store_id=store.id,
+            date_from=window.start,
+            date_to=window.end,
+            model=model,  # type: ignore[arg-type]
+        )
+    except multi_touch_attribution.AttributionWindowTooLargeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SuccessResponse(
+        data=MultiTouchAttributionResponse(
+            model=result["model"],
+            total_orders=result["total_orders"],
+            total_revenue_cents=result["total_revenue_cents"],
+            by_channel=[MultiTouchChannelRow(**row) for row in result["by_channel"]],
+            by_campaign=[MultiTouchCampaignRow(**row) for row in result["by_campaign"]],
+        ),
+        message="Multi-touch attribution computed",
+    )
