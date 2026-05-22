@@ -26,6 +26,7 @@ from src.api.middleware import (
     setup_cors,
     setup_exception_handlers,
 )
+from src.api.short_link_redirect import router as short_link_redirect_router
 from src.api.v1.routes import api_router
 from src.config import settings
 from src.config.logging_config import configure_logging, get_logger
@@ -131,7 +132,9 @@ async def lifespan(app: FastAPI):
                 _apply_overrides(row.value)
                 logger.info("plan_limits_loaded_from_db", plans=list(row.value.keys()))
     except Exception:
-        logger.warning("plan_limits_db_load_failed — using code defaults", exc_info=True)
+        logger.warning(
+            "plan_limits_db_load_failed — using code defaults", exc_info=True
+        )
 
     logger.info(
         "app_startup",
@@ -315,6 +318,9 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(api_router)
+    # Short-link redirector — mounted at app root (no /api/v1 prefix)
+    # so the public URL stays clean: numueg.app/r/{short_code}.
+    app.include_router(short_link_redirect_router)
 
     # Serve local uploads in development (when R2 is not configured)
     if settings.debug and not settings.r2_account_id:

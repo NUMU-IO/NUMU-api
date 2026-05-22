@@ -95,6 +95,7 @@ from src.infrastructure.database.models.tenant.shopify_app_settings import (
 from src.infrastructure.database.models.tenant.shopify_installation import (
     ShopifyInstallationModel,
 )
+from src.infrastructure.database.models.tenant.short_link import ShortLinkModel
 from src.infrastructure.database.models.tenant.social_connection import (
     SocialConnectionModel,
 )
@@ -181,6 +182,7 @@ __all__ = [
     "ShippingRateModel",
     "ShippingZoneModel",
     "ShippingZoneGovernorateModel",
+    "ShortLinkModel",
     "StoreModel",
     "SocialConnectionModel",
     "SocialPostModel",
