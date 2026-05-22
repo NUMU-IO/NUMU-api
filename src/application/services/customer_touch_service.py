@@ -133,51 +133,61 @@ async def maybe_capture_touch(
     ):
         return None
 
-    # Look at the most recent prior touch for dedup + the
-    # is_first_touch flag.
+    # Dedup check — ALWAYS scoped to the same session.
     #
-    # Scope selection — what counts as "prior" depends on identity:
-    # * authenticated visitors (customer_id known): use
-    #   (store_id, customer_id) so a returning customer on a new
-    #   device doesn't get a second "first touch" — the flag is
-    #   per-customer-ever, not per-session.
-    # * anonymous visitors (customer_id absent): fall back to
-    #   (store_id, session_fingerprint). Sessions get backfilled at
-    #   checkout via ``backfill_session_touches`` which then
-    #   re-evaluates is_first_touch across the now-known customer's
-    #   full history.
-    if customer_id is not None:
-        prior_query = (
-            select(CustomerTouchModel)
-            .where(
-                CustomerTouchModel.store_id == store_id,
-                CustomerTouchModel.customer_id == customer_id,
-            )
-            .order_by(desc(CustomerTouchModel.ts))
-            .limit(1)
+    # A page refresh / sendBeacon retry on a UTM-tagged URL would
+    # otherwise duplicate the row. But dedup must NOT span sessions:
+    # a returning customer who clicks the SAME campaign link in a
+    # fresh session is a legitimate new touch, even though the UTMs
+    # match a touch from a previous session. Scoping dedup to
+    # session_fingerprint preserves that distinction.
+    dedup_query = (
+        select(CustomerTouchModel)
+        .where(
+            CustomerTouchModel.store_id == store_id,
+            CustomerTouchModel.session_fingerprint == session_fingerprint,
         )
-    else:
-        prior_query = (
-            select(CustomerTouchModel)
-            .where(
-                CustomerTouchModel.store_id == store_id,
-                CustomerTouchModel.session_fingerprint == session_fingerprint,
-            )
-            .order_by(desc(CustomerTouchModel.ts))
-            .limit(1)
-        )
-    result = await session.execute(prior_query)
-    prior = result.scalar_one_or_none()
+        .order_by(desc(CustomerTouchModel.ts))
+        .limit(1)
+    )
+    prior_in_session = (await session.execute(dedup_query)).scalar_one_or_none()
 
-    if prior is not None and _utms_equal(
-        prior,
+    if prior_in_session is not None and _utms_equal(
+        prior_in_session,
         utm_source=utm_source,
         utm_medium=utm_medium,
         utm_campaign=utm_campaign,
     ):
-        # Same touch identity as the immediately-prior row — refresh
-        # or retry, not a new touch.
+        # Same touch identity as the immediately-prior row IN THIS
+        # SESSION — refresh or retry, not a new touch.
         return None
+
+    # is_first_touch lookup — broader scope when the customer is
+    # known.
+    #
+    # If there's already a prior row in THIS session, we already know
+    # this isn't the first touch — no extra query needed.
+    # Otherwise: for authenticated visitors (customer_id present),
+    # look across all of the customer's touches; for anonymous
+    # visitors, the session-scoped check we already did is the best
+    # signal we have. Backfill re-evaluates the flag once the
+    # customer is identified at checkout, so guesting-then-converting
+    # still ends up with exactly one is_first_touch=True row per
+    # customer.
+    if prior_in_session is not None:
+        is_first_touch = False
+    elif customer_id is not None:
+        customer_prior = await session.execute(
+            select(CustomerTouchModel.id)
+            .where(
+                CustomerTouchModel.store_id == store_id,
+                CustomerTouchModel.customer_id == customer_id,
+            )
+            .limit(1)
+        )
+        is_first_touch = customer_prior.scalar_one_or_none() is None
+    else:
+        is_first_touch = True
 
     touch = CustomerTouchModel(
         store_id=store_id,
@@ -195,7 +205,7 @@ async def maybe_capture_touch(
         referrer=referrer,
         landing_path=landing_path,
         campaign_id=campaign_id,
-        is_first_touch=(prior is None),
+        is_first_touch=is_first_touch,
     )
     session.add(touch)
     await session.flush()
