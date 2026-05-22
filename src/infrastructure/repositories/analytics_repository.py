@@ -1244,6 +1244,14 @@ class AnalyticsRepository:
             "direct",
         ).label("channel")
 
+        # Defense-in-depth tenant scoping: every other method here
+        # binds OrderModel.tenant_id even when store_id is already in
+        # the predicate. If a row ever lands with mismatched
+        # (store_id, tenant_id) — bad backfill, restore from a
+        # mis-tagged dump, FK gap — the store_id alone would leak it
+        # across tenants. Pin both sides.
+        tid = get_tenant_id()
+
         # LEFT JOIN so customers with zero non-cancelled orders still
         # contribute to the cohort count; their revenue / order count
         # come back as 0 from the COALESCE / COUNT.
@@ -1252,6 +1260,8 @@ class AnalyticsRepository:
             & (OrderModel.store_id == store_id)
             & (OrderModel.status.notin_(_NON_REVENUE_STATUSES))
         )
+        if tid:
+            join_clause = join_clause & (OrderModel.tenant_id == tid)
 
         query = (
             select(
@@ -1274,10 +1284,6 @@ class AnalyticsRepository:
             .order_by(func.coalesce(func.sum(OrderModel.total), 0).desc())
         )
 
-        # Tenant scoping on the customer side is sufficient: the JOIN
-        # already binds orders to the same store_id, so cross-tenant
-        # rows can't sneak in through the order half.
-        tid = get_tenant_id()
         if tid:
             query = query.where(CustomerModel.tenant_id == tid)
 
