@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.api.dependencies import (
@@ -1665,6 +1665,159 @@ async def get_marketing_attribution(
             attributed_visits=attributed_visits,
         ),
         message="Marketing attribution retrieved successfully",
+    )
+
+
+# ── LTV by acquisition channel ──
+
+
+class LtvChannelRow(BaseModel):
+    """One row of LTV-by-channel rollup."""
+
+    channel: str
+    customer_count: int
+    total_orders: int
+    total_revenue_cents: int
+    average_order_value_cents: int
+    orders_per_customer: float
+    ltv_cents: int  # total_revenue / customer_count
+
+
+class LtvByChannelTotals(BaseModel):
+    """Overall totals across all channels in the response window."""
+
+    customer_count: int
+    total_orders: int
+    total_revenue_cents: int
+    average_ltv_cents: int
+
+
+class LtvByChannelResponse(BaseModel):
+    """LTV by first-touch acquisition channel."""
+
+    group_by: str
+    channels: list[LtvChannelRow]
+    totals: LtvByChannelTotals
+
+
+_VALID_LTV_GROUP_BY = ("source", "medium", "campaign")
+
+
+def _build_ltv_channel_row(
+    channel: str,
+    customer_count: int,
+    total_orders: int,
+    total_revenue_cents: int,
+) -> LtvChannelRow:
+    """Derive the per-channel metrics shown to the merchant.
+
+    Integer-cent division (``//``) matches the AOV convention used
+    elsewhere in this file (see ``/overview``); fractional cents would
+    be misleading for an EGP-denominated dashboard. ``orders_per_customer``
+    is float because it's an unbounded ratio, not a money quantity.
+    Empty cohorts (no customers or no orders) collapse to zero rather
+    than DivisionByZero.
+    """
+    aov = total_revenue_cents // total_orders if total_orders > 0 else 0
+    opc = round(total_orders / customer_count, 2) if customer_count > 0 else 0.0
+    ltv = total_revenue_cents // customer_count if customer_count > 0 else 0
+    return LtvChannelRow(
+        channel=channel,
+        customer_count=customer_count,
+        total_orders=total_orders,
+        total_revenue_cents=total_revenue_cents,
+        average_order_value_cents=aov,
+        orders_per_customer=opc,
+        ltv_cents=ltv,
+    )
+
+
+def _build_ltv_totals(rows: list[LtvChannelRow]) -> LtvByChannelTotals:
+    """Aggregate the per-channel rows into a single totals row.
+
+    ``average_ltv_cents`` is the **weighted** average across all
+    customers in the response window (total revenue / total customers),
+    not the mean of per-channel LTVs — the unweighted mean would skew
+    toward channels with tiny cohorts.
+    """
+    total_customers = sum(r.customer_count for r in rows)
+    total_orders = sum(r.total_orders for r in rows)
+    total_revenue = sum(r.total_revenue_cents for r in rows)
+    avg_ltv = total_revenue // total_customers if total_customers > 0 else 0
+    return LtvByChannelTotals(
+        customer_count=total_customers,
+        total_orders=total_orders,
+        total_revenue_cents=total_revenue,
+        average_ltv_cents=avg_ltv,
+    )
+
+
+@router.get(
+    "/ltv-by-channel",
+    response_model=SuccessResponse[LtvByChannelResponse],
+    summary="Get customer LTV by first-touch acquisition channel",
+    operation_id="get_ltv_by_channel",
+)
+async def get_ltv_by_channel(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
+    group_by: str = Query(
+        "source",
+        description=(
+            "Acquisition dimension to bucket by: source, medium, or campaign. "
+            "Sourced from customers.first_touch_attribution JSONB."
+        ),
+    ),
+):
+    """LTV by acquisition channel — customer cohorts joined to lifetime orders.
+
+    The ``date_from``/``date_to`` window from the standard date-range
+    dependency is applied to ``customers.first_touch_at`` (cohort
+    selection), **not** to orders. The point of LTV-by-channel is to
+    see how much revenue each acquisition cohort eventually produces
+    over their entire history, so we don't crop the order side.
+
+    Channels are read from ``customers.first_touch_attribution`` —
+    customers without that field (no UTMs on first touch) fall into a
+    ``"direct"`` bucket so they aren't dropped from the rollup.
+
+    ``group_by`` accepts ``source`` (default), ``medium``, or
+    ``campaign``. Invalid values 422 at the route layer before any
+    DB work runs.
+    """
+    if group_by not in _VALID_LTV_GROUP_BY:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"group_by must be one of {list(_VALID_LTV_GROUP_BY)}; got {group_by!r}"
+            ),
+        )
+
+    rows = await analytics_repo.ltv_by_channel(
+        store.id,
+        window.start,
+        window.end,
+        group_by=group_by,
+    )
+
+    channels = [
+        _build_ltv_channel_row(
+            channel=r["channel"],
+            customer_count=r["customer_count"],
+            total_orders=r["total_orders"],
+            total_revenue_cents=r["total_revenue_cents"],
+        )
+        for r in rows
+    ]
+
+    return SuccessResponse(
+        data=LtvByChannelResponse(
+            group_by=group_by,
+            channels=channels,
+            totals=_build_ltv_totals(channels),
+        ),
+        message="LTV by channel retrieved successfully",
     )
 
 
