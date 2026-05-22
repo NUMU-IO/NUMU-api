@@ -31,7 +31,7 @@ from alembic import op
 
 # revision identifiers
 revision: str = "campaign_coupon_fk_20260522"
-down_revision: str = "utm_campaign_attribution_20260521"
+down_revision: str = "utm_attribution_20260521"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
