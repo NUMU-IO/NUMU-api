@@ -1191,6 +1191,24 @@ async def checkout(
             },
         )
 
+    # Post-feature-001 / journey table — link any anonymous touches
+    # the visitor accrued before authenticating to this customer. One
+    # UPDATE per checkout; bounded by the visitor's session length.
+    # Failure here is non-fatal: a missed backfill just means the
+    # journey timeline starts from the customer's known events, not
+    # their anonymous prefix.
+    if request.session_fingerprint:
+        try:
+            from src.application.services import customer_touch_service
+
+            await customer_touch_service.backfill_session_touches(
+                session=order_repo.session,
+                session_fingerprint=request.session_fingerprint,
+                customer_id=current_customer.id,
+            )
+        except Exception:  # pragma: no cover - non-critical
+            pass
+
     # ── Persist COD trust assessment for the allowed/warned decision ───
     # Skip non-actionable reasons (disabled, no_phone, lookup_error) —
     # those are noise for the merchant feed. Below-threshold, warned, new

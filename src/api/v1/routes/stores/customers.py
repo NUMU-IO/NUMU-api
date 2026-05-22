@@ -329,3 +329,129 @@ async def erase_customer_analytics(
         ),
         message="Customer analytics erased",
     )
+
+
+# ── Customer journey (full touch timeline) ───────────────────────────
+
+
+class JourneyTouchResponse(BaseModel):
+    """One entry on the customer-journey timeline."""
+
+    id: str
+    ts: str
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    utm_term: str | None = None
+    utm_content: str | None = None
+    gclid: str | None = None
+    fbclid: str | None = None
+    referrer: str | None = None
+    landing_path: str | None = None
+    campaign_id: str | None = None
+    campaign_name: str | None = None
+    is_first_touch: bool
+
+
+class JourneyResponse(BaseModel):
+    customer_id: str
+    touch_count: int
+    touches: list[JourneyTouchResponse]
+
+
+@router.get(
+    "/{customer_id}/journey",
+    response_model=SuccessResponse[JourneyResponse],
+    summary="Get a customer's full touchpoint journey",
+    operation_id="get_customer_journey",
+)
+async def get_customer_journey(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    customer_id: Annotated[UUID, Path(description="Customer ID")],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    limit: int = Query(
+        100,
+        ge=1,
+        le=500,
+        description="Maximum touches to return (most recent first)",
+    ),
+):
+    """Return every UTM-tagged inbound visit this customer made.
+
+    Sourced from ``customer_touches`` — populated incrementally by the
+    /track endpoint for known customers, and backfilled at checkout
+    for anonymous sessions that converted (linking the pre-auth
+    history into the profile).
+
+    Order: most recent first. The merchant hub renders this as a
+    reverse-chrono timeline; ``is_first_touch`` is preserved on each
+    row so the very first touch can be highlighted regardless of
+    where it falls in the result set.
+    """
+    from sqlalchemy import desc, select
+
+    from src.core.exceptions import EntityNotFoundError
+    from src.infrastructure.database.models.tenant.customer_touch import (
+        CustomerTouchModel,
+    )
+    from src.infrastructure.database.models.tenant.marketing_campaign import (
+        MarketingCampaignModel,
+    )
+
+    customer = await customer_repo.get_by_id(customer_id)
+    if not customer or customer.store_id != store.id:
+        raise EntityNotFoundError("Customer", str(customer_id))
+
+    session = customer_repo.session  # type: ignore[attr-defined]
+    # LEFT JOIN to MarketingCampaign so we can show the campaign name
+    # alongside the campaign_id without a follow-up roundtrip. The
+    # FK on ``customer_touches.campaign_id`` is ``ON DELETE SET NULL``,
+    # so the join is safe even when a campaign was deleted after the
+    # touch was recorded.
+    stmt = (
+        select(
+            CustomerTouchModel,
+            MarketingCampaignModel.name,
+        )
+        .outerjoin(
+            MarketingCampaignModel,
+            CustomerTouchModel.campaign_id == MarketingCampaignModel.id,
+        )
+        .where(
+            CustomerTouchModel.store_id == store.id,
+            CustomerTouchModel.customer_id == customer_id,
+        )
+        .order_by(desc(CustomerTouchModel.ts))
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    touches = [
+        JourneyTouchResponse(
+            id=str(t.id),
+            ts=t.ts.isoformat(),
+            utm_source=t.utm_source,
+            utm_medium=t.utm_medium,
+            utm_campaign=t.utm_campaign,
+            utm_term=t.utm_term,
+            utm_content=t.utm_content,
+            gclid=t.gclid,
+            fbclid=t.fbclid,
+            referrer=t.referrer,
+            landing_path=t.landing_path,
+            campaign_id=str(t.campaign_id) if t.campaign_id else None,
+            campaign_name=campaign_name,
+            is_first_touch=t.is_first_touch,
+        )
+        for t, campaign_name in rows
+    ]
+
+    return SuccessResponse(
+        data=JourneyResponse(
+            customer_id=str(customer_id),
+            touch_count=len(touches),
+            touches=touches,
+        ),
+        message="Customer journey retrieved",
+    )
