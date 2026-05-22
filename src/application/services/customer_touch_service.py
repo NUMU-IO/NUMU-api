@@ -183,16 +183,26 @@ async def maybe_capture_touch(
 async def backfill_session_touches(
     *,
     session: AsyncSession,
+    store_id: UUID,
     session_fingerprint: str,
     customer_id: UUID,
 ) -> int:
     """Link anonymous touches to a now-known customer.
 
     Called from the checkout path when a guest converts. Updates every
-    prior touch for ``session_fingerprint`` that doesn't yet have a
-    customer_id — typically the entire pre-auth browsing history.
+    prior touch for ``(store_id, session_fingerprint)`` that doesn't
+    yet have a customer_id — typically the entire pre-auth browsing
+    history.
 
-    Returns the number of rows updated. The single-statement UPDATE
+    SEC: the ``store_id`` filter is critical. ``session_fingerprint``
+    is generated client-side and is NOT cryptographically
+    unforgeable; two visitors on two different stores could in
+    principle collide on fingerprint. Without the store_id scope,
+    backfilling at checkout on store A would silently link store B's
+    anonymous touches to this customer — breaking journey isolation
+    between merchants on the same NUMU instance.
+
+    Returns the number of rows updated. Single-statement UPDATE
     avoids reading-then-writing under concurrent /track inserts on
     the same session.
     """
@@ -201,6 +211,7 @@ async def backfill_session_touches(
     result = await session.execute(
         update(CustomerTouchModel)
         .where(
+            CustomerTouchModel.store_id == store_id,
             CustomerTouchModel.session_fingerprint == session_fingerprint,
             CustomerTouchModel.customer_id.is_(None),
         )

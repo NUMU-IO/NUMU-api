@@ -247,6 +247,14 @@ class TrackPageViewRequest(BaseModel):
     # clients — the route falls back to parsing the cookie from the
     # Cookie: header automatically.
     attribution: AttributionSnapshot | None = None
+    # Optional logged-in customer identifier. The storefront passes
+    # this when the visitor is authenticated so the journey-touch
+    # row lands with customer_id set immediately, instead of staying
+    # anonymous until the next checkout backfill. Soft-trusted: a
+    # forged value only pollutes that visitor's own journey timeline
+    # (no PII flows back, no monetary impact). Absent values
+    # preserve the legacy anonymous-then-backfill flow.
+    customer_id: UUID | None = None
 
 
 @router.post("/track", status_code=204)
@@ -369,12 +377,18 @@ async def track_page_view(
         )
         f_gclid = last_touch.gclid if last_touch else None
         f_fbclid = last_touch.fbclid if last_touch else None
+        # Pass-through customer_id when the storefront has flagged
+        # the visitor as authenticated. Anonymous touches still get
+        # backfilled at checkout for guests; this avoids an
+        # unnecessary backfill round-trip for returning logged-in
+        # customers and makes their journey timeline complete even
+        # if they never re-checkout in the current session.
         await customer_touch_service.maybe_capture_touch(
             session=funnel_repo.session,
             store_id=store.id,
             tenant_id=store.tenant_id,
             session_fingerprint=body.fingerprint,
-            customer_id=None,
+            customer_id=body.customer_id,
             utm_source=f_utm_source,
             utm_medium=f_utm_medium,
             utm_campaign=f_utm_campaign,

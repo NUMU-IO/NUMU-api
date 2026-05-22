@@ -1203,6 +1203,7 @@ async def checkout(
 
             await customer_touch_service.backfill_session_touches(
                 session=order_repo.session,
+                store_id=store_id,
                 session_fingerprint=request.session_fingerprint,
                 customer_id=current_customer.id,
             )
