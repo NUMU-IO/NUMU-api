@@ -133,17 +133,39 @@ async def maybe_capture_touch(
     ):
         return None
 
-    # Look at the most recent prior touch on this session for dedup +
-    # the is_first_touch flag.
-    prior_query = (
-        select(CustomerTouchModel)
-        .where(
-            CustomerTouchModel.session_fingerprint == session_fingerprint,
-            CustomerTouchModel.store_id == store_id,
+    # Look at the most recent prior touch for dedup + the
+    # is_first_touch flag.
+    #
+    # Scope selection — what counts as "prior" depends on identity:
+    # * authenticated visitors (customer_id known): use
+    #   (store_id, customer_id) so a returning customer on a new
+    #   device doesn't get a second "first touch" — the flag is
+    #   per-customer-ever, not per-session.
+    # * anonymous visitors (customer_id absent): fall back to
+    #   (store_id, session_fingerprint). Sessions get backfilled at
+    #   checkout via ``backfill_session_touches`` which then
+    #   re-evaluates is_first_touch across the now-known customer's
+    #   full history.
+    if customer_id is not None:
+        prior_query = (
+            select(CustomerTouchModel)
+            .where(
+                CustomerTouchModel.store_id == store_id,
+                CustomerTouchModel.customer_id == customer_id,
+            )
+            .order_by(desc(CustomerTouchModel.ts))
+            .limit(1)
         )
-        .order_by(desc(CustomerTouchModel.ts))
-        .limit(1)
-    )
+    else:
+        prior_query = (
+            select(CustomerTouchModel)
+            .where(
+                CustomerTouchModel.store_id == store_id,
+                CustomerTouchModel.session_fingerprint == session_fingerprint,
+            )
+            .order_by(desc(CustomerTouchModel.ts))
+            .limit(1)
+        )
     result = await session.execute(prior_query)
     prior = result.scalar_one_or_none()
 
@@ -217,4 +239,34 @@ async def backfill_session_touches(
         )
         .values(customer_id=customer_id)
     )
-    return result.rowcount or 0
+    linked = result.rowcount or 0
+
+    # Re-evaluate `is_first_touch` across the customer's full
+    # touch history. At capture time the flag is set per-session
+    # for anonymous visits — a guest browsing across two devices
+    # could end up with TWO `is_first_touch=True` rows pre-backfill.
+    # Once we know the customer_id, mark only the earliest touch
+    # as the first touch and clear the flag on every other touch.
+    # Done in a single UPDATE with a scalar subquery so the math
+    # stays atomic under concurrent /track inserts.
+    if linked > 0:
+        earliest = (
+            select(CustomerTouchModel.id)
+            .where(
+                CustomerTouchModel.store_id == store_id,
+                CustomerTouchModel.customer_id == customer_id,
+            )
+            .order_by(CustomerTouchModel.ts.asc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        await session.execute(
+            update(CustomerTouchModel)
+            .where(
+                CustomerTouchModel.store_id == store_id,
+                CustomerTouchModel.customer_id == customer_id,
+            )
+            .values(is_first_touch=(CustomerTouchModel.id == earliest))
+        )
+
+    return linked
