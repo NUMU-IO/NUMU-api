@@ -617,6 +617,21 @@ async def generate_trackable_link(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="short link could not be created for this destination",
                 )
+            except short_link_service.ShortLinkCreationError:
+                # Generator exhausted its collision-retry budget. At
+                # 32^8 ≈ 1.1T short_codes this is astronomically
+                # unlikely in normal use (would imply a broken RNG or
+                # a trillion-row table). Surface as 503 — transient
+                # so the merchant can simply retry the request — and
+                # with an explicit detail so it doesn't get confused
+                # with the OpenRedirectorError path above.
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=(
+                        "short link generator could not find a free code; "
+                        "retry the request"
+                    ),
+                )
 
     # SEC-008: audit-log the link generation. The URL itself is what
     # gets shared externally — having a who/when trail per link

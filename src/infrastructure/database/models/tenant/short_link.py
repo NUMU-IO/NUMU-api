@@ -19,7 +19,7 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.database.connection import Base
 from src.infrastructure.database.models.base import (
@@ -75,13 +75,15 @@ class ShortLinkModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     created_by: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
-    # Relationship — optional; the redirector path doesn't need it,
-    # but the campaign-detail page may render the spawned-links list.
-    campaign = relationship(
-        "MarketingCampaignModel",
-        foreign_keys=[campaign_id],
-        lazy="selectin",
-    )
+    # Note: no ORM relationship to MarketingCampaignModel. The redirect
+    # path (`GET /r/{short_code}`) is performance-critical — a one-row
+    # lookup — and any `lazy=` strategy on `campaign` either fires a
+    # second SELECT on every load (lazy="selectin") or risks accidental
+    # sync IO in async context (lazy="select"). Callers that need the
+    # campaign for a per-link list (e.g. the campaign-detail "spawned
+    # links" view) should JOIN explicitly at query time via
+    # ``select(...).outerjoin(MarketingCampaignModel, ...)``. The
+    # ``campaign_id`` FK column remains for that purpose.
 
     def __repr__(self) -> str:
         return (
