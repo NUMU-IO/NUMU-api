@@ -859,9 +859,14 @@ def _coupon_to_response(c: Coupon) -> CampaignCouponResponse:
         code=c.code,
         coupon_type=c.coupon_type.value,
         value=float(c.value),
-        min_order_amount=float(c.min_order_amount) if c.min_order_amount else None,
+        # `is not None` (not truthiness) because Decimal('0') is falsy
+        # in Python — a merchant who set min_order_amount=0 explicitly
+        # was getting `null` back instead of `0.0`. Same for the cap.
+        min_order_amount=float(c.min_order_amount)
+        if c.min_order_amount is not None
+        else None,
         max_discount_amount=float(c.max_discount_amount)
-        if c.max_discount_amount
+        if c.max_discount_amount is not None
         else None,
         usage_limit=c.usage_limit,
         usage_count=c.usage_count,
