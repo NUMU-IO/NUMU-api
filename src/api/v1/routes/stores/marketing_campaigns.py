@@ -1000,11 +1000,14 @@ async def list_campaign_coupons(
         # store + campaign, ordered by created_at DESC.
         from sqlalchemy import select as _select
 
+        from src.infrastructure.database.connection import (
+            get_tenant_id as _get_tenant_id,
+        )
         from src.infrastructure.database.models.tenant.coupon import (
             CouponModel as _CouponModel,
         )
 
-        result = await session.execute(
+        coupon_query = (
             _select(_CouponModel)
             .where(
                 _CouponModel.store_id == store_id,
@@ -1012,6 +1015,18 @@ async def list_campaign_coupons(
             )
             .order_by(_CouponModel.created_at.desc())
         )
+        # Defense in depth: even though store_id + campaign_id ought
+        # to be enough to scope to one tenant (campaigns are
+        # store-scoped, stores are tenant-scoped), every other repo
+        # method on this table also filters by tenant_id. Apply the
+        # same filter here so a future bug elsewhere — e.g. a
+        # campaign_id resolution that leaks across tenants — can't
+        # turn this into a data-disclosure path.
+        _tid = _get_tenant_id()
+        if _tid:
+            coupon_query = coupon_query.where(_CouponModel.tenant_id == _tid)
+
+        result = await session.execute(coupon_query)
         models = result.scalars().all()
         coupon_repo = CouponRepository(session)
         entities = [coupon_repo._to_entity(m) for m in models]
