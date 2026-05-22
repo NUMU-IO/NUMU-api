@@ -83,6 +83,12 @@ class Coupon(BaseEntity):
     # validate the shape here — calculate_discount asserts the
     # expected keys when it reads the dict.
     config: dict[str, Any] | None = None
+    # Post-feature-001 — optional FK to a marketing_campaigns row.
+    # When set, redemption at checkout stamps the order's campaign_id
+    # (only when no UTM-resolved campaign won first) so the campaign
+    # performance dashboard sees the conversion even when the customer
+    # came in direct and pasted the code.
+    campaign_id: UUID | None = None
 
     @field_validator("code", mode="before")
     @classmethod
@@ -230,7 +236,7 @@ def _calculate_tiered_discount(
             continue
         threshold = tier.get("min_subtotal_cents")
         pct = tier.get("discount_percentage")
-        if not isinstance(threshold, (int, float)) or not isinstance(pct, (int, float)):
+        if not isinstance(threshold, int | float) or not isinstance(pct, int | float):
             continue
         if order_cents >= int(threshold):
             best_pct = max(best_pct, Decimal(str(pct)))

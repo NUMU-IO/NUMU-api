@@ -50,6 +50,7 @@ class CouponRepository(ICouponRepository):
             applicable_product_ids=model.applicable_product_ids,
             applicable_category_ids=model.applicable_category_ids,
             config=model.config,
+            campaign_id=model.campaign_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -75,6 +76,7 @@ class CouponRepository(ICouponRepository):
             applicable_product_ids=entity.applicable_product_ids,
             applicable_category_ids=entity.applicable_category_ids,
             config=entity.config,
+            campaign_id=entity.campaign_id,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )

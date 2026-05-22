@@ -932,6 +932,11 @@ async def checkout(
     discount_amount = 0
     coupon_code = None
     coupon_id = None
+    # If the redeemed coupon was issued under a marketing campaign,
+    # we want to attribute the order to that campaign when no
+    # UTM-resolved campaign won first. Captured here, applied below
+    # after the UTM resolver has run.
+    _coupon_campaign_id = None
 
     if request.coupon_code:
         from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
@@ -946,6 +951,7 @@ async def checkout(
         discount_amount = int(coupon_result.discount_amount)
         coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
+        _coupon_campaign_id = coupon_result.campaign_id
 
     # Atomically deduct stock BEFORE creating the order. Variant combos
     # use a row-lock path (deduct_variant_stock); non-variant flows keep
@@ -1098,6 +1104,13 @@ async def checkout(
         store_id=store_id,
         utm_campaign=_eff_utm_campaign,
     )
+    # Coupon-based attribution fallback: when the UTM resolver came up
+    # empty (direct traffic, organic, or untagged share) and the
+    # customer pasted a campaign-issued coupon, attribute the order to
+    # the coupon's campaign. UTM wins by default — coupon only fills
+    # the blank.
+    if _resolved_campaign_id is None and _coupon_campaign_id is not None:
+        _resolved_campaign_id = _coupon_campaign_id
     _attribution_dict = (
         request.attribution.model_dump(mode="json")
         if request.attribution is not None

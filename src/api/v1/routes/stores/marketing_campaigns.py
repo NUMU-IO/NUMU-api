@@ -34,13 +34,14 @@ from src.api.dependencies.repositories import (
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
-from src.application.services import short_link_service
+from src.application.services import campaign_coupon_service, short_link_service
 from src.application.services.audit_service import AuditService, EventType
 from src.application.services.link_builder import LinkBuilder
 from src.application.services.short_code_generator import (
     generate as generate_short_code,
 )
 from src.config import settings
+from src.core.entities.coupon import Coupon, CouponType
 from src.core.entities.marketing_campaign import (
     CampaignChannel,
     CampaignStatus,
@@ -51,6 +52,7 @@ from src.infrastructure.repositories import ProductRepository, StoreRepository
 from src.infrastructure.repositories.analytics_repository import (
     AnalyticsRepository,
 )
+from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.marketing_campaign_repository import (
     MarketingCampaignRepository,
 )
@@ -697,6 +699,21 @@ class CampaignPerformanceResponse(BaseModel):
     totals: CampaignPerformanceTotals
 
 
+class CouponRedemptionBreakdownItem(BaseModel):
+    """One redeemed coupon code within a campaign window."""
+
+    code: str
+    redemptions: int
+    discount_value_cents: int
+    revenue_cents: int
+    # True when the code was minted via POST /campaigns/{id}/coupons
+    # (i.e. tied to the campaign at creation). False for codes the
+    # customer pasted that happened to also attribute to this campaign
+    # via UTM resolution — still counted, but flagged differently in
+    # the hub so merchants can tell organic from intended redemptions.
+    campaign_issued: bool
+
+
 class CampaignPerformanceTotals(BaseModel):
     sessions: int
     product_views: int
@@ -707,6 +724,11 @@ class CampaignPerformanceTotals(BaseModel):
     average_order_value_cents: int
     conversion_rates: ConversionRatesResponse
     top_products: list[TopProductResponse]
+    # Post-feature-001: total redemptions of any coupon attached to
+    # this campaign, plus a per-code breakdown for the dashboard.
+    coupon_redemptions: int = 0
+    coupon_discount_value_cents: int = 0
+    coupon_breakdown: list[CouponRedemptionBreakdownItem] = Field(default_factory=list)
 
 
 CampaignPerformanceResponse.model_rebuild()
@@ -773,7 +795,228 @@ async def get_campaign_performance(
                 average_order_value_cents=totals["average_order_value_cents"],
                 conversion_rates=ConversionRatesResponse(**totals["conversion_rates"]),
                 top_products=[TopProductResponse(**p) for p in totals["top_products"]],
+                coupon_redemptions=totals.get("coupon_redemptions", 0),
+                coupon_discount_value_cents=totals.get(
+                    "coupon_discount_value_cents", 0
+                ),
+                coupon_breakdown=[
+                    CouponRedemptionBreakdownItem(**c)
+                    for c in totals.get("coupon_breakdown", [])
+                ],
             ),
         ),
         message="Campaign performance retrieved",
+    )
+
+
+# ── Campaign-attached coupons ─────────────────────────────────────
+
+
+class IssueCampaignCouponRequest(BaseModel):
+    """Body for ``POST /campaigns/{id}/coupons``.
+
+    Mirrors the relevant subset of the standalone-coupon CRUD: the
+    code is auto-generated from the campaign name; the merchant only
+    chooses the discount mechanics.
+    """
+
+    coupon_type: Literal["percentage", "fixed"]
+    # Decimal in store currency — percentage when coupon_type=percentage
+    # (0-100), absolute discount when coupon_type=fixed.
+    value: float = Field(gt=0, le=100_000)
+    min_order_amount: float | None = Field(default=None, ge=0)
+    max_discount_amount: float | None = Field(default=None, ge=0)
+    usage_limit: int | None = Field(default=None, ge=1, le=1_000_000)
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+
+    @model_validator(mode="after")
+    def _enforce_percentage_range(self) -> IssueCampaignCouponRequest:
+        if self.coupon_type == "percentage" and self.value > 100:
+            raise ValueError("percentage coupons cannot exceed 100")
+        return self
+
+
+class CampaignCouponResponse(BaseModel):
+    id: str
+    code: str
+    coupon_type: str
+    value: float
+    min_order_amount: float | None = None
+    max_discount_amount: float | None = None
+    usage_limit: int | None = None
+    usage_count: int
+    valid_from: str | None = None
+    valid_until: str | None = None
+    is_active: bool
+    campaign_id: str | None = None
+    created_at: str
+
+
+def _coupon_to_response(c: Coupon) -> CampaignCouponResponse:
+    return CampaignCouponResponse(
+        id=str(c.id),
+        code=c.code,
+        coupon_type=c.coupon_type.value,
+        value=float(c.value),
+        min_order_amount=float(c.min_order_amount) if c.min_order_amount else None,
+        max_discount_amount=float(c.max_discount_amount)
+        if c.max_discount_amount
+        else None,
+        usage_limit=c.usage_limit,
+        usage_count=c.usage_count,
+        valid_from=c.valid_from.isoformat() if c.valid_from else None,
+        valid_until=c.valid_until.isoformat() if c.valid_until else None,
+        is_active=c.is_active,
+        campaign_id=str(c.campaign_id) if c.campaign_id else None,
+        created_at=c.created_at.isoformat() if c.created_at else "",
+    )
+
+
+@router.post(
+    "/{campaign_id}/coupons",
+    response_model=SuccessResponse[CampaignCouponResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Issue a discount code attached to a campaign",
+    operation_id="issue_campaign_coupon",
+)
+async def issue_campaign_coupon(
+    store_id: UUID,
+    campaign_id: UUID,
+    body: IssueCampaignCouponRequest,
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Mint a coupon linked to ``campaign_id``.
+
+    Code is auto-generated as ``<CAMPAIGN-SLUG>-<6-char-Crockford>``
+    so a merchant scanning their coupons list can eyeball which
+    campaign each code belongs to. The campaign_id is stamped onto
+    every order that redeems this code (when no UTM-resolved
+    attribution wins first), so direct-traffic conversions still
+    attribute back to the campaign.
+
+    SEC-001: campaign lookup is filtered by ``(id, store_id)`` so
+    cross-tenant probes 404 (not 403).
+    """
+    from decimal import Decimal as _D
+
+    async with AsyncSessionLocal() as session:
+        camp_repo = MarketingCampaignRepository(session)
+        campaign = await camp_repo.get_by_id(campaign_id)
+        if campaign is None or campaign.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found",
+            )
+
+        code = await campaign_coupon_service.generate_unique_code(
+            session=session,
+            store_id=store_id,
+            campaign_name=campaign.name,
+        )
+
+        try:
+            entity = campaign_coupon_service.build_campaign_coupon(
+                store_id=store_id,
+                tenant_id=campaign.tenant_id,
+                campaign=campaign,
+                code=code,
+                coupon_type=CouponType(body.coupon_type),
+                value=_D(str(body.value)),
+                min_order_amount=_D(str(body.min_order_amount))
+                if body.min_order_amount is not None
+                else None,
+                max_discount_amount=_D(str(body.max_discount_amount))
+                if body.max_discount_amount is not None
+                else None,
+                usage_limit=body.usage_limit,
+                valid_from=body.valid_from,
+                valid_until=body.valid_until,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+        coupon_repo = CouponRepository(session)
+        created = await coupon_repo.create(entity)
+        await session.commit()
+
+    # SEC-008: audit-log the issuance. Discount codes are money on the
+    # ground — a paper trail of who/when matters for fraud
+    # investigation and merchant disputes.
+    async with AsyncSessionLocal() as audit_session:
+        await AuditService(audit_session).log(
+            event_type=EventType.COUPON_CREATE,
+            action="issue_campaign_coupon",
+            resource_type="coupon",
+            resource_id=str(created.id),
+            user_id=user_id,
+            store_id=store_id,
+            tenant_id=campaign.tenant_id,
+            details={
+                "campaign_id": str(campaign_id),
+                "code": created.code,
+                "coupon_type": created.coupon_type.value,
+                "value": float(created.value),
+            },
+        )
+        await audit_session.commit()
+
+    return SuccessResponse(
+        data=_coupon_to_response(created),
+        message="Campaign coupon issued",
+    )
+
+
+@router.get(
+    "/{campaign_id}/coupons",
+    response_model=SuccessResponse[list[CampaignCouponResponse]],
+    summary="List discount codes attached to a campaign",
+    operation_id="list_campaign_coupons",
+)
+async def list_campaign_coupons(
+    store_id: UUID,
+    campaign_id: UUID,
+):
+    """Read-only view of all coupons attached to ``campaign_id``.
+
+    Drives the hub's "Codes issued under this campaign" panel. Returns
+    them in creation order so the most recently issued code is at the
+    top — that's typically what the merchant just clicked the Issue
+    button for and wants to copy.
+    """
+    async with AsyncSessionLocal() as session:
+        camp_repo = MarketingCampaignRepository(session)
+        campaign = await camp_repo.get_by_id(campaign_id)
+        if campaign is None or campaign.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found",
+            )
+
+        # Direct query — no list-by-campaign method on CouponRepository
+        # yet. Keep it close to the existing patterns: select * where
+        # store + campaign, ordered by created_at DESC.
+        from sqlalchemy import select as _select
+
+        from src.infrastructure.database.models.tenant.coupon import (
+            CouponModel as _CouponModel,
+        )
+
+        result = await session.execute(
+            _select(_CouponModel)
+            .where(
+                _CouponModel.store_id == store_id,
+                _CouponModel.campaign_id == campaign_id,
+            )
+            .order_by(_CouponModel.created_at.desc())
+        )
+        models = result.scalars().all()
+        coupon_repo = CouponRepository(session)
+        entities = [coupon_repo._to_entity(m) for m in models]
+
+    return SuccessResponse(
+        data=[_coupon_to_response(c) for c in entities],
+        message="Campaign coupons listed",
     )
