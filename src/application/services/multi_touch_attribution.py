@@ -32,6 +32,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from src.application.services.attribution_models import (
     AttributionModel,
@@ -51,7 +52,18 @@ from src.infrastructure.database.models.tenant.order import OrderModel
 MAX_ORDERS_PER_RUN = 5_000
 MAX_TOUCHES_PER_ORDER = 50
 
-_NON_REVENUE_STATUSES = (OrderStatus.CANCELLED, OrderStatus.REFUNDED)
+# Orders in these statuses produced no actual collected revenue and
+# must NOT be credited to any attribution touch. Includes RETURNED
+# (COD orders the customer refused on delivery; courier webhook flips
+# the status to RETURNED via the same path that updates shipments).
+# Without this, refused-on-delivery orders would inflate channel
+# revenue and mislead the merchant about which channel actually
+# converted into kept-and-paid sales.
+_NON_REVENUE_STATUSES = (
+    OrderStatus.CANCELLED,
+    OrderStatus.REFUNDED,
+    OrderStatus.RETURNED,
+)
 
 
 class AttributionWindowTooLargeError(RuntimeError):
@@ -96,9 +108,20 @@ async def _fetch_orders(
 
     Sort: created_at ASC. The route layer assumes deterministic
     ordering so a paginated UI gets a stable snapshot.
+
+    Eager-load suppression: ``OrderModel`` declares ``store``,
+    ``customer``, ``invoice``, and ``coupon`` relationships with
+    ``lazy="selectin"``. Without overriding, each of those fires its
+    own SELECT for every batch of orders we load — four extra
+    queries per request. The attribution loop only reads scalar
+    columns (``id``, ``customer_id``, ``total``, ``created_at``), so
+    ``noload('*')`` disables every relationship for this query.
+    Anything that later accesses a relationship would get ``None``
+    (silent) rather than firing sync IO in async context.
     """
     query = (
         select(OrderModel)
+        .options(noload("*"))
         .where(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= date_from,
