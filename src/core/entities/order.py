@@ -250,6 +250,16 @@ class Order(BaseEntity):
     utm_source: str | None = None
     utm_medium: str | None = None
     utm_campaign: str | None = None
+    # Feature 001 — two additional standard UTM dimensions, FK to the
+    # campaign that produced the order (NULL when utm_campaign doesn't
+    # resolve to a known short_code), full attribution snapshot JSONB,
+    # and a convenience timestamp for "time from first contact to
+    # purchase" analytics.
+    utm_term: str | None = None
+    utm_content: str | None = None
+    campaign_id: UUID | None = None
+    attribution: dict[str, Any] | None = None
+    first_touch_at: datetime | None = None
     # Session fingerprint captured from the storefront so funnel queries
     # (COUNT(DISTINCT session_fingerprint)) can connect this order back to
     # the visitor's earlier page_view / add_to_cart / checkout_started events.

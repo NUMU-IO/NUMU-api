@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from src.api.dependencies.sanitization import SanitizedStr
+from src.api.v1.schemas.storefront.attribution import AttributionSnapshot
 from src.api.v1.schemas.tenant.order import OrderAddressRequest
 
 
@@ -99,6 +100,19 @@ class CheckoutRequest(BaseModel):
     utm_source: str | None = Field(None, max_length=200)
     utm_medium: str | None = Field(None, max_length=200)
     utm_campaign: str | None = Field(None, max_length=200)
+    # Two additional standard UTM dimensions (feature 001). Optional;
+    # max_length matches the DB column. Sanitized on ingest in the
+    # route handler via attribution_sanitizer.sanitize_utm.
+    utm_term: str | None = Field(None, max_length=200)
+    utm_content: str | None = Field(None, max_length=200)
+    # Full attribution envelope (feature 001 / contracts/storefront-
+    # attribution-api.md). When present, the route uses
+    # attribution.last_touch for raw UTM stamping and looks up the
+    # campaign_id via campaign_resolver. attribution.first_touch goes
+    # into orders.attribution (JSONB) and seeds customer.first_touch_*
+    # on first attributed order. SEC-004 size caps live inside the
+    # value object itself (4 KB envelope + per-field max_length).
+    attribution: AttributionSnapshot | None = None
     # Session fingerprint for funnel deduplication. Same value the storefront
     # sends to /track for page_view/product_view/add_to_cart, so the
     # COUNT(DISTINCT session_fingerprint) funnel query can connect this

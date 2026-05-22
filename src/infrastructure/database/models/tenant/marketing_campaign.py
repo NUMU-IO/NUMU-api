@@ -26,6 +26,16 @@ class MarketingCampaignModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
             "scheduled_at",
             postgresql_where="status = 'scheduled' AND scheduled_at IS NOT NULL",
         ),
+        # Per-store uniqueness for the trackable-link short_code. The
+        # code embeds into utm_campaign so order/funnel resolvers can
+        # JOIN back to a stable identifier even after the campaign is
+        # renamed.
+        Index(
+            "uq_campaigns_store_short_code",
+            "store_id",
+            "short_code",
+            unique=True,
+        ),
         {"schema": "public"},
     )
 
@@ -52,14 +62,10 @@ class MarketingCampaignModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         nullable=False,
         default=CampaignStatus.DRAFT,
     )
-    template_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    template_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     inline_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     inline_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    segment_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    segment_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     audience_filter: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -83,3 +89,7 @@ class MarketingCampaignModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Crockford base32, 6 chars, generated server-side at create time.
+    # Embedded into utm_campaign so the link survives campaign renames.
+    # Unique per store (see uq_campaigns_store_short_code above).
+    short_code: Mapped[str] = mapped_column(String(8), nullable=False)

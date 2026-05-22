@@ -1,6 +1,8 @@
 """Customer database model (public schema with tenant_id discriminator)."""
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -69,6 +71,14 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         Integer, nullable=False, default=0
     )  # In cents
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
+    # First-touch attribution — set once when the customer's first
+    # attributed order is recorded; never overwritten. Enables
+    # customer-LTV-by-acquisition-channel analytics in future work.
+    # Shape mirrors AttributionTouch from src.core.entities.attribution.
+    first_touch_attribution: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    first_touch_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     notification_prefs: Mapped[dict | None] = mapped_column(
         JSONB,
         nullable=False,
