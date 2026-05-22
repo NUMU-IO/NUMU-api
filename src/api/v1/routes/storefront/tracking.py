@@ -25,6 +25,7 @@ from src.api.dependencies.repositories import (
     get_page_view_repository,
     get_store_repository,
 )
+from src.application.services import customer_touch_service
 from src.application.services.attribution_sanitizer import sanitize_utm
 from src.application.services.campaign_resolver import resolve_campaign_id
 from src.config import settings
@@ -246,6 +247,14 @@ class TrackPageViewRequest(BaseModel):
     # clients — the route falls back to parsing the cookie from the
     # Cookie: header automatically.
     attribution: AttributionSnapshot | None = None
+    # Optional logged-in customer identifier. The storefront passes
+    # this when the visitor is authenticated so the journey-touch
+    # row lands with customer_id set immediately, instead of staying
+    # anonymous until the next checkout backfill. Soft-trusted: a
+    # forged value only pollutes that visitor's own journey timeline
+    # (no PII flows back, no monetary impact). Absent values
+    # preserve the legacy anonymous-then-backfill flow.
+    customer_id: UUID | None = None
 
 
 @router.post("/track", status_code=204)
@@ -353,6 +362,43 @@ async def track_page_view(
             utm_content=f_utm_content,
             campaign_id=f_campaign_id,
             referrer=f_referrer,
+        )
+
+        # Customer-journey touch capture — fires only when this event
+        # carries UTM data or a click-id / referrer; refresh / internal
+        # nav is filtered out by the service's _has_attribution_signal
+        # check. Same session is fine: the journey writes are bounded
+        # (one row per UTM-changing visit, not per /track call) thanks
+        # to the dedup logic in maybe_capture_touch.
+        f_landing_path = (
+            last_touch.landing_path
+            if last_touch and last_touch.landing_path
+            else body.path
+        )
+        f_gclid = last_touch.gclid if last_touch else None
+        f_fbclid = last_touch.fbclid if last_touch else None
+        # Pass-through customer_id when the storefront has flagged
+        # the visitor as authenticated. Anonymous touches still get
+        # backfilled at checkout for guests; this avoids an
+        # unnecessary backfill round-trip for returning logged-in
+        # customers and makes their journey timeline complete even
+        # if they never re-checkout in the current session.
+        await customer_touch_service.maybe_capture_touch(
+            session=funnel_repo.session,
+            store_id=store.id,
+            tenant_id=store.tenant_id,
+            session_fingerprint=body.fingerprint,
+            customer_id=body.customer_id,
+            utm_source=f_utm_source,
+            utm_medium=f_utm_medium,
+            utm_campaign=f_utm_campaign,
+            utm_term=f_utm_term,
+            utm_content=f_utm_content,
+            gclid=f_gclid,
+            fbclid=f_fbclid,
+            referrer=f_referrer,
+            landing_path=f_landing_path,
+            campaign_id=f_campaign_id,
         )
     except Exception:
         pass  # Non-critical — don't break page tracking

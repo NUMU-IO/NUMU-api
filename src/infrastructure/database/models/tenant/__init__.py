@@ -28,6 +28,9 @@ from src.infrastructure.database.models.tenant.configuration import (
 )
 from src.infrastructure.database.models.tenant.coupon import CouponModel
 from src.infrastructure.database.models.tenant.customer import CustomerModel
+from src.infrastructure.database.models.tenant.customer_touch import (
+    CustomerTouchModel,
+)
 from src.infrastructure.database.models.tenant.email_log import EmailLogModel
 from src.infrastructure.database.models.tenant.email_template import EmailTemplateModel
 from src.infrastructure.database.models.tenant.funnel_event import FunnelEventModel
@@ -138,6 +141,7 @@ __all__ = [
     "GiftCardTransactionModel",
     "CustomerAddressModel",
     "CustomerModel",
+    "CustomerTouchModel",
     "InventoryLevelModel",
     "InventoryTransferModel",
     "InvoiceModel",
