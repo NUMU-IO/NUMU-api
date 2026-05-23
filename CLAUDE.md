@@ -3,10 +3,10 @@ For additional context about technologies, project structure, schema changes,
 contracts, and verification steps, read the current plan and its supporting
 artifacts:
 
-- Plan: [specs/001-utm-campaign-attribution/plan.md](specs/001-utm-campaign-attribution/plan.md)
-- Spec: [specs/001-utm-campaign-attribution/spec.md](specs/001-utm-campaign-attribution/spec.md)
-- Research: [specs/001-utm-campaign-attribution/research.md](specs/001-utm-campaign-attribution/research.md)
-- Data model: [specs/001-utm-campaign-attribution/data-model.md](specs/001-utm-campaign-attribution/data-model.md)
-- Contracts: [specs/001-utm-campaign-attribution/contracts/](specs/001-utm-campaign-attribution/contracts/)
-- Quickstart: [specs/001-utm-campaign-attribution/quickstart.md](specs/001-utm-campaign-attribution/quickstart.md)
+- Plan: [specs/002-marketing-campaigns-v2/plan.md](specs/002-marketing-campaigns-v2/plan.md)
+- Spec: [specs/002-marketing-campaigns-v2/spec.md](specs/002-marketing-campaigns-v2/spec.md)
+- Research: [specs/002-marketing-campaigns-v2/research.md](specs/002-marketing-campaigns-v2/research.md)
+- Data model: [specs/002-marketing-campaigns-v2/data-model.md](specs/002-marketing-campaigns-v2/data-model.md)
+- Contracts: [specs/002-marketing-campaigns-v2/contracts/](specs/002-marketing-campaigns-v2/contracts/)
+- Quickstart: [specs/002-marketing-campaigns-v2/quickstart.md](specs/002-marketing-campaigns-v2/quickstart.md)
 <!-- SPECKIT END -->
