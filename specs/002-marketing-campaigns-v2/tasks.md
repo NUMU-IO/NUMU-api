@@ -1,5 +1,5 @@
 ---
-description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 tasks across backend + frontend"
+description: "Task list for marketing-campaigns-v2 — 9 user stories, 109 numbered tasks + 9 TASK-SEC follow-ups = 118 total"
 ---
 
 # Tasks: Marketing Campaigns v2 — Shopify-style rebuild + NUMU extras
@@ -60,6 +60,10 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 
 - [ ] T014 [P] Register the new routes in `numo-merchant-hub/src/App.tsx` — `/marketing/attribution` → `<MarketingAttribution />` and `/campaigns/compare` → `<MarketingCampaignsCompare />`. Plus redirects from `/analytics/ltv` and `/analytics/multi-touch` to `/marketing/attribution` with the appropriate `?tab=` query.
 
+### Security hardening (cross-cutting prerequisite)
+
+- [ ] [TASK-SEC-004] HIGH | Rate limit the new endpoints. Grep the repo for existing rate-limit middleware (`slowapi`, `RateLimit`, `Limiter`); if present, apply per-store quotas: breakdowns / tips / compare = 60 req/min, backfill POST = 5 req/hour. If no middleware exists, scope a `slowapi` integration as a sub-task and gate Phase 5+ on it. Reference: SEC-004 from security-review-tasks report. Category: OWASP A04 Insecure Design (DoS amplification).
+
 **Checkpoint**: Foundation ready — user story implementation can now begin.
 
 ---
@@ -113,6 +117,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 
 - [ ] T022 [P] [US3] Write `NUMU-api/tests/unit/test_analytics_campaign_breakdowns.py` — parameterized tests for each of the 5 new aggregation methods. Cover: empty window → empty list, single-channel data, multi-channel split, NULL utm_source bucketed as "direct", new vs returning logic, device classification, order-size histogram bin boundaries.
 - [ ] T023 [P] [US3] Write `NUMU-api/tests/integration/test_campaign_breakdowns_e2e.py` — fixture creates a campaign with synthetic orders + funnel events across 3 channels / 2 devices. Hit all 5 endpoints. Assert payload shape matches `contracts/analytics-breakdowns.md`.
+- [ ] [TASK-SEC-007] [P] [US3] MEDIUM | Add a positive-by-absence assertion to T023: the customer-type breakdown response MUST NOT contain a `first_touch_attribution` key anywhere in the JSON. The customer-type panel reads `customers.first_touch_attribution` JSONB internally — verify it never leaks raw landing-page/session_id strings via the aggregated response. Reference: SEC-007 from security-review-tasks report. Category: OWASP A01 Broken Access Control (data over-exposure).
 
 ### Backend implementation for User Story 3
 
@@ -162,6 +167,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 
 - [ ] T049 [P] [US4] Write `NUMU-api/tests/unit/test_campaign_auto_match.py` — matrix: single rule equals/starts_with/contains; AND group; OR group; priority order across campaigns; short_code overrides rule (FR-019); no match → NULL campaign_id
 - [ ] T050 [P] [US4] Write `NUMU-api/tests/integration/test_campaign_auto_match_e2e.py` — full ingest flow: POST `/track` with various UTM combos; assert correct `funnel_events.campaign_id` per fixture
+- [ ] [TASK-SEC-006] [P] [US4] MEDIUM | Add a cross-tenant test to T050: create two stores X and Y each with a campaign; attempt to create a rule on store X that overlaps store Y's rule. Assert the `warnings` response NEVER names store Y's campaign / id. Verify the overlap query at T054 is store-scoped via `WHERE store_id = X`. Reference: SEC-006. Category: OWASP A01 Broken Access Control (information disclosure across tenants).
 
 ### Backend implementation for User Story 4
 
@@ -171,6 +177,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 - [ ] T054 [US4] Add overlap-detection helper in T051's repository — `overlaps_existing(rule_conditions) -> list[ConflictingRule]` for the editor warning (FR-021)
 - [ ] T055 [US4] Create CRUD endpoints in `NUMU-api/src/api/v1/routes/stores/marketing_campaign_rules.py` per `contracts/auto-match-rules.md` — GET list, POST create, DELETE; mount under `/{store_id}/marketing/campaigns/{campaign_id}/auto-match-rules`. Include the `warnings` field in POST responses.
 - [ ] T056 [US4] Register the new router in `NUMU-api/src/api/v1/__init__.py` (or wherever the route registry lives)
+- [ ] [TASK-SEC-002a] [US4] HIGH | Add `AuditService.record(EventType.MARKETING_RULE_CREATED, ...)` and `EventType.MARKETING_RULE_DELETED` calls inside the POST and DELETE handlers in T055. Mirror the existing audit pattern from `marketing_campaigns.py` SEC-008. Include `{campaign_id, group_id, conditions_count, priority}` in the audit payload. Add `EventType.MARKETING_RULE_CREATED` + `MARKETING_RULE_DELETED` constants to `audit_service.py`. Reference: SEC-002 (rule-CRUD slice). Category: OWASP A09 Insufficient Logging.
 
 ### Frontend implementation for User Story 4
 
@@ -193,6 +200,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 
 - [ ] T061 [P] [US5] Write `NUMU-api/tests/unit/test_campaign_backfill.py` — service function tests: filter SQL build, chunked UPDATE behavior, idempotency, skip-already-attributed semantics, error-path status=failed
 - [ ] T062 [P] [US5] Write `NUMU-api/tests/integration/test_campaign_backfill_e2e.py` — fixture creates 100 historical orders/events with various UTMs. POST backfill, poll until status=completed, assert affected_count, query DB to verify `campaign_id` set.
+- [ ] [TASK-SEC-003] [P] [US5] HIGH | Add a SQL-injection test to T061: feed an `utm_filters` payload with `value="' OR 1=1 --"` and `value="%'; DROP TABLE orders; --"`. Assert the resulting UPDATE is parameterized (no DDL executed, `affected_count == 0`). Implementation note for T064: all `value` operands MUST pass through SQLAlchemy column operators (`.op('=')`, `.like()`, etc.) with `bindparam`, NEVER `text(f'... = {value}')` or string interpolation. Reference: SEC-003. Category: OWASP A03 Injection.
 
 ### Backend implementation for User Story 5
 
@@ -201,6 +209,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 - [ ] T065 [US5] Create Celery task `NUMU-api/src/infrastructure/messaging/tasks/marketing_tasks.py::backfill_campaign_attribution` per `contracts/activities.md`. Uses T064 to build the filter, executes against orders + funnel_events in 5,000-row chunks via SAVEPOINT, updates activity row on completion/failure. Task name: `numu_api.marketing.backfill_campaign_attribution`.
 - [ ] T066 [US5] Create endpoints in `NUMU-api/src/api/v1/routes/stores/marketing_campaign_activities.py` per `contracts/activities.md` — GET list, POST backfill (202 + enqueue task). Mount under `/{store_id}/marketing/campaigns/{campaign_id}/activities`. 409 on concurrent backfill.
 - [ ] T067 [US5] Register the new router in the API package init.
+- [ ] [TASK-SEC-002b] [US5] HIGH | Add `AuditService.record(EventType.MARKETING_BACKFILL_ENQUEUED, ...)` call in T066's POST handler. Payload: `{campaign_id, activity_id, filter_count, window_days}`. Add the EventType constant to `audit_service.py`. Reference: SEC-002 (backfill slice). Category: OWASP A09 Insufficient Logging.
 
 ### Frontend implementation for User Story 5
 
@@ -228,6 +237,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 
 - [ ] T074 [US6] Create `NUMU-api/src/application/services/campaign_duplicate.py` — `duplicate(campaign_id, store_id, user_id) -> Campaign` reads source, applies copy/skip semantics per FR-029/030, generates new short_code via existing `generate_short_code()`, persists
 - [ ] T075 [US6] Add POST endpoint in `NUMU-api/src/api/v1/routes/stores/marketing_campaigns.py` at `/{campaign_id}/duplicate` per `contracts/campaign-actions.md` (201 + body)
+- [ ] [TASK-SEC-002c] [US6] HIGH | Add `AuditService.record(EventType.MARKETING_CAMPAIGN_DUPLICATED, ...)` call inside T075's handler. Payload: `{source_campaign_id, new_campaign_id, channel}`. Add the EventType constant to `audit_service.py`. Reference: SEC-002 (duplicate slice). Category: OWASP A09 Insufficient Logging.
 - [ ] T076 [P] [US6] Extend `numo-merchant-hub/src/services/campaignApi.ts` — add `duplicateCampaign`
 - [ ] T077 [US6] Add Duplicate button in `numo-merchant-hub/src/pages/MarketingCampaignDetail.tsx` header (alongside Send Now/Schedule/Cancel)
 - [ ] T078 [US6] Add Duplicate icon-button on row hover in `numo-merchant-hub/src/pages/MarketingCampaigns.tsx` — calls T076, toasts success, navigates to the new draft
@@ -246,6 +256,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 
 - [ ] T079 [P] [US7] Write `NUMU-api/tests/unit/test_campaign_compare_service.py` — KPI rollup, time-series bucketing (day vs week granularity), graceful handling of unknown ids (returns `found: false` row)
 - [ ] T080 [P] [US7] Write `NUMU-api/tests/integration/test_campaign_compare_e2e.py` — fixture 3 campaigns, hit endpoint, assert payload shape per `contracts/campaign-actions.md`
+- [ ] [TASK-SEC-001] [P] [US7] HIGH | Add a cross-store leakage test `NUMU-api/tests/integration/test_campaign_compare_cross_store.py`: create two stores X and Y; in store X's request context, call `/api/v1/stores/X/marketing/campaigns/compare?ids=A,B` where A is in X and B is in Y. Assert: either (a) 403 outright OR (b) row for B comes back with `found: false` AND warnings list mentions "1 of 2 campaigns is no longer available" — NEVER expose Y's name/short_code/status. T082 implementation note: before fetching, run a single `SELECT id FROM marketing_campaigns WHERE id = ANY($ids) AND store_id = $store_id`; treat unmatched ids as `found: false`. Reference: SEC-001. Category: OWASP A01 Broken Access Control (cross-tenant data leakage / IDOR).
 
 ### Backend implementation for User Story 7
 
@@ -299,6 +310,7 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, ~110 task
 ### Backend tests for User Story 9
 
 - [ ] T095 [P] [US9] Write `NUMU-api/tests/unit/test_send_time_suggester.py` — fixture matrix: 30 mock sends with varied open rates, assert top 3 chips correct; insufficient data → empty + helper; SMS-only history → fallback `based_on=send_count`
+- [ ] [TASK-SEC-005] [P] [US9] MEDIUM | Add `test_send_time_suggester_cache_isolation` to T095: populate `TTLCache` for store A + channel email; immediately request from store B + channel email; assert the returned `SuggestionResult` is recomputed (not the cached A result). Verify the cache key composition `(store_id, channel)` in T097's implementation — both components MUST be in the key. Reference: SEC-005. Category: OWASP A01 Broken Access Control (cache cross-tenant collision).
 
 ### Backend implementation for User Story 9
 
@@ -436,4 +448,5 @@ Task: T037 CampaignKpiCards
 - **Avoid scope creep**: WhatsApp campaign improvements + email template editor improvements are explicit non-goals (per spec); reject any PR comment asking to bundle them in
 - **Performance budgets are firm**: SC-003 / SC-010 / SC-012 must be measured before final merge (T103-T105)
 - **Commit cadence**: commit after each task or logical group. Branches: one feature branch per story is fine for the parallel team strategy; squash-merge to feature `002-marketing-campaigns-v2` integration branch, then PR to `dev`.
-- **Total task count: 109**
+- **Total task count: 118** (109 numbered T001-T109 + 9 TASK-SEC follow-ups from security review)
+- **Security task placement**: 1 in Phase 2 (SEC-004 rate limiting — cross-cutting prereq), 1 in Phase 5 (SEC-007 JSONB exposure test), 2 in Phase 6 (SEC-002a audit + SEC-006 overlap enumeration), 2 in Phase 7 (SEC-002b audit + SEC-003 SQLi test), 1 in Phase 8 (SEC-002c audit), 1 in Phase 9 (SEC-001 cross-store leak test), 1 in Phase 11 (SEC-005 cache isolation test)
