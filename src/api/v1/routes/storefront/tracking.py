@@ -28,6 +28,7 @@ from src.api.dependencies.repositories import (
 from src.application.services import customer_touch_service
 from src.application.services.attribution_sanitizer import sanitize_utm
 from src.application.services.campaign_resolver import resolve_campaign_id
+from src.application.services.device_classifier import classify as classify_device
 from src.config import settings
 from src.config.logging_config import get_logger
 from src.core.entities.attribution import AttributionSnapshot
@@ -76,6 +77,10 @@ async def _emit_funnel_event(
     utm_content: str | None = None,
     campaign_id: UUID | None = None,
     referrer: str | None = None,
+    # Feature 002 US3 — device classification (mobile/tablet/desktop or
+    # None for unparseable/historical). Caller passes the already-
+    # classified value to avoid re-parsing the UA inside the hot path.
+    device: str | None = None,
 ) -> None:
     """Persist a funnel event — async via Celery when the kill switch is on.
 
@@ -109,6 +114,7 @@ async def _emit_funnel_event(
             utm_content=utm_content,
             campaign_id=campaign_id,
             referrer=referrer,
+            device=device,
         )
         return
 
@@ -138,6 +144,7 @@ async def _emit_funnel_event(
                 "utm_content": utm_content,
                 "campaign_id": str(campaign_id) if campaign_id else None,
                 "referrer": referrer,
+                "device": device,
             }
         },
         queue="analytics",
@@ -362,6 +369,7 @@ async def track_page_view(
             utm_content=f_utm_content,
             campaign_id=f_campaign_id,
             referrer=f_referrer,
+            device=classify_device(ua),
         )
 
         # Customer-journey touch capture — fires only when this event
@@ -540,6 +548,7 @@ async def track_analytics_event(
             utm_content=e_utm_content,
             campaign_id=e_campaign_id,
             referrer=e_referrer,
+            device=classify_device(ua),
         )
     except Exception:
         pass

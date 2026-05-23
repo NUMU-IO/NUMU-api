@@ -41,6 +41,12 @@ class FunnelEventRepository:
         utm_content: str | None = None,
         campaign_id: UUID | None = None,
         referrer: str | None = None,
+        # Feature 002 US3 — device classification (mobile/tablet/desktop).
+        # Classified at ingest by the device_classifier service to avoid
+        # regex-scanning UAs at query time. NULL means historical (pre-
+        # 2026-05-24) or unparseable — surfaces as the "Unknown" donut
+        # bucket in the campaign detail page's Sessions-by-device panel.
+        device: str | None = None,
     ) -> None:
         """Record a funnel event.
 
@@ -64,6 +70,7 @@ class FunnelEventRepository:
             utm_content=utm_content,
             campaign_id=campaign_id,
             referrer=referrer,
+            device=device,
         )
         self.session.add(event)
         await self.session.flush()

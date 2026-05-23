@@ -809,6 +809,315 @@ async def get_campaign_performance(
     )
 
 
+# ── Per-campaign breakdowns (feature 002 US3) ─────────────────────
+#
+# Five GET endpoints feeding the Shopify-style chart grid on the
+# campaign detail page. Each accepts ?date_from&date_to and is
+# (store_id, campaign_id, tenant)-scoped. The 365-day window cap
+# matches FR-028's backfill cap (consistent operator guardrail).
+# attribution_model query param is accepted for forward-compat with
+# US3's model pill but not yet consumed — breakdown semantics here are
+# stable across the model selector; only multi-touch credits change.
+
+
+_MAX_WINDOW_DAYS = 365
+
+
+async def _load_campaign_or_404(store_id: UUID, campaign_id: UUID):
+    """Common (store_id, campaign_id) tenant-scoped lookup.
+
+    Returns the campaign or raises 404. 404 (not 403) is the right
+    error per the existing SEC-001 convention — it avoids leaking
+    cross-tenant campaign existence.
+    """
+    async with AsyncSessionLocal() as session:
+        repo = MarketingCampaignRepository(session)
+        campaign = await repo.get_by_id(campaign_id)
+        if campaign is None or campaign.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found",
+            )
+        return campaign
+
+
+def _validate_window(date_from: datetime, date_to: datetime) -> None:
+    if date_to < date_from:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="date_to must be >= date_from",
+        )
+    if (date_to - date_from).days > _MAX_WINDOW_DAYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Date window cannot exceed {_MAX_WINDOW_DAYS} days",
+        )
+
+
+# Response models — flat shapes per contracts/analytics-breakdowns.md.
+# Each wraps a dict, with a Channel/Combo/Bin/Device row type.
+
+
+class _ChannelRow(BaseModel):
+    channel: str
+    sessions: int
+    sales_cents: int
+
+
+class CampaignBreakdownChannelResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    channels: list[_ChannelRow]
+
+
+class _UtmComboRow(BaseModel):
+    utm_source: str | None
+    utm_medium: str | None
+    utm_campaign: str | None
+    utm_term: str | None
+    utm_content: str | None
+    sessions: int
+    sales_cents: int
+
+
+class CampaignBreakdownUtmResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    combos: list[_UtmComboRow]
+
+
+class _CustomerTypeBlock(BaseModel):
+    orders: int
+    sales_cents: int
+
+
+class CampaignBreakdownCustomerTypeResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    new_customers: _CustomerTypeBlock
+    returning_customers: _CustomerTypeBlock
+
+
+class _OrderSizeBin(BaseModel):
+    lower_cents: int
+    upper_cents: int | None
+    orders: int
+
+
+class CampaignBreakdownOrderSizeResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    bins: list[_OrderSizeBin]
+
+
+class _DeviceRow(BaseModel):
+    device: str
+    sessions: int
+
+
+class CampaignBreakdownDeviceResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    devices: list[_DeviceRow]
+
+
+AttributionModel = Literal[
+    "last_touch", "first_touch", "linear", "time_decay", "position_based"
+]
+
+
+@router.get(
+    "/{campaign_id}/breakdown/channel",
+    response_model=SuccessResponse[CampaignBreakdownChannelResponse],
+    summary="Sessions + sales by channel for a campaign",
+    operation_id="get_campaign_breakdown_channel",
+)
+async def get_campaign_breakdown_channel(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        rows = await analytics.campaign_breakdown_channel(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownChannelResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            channels=[_ChannelRow(**r) for r in rows],
+        ),
+        message="Channel breakdown for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/utm",
+    response_model=SuccessResponse[CampaignBreakdownUtmResponse],
+    summary="Top UTM combos by sessions + sales",
+    operation_id="get_campaign_breakdown_utm",
+)
+async def get_campaign_breakdown_utm(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        rows = await analytics.campaign_breakdown_utm(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownUtmResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            combos=[_UtmComboRow(**r) for r in rows],
+        ),
+        message="UTM combo breakdown for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/customer-type",
+    response_model=SuccessResponse[CampaignBreakdownCustomerTypeResponse],
+    summary="Orders + sales by new vs returning customers",
+    operation_id="get_campaign_breakdown_customer_type",
+)
+async def get_campaign_breakdown_customer_type(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    """SEC-007: response shape exposes ONLY aggregates. The repo method
+    reads ``customers.first_touch_attribution`` JSONB internally for
+    the new-vs-returning classification but never surfaces it.
+    """
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        data = await analytics.campaign_breakdown_customer_type(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownCustomerTypeResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            new_customers=_CustomerTypeBlock(**data["new_customers"]),
+            returning_customers=_CustomerTypeBlock(**data["returning_customers"]),
+        ),
+        message="Customer-type breakdown for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/order-size",
+    response_model=SuccessResponse[CampaignBreakdownOrderSizeResponse],
+    summary="Histogram of order totals (10 fixed bins)",
+    operation_id="get_campaign_breakdown_order_size",
+)
+async def get_campaign_breakdown_order_size(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        bins = await analytics.campaign_breakdown_order_size(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownOrderSizeResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            bins=[_OrderSizeBin(**b) for b in bins],
+        ),
+        message="Order-size histogram for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/device",
+    response_model=SuccessResponse[CampaignBreakdownDeviceResponse],
+    summary="Sessions by device class",
+    operation_id="get_campaign_breakdown_device",
+)
+async def get_campaign_breakdown_device(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        rows = await analytics.campaign_breakdown_device(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownDeviceResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            devices=[_DeviceRow(**r) for r in rows],
+        ),
+        message="Device breakdown for campaign",
+    )
+
+
 # ── Campaign-attached coupons ─────────────────────────────────────
 
 
