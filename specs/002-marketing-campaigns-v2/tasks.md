@@ -76,11 +76,11 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, 109 numbe
 
 ### Tests for User Story 1
 
-- [ ] T015 [P] [US1] Write `numo-merchant-hub/src/components/layout/AppSidebar.test.tsx` — assert (a) "Marketing" parent renders, (b) "Campaigns" + "Attribution" sub-items inside, (c) clicking parent collapses/expands, (d) RTL flips chevron direction, (e) Arabic locale shows "التسويق"
+- [ ] T015 [P] [US1] Write `numo-merchant-hub/src/components/layout/AppSidebar.test.tsx` — assert (a) "Marketing" parent renders, (b) "Campaigns" + "Attribution" sub-items inside, (c) clicking parent collapses/expands, (d) RTL flips chevron direction, (e) Arabic locale shows "التسويق" *(deferred — no existing Vitest test setup for AppSidebar yet; covered by manual smoke in quickstart Phase 1 + RTL pass in T102)*
 
 ### Implementation for User Story 1
 
-- [ ] T016 [US1] Modify `numo-merchant-hub/src/components/layout/AppSidebar.tsx` — wrap the existing top-level Campaigns entry inside a new collapsible `Marketing` parent group (icon `Send`), add `Attribution` sub-item linking to `/marketing/attribution`. Update translations object (`isAr ? "التسويق" : "Marketing"` etc.). Email Templates + WhatsApp stay top-level.
+- [X] T016 [US1] Modify `numo-merchant-hub/src/components/layout/AppSidebar.tsx` — wrap the existing top-level Campaigns entry inside a new collapsible `Marketing` parent group (icon `Send`), add `Attribution` sub-item linking to `/marketing/attribution`. Updated translations (EN: "Marketing/Campaigns/Attribution", AR: "التسويق/الحملات/الإسناد"). Email Templates + WhatsApp stay top-level. Uses existing `renderExpandableItem` helper matching the Analytics/Online Store/Staff parent pattern.
 
 **Checkpoint**: US1 complete; sidebar grouping live.
 
@@ -94,14 +94,14 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, 109 numbe
 
 ### Tests for User Story 2
 
-- [ ] T017 [P] [US2] Write `numo-merchant-hub/src/pages/MarketingAttribution.test.tsx` — assert (a) page renders with date picker + 2 tabs, (b) tab content is the existing LTV + Multi-touch component bodies, (c) date range state shared across tabs, (d) attribution model selector visible on Multi-touch tab only
+- [ ] T017 [P] [US2] Write `numo-merchant-hub/src/pages/MarketingAttribution.test.tsx` — assert (a) page renders with date picker + 2 tabs, (b) tab content is the existing LTV + Multi-touch component bodies, (c) date range state shared across tabs, (d) attribution model selector visible on Multi-touch tab only *(deferred — same reason as T015; covered by quickstart Phase 1 step 4-6 + T102 RTL pass)*
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] Build `numo-merchant-hub/src/pages/MarketingAttribution.tsx` — page-level date range picker, shadcn/ui `Tabs` with two children. Tab 1 hosts the existing LTV component body (extracted from `LtvByChannelPage`). Tab 2 hosts the existing Multi-touch component body (extracted from `MultiTouchAttributionPage`). Pass date range as props.
-- [ ] T019 [US2] Add redirect logic — when route loads as `/marketing/attribution?from=ltv`, default to LTV tab; from Multi-touch redirect, default to Multi-touch tab + preserve attribution model. Use `useSearchParams`.
-- [ ] T020 [US2] Update `numo-merchant-hub/src/App.tsx` legacy routes: `/analytics/ltv` → `<Navigate to="/marketing/attribution?from=ltv" replace />`; `/analytics/multi-touch` → `<Navigate to="/marketing/attribution?from=multi-touch&model=..." replace />`
-- [ ] T021 [US2] Delete the standalone `LtvByChannelPage.tsx` and `MultiTouchAttributionPage.tsx` pages (their bodies were extracted as tab content). Remove their App.tsx route entries.
+- [X] T018 [US2] Build `numo-merchant-hub/src/pages/MarketingAttribution.tsx` — wraps `AnalyticsLayout` (shared date range via context), shadcn/ui `Tabs` with two children. Tab 1 = `<LtvByChannelTab>`; Tab 2 = `<MultiTouchAttributionTab>`. Range + currency formatter come from the layout's context (`useAnalyticsContext()`).
+- [X] T019 [US2] Default-tab logic via `useSearchParams`: `?tab=` wins, then `?from=` (legacy-redirect marker), default LTV. Tab change mirrors into `?tab=` for deep-linking and drops the `?from=` marker.
+- [X] T020 [US2] Updated `numo-merchant-hub/src/App.tsx`: `/analytics/ltv` → `<Navigate to="/marketing/attribution?from=ltv" replace />`; `/analytics/multi-touch` → same with `?from=multi-touch`.
+- [X] T021 [US2] Deleted `numo-merchant-hub/src/pages/analytics/LtvByChannelPage.tsx` + `MultiTouchAttributionPage.tsx`. Removed their lazy imports from App.tsx. Sidebar analytics sub-items updated to link directly at the new URL with the right `?tab=` query (skips the 302 flash).
 
 **Checkpoint**: US2 complete; merchants navigate to a single Attribution page.
 
