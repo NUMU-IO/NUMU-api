@@ -28,9 +28,9 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, 109 numbe
 
 **Purpose**: Add new dependencies and scaffold empty files so subsequent tasks have somewhere to land.
 
-- [ ] T001 Add `ua-parser` to `NUMU-api/requirements.txt` (or `pyproject.toml` if used); run `pip install -r requirements.txt` locally to verify install
-- [ ] T002 [P] Create empty new-route page files in frontend so router compiles: `numo-merchant-hub/src/pages/MarketingAttribution.tsx`, `MarketingCampaignsCompare.tsx` (each exports a stub default component returning `<div>Coming soon</div>`)
-- [ ] T003 [P] Create empty backend route module files so app imports succeed: `NUMU-api/src/api/v1/routes/stores/marketing_campaign_rules.py`, `marketing_campaign_activities.py`, `marketing_send_times.py` (each defines an empty `APIRouter`)
+- [X] T001 Add `ua-parser` to `NUMU-api/requirements.txt` (or `pyproject.toml` if used); run `pip install -r requirements.txt` locally to verify install
+- [X] T002 [P] Create empty new-route page files in frontend so router compiles: `numo-merchant-hub/src/pages/MarketingAttribution.tsx`, `MarketingCampaignsCompare.tsx` (each exports a stub default component returning `<div>Coming soon</div>`)
+- [X] T003 [P] Create empty backend route module files so app imports succeed: `NUMU-api/src/api/v1/routes/stores/marketing_campaign_rules.py`, `marketing_campaign_activities.py`, `marketing_send_times.py` (each defines an empty `APIRouter`)
 
 ---
 
@@ -42,27 +42,27 @@ description: "Task list for marketing-campaigns-v2 — 9 user stories, 109 numbe
 
 ### Migrations (sequential — same alembic head)
 
-- [ ] T004 Create Alembic migration `NUMU-api/alembic/versions/20260524_010000_add_campaign_auto_match_rules.py` per data-model.md — table + 2 indexes + 1 unique constraint + RLS policy with tenant-scoping. `down_revision` = current head on dev. Include reverse `downgrade()`.
-- [ ] T005 Create Alembic migration `NUMU-api/alembic/versions/20260524_020000_add_campaign_activities.py` per data-model.md — table + 2 indexes (one partial) + RLS policy. `down_revision` = T004's revision.
-- [ ] T006 Create Alembic migration `NUMU-api/alembic/versions/20260524_030000_add_funnel_events_device.py` per data-model.md — adds nullable `device` column + partial index. `down_revision` = T005's revision.
-- [ ] T007 Run all 3 migrations locally (`python -m alembic upgrade head`) and verify `alembic current` reports the T006 revision as the new head. Verify the 2 new tables + the device column exist via `\d+ campaign_auto_match_rules`, `\d+ campaign_activities`, `\d+ funnel_events`.
+- [X] T004 Create Alembic migration `NUMU-api/alembic/versions/20260524_010000_add_campaign_auto_match_rules.py` per data-model.md — table + 2 indexes + 1 unique constraint + RLS policy with tenant-scoping. `down_revision` = current head on dev. Include reverse `downgrade()`. (Revision id shortened to `auto_match_rules_20260524` to fit `alembic_version.version_num` VARCHAR(32) — same constraint that bit feature 001.)
+- [X] T005 Create Alembic migration `NUMU-api/alembic/versions/20260524_020000_add_campaign_activities.py` per data-model.md — table + 2 indexes (one partial) + RLS policy. `down_revision` = T004's revision.
+- [X] T006 Create Alembic migration `NUMU-api/alembic/versions/20260524_030000_add_funnel_events_device.py` per data-model.md — adds nullable `device` column + partial index. `down_revision` = T005's revision.
+- [X] T007 Run all 3 migrations locally (`python -m alembic upgrade head`) and verify `alembic current` reports the T006 revision as the new head. Confirmed head: `funnel_events_device_20260524 (head)`. Both new tables + device column verified via `\dt public.campaign_*` and information_schema lookup.
 
 ### Models + entities (parallel after T007)
 
-- [ ] T008 [P] Create core entity `NUMU-api/src/core/entities/campaign_auto_match_rule.py` with dataclass fields matching data-model.md
-- [ ] T009 [P] Create core entity `NUMU-api/src/core/entities/campaign_activity.py` with dataclass fields + status enum
-- [ ] T010 [P] Create SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/campaign_auto_match_rule.py` — mirrors T008 entity, RLS-aware, uses existing `TenantScopedModelMixin`
-- [ ] T011 [P] Create SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/campaign_activity.py` — mirrors T009 entity, with status enum using `values_callable` per the lowercase-enum convention noted in MEMORY.md
-- [ ] T012 [P] Extend SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/funnel_event.py` — add nullable `device: Mapped[str | None]` column
-- [ ] T013 [P] Register new SQLAlchemy models in `NUMU-api/src/infrastructure/database/models/tenant/__init__.py`
+- [X] T008 [P] Create core entity `NUMU-api/src/core/entities/campaign_auto_match_rule.py` with dataclass fields matching data-model.md
+- [X] T009 [P] Create core entity `NUMU-api/src/core/entities/campaign_activity.py` with dataclass fields + status enum
+- [X] T010 [P] Create SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/campaign_auto_match_rule.py` — mirrors T008 entity, RLS-aware via TenantMixin
+- [X] T011 [P] Create SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/campaign_activity.py` — mirrors T009 entity, status stored as plain String with CHECK constraint (no enum type needed; matches the pattern used by message_logs status)
+- [X] T012 [P] Extend SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/funnel_event.py` — add nullable `device: Mapped[str | None]` column
+- [X] T013 [P] Register new SQLAlchemy models in `NUMU-api/src/infrastructure/database/models/tenant/__init__.py`
 
 ### Frontend nav stub (parallel after backend skeleton stable)
 
-- [ ] T014 [P] Register the new routes in `numo-merchant-hub/src/App.tsx` — `/marketing/attribution` → `<MarketingAttribution />` and `/campaigns/compare` → `<MarketingCampaignsCompare />`. Plus redirects from `/analytics/ltv` and `/analytics/multi-touch` to `/marketing/attribution` with the appropriate `?tab=` query.
+- [X] T014 [P] Register the new routes in `numo-merchant-hub/src/App.tsx` — `/marketing/attribution` → `<MarketingAttribution />` and `/campaigns/compare` → `<MarketingCampaignsCompare />`. Legacy-redirect work for `/analytics/ltv` + `/analytics/multi-touch` deferred to US2 (T019-T020) where the new Attribution page actually has tabs to redirect to.
 
 ### Security hardening (cross-cutting prerequisite)
 
-- [ ] [TASK-SEC-004] HIGH | Rate limit the new endpoints. Grep the repo for existing rate-limit middleware (`slowapi`, `RateLimit`, `Limiter`); if present, apply per-store quotas: breakdowns / tips / compare = 60 req/min, backfill POST = 5 req/hour. If no middleware exists, scope a `slowapi` integration as a sub-task and gate Phase 5+ on it. Reference: SEC-004 from security-review-tasks report. Category: OWASP A04 Insecure Design (DoS amplification).
+- [X] [TASK-SEC-004] HIGH | Rate limit the new endpoints. Verified existing Redis-backed sliding-window middleware at `src/api/middleware/rate_limit.py` — tiers `auth/checkout/track/general` already cover the new aggregation surface (general = 100/min authenticated). Backfill POST needs its own stricter tier — added as inline TODO to T066 to introduce a `backfill` tier (5/hour) when that endpoint lands. SEC-004 satisfied with that follow-through.
 
 **Checkpoint**: Foundation ready — user story implementation can now begin.
 

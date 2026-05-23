@@ -15,6 +15,12 @@ from src.infrastructure.database.models.tenant.automation_log import AutomationL
 from src.infrastructure.database.models.tenant.automation_rule import (
     AutomationRuleModel,
 )
+from src.infrastructure.database.models.tenant.campaign_activity import (
+    CampaignActivityModel,
+)
+from src.infrastructure.database.models.tenant.campaign_auto_match_rule import (
+    CampaignAutoMatchRuleModel,
+)
 from src.infrastructure.database.models.tenant.category import CategoryModel
 from src.infrastructure.database.models.tenant.configuration import (
     AuditAction,
@@ -132,6 +138,8 @@ __all__ = [
     "AnalyticsDailyRollupModel",
     "AutomationLogModel",
     "AutomationRuleModel",
+    "CampaignActivityModel",
+    "CampaignAutoMatchRuleModel",
     "CategoryModel",
     "CouponModel",
     "EmailLogModel",
