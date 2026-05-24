@@ -1,0 +1,135 @@
+openapi: 3.1.0
+info:
+  title: NUMU WhatsApp Scheduled Sends API
+  version: 1.0.0
+  description: Schedule future-dated WhatsApp template sends per store; cancellable; auto-cancelled when the related order is cancelled/refunded.
+
+servers:
+  - url: https://numueg.app/api/v1
+
+paths:
+  /stores/{store_id}/whatsapp/scheduled-sends:
+    get:
+      summary: List scheduled sends
+      operationId: listScheduledSends
+      tags: [whatsapp-scheduled-sends]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, sent, cancelled, skipped, failed] }
+        - in: query
+          name: related_order_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ScheduledSend" }
+
+    post:
+      summary: Schedule a WhatsApp send for a future time
+      operationId: createScheduledSend
+      tags: [whatsapp-scheduled-sends]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduledSendCreate" }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduledSend" }
+        "422":
+          description: Validation failure (phone, scheduled_for in past, template not APPROVED, etc.).
+
+  /stores/{store_id}/whatsapp/scheduled-sends/{send_id}:
+    get:
+      operationId: getScheduledSend
+      tags: [whatsapp-scheduled-sends]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: path
+          name: send_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduledSend" }
+
+    delete:
+      summary: Cancel a pending scheduled send
+      operationId: cancelScheduledSend
+      tags: [whatsapp-scheduled-sends]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: path
+          name: send_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Status moved to `cancelled`.
+        "409":
+          description: Cannot cancel — not in pending status.
+
+components:
+  parameters:
+    StoreId:
+      in: path
+      name: store_id
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    ScheduledSendCreate:
+      type: object
+      required: [phone, scheduled_for]
+      properties:
+        phone: { type: string, description: Will be canonicalized to E.164. }
+        customer_id: { type: string, format: uuid, nullable: true }
+        template_id: { type: string, format: uuid, nullable: true }
+        template_params: { type: object, additionalProperties: true, nullable: true }
+        text_message: { type: string, nullable: true, description: Free-form text; only valid inside 24h window. }
+        scheduled_for: { type: string, format: date-time }
+        related_order_id: { type: string, format: uuid, nullable: true }
+
+    ScheduledSend:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        store_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid, nullable: true }
+        phone: { type: string }
+        template_id: { type: string, format: uuid, nullable: true }
+        template_params: { type: object, additionalProperties: true, nullable: true }
+        text_message: { type: string, nullable: true }
+        scheduled_for: { type: string, format: date-time }
+        status: { type: string, enum: [pending, sent, cancelled, skipped, failed] }
+        skip_reason: { type: string, nullable: true }
+        failure_reason: { type: string, nullable: true }
+        related_order_id: { type: string, format: uuid, nullable: true }
+        created_by: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        dispatched_at: { type: string, format: date-time, nullable: true }
+        sent_at: { type: string, format: date-time, nullable: true }
+
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

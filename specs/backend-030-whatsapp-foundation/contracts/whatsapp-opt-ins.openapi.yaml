@@ -1,0 +1,193 @@
+openapi: 3.1.0
+info:
+  title: NUMU WhatsApp Opt-In API
+  version: 1.0.0
+  description: |
+    Manage customer opt-in / opt-out for WhatsApp messaging per store.
+    Two surfaces:
+      - Merchant-facing (`/stores/{store_id}/whatsapp/opt-ins/...`) — auth required.
+      - Storefront-facing (`/storefront/{store_slug}/whatsapp/opt-in`) — anonymous; called from the storefront checkout consent checkbox.
+
+servers:
+  - url: https://numueg.app/api/v1
+
+paths:
+  /stores/{store_id}/whatsapp/opt-ins:
+    get:
+      summary: List opt-in rows (merchant view; history-preserving)
+      operationId: listOptIns
+      tags: [whatsapp-opt-ins]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: query
+          name: phone
+          schema: { type: string }
+          description: E.164; filters to rows for this phone.
+        - in: query
+          name: active_only
+          schema: { type: boolean, default: false }
+          description: When true, only rows with opted_out_at IS NULL.
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OptInRow" }
+
+    post:
+      summary: Create an opt-in row (merchant-side; e.g., import flow)
+      operationId: createOptIn
+      tags: [whatsapp-opt-ins]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, source]
+              properties:
+                phone: { type: string, description: Will be canonicalized to E.164. }
+                customer_id: { type: string, format: uuid, nullable: true }
+                source: { type: string, enum: [import, api, signup, inbound_reply] }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OptInRow" }
+        "422":
+          description: Phone could not be canonicalized.
+
+  /stores/{store_id}/whatsapp/opt-ins/revoke:
+    post:
+      summary: Revoke an active opt-in (merchant-initiated)
+      operationId: revokeOptIn
+      tags: [whatsapp-opt-ins]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, reason]
+              properties:
+                phone: { type: string }
+                reason:
+                  type: string
+                  enum:
+                    - merchant_revoke
+                    - customer_request_via_support
+                    - api_revoke
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OptInRow" }
+        "404":
+          description: No active opt-in for that (store, phone).
+
+  /storefront/{store_slug}/whatsapp/opt-in:
+    post:
+      summary: Storefront-facing opt-in write (called when checkout consent checkbox is ticked)
+      description: |
+        Anonymous endpoint, but the request MUST carry a valid checkout-session
+        token (FR-007a). The handler verifies that the session resolves to an
+        active cart on this store AND that the phone in the request body matches
+        the phone attached to that cart (both canonicalized to E.164). Mismatches
+        return 403 — this closes the storefront-opt-in abuse vector.
+      operationId: storefrontOptIn
+      tags: [whatsapp-opt-ins]
+      security: []
+      parameters:
+        - in: path
+          name: store_slug
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, checkout_session_token]
+              properties:
+                phone:
+                  type: string
+                  description: Will be canonicalized to E.164; must match the phone on the cart linked to the session token.
+                checkout_session_token:
+                  type: string
+                  description: Active checkout-session token issued by the storefront checkout flow. Required.
+                customer_id_hint: { type: string, format: uuid, nullable: true }
+                locale: { type: string, default: ar }
+      responses:
+        "201":
+          description: Opt-in row created (or no-op if active opt-in already exists for this phone).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OptInRow" }
+        "403":
+          description: |
+            Either the checkout-session token is invalid/expired, or the phone in
+            the request body does not match the phone on the cart linked to the
+            session token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - invalid_checkout_session
+                      - phone_mismatch_with_cart
+                  message: { type: string }
+        "422":
+          description: Phone could not be canonicalized.
+        "429":
+          description: Rate limit exceeded.
+
+components:
+  parameters:
+    StoreId:
+      in: path
+      name: store_id
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    OptInRow:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        store_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid, nullable: true }
+        phone: { type: string, description: E.164 }
+        source:
+          type: string
+          enum: [checkout, signup, import, api, inbound_reply]
+        opted_in_at: { type: string, format: date-time }
+        opted_out_at: { type: string, format: date-time, nullable: true }
+        opt_out_reason:
+          type: string
+          nullable: true
+          enum:
+            - inbound_stop_keyword
+            - merchant_revoke
+            - customer_request_via_support
+            - api_revoke
+
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
