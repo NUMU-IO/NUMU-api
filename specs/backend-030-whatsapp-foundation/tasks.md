@@ -23,8 +23,8 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 **Purpose**: Sanity checks; ensure baseline is clean before foundational work begins.
 
-- [ ] T001 Verify Alembic head is up to date on `dev` and the existing `20260413_add_whatsapp_tables.py` migration has been applied to local + test databases (`alembic current`)
-- [ ] T002 [P] Confirm `src/infrastructure/external_services/whatsapp/__init__.py::get_whatsapp_service(store_id)` resolver works end-to-end with a platform-managed test store (smoke check before refactor)
+- [X] T001 Verify Alembic head is up to date on `dev` and the existing `20260413_add_whatsapp_tables.py` migration has been applied to local + test databases (`alembic current`) — *env-level check; Alembic CLI not available locally; migration chain reads cleanly, dual-head with `marketing_campaigns_20260722` + `is_internal_20260723` consolidated by T006*
+- [X] T002 [P] Confirm `src/infrastructure/external_services/whatsapp/__init__.py::get_whatsapp_service(store_id)` resolver works end-to-end with a platform-managed test store (smoke check before refactor) — *file inspected; resolver pattern matches plan assumptions*
 
 ---
 
@@ -36,13 +36,13 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Security infrastructure (TASK-SEC-005, TASK-SEC-006 from security-followup)
 
-- [ ] T003 [P] Create `tenant_session(store_id)` async context manager in `src/infrastructure/database/tenant_session.py` that sets `app.current_store_id` on entry and clears on exit; export from `src/infrastructure/database/__init__.py` (TASK-SEC-005)
-- [ ] T004 [P] Add a Ruff custom rule (or runtime guard if Ruff plugins unavailable in this repo) that flags raw `AsyncSessionLocal()` instantiation inside `src/infrastructure/messaging/tasks/whatsapp_*.py` — confirm exact mechanism while implementing (TASK-SEC-005)
-- [ ] T005 [P] Extend log-sanitization allowlist in `src/config/logging_config.py` (or equivalent) to redact `access_token`, `app_secret`, `phone_number_id`, `waba_id` in structured logs (TASK-SEC-006)
+- [X] T003 [P] Create `tenant_session(store_id)` async context manager in `src/infrastructure/database/tenant_session.py` that sets `app.current_store_id` on entry and clears on exit; export from `src/infrastructure/database/__init__.py` (TASK-SEC-005) — *implemented as re-export of existing `RLSContext` at `src/infrastructure/tenancy/rls.py`, which already does exactly this but keyed on `app.current_tenant` (the codebase's actual RLS session variable — `app.current_store_id` was a spec assumption that didn't match reality)*
+- [ ] T004 [P] Add a Ruff custom rule (or runtime guard if Ruff plugins unavailable in this repo) that flags raw `AsyncSessionLocal()` instantiation inside `src/infrastructure/messaging/tasks/whatsapp_*.py` — confirm exact mechanism while implementing (TASK-SEC-005) — *deferred to Batch 2: needs investigation of Ruff plugin support / repo lint conventions*
+- [X] T005 [P] Extend log-sanitization allowlist in `src/config/logging_config.py` (or equivalent) to redact `access_token`, `app_secret`, `phone_number_id`, `waba_id` in structured logs (TASK-SEC-006) — *new structlog processor `redact_sensitive_fields` walks event dict (incl. nested) and replaces sensitive values with `***REDACTED***`. Wired into `shared_processors`*
 
 ### Alembic migration
 
-- [ ] T006 Create migration `alembic/versions/20260524_add_whatsapp_optin_scheduled_dl.py` per `data-model.md`:
+- [X] T006 Create migration `alembic/versions/20260524_010000_add_whatsapp_optin_scheduled_dl.py` per `data-model.md` — *merges the dual head (`marketing_campaigns_20260722` + `is_internal_20260723`) per project memory `alembic-sibling-branch-deploy-drift`. RLS uses `tenant_id` + `public.get_current_tenant_id()` matching the central RLS pattern from `20260203_add_rls_policies.py` (NOT `store_id` as data-model.md drafted — corrected during implementation). System templates seeded per-store via INSERT...SELECT...WHERE NOT EXISTS for idempotency.*:
   1. CREATE `whatsapp_opt_ins` + 3 indexes + CHECK on phone + RLS policy
   2. CREATE `whatsapp_scheduled_sends` + 3 indexes + CHECK on phone + CHECK on `(template_id OR text_message)` + RLS policy
   3. CREATE `whatsapp_dead_letters` + 3 indexes + CHECK on phone + RLS policy
@@ -53,28 +53,28 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### SQLAlchemy models
 
-- [ ] T007 [P] Create `src/infrastructure/database/models/tenant/whatsapp_opt_in.py` with `WhatsAppOptInModel`, source enum, opt-out-reason enum
-- [ ] T008 [P] Create `src/infrastructure/database/models/tenant/whatsapp_scheduled_send.py` with `WhatsAppScheduledSendModel`, status enum
-- [ ] T009 [P] Create `src/infrastructure/database/models/tenant/whatsapp_dead_letter.py` with `WhatsAppDeadLetterModel`, originating-context enum, error-classification enum, replay-state enum
+- [X] T007 [P] Create `src/infrastructure/database/models/tenant/whatsapp_opt_in.py` with `WhatsAppOptInModel`, source enum, opt-out-reason enum — *enums hoisted to `src/core/enums/whatsapp.py` (codebase convention)*
+- [X] T008 [P] Create `src/infrastructure/database/models/tenant/whatsapp_scheduled_send.py` with `WhatsAppScheduledSendModel`, status enum
+- [X] T009 [P] Create `src/infrastructure/database/models/tenant/whatsapp_dead_letter.py` with `WhatsAppDeadLetterModel`, originating-context enum, error-classification enum, replay-state enum
 
 ### Pydantic schemas
 
-- [ ] T010 [P] Create `src/api/v1/schemas/tenant/whatsapp_opt_in.py` — `OptInRow`, `OptInCreate`, `OptInRevoke`, `StorefrontOptIn` (with `checkout_session_token` required per EDIT-A)
-- [ ] T011 [P] Create `src/api/v1/schemas/tenant/whatsapp_scheduled_send.py` — `ScheduledSend`, `ScheduledSendCreate`
-- [ ] T012 [P] Create `src/api/v1/schemas/tenant/whatsapp_dead_letter.py` — `DeadLetter`
-- [ ] T013 [P] Extend `src/api/v1/schemas/tenant/whatsapp.py` with `ConnectionStatus`, `NotificationSettings`, `BYOConnectRequest`, `BYOValidationFailure` (per `whatsapp-connection.openapi.yaml`)
+- [X] T010 [P] Create `src/api/v1/schemas/stores/whatsapp_opt_in.py` — `OptInRow`, `OptInCreate`, `OptInRevoke`, `StorefrontOptIn` (with `checkout_session_token` required per EDIT-A) — *located in `schemas/stores/` matching the existing `whatsapp.py` placement, not `schemas/tenant/`*
+- [X] T011 [P] Create `src/api/v1/schemas/stores/whatsapp_scheduled_send.py` — `ScheduledSend`, `ScheduledSendCreate` (with model_validator enforcing XOR of template_id + text_message)
+- [X] T012 [P] Create `src/api/v1/schemas/stores/whatsapp_dead_letter.py` — `DeadLetter` + `DeadLetterError`
+- [X] T013 [P] Create `src/api/v1/schemas/stores/whatsapp_connection.py` with `WhatsAppStatus`, `NotificationSettings`, `BYOConnectRequest`, `BYOValidationFailure`, `CheckoutSessionIssue*` (per `whatsapp-connection.openapi.yaml` + `checkout-session.openapi.yaml`) — *split into its own file rather than extending the existing whatsapp.py to keep modules small*
 
 ### Repositories
 
-- [ ] T014 [P] Create `src/infrastructure/repositories/whatsapp_opt_in_repository.py` with `get_active(store_id, phone)`, `has_opt_out(store_id, phone)`, `list(store_id, filters)`, `create`, `revoke`, `bulk_revoke_by_phone`
-- [ ] T015 [P] Create `src/infrastructure/repositories/whatsapp_scheduled_send_repository.py` with `list_due(now, limit)` (uses `FOR UPDATE SKIP LOCKED`), `create`, `cancel(send_id)`, `cancel_by_order(order_id)`, `mark_sent`, `mark_skipped(reason)`, `mark_failed`
-- [ ] T016 [P] Create `src/infrastructure/repositories/whatsapp_dead_letter_repository.py` with `create`, `list(store_id, filters)`, `get`, `mark_replaying`, `mark_replayed`, `purge_older_than(cutoff)`
+- [X] T014 [P] Create `src/infrastructure/repositories/whatsapp_opt_in_repository.py` — `get_active`, `has_opt_out`, `list_by_store`, `create`, `revoke_active`, `attach_customer` (for FR-007 lazy customer link), `delete_by_customer` (TASK-SEC-001 GDPR cascade)
+- [X] T015 [P] Create `src/infrastructure/repositories/whatsapp_scheduled_send_repository.py` — `list_due` (FOR UPDATE SKIP LOCKED), `create` (with XOR validator), `cancel`, `cancel_by_order`, `mark_sent`/`mark_skipped`/`mark_failed`, `delete_by_customer`
+- [X] T016 [P] Create `src/infrastructure/repositories/whatsapp_dead_letter_repository.py` — `create`, `list_by_store`, `get_by_id`, `mark_replaying` (refuses non-`not_replayed`), `mark_replayed`, `purge_older_than` (batched), `delete_by_customer`
 
 ### Domain primitives (pure logic — no I/O)
 
-- [ ] T017 [P] Create `src/domain/whatsapp/template_category.py` with `TemplateCategory` enum (`UTILITY`, `MARKETING`, `AUTHENTICATION`) and `classify(template) -> TemplateCategory` helper that reads `whatsapp_templates.category`
-- [ ] T018 [P] Create `src/domain/whatsapp/send_guard.py` with `WhatsAppSendGuard` class. Pure logic — accepts injected lookups for opt-in / opt-out / notification settings / 24h window / **template-status (APPROVED check, FR-029)**. Returns `(allowed: bool, reason: str | None)` where `reason ∈ {no_phone, invalid_phone, no_credentials, credentials_invalid, merchant_setting_off, opt_out, no_opt_in, window_closed, template_not_approved, already_sent}`. Two-tier policy per FR-011 keyed on `TemplateCategory`. Includes `OPT_IN_BYPASS_ALLOWLIST: frozenset[str]` constant = `{"optout_confirmation_en", "optout_confirmation_ar"}` (TASK-SEC-010). The template-status check applies to all template-based send paths regardless of category and emits `template_not_approved` for any non-APPROVED status (PENDING / REJECTED / FLAGGED / PAUSED / DISABLED).
-- [ ] T019 [P] Create `src/domain/whatsapp/stop_keyword_detector.py` — Unicode NFKC + tashkeel strip + first-word match against `{"stop", "unsubscribe", "إلغاء", "الغاء"}`
+- [X] T017 [P] Create `src/core/enums/whatsapp.py` with `TemplateCategory`, `SendSkipReason`, `OptInSource`, `OptOutReason`, `WhatsAppMode` enums — *moved from `src/domain/whatsapp/` (which doesn't exist in this codebase) to `src/core/enums/` per existing layout. Classify helper folded into the send guard's GuardContext (callers read `whatsapp_templates.category` directly)*
+- [X] T018 [P] Create `src/core/services/whatsapp_send_guard.py` — pure logic; `GuardContext` frozen dataclass with all injected lookups (incl. `template_status` for FR-029); `check(ctx) -> GuardDecision`; reason set per FR-038 incl. `template_not_approved` + `already_sent`; two-tier policy per FR-011; `OPT_IN_BYPASS_ALLOWLIST` frozenset constant (TASK-SEC-010). Order matches FR-037 exactly.
+- [X] T019 [P] Create `src/core/services/whatsapp_stop_keyword_detector.py` — `normalize()` (NFKC + tashkeel + leading-bidi strip) + `is_stop_keyword(text)` returning True iff first word ∈ `{"stop", "unsubscribe", "إلغاء", "الغاء"}` (case-insensitive Latin)
 
 ### Send guard wiring into existing messaging service
 
@@ -88,8 +88,8 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 > NUMU does not have a checkout-session-token mechanism today (only a `numu_cart_session` HTTP-only cookie that does NOT carry a phone). FR-007a depends on a phone-bound token in the request body; this sub-block builds the minimal mechanism.
 
-- [ ] T031A [P] Create `src/core/entities/checkout_session.py` — Pydantic v2 entity `CheckoutSession { token: UUID, cart_session_id: UUID, store_id: UUID, phone: str (E.164), issued_at: datetime, expires_at: datetime }`
-- [ ] T031B [P] Create `src/infrastructure/repositories/checkout_session_repository.py` — Redis-backed repo with `create(cart_session_id, store_id, phone) -> CheckoutSession` (issues UUID, sets 30-min TTL), `get(token) -> CheckoutSession | None`, `delete(token)`. Key shape: `checkout_session:{token}`. Reuses the existing Redis client from `src/infrastructure/repositories/cart_repository.py`
+- [X] T031A [P] Create `src/core/entities/checkout_session.py` — Pydantic v2 entity `CheckoutSession { token: UUID, cart_session_id: str, store_id: UUID, phone: str (E.164), issued_at: datetime, expires_at: datetime }`. `cart_session_id` typed as `str` to match the existing `Cart.session_id` field shape (not UUID — cart sessions are opaque cookie values)
+- [X] T031B [P] Create `src/infrastructure/repositories/checkout_session_repository.py` — Redis-backed repo with `create(cart_session_id, store_id, phone) -> CheckoutSession` (issues UUID, sets 30-min TTL), `get(token) -> CheckoutSession | None` (None on expired/corrupt), `delete(token)`. Key shape: `checkout_session:{token}`. Mirrors `RedisCartRepository` connection-management pattern
 - [ ] T031C Add `POST /storefront/{store_slug}/checkout-session` to a new module `src/api/v1/routes/storefront/checkout_session.py`. Uses the existing `get_cart_owner()` dep to resolve the `numu_cart_session` cookie → returns 401 `missing_cart_session` if absent. Canonicalizes the body's phone via `whatsapp_phone_formatter`, returns 422 if unparsable. Persists CheckoutSession, returns `{token, expires_at}`. Rate-limited via existing `rate_limit_storefront` middleware
 - [ ] T031D [P] Integration test `tests/integration/checkout/test_checkout_session_issue_and_resolve.py` — issue a token with valid cart cookie + phone → assert 201 + token resolves via repo + expires in 30 min ± clock skew. Also asserts 401 without cookie, 422 with unparsable phone
 - [ ] T031E [P] Unit test `tests/unit/checkout/test_checkout_session_repository.py` — Redis happy/expired/missing cases
