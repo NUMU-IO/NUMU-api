@@ -92,6 +92,10 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.promotion_tasks",
         # Step 09 — async funnel-event ingest.
         "src.infrastructure.messaging.tasks.analytics_ingest_task",
+        # Phase 8.6 — marketing campaign runner (Send-Now + scheduled sweep).
+        "src.infrastructure.messaging.tasks.marketing_campaign_tasks",
+        # Feature 002 — marketing campaign attribution backfill.
+        "src.infrastructure.messaging.tasks.marketing_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -148,6 +152,14 @@ celery_app.conf.beat_schedule = {
     "detect-abandoned-carts": {
         "task": "tasks.detect_abandoned_carts",
         "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    # Phase 8.6 — marketing campaign sweep. Promotes SCHEDULED→SENDING
+    # for due campaigns + rescues orphaned SENDING (Send-Now invocations
+    # that failed to enqueue). 60s cadence is fine because the
+    # send-now endpoint enqueues directly; the sweep is the backstop.
+    "process-scheduled-marketing-campaigns": {
+        "task": "marketing.campaign.process_scheduled",
+        "schedule": 60.0,
     },
     # Phase 3.5 — sweep pending back-in-stock subscriptions and notify
     # subscribers of products that came back in stock since the last

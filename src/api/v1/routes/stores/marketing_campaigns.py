@@ -552,9 +552,14 @@ async def schedule_campaign(store_id: UUID, campaign_id: UUID, body: ScheduleReq
     operation_id="send_marketing_campaign_now",
 )
 async def send_now(store_id: UUID, campaign_id: UUID):
-    """Skip the scheduler — push the campaign straight to SENDING.
-    The next Celery sweep tick picks it up; in dev / test the runner
-    can be invoked directly via the management script."""
+    """Skip the scheduler — push the campaign straight to SENDING and
+    enqueue the dispatch task directly.
+
+    The periodic sweep is the backstop — if this enqueue fails (network
+    blip between the SENDING transition and apply_async), the sweep
+    rescues the orphan within ~5 minutes (see
+    ``_ORPHAN_SENDING_AGE`` in marketing_campaign_tasks.py).
+    """
     async with AsyncSessionLocal() as session:
         repo = MarketingCampaignRepository(session)
         c = await repo.get_by_id(campaign_id)
@@ -569,6 +574,18 @@ async def send_now(store_id: UUID, campaign_id: UUID):
             )
         updated = await repo.transition(campaign_id, CampaignStatus.SENDING)
         await session.commit()
+
+    # Lazy import — keep the request hot path lean and avoid a
+    # circular import via the celery worker module graph.
+    from src.infrastructure.messaging.tasks.marketing_campaign_tasks import (
+        dispatch_marketing_campaign,
+    )
+
+    dispatch_marketing_campaign.apply_async(
+        kwargs={"campaign_id": str(campaign_id)},
+        queue="messaging",
+    )
+
     return SuccessResponse(
         data=_to_response(updated), message="Campaign queued for immediate send"
     )
