@@ -31,7 +31,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified as _flag_modified
 
@@ -80,6 +80,18 @@ _PREBUILT_SEGMENTS: dict[str, dict[str, str]] = {
 }
 
 
+class LookalikeStatus(BaseModel):
+    """One Lookalike audience spawned from a parent Custom Audience."""
+
+    meta_audience_id: str
+    country: str  # ISO 3166-1 alpha-2
+    ratio: float  # 0.01 / 0.03 / 0.05 etc.
+    created_at: str
+    # Future: ``status`` from Meta polling ("CREATING" / "READY" /
+    # "ERROR"). v1 stays None — caller checks Meta Ads Manager.
+    status: str | None = None
+
+
 class AudienceStatus(BaseModel):
     segment_key: SegmentKey
     label_en: str
@@ -91,6 +103,9 @@ class AudienceStatus(BaseModel):
     meta_audience_id: str | None = None
     last_synced_at: str | None = None
     member_count: int | None = None
+    # Lookalikes spawned from this Custom Audience. Empty list when
+    # none built yet.
+    lookalikes: list[LookalikeStatus] = []
 
 
 class ListAudiencesResponse(BaseModel):
@@ -106,6 +121,30 @@ class SyncAudienceResponse(BaseModel):
     meta_audience_id: str
     member_count: int
     synced_at: str
+
+
+class LookalikeSpec(BaseModel):
+    """One (country, ratio) pair the merchant wants a Lookalike for."""
+
+    country: str  # ISO 3166-1 alpha-2 (Meta validates)
+    ratio: float  # 0.01 - 0.20 (1% to 20%); 1/3/5 are typical
+
+
+class CreateLookalikeRequest(BaseModel):
+    # The merchant can ask for multiple Lookalikes in one call (1% EG,
+    # 3% EG, 5% SA all from the same seed) so the hub doesn't have to
+    # issue N requests. Capped to keep accidental fat-finger submissions
+    # from racing through Meta's rate limit.
+    specs: list[LookalikeSpec] = Field(min_length=1, max_length=10)
+
+
+class CreateLookalikeResponse(BaseModel):
+    segment_key: SegmentKey
+    source_audience_id: str
+    # One entry per spec — order matches the request. Lookalikes that
+    # failed Meta validation have ``meta_audience_id=null`` and an
+    # ``error`` string so the hub can render per-row status.
+    created: list[dict]
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -180,6 +219,10 @@ async def list_audiences(
             meta_audience_id=(cache.get(key) or {}).get("audience_id"),
             last_synced_at=(cache.get(key) or {}).get("last_synced_at"),
             member_count=(cache.get(key) or {}).get("member_count"),
+            lookalikes=[
+                LookalikeStatus(**lk)
+                for lk in (cache.get(key) or {}).get("lookalikes") or []
+            ],
         )
         for key, meta in _PREBUILT_SEGMENTS.items()
     ]
@@ -331,4 +374,177 @@ async def sync_audience(
             synced_at=synced_at,
         ),
         message="Custom Audience synced",
+    )
+
+
+# Meta requires ≥100 matched members for a Custom Audience to seed a
+# Lookalike. Surfacing this gate server-side gives a friendlier error
+# than waiting for Meta's raw "audience too small" rejection.
+_LOOKALIKE_MIN_MEMBERS = 100
+
+
+@router.post(
+    "/{segment_key}/lookalike",
+    response_model=SuccessResponse[CreateLookalikeResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Build Lookalike audiences from a synced Custom Audience",
+    operation_id="create_meta_lookalike",
+)
+async def create_lookalike(
+    segment_key: SegmentKey,
+    body: CreateLookalikeRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Create one or more Lookalike Audiences from a synced segment.
+
+    Validates the source has ≥100 members + Meta is connected, then
+    fans out one Meta create-call per ``LookalikeSpec``. Per-spec
+    failures are surfaced in the response so a partial success
+    (3% EG succeeded, 5% EG hit a rate-limit) doesn't all-or-nothing.
+
+    Meta processes each Lookalike async (status flips CREATING → READY
+    within 6-24h). We don't poll here; we cache the audience_id +
+    pending status on ``store.settings.tracking.meta.custom_audiences
+    [segment_key].lookalikes`` so the hub list endpoint surfaces them
+    on every refresh.
+    """
+    meta_cfg = _meta_tracking_cfg(store)
+    ad_account_id = meta_cfg.get("ad_account_id")
+    if not ad_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail=(
+                "Meta ad account is not connected. Complete the Meta "
+                "OAuth flow first via Settings → Integrations → Meta."
+            ),
+        )
+
+    cache = _custom_audiences_cache(store)
+    cached = cache.get(segment_key) or {}
+    source_audience_id = cached.get("audience_id")
+    source_member_count = cached.get("member_count") or 0
+
+    if not source_audience_id:
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail=(
+                f"Segment '{segment_key}' has not been synced to Meta. "
+                f"Sync it first, then build the Lookalike."
+            ),
+        )
+
+    if source_member_count < _LOOKALIKE_MIN_MEMBERS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Source audience needs at least {_LOOKALIKE_MIN_MEMBERS} "
+                f"members to build a Lookalike — currently has "
+                f"{source_member_count}."
+            ),
+        )
+
+    async with AsyncSessionLocal() as db:
+        token = await _get_capi_token(db, store.tenant_id)
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail="Meta access token is missing or expired.",
+            )
+
+        svc = MetaCustomAudienceService(db)
+        created_at = datetime.now(UTC).isoformat()
+        results: list[dict] = []
+        new_cache_entries: list[dict] = []
+
+        for spec in body.specs:
+            try:
+                lookalike_id = await svc.create_lookalike(
+                    ad_account_id=ad_account_id,
+                    source_audience_id=source_audience_id,
+                    access_token=token,
+                    country=spec.country,
+                    ratio=spec.ratio,
+                )
+            except ValueError as exc:
+                # Ratio/country validation failure — return per-spec
+                # error so the merchant sees which row failed.
+                results.append({
+                    "country": spec.country,
+                    "ratio": spec.ratio,
+                    "meta_audience_id": None,
+                    "error": str(exc),
+                })
+                continue
+
+            if lookalike_id is None:
+                results.append({
+                    "country": spec.country,
+                    "ratio": spec.ratio,
+                    "meta_audience_id": None,
+                    "error": (
+                        "Meta refused to create the Lookalike. "
+                        "Check that the token has ads_management "
+                        "scope and the ad account is in good standing."
+                    ),
+                })
+                continue
+
+            entry = {
+                "meta_audience_id": lookalike_id,
+                "country": spec.country.upper(),
+                "ratio": spec.ratio,
+                "created_at": created_at,
+                "status": "CREATING",
+            }
+            new_cache_entries.append(entry)
+            results.append({**entry, "error": None})
+
+        # Persist new lookalikes onto the segment cache. Mutate-in-place
+        # + flag_modified so SQLAlchemy emits an UPDATE on the JSONB.
+        if new_cache_entries:
+            settings_dict: dict = store.settings or {}
+            tracking = settings_dict.get("tracking") or {}
+            meta_cfg_dict = tracking.get("meta") or {}
+            ca_cache = meta_cfg_dict.get("custom_audiences") or {}
+            seg_entry = ca_cache.get(segment_key) or {}
+            existing_lk = seg_entry.get("lookalikes") or []
+            seg_entry["lookalikes"] = existing_lk + new_cache_entries
+            ca_cache[segment_key] = seg_entry
+            meta_cfg_dict["custom_audiences"] = ca_cache
+            tracking["meta"] = meta_cfg_dict
+            settings_dict["tracking"] = tracking
+            store.settings = settings_dict
+            try:
+                _flag_modified(store, "settings")
+            except Exception:
+                pass
+
+            try:
+                await AuditService(db).log(
+                    event_type=EventType.ADMIN_CONFIG_CHANGE,
+                    action="meta_lookalike_create",
+                    resource_type="meta_lookalike_audience",
+                    resource_id=source_audience_id,
+                    store_id=store.id,
+                    tenant_id=store.tenant_id,
+                    new_value={
+                        "segment_key": segment_key,
+                        "source_audience_id": source_audience_id,
+                        "specs_requested": len(body.specs),
+                        "specs_created": len(new_cache_entries),
+                        "ad_account_id": ad_account_id,
+                    },
+                )
+            except Exception:
+                pass
+
+            await db.commit()
+
+    return SuccessResponse(
+        data=CreateLookalikeResponse(
+            segment_key=segment_key,
+            source_audience_id=source_audience_id,
+            created=results,
+        ),
+        message=f"Built {len(new_cache_entries)} of {len(body.specs)} Lookalike audiences",
     )
