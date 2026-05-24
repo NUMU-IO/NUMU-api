@@ -23,8 +23,8 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 **Purpose**: Sanity checks; ensure baseline is clean before foundational work begins.
 
-- [X] T001 Verify Alembic head is up to date on `dev` and the existing `20260413_add_whatsapp_tables.py` migration has been applied to local + test databases (`alembic current`) — *env-level check; Alembic CLI not available locally; migration chain reads cleanly, dual-head with `marketing_campaigns_20260722` + `is_internal_20260723` consolidated by T006*
-- [X] T002 [P] Confirm `src/infrastructure/external_services/whatsapp/__init__.py::get_whatsapp_service(store_id)` resolver works end-to-end with a platform-managed test store (smoke check before refactor) — *file inspected; resolver pattern matches plan assumptions*
+- [ ] T001 Verify Alembic head is up to date on `dev` and the existing `20260413_add_whatsapp_tables.py` migration has been applied to local + test databases (`alembic current`)
+- [ ] T002 [P] Confirm `src/infrastructure/external_services/whatsapp/__init__.py::get_whatsapp_service(store_id)` resolver works end-to-end with a platform-managed test store (smoke check before refactor)
 
 ---
 
@@ -36,13 +36,13 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Security infrastructure (TASK-SEC-005, TASK-SEC-006 from security-followup)
 
-- [X] T003 [P] Create `tenant_session(store_id)` async context manager in `src/infrastructure/database/tenant_session.py` that sets `app.current_store_id` on entry and clears on exit; export from `src/infrastructure/database/__init__.py` (TASK-SEC-005) — *implemented as re-export of existing `RLSContext` at `src/infrastructure/tenancy/rls.py`, which already does exactly this but keyed on `app.current_tenant` (the codebase's actual RLS session variable — `app.current_store_id` was a spec assumption that didn't match reality)*
-- [ ] T004 [P] Add a Ruff custom rule (or runtime guard if Ruff plugins unavailable in this repo) that flags raw `AsyncSessionLocal()` instantiation inside `src/infrastructure/messaging/tasks/whatsapp_*.py` — confirm exact mechanism while implementing (TASK-SEC-005) — *deferred to Batch 2: needs investigation of Ruff plugin support / repo lint conventions*
-- [X] T005 [P] Extend log-sanitization allowlist in `src/config/logging_config.py` (or equivalent) to redact `access_token`, `app_secret`, `phone_number_id`, `waba_id` in structured logs (TASK-SEC-006) — *new structlog processor `redact_sensitive_fields` walks event dict (incl. nested) and replaces sensitive values with `***REDACTED***`. Wired into `shared_processors`*
+- [ ] T003 [P] Create `tenant_session(store_id)` async context manager in `src/infrastructure/database/tenant_session.py` that sets `app.current_store_id` on entry and clears on exit; export from `src/infrastructure/database/__init__.py` (TASK-SEC-005)
+- [ ] T004 [P] Add a Ruff custom rule (or runtime guard if Ruff plugins unavailable in this repo) that flags raw `AsyncSessionLocal()` instantiation inside `src/infrastructure/messaging/tasks/whatsapp_*.py` — confirm exact mechanism while implementing (TASK-SEC-005)
+- [ ] T005 [P] Extend log-sanitization allowlist in `src/config/logging_config.py` (or equivalent) to redact `access_token`, `app_secret`, `phone_number_id`, `waba_id` in structured logs (TASK-SEC-006)
 
 ### Alembic migration
 
-- [X] T006 Create migration `alembic/versions/20260524_010000_add_whatsapp_optin_scheduled_dl.py` per `data-model.md` — *merges the dual head (`marketing_campaigns_20260722` + `is_internal_20260723`) per project memory `alembic-sibling-branch-deploy-drift`. RLS uses `tenant_id` + `public.get_current_tenant_id()` matching the central RLS pattern from `20260203_add_rls_policies.py` (NOT `store_id` as data-model.md drafted — corrected during implementation). System templates seeded per-store via INSERT...SELECT...WHERE NOT EXISTS for idempotency.*:
+- [ ] T006 Create migration `alembic/versions/20260524_add_whatsapp_optin_scheduled_dl.py` per `data-model.md`:
   1. CREATE `whatsapp_opt_ins` + 3 indexes + CHECK on phone + RLS policy
   2. CREATE `whatsapp_scheduled_sends` + 3 indexes + CHECK on phone + CHECK on `(template_id OR text_message)` + RLS policy
   3. CREATE `whatsapp_dead_letters` + 3 indexes + CHECK on phone + RLS policy
@@ -53,59 +53,49 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### SQLAlchemy models
 
-- [X] T007 [P] Create `src/infrastructure/database/models/tenant/whatsapp_opt_in.py` with `WhatsAppOptInModel`, source enum, opt-out-reason enum — *enums hoisted to `src/core/enums/whatsapp.py` (codebase convention)*
-- [X] T008 [P] Create `src/infrastructure/database/models/tenant/whatsapp_scheduled_send.py` with `WhatsAppScheduledSendModel`, status enum
-- [X] T009 [P] Create `src/infrastructure/database/models/tenant/whatsapp_dead_letter.py` with `WhatsAppDeadLetterModel`, originating-context enum, error-classification enum, replay-state enum
+- [ ] T007 [P] Create `src/infrastructure/database/models/tenant/whatsapp_opt_in.py` with `WhatsAppOptInModel`, source enum, opt-out-reason enum
+- [ ] T008 [P] Create `src/infrastructure/database/models/tenant/whatsapp_scheduled_send.py` with `WhatsAppScheduledSendModel`, status enum
+- [ ] T009 [P] Create `src/infrastructure/database/models/tenant/whatsapp_dead_letter.py` with `WhatsAppDeadLetterModel`, originating-context enum, error-classification enum, replay-state enum
 
 ### Pydantic schemas
 
-- [X] T010 [P] Create `src/api/v1/schemas/stores/whatsapp_opt_in.py` — `OptInRow`, `OptInCreate`, `OptInRevoke`, `StorefrontOptIn` (with `checkout_session_token` required per EDIT-A) — *located in `schemas/stores/` matching the existing `whatsapp.py` placement, not `schemas/tenant/`*
-- [X] T011 [P] Create `src/api/v1/schemas/stores/whatsapp_scheduled_send.py` — `ScheduledSend`, `ScheduledSendCreate` (with model_validator enforcing XOR of template_id + text_message)
-- [X] T012 [P] Create `src/api/v1/schemas/stores/whatsapp_dead_letter.py` — `DeadLetter` + `DeadLetterError`
-- [X] T013 [P] Create `src/api/v1/schemas/stores/whatsapp_connection.py` with `WhatsAppStatus`, `NotificationSettings`, `BYOConnectRequest`, `BYOValidationFailure`, `CheckoutSessionIssue*` (per `whatsapp-connection.openapi.yaml` + `checkout-session.openapi.yaml`) — *split into its own file rather than extending the existing whatsapp.py to keep modules small*
+- [ ] T010 [P] Create `src/api/v1/schemas/tenant/whatsapp_opt_in.py` — `OptInRow`, `OptInCreate`, `OptInRevoke`, `StorefrontOptIn` (with `checkout_session_token` required per EDIT-A)
+- [ ] T011 [P] Create `src/api/v1/schemas/tenant/whatsapp_scheduled_send.py` — `ScheduledSend`, `ScheduledSendCreate`
+- [ ] T012 [P] Create `src/api/v1/schemas/tenant/whatsapp_dead_letter.py` — `DeadLetter`
+- [ ] T013 [P] Extend `src/api/v1/schemas/tenant/whatsapp.py` with `ConnectionStatus`, `NotificationSettings`, `BYOConnectRequest`, `BYOValidationFailure` (per `whatsapp-connection.openapi.yaml`)
 
 ### Repositories
 
-- [X] T014 [P] Create `src/infrastructure/repositories/whatsapp_opt_in_repository.py` — `get_active`, `has_opt_out`, `list_by_store`, `create`, `revoke_active`, `attach_customer` (for FR-007 lazy customer link), `delete_by_customer` (TASK-SEC-001 GDPR cascade)
-- [X] T015 [P] Create `src/infrastructure/repositories/whatsapp_scheduled_send_repository.py` — `list_due` (FOR UPDATE SKIP LOCKED), `create` (with XOR validator), `cancel`, `cancel_by_order`, `mark_sent`/`mark_skipped`/`mark_failed`, `delete_by_customer`
-- [X] T016 [P] Create `src/infrastructure/repositories/whatsapp_dead_letter_repository.py` — `create`, `list_by_store`, `get_by_id`, `mark_replaying` (refuses non-`not_replayed`), `mark_replayed`, `purge_older_than` (batched), `delete_by_customer`
+- [ ] T014 [P] Create `src/infrastructure/repositories/whatsapp_opt_in_repository.py` with `get_active(store_id, phone)`, `has_opt_out(store_id, phone)`, `list(store_id, filters)`, `create`, `revoke`, `bulk_revoke_by_phone`
+- [ ] T015 [P] Create `src/infrastructure/repositories/whatsapp_scheduled_send_repository.py` with `list_due(now, limit)` (uses `FOR UPDATE SKIP LOCKED`), `create`, `cancel(send_id)`, `cancel_by_order(order_id)`, `mark_sent`, `mark_skipped(reason)`, `mark_failed`
+- [ ] T016 [P] Create `src/infrastructure/repositories/whatsapp_dead_letter_repository.py` with `create`, `list(store_id, filters)`, `get`, `mark_replaying`, `mark_replayed`, `purge_older_than(cutoff)`
 
 ### Domain primitives (pure logic — no I/O)
 
-- [X] T017 [P] Create `src/core/enums/whatsapp.py` with `TemplateCategory`, `SendSkipReason`, `OptInSource`, `OptOutReason`, `WhatsAppMode` enums — *moved from `src/domain/whatsapp/` (which doesn't exist in this codebase) to `src/core/enums/` per existing layout. Classify helper folded into the send guard's GuardContext (callers read `whatsapp_templates.category` directly)*
-- [X] T018 [P] Create `src/core/services/whatsapp_send_guard.py` — pure logic; `GuardContext` frozen dataclass with all injected lookups (incl. `template_status` for FR-029); `check(ctx) -> GuardDecision`; reason set per FR-038 incl. `template_not_approved` + `already_sent`; two-tier policy per FR-011; `OPT_IN_BYPASS_ALLOWLIST` frozenset constant (TASK-SEC-010). Order matches FR-037 exactly.
-- [X] T019 [P] Create `src/core/services/whatsapp_stop_keyword_detector.py` — `normalize()` (NFKC + tashkeel + leading-bidi strip) + `is_stop_keyword(text)` returning True iff first word ∈ `{"stop", "unsubscribe", "إلغاء", "الغاء"}` (case-insensitive Latin)
+- [ ] T017 [P] Create `src/domain/whatsapp/template_category.py` with `TemplateCategory` enum (`UTILITY`, `MARKETING`, `AUTHENTICATION`) and `classify(template) -> TemplateCategory` helper that reads `whatsapp_templates.category`
+- [ ] T018 [P] Create `src/domain/whatsapp/send_guard.py` with `WhatsAppSendGuard` class. Pure logic — accepts injected lookups for opt-in / opt-out / notification settings / 24h window. Returns `(allowed: bool, reason: str | None)` where `reason ∈ {no_phone, invalid_phone, no_credentials, credentials_invalid, merchant_setting_off, opt_out, no_opt_in, window_closed, already_sent}`. Two-tier policy per FR-011 keyed on `TemplateCategory`. Includes `OPT_IN_BYPASS_ALLOWLIST: frozenset[str]` constant = `{"optout_confirmation_en", "optout_confirmation_ar"}` (TASK-SEC-010)
+- [ ] T019 [P] Create `src/domain/whatsapp/stop_keyword_detector.py` — Unicode NFKC + tashkeel strip + first-word match against `{"stop", "unsubscribe", "إلغاء", "الغاء"}`
 
 ### Send guard wiring into existing messaging service
 
-- [ ] T020 Refactor `src/infrastructure/external_services/whatsapp/messaging_service.py` so every `send_*` method (text, template, media, interactive, order_confirmation, shipping, delivery, payment_received) routes through `WhatsAppSendGuard.check()` before issuing the Meta API call. Before any template-based send, the guard MUST look up `whatsapp_templates` by `(store_id, template_name, language)` and refuse with `template_not_approved` if the row's `status != 'APPROVED'` (FR-029). Skip reasons logged via structlog with structured fields `store_id`, `event_type`, `reason`. Idempotency check (research.md R5) queries `message_log` for prior send with same `(store_id, phone, template_name, metadata->>'order_id' or other idempotency key)`. Signature compatibility with existing call sites preserved (FR-041)
+- [ ] T020 Refactor `src/infrastructure/external_services/whatsapp/messaging_service.py` so every `send_*` method (text, template, media, interactive, order_confirmation, shipping, delivery, payment_received) routes through `WhatsAppSendGuard.check()` before issuing the Meta API call. Skip reasons logged via structlog with structured fields `store_id`, `event_type`, `reason`. Idempotency check (research.md R5) queries `message_log` for prior send with same `(store_id, phone, template_name, metadata->>'order_id' or other idempotency key)`. Signature compatibility with existing call sites preserved (FR-041)
 
 ### Meta client extensions
 
-- [X] T021 Extend `src/infrastructure/external_services/meta/whatsapp_client.py` with `submit_template`, `get_phone_number_info`, `get_waba_info`, `list_templates`, `subscribe_app_to_waba` — *methods use the existing `self.waba_id` + `self.phone_number_id` from the client constructor rather than passing them per-call (matches existing pattern). Returns raw `dict[str, Any]` per the existing convention in this client; typed Pydantic response wrappers can be added at use-case boundaries if/when needed. `raise_for_status()` surfaces Meta errors to callers*
-
-### Checkout-session token mechanism (FR-007b — new infra; settled by /speckit-analyze A1 recon)
-
-> NUMU does not have a checkout-session-token mechanism today (only a `numu_cart_session` HTTP-only cookie that does NOT carry a phone). FR-007a depends on a phone-bound token in the request body; this sub-block builds the minimal mechanism.
-
-- [X] T031A [P] Create `src/core/entities/checkout_session.py` — Pydantic v2 entity `CheckoutSession { token: UUID, cart_session_id: str, store_id: UUID, phone: str (E.164), issued_at: datetime, expires_at: datetime }`. `cart_session_id` typed as `str` to match the existing `Cart.session_id` field shape (not UUID — cart sessions are opaque cookie values)
-- [X] T031B [P] Create `src/infrastructure/repositories/checkout_session_repository.py` — Redis-backed repo with `create(cart_session_id, store_id, phone) -> CheckoutSession` (issues UUID, sets 30-min TTL), `get(token) -> CheckoutSession | None` (None on expired/corrupt), `delete(token)`. Key shape: `checkout_session:{token}`. Mirrors `RedisCartRepository` connection-management pattern
-- [X] T031C Add `POST /storefront/{store_slug}/checkout-session` to `src/api/v1/routes/storefront/checkout_session.py` — *uses `get_cart_owner` dep (which already returns 400 if no cookie + no store-host header, matching the existing storefront pattern; 401 wasn't applicable). Canonicalization via the project's `PhoneNumber` value object (the codebase's actual canonicalizer; `whatsapp_phone_formatter` wasn't a discrete module). Router registered in `src/api/v1/routes/__init__.py` and `storefront/__init__.py`. Rate-limit middleware integration deferred to Batch 3 with the rest of the route hardening*
-- [ ] T031D [P] Integration test `tests/integration/checkout/test_checkout_session_issue_and_resolve.py` — issue a token with valid cart cookie + phone → assert 201 + token resolves via repo + expires in 30 min ± clock skew. Also asserts 401 without cookie, 422 with unparsable phone
-- [ ] T031E [P] Unit test `tests/unit/checkout/test_checkout_session_repository.py` — Redis happy/expired/missing cases
+- [ ] T021 Extend `src/infrastructure/external_services/meta/whatsapp_client.py` with `submit_template(waba_id, payload)`, `get_phone_number_info(phone_number_id)`, `get_waba_info(waba_id)`, `list_templates(waba_id, limit)`, `subscribe_app_to_waba(waba_id, app_id, access_token)`. Each method returns typed Pydantic v2 response models; raises typed exceptions on Meta error codes
 
 ### Foundational tests
 
-- [X] T022 [P] Unit test `tests/unit/core/whatsapp/test_send_guard.py` — full truth table covering FR-037 (a)–(g) including the new `template_not_approved` branch (FR-029 / analyze C1) and the bypass allowlist. Located under `tests/unit/core/whatsapp/` to mirror `tests/unit/core/promotions/` layout.
-- [X] T023 [P] Unit test `tests/unit/core/whatsapp/test_stop_keyword_detector.py` — Latin case-insensitive, Arabic tashkeel-strip (with kasra), first-word-only enforcement, NFKC + leading-bidi-mark strip. Arabic test strings built via `chr()` to keep source ASCII (bandit B613)
-- [X] T024 [P] *Folded into T022* — the codebase has no separate "classifier" module; the guard reads `whatsapp_templates.category` directly and the truth table in T022 exercises all three categories. Marked complete because the underlying coverage exists at T022's parametrized tests over `{UTILITY, AUTHENTICATION, MARKETING}`.
-- [X] T025 [P] *Folded into T022* — `test_bypass_allowlist_constant_is_exactly_two_templates` + `test_non_allowlist_template_cannot_claim_bypass` in `test_send_guard.py` cover TASK-SEC-010 acceptance criteria.
+- [ ] T022 [P] Unit test `tests/unit/whatsapp/test_send_guard.py` — exhaustive truth table of (mode, opt-in state, opt-out state, notification setting, template category, 24h window, idempotency hit) → (allowed, reason)
+- [ ] T023 [P] Unit test `tests/unit/whatsapp/test_stop_keyword_detector.py` — Latin case-insensitive, Arabic tashkeel-strip variants, first-word-only enforcement, NFKC normalization
+- [ ] T024 [P] Unit test `tests/unit/whatsapp/test_template_category_classifier.py` — round-trip against all 5 system template seeds + marketing template fixture
+- [ ] T025 [P] Unit test `tests/unit/whatsapp/test_send_guard_bypass_allowlist.py` — asserts `OPT_IN_BYPASS_ALLOWLIST == {"optout_confirmation_en", "optout_confirmation_ar"}` and that any other template name with `bypass=True` raises (TASK-SEC-010 acceptance)
 - [ ] T026 [P] Security test `tests/security/test_rls_whatsapp_opt_ins.py` — cross-store read returns empty
 - [ ] T027 [P] Security test `tests/security/test_rls_whatsapp_scheduled_sends.py` — cross-store read returns empty
 - [ ] T028 [P] Security test `tests/security/test_rls_whatsapp_dead_letters.py` — cross-store read returns empty
 - [ ] T029 [P] Security test `tests/security/test_rls_celery_workers.py` — runs dispatcher with `app.current_store_id` deliberately unset and asserts queries return empty (TASK-SEC-005 acceptance)
-- [X] T030 [P] Security test `tests/security/test_log_redaction.py` — exercises `redact_sensitive_fields` processor directly across top-level fields, nested dicts, lists of dicts, case-insensitive key match, and the generic credential allowlist. Asserts `SENSITIVE_LOG_KEYS` is a frozenset (immutable). The "trigger a synthetic 500 in the connect path" variant is deferred until the BYO connect route (T074, US4) exists — at that point we add an end-to-end-through-FastAPI variant. Today the processor-level coverage already proves the TASK-SEC-006 acceptance criterion.
-- [ ] T031 [P] Integration test `tests/integration/whatsapp/test_send_guard_two_tier.py` — parametrized over `{UTILITY, AUTHENTICATION, MARKETING}` template categories: utility/authentication-template send succeeds without opt-in row; marketing-template send is skipped with `no_opt_in`; all three categories are skipped when opt-out row exists. Plus: any-category send of a non-APPROVED template is skipped with `template_not_approved` (covers FR-029, C1/C5)
+- [ ] T030 [P] Security test `tests/security/test_byo_secret_log_redaction.py` — triggers a synthetic 500 in the connect path and asserts the formatted log line contains redaction markers for `access_token`, `app_secret`, `phone_number_id`, `waba_id` (TASK-SEC-006 acceptance)
+- [ ] T031 [P] Integration test `tests/integration/whatsapp/test_send_guard_two_tier.py` — verifies utility-template send succeeds without opt-in row; marketing-template send is skipped with `no_opt_in`; both are skipped when opt-out row exists
 
 **Checkpoint**: Foundation ready — user story implementation can begin (US1 + US2 in parallel; US3–US6 sequential after).
 
@@ -119,21 +109,19 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Tests for US1 (write FIRST, ensure FAIL before implementation)
 
-- [X] T032 [P] [US1] *Folded into `tests/integration/whatsapp/test_order_lifecycle_handlers.py`* — `test_order_created_dispatches_order_confirmation` covers AS-1 (dispatch happens with correct args). Idempotency in `test_duplicate_order_created_event_dispatches_only_once`.
-- [X] T033 [P] [US1] *Folded into same file* — `test_order_paid_dispatches_payment_received` covers AS-2.
-- [X] T034 [P] [US1] *Capability documented at T037* — `send_order_confirmation(..., invoice_url=...)` dispatches a follow-up `send_media_message(media_type="document", caption="Invoice for order {n}")`. Best-effort: attachment failure logs `whatsapp_order_invoice_attachment_failed` but does NOT mark the template send as failed. Full e2e Meta-mock variant deferred to Batch 4 with BYO fixtures.
-- [X] T035 [P] [US1] *Folded into same file* — `test_order_created_skipped_when_customer_opted_out` covers AS-3.
-- [X] T036 [P] [US1] *Folded into same file* — `test_order_created_skipped_when_merchant_toggle_off` covers AS-4.
-
-> Test fixtures listed at file-end (`seeded_store`, `seeded_customer_optin_active`, etc.) live at the conftest level and are intentionally NOT in this batch — they land alongside Batch 4's per-US3 dispatcher tests (same fixture shape needed).
+- [ ] T032 [P] [US1] Integration test `tests/integration/whatsapp/test_order_created_handler.py` — emit `OrderCreatedEvent` → assert `message_log` row with `template_name='order_confirmation'`, `metadata.order_id`, `status='sent'`; assert idempotent on event replay
+- [ ] T033 [P] [US1] Integration test `tests/integration/whatsapp/test_order_paid_handler.py` — emit `OrderPaidEvent` → assert `message_log` row with `template_name='payment_received'`, idempotent on replay
+- [ ] T034 [P] [US1] Integration test `tests/integration/whatsapp/test_order_confirmation_invoice_attachment.py` — assert `send_media_message` is invoked with the invoice PDF for the order
+- [ ] T035 [P] [US1] Integration test `tests/integration/whatsapp/test_order_confirmation_respects_optout.py` — opt-out row present → no send, skip reason `opt_out`
+- [ ] T036 [P] [US1] Integration test `tests/integration/whatsapp/test_order_confirmation_respects_merchant_setting.py` — `store_settings.whatsapp_notifications.order_confirmation=false` → no send, skip reason `merchant_setting_off`
 
 ### Implementation for US1
 
-- [X] T037 [US1] `send_order_confirmation` accepts optional `invoice_url: str | None` — when present, dispatches a follow-up `send_media_message(media_type="document")` after the template (FR-004). Attachment is best-effort.
-- [X] T038 [US1] Added `handle_order_created_whatsapp` to `whatsapp_notification_handler.py`. Uses a shared `_resolve_send_context()` helper that prefetches customer + store + opt-in + opt-out + template status + message_log idempotency, builds `GuardContext`, calls `check()`, and dispatches via the per-store-resolved `WhatsAppMessagingService` when allowed. Structured skip-reason logs (FR-039) on every block.
-- [X] T039 [US1] Added `handle_order_paid_whatsapp` — same pattern, template `payment_received`, idempotency `event_tag='order_paid'`.
-- [X] T040 [US1] Both handlers registered in `src/infrastructure/events/setup.py` for `OrderCreatedEvent` and `OrderPaidEvent`.
-- [X] T041 [US1] Verified `OrderCreatedEvent` and `OrderPaidEvent` carry the needed `customer_id` + `store_id` + `order_id` + `total` + `currency`. The handler resolves customer.phone + customer.notification_prefs.whatsapp + store.settings.whatsapp_notifications itself via PK lookups (chose handler-resolves-context over expanding event shape to avoid touching 4 existing emit sites). Event class structures unchanged.
+- [ ] T037 [US1] Extend `src/infrastructure/external_services/whatsapp/messaging_service.py::send_order_confirmation` to accept an optional `invoice_pdf_bytes` arg and call `send_media_message` if provided (FR-004) — invoice PDF assembly delegated to existing `_invoice_helper`
+- [ ] T038 [US1] Add `handle_order_created` to `src/infrastructure/events/handlers/whatsapp_notification_handler.py` — resolves customer + phone, resolves invoice PDF via existing helper, calls `send_order_confirmation` (through the guard); idempotency via `message_log` lookup keyed on `metadata.order_id`
+- [ ] T039 [US1] Add `handle_order_paid` to `src/infrastructure/events/handlers/whatsapp_notification_handler.py` — calls `send_payment_received` (through the guard); idempotency via `message_log` lookup keyed on `metadata.order_id + ':paid'`
+- [ ] T040 [US1] Register both handlers in `src/infrastructure/events/setup.py` for `OrderCreatedEvent` and `OrderPaidEvent`
+- [ ] T041 [US1] Verify `OrderCreatedEvent` and `OrderPaidEvent` carry `customer_phone` and the new `whatsapp_prefs.order_confirmation` / `whatsapp_prefs.payment_received` keys (extend the existing events if needed; both events are in `src/core/events/order_events.py`)
 
 **Checkpoint**: US1 fully functional. Order placed → confirmation lands within 30s. Payment confirmed → payment-received lands within 30s. Replay-safe. Opt-out and merchant-setting-off both block sends.
 
@@ -147,22 +135,20 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Tests for US2
 
-- [X] T042 [P] [US2] *Folded into `tests/integration/whatsapp/test_us2_optin_stop.py`* — `test_stop_keyword_variants_trigger_opt_out` (parametrized over `{stop, STOP, unsubscribe, إلغاء, الغاء}`) asserts the active opt-in row flips to `opted_out_at != NULL` with `opt_out_reason='inbound_stop_keyword'` and `_send_optout_ack` is invoked. Arabic strings constructed via `chr()` per bandit B613.
-- [X] T043 [P] [US2] *Folded into same file* — `test_stop_in_middle_of_message_does_not_opt_out` asserts `'please STOP sending'` leaves the opt-in row untouched and does NOT trigger the ack helper.
-- [X] T044 [P] [US2] *Folded into same file* — five parametrized tests cover: missing token (403/422), expired token (403 `invalid_checkout_session`), wrong-store token (403 `invalid_checkout_session`), phone mismatch (403 `phone_mismatch_with_cart`), happy path (201 + correct phone/source). Storefront opt-in is now unforgeable per EDIT-A/FR-007a.
-- [X] T045 [P] [US2] *Folded into same file* — `test_reopt_after_opt_out_creates_new_row` exercises the FR-012 history-preserving invariant: opt-in → opt-out → opt-in produces two rows; the older row retains its `opted_out_at`.
-- [X] T046 [P] [US2] *Folded into same file* — `test_merchant_opt_in_list_create_revoke_flow` covers create + list + revoke + double-revoke 404 against the merchant `/stores/{id}/whatsapp/opt-ins` endpoints.
-
-> Fixtures (`db_session`, `seeded_store_with_active_optin`, `simulate_inbound_message`, `issue_checkout_session`, etc.) live at the conftest level and are listed at the file end. They're deferred to Batch 5's conftest work alongside the dispatcher tests where the same shapes are needed.
+- [ ] T042 [P] [US2] Integration test `tests/integration/whatsapp/test_stop_keyword_optout.py` — for each of `{stop, STOP, unsubscribe, إلغاء, الغاء}` as the first word: opt-in flipped within 10s; ack reply via `optout_confirmation_*` system template within 10s additional; subsequent send to same phone is skipped with `opt_out`
+- [ ] T043 [P] [US2] Integration test `tests/integration/whatsapp/test_stop_keyword_not_first_word.py` — `"please STOP sending please"` → opt-in unchanged, message routes to conversations inbox normally
+- [ ] T044 [P] [US2] Integration test `tests/integration/whatsapp/test_storefront_optin_requires_checkout_session.py` — POST without `checkout_session_token` → 403; with invalid token → 403 `invalid_checkout_session`; with valid token but mismatched phone → 403 `phone_mismatch_with_cart`; valid token + matched phone → 201 (EDIT-A)
+- [ ] T045 [P] [US2] Integration test `tests/integration/whatsapp/test_reopt_creates_new_row.py` — opt-out then opt-in again → new row exists, prior `opted_out_at` preserved (FR-012)
+- [ ] T046 [P] [US2] Integration test `tests/integration/whatsapp/test_merchant_opt_in_endpoints.py` — list / create / revoke flows via merchant API; revoke on already-revoked → 404
 
 ### Implementation for US2
 
-- [X] T047 [P] [US2] `src/application/use_cases/whatsapp/opt_in_customer.py` — `OptInCustomerUseCase`. Canonicalizes phone via `PhoneNumber.parse(..., default_region="EG")`. Idempotent no-op when an active opt-in already exists for (store, phone); otherwise inserts a fresh row preserving FR-012 history. Backfills `customer_id` onto historical rows when a hint is supplied (FR-007 lazy customer link).
-- [X] T048 [P] [US2] `src/application/use_cases/whatsapp/opt_out_customer.py` — `OptOutCustomerUseCase`. Idempotent flip of the active row to `opted_out_at=NOW()` with `opt_out_reason`. Returns `None` if no active row existed.
-- [X] T049 [US2] `src/api/v1/routes/stores/whatsapp_opt_ins.py` — merchant-facing GET / POST / POST-revoke endpoints with bearer auth via the existing `get_current_store` dependency. 422 on bad phone, 404 on revoke-when-no-active-row.
-- [X] T050 [US2] `src/api/v1/routes/storefront/whatsapp_optin.py` — anonymous storefront route gated by `checkout_session_token`. Resolves store by slug (subdomain or custom domain), looks up the token in Redis via `CheckoutSessionRepository`, verifies `session.store_id == store.id`, canonicalizes the request body phone, compares to `session.phone`. Uses `RLSContext` to set the tenant before calling `OptInCustomerUseCase`. Token is deleted post-success (single-use) so a leaked token can't be reused. 403 codes: `invalid_checkout_session` (missing/expired/wrong store), `phone_mismatch_with_cart` (phone differs).
-- [X] T051 [US2] Extended `src/api/v1/routes/webhooks/whatsapp.py` — STOP detection runs BEFORE the existing verification-reply path (so STOP wins outright). On detect: opt-out via `OptOutCustomerUseCase`, ack via new `_send_optout_ack` helper that calls `WhatsAppMessagingService.send_text_message` (operating inside the 24h customer-service window). Errors logged but do not bubble — opt-out persistence is the source of truth, not the ack.
-- [X] T052 [US2] Routers registered: `whatsapp_opt_ins_module` in `src/api/v1/routes/stores/__init__.py`; `whatsapp_optin_router` in `src/api/v1/routes/storefront/__init__.py` + main `src/api/v1/routes/__init__.py`.
+- [ ] T047 [P] [US2] Create `src/application/use_cases/whatsapp/opt_in_customer.py` — canonicalize phone via existing `whatsapp_phone_formatter`; idempotent no-op if active opt-in already exists for `(store_id, phone)`
+- [ ] T048 [P] [US2] Create `src/application/use_cases/whatsapp/opt_out_customer.py` — flips active opt-in row to `opted_out_at=NOW`, records `opt_out_reason`; idempotent
+- [ ] T049 [US2] Create `src/api/v1/routes/stores/whatsapp_opt_ins.py` with merchant-facing endpoints: `GET /stores/{id}/whatsapp/opt-ins`, `POST /stores/{id}/whatsapp/opt-ins`, `POST /stores/{id}/whatsapp/opt-ins/revoke` (bearer auth)
+- [ ] T050 [US2] Create storefront-facing route in the existing storefront router for `POST /storefront/{store_slug}/whatsapp/opt-in` — requires `checkout_session_token`; verifies session resolves to active cart on store; canonicalizes phone in body and on cart to E.164; returns 403 with `invalid_checkout_session` / `phone_mismatch_with_cart` on mismatch (EDIT-A)
+- [ ] T051 [US2] Extend `src/api/v1/routes/webhooks/whatsapp.py` inbound-message branch: after existing logging, run `stop_keyword_detector` on text messages; on hit, invoke `opt_out_customer` use-case and send `optout_confirmation_{lang}` template (bypassing opt-in guard via the allowlist — utility ack to a customer who just messaged us)
+- [ ] T052 [US2] Register the new opt-ins router in `src/api/v1/routes/__init__.py`
 
 **Checkpoint**: US2 fully functional. Inbound STOP opts out + acks within 10s. Storefront opt-in is unforgeable. Re-opt history is preserved.
 
@@ -176,24 +162,22 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Tests for US3
 
-- [X] T053 [P] [US3] *Folded into `tests/integration/whatsapp/test_us3_scheduled_sends.py`* — `test_dispatcher_fires_due_send_within_two_minutes` covers AS-1.
-- [X] T054 [P] [US3] *Folded into same file* — `test_explicit_cancel_blocks_dispatch` covers AS-2.
-- [X] T055 [P] [US3] *Folded into same file* — `test_order_cancel_cascades_*` + `_refund_also_cascades` + `_non_terminal_does_not_cascade` cover AS-3 (FR-016).
-- [X] T056 [P] [US3] *Folded into same file* — `test_opt_out_between_schedule_and_dispatch_skips_not_fails` covers FR-017 (guard re-evaluated at dispatch time → `skipped` not `failed`).
-- [X] T057 [P] [US3] *Folded into same file* — `test_two_concurrent_dispatchers_fire_each_row_once` (asyncio.gather two dispatchers; SKIP LOCKED ensures exactly one dispatch).
-
-> Plus 3 schedule-time validation tests: rejects past `scheduled_for`, rejects non-APPROVED template, rejects `template_id` XOR `text_message` violation.
+- [ ] T053 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_dispatcher.py` — create row with `scheduled_for = NOW + 90s`; trigger dispatcher; within 2 min row is `sent` and `message_log` has the entry; assert lag metric ≤ 120s
+- [ ] T054 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_cancel_explicit.py` — DELETE on pending row → status `cancelled`, no send fires
+- [ ] T055 [P] [US3] Integration test `tests/integration/whatsapp/test_cascade_cancel_on_order_cancel.py` — schedule 3 sends for an order; emit `OrderStatusChangedEvent(new_status='cancelled')`; assert all 3 → `cancelled`
+- [ ] T056 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_optout_at_dispatch_time.py` — schedule send; insert opt-out row; trigger dispatcher; assert row → `skipped` with `skip_reason='opt_out'`, NOT `failed`
+- [ ] T057 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_concurrent_dispatch.py` — two parallel dispatcher invocations on same row → `FOR UPDATE SKIP LOCKED` ensures exactly one send
 
 ### Implementation for US3
 
-- [X] T058 [P] [US3] `src/application/use_cases/whatsapp/schedule_send.py` — `ScheduleSendUseCase`. Validates phone canonicalization, `scheduled_for > now`, template_id XOR text_message, template status=APPROVED. Raises `ScheduleSendError(code, message)` → 422 at API boundary.
-- [X] T059 [P] [US3] `src/application/use_cases/whatsapp/cancel_scheduled_send.py` — `CancelScheduledSendUseCase` with `execute(send_id)` (single, idempotent) and `cancel_by_order(order_id)` (bulk cascade for FR-016).
-- [X] T060 [US3] `src/api/v1/routes/stores/whatsapp_scheduled_sends.py` — GET list (status + related_order filterable), POST create, GET get, DELETE cancel; 404 not-found, 409 not-pending + race-with-dispatcher.
-- [X] T061 [US3] `src/infrastructure/messaging/tasks/whatsapp_scheduled_send_dispatcher.py` — Celery beat task `numu_api.whatsapp.dispatch_scheduled_sends`. `_dispatch_all_tenants` uses `RLSBypassContext` to find tenants with due rows, then `_dispatch_for_tenant` runs under `RLSContext(tenant_id)` so all queries are RLS-filtered (TASK-SEC-005 enforced). Uses `repo.list_due(now, limit=100)` which is FOR UPDATE SKIP LOCKED. Guard re-evaluated for each row via `_evaluate_guard` (FR-017). Failures route to `mark_failed` for now; full retry/DLQ wiring lands with US6.
-- [X] T062 [US3] Beat-schedule entry `dispatch-whatsapp-scheduled-sends` added in `src/infrastructure/messaging/celery_app.py`, fires every 60s. Task module added to Celery `imports=[]`.
-- [X] T063 [US3] `src/infrastructure/events/handlers/whatsapp_scheduled_cancel_handler.py` — `handle_order_status_for_scheduled_cancel` subscribes to `OrderStatusChangedEvent`; fires only on `new_status in {cancelled, refunded}`; resolves tenant via RLSBypass lookup of `StoreModel.tenant_id`, sets tenant context, then `CancelScheduledSendUseCase.cancel_by_order(event.order_id)`. Best-effort: failures logged but never bubble to the OrderStatusChangedEvent fanout.
-- [X] T064 [US3] Cascade-cancel handler registered in `src/infrastructure/events/setup.py` for `OrderStatusChangedEvent`.
-- [X] T065 [US3] `whatsapp_scheduled_sends_module` registered in `src/api/v1/routes/stores/__init__.py`.
+- [ ] T058 [P] [US3] Create `src/application/use_cases/whatsapp/schedule_send.py` — validates `scheduled_for > now`, validates template is APPROVED if `template_id` set, validates either `template_id` XOR `text_message` set, creates row
+- [ ] T059 [P] [US3] Create `src/application/use_cases/whatsapp/cancel_scheduled_send.py` — single-cancel (by send_id) and bulk-cancel (by related_order_id) variants; 409 if status not `pending`
+- [ ] T060 [US3] Create `src/api/v1/routes/stores/whatsapp_scheduled_sends.py` per `whatsapp-scheduled-sends.openapi.yaml`: GET list, POST create, GET get, DELETE cancel
+- [ ] T061 [US3] Create `src/infrastructure/messaging/tasks/whatsapp_scheduled_send_dispatcher.py` — Celery beat task `numu_api.whatsapp.dispatch_scheduled_sends` running every 60s; uses `tenant_session(store_id)` (TASK-SEC-005); `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 100`; per-row re-runs send guard at dispatch-time; failures route to `WhatsAppMessagingService` retry/DLQ path (US6)
+- [ ] T062 [US3] Add Celery beat schedule entry for `dispatch_scheduled_sends` (every 60s) in the existing beat config
+- [ ] T063 [US3] Create `src/infrastructure/events/handlers/whatsapp_scheduled_cancel_handler.py` — subscribes to `OrderStatusChangedEvent`; when `new_status in {'cancelled', 'refunded'}` calls `cancel_scheduled_send(related_order_id=event.order_id)`
+- [ ] T064 [US3] Register the cascade-cancel handler in `src/infrastructure/events/setup.py`
+- [ ] T065 [US3] Register the new scheduled-sends router
 
 **Checkpoint**: US3 fully functional. Scheduled sends fire within ±2 min, cancel cleanly, cascade on order cancellation, and re-evaluate guards at dispatch-time.
 
@@ -207,22 +191,22 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Tests for US4
 
-- [X] T066 [P] [US4] *Folded into `tests/integration/whatsapp/test_us4_byo_connect.py`* — `test_byo_connect_happy_path_validates_and_persists` mocks 3 happy Meta GETs, asserts row persisted + toggles reset to DISABLED + prior toggle state snapshotted to `whatsapp_notifications_prev_platform_managed`.
-- [X] T067 [P] [US4] *Folded into same file* — 4 tests cover each failing step: `test_byo_connect_phone_metadata_read_failure`, `test_byo_connect_waba_info_read_failure_missing_scope`, `test_byo_connect_waba_id_mismatch`, `test_byo_connect_template_list_read_failure`. Each asserts the correct `failed_step` + `code` + Meta error sanitization (no fbtrace_id leak).
-- [X] T068 [P] [US4] *Folded into same file* — `test_byo_disconnect_restores_prior_toggle_state` connects then disconnects; asserts mode reverts to platform_managed + toggles restored from snapshot. Plus `test_byo_disconnect_with_no_prior_snapshot_defaults_all_true` covers the no-snapshot edge case.
-- [X] T069 [P] [US4] *Folded into same file* — `test_byo_credential_failure_fails_loud_no_platform_fallback` asserts the guard returns `CREDENTIALS_INVALID` when `store_credentials_marked_invalid=True` (FR-025). The "set credential_error on send failure" wiring in the messaging service is deferred to polish (T078 below).
-- [ ] T070 [P] [US4] *Deferred to polish phase* — no existing rate-limit middleware pattern to mirror; TASK-SEC-003 acceptance lands when the rate-limit infrastructure is added.
-- [X] T071 [P] [US4] *Folded into same file* — 3 tests: `test_sanitize_meta_error_drops_fbtrace_id`, `test_sanitize_meta_error_handles_inner_object_directly`, `test_sanitize_meta_error_returns_none_on_garbage`. TASK-SEC-009 acceptance.
+- [ ] T066 [P] [US4] Integration test `tests/integration/whatsapp/test_byo_credential_validation_success.py` — mock 3 Meta GETs all 200; assert row written encrypted; assert mode='byo'; assert toggles flipped to DISABLED; assert snapshot of prior platform-managed state stored in `store_settings.whatsapp_notifications_prev_platform_managed`
+- [ ] T067 [P] [US4] Integration test `tests/integration/whatsapp/test_byo_credential_validation_failures.py` — parametrized: each of `(phone_metadata_read, waba_info_read, template_list_read)` returns non-200; assert response identifies the failed step + Meta error
+- [ ] T068 [P] [US4] Integration test `tests/integration/whatsapp/test_byo_disconnect.py` — connect BYO → disconnect → mode reverts to `platform_managed`; toggles restored from snapshot; subsequent send uses platform credentials
+- [ ] T069 [P] [US4] Integration test `tests/integration/whatsapp/test_byo_expired_token_fails_loud.py` — BYO connect succeeds at time T0; at T1 Meta returns 401 on send; assert send fails (not silently routed to platform), `credential_error` set on status endpoint, NO platform fallback (FR-025)
+- [ ] T070 [P] [US4] Integration test `tests/integration/whatsapp/test_byo_connect_rate_limit.py` — 6 connect attempts in 10 min for same store → 6th returns 429 + Retry-After (TASK-SEC-003 acceptance)
+- [ ] T071 [P] [US4] Unit test `tests/unit/whatsapp/test_byo_validation_error_shape.py` — Meta error body whitelist drops `fbtrace_id`, surfaces only `code`, `error_subcode`, `message`, `type` (TASK-SEC-009 acceptance)
 
 ### Implementation for US4
 
-- [X] T072 [P] [US4] `src/application/use_cases/whatsapp/connect_byo_credentials.py` — `ConnectBYOCredentialsUseCase`. Runs the 3 Meta read calls via `WhatsAppClient.get_phone_number_info / get_waba_info / list_templates`. Maps each httpx HTTPStatusError to a typed `BYOValidationError(failed_step, code, message, meta_error)`. Meta error sanitized via `sanitize_meta_error()` (TASK-SEC-009 — fbtrace_id never surfaced). On success: encrypts creds via `get_secrets_manager().encrypt(creds_data, key_id)`, upserts `ServiceCredential` with `is_active=True is_validated=True last_validated_at=now`, snapshots prior `whatsapp_notifications` to `whatsapp_notifications_prev_platform_managed`, resets all toggles to False (FR-019a), updates `store.settings.whatsapp.connection_type='own' + last_configured` + clears any prior `credential_error`.
-- [X] T073 [P] [US4] `src/application/use_cases/whatsapp/disconnect_byo_credentials.py` — `DisconnectBYOCredentialsUseCase`. Marks `ServiceCredential.is_active=False is_validated=False` (preserves the row for audit). Restores `whatsapp_notifications` from the prior-platform-managed snapshot if present, else defaults all-True (marketing False) per FR-019a. Clears `credential_error` + `last_configured` + `is_configured` from `store.settings.whatsapp`.
-- [X] T074 [US4] Extended `src/api/v1/routes/stores/whatsapp.py` with `POST /byo/connect` + `DELETE /byo/disconnect` + `GET /byo/status` endpoints using the new `WhatsAppStatus` / `BYOConnectRequest` / `BYOValidationFailure` schemas. Existing `/complete-signup` (OAuth flow) + `/status` + `/disconnect` endpoints kept untouched for backward compatibility with the embedded-signup UI.
-- [X] T075 [US4] `PATCH /byo/notifications` endpoint writes to `store.settings.whatsapp_notifications` (the path the order-event handlers + send guard read from). Existing PATCH `/notifications` endpoint kept untouched — it writes to a different path (`store.settings.whatsapp.notification_toggles`) used by the embedded-signup UI. Consolidation deferred to polish (storage-path migration).
-- [X] T076 [US4] `src/core/services/meta_error_whitelist.py` — `sanitize_meta_error()` extracts only `{code, error_subcode, message, type}` from Meta error bodies. Used inside `connect_byo_credentials.py` to populate `BYOValidationError.meta_error` so `fbtrace_id`/`error_user_*` never leak to merchants.
-- [ ] T077 [US4] *Deferred to polish phase* — no existing rate-limit decorator/middleware pattern in this codebase to mirror without inventing new infra. TASK-SEC-003 acceptance lands with the polish-phase rate-limit infrastructure.
-- [ ] T078 [US4] *Partial — guard side complete, messaging-service side deferred*: the send guard correctly short-circuits with `CREDENTIALS_INVALID` when `store_credentials_marked_invalid=True` (FR-025; covered by `test_byo_credential_failure_fails_loud_no_platform_fallback`). The "set `store.settings.whatsapp.credential_error` on first credential-class Meta failure" wiring in `WhatsAppMessagingService` is deferred to polish (it's a small write in the existing error path).
+- [ ] T072 [P] [US4] Create `src/application/use_cases/whatsapp/connect_byo_credentials.py` — orchestrates the 3 Meta read calls (research.md R2), constructs `BYOValidationFailure` on each failure path, persists to `service_credentials` via existing AES-256 mechanism, snapshots current `store_settings.whatsapp_notifications` to `whatsapp_notifications_prev_platform_managed`, resets toggles to all-DISABLED (FR-019a)
+- [ ] T073 [P] [US4] Create `src/application/use_cases/whatsapp/disconnect_byo_credentials.py` — deactivates the `service_credentials` row (or deletes per existing pattern), restores `store_settings.whatsapp_notifications` from snapshot or defaults all-ENABLED if no snapshot
+- [ ] T074 [US4] Extend `src/api/v1/routes/stores/whatsapp.py` — add `POST /byo/connect`, `DELETE /byo/disconnect`, enrich `GET /status` to return `mode`, `last_validated_at`, `credential_error`, `notifications` (per `whatsapp-connection.openapi.yaml`)
+- [ ] T075 [US4] Add `PATCH /stores/{id}/whatsapp/notifications` endpoint to `whatsapp.py` for per-toggle updates
+- [ ] T076 [US4] Apply Meta error whitelist (`code`, `error_subcode`, `message`, `type` only) in `BYOValidationFailure` schema serialization — drops `fbtrace_id` etc. (TASK-SEC-009)
+- [ ] T077 [US4] Apply per-store + per-IP rate limit on `POST /byo/connect` (5/store/10min + 30/IP/min) via the existing rate-limit middleware (TASK-SEC-003)
+- [ ] T078 [US4] Wire the `credential_error` field — when a send fails with a credential-class Meta error in BYO mode, set the store-level error and surface in `GET /status` (FR-025)
 
 **Checkpoint**: US4 fully functional. BYO connect/disconnect works; lemons rejected at submit-time; credential-failure during send fails loud (no silent platform fallback).
 
@@ -314,12 +298,6 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 - [ ] T118 [P] Run the full pytest suite — `pytest tests/ -v -k whatsapp` — verify zero failures
 - [ ] T119 [P] Run mypy strict — `mypy --strict src/domain/whatsapp/ src/application/use_cases/whatsapp/ src/infrastructure/database/models/tenant/whatsapp_*.py src/infrastructure/repositories/whatsapp_*.py src/api/v1/routes/stores/whatsapp_*.py` — verify clean
 - [ ] T120 Update the project memory hub: add `whatsapp-foundation-phase1` memory linking key facts (3 new tables, two-tier guard policy, BYO-only templates, 90-day DLQ retention) so future conversations can recall this design
-
-### Post-analyze additions (from `/speckit-analyze` findings C1–C6)
-
-- [ ] T121 [P] Add an architectural lint / test that asserts no module outside `src/infrastructure/external_services/whatsapp/messaging_service.py` invokes `whatsapp_client.send_*` directly (covers SC-012 + FR-042). Place in `tests/security/test_no_direct_whatsapp_client_bypass.py` using AST walk over `src/` — fails CI if any other file imports and calls `whatsapp_client.send_text|send_template|send_media|send_interactive`. Also asserts no module outside `src/infrastructure/external_services/whatsapp/__init__.py` instantiates `WhatsAppMessagingService` with explicit credentials (FR-042 enforcement, C2/C6)
-- [ ] T122 [P] Integration test `tests/integration/whatsapp/test_backward_compatibility.py` — POSTs a legacy-shape inbound-message webhook payload to `/webhooks/whatsapp/callback` and asserts (a) 200 returned, (b) the existing `message_log` row + `whatsapp_conversations` upsert behavior is preserved, (c) the existing `send_order_confirmation(recipient, order_number, total, tracking_url)` call sites still work end-to-end after the T020 refactor (FR-040 + FR-041 enforcement, C4)
-- [ ] T123 [P] Strengthen T115 acceptance: emit `whatsapp.send.dispatch_lag_seconds` histogram (already listed in T115); add an SLO/alert config asserting p99 ≤ 30s for `template_name IN ('order_confirmation', 'payment_received')` (SC-001 / SC-002 verification, C3)
 
 ---
 
