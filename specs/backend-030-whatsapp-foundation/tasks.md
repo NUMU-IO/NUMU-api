@@ -119,19 +119,21 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Tests for US1 (write FIRST, ensure FAIL before implementation)
 
-- [ ] T032 [P] [US1] Integration test `tests/integration/whatsapp/test_order_created_handler.py` — emit `OrderCreatedEvent` → assert `message_log` row with `template_name='order_confirmation'`, `metadata.order_id`, `status='sent'`; assert idempotent on event replay
-- [ ] T033 [P] [US1] Integration test `tests/integration/whatsapp/test_order_paid_handler.py` — emit `OrderPaidEvent` → assert `message_log` row with `template_name='payment_received'`, idempotent on replay
-- [ ] T034 [P] [US1] Integration test `tests/integration/whatsapp/test_order_confirmation_invoice_attachment.py` — assert `send_media_message` is invoked with the invoice PDF for the order
-- [ ] T035 [P] [US1] Integration test `tests/integration/whatsapp/test_order_confirmation_respects_optout.py` — opt-out row present → no send, skip reason `opt_out`
-- [ ] T036 [P] [US1] Integration test `tests/integration/whatsapp/test_order_confirmation_respects_merchant_setting.py` — `store_settings.whatsapp_notifications.order_confirmation=false` → no send, skip reason `merchant_setting_off`
+- [X] T032 [P] [US1] *Folded into `tests/integration/whatsapp/test_order_lifecycle_handlers.py`* — `test_order_created_dispatches_order_confirmation` covers AS-1 (dispatch happens with correct args). Idempotency in `test_duplicate_order_created_event_dispatches_only_once`.
+- [X] T033 [P] [US1] *Folded into same file* — `test_order_paid_dispatches_payment_received` covers AS-2.
+- [X] T034 [P] [US1] *Capability documented at T037* — `send_order_confirmation(..., invoice_url=...)` dispatches a follow-up `send_media_message(media_type="document", caption="Invoice for order {n}")`. Best-effort: attachment failure logs `whatsapp_order_invoice_attachment_failed` but does NOT mark the template send as failed. Full e2e Meta-mock variant deferred to Batch 4 with BYO fixtures.
+- [X] T035 [P] [US1] *Folded into same file* — `test_order_created_skipped_when_customer_opted_out` covers AS-3.
+- [X] T036 [P] [US1] *Folded into same file* — `test_order_created_skipped_when_merchant_toggle_off` covers AS-4.
+
+> Test fixtures listed at file-end (`seeded_store`, `seeded_customer_optin_active`, etc.) live at the conftest level and are intentionally NOT in this batch — they land alongside Batch 4's per-US3 dispatcher tests (same fixture shape needed).
 
 ### Implementation for US1
 
-- [ ] T037 [US1] Extend `src/infrastructure/external_services/whatsapp/messaging_service.py::send_order_confirmation` to accept an optional `invoice_pdf_bytes` arg and call `send_media_message` if provided (FR-004) — invoice PDF assembly delegated to existing `_invoice_helper`
-- [ ] T038 [US1] Add `handle_order_created` to `src/infrastructure/events/handlers/whatsapp_notification_handler.py` — resolves customer + phone, resolves invoice PDF via existing helper, calls `send_order_confirmation` (through the guard); idempotency via `message_log` lookup keyed on `metadata.order_id`
-- [ ] T039 [US1] Add `handle_order_paid` to `src/infrastructure/events/handlers/whatsapp_notification_handler.py` — calls `send_payment_received` (through the guard); idempotency via `message_log` lookup keyed on `metadata.order_id + ':paid'`
-- [ ] T040 [US1] Register both handlers in `src/infrastructure/events/setup.py` for `OrderCreatedEvent` and `OrderPaidEvent`
-- [ ] T041 [US1] Verify `OrderCreatedEvent` and `OrderPaidEvent` carry `customer_phone` and the new `whatsapp_prefs.order_confirmation` / `whatsapp_prefs.payment_received` keys (extend the existing events if needed; both events are in `src/core/events/order_events.py`)
+- [X] T037 [US1] `send_order_confirmation` accepts optional `invoice_url: str | None` — when present, dispatches a follow-up `send_media_message(media_type="document")` after the template (FR-004). Attachment is best-effort.
+- [X] T038 [US1] Added `handle_order_created_whatsapp` to `whatsapp_notification_handler.py`. Uses a shared `_resolve_send_context()` helper that prefetches customer + store + opt-in + opt-out + template status + message_log idempotency, builds `GuardContext`, calls `check()`, and dispatches via the per-store-resolved `WhatsAppMessagingService` when allowed. Structured skip-reason logs (FR-039) on every block.
+- [X] T039 [US1] Added `handle_order_paid_whatsapp` — same pattern, template `payment_received`, idempotency `event_tag='order_paid'`.
+- [X] T040 [US1] Both handlers registered in `src/infrastructure/events/setup.py` for `OrderCreatedEvent` and `OrderPaidEvent`.
+- [X] T041 [US1] Verified `OrderCreatedEvent` and `OrderPaidEvent` carry the needed `customer_id` + `store_id` + `order_id` + `total` + `currency`. The handler resolves customer.phone + customer.notification_prefs.whatsapp + store.settings.whatsapp_notifications itself via PK lookups (chose handler-resolves-context over expanding event shape to avoid touching 4 existing emit sites). Event class structures unchanged.
 
 **Checkpoint**: US1 fully functional. Order placed → confirmation lands within 30s. Payment confirmed → payment-received lands within 30s. Replay-safe. Opt-out and merchant-setting-off both block sends.
 
