@@ -44,7 +44,16 @@ from src.api.v1.routes.stores import inventory_transfers as inventory_transfers_
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import locations as locations_module
 from src.api.v1.routes.stores import (
+    marketing_campaign_activities as marketing_campaign_activities_module,
+)
+from src.api.v1.routes.stores import (
+    marketing_campaign_rules as marketing_campaign_rules_module,
+)
+from src.api.v1.routes.stores import (
     marketing_campaigns as marketing_campaigns_module,
+)
+from src.api.v1.routes.stores import (
+    marketing_send_times as marketing_send_times_module,
 )
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import order_import as order_import_module
@@ -107,6 +116,19 @@ router.include_router(inventory_levels_module.router, tags=["Inventory Levels"])
 router.include_router(inventory_transfers_module.router, tags=["Inventory Transfers"])
 router.include_router(locations_module.router, tags=["Store Locations"])
 router.include_router(marketing_campaigns_module.router, tags=["Marketing Campaigns"])
+# Feature 002 — auto-match rules, campaign activities, send-time suggestions
+router.include_router(
+    marketing_campaign_rules_module.router,
+    tags=["Marketing Campaign Auto-Match Rules"],
+)
+router.include_router(
+    marketing_campaign_activities_module.router,
+    tags=["Marketing Campaign Activities"],
+)
+router.include_router(
+    marketing_send_times_module.router,
+    tags=["Marketing Send Times"],
+)
 router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(
     analytics_realtime_module.router, tags=["Store Analytics Realtime"]

@@ -99,6 +99,16 @@ class EventType(StrEnum):
     CAMPAIGN_UPDATE = "campaign.update"
     CAMPAIGN_TRACKABLE_LINK_GENERATE = "campaign.trackable_link_generate"
 
+    # Feature 002 events — auto-match rules + backfill + duplicate.
+    # Logged at INFO severity; auto-match rule create/delete is the
+    # main forensic surface (SEC-002a) since a compromised account
+    # could quietly steal a competitor campaign's traffic via a
+    # low-priority intercept rule.
+    CAMPAIGN_AUTO_MATCH_RULE_CREATE = "campaign.auto_match_rule.create"
+    CAMPAIGN_AUTO_MATCH_RULE_DELETE = "campaign.auto_match_rule.delete"
+    CAMPAIGN_BACKFILL_ENQUEUE = "campaign.backfill.enqueue"
+    CAMPAIGN_DUPLICATE = "campaign.duplicate"
+
 
 class AuditService:
     """Centralized audit logging service.

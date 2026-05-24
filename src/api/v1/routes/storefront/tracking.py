@@ -27,6 +27,9 @@ from src.api.dependencies.repositories import (
 )
 from src.application.services import customer_touch_service
 from src.application.services.attribution_sanitizer import sanitize_utm
+from src.application.services.campaign_auto_match import (
+    resolve_via_auto_match,
+)
 from src.application.services.campaign_resolver import resolve_campaign_id
 from src.application.services.device_classifier import classify as classify_device
 from src.config import settings
@@ -352,6 +355,25 @@ async def track_page_view(
             store_id=store.id,
             utm_campaign=f_utm_campaign,
         )
+        # Feature 002 US4 — fall through to auto-match rules ONLY when
+        # short_code resolution returned no campaign. Explicit beats
+        # implicit per FR-019 (a URL carrying a recognized short_code
+        # wins over any rule a merchant configured). Failure here is
+        # silently swallowed — auto-match misses must never break the
+        # storefront response.
+        if f_campaign_id is None:
+            try:
+                f_campaign_id = await resolve_via_auto_match(
+                    funnel_repo.session,
+                    store.id,
+                    {
+                        "utm_source": f_utm_source,
+                        "utm_medium": f_utm_medium,
+                        "utm_campaign": f_utm_campaign,
+                    },
+                )
+            except Exception:
+                f_campaign_id = None
         await _emit_funnel_event(
             funnel_repo=funnel_repo,
             idempotency=idempotency,
