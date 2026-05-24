@@ -1,0 +1,215 @@
+openapi: 3.1.0
+info:
+  title: NUMU WhatsApp Templates API
+  version: 1.0.0
+  description: |
+    Submit, sync, and inspect Meta WhatsApp message templates per store. Phase 1
+    adds real submission-to-Meta (previously the existing endpoint only persisted
+    locally) and webhook-driven status updates.
+
+servers:
+  - url: https://numueg.app/api/v1
+
+paths:
+  /stores/{store_id}/whatsapp/templates:
+    get:
+      summary: List templates for a store
+      operationId: listTemplates
+      tags: [whatsapp-templates]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, FLAGGED, PAUSED, DISABLED]
+        - in: query
+          name: category
+          schema: { type: string, enum: [UTILITY, MARKETING, AUTHENTICATION] }
+        - in: query
+          name: is_system
+          schema: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Template" }
+
+    post:
+      summary: Submit a new template to Meta for approval (BYO-only)
+      description: |
+        Phase 1: custom template submission is permitted only for stores in `byo`
+        mode. Stores in `platform_managed` mode share NUMU's single platform WABA;
+        allowing per-merchant template submission against the shared WABA would
+        leak templates across stores, exhaust the WABA's approval budget, and let
+        one merchant's rejected template degrade the quality rating for every
+        other platform-managed store. Platform-managed stores rely on seeded
+        system templates (FR-030).
+      operationId: submitTemplate
+      tags: [whatsapp-templates]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TemplateSubmission" }
+      responses:
+        "201":
+          description: Template submitted to Meta and persisted locally with status=PENDING.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "403":
+          description: |
+            Store is in `platform_managed` mode; custom template submission requires BYO.
+            Connect a BYO Meta WABA first (see /whatsapp/byo/connect), or use one of
+            the seeded system templates.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [template_submission_requires_byo]
+                  message: { type: string }
+        "422":
+          description: Meta rejected the submission synchronously (invalid content, name collision, etc.).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meta_error_code: { type: string }
+                  meta_error_message: { type: string }
+                  field: { type: string, nullable: true }
+
+  /stores/{store_id}/whatsapp/templates/sync:
+    post:
+      summary: Pull current status for all PENDING templates from Meta
+      operationId: syncTemplates
+      tags: [whatsapp-templates]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated_count: { type: integer }
+                  templates:
+                    type: array
+                    items: { $ref: "#/components/schemas/Template" }
+
+  /stores/{store_id}/whatsapp/templates/{template_id}:
+    get:
+      operationId: getTemplate
+      tags: [whatsapp-templates]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: path
+          name: template_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+
+    delete:
+      operationId: deleteTemplate
+      tags: [whatsapp-templates]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: path
+          name: template_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Template deleted locally and from Meta (best-effort). System templates cannot be deleted.
+
+components:
+  parameters:
+    StoreId:
+      in: path
+      name: store_id
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    TemplateSubmission:
+      type: object
+      required: [name, language, category, components]
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z][a-z0-9_]*$"
+          description: Meta requires lowercase + snake_case.
+        language:
+          type: string
+          example: en
+        category:
+          type: string
+          enum: [UTILITY, MARKETING, AUTHENTICATION]
+        components:
+          type: array
+          items: { $ref: "#/components/schemas/TemplateComponent" }
+          description: Meta-format components (HEADER, BODY, FOOTER, BUTTONS).
+
+    TemplateComponent:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [HEADER, BODY, FOOTER, BUTTONS]
+        format:
+          type: string
+          enum: [TEXT, IMAGE, DOCUMENT, VIDEO]
+          nullable: true
+        text: { type: string, nullable: true }
+        buttons:
+          type: array
+          nullable: true
+          items: { type: object, additionalProperties: true }
+
+    Template:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        store_id: { type: string, format: uuid }
+        meta_template_id: { type: string, nullable: true }
+        name: { type: string }
+        language: { type: string }
+        category: { type: string, enum: [UTILITY, MARKETING, AUTHENTICATION] }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, FLAGGED, PAUSED, DISABLED] }
+        rejection_reason: { type: string, nullable: true }
+        is_system: { type: boolean }
+        body_text: { type: string, nullable: true }
+        header_type: { type: string, nullable: true }
+        footer_text: { type: string, nullable: true }
+        buttons:
+          type: array
+          nullable: true
+          items: { type: object, additionalProperties: true }
+        submitted_at: { type: string, format: date-time, nullable: true }
+        approved_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

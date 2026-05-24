@@ -1,0 +1,124 @@
+openapi: 3.1.0
+info:
+  title: NUMU WhatsApp Dead-Letter API
+  version: 1.0.0
+  description: Operator surface for inspecting and replaying failed WhatsApp sends. 90-day retention.
+
+servers:
+  - url: https://numueg.app/api/v1
+
+paths:
+  /stores/{store_id}/whatsapp/dead-letters:
+    get:
+      summary: List dead-letters for a store
+      operationId: listDeadLetters
+      tags: [whatsapp-dead-letters]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: query
+          name: originating_context
+          schema:
+            type: string
+            enum: [order_created, order_paid, order_status_changed, campaign, scheduled_send, abandoned_cart, ad_hoc]
+        - in: query
+          name: replay_state
+          schema: { type: string, enum: [not_replayed, replaying, replayed_success, replayed_failed] }
+        - in: query
+          name: error_classification
+          schema: { type: string, enum: [retriable_exhausted, non_retriable] }
+        - in: query
+          name: created_after
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DeadLetter" }
+
+  /stores/{store_id}/whatsapp/dead-letters/{dl_id}:
+    get:
+      operationId: getDeadLetter
+      tags: [whatsapp-dead-letters]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: path
+          name: dl_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeadLetter" }
+
+  /stores/{store_id}/whatsapp/dead-letters/{dl_id}/replay:
+    post:
+      summary: Replay a dead-letter (double-send-guarded against message_log)
+      operationId: replayDeadLetter
+      tags: [whatsapp-dead-letters]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+        - in: path
+          name: dl_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "202":
+          description: Replay accepted; final state reflected in `replay_state` after the worker runs.
+        "409":
+          description: Already in `replaying` or `replayed_success`; refuse to double-send.
+
+components:
+  parameters:
+    StoreId:
+      in: path
+      name: store_id
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    DeadLetter:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        store_id: { type: string, format: uuid }
+        phone: { type: string }
+        customer_id: { type: string, format: uuid, nullable: true }
+        template_id: { type: string, format: uuid, nullable: true }
+        template_params: { type: object, additionalProperties: true, nullable: true }
+        text_message: { type: string, nullable: true }
+        originating_context:
+          type: string
+          enum: [order_created, order_paid, order_status_changed, campaign, scheduled_send, abandoned_cart, ad_hoc]
+        originating_context_id: { type: string, format: uuid, nullable: true }
+        error_history:
+          type: array
+          items:
+            type: object
+            properties:
+              attempt_n: { type: integer }
+              at: { type: string, format: date-time }
+              http_status: { type: integer, nullable: true }
+              meta_error_code: { type: string, nullable: true }
+              error_message: { type: string }
+        error_classification: { type: string, enum: [retriable_exhausted, non_retriable] }
+        final_error_code: { type: string, nullable: true }
+        replay_state: { type: string, enum: [not_replayed, replaying, replayed_success, replayed_failed] }
+        replayed_at: { type: string, format: date-time, nullable: true }
+        replayed_by: { type: string, format: uuid, nullable: true }
+        replayed_send_id: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

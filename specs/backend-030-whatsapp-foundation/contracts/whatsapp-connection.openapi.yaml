@@ -1,0 +1,214 @@
+openapi: 3.1.0
+info:
+  title: NUMU WhatsApp Connection API (BYO + Platform-Managed)
+  version: 1.0.0
+  description: |
+    Per-store WhatsApp connection management. Supports two modes:
+    - `platform_managed`: store uses NUMU's platform Meta credentials.
+    - `byo`: store uses merchant-supplied Meta Cloud API credentials, validated and encrypted.
+
+servers:
+  - url: https://numueg.app/api/v1
+
+paths:
+  /stores/{store_id}/whatsapp/status:
+    get:
+      summary: Read current WhatsApp connection status
+      operationId: getWhatsAppStatus
+      tags: [whatsapp-connection]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: Current connection status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode, connected, notifications]
+                properties:
+                  mode:
+                    type: string
+                    enum: [platform_managed, byo]
+                  connected:
+                    type: boolean
+                  phone_display_name:
+                    type: string
+                    nullable: true
+                  display_phone_number:
+                    type: string
+                    nullable: true
+                  quality_rating:
+                    type: string
+                    enum: [GREEN, YELLOW, RED, UNKNOWN]
+                    nullable: true
+                  waba_id:
+                    type: string
+                    nullable: true
+                    description: Only exposed for BYO; null for platform_managed.
+                  last_validated_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  credential_error:
+                    type: string
+                    nullable: true
+                    description: Set when last send failed with credential-class error; cleared on next successful validation.
+                  notifications:
+                    $ref: "#/components/schemas/NotificationSettings"
+
+  /stores/{store_id}/whatsapp/byo/connect:
+    post:
+      summary: Connect merchant's own Meta WhatsApp Business Account (BYO)
+      operationId: connectByoCredentials
+      tags: [whatsapp-connection]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [access_token, phone_number_id, waba_id, app_secret]
+              properties:
+                access_token:
+                  type: string
+                  description: Meta System User Access Token with whatsapp_business_management + whatsapp_business_messaging scopes.
+                phone_number_id:
+                  type: string
+                  description: Numeric ID of the phone number under the WABA.
+                waba_id:
+                  type: string
+                  description: WhatsApp Business Account ID.
+                app_secret:
+                  type: string
+                  description: Meta App secret used for webhook signature verification on this WABA's webhooks (BYO merchants point their app webhook at NUMU).
+      responses:
+        "201":
+          description: BYO credentials validated and stored; mode is now `byo`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+        "422":
+          description: Validation failed at one of the three Meta read steps.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BYOValidationFailure" }
+        "409":
+          description: Store is already in BYO mode; disconnect first or update via PATCH (future).
+
+  /stores/{store_id}/whatsapp/byo/disconnect:
+    delete:
+      summary: Disconnect BYO and revert to platform-managed
+      operationId: disconnectByoCredentials
+      tags: [whatsapp-connection]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          description: Reverted to platform-managed; notification toggles restored from prior platform-managed snapshot or defaulted to ENABLED.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /stores/{store_id}/whatsapp/notifications:
+    get:
+      summary: Read per-message-type notification toggles
+      operationId: getNotificationSettings
+      tags: [whatsapp-connection]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationSettings" }
+    patch:
+      summary: Update per-message-type notification toggles
+      operationId: updateNotificationSettings
+      tags: [whatsapp-connection]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/StoreId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: boolean
+              description: Partial update; only included keys are changed.
+              example:
+                order_confirmation: true
+                payment_received: true
+                marketing: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationSettings" }
+
+components:
+  parameters:
+    StoreId:
+      in: path
+      name: store_id
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    StatusResponse:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [platform_managed, byo]
+        connected: { type: boolean }
+        phone_display_name: { type: string, nullable: true }
+        display_phone_number: { type: string, nullable: true }
+        last_validated_at: { type: string, format: date-time, nullable: true }
+        notifications: { $ref: "#/components/schemas/NotificationSettings" }
+
+    NotificationSettings:
+      type: object
+      properties:
+        order_confirmation: { type: boolean }
+        payment_received: { type: boolean }
+        shipping_update: { type: boolean }
+        delivery_confirmation: { type: boolean }
+        abandoned_cart: { type: boolean }
+        marketing: { type: boolean }
+      additionalProperties:
+        type: boolean
+
+    BYOValidationFailure:
+      type: object
+      required: [failed_step, code, message]
+      properties:
+        failed_step:
+          type: string
+          enum: [phone_metadata_read, waba_info_read, template_list_read]
+        code:
+          type: string
+          enum:
+            - phone_number_unreachable
+            - waba_mismatch
+            - insufficient_scope
+            - meta_api_unavailable
+            - unknown
+        message: { type: string, description: Operator-readable summary }
+        meta_error:
+          type: object
+          nullable: true
+          description: Raw error body from Meta when available.
+
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
