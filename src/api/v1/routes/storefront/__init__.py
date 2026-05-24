@@ -22,6 +22,9 @@ from src.api.v1.routes.storefront.checkout import router as checkout_router
 from src.api.v1.routes.storefront.checkout_config import (
     router as checkout_config_router,
 )
+from src.api.v1.routes.storefront.checkout_session import (
+    router as checkout_session_router,
+)
 from src.api.v1.routes.storefront.coupon import router as coupon_router
 from src.api.v1.routes.storefront.currencies import router as currencies_router
 from src.api.v1.routes.storefront.customer import router as customer_router
@@ -83,6 +86,7 @@ __all__ = [
     "shipping_quote_router",
     "shipping_router",
     "checkout_config_router",
+    "checkout_session_router",
     "bundles_router",
     "geocode_router",
 ]

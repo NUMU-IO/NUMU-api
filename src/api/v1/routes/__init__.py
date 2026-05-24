@@ -101,6 +101,9 @@ from src.api.v1.routes.storefront import (
     checkout_router as storefront_checkout_router,
 )
 from src.api.v1.routes.storefront import (
+    checkout_session_router as storefront_checkout_session_router,
+)
+from src.api.v1.routes.storefront import (
     coupon_router as storefront_coupon_router,
 )
 from src.api.v1.routes.storefront import (
@@ -333,6 +336,16 @@ api_router.include_router(
 api_router.include_router(
     storefront_checkout_config_router,
     prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Checkout"],
+)
+
+# Storefront - checkout-session token issue (anonymous; authenticated by
+# the existing numu_cart_session cookie via get_cart_owner). Used by phone-
+# bound storefront endpoints — currently the WhatsApp opt-in (FR-007a/b).
+# Path is /storefront/{store_slug}/checkout-session per the route's own
+# decorator; no extra prefix here.
+api_router.include_router(
+    storefront_checkout_session_router,
     tags=["Storefront - Checkout"],
 )
 
