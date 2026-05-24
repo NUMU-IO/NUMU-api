@@ -76,6 +76,11 @@ class CreateCampaignRequest(BaseModel):
     audience_filter: dict | None = None
     scheduled_at: datetime | None = None
     note: str | None = Field(None, max_length=2_000)
+    # See MarketingCampaign.promoted_item docstring for shape. Stored
+    # verbatim — the hub's PromotedItemPicker fills the snapshot from its
+    # existing product list so we don't re-query here. NULL means "this
+    # campaign isn't promoting a specific item" (just a freeform message).
+    promoted_item: dict | None = None
 
 
 class UpdateCampaignRequest(BaseModel):
@@ -86,6 +91,7 @@ class UpdateCampaignRequest(BaseModel):
     segment_id: UUID | None = None
     audience_filter: dict | None = None
     note: str | None = None
+    promoted_item: dict | None = None
 
 
 class ScheduleRequest(BaseModel):
@@ -111,6 +117,7 @@ class CampaignResponse(BaseModel):
     delivered_count: int
     failed_count: int
     note: str | None = None
+    promoted_item: dict | None = None
     created_at: str
     updated_at: str
 
@@ -135,6 +142,7 @@ def _to_response(c: MarketingCampaign) -> CampaignResponse:
         delivered_count=c.delivered_count,
         failed_count=c.failed_count,
         note=c.note,
+        promoted_item=c.promoted_item,
         created_at=c.created_at.isoformat() if c.created_at else "",
         updated_at=c.updated_at.isoformat() if c.updated_at else "",
     )
@@ -213,6 +221,7 @@ async def create_campaign(
                 audience_filter=body.audience_filter,
                 scheduled_at=body.scheduled_at,
                 note=body.note,
+                promoted_item=body.promoted_item,
                 created_by=user_id,
                 short_code=short_code,
             )
@@ -510,6 +519,8 @@ async def update_campaign(
             row.audience_filter = body.audience_filter
         if body.note is not None:
             row.note = body.note
+        if body.promoted_item is not None:
+            row.promoted_item = body.promoted_item
         await session.flush()
         updated = await repo.get_by_id(campaign_id)
         await session.commit()
@@ -670,6 +681,7 @@ async def duplicate_campaign(
                 audience_filter=source.audience_filter,
                 scheduled_at=None,
                 note=source.note,
+                promoted_item=source.promoted_item,
                 created_by=user_id,
                 short_code=new_short_code,
             )

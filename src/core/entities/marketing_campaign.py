@@ -106,6 +106,28 @@ class MarketingCampaign(BaseEntity):
     failed_count: int = 0
     # Free-form merchant note.
     note: str | None = None
+    # "What is this campaign promoting?" — drives both the message body
+    # template (Vionne-styled email, generated client-side at v1; will
+    # move to /marketing/templates/preview when feature-007 lands) and
+    # the trackable-link panel auto-prefill in the hub.
+    #
+    # Shape: {
+    #   "kind": "product" | "collection" | "page",
+    #   "ref_id": "<product_id | collection_slug | page_path>",
+    #   "snapshot": {
+    #     "name": "...",
+    #     "image_url": "...",
+    #     "price": "...",
+    #     "currency": "EGP",
+    #     "url": "https://<store>.numueg.app/..."
+    #   }
+    # }
+    #
+    # Snapshot is cached at create / update time so a campaign's preview
+    # always shows what the customer received — even if the underlying
+    # product is renamed or repriced after the send. Stored verbatim;
+    # backend doesn't re-resolve. Hub-side picker pre-fills the snapshot.
+    promoted_item: dict[str, Any] | None = None
     created_by: UUID | None = None
     # Stable Crockford base32 identifier embedded in trackable-link
     # utm_campaign values. Generated server-side at create time so links
