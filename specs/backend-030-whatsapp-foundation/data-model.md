@@ -141,6 +141,31 @@ Two changes:
 
 ---
 
+## New Redis-backed entity: `CheckoutSession`
+
+A short-lived, anonymous-storefront-issued token used to authenticate phone-bound state changes during checkout (initially: WhatsApp opt-in; future: abandoned-checkout recovery, push-token registration, etc.). Lives in Redis only — no Postgres row, no RLS implications (Redis is keyspace-scoped, not tenant-scoped).
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `token` | UUID (string) | Opaque to caller; the Redis key |
+| `cart_session_id` | UUID (string) | Links to the `numu_cart_session` cookie value |
+| `store_id` | UUID (string) | Tenant the cart belongs to |
+| `phone` | E.164 string | The phone the customer entered at the Contact step |
+| `issued_at` | ISO-8601 timestamp | |
+| `expires_at` | ISO-8601 timestamp | issued_at + 30 minutes |
+
+**Redis key shape**: `checkout_session:{token}` → JSON value above; TTL = 1800 s (30 min).
+
+**Lifecycle**:
+- Issued by `POST /storefront/{store_slug}/checkout-session` at the Contact step of checkout (FR-007b).
+- Read by `POST /storefront/{store_slug}/whatsapp/opt-in` (FR-007a) and any future phone-bound anonymous storefront endpoint.
+- Auto-expires; no explicit deletion required (Redis TTL handles purge).
+- A given customer / cart can re-issue (new tokens on each Contact-step revisit); old tokens remain valid until TTL.
+
+**Why Redis, not Postgres**: 30-min ephemeral state; no need for tenant isolation through RLS; lookup latency is sub-ms; aligns with existing cart-session storage which is also Redis-backed (see `src/infrastructure/repositories/cart_repository.py`).
+
+---
+
 ## Extension: `customers.metadata['whatsapp_prefs']`
 
 JSONB nested dict on the existing `customers.metadata`. No schema change required. Phase 1 reads these keys (all default `True`):
