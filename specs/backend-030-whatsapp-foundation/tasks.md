@@ -176,22 +176,24 @@ description: "Task list for WhatsApp Integration Phase 1 — Backend Foundation"
 
 ### Tests for US3
 
-- [ ] T053 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_dispatcher.py` — create row with `scheduled_for = NOW + 90s`; trigger dispatcher; within 2 min row is `sent` and `message_log` has the entry; assert lag metric ≤ 120s
-- [ ] T054 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_cancel_explicit.py` — DELETE on pending row → status `cancelled`, no send fires
-- [ ] T055 [P] [US3] Integration test `tests/integration/whatsapp/test_cascade_cancel_on_order_cancel.py` — schedule 3 sends for an order; emit `OrderStatusChangedEvent(new_status='cancelled')`; assert all 3 → `cancelled`
-- [ ] T056 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_optout_at_dispatch_time.py` — schedule send; insert opt-out row; trigger dispatcher; assert row → `skipped` with `skip_reason='opt_out'`, NOT `failed`
-- [ ] T057 [P] [US3] Integration test `tests/integration/whatsapp/test_scheduled_send_concurrent_dispatch.py` — two parallel dispatcher invocations on same row → `FOR UPDATE SKIP LOCKED` ensures exactly one send
+- [X] T053 [P] [US3] *Folded into `tests/integration/whatsapp/test_us3_scheduled_sends.py`* — `test_dispatcher_fires_due_send_within_two_minutes` covers AS-1.
+- [X] T054 [P] [US3] *Folded into same file* — `test_explicit_cancel_blocks_dispatch` covers AS-2.
+- [X] T055 [P] [US3] *Folded into same file* — `test_order_cancel_cascades_*` + `_refund_also_cascades` + `_non_terminal_does_not_cascade` cover AS-3 (FR-016).
+- [X] T056 [P] [US3] *Folded into same file* — `test_opt_out_between_schedule_and_dispatch_skips_not_fails` covers FR-017 (guard re-evaluated at dispatch time → `skipped` not `failed`).
+- [X] T057 [P] [US3] *Folded into same file* — `test_two_concurrent_dispatchers_fire_each_row_once` (asyncio.gather two dispatchers; SKIP LOCKED ensures exactly one dispatch).
+
+> Plus 3 schedule-time validation tests: rejects past `scheduled_for`, rejects non-APPROVED template, rejects `template_id` XOR `text_message` violation.
 
 ### Implementation for US3
 
-- [ ] T058 [P] [US3] Create `src/application/use_cases/whatsapp/schedule_send.py` — validates `scheduled_for > now`, validates template is APPROVED if `template_id` set, validates either `template_id` XOR `text_message` set, creates row
-- [ ] T059 [P] [US3] Create `src/application/use_cases/whatsapp/cancel_scheduled_send.py` — single-cancel (by send_id) and bulk-cancel (by related_order_id) variants; 409 if status not `pending`
-- [ ] T060 [US3] Create `src/api/v1/routes/stores/whatsapp_scheduled_sends.py` per `whatsapp-scheduled-sends.openapi.yaml`: GET list, POST create, GET get, DELETE cancel
-- [ ] T061 [US3] Create `src/infrastructure/messaging/tasks/whatsapp_scheduled_send_dispatcher.py` — Celery beat task `numu_api.whatsapp.dispatch_scheduled_sends` running every 60s; uses `tenant_session(store_id)` (TASK-SEC-005); `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 100`; per-row re-runs send guard at dispatch-time; failures route to `WhatsAppMessagingService` retry/DLQ path (US6)
-- [ ] T062 [US3] Add Celery beat schedule entry for `dispatch_scheduled_sends` (every 60s) in the existing beat config
-- [ ] T063 [US3] Create `src/infrastructure/events/handlers/whatsapp_scheduled_cancel_handler.py` — subscribes to `OrderStatusChangedEvent`; when `new_status in {'cancelled', 'refunded'}` calls `cancel_scheduled_send(related_order_id=event.order_id)`
-- [ ] T064 [US3] Register the cascade-cancel handler in `src/infrastructure/events/setup.py`
-- [ ] T065 [US3] Register the new scheduled-sends router
+- [X] T058 [P] [US3] `src/application/use_cases/whatsapp/schedule_send.py` — `ScheduleSendUseCase`. Validates phone canonicalization, `scheduled_for > now`, template_id XOR text_message, template status=APPROVED. Raises `ScheduleSendError(code, message)` → 422 at API boundary.
+- [X] T059 [P] [US3] `src/application/use_cases/whatsapp/cancel_scheduled_send.py` — `CancelScheduledSendUseCase` with `execute(send_id)` (single, idempotent) and `cancel_by_order(order_id)` (bulk cascade for FR-016).
+- [X] T060 [US3] `src/api/v1/routes/stores/whatsapp_scheduled_sends.py` — GET list (status + related_order filterable), POST create, GET get, DELETE cancel; 404 not-found, 409 not-pending + race-with-dispatcher.
+- [X] T061 [US3] `src/infrastructure/messaging/tasks/whatsapp_scheduled_send_dispatcher.py` — Celery beat task `numu_api.whatsapp.dispatch_scheduled_sends`. `_dispatch_all_tenants` uses `RLSBypassContext` to find tenants with due rows, then `_dispatch_for_tenant` runs under `RLSContext(tenant_id)` so all queries are RLS-filtered (TASK-SEC-005 enforced). Uses `repo.list_due(now, limit=100)` which is FOR UPDATE SKIP LOCKED. Guard re-evaluated for each row via `_evaluate_guard` (FR-017). Failures route to `mark_failed` for now; full retry/DLQ wiring lands with US6.
+- [X] T062 [US3] Beat-schedule entry `dispatch-whatsapp-scheduled-sends` added in `src/infrastructure/messaging/celery_app.py`, fires every 60s. Task module added to Celery `imports=[]`.
+- [X] T063 [US3] `src/infrastructure/events/handlers/whatsapp_scheduled_cancel_handler.py` — `handle_order_status_for_scheduled_cancel` subscribes to `OrderStatusChangedEvent`; fires only on `new_status in {cancelled, refunded}`; resolves tenant via RLSBypass lookup of `StoreModel.tenant_id`, sets tenant context, then `CancelScheduledSendUseCase.cancel_by_order(event.order_id)`. Best-effort: failures logged but never bubble to the OrderStatusChangedEvent fanout.
+- [X] T064 [US3] Cascade-cancel handler registered in `src/infrastructure/events/setup.py` for `OrderStatusChangedEvent`.
+- [X] T065 [US3] `whatsapp_scheduled_sends_module` registered in `src/api/v1/routes/stores/__init__.py`.
 
 **Checkpoint**: US3 fully functional. Scheduled sends fire within ±2 min, cancel cleanly, cascade on order cancellation, and re-evaluate guards at dispatch-time.
 
