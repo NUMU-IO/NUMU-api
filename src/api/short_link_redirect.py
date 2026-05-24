@@ -64,6 +64,52 @@ async def _bump_async(short_link_id: str) -> None:
 
 
 @router.get(
+    "/api/v1/short-links/{short_code}/resolve",
+    summary="JSON-resolve a short_code (used by storefront /r/{code} pages)",
+    operation_id="resolve_short_link_json",
+    responses={
+        200: {"description": "Destination URL"},
+        404: {"description": "Unknown, disabled, or expired short_code"},
+    },
+)
+async def resolve_short_link_json(
+    background_tasks: BackgroundTasks,
+    short_code: str = Path(
+        ...,
+        min_length=4,
+        max_length=12,
+        pattern=_CODE_PATTERN,
+    ),
+):
+    """JSON variant of the redirector.
+
+    Feature 002 changed the displayed short URL to use the merchant's
+    own storefront host (``<store>.numueg.app/r/{code}``) instead of
+    the apex. The storefronts don't run FastAPI, so they need a way to
+    look up the destination from the API. This endpoint returns the
+    destination URL as JSON; the storefront's ``/r/:code`` route
+    fetches it and ``window.location.replace``s.
+
+    Public — no auth — same security profile as the 302 path: codes
+    are sharing artifacts; not-found / disabled / expired all return
+    404 (no info leak).
+    """
+    from fastapi import HTTPException
+
+    normalized = short_code.upper()
+    async with AsyncSessionLocal() as session:
+        row = await short_link_service.resolve_short_code(
+            session=session,
+            short_code=normalized,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    background_tasks.add_task(_bump_async, row.id)
+    return {"destination_url": row.destination_url, "short_code": normalized}
+
+
+@router.get(
     "/r/{short_code}",
     summary="Redirect a short_code to its destination URL",
     operation_id="resolve_short_link",

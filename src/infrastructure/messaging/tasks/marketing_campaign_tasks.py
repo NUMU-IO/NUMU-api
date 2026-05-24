@@ -206,6 +206,25 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
 
             sent = 0
             failed = 0
+            canceled = False
+
+            # Mid-loop cancellation poll cadence — every N recipients we
+            # re-read the campaign's status and bail out if the merchant
+            # clicked Cancel after dispatch started. 25 is a sweet spot:
+            # one DB round-trip per ~25 sends keeps the cancel response
+            # snappy without dominating throughput.
+            _CANCEL_POLL_INTERVAL = 25
+
+            async def _check_canceled(idx: int) -> bool:
+                """Poll the campaign's status every N sends. Returns True
+                when the merchant has flipped it to CANCELED.
+                """
+                if idx % _CANCEL_POLL_INTERVAL != 0:
+                    return False
+                current = await repo.get_by_id(campaign.id)
+                if current is None:
+                    return True  # row vanished; treat as cancel
+                return current.status == CampaignStatus.CANCELED
 
             if campaign.channel == CampaignChannel.SMS:
                 from src.infrastructure.external_services.twilio import (
@@ -214,7 +233,10 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
 
                 twilio = TwilioSMSService()
                 body = campaign.inline_body or ""
-                for to in recipients:
+                for idx, to in enumerate(recipients):
+                    if await _check_canceled(idx):
+                        canceled = True
+                        break
                     result = await twilio.send(to=to, body=body)
                     if result.success:
                         sent += 1
@@ -235,7 +257,10 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
                 service = _email_module.ResendEmailService()
                 subject = campaign.inline_subject or campaign.name
                 body = campaign.inline_body or ""
-                for to in recipients:
+                for idx, to in enumerate(recipients):
+                    if await _check_canceled(idx):
+                        canceled = True
+                        break
                     try:
                         ok = await service.send_email(
                             EmailMessage(
@@ -263,6 +288,18 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
                         failed += 1
                         await repo.update_counters(campaign.id, failed_delta=1)
                 await session.commit()
+
+            # If the merchant canceled mid-flight, the cancel route
+            # already transitioned the campaign to CANCELED — don't
+            # overwrite that with COMPLETED here. Just return early.
+            if canceled:
+                return {
+                    "campaign_id": str(campaign.id),
+                    "sent": sent,
+                    "failed": failed,
+                    "status": "canceled",
+                    "canceled_at_recipient": sent + failed,
+                }
 
             await repo.transition(campaign.id, CampaignStatus.COMPLETED)
             await session.commit()
