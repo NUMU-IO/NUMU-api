@@ -59,6 +59,10 @@ VALID_CAMPAIGN_TRANSITIONS: dict[CampaignStatus, list[CampaignStatus]] = {
     CampaignStatus.SENDING: [
         CampaignStatus.COMPLETED,
         CampaignStatus.FAILED,
+        # Merchant can cancel mid-flight. The dispatch task polls the
+        # status before each recipient send and short-circuits when it
+        # sees CANCELED — see _dispatch_campaign_async.
+        CampaignStatus.CANCELED,
     ],
     CampaignStatus.COMPLETED: [],
     CampaignStatus.FAILED: [],
