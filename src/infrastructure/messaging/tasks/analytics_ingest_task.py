@@ -77,6 +77,10 @@ async def _insert_funnel_event(event: dict[str, Any]) -> bool:
         "utm_content": event.get("utm_content"),
         "campaign_id": _coerce_uuid(event.get("campaign_id")),
         "referrer": event.get("referrer"),
+        # Feature 002 US3 — device classification (mobile/tablet/desktop).
+        # Legacy task payloads without this key get NULL — the donut
+        # surfaces it as the "Unknown" bucket.
+        "device": event.get("device"),
     }
 
     stmt = pg_insert(FunnelEventModel).values(**payload)

@@ -82,6 +82,11 @@ dependencies = [
     # Admin Panel
     "sqladmin>=0.16.0",
     "wtforms>=3.1.0",
+
+    # Feature 002 — marketing-campaigns-v2: UA classification for
+    # the "Sessions by device" chart panel on the campaign detail page.
+    # Vendored Browserscope regex db, MIT-licensed, ~2M downloads/week.
+    "ua-parser>=0.18.0",
 ]
 
 [project.optional-dependencies]

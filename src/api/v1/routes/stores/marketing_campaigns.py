@@ -239,6 +239,211 @@ async def create_campaign(
     return SuccessResponse(data=_to_response(created), message="Campaign created")
 
 
+# ── Cross-campaign comparison (feature 002 US7) ──────────────────
+#
+# MUST be declared BEFORE the dynamic /{campaign_id} route so FastAPI
+# matches the static path first; otherwise "compare" would be parsed
+# as a UUID and 422 out.
+
+
+class CompareKpis(BaseModel):
+    sessions: int
+    sales_cents: int
+    orders: int
+    average_order_value_cents: int
+
+
+class CompareSeriesPoint(BaseModel):
+    date: str
+    sessions: int
+    sales_cents: int
+
+
+class CompareCampaignBlock(BaseModel):
+    id: str
+    name: str | None
+    short_code: str | None
+    status: str | None
+    found: bool
+    kpis: CompareKpis | None
+    series: list[CompareSeriesPoint]
+
+
+class CompareWarning(BaseModel):
+    code: str
+    message: str
+
+
+class CompareResponse(BaseModel):
+    date_from: str
+    date_to: str
+    attribution_model: str
+    granularity: str
+    campaigns: list[CompareCampaignBlock]
+    warnings: list[CompareWarning] = []
+
+
+@router.get(
+    "/compare",
+    response_model=SuccessResponse[CompareResponse],
+    summary="Compare 2-4 campaigns side-by-side",
+    operation_id="compare_marketing_campaigns",
+)
+async def compare_campaigns(
+    store_id: UUID,
+    ids: str = Query(..., description="Comma-separated campaign UUIDs (2-4)"),
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+    granularity: Literal["day", "week"] | None = Query(None),
+):
+    """Side-by-side comparison of 2-4 campaigns.
+
+    SEC-001: every requested id is pre-filtered against the path
+    store_id BEFORE any data is read. IDs from a different tenant are
+    returned with ``found: false`` + a warning — NEVER a stub with a
+    name/short_code that would confirm their existence in another
+    tenant.
+    """
+    _validate_window(date_from, date_to)
+
+    try:
+        requested_ids = [UUID(s.strip()) for s in ids.split(",") if s.strip()]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid UUID in ids: {exc!s}",
+        ) from exc
+
+    if len(requested_ids) < 2 or len(requested_ids) > 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pick 2 to 4 campaigns",
+        )
+
+    # Pick granularity: day for windows < 60 days, else week. Caller
+    # can override via the query param.
+    chosen_granularity = granularity or (
+        "day" if (date_to - date_from).days < 60 else "week"
+    )
+
+    # SEC-001 pre-filter: load only the campaigns that actually belong
+    # to this store. Unknown / cross-tenant ids drop here.
+    async with AsyncSessionLocal() as session:
+        repo = MarketingCampaignRepository(session)
+        loaded_by_id: dict[UUID, object] = {}
+        for cid in requested_ids:
+            c = await repo.get_by_id(cid)
+            if c is not None and c.store_id == store_id:
+                loaded_by_id[cid] = c
+
+        found_ids = list(loaded_by_id.keys())
+
+        if not found_ids:
+            return SuccessResponse(
+                data=CompareResponse(
+                    date_from=date_from.isoformat(),
+                    date_to=date_to.isoformat(),
+                    attribution_model=attribution_model,
+                    granularity=chosen_granularity,
+                    campaigns=[
+                        CompareCampaignBlock(
+                            id=str(cid),
+                            name=None,
+                            short_code=None,
+                            status=None,
+                            found=False,
+                            kpis=None,
+                            series=[],
+                        )
+                        for cid in requested_ids
+                    ],
+                    warnings=[
+                        CompareWarning(
+                            code="campaign_unavailable",
+                            message=(
+                                f"{len(requested_ids)} of {len(requested_ids)} "
+                                "campaigns are no longer available"
+                            ),
+                        )
+                    ],
+                ),
+                message="Comparison ready",
+            )
+
+        analytics = AnalyticsRepository(session)
+        compare = await analytics.campaign_compare(
+            store_id=store_id,
+            campaign_ids=found_ids,
+            date_from=date_from,
+            date_to=date_to,
+            granularity=chosen_granularity,
+        )
+
+    blocks: list[CompareCampaignBlock] = []
+    for cid in requested_ids:
+        if cid not in loaded_by_id:
+            blocks.append(
+                CompareCampaignBlock(
+                    id=str(cid),
+                    name=None,
+                    short_code=None,
+                    status=None,
+                    found=False,
+                    kpis=None,
+                    series=[],
+                )
+            )
+            continue
+        c = loaded_by_id[cid]
+        k = compare["kpis"].get(
+            cid,
+            {
+                "sessions": 0,
+                "orders": 0,
+                "sales_cents": 0,
+                "average_order_value_cents": 0,
+            },
+        )
+        s = compare["series_by_campaign"].get(cid, [])
+        blocks.append(
+            CompareCampaignBlock(
+                id=str(cid),
+                name=c.name,
+                short_code=c.short_code,
+                status=c.status.value if hasattr(c.status, "value") else str(c.status),
+                found=True,
+                kpis=CompareKpis(**k),
+                series=[CompareSeriesPoint(**pt) for pt in s],
+            )
+        )
+
+    missing = len(requested_ids) - len(found_ids)
+    warnings: list[CompareWarning] = []
+    if missing > 0:
+        warnings.append(
+            CompareWarning(
+                code="campaign_unavailable",
+                message=(
+                    f"{missing} of {len(requested_ids)} campaigns "
+                    "are no longer available"
+                ),
+            )
+        )
+
+    return SuccessResponse(
+        data=CompareResponse(
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            granularity=chosen_granularity,
+            campaigns=blocks,
+            warnings=warnings,
+        ),
+        message="Comparison ready",
+    )
+
+
 @router.get(
     "/{campaign_id}",
     response_model=SuccessResponse[CampaignResponse],
@@ -392,6 +597,85 @@ async def cancel_campaign(store_id: UUID, campaign_id: UUID):
         updated = await repo.transition(campaign_id, CampaignStatus.CANCELED)
         await session.commit()
     return SuccessResponse(data=_to_response(updated), message="Campaign canceled")
+
+
+@router.post(
+    "/{campaign_id}/duplicate",
+    response_model=SuccessResponse[CampaignResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Duplicate a campaign as a new Draft",
+    operation_id="duplicate_marketing_campaign",
+)
+async def duplicate_campaign(
+    store_id: UUID,
+    campaign_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """One-click duplicate (feature 002 US6).
+
+    Copies: name (suffixed " (Copy)"), channel, inline_subject,
+    inline_body, template_id, audience_filter, segment_id, note.
+    NOT copied: trackable links, auto-match rules, campaign activities,
+    coupons, status fields (always Draft), counters. Mints a fresh
+    short_code per FR-030.
+
+    SEC-002c: audit-log the duplicate so disputes ("who copied this
+    campaign?") have a definitive trail.
+    """
+    async with AsyncSessionLocal() as session:
+        repo = MarketingCampaignRepository(session)
+        source = await repo.get_by_id(campaign_id)
+        if source is None or source.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found",
+            )
+
+        # Fresh short_code generated against this store so the URL space
+        # stays unambiguous; the source's short_code MUST NOT be reused
+        # (uq_campaigns_store_short_code would reject anyway).
+        new_short_code = await generate_short_code(store_id, session)
+        new_name = f"{source.name} (Copy)"
+        # Truncate name if (Copy) suffix would exceed the model's 255-char cap.
+        if len(new_name) > 255:
+            new_name = new_name[:255]
+
+        created = await repo.create(
+            MarketingCampaign(
+                tenant_id=source.tenant_id,
+                store_id=store_id,
+                channel=source.channel,
+                name=new_name,
+                status=CampaignStatus.DRAFT,
+                template_id=source.template_id,
+                inline_subject=source.inline_subject,
+                inline_body=source.inline_body,
+                segment_id=source.segment_id,
+                audience_filter=source.audience_filter,
+                scheduled_at=None,
+                note=source.note,
+                created_by=user_id,
+                short_code=new_short_code,
+            )
+        )
+
+        await AuditService(session).log(
+            event_type=EventType.CAMPAIGN_DUPLICATE,
+            action="duplicate",
+            resource_type="marketing_campaign",
+            resource_id=str(created.id),
+            user_id=user_id,
+            store_id=store_id,
+            tenant_id=source.tenant_id,
+            new_value={
+                "source_campaign_id": str(campaign_id),
+                "new_campaign_id": str(created.id),
+                "channel": created.channel.value,
+            },
+        )
+        await session.commit()
+
+    return SuccessResponse(data=_to_response(created), message="Campaign duplicated")
 
 
 # ── Trackable-link generator (feature 001) ───────────────────────
@@ -806,6 +1090,408 @@ async def get_campaign_performance(
             ),
         ),
         message="Campaign performance retrieved",
+    )
+
+
+# ── Per-campaign breakdowns (feature 002 US3) ─────────────────────
+#
+# Five GET endpoints feeding the Shopify-style chart grid on the
+# campaign detail page. Each accepts ?date_from&date_to and is
+# (store_id, campaign_id, tenant)-scoped. The 365-day window cap
+# matches FR-028's backfill cap (consistent operator guardrail).
+# attribution_model query param is accepted for forward-compat with
+# US3's model pill but not yet consumed — breakdown semantics here are
+# stable across the model selector; only multi-touch credits change.
+
+
+_MAX_WINDOW_DAYS = 365
+
+
+async def _load_campaign_or_404(store_id: UUID, campaign_id: UUID):
+    """Common (store_id, campaign_id) tenant-scoped lookup.
+
+    Returns the campaign or raises 404. 404 (not 403) is the right
+    error per the existing SEC-001 convention — it avoids leaking
+    cross-tenant campaign existence.
+    """
+    async with AsyncSessionLocal() as session:
+        repo = MarketingCampaignRepository(session)
+        campaign = await repo.get_by_id(campaign_id)
+        if campaign is None or campaign.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found",
+            )
+        return campaign
+
+
+def _validate_window(date_from: datetime, date_to: datetime) -> None:
+    if date_to < date_from:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="date_to must be >= date_from",
+        )
+    if (date_to - date_from).days > _MAX_WINDOW_DAYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Date window cannot exceed {_MAX_WINDOW_DAYS} days",
+        )
+
+
+# Response models — flat shapes per contracts/analytics-breakdowns.md.
+# Each wraps a dict, with a Channel/Combo/Bin/Device row type.
+
+
+class _ChannelRow(BaseModel):
+    channel: str
+    sessions: int
+    sales_cents: int
+
+
+class CampaignBreakdownChannelResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    channels: list[_ChannelRow]
+
+
+class _UtmComboRow(BaseModel):
+    utm_source: str | None
+    utm_medium: str | None
+    utm_campaign: str | None
+    utm_term: str | None
+    utm_content: str | None
+    sessions: int
+    sales_cents: int
+
+
+class CampaignBreakdownUtmResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    combos: list[_UtmComboRow]
+
+
+class _CustomerTypeBlock(BaseModel):
+    orders: int
+    sales_cents: int
+
+
+class CampaignBreakdownCustomerTypeResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    new_customers: _CustomerTypeBlock
+    returning_customers: _CustomerTypeBlock
+
+
+class _OrderSizeBin(BaseModel):
+    lower_cents: int
+    upper_cents: int | None
+    orders: int
+
+
+class CampaignBreakdownOrderSizeResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    bins: list[_OrderSizeBin]
+
+
+class _DeviceRow(BaseModel):
+    device: str
+    sessions: int
+
+
+class CampaignBreakdownDeviceResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    devices: list[_DeviceRow]
+
+
+AttributionModel = Literal[
+    "last_touch", "first_touch", "linear", "time_decay", "position_based"
+]
+
+
+@router.get(
+    "/{campaign_id}/breakdown/channel",
+    response_model=SuccessResponse[CampaignBreakdownChannelResponse],
+    summary="Sessions + sales by channel for a campaign",
+    operation_id="get_campaign_breakdown_channel",
+)
+async def get_campaign_breakdown_channel(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        rows = await analytics.campaign_breakdown_channel(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownChannelResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            channels=[_ChannelRow(**r) for r in rows],
+        ),
+        message="Channel breakdown for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/utm",
+    response_model=SuccessResponse[CampaignBreakdownUtmResponse],
+    summary="Top UTM combos by sessions + sales",
+    operation_id="get_campaign_breakdown_utm",
+)
+async def get_campaign_breakdown_utm(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        rows = await analytics.campaign_breakdown_utm(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownUtmResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            combos=[_UtmComboRow(**r) for r in rows],
+        ),
+        message="UTM combo breakdown for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/customer-type",
+    response_model=SuccessResponse[CampaignBreakdownCustomerTypeResponse],
+    summary="Orders + sales by new vs returning customers",
+    operation_id="get_campaign_breakdown_customer_type",
+)
+async def get_campaign_breakdown_customer_type(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    """SEC-007: response shape exposes ONLY aggregates. The repo method
+    reads ``customers.first_touch_attribution`` JSONB internally for
+    the new-vs-returning classification but never surfaces it.
+    """
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        data = await analytics.campaign_breakdown_customer_type(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownCustomerTypeResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            new_customers=_CustomerTypeBlock(**data["new_customers"]),
+            returning_customers=_CustomerTypeBlock(**data["returning_customers"]),
+        ),
+        message="Customer-type breakdown for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/order-size",
+    response_model=SuccessResponse[CampaignBreakdownOrderSizeResponse],
+    summary="Histogram of order totals (10 fixed bins)",
+    operation_id="get_campaign_breakdown_order_size",
+)
+async def get_campaign_breakdown_order_size(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        bins = await analytics.campaign_breakdown_order_size(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownOrderSizeResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            bins=[_OrderSizeBin(**b) for b in bins],
+        ),
+        message="Order-size histogram for campaign",
+    )
+
+
+@router.get(
+    "/{campaign_id}/breakdown/device",
+    response_model=SuccessResponse[CampaignBreakdownDeviceResponse],
+    summary="Sessions by device class",
+    operation_id="get_campaign_breakdown_device",
+)
+async def get_campaign_breakdown_device(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        rows = await analytics.campaign_breakdown_device(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    return SuccessResponse(
+        data=CampaignBreakdownDeviceResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            devices=[_DeviceRow(**r) for r in rows],
+        ),
+        message="Device breakdown for campaign",
+    )
+
+
+# ── Tips (feature 002 US8) ───────────────────────────────────────
+
+
+class TipResponse(BaseModel):
+    id: str
+    severity: str
+    title: str
+    body: str
+    data: dict
+
+
+class CampaignTipsResponse(BaseModel):
+    campaign_id: str
+    date_from: str
+    date_to: str
+    attribution_model: str
+    tips: list[TipResponse]
+
+
+@router.get(
+    "/{campaign_id}/tips",
+    response_model=SuccessResponse[CampaignTipsResponse],
+    summary="Heuristic optimization tips for a campaign",
+    operation_id="get_campaign_tips",
+)
+async def get_campaign_tips(
+    store_id: UUID,
+    campaign_id: UUID,
+    date_from: datetime = Query(...),
+    date_to: datetime = Query(...),
+    attribution_model: AttributionModel = Query("last_touch"),
+):
+    """Compute heuristic tips from existing aggregations.
+
+    Reuses the breakdown queries we already have — channel, customer
+    type, device, coupon stats (from performance), top products (from
+    performance). No new aggregation method or external call.
+    """
+    from src.application.services.campaign_tips import compute_tips
+
+    _validate_window(date_from, date_to)
+    await _load_campaign_or_404(store_id, campaign_id)
+    async with AsyncSessionLocal() as session:
+        analytics = AnalyticsRepository(session)
+        channel = await analytics.campaign_breakdown_channel(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        customer_type = await analytics.campaign_breakdown_customer_type(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        device = await analytics.campaign_breakdown_device(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        perf = await analytics.campaign_performance(
+            store_id=store_id,
+            campaign_id=campaign_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+    tips = compute_tips(
+        channel_breakdown=channel,
+        customer_type_breakdown=customer_type,
+        device_breakdown=device,
+        coupon_redemptions=perf.get("coupon_redemptions", 0),
+        coupon_revenue_cents=sum(
+            c.get("revenue_cents", 0) for c in perf.get("coupon_breakdown", [])
+        ),
+        total_revenue_cents=perf.get("revenue_cents", 0),
+        top_products=perf.get("top_products", []),
+    )
+
+    return SuccessResponse(
+        data=CampaignTipsResponse(
+            campaign_id=str(campaign_id),
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+            attribution_model=attribution_model,
+            tips=[TipResponse(**t.to_dict()) for t in tips],
+        ),
+        message="Tips for campaign",
     )
 
 

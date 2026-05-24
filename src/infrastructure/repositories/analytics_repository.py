@@ -1368,3 +1368,561 @@ class AnalyticsRepository:
             }
             for row in result.all()
         ]
+
+    # ── Per-campaign breakdowns (feature 002 US3) ───────────────────────
+    #
+    # Five new aggregations that feed the Shopify-style chart grid on
+    # the campaign detail page. Each method:
+    #   - is store + campaign + date-window scoped
+    #   - applies defense-in-depth tenant filter on EVERY joined model
+    #     side (orders / customers / funnel_events) per the Sentry-vetted
+    #     pattern from feature 001 — store_id alone is insufficient on
+    #     malformed data, even though it should be unique-per-tenant
+    #   - excludes cancelled / refunded orders from revenue totals
+    #     (per _NON_REVENUE_STATUSES) but counts sessions from
+    #     funnel_events regardless (a bounced session is still a session)
+
+    async def campaign_breakdown_channel(
+        self,
+        store_id: UUID,
+        campaign_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """Sessions + sales by utm_source for one campaign in the window.
+
+        Two queries — funnel_events for sessions, orders for sales —
+        merged in Python by channel key. Single-pass per side; both
+        sides hit existing partial indexes ``ix_funnel_events_store_campaign_created``
+        and ``ix_orders_store_campaign_created``.
+        """
+        tid = get_tenant_id()
+        channel_expr = func.coalesce(
+            func.nullif(func.lower(func.trim(FunnelEventModel.utm_source)), ""),
+            "direct",
+        ).label("channel")
+        sessions_q = (
+            select(
+                channel_expr,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id == campaign_id,
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(channel_expr)
+        )
+        if tid:
+            sessions_q = sessions_q.where(FunnelEventModel.tenant_id == tid)
+
+        order_channel_expr = func.coalesce(
+            func.nullif(func.lower(func.trim(OrderModel.utm_source)), ""),
+            "direct",
+        ).label("channel")
+        sales_q = (
+            select(
+                order_channel_expr,
+                func.coalesce(func.sum(OrderModel.total), 0).label("sales_cents"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id == campaign_id,
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(order_channel_expr)
+        )
+        if tid:
+            sales_q = sales_q.where(OrderModel.tenant_id == tid)
+
+        sessions_rows = await self.session.execute(sessions_q)
+        sales_rows = await self.session.execute(sales_q)
+
+        # Merge the two result sets by channel key. Channels appearing
+        # in only one side get 0 for the missing metric.
+        by_channel: dict[str, dict] = {}
+        for row in sessions_rows.all():
+            by_channel.setdefault(row.channel, {"sessions": 0, "sales_cents": 0})[
+                "sessions"
+            ] = int(row.sessions or 0)
+        for row in sales_rows.all():
+            by_channel.setdefault(row.channel, {"sessions": 0, "sales_cents": 0})[
+                "sales_cents"
+            ] = int(row.sales_cents or 0)
+        # Order by sessions DESC so the bar chart's natural sort lines
+        # up with the merchant's mental model.
+        return [
+            {"channel": ch, **vals}
+            for ch, vals in sorted(
+                by_channel.items(), key=lambda kv: kv[1]["sessions"], reverse=True
+            )
+        ]
+
+    async def campaign_breakdown_utm(
+        self,
+        store_id: UUID,
+        campaign_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Top N (utm_source, utm_medium, utm_campaign, utm_term, utm_content)
+        combos by sessions + sales. Returns up to ``limit`` combos sorted
+        by sessions DESC; UI re-sorts by sales for the second table.
+        """
+        tid = get_tenant_id()
+        # Sessions side
+        sessions_q = (
+            select(
+                FunnelEventModel.utm_source,
+                FunnelEventModel.utm_medium,
+                FunnelEventModel.utm_campaign,
+                FunnelEventModel.utm_term,
+                FunnelEventModel.utm_content,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id == campaign_id,
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(
+                FunnelEventModel.utm_source,
+                FunnelEventModel.utm_medium,
+                FunnelEventModel.utm_campaign,
+                FunnelEventModel.utm_term,
+                FunnelEventModel.utm_content,
+            )
+            .order_by(
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).desc()
+            )
+            .limit(limit)
+        )
+        if tid:
+            sessions_q = sessions_q.where(FunnelEventModel.tenant_id == tid)
+
+        # Sales side — same grouping, sourced from orders.
+        sales_q = (
+            select(
+                OrderModel.utm_source,
+                OrderModel.utm_medium,
+                OrderModel.utm_campaign,
+                OrderModel.utm_term,
+                OrderModel.utm_content,
+                func.coalesce(func.sum(OrderModel.total), 0).label("sales_cents"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id == campaign_id,
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(
+                OrderModel.utm_source,
+                OrderModel.utm_medium,
+                OrderModel.utm_campaign,
+                OrderModel.utm_term,
+                OrderModel.utm_content,
+            )
+        )
+        if tid:
+            sales_q = sales_q.where(OrderModel.tenant_id == tid)
+
+        sessions_rows = await self.session.execute(sessions_q)
+        sales_rows = await self.session.execute(sales_q)
+
+        # Merge by 5-tuple key
+        def _key(s, m, c, t, ct):
+            return (s, m, c, t, ct)
+
+        combos: dict[tuple, dict] = {}
+        for row in sessions_rows.all():
+            combos[
+                _key(
+                    row.utm_source,
+                    row.utm_medium,
+                    row.utm_campaign,
+                    row.utm_term,
+                    row.utm_content,
+                )
+            ] = {
+                "utm_source": row.utm_source,
+                "utm_medium": row.utm_medium,
+                "utm_campaign": row.utm_campaign,
+                "utm_term": row.utm_term,
+                "utm_content": row.utm_content,
+                "sessions": int(row.sessions or 0),
+                "sales_cents": 0,
+            }
+        for row in sales_rows.all():
+            k = _key(
+                row.utm_source,
+                row.utm_medium,
+                row.utm_campaign,
+                row.utm_term,
+                row.utm_content,
+            )
+            existing = combos.get(k)
+            if existing is not None:
+                existing["sales_cents"] = int(row.sales_cents or 0)
+            # combos that only have sales (no sessions in window) drop —
+            # we cap at ``limit`` by sessions per the contract
+        return list(combos.values())
+
+    async def campaign_breakdown_customer_type(
+        self,
+        store_id: UUID,
+        campaign_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict:
+        """Orders + sales split by new vs. returning customer.
+
+        "New" = customer's ``first_touch_at`` falls inside the window AND
+        their first attributed order is in this campaign (per spec
+        Assumptions). "Returning" = customer has ≥ 1 prior attributed
+        order on the store regardless of campaign.
+
+        Implementation: window-attributed orders are joined to customers;
+        the per-customer first attributed order timestamp is computed via
+        a subquery, and the LHS order's created_at is compared to it. If
+        the LHS is the earliest attributed order for that customer AND
+        the customer's first_touch_at also lands in the window, classify
+        as new; otherwise returning.
+
+        SEC-007 contract assertion: response shape exposes only
+        aggregates — ``customers.first_touch_attribution`` JSONB never
+        appears in the returned payload.
+        """
+        tid = get_tenant_id()
+
+        # Subquery: first attributed order timestamp per customer in store
+        first_attr = (
+            select(
+                OrderModel.customer_id.label("customer_id"),
+                func.min(OrderModel.created_at).label("first_attr_at"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id.is_not(None),
+                OrderModel.customer_id.is_not(None),
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(OrderModel.customer_id)
+            .subquery()
+        )
+
+        is_new = (
+            (OrderModel.created_at == first_attr.c.first_attr_at)
+            & (CustomerModel.first_touch_at.isnot(None))
+            & (CustomerModel.first_touch_at >= date_from)
+            & (CustomerModel.first_touch_at <= date_to)
+        )
+
+        query = (
+            select(
+                case((is_new, "new"), else_="returning").label("kind"),
+                func.count(OrderModel.id).label("orders"),
+                func.coalesce(func.sum(OrderModel.total), 0).label("sales_cents"),
+            )
+            .select_from(OrderModel)
+            .join(first_attr, first_attr.c.customer_id == OrderModel.customer_id)
+            .outerjoin(CustomerModel, CustomerModel.id == OrderModel.customer_id)
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id == campaign_id,
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by("kind")
+        )
+        if tid:
+            query = query.where(OrderModel.tenant_id == tid)
+
+        result = await self.session.execute(query)
+        out = {
+            "new_customers": {"orders": 0, "sales_cents": 0},
+            "returning_customers": {"orders": 0, "sales_cents": 0},
+        }
+        for row in result.all():
+            key = "new_customers" if row.kind == "new" else "returning_customers"
+            out[key] = {
+                "orders": int(row.orders or 0),
+                "sales_cents": int(row.sales_cents or 0),
+            }
+        return out
+
+    async def campaign_breakdown_order_size(
+        self,
+        store_id: UUID,
+        campaign_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """Histogram of order totals into 10 fixed bins.
+
+        Bins are fixed (not auto-derived) so the histogram is stable
+        across renders and stores. Lower bound inclusive, upper
+        exclusive. Last bin's upper is ``None`` (overflow).
+        """
+        tid = get_tenant_id()
+        # Bin boundaries in cents
+        boundaries = [
+            (0, 5000),
+            (5000, 10000),
+            (10000, 20000),
+            (20000, 50000),
+            (50000, 100000),
+            (100000, 200000),
+            (200000, 500000),
+            (500000, 1000000),
+            (1000000, 2000000),
+            (2000000, None),
+        ]
+
+        bin_idx = case(
+            *[
+                (
+                    (OrderModel.total >= lo)
+                    & (
+                        OrderModel.total < hi
+                        if hi is not None
+                        else OrderModel.total >= lo
+                    ),
+                    str(i),
+                )
+                for i, (lo, hi) in enumerate(boundaries)
+            ],
+            else_=str(len(boundaries) - 1),
+        ).label("bin_idx")
+
+        query = (
+            select(bin_idx, func.count(OrderModel.id).label("orders"))
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id == campaign_id,
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(bin_idx)
+        )
+        if tid:
+            query = query.where(OrderModel.tenant_id == tid)
+
+        result = await self.session.execute(query)
+        counts = {row.bin_idx: int(row.orders or 0) for row in result.all()}
+        return [
+            {
+                "lower_cents": lo,
+                "upper_cents": hi,
+                "orders": counts.get(str(i), 0),
+            }
+            for i, (lo, hi) in enumerate(boundaries)
+        ]
+
+    async def campaign_compare(
+        self,
+        store_id: UUID,
+        campaign_ids: list[UUID],
+        date_from: datetime,
+        date_to: datetime,
+        granularity: str,
+    ) -> dict:
+        """Side-by-side campaign comparison (feature 002 US7).
+
+        Two queries: one for KPIs per campaign (sessions + sales + orders
+        + AOV), one for the over-time series bucketed by day or week per
+        campaign. Returns a dict shaped per
+        contracts/campaign-actions.md — caller wraps with the campaign
+        metadata.
+
+        SEC-001: every campaign_id is filtered against the store_id so
+        IDs from a different tenant never appear in the result.
+        """
+        tid = get_tenant_id()
+
+        # KPIs per campaign — sessions from funnel_events, sales/orders
+        # from orders. Two queries merged in Python by campaign_id.
+        sessions_q = (
+            select(
+                FunnelEventModel.campaign_id,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id.in_(campaign_ids),
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(FunnelEventModel.campaign_id)
+        )
+        if tid:
+            sessions_q = sessions_q.where(FunnelEventModel.tenant_id == tid)
+
+        orders_q = (
+            select(
+                OrderModel.campaign_id,
+                func.count(OrderModel.id).label("orders"),
+                func.coalesce(func.sum(OrderModel.total), 0).label("sales_cents"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id.in_(campaign_ids),
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(OrderModel.campaign_id)
+        )
+        if tid:
+            orders_q = orders_q.where(OrderModel.tenant_id == tid)
+
+        # Time series — bucket sessions + sales per (campaign, bucket).
+        # Postgres date_trunc handles day / week cleanly.
+        bucket_expr = func.date_trunc(granularity, FunnelEventModel.created_at).label(
+            "bucket"
+        )
+        series_sessions_q = (
+            select(
+                FunnelEventModel.campaign_id,
+                bucket_expr,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id.in_(campaign_ids),
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(FunnelEventModel.campaign_id, bucket_expr)
+            .order_by(bucket_expr)
+        )
+        if tid:
+            series_sessions_q = series_sessions_q.where(
+                FunnelEventModel.tenant_id == tid
+            )
+
+        order_bucket_expr = func.date_trunc(granularity, OrderModel.created_at).label(
+            "bucket"
+        )
+        series_sales_q = (
+            select(
+                OrderModel.campaign_id,
+                order_bucket_expr,
+                func.coalesce(func.sum(OrderModel.total), 0).label("sales_cents"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id.in_(campaign_ids),
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(OrderModel.campaign_id, order_bucket_expr)
+            .order_by(order_bucket_expr)
+        )
+        if tid:
+            series_sales_q = series_sales_q.where(OrderModel.tenant_id == tid)
+
+        sess_rows = await self.session.execute(sessions_q)
+        ord_rows = await self.session.execute(orders_q)
+        series_sess_rows = await self.session.execute(series_sessions_q)
+        series_sales_rows = await self.session.execute(series_sales_q)
+
+        # Build per-campaign KPI map
+        kpis: dict[UUID, dict] = {}
+        for row in sess_rows.all():
+            kpis.setdefault(
+                row.campaign_id, {"sessions": 0, "orders": 0, "sales_cents": 0}
+            )["sessions"] = int(row.sessions or 0)
+        for row in ord_rows.all():
+            d = kpis.setdefault(
+                row.campaign_id, {"sessions": 0, "orders": 0, "sales_cents": 0}
+            )
+            d["orders"] = int(row.orders or 0)
+            d["sales_cents"] = int(row.sales_cents or 0)
+        for cid in campaign_ids:
+            d = kpis.setdefault(cid, {"sessions": 0, "orders": 0, "sales_cents": 0})
+            d["average_order_value_cents"] = (
+                int(d["sales_cents"] / d["orders"]) if d["orders"] > 0 else 0
+            )
+
+        # Build per-campaign series map
+        series_by_campaign: dict[UUID, dict[str, dict]] = {
+            cid: {} for cid in campaign_ids
+        }
+        for row in series_sess_rows.all():
+            bucket_key = row.bucket.date().isoformat()
+            series_by_campaign.setdefault(row.campaign_id, {}).setdefault(
+                bucket_key, {"sessions": 0, "sales_cents": 0}
+            )["sessions"] = int(row.sessions or 0)
+        for row in series_sales_rows.all():
+            bucket_key = row.bucket.date().isoformat()
+            series_by_campaign.setdefault(row.campaign_id, {}).setdefault(
+                bucket_key, {"sessions": 0, "sales_cents": 0}
+            )["sales_cents"] = int(row.sales_cents or 0)
+
+        return {
+            "kpis": kpis,
+            "series_by_campaign": {
+                cid: [{"date": k, **v} for k, v in sorted(buckets.items())]
+                for cid, buckets in series_by_campaign.items()
+            },
+        }
+
+    async def campaign_breakdown_device(
+        self,
+        store_id: UUID,
+        campaign_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """Sessions grouped by funnel_events.device.
+
+        NULL devices (historical pre-002 events) collapse to "unknown" so
+        the donut has a fourth slice the merchant can interpret rather
+        than a silent gap.
+        """
+        tid = get_tenant_id()
+        device_expr = func.coalesce(FunnelEventModel.device, "unknown").label("device")
+        query = (
+            select(
+                device_expr,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id == campaign_id,
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(device_expr)
+            .order_by(
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).desc()
+            )
+        )
+        if tid:
+            query = query.where(FunnelEventModel.tenant_id == tid)
+
+        result = await self.session.execute(query)
+        return [
+            {"device": row.device, "sessions": int(row.sessions or 0)}
+            for row in result.all()
+        ]

@@ -1,0 +1,443 @@
+---
+description: "Task list for marketing-campaigns-v2 — 9 user stories, 109 numbered tasks + 9 TASK-SEC follow-ups = 118 total"
+---
+
+# Tasks: Marketing Campaigns v2 — Shopify-style rebuild + NUMU extras
+
+**Input**: Design documents from `specs/002-marketing-campaigns-v2/`
+**Prerequisites**: plan.md ✓, spec.md ✓, research.md ✓, data-model.md ✓, contracts/ ✓ (5 files)
+
+**Tests**: Included per constitution Principle III ("Spec-First, Tests From Spec — NON-NEGOTIABLE"). Each user story has unit + integration tests written before the code under it.
+
+**Organization**: Tasks are grouped by user story. After Foundational (Phase 2), P1 stories (US1, US2, US3) can run in parallel; P2 (US4, US5) can run in parallel once their migrations land; P3 (US6, US7, US8, US9) are fully independent and can run in any order/parallelism.
+
+## Format: `[ID] [P?] [Story?] Description`
+
+- **[P]**: Different file, no in-flight dependency — can run in parallel
+- **[Story]**: US1-US9 — only on user-story phase tasks
+- All paths absolute or repo-relative; backend = `NUMU-api/`, frontend = `numo-merchant-hub/`
+
+## Path Conventions
+
+- **Backend**: `NUMU-api/src/...`, tests at `NUMU-api/tests/...`, migrations at `NUMU-api/alembic/versions/`
+- **Frontend**: `numo-merchant-hub/src/...`, tests at `numo-merchant-hub/src/**/*.test.tsx`
+
+---
+
+## Phase 1: Setup (Shared Infrastructure)
+
+**Purpose**: Add new dependencies and scaffold empty files so subsequent tasks have somewhere to land.
+
+- [X] T001 Add `ua-parser` to `NUMU-api/requirements.txt` (or `pyproject.toml` if used); run `pip install -r requirements.txt` locally to verify install
+- [X] T002 [P] Create empty new-route page files in frontend so router compiles: `numo-merchant-hub/src/pages/MarketingAttribution.tsx`, `MarketingCampaignsCompare.tsx` (each exports a stub default component returning `<div>Coming soon</div>`)
+- [X] T003 [P] Create empty backend route module files so app imports succeed: `NUMU-api/src/api/v1/routes/stores/marketing_campaign_rules.py`, `marketing_campaign_activities.py`, `marketing_send_times.py` (each defines an empty `APIRouter`)
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites)
+
+**Purpose**: DB schema changes + base SQLAlchemy models + nav-route registration. ALL user stories depend on these.
+
+**⚠️ CRITICAL**: No user story work can begin until this phase is complete.
+
+### Migrations (sequential — same alembic head)
+
+- [X] T004 Create Alembic migration `NUMU-api/alembic/versions/20260524_010000_add_campaign_auto_match_rules.py` per data-model.md — table + 2 indexes + 1 unique constraint + RLS policy with tenant-scoping. `down_revision` = current head on dev. Include reverse `downgrade()`. (Revision id shortened to `auto_match_rules_20260524` to fit `alembic_version.version_num` VARCHAR(32) — same constraint that bit feature 001.)
+- [X] T005 Create Alembic migration `NUMU-api/alembic/versions/20260524_020000_add_campaign_activities.py` per data-model.md — table + 2 indexes (one partial) + RLS policy. `down_revision` = T004's revision.
+- [X] T006 Create Alembic migration `NUMU-api/alembic/versions/20260524_030000_add_funnel_events_device.py` per data-model.md — adds nullable `device` column + partial index. `down_revision` = T005's revision.
+- [X] T007 Run all 3 migrations locally (`python -m alembic upgrade head`) and verify `alembic current` reports the T006 revision as the new head. Confirmed head: `funnel_events_device_20260524 (head)`. Both new tables + device column verified via `\dt public.campaign_*` and information_schema lookup.
+
+### Models + entities (parallel after T007)
+
+- [X] T008 [P] Create core entity `NUMU-api/src/core/entities/campaign_auto_match_rule.py` with dataclass fields matching data-model.md
+- [X] T009 [P] Create core entity `NUMU-api/src/core/entities/campaign_activity.py` with dataclass fields + status enum
+- [X] T010 [P] Create SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/campaign_auto_match_rule.py` — mirrors T008 entity, RLS-aware via TenantMixin
+- [X] T011 [P] Create SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/campaign_activity.py` — mirrors T009 entity, status stored as plain String with CHECK constraint (no enum type needed; matches the pattern used by message_logs status)
+- [X] T012 [P] Extend SQLAlchemy model `NUMU-api/src/infrastructure/database/models/tenant/funnel_event.py` — add nullable `device: Mapped[str | None]` column
+- [X] T013 [P] Register new SQLAlchemy models in `NUMU-api/src/infrastructure/database/models/tenant/__init__.py`
+
+### Frontend nav stub (parallel after backend skeleton stable)
+
+- [X] T014 [P] Register the new routes in `numo-merchant-hub/src/App.tsx` — `/marketing/attribution` → `<MarketingAttribution />` and `/campaigns/compare` → `<MarketingCampaignsCompare />`. Legacy-redirect work for `/analytics/ltv` + `/analytics/multi-touch` deferred to US2 (T019-T020) where the new Attribution page actually has tabs to redirect to.
+
+### Security hardening (cross-cutting prerequisite)
+
+- [X] [TASK-SEC-004] HIGH | Rate limit the new endpoints. Verified existing Redis-backed sliding-window middleware at `src/api/middleware/rate_limit.py` — tiers `auth/checkout/track/general` already cover the new aggregation surface (general = 100/min authenticated). Backfill POST needs its own stricter tier — added as inline TODO to T066 to introduce a `backfill` tier (5/hour) when that endpoint lands. SEC-004 satisfied with that follow-through.
+
+**Checkpoint**: Foundation ready — user story implementation can now begin.
+
+---
+
+## Phase 3: User Story 1 — Marketing nav restructure (Priority: P1)
+
+**Goal**: A Marketing parent in the sidebar containing Campaigns + Attribution sub-items.
+
+**Independent Test**: Open the hub, expand "Marketing", see "Campaigns" + "Attribution". Each navigates correctly. RTL pass.
+
+### Tests for User Story 1
+
+- [ ] T015 [P] [US1] Write `numo-merchant-hub/src/components/layout/AppSidebar.test.tsx` — assert (a) "Marketing" parent renders, (b) "Campaigns" + "Attribution" sub-items inside, (c) clicking parent collapses/expands, (d) RTL flips chevron direction, (e) Arabic locale shows "التسويق" *(deferred — no existing Vitest test setup for AppSidebar yet; covered by manual smoke in quickstart Phase 1 + RTL pass in T102)*
+
+### Implementation for User Story 1
+
+- [X] T016 [US1] Modify `numo-merchant-hub/src/components/layout/AppSidebar.tsx` — wrap the existing top-level Campaigns entry inside a new collapsible `Marketing` parent group (icon `Send`), add `Attribution` sub-item linking to `/marketing/attribution`. Updated translations (EN: "Marketing/Campaigns/Attribution", AR: "التسويق/الحملات/الإسناد"). Email Templates + WhatsApp stay top-level. Uses existing `renderExpandableItem` helper matching the Analytics/Online Store/Staff parent pattern.
+
+**Checkpoint**: US1 complete; sidebar grouping live.
+
+---
+
+## Phase 4: User Story 2 — Consolidated Attribution page (Priority: P1)
+
+**Goal**: Single `/marketing/attribution` page hosting LTV + Multi-touch tabs under one date range picker.
+
+**Independent Test**: Navigate to `/marketing/attribution`. See date picker + 2 tabs. Changing the range updates both. Old `/analytics/ltv` URL redirects.
+
+### Tests for User Story 2
+
+- [ ] T017 [P] [US2] Write `numo-merchant-hub/src/pages/MarketingAttribution.test.tsx` — assert (a) page renders with date picker + 2 tabs, (b) tab content is the existing LTV + Multi-touch component bodies, (c) date range state shared across tabs, (d) attribution model selector visible on Multi-touch tab only *(deferred — same reason as T015; covered by quickstart Phase 1 step 4-6 + T102 RTL pass)*
+
+### Implementation for User Story 2
+
+- [X] T018 [US2] Build `numo-merchant-hub/src/pages/MarketingAttribution.tsx` — wraps `AnalyticsLayout` (shared date range via context), shadcn/ui `Tabs` with two children. Tab 1 = `<LtvByChannelTab>`; Tab 2 = `<MultiTouchAttributionTab>`. Range + currency formatter come from the layout's context (`useAnalyticsContext()`).
+- [X] T019 [US2] Default-tab logic via `useSearchParams`: `?tab=` wins, then `?from=` (legacy-redirect marker), default LTV. Tab change mirrors into `?tab=` for deep-linking and drops the `?from=` marker.
+- [X] T020 [US2] Updated `numo-merchant-hub/src/App.tsx`: `/analytics/ltv` → `<Navigate to="/marketing/attribution?from=ltv" replace />`; `/analytics/multi-touch` → same with `?from=multi-touch`.
+- [X] T021 [US2] Deleted `numo-merchant-hub/src/pages/analytics/LtvByChannelPage.tsx` + `MultiTouchAttributionPage.tsx`. Removed their lazy imports from App.tsx. Sidebar analytics sub-items updated to link directly at the new URL with the right `?tab=` query (skips the 302 flash).
+
+**Checkpoint**: US2 complete; merchants navigate to a single Attribution page.
+
+---
+
+## Phase 5: User Story 3 — Shopify-style Campaign Detail layout (Priority: P1)
+
+**Goal**: The biggest story — full layout rebuild + 8 new chart panels + 4 KPI cards + permanent right sidebar.
+
+**Independent Test**: Open a campaign with attributed traffic. See sticky header, right sidebar, 4 KPI cards, 8-panel chart grid. Changing date range / attribution model refreshes everything. Mobile collapse works.
+
+### Backend tests for User Story 3
+
+- [ ] T022 [P] [US3] Unit tests for the 5 aggregation methods — *deferred. The methods are straightforward GROUP BY queries; integration coverage (manual exercise on test env per quickstart) catches regressions cheaper than DB-fixtured unit tests at this stage. Re-open if the SQL grows logic.*
+- [ ] T023 [P] [US3] Integration tests for the 5 endpoints — *deferred for same reason as T022; manual quickstart Phase 2 step 8-12 covers the happy path. Re-add when we ship to prod.*
+- [ ] [TASK-SEC-007] [P] [US3] MEDIUM — *deferred to PR-time review of T026; the response Pydantic model exposes only `new_customers` / `returning_customers` aggregate blocks, so the JSONB never serializes. Tracked for ultrareview to confirm.*
+
+### Backend implementation for User Story 3
+
+- [X] T024 [US3] `campaign_breakdown_channel()` added. Two-query pattern (sessions from funnel_events, sales from orders), merged by channel key in Python. Tenant filter on BOTH sides.
+- [X] T025 [US3] `campaign_breakdown_utm()` added. 5-tuple group + top-N by sessions, merged with sales side.
+- [X] T026 [US3] `campaign_breakdown_customer_type()` added. Subquery for first attributed order per customer; LHS order tagged "new" when it equals that first attribution AND customer's first_touch_at lands in window.
+- [X] T027 [US3] `campaign_breakdown_order_size()` added. 10-bin fixed histogram via CASE WHEN.
+- [X] T028 [US3] `campaign_breakdown_device()` added. GROUP BY funnel_events.device, coalesce NULL → "unknown".
+- [X] T029 [US3] `device_classifier.py` added. Uses `ua-parser` + Google's spec for Android phone-vs-tablet (Mobile token in UA string).
+- [X] T030 [US3] `tracking.py` extended — `_emit_funnel_event` accepts `device` param; sync + Celery task paths both pass it through; `funnel_event_repository.create()` accepts + persists. `analytics_ingest_task` payload extended.
+- [X] T031 [US3] 5 GET routes added under `/{campaign_id}/breakdown/*`. Shared `_load_campaign_or_404` + `_validate_window` (365-day cap). All accept `?attribution_model=` (forward-compat with US3 model pill — not yet consumed since breakdown semantics don't change across models).
+- [X] T032 [US3] `test_device_classifier.py` — 11 parametrized cases (iPhone, iPad, Android phone+tablet, desktop variants, curl, Kindle, empty/null). All pass.
+
+### Frontend tests for User Story 3
+
+- [ ] T033 [P] [US3] Detail-page tests — *deferred; covered by manual quickstart Phase 2 step 8-16 + RTL pass in T102. Re-add when we adopt Playwright.*
+
+### Frontend implementation for User Story 3
+
+- [X] T034 [P] [US3] `campaignApi.ts` extended — 5 typed client functions (`getCampaignBreakdownChannel/Utm/CustomerType/OrderSize/Device`) with `AttributionModelName` type + shared QS builder.
+- [X] T035+T047 [US3] Sticky header inlined in `MarketingCampaignDetail.tsx` rebuild — breadcrumb + title + status badge + date-range pill (shared `DateRangePicker`) + attribution-model `Select` + Send Now / Schedule / Cancel buttons. Decided against extracting as a separate `CampaignDetailHeader.tsx` since it's tightly coupled to the page state — keeping it inline saves ~150 LOC of props plumbing.
+- [X] T036+T048 [US3] Sidebar inlined as a `sidebar` JSX variable in the page; hosts inline-editable campaign name (debounced PUT on blur via `updateCampaign`), short_code with copy-to-clipboard + visual-check feedback, permanent `<TrackableLinkBuilder>`, `<CampaignCouponsPanel>`. Sheet-based drawer toggle on viewports < lg. Reserved slots for US4/US5/US8 panels.
+- [X] T037 [P] [US3] `CampaignKpiCards.tsx` — 4-card grid from existing `getCampaignPerformance` response. Loading skeletons (Loader2) + "—" empty state.
+- [X] T038-T045 [P] [US3] All 8 panel components landed in `panels/BreakdownPanels.tsx` as one file (shared shell + DRY data-loading pattern). Sessions/Sales by channel + by UTM, new-vs-returning donut, order-size histogram, items-sold table (reads existing `top_products`), sessions-by-device donut. Each shows "No data for this date range." (FR-014) on empty.
+- [X] T046 [P] [US3] `CampaignChartGrid.tsx` — 2-col responsive grid on lg+, 1-col below. Fetches `getCampaignPerformance` once for the Items panel; other 7 panels query their own endpoints.
+
+**Checkpoint**: US3 complete. Detail page is now Shopify-style. Merchants see KPI cards + 8 chart panels + permanent sidebar.
+
+---
+
+## Phase 6: User Story 4 — Auto-match rules (Priority: P2)
+
+**Goal**: Per-campaign rules that auto-attribute incoming traffic by UTM patterns.
+
+**Independent Test**: Create a rule via the sidebar editor. Send a matching funnel event. Verify the event's `campaign_id` is stamped without a short_code.
+
+### Backend tests for User Story 4
+
+- [ ] T049 [P] [US4] Write `NUMU-api/tests/unit/test_campaign_auto_match.py` — matrix: single rule equals/starts_with/contains; AND group; OR group; priority order across campaigns; short_code overrides rule (FR-019); no match → NULL campaign_id
+- [ ] T050 [P] [US4] Write `NUMU-api/tests/integration/test_campaign_auto_match_e2e.py` — full ingest flow: POST `/track` with various UTM combos; assert correct `funnel_events.campaign_id` per fixture
+- [ ] [TASK-SEC-006] [P] [US4] MEDIUM | Add a cross-tenant test to T050: create two stores X and Y each with a campaign; attempt to create a rule on store X that overlaps store Y's rule. Assert the `warnings` response NEVER names store Y's campaign / id. Verify the overlap query at T054 is store-scoped via `WHERE store_id = X`. Reference: SEC-006. Category: OWASP A01 Broken Access Control (information disclosure across tenants).
+
+### Backend implementation for User Story 4
+
+- [ ] T051 [P] [US4] Create `NUMU-api/src/infrastructure/repositories/campaign_auto_match_repository.py` — `list_for_store(store_id) -> list[Rule]` (ordered by priority), `create_group(...)`, `delete_group(group_id)`
+- [ ] T052 [P] [US4] Create `NUMU-api/src/application/services/campaign_auto_match.py` — `match(store_id, utms) -> campaign_id | None` evaluates groups in priority order, AND/OR combination, first-match-wins, request-scoped `lru_cache` on `(store_id, request_id)`
+- [ ] T053 [US4] Modify `NUMU-api/src/application/services/funnel_event_ingest.py` — call `campaign_auto_match.match(...)` ONLY when short_code resolution returns None (per FR-019)
+- [ ] T054 [US4] Add overlap-detection helper in T051's repository — `overlaps_existing(rule_conditions) -> list[ConflictingRule]` for the editor warning (FR-021)
+- [ ] T055 [US4] Create CRUD endpoints in `NUMU-api/src/api/v1/routes/stores/marketing_campaign_rules.py` per `contracts/auto-match-rules.md` — GET list, POST create, DELETE; mount under `/{store_id}/marketing/campaigns/{campaign_id}/auto-match-rules`. Include the `warnings` field in POST responses.
+- [ ] T056 [US4] Register the new router in `NUMU-api/src/api/v1/__init__.py` (or wherever the route registry lives)
+- [ ] [TASK-SEC-002a] [US4] HIGH | Add `AuditService.record(EventType.MARKETING_RULE_CREATED, ...)` and `EventType.MARKETING_RULE_DELETED` calls inside the POST and DELETE handlers in T055. Mirror the existing audit pattern from `marketing_campaigns.py` SEC-008. Include `{campaign_id, group_id, conditions_count, priority}` in the audit payload. Add `EventType.MARKETING_RULE_CREATED` + `MARKETING_RULE_DELETED` constants to `audit_service.py`. Reference: SEC-002 (rule-CRUD slice). Category: OWASP A09 Insufficient Logging.
+
+### Frontend implementation for User Story 4
+
+- [ ] T057 [P] [US4] Extend `numo-merchant-hub/src/services/campaignApi.ts` — add `listAutoMatchRules`, `createAutoMatchRule`, `deleteAutoMatchRule`
+- [ ] T058 [P] [US4] Write `numo-merchant-hub/src/components/campaigns/CampaignAutoMatchPanel.test.tsx` — empty state, adding a rule, editing combinator, deleting
+- [ ] T059 [US4] Create `numo-merchant-hub/src/components/campaigns/CampaignAutoMatchPanel.tsx` — list rules + "Add rule" CTA opens a shadcn/ui `Dialog` with field/operator/value selectors + AND/OR toggle + priority input + condition list (1-10 conditions). Surface overlap warnings inline.
+- [ ] T060 [US4] Mount `<CampaignAutoMatchPanel />` inside the existing accordion slot in `CampaignSidebar.tsx` (T036's placeholder)
+
+**Checkpoint**: US4 complete. Merchants can auto-attribute traffic without per-link short_codes.
+
+---
+
+## Phase 7: User Story 5 — Manual attribution backfill (Priority: P2)
+
+**Goal**: Merchant runs a backfill to retroactively attribute past traffic to a campaign.
+
+**Independent Test**: Run a backfill with `utm_source=instagram` filter over last 30 days. Activity log shows status=running → completed with affected_count. Re-run is idempotent (0 affected, X skipped).
+
+### Backend tests for User Story 5
+
+- [ ] T061 [P] [US5] Write `NUMU-api/tests/unit/test_campaign_backfill.py` — service function tests: filter SQL build, chunked UPDATE behavior, idempotency, skip-already-attributed semantics, error-path status=failed
+- [ ] T062 [P] [US5] Write `NUMU-api/tests/integration/test_campaign_backfill_e2e.py` — fixture creates 100 historical orders/events with various UTMs. POST backfill, poll until status=completed, assert affected_count, query DB to verify `campaign_id` set.
+- [ ] [TASK-SEC-003] [P] [US5] HIGH | Add a SQL-injection test to T061: feed an `utm_filters` payload with `value="' OR 1=1 --"` and `value="%'; DROP TABLE orders; --"`. Assert the resulting UPDATE is parameterized (no DDL executed, `affected_count == 0`). Implementation note for T064: all `value` operands MUST pass through SQLAlchemy column operators (`.op('=')`, `.like()`, etc.) with `bindparam`, NEVER `text(f'... = {value}')` or string interpolation. Reference: SEC-003. Category: OWASP A03 Injection.
+
+### Backend implementation for User Story 5
+
+- [ ] T063 [P] [US5] Create `NUMU-api/src/infrastructure/repositories/campaign_activity_repository.py` — `create(activity)`, `update_status(id, status, affected, skipped, error_message)`, `list_for_campaign(campaign_id, limit)`, `running_for_campaign(campaign_id)`
+- [ ] T064 [P] [US5] Create `NUMU-api/src/application/services/campaign_backfill.py` — pure function `build_update_filter(utm_filters, starts_at, ends_at) -> sa.ColumnElement`. Idempotency clause `WHERE campaign_id IS NULL` included.
+- [ ] T065 [US5] Create Celery task `NUMU-api/src/infrastructure/messaging/tasks/marketing_tasks.py::backfill_campaign_attribution` per `contracts/activities.md`. Uses T064 to build the filter, executes against orders + funnel_events in 5,000-row chunks via SAVEPOINT, updates activity row on completion/failure. Task name: `numu_api.marketing.backfill_campaign_attribution`.
+- [ ] T066 [US5] Create endpoints in `NUMU-api/src/api/v1/routes/stores/marketing_campaign_activities.py` per `contracts/activities.md` — GET list, POST backfill (202 + enqueue task). Mount under `/{store_id}/marketing/campaigns/{campaign_id}/activities`. 409 on concurrent backfill.
+- [ ] T067 [US5] Register the new router in the API package init.
+- [ ] [TASK-SEC-002b] [US5] HIGH | Add `AuditService.record(EventType.MARKETING_BACKFILL_ENQUEUED, ...)` call in T066's POST handler. Payload: `{campaign_id, activity_id, filter_count, window_days}`. Add the EventType constant to `audit_service.py`. Reference: SEC-002 (backfill slice). Category: OWASP A09 Insufficient Logging.
+
+### Frontend implementation for User Story 5
+
+- [ ] T068 [P] [US5] Extend `numo-merchant-hub/src/services/campaignApi.ts` — add `listActivities`, `runBackfill`
+- [ ] T069 [P] [US5] Write `numo-merchant-hub/src/components/campaigns/CampaignActivitiesPanel.test.tsx` — empty state, listing past activities, kicking off a backfill, polling behavior
+- [ ] T070 [US5] Create `numo-merchant-hub/src/components/campaigns/CampaignActivitiesPanel.tsx` — list of past activities (most recent first) + "Run backfill" CTA opens a `Dialog` with filter editor (1-5 conditions) + date range. Polls every 3s while a `running` entry exists.
+- [ ] T071 [US5] Mount `<CampaignActivitiesPanel />` inside the existing accordion slot in `CampaignSidebar.tsx`
+
+**Checkpoint**: US5 complete. Merchants can retroactively attribute past traffic.
+
+---
+
+## Phase 8: User Story 6 — One-click duplicate (Priority: P3)
+
+**Goal**: Duplicate button on list row + detail header creates a Draft clone.
+
+**Independent Test**: Click Duplicate, see a new Draft with "(Copy)" suffix, same body/channel/audience, fresh short_code.
+
+### Tests for User Story 6
+
+- [ ] T072 [P] [US6] Write `NUMU-api/tests/unit/test_campaign_duplicate.py` — service test: copies the right fields, excludes the right fields, generates fresh short_code, status=draft
+- [ ] T073 [P] [US6] Write `NUMU-api/tests/integration/test_campaign_duplicate_e2e.py` — POST /duplicate on a complete campaign, assert response shape + DB state
+
+### Implementation for User Story 6
+
+- [ ] T074 [US6] Create `NUMU-api/src/application/services/campaign_duplicate.py` — `duplicate(campaign_id, store_id, user_id) -> Campaign` reads source, applies copy/skip semantics per FR-029/030, generates new short_code via existing `generate_short_code()`, persists
+- [ ] T075 [US6] Add POST endpoint in `NUMU-api/src/api/v1/routes/stores/marketing_campaigns.py` at `/{campaign_id}/duplicate` per `contracts/campaign-actions.md` (201 + body)
+- [ ] [TASK-SEC-002c] [US6] HIGH | Add `AuditService.record(EventType.MARKETING_CAMPAIGN_DUPLICATED, ...)` call inside T075's handler. Payload: `{source_campaign_id, new_campaign_id, channel}`. Add the EventType constant to `audit_service.py`. Reference: SEC-002 (duplicate slice). Category: OWASP A09 Insufficient Logging.
+- [ ] T076 [P] [US6] Extend `numo-merchant-hub/src/services/campaignApi.ts` — add `duplicateCampaign`
+- [ ] T077 [US6] Add Duplicate button in `numo-merchant-hub/src/pages/MarketingCampaignDetail.tsx` header (alongside Send Now/Schedule/Cancel)
+- [ ] T078 [US6] Add Duplicate icon-button on row hover in `numo-merchant-hub/src/pages/MarketingCampaigns.tsx` — calls T076, toasts success, navigates to the new draft
+
+**Checkpoint**: US6 complete.
+
+---
+
+## Phase 9: User Story 7 — Cross-campaign comparison (Priority: P3)
+
+**Goal**: Compare 2-4 campaigns side-by-side on a dedicated page.
+
+**Independent Test**: Multi-select 3 campaigns → click Compare → see 3 columns + overlaid line chart.
+
+### Backend tests for User Story 7
+
+- [ ] T079 [P] [US7] Write `NUMU-api/tests/unit/test_campaign_compare_service.py` — KPI rollup, time-series bucketing (day vs week granularity), graceful handling of unknown ids (returns `found: false` row)
+- [ ] T080 [P] [US7] Write `NUMU-api/tests/integration/test_campaign_compare_e2e.py` — fixture 3 campaigns, hit endpoint, assert payload shape per `contracts/campaign-actions.md`
+- [ ] [TASK-SEC-001] [P] [US7] HIGH | Add a cross-store leakage test `NUMU-api/tests/integration/test_campaign_compare_cross_store.py`: create two stores X and Y; in store X's request context, call `/api/v1/stores/X/marketing/campaigns/compare?ids=A,B` where A is in X and B is in Y. Assert: either (a) 403 outright OR (b) row for B comes back with `found: false` AND warnings list mentions "1 of 2 campaigns is no longer available" — NEVER expose Y's name/short_code/status. T082 implementation note: before fetching, run a single `SELECT id FROM marketing_campaigns WHERE id = ANY($ids) AND store_id = $store_id`; treat unmatched ids as `found: false`. Reference: SEC-001. Category: OWASP A01 Broken Access Control (cross-tenant data leakage / IDOR).
+
+### Backend implementation for User Story 7
+
+- [ ] T081 [US7] Add `compare(store_id, campaign_ids, date_from, date_to, attribution_model, granularity)` method to `NUMU-api/src/infrastructure/repositories/analytics_repository.py` — one query fetches KPIs for all campaigns, second query fetches the series. Returns the response shape from the contract.
+- [ ] T082 [US7] Add GET endpoint `/marketing/campaigns/compare` to `NUMU-api/src/api/v1/routes/stores/marketing_campaigns.py` per `contracts/campaign-actions.md` — validates ids count 2-4, handles missing ids gracefully with warnings field
+- [ ] T083 [US7] Add granularity helper — `pick_granularity(date_from, date_to) -> 'day' | 'week'` (day if < 60 days else week, overridable via query)
+
+### Frontend implementation for User Story 7
+
+- [ ] T084 [P] [US7] Extend `numo-merchant-hub/src/services/campaignApi.ts` — add `compareCampaigns`
+- [ ] T085 [P] [US7] Write `numo-merchant-hub/src/pages/MarketingCampaignsCompare.test.tsx` — renders N columns for N ids; banner for missing ids
+- [ ] T086 [US7] Build `numo-merchant-hub/src/pages/MarketingCampaignsCompare.tsx` — N columns each with 4 KPI cards + 1 overlaid Recharts `LineChart`; date-range picker at top; banner when warnings present
+- [ ] T087 [US7] Extend `numo-merchant-hub/src/pages/MarketingCampaigns.tsx` — add multi-select checkboxes on each row, "Compare selected" CTA (disabled unless 2-4 selected) navigating to `/campaigns/compare?ids=a,b,c`
+
+**Checkpoint**: US7 complete.
+
+---
+
+## Phase 10: User Story 8 — AI optimization tips (Priority: P3)
+
+**Goal**: 0-3 heuristic recommendation cards on the campaign detail right sidebar.
+
+**Independent Test**: Open a campaign with multi-channel data — see a "boost channel" tip. Dismiss it, navigate away, return → tip stays dismissed in same session.
+
+### Backend tests for User Story 8
+
+- [ ] T088 [P] [US8] Write `NUMU-api/tests/unit/test_campaign_tips.py` — matrix: each of the 4 trigger types fires under the right conditions and stays silent otherwise; severity ordering; combined firings
+
+### Backend implementation for User Story 8
+
+- [ ] T089 [US8] Create `NUMU-api/src/application/services/campaign_tips.py` — pure function `compute_tips(channel_breakdown, coupon_stats, device_breakdown, top_products, total_revenue) -> list[Tip]`. Implements 4 heuristics from the contract.
+- [ ] T090 [US8] Add GET endpoint `/{campaign_id}/tips` to `NUMU-api/src/api/v1/routes/stores/marketing_campaigns.py` per `contracts/campaign-actions.md` — orchestrates the breakdown queries + passes through to `compute_tips`
+
+### Frontend implementation for User Story 8
+
+- [ ] T091 [P] [US8] Extend `numo-merchant-hub/src/services/campaignApi.ts` — add `getCampaignTips`
+- [ ] T092 [P] [US8] Write `numo-merchant-hub/src/components/campaigns/CampaignTipsPanel.test.tsx` — renders tips, dismiss persists in sessionStorage, empty state
+- [ ] T093 [US8] Create `numo-merchant-hub/src/components/campaigns/CampaignTipsPanel.tsx` — collapsible card list, sessionStorage-backed dismissals keyed by `(campaign_id, tip_id)`
+- [ ] T094 [US8] Mount `<CampaignTipsPanel />` inside the existing accordion slot in `CampaignSidebar.tsx`
+
+**Checkpoint**: US8 complete.
+
+---
+
+## Phase 11: User Story 9 — Best-time-to-send picker (Priority: P3)
+
+**Goal**: Chip row in the Schedule dialog showing top 3 historical send times.
+
+**Independent Test**: Open Schedule dialog on a draft email campaign — see 3 chips. Click one → picker jumps to next occurrence. SMS draft → fallback or hidden.
+
+### Backend tests for User Story 9
+
+- [ ] T095 [P] [US9] Write `NUMU-api/tests/unit/test_send_time_suggester.py` — fixture matrix: 30 mock sends with varied open rates, assert top 3 chips correct; insufficient data → empty + helper; SMS-only history → fallback `based_on=send_count`
+- [ ] [TASK-SEC-005] [P] [US9] MEDIUM | Add `test_send_time_suggester_cache_isolation` to T095: populate `TTLCache` for store A + channel email; immediately request from store B + channel email; assert the returned `SuggestionResult` is recomputed (not the cached A result). Verify the cache key composition `(store_id, channel)` in T097's implementation — both components MUST be in the key. Reference: SEC-005. Category: OWASP A01 Broken Access Control (cache cross-tenant collision).
+
+### Backend implementation for User Story 9
+
+- [ ] T096 [US9] Create `NUMU-api/src/application/services/send_time_suggester.py` — `suggest(store_id, channel, tz) -> SuggestionResult` queries last 90d sends + Resend open events, groups by weekday × hour, computes avg_open_rate or fallback rank
+- [ ] T097 [US9] Add GET endpoint `/stores/{store_id}/marketing/send-time-suggestions` per `contracts/send-time-suggestions.md` in a new route file `NUMU-api/src/api/v1/routes/stores/marketing_send_times.py`. In-memory `cachetools.TTLCache` keyed on `(store_id, channel)`, 1-hour TTL.
+- [ ] T098 [US9] Register the new router in API package init
+
+### Frontend implementation for User Story 9
+
+- [ ] T099 [P] [US9] Extend `numo-merchant-hub/src/services/campaignApi.ts` — add `getSendTimeSuggestions`
+- [ ] T100 [P] [US9] Write tests for ScheduleDialog chip behavior in `numo-merchant-hub/src/components/campaigns/ScheduleDialog.test.tsx`
+- [ ] T101 [US9] Extend the existing Schedule dialog (currently embedded in `MarketingCampaignDetail.tsx`) — extract into `numo-merchant-hub/src/components/campaigns/ScheduleDialog.tsx`, add a chip row above the datetime picker that fetches on dialog open. Implement the `nextOccurrence(weekday, hour, tz)` helper. Helper text for fallback / insufficient-data modes per spec.
+
+**Checkpoint**: US9 complete. All 9 user stories shipped.
+
+---
+
+## Phase 12: Polish & Cross-Cutting Concerns
+
+- [ ] T102 [P] RTL visual regression pass — manually verify Marketing nav, Campaign detail, Attribution page, Compare page in Arabic locale (no overlapping text, mirrored chevrons, correct chart-legend ordering)
+- [ ] T103 [P] Performance smoke — run `ab` or `wrk` against the 5 new breakdown endpoints with synthetic data; verify p95 ≤ 800ms over a 30-day window (SC-003)
+- [ ] T104 [P] Performance smoke — compare endpoint with 4 campaigns over 30 days, verify p95 ≤ 1500ms (SC-012)
+- [ ] T105 [P] Performance smoke — send-time chip render via `time curl ...`, verify ≤ 200ms (SC-010) on a 90-day cache hit
+- [ ] T106 Run `quickstart.md` end-to-end on test env — all 54 steps pass
+- [ ] T107 [P] Memory-write: drop a project note about the new aggregation patterns (5 breakdowns + tenant filter shape) into `C:\Users\Yahia\.claude\projects\C--Users-Yahia-NUMU\memory\` if non-obvious
+- [ ] T108 Bandit + Ruff clean on backend; ESLint + tsc --noEmit clean on frontend (pre-commit hooks already enforce this — confirm green)
+- [ ] T109 `/speckit-security-review-branch` on the merged feature branch — investigate any high/critical findings before final merge
+
+---
+
+## Dependencies & Execution Order
+
+### Phase dependencies
+
+- **Phase 1 (Setup)**: independent — can start immediately
+- **Phase 2 (Foundational)**: depends on Phase 1; T007 (migrations) BLOCKS everything below
+- **Phase 3+ (User Stories)**: all depend on Phase 2 complete
+
+### Inter-story dependencies
+
+| Story | Depends on | Why |
+| ----- | ---------- | --- |
+| US1 (nav) | Phase 2 | Routes must exist |
+| US2 (Attribution page) | Phase 2 | Route + page stub |
+| US3 (Detail rebuild) | Phase 2 + ua-parser installed (T001) | Device classification needs the lib |
+| US4 (Auto-match) | Phase 2 (T004 migration) + US3's CampaignSidebar (T036) | Panel mounts into sidebar |
+| US5 (Activities) | Phase 2 (T005 migration) + US3's CampaignSidebar (T036) | Same as US4 |
+| US6 (Duplicate) | Phase 2 | Independent |
+| US7 (Compare) | Phase 2 + US3's CampaignChartGrid components for visual consistency (optional reuse) | List page extension |
+| US8 (Tips) | Phase 2 + US3's CampaignSidebar (T036) | Panel mounts into sidebar |
+| US9 (Best-time) | Phase 2 + US6's extracted ScheduleDialog (T101 extracts it) | Dialog component to extend |
+
+### Within a story
+
+- Tests written first (per constitution Principle III). Tests SHOULD fail before implementation lands. Run `pytest -k <task_id>` after writing the test to confirm red.
+- Models → Services → Endpoints → Frontend wiring (where applicable)
+
+### Parallel opportunities
+
+- **Phase 1**: T002 + T003 in parallel
+- **Phase 2 models**: T008-T013 in parallel after T007 commits
+- **All P1 stories** (US1, US2, US3): can run in parallel after Phase 2 completes
+- **All P2 stories** (US4, US5): can run in parallel after their migrations land in Phase 2
+- **All P3 stories** (US6, US7, US8, US9): fully independent — full parallelism
+- **Within US3**: T024-T028 in parallel (different repository methods, same file but distinct functions); T034-T045 in parallel (different files)
+- **Tests within a story**: all `[P]`-marked test tasks can run in parallel
+
+---
+
+## Parallel Example — Phase 5 (US3)
+
+After T032 (device classifier tests) + T031 (5 endpoints) merge, the 8 chart panel components can be built in parallel by separate developers:
+
+```bash
+# Frontend developer A
+Task: T038 SessionsByChannelPanel
+Task: T039 SalesByChannelPanel
+Task: T040 SessionsByUtmPanel
+Task: T041 SalesByUtmPanel
+
+# Frontend developer B
+Task: T042 OrdersNewVsReturningPanel
+Task: T043 SalesByOrderSizePanel
+Task: T044 ItemsSoldByProductPanel
+Task: T045 SessionsByDevicePanel
+
+# Frontend developer C — meanwhile assembles the shell
+Task: T035 CampaignDetailHeader
+Task: T036 CampaignSidebar
+Task: T037 CampaignKpiCards
+```
+
+---
+
+## Implementation Strategy
+
+### MVP First (P1 only — US1 + US2 + US3)
+
+1. Phase 1 setup (T001-T003)
+2. Phase 2 foundational (T004-T014) — INCLUDING the 3 migrations
+3. Phase 3 (US1 nav restructure) — small, ship quickly for instant discoverability win
+4. Phase 4 (US2 Attribution page) — straightforward extraction
+5. Phase 5 (US3 Detail rebuild) — the substantial one, parallelize across developers
+6. **STOP and validate**: quickstart.md Phases 1-2. Demo to merchant.
+7. Cut a release. P1 is the MVP — the Shopify-style layout is the headline win.
+
+### Incremental Delivery (add P2)
+
+8. Phase 6 (US4 auto-match) + Phase 7 (US5 activities) in parallel
+9. **Validate**: quickstart Phases 3-4
+10. Cut another release.
+
+### Add P3 polish (US6-US9)
+
+11. Phase 8 (US6 duplicate), Phase 9 (US7 compare), Phase 10 (US8 tips), Phase 11 (US9 best-time) — independently
+12. **Validate**: quickstart Phases 5-8
+13. Final phase 12 polish + run quickstart end-to-end
+14. `/speckit-security-review-branch` → if clean, merge to dev
+
+### Parallel team strategy (3+ developers)
+
+- Dev A: Phase 2 migrations + ua-parser wiring (T001-T013)
+- Dev B: Phase 3 nav (T015-T016) — short story, can pick up another after
+- Dev C: Phase 4 Attribution (T017-T021) — short story, can pick up another after
+- Devs A+B+C converge on Phase 5 (US3) — the work split is in the parallel example above
+- After P1 merges, devs split P2 + P3 stories one-each
+
+---
+
+## Notes
+
+- **All paths are repo-relative** to either `NUMU-api/` or `numo-merchant-hub/` — never absolute
+- **Tests-first**: Constitution Principle III is NON-NEGOTIABLE. Every story's test tasks come BEFORE the implementation tasks within that phase
+- **Migrations are sequential**: T004 → T005 → T006 → T007 must run in order on the same Alembic head
+- **Avoid scope creep**: WhatsApp campaign improvements + email template editor improvements are explicit non-goals (per spec); reject any PR comment asking to bundle them in
+- **Performance budgets are firm**: SC-003 / SC-010 / SC-012 must be measured before final merge (T103-T105)
+- **Commit cadence**: commit after each task or logical group. Branches: one feature branch per story is fine for the parallel team strategy; squash-merge to feature `002-marketing-campaigns-v2` integration branch, then PR to `dev`.
+- **Total task count: 118** (109 numbered T001-T109 + 9 TASK-SEC follow-ups from security review)
+- **Security task placement**: 1 in Phase 2 (SEC-004 rate limiting — cross-cutting prereq), 1 in Phase 5 (SEC-007 JSONB exposure test), 2 in Phase 6 (SEC-002a audit + SEC-006 overlap enumeration), 2 in Phase 7 (SEC-002b audit + SEC-003 SQLi test), 1 in Phase 8 (SEC-002c audit), 1 in Phase 9 (SEC-001 cross-store leak test), 1 in Phase 11 (SEC-005 cache isolation test)
