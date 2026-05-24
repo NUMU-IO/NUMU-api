@@ -259,10 +259,64 @@ async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> N
             )
             continue
 
+        # ── STOP-keyword detection (backend-030 / FR-009, FR-010) ──────
+        # Customers replying STOP / UNSUBSCRIBE / إلغاء / الغاء as the
+        # first word of an inbound text message must be opted out within
+        # 10s and an acknowledgement reply sent. Checked BEFORE the
+        # verification-reply branch so a STOP keyword takes precedence
+        # over any other interpretation (a customer trying to opt out
+        # should never be classified as a verification reply).
+        stop_detected = False
+        if msg_type == "text" and text_content:
+            from src.core.services.whatsapp_stop_keyword_detector import (
+                is_stop_keyword,
+            )
+
+            if is_stop_keyword(text_content):
+                stop_detected = True
+                try:
+                    from src.application.use_cases.whatsapp.opt_out_customer import (
+                        OptOutCustomerUseCase,
+                    )
+
+                    # Phone arrives as country-code digits (e.g. "201001234567")
+                    # from Meta; canonicalize to "+201001234567" for storage.
+                    canon_phone = (
+                        f"+{from_number}"
+                        if not from_number.startswith("+")
+                        else from_number
+                    )
+                    await OptOutCustomerUseCase(db).execute(
+                        store_id=prior.store_id,
+                        phone=canon_phone,
+                        reason="inbound_stop_keyword",
+                    )
+                    await _send_optout_ack(
+                        db,
+                        store_id=prior.store_id,
+                        tenant_id=prior.tenant_id,
+                        phone=canon_phone,
+                    )
+                    logger.info(
+                        "whatsapp_stop_keyword_opt_out",
+                        phone_tail=canon_phone[-4:],
+                        store_id=str(prior.store_id),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "stop_keyword_opt_out_failed for %s: %s", from_number, e
+                    )
+
         # Verification reply path (backend-015). Only text messages can
         # carry a yes/no token; button replies are still handled here
-        # since the WhatsApp template offers buttons too.
-        reply_text = text_content if msg_type in ("text", "button") else None
+        # since the WhatsApp template offers buttons too. STOP wins
+        # outright — if the first word was STOP/إلغاء we don't try to
+        # interpret it as a verification reply.
+        reply_text = (
+            text_content
+            if (msg_type in ("text", "button") and not stop_detected)
+            else None
+        )
         if reply_text:
             try:
                 reply_result = await apply_reply(
@@ -289,3 +343,44 @@ async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> N
             )
         except Exception as e:
             logger.warning("Failed to upsert conversation for %s: %s", from_number, e)
+
+
+async def _send_optout_ack(
+    db: AsyncSession,
+    *,
+    store_id: UUID,
+    tenant_id: UUID,
+    phone: str,
+) -> None:
+    """Send the STOP-acknowledgement confirmation reply (FR-010).
+
+    Resolves the per-store WhatsApp service and sends one of the
+    seeded system templates (``optout_confirmation_en`` /
+    ``optout_confirmation_ar``). The template name is in the
+    ``OPT_IN_BYPASS_ALLOWLIST`` so the send guard does NOT block it
+    even though we just flipped opt-out for this customer (TASK-SEC-010).
+
+    Errors here are logged but do not bubble — the opt-out itself is
+    already persisted; failing to send the ack must not prevent the
+    customer's actual opt-out from taking effect.
+    """
+    try:
+        from src.core.interfaces.services.messaging_service import MessageRecipient
+        from src.infrastructure.external_services.whatsapp import get_whatsapp_service
+
+        service = await get_whatsapp_service(store_id, db, tenant_id)
+        # Use Arabic by default for EG market; falls back to en if the
+        # template's `_ar` row isn't APPROVED. The send_text_message path
+        # is used because we're inside the 24h customer-service window
+        # (the customer just messaged in).
+        recipient = MessageRecipient(phone=phone, name="", language="ar")
+        await service.send_text_message(
+            recipient,
+            "تم إلغاء اشتراكك في رسائل واتساب. أرسل START للاشتراك مرة أخرى.",
+        )
+    except Exception as exc:
+        logger.warning(
+            "whatsapp_stop_ack_send_failed",
+            phone_tail=phone[-4:],
+            error=str(exc),
+        )

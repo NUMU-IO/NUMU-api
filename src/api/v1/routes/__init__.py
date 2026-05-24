@@ -174,6 +174,9 @@ from src.api.v1.routes.storefront import (
     upsell_router as storefront_upsell_router,
 )
 from src.api.v1.routes.storefront import (
+    whatsapp_optin_router as storefront_whatsapp_optin_router,
+)
+from src.api.v1.routes.storefront import (
     wishlist_router as storefront_wishlist_router,
 )
 from src.api.v1.routes.storefront.cart_sdk_aliases import (
@@ -347,6 +350,13 @@ api_router.include_router(
 api_router.include_router(
     storefront_checkout_session_router,
     tags=["Storefront - Checkout"],
+)
+
+# Storefront - WhatsApp opt-in (anonymous; gated by checkout-session token).
+# Path is /storefront/{store_slug}/whatsapp/opt-in per the route's decorator.
+api_router.include_router(
+    storefront_whatsapp_optin_router,
+    tags=["Storefront - WhatsApp"],
 )
 
 # Storefront - reverse geocoding proxy for the checkout location picker

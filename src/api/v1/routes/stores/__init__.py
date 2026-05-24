@@ -84,6 +84,7 @@ from src.api.v1.routes.stores import webhooks as webhooks_module
 from src.api.v1.routes.stores import whatsapp as whatsapp_module
 from src.api.v1.routes.stores import whatsapp_campaigns as whatsapp_campaigns_module
 from src.api.v1.routes.stores import whatsapp_chat as whatsapp_chat_module
+from src.api.v1.routes.stores import whatsapp_opt_ins as whatsapp_opt_ins_module
 from src.api.v1.routes.stores import whatsapp_templates as whatsapp_templates_module
 
 # Create main stores router - this will be mounted at /stores in the main router
@@ -171,5 +172,6 @@ router.include_router(whatsapp_chat_module.router, tags=["Store WhatsApp Chat"])
 router.include_router(
     whatsapp_campaigns_module.router, tags=["Store WhatsApp Campaigns"]
 )
+router.include_router(whatsapp_opt_ins_module.router, tags=["Store WhatsApp Opt-Ins"])
 
 __all__ = ["router"]

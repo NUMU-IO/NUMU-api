@@ -56,6 +56,9 @@ from src.api.v1.routes.storefront.theme_resolution import (
 )
 from src.api.v1.routes.storefront.tracking import router as tracking_router
 from src.api.v1.routes.storefront.upsell import router as upsell_router
+from src.api.v1.routes.storefront.whatsapp_optin import (
+    router as whatsapp_optin_router,
+)
 from src.api.v1.routes.storefront.wishlist import router as wishlist_router
 
 __all__ = [
@@ -87,6 +90,7 @@ __all__ = [
     "shipping_router",
     "checkout_config_router",
     "checkout_session_router",
+    "whatsapp_optin_router",
     "bundles_router",
     "geocode_router",
 ]
