@@ -116,6 +116,9 @@ from src.infrastructure.events.handlers.whatsapp_notification_handler import (
     handle_order_paid_whatsapp,
     handle_whatsapp_notification,
 )
+from src.infrastructure.events.handlers.whatsapp_scheduled_cancel_handler import (
+    handle_order_status_for_scheduled_cancel,
+)
 
 # Module-level singleton
 _event_bus: EventBus | None = None
@@ -135,6 +138,9 @@ def create_event_bus() -> EventBus:
     bus.subscribe(OrderStatusChangedEvent, handle_activity_log)
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_changed_activity)
     bus.subscribe(OrderStatusChangedEvent, handle_webhook_order_status_changed)
+    # backend-030 / US3 — cascade-cancel any pending WhatsApp scheduled
+    # sends linked to an order when that order moves to cancelled/refunded.
+    bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_scheduled_cancel)
 
     # Auto-create shipment on order confirmation
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_shipment)
