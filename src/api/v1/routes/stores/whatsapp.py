@@ -24,6 +24,11 @@ from src.api.v1.schemas.stores.whatsapp import (
     WhatsAppConnectionStatus,
     WhatsAppDayStat,
 )
+from src.api.v1.schemas.stores.whatsapp_connection import (
+    BYOConnectRequest,
+    BYOValidationFailure,
+    WhatsAppStatus,
+)
 from src.config import settings
 from src.core.entities.store import Store
 from src.infrastructure.database.models.tenant.configuration import (
@@ -505,3 +510,183 @@ async def get_analytics(
         ),
         message="Analytics retrieved",
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# US4 — Bring-Your-Own Meta WABA (FR-019 .. FR-025, backend-030)
+# ─────────────────────────────────────────────────────────────────────
+#
+# These endpoints serve the manual-paste credential path (a merchant
+# entering an access_token + phone_number_id + waba_id + app_secret
+# directly), as distinct from the JS-SDK-driven /complete-signup
+# endpoint above which exchanges a Meta OAuth code. The new endpoints
+# use the WhatsAppStatus / BYOConnectRequest schemas from
+# api/v1/schemas/stores/whatsapp_connection.py per the
+# whatsapp-connection.openapi.yaml contract.
+
+
+@router.post(
+    "/byo/connect",
+    status_code=status.HTTP_201_CREATED,
+    response_model=WhatsAppStatus,
+    summary="Connect merchant's own Meta WABA (BYO)",
+    operation_id="connect_byo_credentials",
+)
+async def byo_connect(
+    body: BYOConnectRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WhatsAppStatus:
+    """3-step validate + encrypt + persist + reset toggles (FR-019..FR-025)."""
+    from src.application.use_cases.whatsapp.connect_byo_credentials import (
+        BYOValidationError,
+        ConnectBYOCredentialsUseCase,
+    )
+
+    use_case = ConnectBYOCredentialsUseCase(db)
+    try:
+        result = await use_case.execute(
+            store_id=store.id,
+            access_token=body.access_token,
+            phone_number_id=body.phone_number_id,
+            waba_id=body.waba_id,
+            app_secret=body.app_secret,
+        )
+    except BYOValidationError as exc:
+        # 422 with whitelisted Meta error fields only (TASK-SEC-009).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=BYOValidationFailure.model_validate(
+                exc.to_response_dict()
+            ).model_dump(),
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.error("byo_connect_failed", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "internal_error", "message": "BYO connect failed."},
+        ) from exc
+
+    return WhatsAppStatus.model_validate(result)
+
+
+@router.delete(
+    "/byo/disconnect",
+    summary="Disconnect BYO Meta WABA and revert to platform-managed",
+    operation_id="disconnect_byo_credentials",
+)
+async def byo_disconnect(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Reverts mode to platform_managed; restores prior toggle snapshot."""
+    from src.api.v1.schemas.stores.whatsapp_connection import WhatsAppStatus
+    from src.application.use_cases.whatsapp.disconnect_byo_credentials import (
+        DisconnectBYOCredentialsUseCase,
+    )
+
+    use_case = DisconnectBYOCredentialsUseCase(db)
+    try:
+        result = await use_case.execute(store_id=store.id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "store_not_found", "message": str(exc)},
+        ) from exc
+
+    return WhatsAppStatus.model_validate(result)
+
+
+@router.get(
+    "/byo/status",
+    summary="Get WhatsApp connection status (BYO-aware)",
+    operation_id="get_whatsapp_status_v2",
+)
+async def byo_status(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Returns the WhatsAppStatus shape per the BYO contract. Distinct
+    from the legacy /status endpoint which uses the older
+    WhatsAppConnectionStatus schema kept for backward compatibility.
+    """
+    from src.api.v1.schemas.stores.whatsapp_connection import (
+        NotificationSettings as NotifSettings,
+    )
+    from src.api.v1.schemas.stores.whatsapp_connection import WhatsAppStatus
+
+    cred = (
+        await db.execute(
+            select(ServiceCredential).where(
+                ServiceCredential.tenant_id == store.tenant_id,
+                ServiceCredential.service_type == ServiceType.WHATSAPP,
+                ServiceCredential.service_name == ServiceName.WHATSAPP_BUSINESS,
+                ServiceCredential.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    store_settings = store.settings or {}
+    notifs = store_settings.get("whatsapp_notifications") or {}
+    wa_settings = store_settings.get("whatsapp") or {}
+    credential_error = wa_settings.get("credential_error")
+
+    if cred and cred.extra_metadata:
+        return WhatsAppStatus(
+            mode="byo",
+            connected=True,
+            phone_display_name=cred.extra_metadata.get("display_name"),
+            display_phone_number=cred.extra_metadata.get("phone_number"),
+            waba_id=cred.extra_metadata.get("waba_id"),
+            last_validated_at=cred.last_validated_at,
+            credential_error=credential_error,
+            notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
+        )
+
+    # Platform-managed
+    return WhatsAppStatus(
+        mode="platform_managed",
+        connected=bool(settings.whatsapp_enabled and settings.whatsapp_phone_number_id),
+        phone_display_name="NUMU" if settings.whatsapp_enabled else None,
+        display_phone_number=None,
+        waba_id=None,
+        last_validated_at=None,
+        credential_error=None,
+        notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
+    )
+
+
+@router.patch(
+    "/byo/notifications",
+    summary="Update notification toggles (BYO-path)",
+    operation_id="update_whatsapp_notifications_v2",
+)
+async def byo_update_notifications(
+    body: dict,
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Partial update of ``store.settings.whatsapp_notifications.*``.
+
+    Distinct from the legacy PATCH /notifications endpoint which writes
+    to a different settings path (``store.settings.whatsapp.notification_toggles``)
+    for backward compatibility with the embedded-signup UI. This endpoint
+    writes to the canonical path that the order-event handlers + the
+    send guard read from (FR-019a).
+    """
+    from src.api.v1.schemas.stores.whatsapp_connection import (
+        NotificationSettings as NotifSettings,
+    )
+
+    allowed_keys = set(NotifSettings.model_fields.keys())
+    updates = {k: bool(v) for k, v in body.items() if k in allowed_keys}
+
+    store_settings = dict(store.settings or {})
+    current = dict(store_settings.get("whatsapp_notifications") or {})
+    current.update(updates)
+    store_settings["whatsapp_notifications"] = current
+    store.settings = store_settings
+
+    store_repo = StoreRepository(db)
+    await store_repo.update(store)
+
+    return NotifSettings(**current)
