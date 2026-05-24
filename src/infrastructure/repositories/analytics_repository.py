@@ -1731,6 +1731,160 @@ class AnalyticsRepository:
             for i, (lo, hi) in enumerate(boundaries)
         ]
 
+    async def campaign_compare(
+        self,
+        store_id: UUID,
+        campaign_ids: list[UUID],
+        date_from: datetime,
+        date_to: datetime,
+        granularity: str,
+    ) -> dict:
+        """Side-by-side campaign comparison (feature 002 US7).
+
+        Two queries: one for KPIs per campaign (sessions + sales + orders
+        + AOV), one for the over-time series bucketed by day or week per
+        campaign. Returns a dict shaped per
+        contracts/campaign-actions.md — caller wraps with the campaign
+        metadata.
+
+        SEC-001: every campaign_id is filtered against the store_id so
+        IDs from a different tenant never appear in the result.
+        """
+        tid = get_tenant_id()
+
+        # KPIs per campaign — sessions from funnel_events, sales/orders
+        # from orders. Two queries merged in Python by campaign_id.
+        sessions_q = (
+            select(
+                FunnelEventModel.campaign_id,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id.in_(campaign_ids),
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(FunnelEventModel.campaign_id)
+        )
+        if tid:
+            sessions_q = sessions_q.where(FunnelEventModel.tenant_id == tid)
+
+        orders_q = (
+            select(
+                OrderModel.campaign_id,
+                func.count(OrderModel.id).label("orders"),
+                func.coalesce(func.sum(OrderModel.total), 0).label("sales_cents"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id.in_(campaign_ids),
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(OrderModel.campaign_id)
+        )
+        if tid:
+            orders_q = orders_q.where(OrderModel.tenant_id == tid)
+
+        # Time series — bucket sessions + sales per (campaign, bucket).
+        # Postgres date_trunc handles day / week cleanly.
+        bucket_expr = func.date_trunc(granularity, FunnelEventModel.created_at).label(
+            "bucket"
+        )
+        series_sessions_q = (
+            select(
+                FunnelEventModel.campaign_id,
+                bucket_expr,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.campaign_id.in_(campaign_ids),
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+            )
+            .group_by(FunnelEventModel.campaign_id, bucket_expr)
+            .order_by(bucket_expr)
+        )
+        if tid:
+            series_sessions_q = series_sessions_q.where(
+                FunnelEventModel.tenant_id == tid
+            )
+
+        order_bucket_expr = func.date_trunc(granularity, OrderModel.created_at).label(
+            "bucket"
+        )
+        series_sales_q = (
+            select(
+                OrderModel.campaign_id,
+                order_bucket_expr,
+                func.coalesce(func.sum(OrderModel.total), 0).label("sales_cents"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.campaign_id.in_(campaign_ids),
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            )
+            .group_by(OrderModel.campaign_id, order_bucket_expr)
+            .order_by(order_bucket_expr)
+        )
+        if tid:
+            series_sales_q = series_sales_q.where(OrderModel.tenant_id == tid)
+
+        sess_rows = await self.session.execute(sessions_q)
+        ord_rows = await self.session.execute(orders_q)
+        series_sess_rows = await self.session.execute(series_sessions_q)
+        series_sales_rows = await self.session.execute(series_sales_q)
+
+        # Build per-campaign KPI map
+        kpis: dict[UUID, dict] = {}
+        for row in sess_rows.all():
+            kpis.setdefault(
+                row.campaign_id, {"sessions": 0, "orders": 0, "sales_cents": 0}
+            )["sessions"] = int(row.sessions or 0)
+        for row in ord_rows.all():
+            d = kpis.setdefault(
+                row.campaign_id, {"sessions": 0, "orders": 0, "sales_cents": 0}
+            )
+            d["orders"] = int(row.orders or 0)
+            d["sales_cents"] = int(row.sales_cents or 0)
+        for cid in campaign_ids:
+            d = kpis.setdefault(cid, {"sessions": 0, "orders": 0, "sales_cents": 0})
+            d["average_order_value_cents"] = (
+                int(d["sales_cents"] / d["orders"]) if d["orders"] > 0 else 0
+            )
+
+        # Build per-campaign series map
+        series_by_campaign: dict[UUID, dict[str, dict]] = {
+            cid: {} for cid in campaign_ids
+        }
+        for row in series_sess_rows.all():
+            bucket_key = row.bucket.date().isoformat()
+            series_by_campaign.setdefault(row.campaign_id, {}).setdefault(
+                bucket_key, {"sessions": 0, "sales_cents": 0}
+            )["sessions"] = int(row.sessions or 0)
+        for row in series_sales_rows.all():
+            bucket_key = row.bucket.date().isoformat()
+            series_by_campaign.setdefault(row.campaign_id, {}).setdefault(
+                bucket_key, {"sessions": 0, "sales_cents": 0}
+            )["sales_cents"] = int(row.sales_cents or 0)
+
+        return {
+            "kpis": kpis,
+            "series_by_campaign": {
+                cid: [{"date": k, **v} for k, v in sorted(buckets.items())]
+                for cid, buckets in series_by_campaign.items()
+            },
+        }
+
     async def campaign_breakdown_device(
         self,
         store_id: UUID,
