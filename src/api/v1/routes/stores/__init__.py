@@ -44,6 +44,9 @@ from src.api.v1.routes.stores import inventory_transfers as inventory_transfers_
 from src.api.v1.routes.stores import invoices as invoices_module
 from src.api.v1.routes.stores import locations as locations_module
 from src.api.v1.routes.stores import (
+    marketing_audiences as marketing_audiences_module,
+)
+from src.api.v1.routes.stores import (
     marketing_campaign_activities as marketing_campaign_activities_module,
 )
 from src.api.v1.routes.stores import (
@@ -128,6 +131,10 @@ router.include_router(
 router.include_router(
     marketing_send_times_module.router,
     tags=["Marketing Send Times"],
+)
+router.include_router(
+    marketing_audiences_module.router,
+    tags=["Marketing Audiences"],
 )
 router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(

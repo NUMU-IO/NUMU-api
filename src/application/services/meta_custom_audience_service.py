@@ -270,3 +270,71 @@ class MetaCustomAudienceService:
                 },
             )
             return False
+
+    async def create_audience(
+        self,
+        *,
+        ad_account_id: str,
+        access_token: str,
+        name: str,
+        description: str | None = None,
+    ) -> str | None:
+        """Create an empty Custom Audience on Meta, return its id.
+
+        Required before ``push_to_meta`` can deposit hashed members —
+        Meta separates audience creation from member upload so the
+        same audience can be refreshed without recreating.
+
+        Returns the new ``customaudiences/{id}`` value on success,
+        ``None`` on Marketing-API error (caller logs + retries).
+        ``customer_file_source=USER_PROVIDED_ONLY`` is required for
+        audiences that get populated via the hashed-PII upload path.
+        """
+        import httpx
+
+        from src.config import settings as _app_settings
+
+        api_version = getattr(_app_settings, "meta_graph_api_version", "v21.0")
+        # Strip any leading "act_" the caller might pass — Meta accepts
+        # the bare ad account id on this path and rejects double prefixes.
+        clean_act_id = ad_account_id.removeprefix("act_")
+        url = (
+            f"https://graph.facebook.com/{api_version}/act_{clean_act_id}/"
+            f"customaudiences"
+        )
+
+        payload: dict[str, Any] = {
+            "name": name[:128],  # Meta caps name at 128 chars
+            "subtype": "CUSTOM",
+            "customer_file_source": "USER_PROVIDED_ONLY",
+            "access_token": access_token,
+        }
+        if description:
+            payload["description"] = description[:255]
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(url, data=payload)
+            if resp.status_code >= 400:
+                logger.warning(
+                    "custom_audience_create_failed",
+                    extra={
+                        "ad_account_id": clean_act_id,
+                        "name": name,
+                        "status": resp.status_code,
+                        "body": resp.text[:300],
+                    },
+                )
+                return None
+            body = resp.json() if resp.content else {}
+            return str(body.get("id")) if body.get("id") else None
+        except Exception as exc:  # noqa: BLE001 — fail-open for caller retry
+            logger.warning(
+                "custom_audience_create_exception",
+                extra={
+                    "ad_account_id": clean_act_id,
+                    "name": name,
+                    "error": str(exc),
+                },
+            )
+            return None
