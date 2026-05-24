@@ -40,7 +40,6 @@ from src.application.services.link_builder import LinkBuilder
 from src.application.services.short_code_generator import (
     generate as generate_short_code,
 )
-from src.config import settings
 from src.core.entities.coupon import Coupon, CouponType
 from src.core.entities.marketing_campaign import (
     CampaignChannel,
@@ -744,7 +743,9 @@ class TrackableLinkResponse(BaseModel):
     campaign_slug: str
     destination: TrackableLinkDestinationResponse
     # Optional short URL — only set when the request had
-    # ``with_short_link=true``. Shape: ``https://numueg.app/r/{code}``.
+    # ``with_short_link=true``. Shape: ``https://<store-host>/r/{code}``
+    # (uses the store's canonical origin, not the apex, so the
+    # displayed link looks branded).
     # The 8-char ``short_url_code`` is the per-link identifier (not the
     # 6-char campaign short_code above); they live in different
     # namespaces.
@@ -889,9 +890,15 @@ async def generate_trackable_link(
                 )
                 await link_session.commit()
                 short_url_code = short_link_row.short_code
-                short_url = (
-                    f"https://{settings.storefront_base_domain}/r/{short_url_code}"
-                )
+                # Use the store's canonical origin (subdomain or
+                # custom_domain) so the displayed short link looks
+                # branded — e.g. `https://yreab-test.numueg.app/r/AB7K9XYZ`
+                # instead of the apex `numueg.app/r/...`. The /r/{code}
+                # route is still handled by the API (test env routes
+                # via nginx hostname split). Storefronts without an
+                # `/r/...` proxy fall back via Cloudflare; for prod
+                # Heroku see follow-up task to add a Next.js route.
+                short_url = f"{store.store_url.rstrip('/')}/r/{short_url_code}"
             except short_link_service.OpenRedirectorError:
                 # The destination didn't pass the host check — should
                 # never happen because the link builder composed it
