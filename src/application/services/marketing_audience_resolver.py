@@ -125,8 +125,16 @@ def _materialize(filter_in: MarketingAudienceFilter) -> dict:
     Custom field values on the request take precedence over the preset's
     defaults so the merchant can pick "Lapsed" and then bump
     ``inactive_days`` to 120 without losing the preset's other filters.
+
+    Uses ``exclude_unset=True`` (not ``exclude_none``): the latter would
+    leak Pydantic model defaults like ``accepts_marketing=True`` into
+    every request and silently override a preset that wanted
+    ``accepts_marketing=False``. ``exclude_unset`` ships only fields the
+    caller explicitly set, so unset fields fall through to the preset's
+    value, and the ``_build_query`` default-True fallback handles the
+    "no preset + no override" path.
     """
-    raw = filter_in.model_dump(exclude_none=True, exclude={"preset"})
+    raw = filter_in.model_dump(exclude_unset=True, exclude={"preset"})
     if filter_in.preset and filter_in.preset in _PRESETS:
         base = dict(_PRESETS[filter_in.preset])
         base.update(raw)  # request overrides preset
@@ -201,8 +209,12 @@ def _build_query(
 
     tags = f.get("tags_any")
     if tags:
-        # JSONB array overlap: ``customers.tags && ARRAY['vip','wholesale']``
-        stmt = stmt.where(CustomerModel.tags.op("&&")(tags))
+        # PostgreSQL ARRAY overlap — ``customers.tags && ARRAY['vip','wholesale']``.
+        # ``CustomerModel.tags`` is ``ARRAY(String)``, so we use SQLAlchemy's
+        # typed ``.overlap()`` method (not the generic ``.op("&&")``) so the
+        # parameter binds as ``text[]`` instead of relying on asyncpg type
+        # inference, which falls over when the list is empty or mixed-type.
+        stmt = stmt.where(CustomerModel.tags.overlap(tags))
 
     return stmt
 
