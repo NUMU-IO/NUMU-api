@@ -3028,12 +3028,71 @@ async def delete_meta_tracking(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     db: Annotated[_AsyncSession, Depends(_get_db)],
 ):
-    """Disconnect: both flags off, soft-delete CAPI credential, keep history.
+    """Disconnect: revoke server-side on Meta + soft-delete locally + audit.
+
+    Flow:
+      1. Decrypt the merchant's CAPI token (if one is on file).
+      2. Best-effort call to Meta's ``DELETE /me/permissions`` so the
+         merchant's Meta Business Settings → Apps page also shows the
+         NUMU app as removed — keeps the two surfaces in sync.
+      3. Turn off ``pixel_enabled`` + ``capi_enabled`` on the store
+         settings JSONB.
+      4. Soft-delete the ``service_credentials`` row (``is_active=False``)
+         so the audit trail of "this token existed once" survives.
+      5. Audit log under ``ADMIN_CONFIG_CHANGE`` so a later dispute
+         ("who turned off our Meta integration?") has a trail.
+
+    The Meta-side revoke is best-effort: if Meta is down or the token
+    is already invalid, the local cleanup still proceeds. Once the
+    merchant clicks Disconnect they expect NUMU to stop using their
+    data regardless of what Meta's API does.
 
     The ``meta_event_log`` rows are intentionally retained — they're
     audit data that the merchant might still need to debug a past
     campaign or chase a fbtrace_id with Meta support.
     """
+    from src.application.services.audit_service import AuditService, EventType
+    from src.infrastructure.external_services.meta.oauth_client import (
+        MetaOAuthClient,
+    )
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    cred = await _get_capi_credential(db, store.tenant_id)
+    revoke_attempted = False
+    revoke_succeeded = False
+    had_active_token = cred is not None and cred.is_active
+
+    # Step 1+2: best-effort server-side revoke. Only attempt when we
+    # actually have a valid token on file — no point hitting Meta with
+    # an empty access_token. MetaOAuthClient.is_configured guards the
+    # case where the NUMU Meta App env vars aren't set (App Review
+    # still pending) — without the app credentials the revoke endpoint
+    # would 4xx anyway.
+    if had_active_token:
+        try:
+            sm = get_secrets_manager()
+            decrypted = await sm.decrypt(
+                cred.credentials_encrypted, cred.encryption_key_id
+            )
+            access_token = (decrypted or {}).get("access_token")
+            client = MetaOAuthClient()
+            if access_token and client.is_configured:
+                revoke_attempted = True
+                revoke_succeeded = await client.revoke_permissions(
+                    access_token=access_token
+                )
+        except Exception:
+            # Decryption / network failures must not block local
+            # cleanup — log and proceed.
+            logger.warning(
+                "meta_revoke_pre_local_cleanup_failed",
+                extra={"store_id": str(store.id)},
+                exc_info=True,
+            )
+
+    # Step 3: turn off flags on store.settings.tracking.meta.
     settings_dict: dict = store.settings or {}
     tracking = settings_dict.get("tracking") or {}
     meta_cfg = tracking.get("meta") or {}
@@ -3049,12 +3108,42 @@ async def delete_meta_tracking(
         pass
     await store_repo.update(store)
 
-    cred = await _get_capi_credential(db, store.tenant_id)
+    # Step 4: soft-delete the credential row (preserves audit history).
     if cred is not None:
         cred.is_active = False
         await db.flush()
 
-    logger.info("meta_tracking_disconnected store_id=%s", store.id)
+    # Step 5: audit log so disputes have a trail.
+    try:
+        await AuditService(db).log(
+            event_type=EventType.ADMIN_CONFIG_CHANGE,
+            action="meta_disconnect",
+            resource_type="store_meta_integration",
+            resource_id=str(store.id),
+            store_id=store.id,
+            tenant_id=store.tenant_id,
+            new_value={
+                "pixel_enabled": False,
+                "capi_enabled": False,
+                "had_active_token": had_active_token,
+                "meta_revoke_attempted": revoke_attempted,
+                "meta_revoke_succeeded": revoke_succeeded,
+            },
+        )
+        await db.commit()
+    except Exception:
+        logger.warning(
+            "meta_disconnect_audit_log_failed",
+            extra={"store_id": str(store.id)},
+            exc_info=True,
+        )
+
+    logger.info(
+        "meta_tracking_disconnected store_id=%s revoke_attempted=%s revoke_succeeded=%s",
+        store.id,
+        revoke_attempted,
+        revoke_succeeded,
+    )
 
     response = await _build_meta_response(db, store)
     return SuccessResponse(data=response, message="Meta tracking disconnected")

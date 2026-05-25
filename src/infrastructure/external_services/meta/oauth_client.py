@@ -223,6 +223,54 @@ class MetaOAuthClient:
             if self._client is None:
                 await client.aclose()
 
+    async def revoke_permissions(self, *, access_token: str) -> bool:
+        """Revoke the merchant's grant of the NUMU Meta App, server-side.
+
+        Posts ``DELETE /me/permissions`` which atomically removes ALL
+        scopes the user previously granted. Returns True on success
+        (Meta confirms removal) so the caller can audit. False on any
+        failure — caller should still clear the local credential row +
+        store settings, because once the merchant clicks Disconnect
+        they expect NUMU to stop using their data regardless of what
+        Meta's API does.
+
+        Best-effort by design: 4xx (token already invalid, permissions
+        already revoked) and 5xx (Meta outage) both return False
+        without raising. The local cleanup is the authoritative
+        operation; the Meta-side call is courtesy so the merchant's
+        Meta Business Settings → Apps page also shows the disconnect.
+        """
+        client = self._client or httpx.AsyncClient(timeout=10.0)
+        try:
+            resp = await client.delete(
+                f"https://graph.facebook.com/{self.api_version}/me/permissions",
+                params={"access_token": access_token},
+            )
+            if resp.status_code >= 400:
+                logger.warning(
+                    "meta_revoke_permissions_failed",
+                    extra={
+                        "status": resp.status_code,
+                        "body": resp.text[:300],
+                    },
+                )
+                return False
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+            # Meta returns ``{"success": true}`` on a successful revoke.
+            return bool(body.get("success")) if isinstance(body, dict) else True
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "meta_revoke_permissions_http_error",
+                extra={"error": str(exc)[:300]},
+            )
+            return False
+        finally:
+            if self._client is None:
+                await client.aclose()
+
 
 def _parse_token_response(resp: httpx.Response) -> MetaOAuthTokens:
     if resp.status_code >= 400:
