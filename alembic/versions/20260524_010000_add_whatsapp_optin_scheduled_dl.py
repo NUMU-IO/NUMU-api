@@ -513,20 +513,32 @@ def upgrade() -> None:
     # %-syntax with "syntax error at or near %". sa.text() is
     # driver-agnostic — SQLAlchemy rewrites :name to the right form per
     # dialect.
+    # ``CAST(:x AS text)`` disambiguates the parameter types for asyncpg.
+    # ``:name`` and ``:lang`` appear twice (SELECT + WHERE). Without an
+    # explicit cast, asyncpg's protocol-prepare step tries to infer one
+    # Postgres type per placeholder and fails:
+    #   AmbiguousParameterError: inconsistent types deduced for parameter $1
+    #   DETAIL: text versus character varying
+    # because the SELECT inserts into a `varchar` column while the WHERE
+    # compares against `varchar` too — but the Python str literal flows
+    # in as `text`. Forcing the cast gives asyncpg a single resolved type;
+    # Postgres implicitly coerces text→varchar on the insert + compare.
     conn = op.get_bind()
     insert_stmt = sa.text(
         """
         INSERT INTO public.whatsapp_templates
           (tenant_id, store_id, name, language, category, status,
            body_text, is_system, created_at, updated_at)
-        SELECT s.tenant_id, s.id, :name, :lang, :cat, 'APPROVED',
-               :body, true, NOW(), NOW()
+        SELECT s.tenant_id, s.id,
+               CAST(:name AS text), CAST(:lang AS text),
+               CAST(:cat AS text), 'APPROVED',
+               CAST(:body AS text), true, NOW(), NOW()
         FROM public.stores s
         WHERE NOT EXISTS (
             SELECT 1 FROM public.whatsapp_templates t
             WHERE t.store_id = s.id
-              AND t.name = :name
-              AND t.language = :lang
+              AND t.name = CAST(:name AS text)
+              AND t.language = CAST(:lang AS text)
         )
         """
     )
