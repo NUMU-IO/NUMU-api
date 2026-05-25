@@ -265,3 +265,100 @@ class WhatsAppClient:
         response.raise_for_status()
         result: dict[str, Any] = response.json()
         return result
+
+    # ─────────────────────────────────────────────────────────────────
+    # BYO validation & template management (added for feature backend-030)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def get_phone_number_info(self) -> dict[str, Any]:
+        """Read phone metadata. Step 1 of BYO validation (FR-021)."""
+        endpoint = (
+            f"{self.phone_number_id}"
+            "?fields=verified_name,display_phone_number,quality_rating,"
+            "code_verification_status"
+        )
+        response = await self._client.get(
+            f"{self.base_url}/{endpoint}",
+            headers=self._get_headers(),
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    async def get_waba_info(self) -> dict[str, Any]:
+        """Read WABA-level info. Step 2 of BYO validation (FR-021).
+
+        Verifies the token carries ``whatsapp_business_management`` scope —
+        without it this endpoint returns 403/401.
+        """
+        if not self.waba_id:
+            raise ValueError("waba_id is required to read WABA info")
+        endpoint = f"{self.waba_id}?fields=id,name,owner_business_info,timezone_id"
+        response = await self._client.get(
+            f"{self.base_url}/{endpoint}",
+            headers=self._get_headers(),
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    async def list_templates(self, limit: int = 100) -> dict[str, Any]:
+        """List templates for the WABA.
+
+        Step 3 of BYO validation (FR-021) — proves messaging-management
+        surface is reachable and the phone is associated with the supplied
+        WABA. Also called by the polling sync task (FR-028, T091).
+        """
+        if not self.waba_id:
+            raise ValueError("waba_id is required to list templates")
+        endpoint = f"{self.waba_id}/message_templates?limit={limit}"
+        response = await self._client.get(
+            f"{self.base_url}/{endpoint}",
+            headers=self._get_headers(),
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    async def submit_template(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Submit a new template to Meta for approval (FR-026).
+
+        ``payload`` must follow Meta's template-creation contract:
+        ``{ "name", "language", "category", "components": [...] }``.
+
+        Returns Meta's response with the assigned ``id`` (stored as
+        ``meta_template_id``) and the initial ``status``. 4xx from Meta on
+        bad template content surfaces via ``raise_for_status()`` — the
+        use-case catches and returns 422 to the merchant (T086 / FR-027).
+        """
+        if not self.waba_id:
+            raise ValueError("waba_id is required to submit a template")
+        endpoint = f"{self.waba_id}/message_templates"
+        response = await self._client.post(
+            f"{self.base_url}/{endpoint}",
+            headers=self._get_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    async def subscribe_app_to_waba(self, app_id: str) -> dict[str, Any]:
+        """Subscribe a Meta app to ``message_template_status_update`` events
+        for this WABA (FR-028 / research R1).
+
+        Idempotent — Meta returns success even if already subscribed.
+        Called once at platform-app boot via T093; not used for BYO stores
+        (merchant owns their own app+webhook).
+        """
+        if not self.waba_id:
+            raise ValueError("waba_id is required to subscribe an app")
+        endpoint = f"{self.waba_id}/subscribed_apps"
+        response = await self._client.post(
+            f"{self.base_url}/{endpoint}",
+            headers=self._get_headers(),
+            params={"app_id": app_id},
+        )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result

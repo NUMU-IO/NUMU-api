@@ -22,6 +22,9 @@ from src.api.v1.routes.storefront.checkout import router as checkout_router
 from src.api.v1.routes.storefront.checkout_config import (
     router as checkout_config_router,
 )
+from src.api.v1.routes.storefront.checkout_session import (
+    router as checkout_session_router,
+)
 from src.api.v1.routes.storefront.coupon import router as coupon_router
 from src.api.v1.routes.storefront.currencies import router as currencies_router
 from src.api.v1.routes.storefront.customer import router as customer_router
@@ -53,6 +56,9 @@ from src.api.v1.routes.storefront.theme_resolution import (
 )
 from src.api.v1.routes.storefront.tracking import router as tracking_router
 from src.api.v1.routes.storefront.upsell import router as upsell_router
+from src.api.v1.routes.storefront.whatsapp_optin import (
+    router as whatsapp_optin_router,
+)
 from src.api.v1.routes.storefront.wishlist import router as wishlist_router
 
 __all__ = [
@@ -83,6 +89,8 @@ __all__ = [
     "shipping_quote_router",
     "shipping_router",
     "checkout_config_router",
+    "checkout_session_router",
+    "whatsapp_optin_router",
     "bundles_router",
     "geocode_router",
 ]

@@ -112,7 +112,12 @@ from src.infrastructure.events.handlers.webhook_handler import (
     handle_webhook_product_updated,
 )
 from src.infrastructure.events.handlers.whatsapp_notification_handler import (
+    handle_order_created_whatsapp,
+    handle_order_paid_whatsapp,
     handle_whatsapp_notification,
+)
+from src.infrastructure.events.handlers.whatsapp_scheduled_cancel_handler import (
+    handle_order_status_for_scheduled_cancel,
 )
 
 # Module-level singleton
@@ -133,6 +138,9 @@ def create_event_bus() -> EventBus:
     bus.subscribe(OrderStatusChangedEvent, handle_activity_log)
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_changed_activity)
     bus.subscribe(OrderStatusChangedEvent, handle_webhook_order_status_changed)
+    # backend-030 / US3 — cascade-cancel any pending WhatsApp scheduled
+    # sends linked to an order when that order moves to cancelled/refunded.
+    bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_scheduled_cancel)
 
     # Auto-create shipment on order confirmation
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_shipment)
@@ -144,8 +152,12 @@ def create_event_bus() -> EventBus:
     # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
     bus.subscribe(OrderCreatedEvent, handle_order_created_activity)
+    # backend-030 / US1 — WhatsApp order-confirmation on order creation
+    bus.subscribe(OrderCreatedEvent, handle_order_created_whatsapp)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
     bus.subscribe(OrderPaidEvent, handle_order_paid_activity)
+    # backend-030 / US1 — WhatsApp payment-received on order payment
+    bus.subscribe(OrderPaidEvent, handle_order_paid_whatsapp)
     # offers-v2: emit `convert` PromotionEvent for every promotion
     # attributable to a paid order so merchant analytics show real
     # conversion totals (not just redemptions).

@@ -35,6 +35,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.fraud_tasks",
         "src.infrastructure.messaging.tasks.risk_scoring_tasks",
         "src.infrastructure.messaging.tasks.whatsapp_nudge_task",
+        # backend-030 / US3 — scheduled-send dispatcher (every 60s).
+        "src.infrastructure.messaging.tasks.whatsapp_scheduled_send_dispatcher",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
@@ -362,6 +364,13 @@ celery_app.conf.beat_schedule = {
     "rollup-promotion-events-daily": {
         "task": "tasks.rollup_promotion_events_daily",
         "schedule": crontab(hour=2, minute=15),
+    },
+    # backend-030 / US3 — dispatch due whatsapp_scheduled_sends rows.
+    # Fires every 60s; per-row guard re-evaluated at dispatch time
+    # (FR-014, FR-015, FR-017).
+    "dispatch-whatsapp-scheduled-sends": {
+        "task": "numu_api.whatsapp.dispatch_scheduled_sends",
+        "schedule": 60.0,
     },
 }
 

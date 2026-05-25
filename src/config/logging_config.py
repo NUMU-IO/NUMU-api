@@ -51,6 +51,56 @@ def add_app_context(
     return event_dict
 
 
+# Sensitive field names whose values must NEVER appear in logs (TASK-SEC-006).
+# Matched case-insensitively against any key in the event dict (recursive into
+# nested dicts/lists). The original value is replaced with REDACTION_MARKER.
+SENSITIVE_LOG_KEYS: frozenset[str] = frozenset({
+    # Authentication / authorization secrets
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "bearer_token",
+    "api_key",
+    "apikey",
+    "secret",
+    "client_secret",
+    "password",
+    "passwd",
+    "authorization",
+    # WhatsApp / Meta BYO credentials (TASK-SEC-006 — feature: backend-030)
+    "app_secret",
+    "phone_number_id",
+    "waba_id",
+    # Payment / generic-credential fields
+    "card_number",
+    "cvv",
+    "encrypted_credentials",
+})
+REDACTION_MARKER: str = "***REDACTED***"
+
+
+def _redact_value(key: str, value: Any) -> Any:
+    """Recurse into the value and redact wherever a sensitive key appears."""
+    if isinstance(value, dict):
+        return {k: _redact_value(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(key, item) for item in value]
+    if key.lower() in SENSITIVE_LOG_KEYS:
+        return REDACTION_MARKER
+    return value
+
+
+def redact_sensitive_fields(
+    logger: logging.Logger, method_name: str, event_dict: EventDict
+) -> EventDict:
+    """structlog processor — redacts sensitive field values everywhere they
+    appear in the event dict, including inside nested dicts/lists.
+
+    Idempotent and cheap (no allocation when no sensitive keys present).
+    """
+    return {k: _redact_value(k, v) for k, v in event_dict.items()}
+
+
 def configure_logging() -> None:
     """Configure structlog for the application.
 
@@ -68,6 +118,9 @@ def configure_logging() -> None:
         structlog.processors.StackInfoRenderer(),
         add_app_context,
         add_request_context,
+        # Must come AFTER context processors and BEFORE any renderer so that
+        # secrets injected via .bind() or context vars also get redacted.
+        redact_sensitive_fields,
     ]
 
     if settings.log_format == "json":

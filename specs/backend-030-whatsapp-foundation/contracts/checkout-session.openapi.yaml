@@ -1,0 +1,80 @@
+openapi: 3.1.0
+info:
+  title: NUMU Checkout Session Token API
+  version: 1.0.0
+  description: |
+    Storefront-facing endpoint that issues a short-lived (30 min), phone-bound
+    token at the checkout Contact step. The token is consumed by phone-bound
+    anonymous endpoints — initially `POST /storefront/{store_slug}/whatsapp/opt-in`
+    (FR-007a). General-purpose: future endpoints (abandoned-checkout recovery,
+    mid-checkout push registration) reuse the same token.
+
+    Authentication is via the existing `numu_cart_session` HTTP-only cookie
+    (already issued for cart access). The token is bound to that cart session +
+    the phone the customer entered at Contact.
+
+servers:
+  - url: https://numueg.app/api/v1
+
+paths:
+  /storefront/{store_slug}/checkout-session:
+    post:
+      summary: Issue a checkout-session token bound to the caller's cart and phone
+      operationId: issueCheckoutSession
+      tags: [checkout-session]
+      security: []
+      description: |
+        Anonymous endpoint. The caller MUST send the `numu_cart_session` cookie
+        (set automatically when they accessed the cart). The handler resolves the
+        cart, canonicalizes the supplied phone to E.164, persists a Redis row,
+        and returns the opaque token.
+
+        Calling this endpoint multiple times for the same cart is permitted (e.g.,
+        the customer edits their phone mid-checkout); each call issues a new token,
+        and prior tokens remain valid until their TTL expires.
+      parameters:
+        - in: path
+          name: store_slug
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  description: Will be canonicalized to E.164 and stored on the session.
+                locale: { type: string, default: ar }
+      responses:
+        "201":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expires_at]
+                properties:
+                  token:
+                    type: string
+                    format: uuid
+                    description: Pass this back to phone-bound anonymous endpoints.
+                  expires_at:
+                    type: string
+                    format: date-time
+        "401":
+          description: Missing or invalid `numu_cart_session` cookie.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, enum: [missing_cart_session] }
+                  message: { type: string }
+        "422":
+          description: Phone could not be canonicalized.
+        "429":
+          description: Rate limit exceeded.

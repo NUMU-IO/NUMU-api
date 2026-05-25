@@ -325,6 +325,7 @@ class WhatsAppMessagingService(IMessagingService):
         total: str,
         store_name: str,
         tracking_url: str | None = None,
+        invoice_url: str | None = None,
     ) -> MessageResult:
         """Send order confirmation message.
 
@@ -333,6 +334,14 @@ class WhatsAppMessagingService(IMessagingService):
         button or body variable), it'll surface as a tap-to-open tracking
         link — reflecting live status changes from the merchant dashboard.
 
+        When ``invoice_url`` is provided (backend-030 / FR-004), a
+        follow-up document message is dispatched after the template send
+        carrying the invoice PDF as an attachment. The template's success
+        determines the return value; an invoice-attachment failure does
+        NOT mark the order-confirmation send as failed (the customer
+        already received the confirmation; the attachment is best-effort
+        and logged separately).
+
         Args:
             recipient: Customer contact info
             order_number: Order reference number
@@ -340,9 +349,10 @@ class WhatsAppMessagingService(IMessagingService):
             store_name: Store name
             tracking_url: Persistent order-tracking URL, e.g.
                 ``https://<subdomain>.numueg.app/track/<order_id>``.
+            invoice_url: Optional public URL of the order's invoice PDF.
 
         Returns:
-            MessageResult
+            MessageResult — reflects the template (primary) send only.
         """
         content = MessageContent(
             type=MessageType.ORDER_CONFIRMATION,
@@ -355,7 +365,33 @@ class WhatsAppMessagingService(IMessagingService):
                 "tracking_url": tracking_url or "",
             },
         )
-        return await self.send_message(content)
+        result = await self.send_message(content)
+
+        # Best-effort invoice-PDF attachment (FR-004). Only attempted when
+        # the template send itself succeeded — sending an attachment after
+        # a failed primary makes no UX sense.
+        if result.success and invoice_url:
+            try:
+                attachment_result = await self.send_media_message(
+                    phone=recipient.phone,
+                    media_url=invoice_url,
+                    media_type="document",
+                    caption=f"Invoice for order {order_number}",
+                )
+                logger.info(
+                    "whatsapp_order_invoice_attachment",
+                    order_number=order_number,
+                    phone=recipient.phone[-4:],
+                    success=attachment_result.success,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "whatsapp_order_invoice_attachment_failed",
+                    order_number=order_number,
+                    error=str(exc),
+                )
+
+        return result
 
     async def send_shipping_notification(
         self,
