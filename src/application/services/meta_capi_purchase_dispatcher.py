@@ -66,7 +66,22 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
 
 
 def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
-    """Build the Meta CAPI custom_data dict for an Order."""
+    """Build the Meta CAPI custom_data dict for an Order.
+
+    Forwards the order's UTM attribution (captured by feature 001 at
+    checkout-create time from the storefront's ``numu_attribution``
+    cookie) into the event payload so Meta's Events Manager can split
+    conversions by NUMU marketing campaign instead of collapsing them
+    all into ``Direct``.
+
+    Meta accepts arbitrary keys on ``custom_data`` and surfaces them as
+    filter / breakdown dimensions, so the merchant can pivot the
+    Purchase report by ``numu_utm_campaign`` and see exactly which
+    email/SMS campaign drove the sale — even if the user landed via a
+    Meta ad first (last-touch wins per Meta's default attribution
+    window, but the campaign signal is now visible alongside the ad
+    signal for cross-channel reconciliation).
+    """
     line_items = order.line_items or []
     contents = [
         {
@@ -77,7 +92,7 @@ def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
         for li in line_items
         if li.get("product_id")
     ]
-    return {
+    data: dict[str, Any] = {
         "value": (order.total or 0) / 100,
         "currency": order.currency or "EGP",
         "content_ids": [
@@ -88,6 +103,29 @@ def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
         "num_items": sum(int(li.get("quantity", 1)) for li in line_items),
         "order_id": str(order.id),
     }
+
+    # UTM attribution carry-through. ``utm_campaign`` carries the
+    # marketing_campaigns.short_code (Crockford base32, set by the
+    # trackable-link builder). ``campaign_id`` is the canonical UUID FK
+    # when the short code resolved to a known campaign — Meta sees both
+    # so analysts can correlate via either dimension.
+    if getattr(order, "utm_source", None):
+        data["numu_utm_source"] = order.utm_source
+    if getattr(order, "utm_medium", None):
+        data["numu_utm_medium"] = order.utm_medium
+    if getattr(order, "utm_campaign", None):
+        data["numu_utm_campaign"] = order.utm_campaign
+        # `numu_campaign_id` is the spec-level alias; keep both for
+        # discoverability in Events Manager UI.
+        data["numu_campaign_id"] = order.utm_campaign
+    if getattr(order, "utm_term", None):
+        data["numu_utm_term"] = order.utm_term
+    if getattr(order, "utm_content", None):
+        data["numu_utm_content"] = order.utm_content
+    if getattr(order, "campaign_id", None):
+        data["numu_campaign_uuid"] = str(order.campaign_id)
+
+    return data
 
 
 async def enqueue_meta_capi_event_for_order(
