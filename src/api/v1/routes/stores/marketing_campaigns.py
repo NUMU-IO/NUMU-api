@@ -40,6 +40,7 @@ from src.application.services.link_builder import LinkBuilder
 from src.application.services.short_code_generator import (
     generate as generate_short_code,
 )
+from src.config.logging_config import get_logger
 from src.core.entities.coupon import Coupon, CouponType
 from src.core.entities.marketing_campaign import (
     CampaignChannel,
@@ -55,6 +56,8 @@ from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.marketing_campaign_repository import (
     MarketingCampaignRepository,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/{store_id}/marketing/campaigns",
@@ -1761,4 +1764,193 @@ async def list_campaign_coupons(
     return SuccessResponse(
         data=[_coupon_to_response(c) for c in entities],
         message="Campaign coupons listed",
+    )
+
+
+# ── Promote-on-Meta (spec 005 US7) ──────────────────────────────
+
+
+class PromoteOnMetaResponse(BaseModel):
+    ad_id: str
+    creative_id: str
+    ads_manager_url: str
+    used_custom_audience_id: str | None = None
+
+
+@router.post(
+    "/{campaign_id}/promote-on-meta",
+    response_model=SuccessResponse[PromoteOnMetaResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Fork a completed campaign into a PAUSED Meta ad draft",
+    operation_id="promote_campaign_on_meta",
+)
+async def promote_campaign_on_meta_route(
+    store_id: UUID,
+    campaign_id: UUID,
+):
+    """Create a PAUSED Meta ad mirroring the campaign's creative.
+
+    Gated on:
+      - Campaign in ``completed`` state.
+      - Store has Meta connected (ad_account_id + page_id + valid token).
+      - Token has ``ads_management`` scope.
+
+    Targeting defaults to the synced Custom Audience for the campaign's
+    segment when one exists; otherwise empty + Egypt geo. Always
+    PAUSED so the merchant sets budget / schedule / bid in Meta Ads
+    Manager before publishing — NUMU never instructs Meta to charge.
+    """
+    from sqlalchemy import select as _select
+
+    from src.application.services.meta_ad_promote_service import (
+        promote_campaign_on_meta,
+    )
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+    from src.infrastructure.repositories import StoreRepository
+
+    async with AsyncSessionLocal() as session:
+        repo = MarketingCampaignRepository(session)
+        c = await repo.get_by_id(campaign_id)
+        if c is None or c.store_id != store_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found"
+            )
+        if c.status != CampaignStatus.COMPLETED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Can only promote completed campaigns to Meta — this "
+                    f"one is '{c.status.value}'."
+                ),
+            )
+
+        store_repo_local = StoreRepository(session)
+        store = await store_repo_local.get_by_id(store_id)
+        if store is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
+            )
+
+        meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
+        ad_account_id = meta_cfg.get("ad_account_id")
+        page_id = meta_cfg.get("page_id")
+        if not (ad_account_id and page_id):
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail=(
+                    "Meta is not fully connected — both ad_account_id "
+                    "and page_id are required. Complete the OAuth picker "
+                    "in Settings → Integrations → Meta."
+                ),
+            )
+
+        cred_q = (
+            _select(ServiceCredential)
+            .where(ServiceCredential.tenant_id == store.tenant_id)
+            .where(ServiceCredential.service_type == ServiceType.TRACKING)
+            .where(ServiceCredential.service_name == ServiceName.META_CAPI)
+            .where(ServiceCredential.is_active.is_(True))
+        )
+        cred = (await session.execute(cred_q)).scalar_one_or_none()
+        if cred is None:
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail="Meta access token is missing or expired.",
+            )
+        try:
+            sm = get_secrets_manager()
+            decrypted = await sm.decrypt(
+                cred.credentials_encrypted, cred.encryption_key_id
+            )
+            access_token = (decrypted or {}).get("access_token")
+        except Exception:
+            access_token = None
+        if not access_token:
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail="Meta access token could not be decrypted.",
+            )
+
+        # Creative resolution: prefer promoted_item snapshot, fall back
+        # to subject/body for legacy campaigns with no promoted_item.
+        promoted = c.promoted_item or {}
+        snapshot = promoted.get("snapshot") or {}
+        headline = snapshot.get("name") or c.inline_subject or c.name
+        image_url = snapshot.get("image_url") or store.logo_url or ""
+        link_url = snapshot.get("url") or (
+            f"https://{store.subdomain}.numueg.app/"
+            if store.subdomain
+            else "https://numueg.app/"
+        )
+        body_text = c.inline_subject or c.name
+
+        custom_audience_id: str | None = None
+        af = c.audience_filter or {}
+        seg_key = af.get("segment_key") if isinstance(af, dict) else None
+        if seg_key:
+            ca_cache = (meta_cfg.get("custom_audiences") or {}).get(seg_key) or {}
+            custom_audience_id = ca_cache.get("audience_id")
+
+        result = await promote_campaign_on_meta(
+            ad_account_id=ad_account_id,
+            page_id=page_id,
+            access_token=access_token,
+            campaign_name=c.name,
+            headline=headline,
+            body_text=body_text,
+            image_url=image_url,
+            link_url=link_url,
+            custom_audience_id=custom_audience_id,
+        )
+
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    "Meta refused the ad creation. Check that the token "
+                    "has ads_management scope and the ad account has a "
+                    "default ad set configured."
+                ),
+            )
+
+        try:
+            await AuditService(session).log(
+                event_type=EventType.ADMIN_CONFIG_CHANGE,
+                action="meta_promote_campaign",
+                resource_type="marketing_campaign",
+                resource_id=str(campaign_id),
+                store_id=store_id,
+                tenant_id=store.tenant_id,
+                new_value={
+                    "campaign_id": str(campaign_id),
+                    "campaign_name": c.name,
+                    "meta_ad_id": result["ad_id"],
+                    "meta_creative_id": result["creative_id"],
+                    "ad_account_id": ad_account_id,
+                    "used_custom_audience_id": custom_audience_id,
+                },
+            )
+            await session.commit()
+        except Exception:
+            logger.warning(
+                "promote_campaign_audit_log_failed",
+                extra={"campaign_id": str(campaign_id)},
+                exc_info=True,
+            )
+
+    return SuccessResponse(
+        data=PromoteOnMetaResponse(
+            ad_id=result["ad_id"],
+            creative_id=result["creative_id"],
+            ads_manager_url=result["ads_manager_url"],
+            used_custom_audience_id=custom_audience_id,
+        ),
+        message="Draft ad created in Meta Ads Manager (PAUSED)",
     )
