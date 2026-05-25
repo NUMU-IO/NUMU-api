@@ -166,6 +166,18 @@ class SaveMetaTrackingRequest(BaseModel):
     # storefront renders the 4-flag granular banner.
     consent_settings: ConsentSettings | None = None
 
+    # Meta Business connection IDs — required by the audience-sync (US4)
+    # and Promote-on-Meta (US7) features which call Meta's Marketing
+    # Graph API. Pixel + CAPI alone (Pixel ID + access_token above) only
+    # unlock event ingestion; creating Custom Audiences, building
+    # Lookalikes, or pushing a draft ad needs ad_account_id, and
+    # publishing an ad creative needs page_id. Both are optional here so
+    # merchants who only use Pixel + CAPI never get gated; downstream
+    # routes that need them raise 412 with a clear "complete OAuth"
+    # message. Stored verbatim in store.settings.tracking.meta.
+    ad_account_id: str | None = Field(default=None, max_length=64)
+    page_id: str | None = Field(default=None, max_length=64)
+
     @field_validator("pixel_id")
     @classmethod
     def _validate_pixel_id(cls, v: str) -> str:
@@ -208,6 +220,12 @@ class MetaTrackingResponse(BaseModel):
     debug_mode_expires_at: datetime | None = None
     last_validated_at: datetime | None = None
     status: TrackingStatus = "disabled"
+    # Meta Business connection IDs — surfaced so the hub's tracking
+    # panel can render the current values and the downstream-feature
+    # gates ("Connect Meta to use Audiences / Promote-on-Meta") can
+    # decide whether to render the empty state.
+    ad_account_id: str | None = None
+    page_id: str | None = None
     # Wave 2 Phase 12 — surfaced so the merchant hub UI can pre-populate
     # the timing-config selectors when the merchant returns to the panel.
     purchase_trigger: PurchaseTrigger | None = None
