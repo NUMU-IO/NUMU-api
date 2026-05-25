@@ -69,6 +69,26 @@ router = APIRouter(
 # ── Schemas ──────────────────────────────────────────────────────
 
 
+class _EstimateAudienceRequest(BaseModel):
+    """Body for ``POST /marketing/campaigns/audience/estimate``.
+
+    Mirrors the channel + audience_filter pair of a create request so
+    the hub can ping the estimate route with the same shape it'll
+    eventually POST as a draft. Channel matters because EMAIL filters
+    on email-not-null while SMS filters on phone-not-null.
+    """
+
+    channel: CampaignChannel
+    audience_filter: dict | None = None
+
+
+class _AudienceEstimateResponse(BaseModel):
+    """Audience count + sample list for the pre-send preview panel."""
+
+    estimated_count: int
+    sample: list[dict] = Field(default_factory=list)
+
+
 class CreateCampaignRequest(BaseModel):
     channel: CampaignChannel
     name: str = Field(min_length=1, max_length=255)
@@ -172,6 +192,55 @@ async def list_campaigns(
         )
     return SuccessResponse(
         data=[_to_response(c) for c in rows], message="Campaigns listed"
+    )
+
+
+@router.post(
+    "/audience/estimate",
+    response_model=SuccessResponse[_AudienceEstimateResponse],
+    summary="Estimate the audience size for a draft campaign filter",
+    operation_id="estimate_marketing_audience",
+)
+async def estimate_audience_route(
+    store_id: UUID,
+    body: _EstimateAudienceRequest,
+):
+    """Resolve a filter into an audience count + sample for the hub's
+    pre-send preview panel.
+
+    Stateless — does NOT mutate the campaign row. The hub calls this
+    every time the merchant tweaks a filter field so they see a live
+    "Will send to ~N recipients" count before clicking Save / Send.
+    """
+    from src.application.services.marketing_audience_resolver import (
+        MarketingAudienceFilter,
+        estimate_audience,
+    )
+
+    try:
+        filt = MarketingAudienceFilter.model_validate(body.audience_filter or {})
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid audience_filter: {exc}",
+        ) from exc
+
+    async with AsyncSessionLocal() as session:
+        estimate = await estimate_audience(
+            session,
+            store_id=store_id,
+            filter_in=filt,
+            channel=body.channel,
+        )
+    return SuccessResponse(
+        data=_AudienceEstimateResponse(
+            estimated_count=estimate.estimated_count,
+            sample=[
+                {"id": str(s.id), "name": s.name, "contact": s.contact}
+                for s in estimate.sample
+            ],
+        ),
+        message="Audience estimated",
     )
 
 

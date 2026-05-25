@@ -433,33 +433,35 @@ async def _resolve_recipients(session, campaign) -> list[str]:
     """Resolve the campaign's audience into a flat list of contact
     strings (email addresses for EMAIL, E.164 phone numbers for SMS).
 
-    v1 — supports inline audience_filter:
-      `{tags: [...]}`         — customers carrying any of the tags
-                                (NOT YET IMPLEMENTED — see feature 003)
-      `{rfm: 'champion'|...}` — customers in the named RFM segment
-                                (NOT YET IMPLEMENTED — see feature 003)
-      `{all: true}` / empty   — every customer with the right contact
-                                column (email/phone)
-
-    Phase 8.7 / feature 003's segment rule engine will replace this
-    with a segment_id-driven resolver.
+    Delegates to ``marketing_audience_resolver.resolve_audience`` which
+    honors the campaign's stored ``audience_filter`` (preset +/or custom
+    field filters: accepts_marketing, ordered_within_days, inactive_days,
+    min/max_total_spent_cents, min/max_total_orders, tags_any,
+    created_within_days). Falls back to the all-opted-in default when
+    the campaign was created before the filter UI shipped (audience_filter
+    is None or {}).
     """
-    from sqlalchemy import select
-
+    from src.application.services.marketing_audience_resolver import (
+        MarketingAudienceFilter,
+        resolve_audience,
+    )
     from src.core.entities.marketing_campaign import CampaignChannel
-    from src.infrastructure.database.models.tenant.customer import CustomerModel
 
-    f = campaign.audience_filter or {}
-    contact_col = (
-        CustomerModel.email
-        if campaign.channel == CampaignChannel.EMAIL
-        else CustomerModel.phone
+    raw = campaign.audience_filter or {}
+    # ``audience_filter`` is JSONB on disk — coerce dict → Pydantic for
+    # type-safe field access + default propagation. Unknown keys are
+    # ignored so legacy campaigns with experimental filter shapes don't
+    # crash dispatch; they just degrade to the all-opted-in default.
+    try:
+        filt = MarketingAudienceFilter.model_validate(raw)
+    except Exception:
+        filt = MarketingAudienceFilter()
+
+    customers = await resolve_audience(
+        session,
+        store_id=campaign.store_id,
+        filter_in=filt,
+        channel=campaign.channel,
     )
-    stmt = select(contact_col).where(
-        CustomerModel.store_id == campaign.store_id,
-        contact_col.is_not(None),
-    )
-    if not f or f.get("all"):
-        pass  # no extra filter
-    rows = (await session.execute(stmt)).all()
-    return [r[0] for r in rows if r[0]]
+    contact_attr = "email" if campaign.channel == CampaignChannel.EMAIL else "phone"
+    return [getattr(c, contact_attr) for c in customers if getattr(c, contact_attr)]
