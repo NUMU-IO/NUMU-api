@@ -42,7 +42,7 @@ from src.application.services.meta_custom_audience_service import (
     MetaCustomAudienceService,
 )
 from src.core.entities.store import Store
-from src.infrastructure.database.connection import AsyncSessionLocal, get_db
+from src.infrastructure.database.connection import AsyncSessionLocal
 
 router = APIRouter(
     prefix="/{store_id}/marketing/audiences",
@@ -162,11 +162,16 @@ async def _get_capi_token(db: AsyncSession, tenant_id: UUID) -> str | None:
 )
 async def list_audiences(
     store: Annotated[Store, Depends(get_current_store)],
-    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Surface what's been synced so the hub can render a Sync/Resync row."""
+    """Surface what's been synced so the hub can render a Sync/Resync row.
+
+    Opens its own ``AsyncSessionLocal`` to match every other endpoint in
+    this file. The earlier draft used a ``get_db`` FastAPI dependency
+    that doesn't exist on ``database.connection`` — caught at app boot.
+    """
     meta_cfg = _meta_tracking_cfg(store)
-    token = await _get_capi_token(db, store.tenant_id)
+    async with AsyncSessionLocal() as db:
+        token = await _get_capi_token(db, store.tenant_id)
     meta_connected = bool(token and meta_cfg.get("ad_account_id"))
 
     cache = _custom_audiences_cache(store)
