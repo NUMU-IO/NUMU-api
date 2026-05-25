@@ -1,6 +1,7 @@
 """Store settings routes."""
 
 import base64
+import hashlib
 import logging
 import re
 import uuid
@@ -3191,6 +3192,16 @@ async def send_meta_test_event(
         else str(store.default_currency)
     )
 
+    # Meta CAPI rejects events with no user_data (error_subcode 2804050 —
+    # "This event has no user information"). For the synthetic test event
+    # we mint a deterministic hashed external_id per store, plus a static
+    # user-agent. Both Meta-blessed fields, neither identifies a real
+    # human, and they're enough to clear Meta's "at least one PII field"
+    # gate so the test event surfaces in Events Manager → Test Events.
+    synthetic_external_id = hashlib.sha256(
+        f"numu-test-event:{store.id}".encode()
+    ).hexdigest()
+
     meta_capi_send_event.delay(
         store_id=str(store.id),
         pixel_id=pixel_id,
@@ -3198,7 +3209,10 @@ async def send_meta_test_event(
         event_id=event_id,
         event_time=int(datetime.now(UTC).timestamp()),
         event_source_url=None,
-        user_data={},
+        user_data={
+            "external_id": synthetic_external_id,
+            "client_user_agent": "NUMU-Test-Event/1.0",
+        },
         custom_data={
             "value": 0.01,
             "currency": currency,
