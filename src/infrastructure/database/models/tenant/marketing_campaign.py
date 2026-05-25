@@ -94,3 +94,6 @@ class MarketingCampaignModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Embedded into utm_campaign so the link survives campaign renames.
     # Unique per store (see uq_campaigns_store_short_code above).
     short_code: Mapped[str] = mapped_column(String(8), nullable=False)
+    meta_custom_conversion_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
