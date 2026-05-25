@@ -271,6 +271,107 @@ class MetaCustomAudienceService:
             )
             return False
 
+    async def create_lookalike(
+        self,
+        *,
+        ad_account_id: str,
+        source_audience_id: str,
+        access_token: str,
+        country: str,
+        ratio: float,
+        name: str | None = None,
+    ) -> str | None:
+        """Create a Lookalike Audience seeded by ``source_audience_id``.
+
+        ``country`` is an ISO 3166-1 alpha-2 code (e.g. ``"EG"``).
+        ``ratio`` is the percent of the country's population to target,
+        as a fraction in ``[0.01, 0.20]`` — 1/3/5 are the canonical
+        sizes most merchants ask for.
+
+        Meta processes the new audience asynchronously — status flips
+        from CREATING → READY within 6-24h. Returns the new audience
+        id immediately; caller polls Meta later for status.
+
+        Source audience must have ≥100 matched members (Meta returns
+        a 400 otherwise) and must be in a final state itself. We don't
+        re-validate here; that's the route's job so the merchant sees
+        a friendly localized error instead of Meta's raw message.
+
+        Returns ``None`` on Marketing-API error (caller logs + can
+        surface a 502 to the merchant).
+        """
+        import json as _json
+
+        import httpx
+
+        from src.config import settings as _app_settings
+
+        if not (0.01 <= ratio <= 0.20):
+            raise ValueError(
+                f"Lookalike ratio must be between 0.01 and 0.20, got {ratio}"
+            )
+
+        country_code = (country or "").upper().strip()
+        if len(country_code) != 2:
+            raise ValueError(f"country must be 2-letter ISO code, got {country!r}")
+
+        api_version = getattr(_app_settings, "meta_graph_api_version", "v21.0")
+        clean_act_id = ad_account_id.removeprefix("act_")
+        url = (
+            f"https://graph.facebook.com/{api_version}/act_{clean_act_id}/"
+            f"customaudiences"
+        )
+
+        # Meta requires ``lookalike_spec`` as a JSON-encoded string.
+        lookalike_spec = {
+            "type": "similarity",
+            "country": country_code,
+            "ratio": ratio,
+        }
+
+        if not name:
+            pct = int(ratio * 100)
+            name = f"Lookalike ({country_code}, {pct}%)"
+
+        payload: dict[str, Any] = {
+            "name": name[:128],
+            "subtype": "LOOKALIKE",
+            "origin_audience_id": source_audience_id,
+            "lookalike_spec": _json.dumps(lookalike_spec),
+            "access_token": access_token,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(url, data=payload)
+            if resp.status_code >= 400:
+                logger.warning(
+                    "custom_audience_lookalike_failed",
+                    extra={
+                        "ad_account_id": clean_act_id,
+                        "source_audience_id": source_audience_id,
+                        "country": country_code,
+                        "ratio": ratio,
+                        "status": resp.status_code,
+                        "body": resp.text[:300],
+                    },
+                )
+                return None
+            body = resp.json() if resp.content else {}
+            return str(body.get("id")) if body.get("id") else None
+        except Exception as exc:  # noqa: BLE001 — fail-open for caller retry
+            logger.warning(
+                "custom_audience_lookalike_exception",
+                extra={
+                    "ad_account_id": clean_act_id,
+                    "source_audience_id": source_audience_id,
+                    "country": country_code,
+                    "ratio": ratio,
+                    "error": str(exc),
+                },
+            )
+            return None
+
     async def create_audience(
         self,
         *,
