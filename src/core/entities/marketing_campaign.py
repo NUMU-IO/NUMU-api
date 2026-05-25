@@ -134,6 +134,13 @@ class MarketingCampaign(BaseEntity):
     # survive campaign renames. Per-store uniqueness is enforced at the
     # DB level (see uq_campaigns_store_short_code).
     short_code: str = Field(min_length=6, max_length=8)
+    # Meta Custom Conversion id auto-created at send time when Meta is
+    # connected. Lets Ads Manager filter Purchase events by this
+    # campaign's UTM without the merchant manually creating a Custom
+    # Conversion. NULL when Meta isn't connected, the create call
+    # hasn't fired yet, or it failed (best-effort, never blocks send).
+    # See ``meta_custom_conversion_service.py`` + the send-now flow.
+    meta_custom_conversion_id: str | None = None
 
     def can_transition_to(self, target: CampaignStatus) -> bool:
         return target in VALID_CAMPAIGN_TRANSITIONS.get(self.status, [])

@@ -204,6 +204,15 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
             await repo.update_counters(campaign.id, total_recipients=len(recipients))
             await session.commit()
 
+            # Spec 005 US6 v2 — auto-create a Meta Custom Conversion the
+            # first time this campaign sends so Ads Manager can break
+            # down Purchase events by this campaign's UTM. Best-effort:
+            # we never block the send loop on the result. Run once per
+            # campaign (cached on the entity); re-sends reuse the same
+            # custom_conversion_id, including any future re-attempts.
+            if campaign.meta_custom_conversion_id is None:
+                await _try_auto_create_meta_custom_conversion(session, campaign)
+
             sent = 0
             failed = 0
             canceled = False
@@ -324,6 +333,97 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
                 "status": "failed",
                 "error": str(exc)[:200],
             }
+
+
+# ── Meta Custom Conversion auto-creator (US6 v2) ───────────────────
+
+
+async def _try_auto_create_meta_custom_conversion(session, campaign) -> None:
+    """Best-effort: create a Meta Custom Conversion for this campaign's
+    UTM the first time it sends, persist the id back on the campaign.
+
+    Skipped silently when:
+      - The store doesn't have Meta connected (ad_account_id /
+        pixel_id missing on tracking config).
+      - No active CAPI access token on file.
+      - Decryption / Meta API call fails for any reason.
+
+    NEVER raises — message dispatch is the priority. The next send
+    re-attempts because the id stays NULL on failure.
+    """
+    from sqlalchemy import select as _select
+
+    from src.application.services.meta_custom_conversion_service import (
+        create_meta_custom_conversion_for_campaign,
+    )
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+    from src.infrastructure.database.models.tenant.marketing_campaign import (
+        MarketingCampaignModel,
+    )
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+    from src.infrastructure.repositories import StoreRepository
+
+    try:
+        store = await StoreRepository(session).get_by_id(campaign.store_id)
+        if store is None:
+            return
+
+        meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
+        ad_account_id = meta_cfg.get("ad_account_id")
+        pixel_id = meta_cfg.get("pixel_id")
+        if not (ad_account_id and pixel_id):
+            return
+
+        cred_q = (
+            _select(ServiceCredential)
+            .where(ServiceCredential.tenant_id == store.tenant_id)
+            .where(ServiceCredential.service_type == ServiceType.TRACKING)
+            .where(ServiceCredential.service_name == ServiceName.META_CAPI)
+            .where(ServiceCredential.is_active.is_(True))
+        )
+        cred = (await session.execute(cred_q)).scalar_one_or_none()
+        if cred is None:
+            return
+
+        sm = get_secrets_manager()
+        decrypted = await sm.decrypt(cred.credentials_encrypted, cred.encryption_key_id)
+        access_token = (decrypted or {}).get("access_token")
+        if not access_token:
+            return
+
+        conv_id = await create_meta_custom_conversion_for_campaign(
+            ad_account_id=ad_account_id,
+            pixel_id=pixel_id,
+            access_token=access_token,
+            campaign_short_code=campaign.short_code,
+            campaign_name=campaign.name,
+        )
+        if not conv_id:
+            return
+
+        # Persist on the row. Direct ORM update because the repo doesn't
+        # expose a "set this field" helper and we don't want to round-
+        # trip the whole entity.
+        row = (
+            await session.execute(
+                _select(MarketingCampaignModel).where(
+                    MarketingCampaignModel.id == campaign.id
+                )
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            row.meta_custom_conversion_id = conv_id
+            campaign.meta_custom_conversion_id = conv_id
+            await session.commit()
+    except Exception:
+        # Swallow everything — must never block the send loop.
+        pass
 
 
 # ── Audience resolver ──────────────────────────────────────────────

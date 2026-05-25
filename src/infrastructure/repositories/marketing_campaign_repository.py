@@ -45,6 +45,7 @@ def _to_entity(row: MarketingCampaignModel) -> MarketingCampaign:
         failed_count=row.failed_count,
         note=row.note,
         promoted_item=row.promoted_item,
+        meta_custom_conversion_id=row.meta_custom_conversion_id,
         created_by=row.created_by,
         short_code=row.short_code,
         created_at=row.created_at,
@@ -125,6 +126,7 @@ class MarketingCampaignRepository:
             scheduled_at=campaign.scheduled_at,
             note=campaign.note,
             promoted_item=campaign.promoted_item,
+            meta_custom_conversion_id=campaign.meta_custom_conversion_id,
             created_by=campaign.created_by,
             short_code=campaign.short_code,
         )
