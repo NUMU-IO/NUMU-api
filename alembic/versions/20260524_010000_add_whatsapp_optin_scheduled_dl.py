@@ -506,23 +506,33 @@ def upgrade() -> None:
     # platform_managed mode, we backfill: for every store where no
     # is_system=true template with this name+language exists yet, insert
     # one. Idempotent via NOT EXISTS subquery.
+    # Use sa.text() with `:name` style placeholders instead of
+    # exec_driver_sql(`%(name)s`). The latter passes %-placeholders raw to
+    # the underlying DBAPI; that works on psycopg2 but asyncpg (which the
+    # async stack uses) only understands $1, $2 style and rejects
+    # %-syntax with "syntax error at or near %". sa.text() is
+    # driver-agnostic — SQLAlchemy rewrites :name to the right form per
+    # dialect.
     conn = op.get_bind()
+    insert_stmt = sa.text(
+        """
+        INSERT INTO public.whatsapp_templates
+          (tenant_id, store_id, name, language, category, status,
+           body_text, is_system, created_at, updated_at)
+        SELECT s.tenant_id, s.id, :name, :lang, :cat, 'APPROVED',
+               :body, true, NOW(), NOW()
+        FROM public.stores s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM public.whatsapp_templates t
+            WHERE t.store_id = s.id
+              AND t.name = :name
+              AND t.language = :lang
+        )
+        """
+    )
     for name, lang, category, body in _SYSTEM_TEMPLATES:
-        conn.exec_driver_sql(
-            """
-            INSERT INTO public.whatsapp_templates
-              (tenant_id, store_id, name, language, category, status,
-               body_text, is_system, created_at, updated_at)
-            SELECT s.tenant_id, s.id, %(name)s, %(lang)s, %(cat)s, 'APPROVED',
-                   %(body)s, true, NOW(), NOW()
-            FROM public.stores s
-            WHERE NOT EXISTS (
-                SELECT 1 FROM public.whatsapp_templates t
-                WHERE t.store_id = s.id
-                  AND t.name = %(name)s
-                  AND t.language = %(lang)s
-            )
-            """,
+        conn.execute(
+            insert_stmt,
             {"name": name, "lang": lang, "cat": category, "body": body},
         )
 
@@ -532,8 +542,12 @@ def downgrade() -> None:
     conn = op.get_bind()
     seeded_names = sorted({n for n, _l, _c, _b in _SYSTEM_TEMPLATES})
     for name in seeded_names:
-        conn.exec_driver_sql(
-            "DELETE FROM public.whatsapp_templates WHERE is_system = true AND name = %(name)s",
+        # Same asyncpg-compat note as upgrade — use sa.text(:name) not %(name)s.
+        conn.execute(
+            sa.text(
+                "DELETE FROM public.whatsapp_templates "
+                "WHERE is_system = true AND name = :name"
+            ),
             {"name": name},
         )
 
