@@ -476,9 +476,15 @@ def upgrade() -> None:
     # Used by the order-event handlers for idempotency lookups keyed on
     # metadata->>'order_id'. IF NOT EXISTS guard handles the case where
     # someone else already added it.
+    # NOTE: the original commit used ``message_log`` (singular); the
+    # actual table is ``message_logs`` (plural — see
+    # infrastructure/database/models/tenant/message_log.py: ``__tablename__
+    # = "message_logs"``). Fixed in-flight before any env successfully
+    # applied this migration — the CREATE INDEX was the line that
+    # blocked CD with ``relation "public.message_log" does not exist``.
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_message_log_metadata_gin "
-        "ON public.message_log USING gin (metadata)"
+        "CREATE INDEX IF NOT EXISTS ix_message_logs_metadata_gin "
+        "ON public.message_logs USING gin (metadata)"
     )
 
     # ─── 5. Seed system templates (FR-030) ───────────────────────────
@@ -531,7 +537,7 @@ def downgrade() -> None:
             {"name": name},
         )
 
-    op.execute("DROP INDEX IF EXISTS public.ix_message_log_metadata_gin")
+    op.execute("DROP INDEX IF EXISTS public.ix_message_logs_metadata_gin")
 
     _drop_rls_for_table("whatsapp_dead_letters")
     op.drop_index(
