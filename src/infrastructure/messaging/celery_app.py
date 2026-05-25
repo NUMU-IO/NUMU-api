@@ -39,6 +39,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.whatsapp_scheduled_send_dispatcher",
         # backend-030 / US5 — PENDING template polling sync (every 15 min).
         "src.infrastructure.messaging.tasks.whatsapp_template_poll_task",
+        # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
+        "src.infrastructure.messaging.tasks.whatsapp_dead_letter_purge",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
@@ -380,6 +382,13 @@ celery_app.conf.beat_schedule = {
     "poll-whatsapp-pending-templates": {
         "task": "numu_api.whatsapp.poll_pending_templates",
         "schedule": 15 * 60.0,
+    },
+    # backend-030 / US6 — 90-day dead-letter purge (FR-035a). Off-peak
+    # for EG market (03:00 UTC = 05:00 Cairo). message_logs (audit) is
+    # NOT touched — only the replay-surface DLQ.
+    "purge-whatsapp-dead-letters": {
+        "task": "numu_api.whatsapp.purge_dead_letters",
+        "schedule": crontab(hour=3, minute=0),
     },
 }
 

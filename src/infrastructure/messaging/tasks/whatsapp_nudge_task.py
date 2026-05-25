@@ -12,6 +12,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import httpx
+
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -33,9 +35,15 @@ def _run_async(coro):
 @celery_app.task(
     name="tasks.send_whatsapp_nudge",
     bind=True,
-    max_retries=2,
-    default_retry_delay=30,
-    soft_time_limit=30,
+    # backend-030 / US6 / FR-031 — exponential backoff for retriable
+    # transport errors. NonRetriableWhatsAppError is intentionally NOT
+    # in the autoretry tuple so it short-circuits to DLQ (FR-032).
+    autoretry_for=(httpx.HTTPError, ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
+    max_retries=5,
+    soft_time_limit=60,
 )
 def send_whatsapp_nudge(
     self,
