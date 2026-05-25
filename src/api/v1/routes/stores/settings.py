@@ -3191,6 +3191,31 @@ async def send_meta_test_event(
         else str(store.default_currency)
     )
 
+    # Meta CAPI rejects events with no user_data (error_subcode 2804050 —
+    # "This event has no user information"). For the synthetic test event
+    # we send a full set of plausible-but-fake identifiers — the Celery
+    # worker calls ``hash_user_data()`` (src/infrastructure/external_services/
+    # meta/hashing.py) on every PII key before POSTing, so we pass RAW
+    # values here using NUMU's internal vocabulary (email/phone/first_name/
+    # ...) — the worker normalizes + SHA-256s downstream. ``ip`` and
+    # ``user_agent`` are passed verbatim per Meta's spec. Sending the full
+    # set maximizes Event Match Quality (EMQ) score in Events Manager so
+    # the test row reports a green badge instead of a low-quality warning.
+    synthetic_user_data = {
+        # Hashed PII — Meta accepts any string; worker SHA-256s before send.
+        "email": f"numu-test-{store.id}@test.numueg.app",
+        "phone": "+201000000000",
+        "first_name": "Numu",
+        "last_name": "Test",
+        "city": "Cairo",
+        "country_code": "EG",
+        "zip": "11511",
+        "customer_id": f"numu-test:{store.id}",
+        # Raw — Meta wants these unhashed per spec.
+        "ip": "127.0.0.1",
+        "user_agent": "NUMU-Test-Event/1.0",
+    }
+
     meta_capi_send_event.delay(
         store_id=str(store.id),
         pixel_id=pixel_id,
@@ -3198,7 +3223,7 @@ async def send_meta_test_event(
         event_id=event_id,
         event_time=int(datetime.now(UTC).timestamp()),
         event_source_url=None,
-        user_data={},
+        user_data=synthetic_user_data,
         custom_data={
             "value": 0.01,
             "currency": currency,
