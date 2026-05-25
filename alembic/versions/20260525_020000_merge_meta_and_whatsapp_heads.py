@@ -1,12 +1,12 @@
 """merge meta and whatsapp migration heads
 
 Revision ID: merge_meta_wa_heads_20260525
-Revises: meta_custom_conversion_id_20260525, wa_optin_sched_dl_20260524
+Revises: meta_custom_conv_20260525, wa_optin_sched_dl_20260524
 Create Date: 2026-05-25
 
 Two parallel migration chains landed on dev simultaneously:
 
-  * Meta integration: ``meta_custom_conversion_id_20260525`` (spec 005)
+  * Meta integration: ``meta_custom_conv_20260525`` (spec 005)
   * WhatsApp foundation: ``wa_optin_sched_dl_20260524`` (backend-030)
 
 Each is its own self-contained chain — Meta's chain runs through
@@ -31,7 +31,7 @@ from alembic import op  # noqa: F401
 # revision identifiers.
 revision: str = "merge_meta_wa_heads_20260525"
 down_revision: tuple[str, ...] = (
-    "meta_custom_conversion_id_20260525",
+    "meta_custom_conv_20260525",
     "wa_optin_sched_dl_20260524",
 )
 branch_labels: Sequence[str] | None = None

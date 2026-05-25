@@ -1,6 +1,6 @@
 """add meta_custom_conversion_id to marketing_campaigns
 
-Revision ID: meta_custom_conversion_id_20260525
+Revision ID: meta_custom_conv_20260525
 Revises: promoted_item_20260524
 Create Date: 2026-05-25
 
@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers.
-revision: str = "meta_custom_conversion_id_20260525"
+revision: str = "meta_custom_conv_20260525"
 down_revision: str = "promoted_item_20260524"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
