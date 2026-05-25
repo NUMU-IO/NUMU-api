@@ -37,6 +37,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.whatsapp_nudge_task",
         # backend-030 / US3 — scheduled-send dispatcher (every 60s).
         "src.infrastructure.messaging.tasks.whatsapp_scheduled_send_dispatcher",
+        # backend-030 / US5 — PENDING template polling sync (every 15 min).
+        "src.infrastructure.messaging.tasks.whatsapp_template_poll_task",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
@@ -371,6 +373,13 @@ celery_app.conf.beat_schedule = {
     "dispatch-whatsapp-scheduled-sends": {
         "task": "numu_api.whatsapp.dispatch_scheduled_sends",
         "schedule": 60.0,
+    },
+    # backend-030 / US5 — poll Meta for PENDING template statuses
+    # (FR-028 / FR-028a). 15-minute cadence; only PENDING templates
+    # older than 5 minutes are polled per FR-028a.
+    "poll-whatsapp-pending-templates": {
+        "task": "numu_api.whatsapp.poll_pending_templates",
+        "schedule": 15 * 60.0,
     },
 }
 

@@ -143,7 +143,7 @@ async def whatsapp_callback(
 
             for change in changes:
                 field = change.get("field")
-                _value = change.get("value", {})
+                value = change.get("value", {})
 
                 if field == "messages":
                     # Delegate to the service which now persists via repo
@@ -156,6 +156,35 @@ async def whatsapp_callback(
                     await _upsert_conversations_from_webhook(
                         db, change.get("value", {})
                     )
+                elif field == "message_template_status_update":
+                    # backend-030 / US5 / FR-028 — template approval
+                    # status updates from Meta. Routed here by the
+                    # top-level field discriminator; idempotent per
+                    # TASK-SEC-008 (duplicate payloads = no-op).
+                    from src.infrastructure.external_services.meta.whatsapp_template_status_webhook import (
+                        handle_template_status_update,
+                    )
+
+                    await handle_template_status_update(
+                        db, waba_id=str(_account_id), value=value
+                    )
+                else:
+                    # Unknown field — log + 200 so we don't trigger Meta
+                    # retry storms on subscription fields we haven't
+                    # onboarded yet (CommunityRule, message_template_quality_update, etc.).
+                    logger.warning(
+                        "whatsapp_webhook_unhandled_field",
+                        extra={"field": field, "waba_id": str(_account_id)},
+                    )
+
+        # Commit any DB mutations made by the field handlers (template
+        # status updates, conversation upserts). The message-log persist
+        # path commits its own session inside the service; this commit is
+        # specifically for the template-status webhook handler's flushes.
+        try:
+            await db.commit()
+        except Exception:
+            pass
 
         return {"status": "received"}
 

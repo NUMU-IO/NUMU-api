@@ -90,58 +90,34 @@ async def create_template(
     store: Annotated[Store, Depends(get_current_store)],
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a template locally and submit to Meta for approval."""
-    repo = WhatsAppTemplateRepository(db)
+    """Submit a custom WhatsApp template to Meta for approval.
 
-    # Check duplicate
-    existing = await repo.get_by_name(store.id, request.name, request.language)
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Template '{request.name}' ({request.language}) already exists",
-        )
+    Phase 1 (FR-026 / EDIT-C / analyze HIGH-3): **BYO-only**.
+    Platform-managed stores cannot create custom templates — they share
+    NUMU's single Meta WABA, and per-merchant custom templates against
+    a shared WABA cause cross-store visibility + approval-budget
+    exhaustion. Platform-managed stores rely on the system-seeded
+    canonical templates (FR-030); custom templates require BYO.
 
-    model = WhatsAppTemplateModel(
-        store_id=store.id,
-        tenant_id=store.tenant_id,
-        name=request.name,
-        language=request.language,
-        category=request.category,
-        status="PENDING",
-        header_type=request.header_type,
-        header_content=request.header_content,
-        body_text=request.body_text,
-        footer_text=request.footer_text,
-        buttons=[b.model_dump() for b in request.buttons] if request.buttons else None,
-        submitted_at=datetime.now(UTC),
-    )
-    created = await repo.create(model)
-
-    # Submit to Meta if store has own WABA
-    from src.infrastructure.database.models.tenant.configuration import (
-        ServiceName,
-        ServiceType,
-    )
-    from src.infrastructure.repositories.credential_repository import (
-        CredentialRepository,
+    Behavior:
+    - Store mode = platform_managed → 403 ``template_submission_requires_byo``.
+    - Local duplicate (name + language) → 409.
+    - Meta synchronous rejection → 422 with the sanitized Meta error
+      body (TASK-SEC-009 — fbtrace_id never surfaced); no local row.
+    - Meta accept → 201 with the persisted PENDING row.
+    """
+    from src.application.use_cases.whatsapp.submit_template import (
+        SubmitTemplateUseCase,
+        TemplateDuplicateLocal,
+        TemplateSubmissionForbidden,
+        TemplateSubmissionRejected,
     )
 
-    cred_repo = CredentialRepository(db)
-    creds = await cred_repo.get_decrypted_credentials(
-        tenant_id=store.tenant_id,
-        service_type=ServiceType.WHATSAPP,
-        service_name=ServiceName.WHATSAPP_BUSINESS,
-    )
-    if creds:
-        from src.infrastructure.external_services.whatsapp.template_service import (
-            WhatsAppTemplateService,
-        )
-
-        svc = WhatsAppTemplateService(
-            access_token=creds["access_token"],
-            waba_id=creds["waba_id"],
-        )
-        meta_result = await svc.create_template(
+    use_case = SubmitTemplateUseCase(db)
+    try:
+        created = await use_case.execute(
+            store_id=store.id,
+            tenant_id=store.tenant_id,
             name=request.name,
             language=request.language,
             category=request.category,
@@ -153,14 +129,37 @@ async def create_template(
             if request.buttons
             else None,
         )
-        if meta_result:
-            created.meta_template_id = meta_result.get("id")
-            await db.flush()
-            await db.refresh(created)
+    except TemplateDuplicateLocal as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "template_duplicate", "message": str(exc)},
+        ) from exc
+    except TemplateSubmissionForbidden as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    except TemplateSubmissionRejected as exc:
+        # Meta 4xx — surface the sanitized error so the merchant can
+        # see the specific reason (e.g., name collision at Meta-side,
+        # disallowed content, malformed placeholder).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "template_rejected_by_meta",
+                "meta_error_code": (exc.meta_error or {}).get("code")
+                if exc.meta_error
+                else None,
+                "meta_error_message": (exc.meta_error or {}).get("message")
+                if exc.meta_error
+                else None,
+                "meta_http_status": exc.http_status,
+            },
+        ) from exc
 
     return SuccessResponse(
         data=_model_to_response(created),
-        message="Template created and submitted for approval",
+        message="Template submitted to Meta",
     )
 
 
