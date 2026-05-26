@@ -2849,6 +2849,8 @@ async def _build_meta_response(
         debug_mode_expires_at=debug_expires_dt,
         last_validated_at=last_validated_dt,
         status=status_label,
+        ad_account_id=cfg.get("ad_account_id"),
+        page_id=cfg.get("page_id"),
     )
 
 
@@ -2988,6 +2990,19 @@ async def save_meta_tracking(
             request.consent_settings.model_dump()
             if request.consent_settings is not None
             else None
+        ),
+        # Meta Business connection IDs — only overwrite when the request
+        # supplies a value. Sending the panel without re-entering them
+        # (legacy panel state) must NOT wipe the existing IDs, otherwise
+        # the audience-sync and Promote-on-Meta gates would silently
+        # break on every settings save.
+        "ad_account_id": (
+            request.ad_account_id
+            if request.ad_account_id is not None
+            else meta_cfg.get("ad_account_id")
+        ),
+        "page_id": (
+            request.page_id if request.page_id is not None else meta_cfg.get("page_id")
         ),
     }
     tracking["meta"] = new_meta_cfg
