@@ -55,6 +55,39 @@ def _ads_manager_url(act_id: str, ad_id: str) -> str:
     return f"https://adsmanager.facebook.com/adsmanager/manage/ads?{qs}"
 
 
+def _summarize_meta_error(body_text: str) -> str:
+    """Pull Meta's user-facing message out of an error response.
+
+    Meta error envelope looks like::
+
+        {"error": {"message": "...", "code": 100, "error_subcode": 33,
+                   "fbtrace_id": "..."}}
+
+    We surface ``error.message`` because that's what merchants need to
+    act on. ``error_subcode = 33`` in particular is the "missing
+    permissions" tell — most commonly the token lacks
+    ``ads_management``. We append actionable guidance for that case
+    so the route can surface a useful toast instead of a bare 502.
+    """
+    import json as _json
+
+    try:
+        envelope = _json.loads(body_text)
+    except Exception:
+        return body_text[:240] or "Meta returned an unstructured error."
+    err = envelope.get("error") or {}
+    message = err.get("message") or "Meta rejected the request."
+    subcode = err.get("error_subcode")
+    if subcode == 33:
+        return (
+            f"{message} (Meta error subcode 33: the saved access token "
+            "likely lacks the 'ads_management' permission. Generate a "
+            "new System User token with ads_management scope on the "
+            "Ad Account and paste it in Settings → Tracking & Pixels.)"
+        )
+    return message
+
+
 async def promote_campaign_on_meta(
     *,
     ad_account_id: str,
@@ -67,11 +100,19 @@ async def promote_campaign_on_meta(
     link_url: str,
     custom_audience_id: str | None = None,
     cta_type: str = SHOP_NOW_CTA,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """Create a PAUSED draft ad mirroring the campaign's creative.
 
-    Returns ``{ad_id, creative_id, ads_manager_url}`` on success,
-    ``None`` on Marketing-API failure (caller logs + surfaces 502).
+    Returns one of two shapes:
+
+      * ``{"ad_id", "creative_id", "ads_manager_url"}`` on success
+      * ``{"error": "<Meta's actual message>"}`` on failure
+
+    Failure shape replaces the previous ``None`` return so the route
+    can surface Meta's actual reason in the HTTP response — opaque
+    502s left the merchant with nothing actionable when their token
+    lacked ads_management scope (subcode 33), the ad account had no
+    default ad set, or the image URL wasn't publicly fetchable.
 
     ``custom_audience_id`` is optional — when set, ad targeting
     narrows to that audience (typically the synced Lookalike or
@@ -119,17 +160,21 @@ async def promote_campaign_on_meta(
                     "body": creative_resp.text[:400],
                 },
             )
-            return None
+            return {"error": _summarize_meta_error(creative_resp.text)}
         creative_body = creative_resp.json() if creative_resp.content else {}
         creative_id = str(creative_body.get("id") or "")
         if not creative_id:
-            return None
+            return {
+                "error": "Meta accepted the creative request but did not return an id."
+            }
     except Exception as exc:  # noqa: BLE001 — fail-open
         logger.warning(
             "meta_promote_creative_exception",
             extra={"ad_account_id": clean_act_id, "error": str(exc)},
         )
-        return None
+        return {
+            "error": f"Network error reaching Meta during ad creative creation: {exc}"
+        }
 
     # Step 2: create the ad (PAUSED).
     targeting: dict[str, Any] = {
@@ -167,17 +212,17 @@ async def promote_campaign_on_meta(
                     "body": ad_resp.text[:400],
                 },
             )
-            return None
+            return {"error": _summarize_meta_error(ad_resp.text)}
         ad_body = ad_resp.json() if ad_resp.content else {}
         ad_id = str(ad_body.get("id") or "")
         if not ad_id:
-            return None
+            return {"error": "Meta accepted the ad request but did not return an id."}
     except Exception as exc:  # noqa: BLE001 — fail-open
         logger.warning(
             "meta_promote_ad_exception",
             extra={"ad_account_id": clean_act_id, "error": str(exc)},
         )
-        return None
+        return {"error": f"Network error reaching Meta during ad creation: {exc}"}
 
     return {
         "ad_id": ad_id,
