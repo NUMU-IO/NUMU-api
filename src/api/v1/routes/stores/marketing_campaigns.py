@@ -1979,14 +1979,14 @@ async def promote_campaign_on_meta_route(
             custom_audience_id=custom_audience_id,
         )
 
-        if result is None:
+        # Service now returns a structured ``{"error": "<Meta message>"}``
+        # on failure so we can surface Meta's actual reason. Opaque 502s
+        # left the merchant guessing which of the three canned causes
+        # applied (commonly: ads_management scope missing — subcode 33).
+        if "error" in result:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=(
-                    "Meta refused the ad creation. Check that the token "
-                    "has ads_management scope and the ad account has a "
-                    "default ad set configured."
-                ),
+                detail=result["error"],
             )
 
         try:
