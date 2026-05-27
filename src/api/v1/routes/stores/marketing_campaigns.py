@@ -1924,14 +1924,19 @@ async def promote_campaign_on_meta_route(
             _select(ServiceCredential)
             .where(ServiceCredential.tenant_id == store.tenant_id)
             .where(ServiceCredential.service_type == ServiceType.TRACKING)
-            .where(ServiceCredential.service_name == ServiceName.META_CAPI)
+            .where(ServiceCredential.service_name == ServiceName.META_MARKETING)
             .where(ServiceCredential.is_active.is_(True))
         )
         cred = (await session.execute(cred_q)).scalar_one_or_none()
         if cred is None:
             raise HTTPException(
                 status_code=status.HTTP_412_PRECONDITION_FAILED,
-                detail="Meta access token is missing or expired.",
+                detail=(
+                    "Meta Marketing is not connected — Promote-on-Meta "
+                    "needs ads_management scope, which the CAPI token "
+                    "does not have. Connect Meta Marketing in Settings "
+                    "→ Integrations → Meta Ads."
+                ),
             )
         try:
             sm = get_secrets_manager()

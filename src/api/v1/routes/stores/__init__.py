@@ -56,6 +56,9 @@ from src.api.v1.routes.stores import (
     marketing_campaigns as marketing_campaigns_module,
 )
 from src.api.v1.routes.stores import (
+    marketing_meta as marketing_meta_module,
+)
+from src.api.v1.routes.stores import (
     marketing_send_times as marketing_send_times_module,
 )
 from src.api.v1.routes.stores import onboarding as onboarding_module
@@ -139,6 +142,10 @@ router.include_router(
 router.include_router(
     marketing_audiences_module.router,
     tags=["Marketing Audiences"],
+)
+router.include_router(
+    marketing_meta_module.router,
+    tags=["Marketing Meta Connect"],
 )
 router.include_router(analytics_module.router, tags=["Store Analytics"])
 router.include_router(

@@ -311,6 +311,13 @@ class Settings(BaseSettings):
     meta_graph_api_version: str = "v19.0"
     meta_webhook_verify_token: str | None = None
     meta_login_config_id: str | None = None
+    # Marketing-API OAuth app. Set these when the Marketing flow uses
+    # a different FB app than the main one (e.g. main app is gated on
+    # CAPI/Pixel App Review and we run Ads via a separate app). When
+    # null, the marketing OAuth route falls back to meta_app_id /
+    # meta_app_secret above.
+    meta_marketing_app_id: str | None = None
+    meta_marketing_app_secret: str | None = None
 
     # Omnichannel Inbox
     inbox_realtime_enabled: bool = True

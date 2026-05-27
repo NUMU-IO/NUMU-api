@@ -120,8 +120,14 @@ def _custom_audiences_cache(store: Store) -> dict:
     return _meta_tracking_cfg(store).get("custom_audiences") or {}
 
 
-async def _get_capi_token(db: AsyncSession, tenant_id: UUID) -> str | None:
-    """Decrypt the on-file CAPI access token, or None if not set."""
+async def _get_marketing_token(db: AsyncSession, tenant_id: UUID) -> str | None:
+    """Decrypt the on-file Meta Marketing access token, or None if not set.
+
+    Custom Audience sync hits ``/customaudiences/{id}/users`` which
+    requires ``ads_management``. The CAPI/Pixel system-user token does
+    not carry that scope, so we read from the META_MARKETING row that
+    the dedicated marketing OAuth flow populates.
+    """
     from sqlalchemy import select as _select
 
     from src.infrastructure.database.models.tenant.configuration import (
@@ -137,7 +143,7 @@ async def _get_capi_token(db: AsyncSession, tenant_id: UUID) -> str | None:
         _select(ServiceCredential)
         .where(ServiceCredential.tenant_id == tenant_id)
         .where(ServiceCredential.service_type == ServiceType.TRACKING)
-        .where(ServiceCredential.service_name == ServiceName.META_CAPI)
+        .where(ServiceCredential.service_name == ServiceName.META_MARKETING)
         .where(ServiceCredential.is_active.is_(True))
     )
     cred = (await db.execute(q)).scalar_one_or_none()
@@ -171,7 +177,7 @@ async def list_audiences(
     """
     meta_cfg = _meta_tracking_cfg(store)
     async with AsyncSessionLocal() as db:
-        token = await _get_capi_token(db, store.tenant_id)
+        token = await _get_marketing_token(db, store.tenant_id)
     meta_connected = bool(token and meta_cfg.get("ad_account_id"))
 
     cache = _custom_audiences_cache(store)
@@ -227,11 +233,15 @@ async def sync_audience(
         )
 
     async with AsyncSessionLocal() as db:
-        token = await _get_capi_token(db, store.tenant_id)
+        token = await _get_marketing_token(db, store.tenant_id)
         if not token:
             raise HTTPException(
                 status_code=status.HTTP_412_PRECONDITION_FAILED,
-                detail="Meta access token is missing or expired.",
+                detail=(
+                    "Meta Marketing is not connected — Custom Audience "
+                    "sync needs ads_management scope. Connect Meta "
+                    "Marketing in Settings → Integrations → Meta Ads."
+                ),
             )
 
         svc = MetaCustomAudienceService(db)

@@ -56,6 +56,9 @@ from src.api.v1.routes.marketplace import (
     marketplace_reviews_router,
     marketplace_store_install_router,
 )
+from src.api.v1.routes.oauth.meta_marketing import (
+    router as oauth_meta_marketing_router,
+)
 
 # Omnichannel routes
 from src.api.v1.routes.omnichannel import (
@@ -226,6 +229,15 @@ api_router.include_router(
     tenants_admin_router, prefix="/admin/tenants", tags=["Admin - Tenants"]
 )
 api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
+
+# Meta Marketing OAuth (separate from the dormant oauth/meta.py CAPI
+# flow). Feeds Promote-on-Meta + Custom Audiences via
+# service_credentials(service_name=META_MARKETING).
+api_router.include_router(
+    oauth_meta_marketing_router,
+    prefix="/oauth/meta-marketing",
+    tags=["OAuth - Meta Marketing"],
+)
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores")

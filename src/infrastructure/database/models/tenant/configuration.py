@@ -76,6 +76,11 @@ class ServiceName(StrEnum):
     # Tracking / ad attribution
     # Holds the encrypted Meta Conversions API access token.
     META_CAPI = "meta_capi"
+    # Holds the encrypted Meta Marketing API access token (ads_management,
+    # ads_read, business_management). Separate row from META_CAPI because
+    # the two flows often use different FB apps and the CAPI system-user
+    # token has no Marketing API scopes.
+    META_MARKETING = "meta_marketing"
 
 
 class RequestStatus(StrEnum):

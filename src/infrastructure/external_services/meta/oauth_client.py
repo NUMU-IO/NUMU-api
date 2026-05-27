@@ -45,6 +45,18 @@ META_OAUTH_SCOPES: tuple[str, ...] = (
     "instagram_basic",
 )
 
+# Marketing-only scopes — used by the parallel "Connect Meta for Ads"
+# flow that grants ad-account access without re-doing the CAPI/Pixel
+# connect. ads_read is included so we can validate the ad account
+# without granting ads_management when the merchant only wants
+# read-only attribution; ads_management is still required for
+# promote-on-meta and Custom Audience push.
+META_MARKETING_SCOPES: tuple[str, ...] = (
+    "ads_management",
+    "ads_read",
+    "business_management",
+)
+
 
 @dataclass(frozen=True)
 class MetaOAuthTokens:
@@ -91,6 +103,7 @@ class MetaOAuthClient:
         app_secret: str | None = None,
         api_version: str | None = None,
         client: httpx.AsyncClient | None = None,
+        scopes: tuple[str, ...] | None = None,
     ) -> None:
         self.app_id = app_id or getattr(settings, "meta_app_id", None) or ""
         self.app_secret = app_secret or getattr(settings, "meta_app_secret", None) or ""
@@ -98,6 +111,7 @@ class MetaOAuthClient:
             settings, "meta_graph_api_version", "v21.0"
         )
         self._client = client
+        self.scopes: tuple[str, ...] = scopes or META_OAUTH_SCOPES
 
     @property
     def is_configured(self) -> bool:
@@ -111,7 +125,7 @@ class MetaOAuthClient:
         and verifies on the callback. Caller is responsible for storing
         it in the session and rejecting callbacks where it doesn't match.
         """
-        scope = ",".join(META_OAUTH_SCOPES)
+        scope = ",".join(self.scopes)
         params = {
             "client_id": self.app_id,
             "redirect_uri": redirect_uri,
@@ -219,6 +233,55 @@ class MetaOAuthClient:
             return MetaBusinessResources(
                 pixels=pixels, pages=pages, catalogs=catalogs, business_id=business_id
             )
+        finally:
+            if self._client is None:
+                await client.aclose()
+
+    async def list_ad_accounts(self, *, access_token: str) -> list[dict[str, Any]]:
+        """Return the ad accounts the token can manage.
+
+        Used by the marketing OAuth flow's picker UI. Returns
+        ``[{"id": "act_…", "account_id": "…", "name": "…",
+        "account_status": int, "business": {…}|None}]``. Empty list
+        on any error so the picker can still render a paste-fallback.
+        """
+        client = self._client or httpx.AsyncClient(timeout=15.0)
+        try:
+            resp = await client.get(
+                f"https://graph.facebook.com/{self.api_version}/me/adaccounts",
+                params={
+                    "access_token": access_token,
+                    "fields": "id,account_id,name,account_status,business",
+                    "limit": 100,
+                },
+            )
+            return _parse_data_response(resp)
+        finally:
+            if self._client is None:
+                await client.aclose()
+
+    async def debug_token(self, *, access_token: str) -> dict[str, Any]:
+        """Return Meta's token-debug envelope (scopes, expiry, app, type).
+
+        Used to verify a freshly-issued marketing token actually has
+        ``ads_management`` before we persist it — if the merchant
+        denied a scope on the consent screen, Meta still returns a
+        token but with the reduced scope list. Returns the inner
+        ``data`` object on success, or ``{}`` on any error.
+        """
+        client = self._client or httpx.AsyncClient(timeout=15.0)
+        try:
+            resp = await client.get(
+                f"https://graph.facebook.com/{self.api_version}/debug_token",
+                params={"input_token": access_token, "access_token": access_token},
+            )
+            if resp.status_code >= 400:
+                logger.warning(
+                    "meta_oauth_debug_token_failed",
+                    extra={"status": resp.status_code, "body": resp.text[:300]},
+                )
+                return {}
+            return (resp.json() or {}).get("data") or {}
         finally:
             if self._client is None:
                 await client.aclose()

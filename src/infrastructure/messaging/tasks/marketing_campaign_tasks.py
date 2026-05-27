@@ -380,11 +380,16 @@ async def _try_auto_create_meta_custom_conversion(session, campaign) -> None:
         if not (ad_account_id and pixel_id):
             return
 
+        # Custom Conversion create needs ads_management — that scope
+        # lives on the META_MARKETING credential, not META_CAPI. No-op
+        # when the merchant hasn't completed the Marketing OAuth flow
+        # yet (the campaign still sends; attribution just falls back to
+        # last-touch from internal funnel events).
         cred_q = (
             _select(ServiceCredential)
             .where(ServiceCredential.tenant_id == store.tenant_id)
             .where(ServiceCredential.service_type == ServiceType.TRACKING)
-            .where(ServiceCredential.service_name == ServiceName.META_CAPI)
+            .where(ServiceCredential.service_name == ServiceName.META_MARKETING)
             .where(ServiceCredential.is_active.is_(True))
         )
         cred = (await session.execute(cred_q)).scalar_one_or_none()
