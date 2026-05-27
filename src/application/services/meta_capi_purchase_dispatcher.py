@@ -49,15 +49,25 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     back to None when the metadata snapshot is missing (legacy orders,
     COD-via-courier paths) is fine — Meta drops null fields server-side.
     """
+    from src.infrastructure.external_services.meta.country_iso import (
+        canonicalize_country,
+    )
+
     shipping = order.shipping_address or {}
     meta = getattr(order, "metadata", None) or {}
+    # Country is free-form on the address ("Egypt", "EG", "مصر"). Meta
+    # only indexes the hash of the lowercase ISO-2 code, so non-canonical
+    # values would silently miss — run them through the mapper and drop
+    # anything unrecognized. ``country_code`` (if explicitly set) takes
+    # precedence over the free-form ``country``.
+    raw_country = shipping.get("country_code") or shipping.get("country")
     return {
         "email": shipping.get("email"),
         "phone": shipping.get("phone"),
         "first_name": shipping.get("first_name"),
         "last_name": shipping.get("last_name"),
         "city": shipping.get("city"),
-        "country_code": shipping.get("country") or shipping.get("country_code"),
+        "country_code": canonicalize_country(raw_country),
         "zip": shipping.get("postal_code") or shipping.get("zip"),
         "customer_id": str(order.customer_id) if order.customer_id else None,
         "ip": meta.get("ip_address"),

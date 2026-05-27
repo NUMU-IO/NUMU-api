@@ -671,16 +671,18 @@ async def _enrich_user_data_with_customer(
     if not user_data.get("zip") and addr.postal_code:
         user_data["zip"] = addr.postal_code
     # country is stored as free-form (could be "Egypt" / "EG" / "مصر").
-    # Forward only if it's already a 2-letter ISO code so the hash
-    # matches what Meta indexes against; otherwise skip to avoid
-    # polluting EMQ with non-canonical hashes.
-    if (
-        not user_data.get("country_code")
-        and addr.country
-        and len(addr.country) == 2
-        and addr.country.isalpha()
-    ):
-        user_data["country_code"] = addr.country
+    # Canonicalize to lowercase ISO-2 via the MENA-priority mapper —
+    # the hash only matches Meta's audience index for canonical codes,
+    # so non-mappable values are dropped rather than shipped as
+    # garbage hashes that would actively hurt EMQ.
+    if not user_data.get("country_code") and addr.country:
+        from src.infrastructure.external_services.meta.country_iso import (
+            canonicalize_country,
+        )
+
+        iso2 = canonicalize_country(addr.country)
+        if iso2:
+            user_data["country_code"] = iso2
 
 
 async def _maybe_enqueue_meta_capi(
