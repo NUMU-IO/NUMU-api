@@ -16,8 +16,21 @@ from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = logging.getLogger(__name__)
 
-# Exact paths that bypass tenant resolution
-PUBLIC_EXACT_PATHS = frozenset({"/", "/health", "/docs", "/redoc", "/openapi.json"})
+# Exact paths that bypass tenant resolution.
+# `/api/v1/stores/check-subdomain` runs during the "create new store"
+# flow when the user has no current-store context yet — the merchant
+# hub still sends its last-viewed store's id as `x-tenant-id`, which
+# can point at a deleted store and would 404 here. Subdomain
+# availability checks don't need tenant context anyway; the SELECT
+# against `stores.subdomain` is global.
+PUBLIC_EXACT_PATHS = frozenset({
+    "/",
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/api/v1/stores/check-subdomain",
+})
 
 # Path prefixes that bypass tenant resolution
 PUBLIC_PATH_PREFIXES = (
@@ -102,11 +115,32 @@ class TenantMiddleware(BaseHTTPMiddleware):
                         tenant = await tenant_repo.get_by_id(store_id_header)
 
             if not tenant or not tenant.is_active:
-                identifier = subdomain or f"id={store_id_header}"
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Store '{identifier}' not found or inactive.",
+                # Subdomain routing is the authoritative tenant signal —
+                # if it doesn't resolve, the request is targeting a
+                # store that doesn't exist and 404 is correct.
+                #
+                # The `x-tenant-id` header, by contrast, is a hub-side
+                # hint sent on EVERY request from the merchant dashboard
+                # (the current-store-picker value). A stale id — e.g.
+                # the merchant just deleted that store, or it was
+                # cleaned up server-side — would otherwise 404 every
+                # endpoint including unrelated ones like
+                # `/stores/check-subdomain` (used by "create new store").
+                # Log + continue without tenant context; route handlers
+                # that strictly require it can 401/404 themselves.
+                if subdomain:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Store '{subdomain}' not found or inactive.",
+                    )
+                logger.info(
+                    "stale x-tenant-id header (no tenant matched id=%s) — "
+                    "continuing without tenant context",
+                    store_id_header,
                 )
+                request.state.tenant = None
+                response = await call_next(request)
+                return response
 
             # Set tenant context
             request.state.tenant = tenant
