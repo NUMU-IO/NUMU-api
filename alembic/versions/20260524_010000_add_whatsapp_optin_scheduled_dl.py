@@ -36,17 +36,28 @@ depends_on: str | Sequence[str] | None = None
 # they must submit their own per FR-026.
 _SYSTEM_TEMPLATES: list[dict[str, str]] = [
     # (name, language, category, body_text)
+    #
+    # Meta validation rules these bodies satisfy (subcode 2388299):
+    #   1. Body cannot start with a variable.
+    #   2. Body cannot end on a variable — punctuation alone after `{{n}}`
+    #      is not enough; there has to be at least one literal word.
+    #      i.e. "{{2}}!" is REJECTED, "{{2}}. Thanks!" is accepted.
+    #
+    # Arabic bodies use Egyptian colloquial dialect (أهلاً يا / استلمنا /
+    # شكراً ليك / سايبلك / اتسلم). Language code stays "ar" so backend
+    # send-guard lookups in whatsapp_notification_handler.py + the
+    # scheduled-send dispatcher continue to resolve.
     (
         "order_confirmation",
         "en",
         "UTILITY",
-        "Hi {{1}}, your order {{2}} has been received. Total: {{3}}. Track it: {{4}}",
+        "Hi {{1}}, your order {{2}} has been received. Total: {{3}}. Track it here: {{4}} Thank you for shopping with us.",
     ),
     (
         "order_confirmation",
         "ar",
         "UTILITY",
-        "مرحبا {{1}}، تم استلام طلبك {{2}}. الإجمالي: {{3}}. تتبع الطلب: {{4}}",
+        "أهلاً يا {{1}}، استلمنا طلبك رقم {{2}}. الإجمالي: {{3}}. اتفرج عليه من اللينك ده: {{4}} وشكراً ليك.",
     ),
     (
         "payment_received",
@@ -58,43 +69,43 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
         "payment_received",
         "ar",
         "UTILITY",
-        "تم استلام الدفع لطلب {{1}}. المبلغ: {{2}}. شكرا لك!",
+        "استلمنا الدفع لطلبك رقم {{1}}. المبلغ: {{2}}. شكراً ليك!",
     ),
     (
         "order_shipped",
         "en",
         "UTILITY",
-        "Your order {{1}} is on the way. Tracking: {{2}} (carrier: {{3}})",
+        "Your order {{1}} is on the way. Tracking: {{2}} (carrier: {{3}}). Thanks!",
     ),
     (
         "order_shipped",
         "ar",
         "UTILITY",
-        "طلبك {{1}} في الطريق. التتبع: {{2}} (الناقل: {{3}})",
+        "طلبك رقم {{1}} في الطريق! اتابع شحنتك من هنا: {{2}} (مع شركة {{3}}). متشكرين!",
     ),
     (
         "order_delivered",
         "en",
         "UTILITY",
-        "Your order {{1}} has been delivered. Thank you for shopping at {{2}}!",
+        "Your order {{1}} has been delivered. Thanks for shopping at {{2}}. We hope you enjoy your purchase!",
     ),
     (
         "order_delivered",
         "ar",
         "UTILITY",
-        "تم تسليم طلبك {{1}}. شكرا لتسوقك من {{2}}!",
+        "طلبك رقم {{1}} اتسلم بنجاح. شكراً إنك اتسوقت من {{2}}. نتمنالك تكون مبسوط بشرائك!",
     ),
     (
         "abandoned_cart",
         "en",
         "MARKETING",
-        "Hi {{1}}, you left items in your cart at {{2}}. Complete your purchase: {{3}}",
+        "Hi {{1}}, you left items in your cart at {{2}}. Complete your purchase here: {{3}} before they sell out.",
     ),
     (
         "abandoned_cart",
         "ar",
         "MARKETING",
-        "مرحبا {{1}}، لقد تركت منتجات في سلتك على {{2}}. أكمل الشراء: {{3}}",
+        "أهلاً يا {{1}}، سايبلك حاجات في عربتك على {{2}}. اكمل الطلب من هنا: {{3}} قبل ما تخلص الكميات.",
     ),
     # STOP-keyword acknowledgement (FR-010). Sent inside the customer-service
     # window (no template approval needed at send-time) but seeded as a
@@ -110,7 +121,7 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
         "optout_confirmation",
         "ar",
         "UTILITY",
-        "تم إلغاء اشتراكك في رسائل واتساب من {{1}}. أرسل START للاشتراك مرة أخرى.",
+        "تم إلغاء اشتراكك من رسايل واتساب بتاعت {{1}}. لو حبيت ترجع تاني، ابعت START.",
     ),
 ]
 
