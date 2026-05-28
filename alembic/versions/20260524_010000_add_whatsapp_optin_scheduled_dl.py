@@ -37,27 +37,35 @@ depends_on: str | Sequence[str] | None = None
 _SYSTEM_TEMPLATES: list[dict[str, str]] = [
     # (name, language, category, body_text)
     #
-    # Meta validation rules these bodies satisfy (subcode 2388299):
+    # Meta validator rules these bodies satisfy (subcode 2388299):
     #   1. Body cannot start with a variable.
     #   2. Body cannot end on a variable — punctuation alone after `{{n}}`
     #      is not enough; there has to be at least one literal word.
     #      i.e. "{{2}}!" is REJECTED, "{{2}}. Thanks!" is accepted.
     #
+    # Templates with an action URL (order_confirmation, order_shipped,
+    # abandoned_cart) now render that URL as a CTA URL button rather than
+    # an inline {{n}} placeholder. The button URL pattern is
+    # `https://numueg.app/o/{{1}}` (or `/cart/{{1}}` for abandoned_cart)
+    # — a numueg.app redirector route resolves the path segment to the
+    # tenant store. Handler responsibility: pass the path segment as the
+    # button URL parameter (NOT the full URL).
+    #
     # Arabic bodies use Egyptian colloquial dialect (أهلاً يا / استلمنا /
-    # شكراً ليك / سايبلك / اتسلم). Language code stays "ar" so backend
-    # send-guard lookups in whatsapp_notification_handler.py + the
+    # شكراً ليك / انت سايب / اتسلم / بتاعة). Language code stays "ar" so
+    # backend send-guard lookups in whatsapp_notification_handler.py + the
     # scheduled-send dispatcher continue to resolve.
     (
         "order_confirmation",
         "en",
         "UTILITY",
-        "Hi {{1}}, your order {{2}} has been received. Total: {{3}}. Track it here: {{4}} Thank you for shopping with us.",
+        "Hi {{1}}, your order {{2}} has been received. Total: {{3}}. Thank you for shopping with us.",
     ),
     (
         "order_confirmation",
         "ar",
         "UTILITY",
-        "أهلاً يا {{1}}، استلمنا طلبك رقم {{2}}. الإجمالي: {{3}}. اتفرج عليه من اللينك ده: {{4}} وشكراً ليك.",
+        "أهلاً يا {{1}}، استلمنا طلبك رقم {{2}}. الإجمالي: {{3}}. شكراً ليك على ثقتك فينا.",
     ),
     (
         "payment_received",
@@ -75,13 +83,13 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
         "order_shipped",
         "en",
         "UTILITY",
-        "Your order {{1}} is on the way. Tracking: {{2}} (carrier: {{3}}). Thanks!",
+        "Your order {{1}} is on the way with {{2}}. Thanks for your patience!",
     ),
     (
         "order_shipped",
         "ar",
         "UTILITY",
-        "طلبك رقم {{1}} في الطريق! اتابع شحنتك من هنا: {{2}} (مع شركة {{3}}). متشكرين!",
+        "طلبك رقم {{1}} في الطريق مع شركة {{2}}. شكراً لصبرك!",
     ),
     (
         "order_delivered",
@@ -99,13 +107,13 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
         "abandoned_cart",
         "en",
         "MARKETING",
-        "Hi {{1}}, you left items in your cart at {{2}}. Complete your purchase here: {{3}} before they sell out.",
+        "Hi {{1}}, you left items in your cart at {{2}}. Don't miss out — they may sell out soon!",
     ),
     (
         "abandoned_cart",
         "ar",
         "MARKETING",
-        "أهلاً يا {{1}}، سايبلك حاجات في عربتك على {{2}}. اكمل الطلب من هنا: {{3}} قبل ما تخلص الكميات.",
+        "أهلاً يا {{1}}، انت سايب حاجات في عربتك على {{2}}. الحقها قبل ما تخلص الكميات!",
     ),
     # STOP-keyword acknowledgement (FR-010). Sent inside the customer-service
     # window (no template approval needed at send-time) but seeded as a
@@ -121,7 +129,7 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
         "optout_confirmation",
         "ar",
         "UTILITY",
-        "تم إلغاء اشتراكك من رسايل واتساب بتاعت {{1}}. لو حبيت ترجع تاني، ابعت START.",
+        "تم إلغاء اشتراكك من رسايل واتساب بتاعة {{1}}. لو حبيت ترجع تاني، ابعت START.",
     ),
 ]
 
