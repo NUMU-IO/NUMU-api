@@ -440,12 +440,13 @@ async def track_page_view(
     # Forward `raw_ip` (NOT the anonymized form): Meta's match-quality
     # model keys on full client IP and refuses a /24 network address.
     try:
-        _maybe_enqueue_meta_capi(
+        await _maybe_enqueue_meta_capi(
             store=store,
             step=step,
             body=body,
             ip=raw_ip,
             user_agent=ua,
+            session=funnel_repo.session,
         )
     except Exception:
         # Never let a CAPI enqueue error break the main tracking call.
@@ -598,13 +599,154 @@ async def track_analytics_event(
     return Response(status_code=204)
 
 
-def _maybe_enqueue_meta_capi(
+async def _enrich_user_data_with_customer(
+    user_data: dict,
+    customer_id: UUID | str,
+    store_id: UUID | str,
+    session,
+) -> None:
+    """Inject email / phone / name / city / zip from the customer record.
+
+    Meta's CAPI Event Match Quality (EMQ) jumps materially with each
+    hashed PII field present — email is +63% EMQ alone, phone +44%,
+    etc. The storefront only sends ``customer_id`` for logged-in
+    visitors; server-side enrichment fills in the rest from the
+    customer + their default address so the merchant doesn't have to
+    plumb each field through every track call.
+
+    In-place mutation; explicit fields from the storefront body are
+    not overwritten. Falls open on every failure — CAPI must never
+    block /track.
+
+    Sentry CRITICAL — tenant scoping:
+        The /track endpoint is unauthenticated. Without a store_id
+        filter on the customer lookup, an attacker could forge any
+        store's customer_id and have the server fan their PII into
+        the attacker's Meta pixel. Both lookups (customer + address)
+        scope to ``store_id`` so a cross-store id silently 0-rows
+        and the function returns with no enrichment.
+
+    Sentry MEDIUM — query shape:
+        CustomerModel + CustomerAddressModel both have
+        ``lazy="selectin"`` relationships (store, orders, invoices,
+        addresses on Customer; customer on Address). Plain
+        ``select(Model)`` triggers all of those on every /track,
+        producing 4+ extra SELECTs per logged-in event. We use
+        ``load_only`` to fetch just the column subset we read and
+        ``raiseload("*")`` to make any accidental relationship
+        access fail loudly instead of silently re-introducing the
+        N+1.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import load_only, raiseload
+
+    from src.infrastructure.database.models.tenant.address import (
+        CustomerAddressModel,
+    )
+    from src.infrastructure.database.models.tenant.customer import CustomerModel
+
+    try:
+        cust_uuid = (
+            customer_id if isinstance(customer_id, UUID) else UUID(str(customer_id))
+        )
+    except (ValueError, TypeError):
+        return
+
+    try:
+        store_uuid = store_id if isinstance(store_id, UUID) else UUID(str(store_id))
+    except (ValueError, TypeError):
+        return
+
+    try:
+        customer = (
+            await session.execute(
+                select(CustomerModel)
+                .where(
+                    CustomerModel.id == cust_uuid,
+                    CustomerModel.store_id == store_uuid,
+                )
+                .options(
+                    load_only(
+                        CustomerModel.id,
+                        CustomerModel.email,
+                        CustomerModel.phone,
+                        CustomerModel.first_name,
+                        CustomerModel.last_name,
+                        CustomerModel.default_address_id,
+                    ),
+                    raiseload("*"),
+                )
+            )
+        ).scalar_one_or_none()
+    except Exception:
+        return
+    if customer is None:
+        return
+
+    if not user_data.get("email") and customer.email:
+        user_data["email"] = customer.email
+    if not user_data.get("phone") and customer.phone:
+        user_data["phone"] = customer.phone
+    if not user_data.get("first_name") and customer.first_name:
+        user_data["first_name"] = customer.first_name
+    if not user_data.get("last_name") and customer.last_name:
+        user_data["last_name"] = customer.last_name
+    if not user_data.get("customer_id"):
+        user_data["customer_id"] = str(customer.id)
+
+    addr_id = getattr(customer, "default_address_id", None)
+    if not addr_id:
+        return
+    try:
+        addr = (
+            await session.execute(
+                select(CustomerAddressModel)
+                .where(
+                    CustomerAddressModel.id == addr_id,
+                    CustomerAddressModel.customer_id == cust_uuid,
+                )
+                .options(
+                    load_only(
+                        CustomerAddressModel.id,
+                        CustomerAddressModel.city,
+                        CustomerAddressModel.postal_code,
+                        CustomerAddressModel.country,
+                    ),
+                    raiseload("*"),
+                )
+            )
+        ).scalar_one_or_none()
+    except Exception:
+        return
+    if addr is None:
+        return
+    if not user_data.get("city") and addr.city:
+        user_data["city"] = addr.city
+    if not user_data.get("zip") and addr.postal_code:
+        user_data["zip"] = addr.postal_code
+    # country is stored as free-form (could be "Egypt" / "EG" / "مصر").
+    # Canonicalize to lowercase ISO-2 via the MENA-priority mapper —
+    # the hash only matches Meta's audience index for canonical codes,
+    # so non-mappable values are dropped rather than shipped as
+    # garbage hashes that would actively hurt EMQ.
+    if not user_data.get("country_code") and addr.country:
+        from src.infrastructure.external_services.meta.country_iso import (
+            canonicalize_country,
+        )
+
+        iso2 = canonicalize_country(addr.country)
+        if iso2:
+            user_data["country_code"] = iso2
+
+
+async def _maybe_enqueue_meta_capi(
     *,
     store: Store,
     step: str,
     body: TrackPageViewRequest,
     ip: str | None,
     user_agent: str,
+    session,
 ) -> None:
     """Enqueue ``meta_capi_send_event`` when this store has CAPI configured.
 
@@ -619,6 +761,12 @@ def _maybe_enqueue_meta_capi(
     fans out one task per capi-enabled pixel. Each pixel is a separate
     Meta dedup namespace, so the same browser-issued ``event_id`` works
     across all of them (no per-pixel namespacing needed).
+
+    EMQ enrichment: when ``body.customer_id`` is set, looks up the
+    customer + default address and adds email/phone/name/city/zip to
+    user_data before enqueuing. Lifts Event Match Quality across every
+    funnel step for logged-in shoppers without needing the storefront
+    to plumb each field through.
     """
     from src.application.services.meta_pixel_resolver import resolve_pixels
     from src.infrastructure.messaging.tasks.meta_capi import (
@@ -656,6 +804,21 @@ def _maybe_enqueue_meta_capi(
         user_data["ip"] = ip
     if "user_agent" not in user_data and user_agent:
         user_data["user_agent"] = user_agent
+
+    # Server-side customer enrichment — see helper docstring. Catches
+    # broadly so a missing customer / DB blip never breaks /track. The
+    # customer lookup is store-scoped (sentry CRITICAL) so a forged
+    # customer_id from another store silently 0-rows.
+    if body.customer_id:
+        try:
+            await _enrich_user_data_with_customer(
+                user_data, body.customer_id, store.id, session
+            )
+        except Exception:
+            logger.exception(
+                "meta_capi_enrich_user_data_failed",
+                extra={"store_id": str(store.id)},
+            )
 
     custom_data = dict(body.step_data or {})
     event_time_int = int(event_time.timestamp())
