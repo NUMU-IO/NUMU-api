@@ -17,8 +17,20 @@ Behavior:
   the merchant gets a 409 instead of a Meta name-collision error.
 - On Meta success, persist a local ``whatsapp_templates`` row with
   status=PENDING (or Meta's reported status), meta_template_id set.
+
+Body / button example values:
+- Meta requires an ``example.body_text`` array for every BODY with one or
+  more ``{{n}}`` placeholders (error code 100 / subcode 2388023). The
+  caller can supply ``body_examples`` to provide realistic preview values
+  (improves Meta's review pass-rate). When not supplied we auto-derive
+  placeholder strings (sample 1, sample 2, …) so the submission still
+  passes validation.
+- Dynamic URL buttons need an ``example`` URL field too; buttons are
+  passed through verbatim — callers using URL placeholders must include
+  ``example`` in each button dict.
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -26,6 +38,11 @@ from uuid import UUID
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Match Meta's positional placeholders ``{{1}}``, ``{{12}}``, etc. The
+# numeric value gives us the placeholder index used to deduplicate +
+# size the example list.
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*(\d+)\s*\}\}")
 
 from src.core.services.meta_error_whitelist import sanitize_meta_error
 from src.infrastructure.database.models.tenant.configuration import (
@@ -91,6 +108,7 @@ class SubmitTemplateUseCase:
         header_content: str | None = None,
         footer_text: str | None = None,
         buttons: list[dict[str, Any]] | None = None,
+        body_examples: list[str] | None = None,
     ) -> WhatsAppTemplateModel:
         # 1. Local duplicate guard. Raise before any external call so the
         #    merchant doesn't burn a Meta approval-rate-budget slot.
@@ -131,6 +149,7 @@ class SubmitTemplateUseCase:
             body_text=body_text,
             footer_text=footer_text,
             buttons=buttons,
+            body_examples=body_examples,
         )
         meta_payload = {
             "name": name,
@@ -192,6 +211,15 @@ class SubmitTemplateUseCase:
         return local
 
 
+def _placeholder_count(text: str) -> int:
+    """Return the number of distinct ``{{n}}`` placeholders in ``text``.
+    Counts by max index rather than match count so duplicated indices
+    (``"{{1}} and {{1}}"``) collapse to a single example slot.
+    """
+    indices = {int(m.group(1)) for m in _PLACEHOLDER_RE.finditer(text)}
+    return max(indices) if indices else 0
+
+
 def _build_components(
     *,
     header_type: str | None,
@@ -199,8 +227,16 @@ def _build_components(
     body_text: str,
     footer_text: str | None,
     buttons: list[dict[str, Any]] | None,
+    body_examples: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build Meta's ``components`` array from our flat schema."""
+    """Build Meta's ``components`` array from our flat schema.
+
+    BODY components with placeholders MUST include an ``example`` block —
+    Meta rejects the submission otherwise (error 100 subcode 2388023:
+    ``"Body parameters must include example body_text"``). When the
+    caller doesn't supply ``body_examples`` we synthesize placeholder
+    values so the call still passes validation.
+    """
     components: list[dict[str, Any]] = []
 
     if header_type and header_content:
@@ -214,7 +250,19 @@ def _build_components(
         elif ht in ("IMAGE", "VIDEO", "DOCUMENT"):
             components.append({"type": "HEADER", "format": ht})
 
-    components.append({"type": "BODY", "text": body_text})
+    body_component: dict[str, Any] = {"type": "BODY", "text": body_text}
+    n_placeholders = _placeholder_count(body_text)
+    if n_placeholders > 0:
+        examples = list(body_examples or [])
+        # Top up with synthetic values when the caller supplies fewer
+        # examples than placeholders — keep Meta's validator happy.
+        while len(examples) < n_placeholders:
+            examples.append(f"sample {len(examples) + 1}")
+        # Trim any extras so we don't accidentally encode an
+        # off-by-one in Meta's preview.
+        examples = examples[:n_placeholders]
+        body_component["example"] = {"body_text": [examples]}
+    components.append(body_component)
 
     if footer_text:
         components.append({"type": "FOOTER", "text": footer_text})

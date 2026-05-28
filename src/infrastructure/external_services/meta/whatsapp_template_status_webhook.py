@@ -72,22 +72,24 @@ async def handle_template_status_update(
 
     # Resolve the store this WABA belongs to. Two paths:
     # 1. Platform WABA — multiple stores share it; we cannot resolve a
-    #    single store from waba_id alone, so we update by
-    #    (meta_template_id) globally (the meta_template_id is unique per
-    #    WABA so still narrows to one row).
+    #    single store from waba_id alone. The system templates are seeded
+    #    per-store (one row per store), so we fan out the status change
+    #    across every is_system row matching the (name, language) pair.
     # 2. BYO WABA — exactly one ServiceCredential row maps to it; we use
-    #    its tenant_id to scope the lookup.
+    #    its tenant_id to scope the lookup to that tenant's rows.
     store_id = await _resolve_store_from_waba(db, waba_id)
 
-    # Locate the local template row.
-    row = await _find_template_row(
+    # Locate the local template row(s). Sentry HIGH-3: previously this
+    # was scalar_one_or_none() and threw MultipleResultsFound on every
+    # platform-WABA webhook because system templates duplicate per-store.
+    rows = await _find_template_rows(
         db,
         store_id=store_id,
         meta_template_id=meta_template_id,
         name=template_name,
         language=template_language,
     )
-    if row is None:
+    if not rows:
         logger.info(
             "template_status_webhook_no_local_row",
             waba_id=waba_id,
@@ -97,32 +99,36 @@ async def handle_template_status_update(
         return False
 
     new_status = _meta_event_to_status(event)
-    # IDEMPOTENCY (TASK-SEC-008): re-applying same status is a no-op.
-    if row.status == new_status and (
-        new_status != "REJECTED" or row.rejection_reason == reason
-    ):
-        logger.debug(
-            "template_status_webhook_idempotent_skip",
+    mutated_any = False
+    for row in rows:
+        # IDEMPOTENCY (TASK-SEC-008): re-applying same status is a no-op.
+        if row.status == new_status and (
+            new_status != "REJECTED" or row.rejection_reason == reason
+        ):
+            logger.debug(
+                "template_status_webhook_idempotent_skip",
+                template_id=str(row.id),
+                status=new_status,
+            )
+            continue
+
+        row.status = new_status
+        if new_status == "REJECTED":
+            row.rejection_reason = reason
+        elif new_status == "APPROVED" and row.approved_at is None:
+            row.approved_at = datetime.now(UTC)
+        mutated_any = True
+        logger.info(
+            "template_status_updated",
             template_id=str(row.id),
-            status=new_status,
+            meta_template_id=meta_template_id,
+            new_status=new_status,
+            source="webhook",
         )
-        return False
 
-    row.status = new_status
-    if new_status == "REJECTED":
-        row.rejection_reason = reason
-    elif new_status == "APPROVED" and row.approved_at is None:
-        row.approved_at = datetime.now(UTC)
-
-    await db.flush()
-    logger.info(
-        "template_status_updated",
-        template_id=str(row.id),
-        meta_template_id=meta_template_id,
-        new_status=new_status,
-        source="webhook",
-    )
-    return True
+    if mutated_any:
+        await db.flush()
+    return mutated_any
 
 
 async def _resolve_store_from_waba(db: AsyncSession, waba_id: str) -> Any | None:
@@ -153,28 +159,49 @@ async def _resolve_store_from_waba(db: AsyncSession, waba_id: str) -> Any | None
     return None
 
 
-async def _find_template_row(
+async def _find_template_rows(
     db: AsyncSession,
     *,
     store_id: Any | None,
     meta_template_id: str | None,
     name: str | None,
     language: str | None,
-) -> WhatsAppTemplateModel | None:
-    """Find the local template row by ``meta_template_id`` first
-    (uniquely identifies the row across the WABA), falling back to
-    ``(store_id, name, language)`` if meta_template_id is unset.
+) -> list[WhatsAppTemplateModel]:
+    """Find local template row(s) matching this webhook event.
+
+    Lookup precedence:
+
+    1. ``meta_template_id`` — uniquely identifies the Meta-side template
+       across the WABA, so when present we narrow to all local rows
+       carrying that id (typically 1; could be N per-store copies of
+       the same system template post-seeding).
+    2. ``(store_id, name, language)`` fallback when meta_template_id is
+       not yet recorded locally (template was just submitted and the
+       backend hasn't stored its Meta id yet).
+
+    Scoping rules:
+
+    - BYO WABA (``store_id`` resolved from ServiceCredential.tenant_id):
+      narrow by ``tenant_id == store_id`` to the BYO merchant's rows.
+    - Platform WABA (``store_id is None``): the system templates are
+      seeded per-store with ``is_system=true``. Fan out the status
+      change to every is_system row matching the (name, language) — the
+      Meta-side template approval applies to all of them.
     """
     if meta_template_id:
-        row = (
-            await db.execute(
-                select(WhatsAppTemplateModel).where(
-                    WhatsAppTemplateModel.meta_template_id == meta_template_id
+        rows = (
+            (
+                await db.execute(
+                    select(WhatsAppTemplateModel).where(
+                        WhatsAppTemplateModel.meta_template_id == meta_template_id
+                    )
                 )
             )
-        ).scalar_one_or_none()
-        if row is not None:
-            return row
+            .scalars()
+            .all()
+        )
+        if rows:
+            return list(rows)
 
     if name and language:
         stmt = select(WhatsAppTemplateModel).where(
@@ -183,9 +210,14 @@ async def _find_template_row(
         )
         if store_id is not None:
             stmt = stmt.where(WhatsAppTemplateModel.tenant_id == store_id)
-        return (await db.execute(stmt)).scalar_one_or_none()
+        else:
+            # Platform WABA path — restrict to system templates so a BYO
+            # merchant happening to have a same-named template doesn't get
+            # its status accidentally flipped by a platform-side webhook.
+            stmt = stmt.where(WhatsAppTemplateModel.is_system.is_(True))
+        return list((await db.execute(stmt)).scalars().all())
 
-    return None
+    return []
 
 
 def _meta_event_to_status(event: str) -> str:

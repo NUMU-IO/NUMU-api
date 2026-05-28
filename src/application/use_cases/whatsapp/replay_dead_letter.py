@@ -97,8 +97,12 @@ class ReplayDeadLetterUseCase:
 
         # Enqueue the appropriate Celery task based on originating_context.
         # The Celery task should accept a replay_of_dl_id kwarg and call
-        # mark_replayed on completion.
-        enqueued = self._enqueue_replay(row)
+        # mark_replayed on completion. For scheduled_send replays this
+        # also resets the parent row's status back to pending so the
+        # dispatcher picks it back up — commit that mutation now.
+        enqueued = await self._enqueue_replay(row)
+        if enqueued:
+            await self.session.commit()
         logger.info(
             "dead_letter_replay_enqueued",
             dl_id=str(dl_id),
@@ -161,7 +165,7 @@ class ReplayDeadLetterUseCase:
                     return log.id
         return None
 
-    def _enqueue_replay(self, dl_row: Any) -> bool:
+    async def _enqueue_replay(self, dl_row: Any) -> bool:
         """Enqueue the appropriate Celery task for this DLQ row.
 
         Phase 1 supports replay for `campaign` and `scheduled_send`
@@ -169,6 +173,17 @@ class ReplayDeadLetterUseCase:
         Other contexts log a warning + return False; the operator can
         manually re-trigger the source event (e.g., re-emit
         OrderCreatedEvent) instead.
+
+        For `scheduled_send`, the dispatcher polls rows where
+        ``status='pending'`` and ``scheduled_for <= NOW``. The DLQ row
+        was written precisely BECAUSE the dispatcher already attempted
+        the send and the row's status was transitioned away from
+        ``pending`` (to ``failed`` or ``sent`` depending on the
+        original outcome). Returning True without resetting the row's
+        status means the dispatcher will never pick it back up — the
+        DLQ entry would get stuck in ``replaying`` forever (sentry
+        HIGH-2). We reset the scheduled_send row HERE so the next
+        dispatcher tick re-attempts the send.
         """
         try:
             if dl_row.originating_context == "campaign":
@@ -182,15 +197,28 @@ class ReplayDeadLetterUseCase:
                 )
                 return True
             if dl_row.originating_context == "scheduled_send":
-                # The scheduled-send dispatcher polls due rows from the
-                # DB and dispatches them — we don't directly enqueue a
-                # per-row task. Instead, we re-set the scheduled_send
-                # row's status back to pending so the next dispatcher
-                # tick picks it up.
-                # NB: this MUST be done by the route layer (we don't
-                # mutate state from the use-case here in a synchronous
-                # way; the route handles it). For now, return True
-                # since the polling-tick will catch it on its next run.
+                from src.infrastructure.database.models.tenant.whatsapp_scheduled_send import (
+                    WhatsAppScheduledSendModel,
+                )
+
+                sched_row = (
+                    await self.session.execute(
+                        select(WhatsAppScheduledSendModel).where(
+                            WhatsAppScheduledSendModel.id
+                            == dl_row.originating_context_id,
+                            WhatsAppScheduledSendModel.store_id == dl_row.store_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if sched_row is None:
+                    logger.warning(
+                        "dead_letter_replay_scheduled_send_missing",
+                        dl_id=str(dl_row.id),
+                        scheduled_send_id=str(dl_row.originating_context_id),
+                    )
+                    return False
+                sched_row.status = "pending"
+                await self.session.flush()
                 return True
         except Exception:
             logger.exception(

@@ -1,7 +1,6 @@
 """Store settings routes."""
 
 import base64
-import hashlib
 import logging
 import re
 import uuid
@@ -2850,6 +2849,8 @@ async def _build_meta_response(
         debug_mode_expires_at=debug_expires_dt,
         last_validated_at=last_validated_dt,
         status=status_label,
+        ad_account_id=cfg.get("ad_account_id"),
+        page_id=cfg.get("page_id"),
     )
 
 
@@ -2989,6 +2990,19 @@ async def save_meta_tracking(
             request.consent_settings.model_dump()
             if request.consent_settings is not None
             else None
+        ),
+        # Meta Business connection IDs — only overwrite when the request
+        # supplies a value. Sending the panel without re-entering them
+        # (legacy panel state) must NOT wipe the existing IDs, otherwise
+        # the audience-sync and Promote-on-Meta gates would silently
+        # break on every settings save.
+        "ad_account_id": (
+            request.ad_account_id
+            if request.ad_account_id is not None
+            else meta_cfg.get("ad_account_id")
+        ),
+        "page_id": (
+            request.page_id if request.page_id is not None else meta_cfg.get("page_id")
         ),
     }
     tracking["meta"] = new_meta_cfg
@@ -3194,13 +3208,28 @@ async def send_meta_test_event(
 
     # Meta CAPI rejects events with no user_data (error_subcode 2804050 —
     # "This event has no user information"). For the synthetic test event
-    # we mint a deterministic hashed external_id per store, plus a static
-    # user-agent. Both Meta-blessed fields, neither identifies a real
-    # human, and they're enough to clear Meta's "at least one PII field"
-    # gate so the test event surfaces in Events Manager → Test Events.
-    synthetic_external_id = hashlib.sha256(
-        f"numu-test-event:{store.id}".encode()
-    ).hexdigest()
+    # we send a full set of plausible-but-fake identifiers — the Celery
+    # worker calls ``hash_user_data()`` (src/infrastructure/external_services/
+    # meta/hashing.py) on every PII key before POSTing, so we pass RAW
+    # values here using NUMU's internal vocabulary (email/phone/first_name/
+    # ...) — the worker normalizes + SHA-256s downstream. ``ip`` and
+    # ``user_agent`` are passed verbatim per Meta's spec. Sending the full
+    # set maximizes Event Match Quality (EMQ) score in Events Manager so
+    # the test row reports a green badge instead of a low-quality warning.
+    synthetic_user_data = {
+        # Hashed PII — Meta accepts any string; worker SHA-256s before send.
+        "email": f"numu-test-{store.id}@test.numueg.app",
+        "phone": "+201000000000",
+        "first_name": "Numu",
+        "last_name": "Test",
+        "city": "Cairo",
+        "country_code": "EG",
+        "zip": "11511",
+        "customer_id": f"numu-test:{store.id}",
+        # Raw — Meta wants these unhashed per spec.
+        "ip": "127.0.0.1",
+        "user_agent": "NUMU-Test-Event/1.0",
+    }
 
     meta_capi_send_event.delay(
         store_id=str(store.id),
@@ -3209,10 +3238,7 @@ async def send_meta_test_event(
         event_id=event_id,
         event_time=int(datetime.now(UTC).timestamp()),
         event_source_url=None,
-        user_data={
-            "external_id": synthetic_external_id,
-            "client_user_agent": "NUMU-Test-Event/1.0",
-        },
+        user_data=synthetic_user_data,
         custom_data={
             "value": 0.01,
             "currency": currency,

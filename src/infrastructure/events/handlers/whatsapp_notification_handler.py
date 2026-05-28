@@ -309,16 +309,16 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             name=extras["customer_name"],
             language=extras["language"],
         )
-        # Tracking URL is built later (US3 wiring will pass it through);
-        # for now use the store's storefront origin if available.
-        tracking_url = None  # Order-tracking URL wiring: future task
-
+        # order_confirmation_v2 renders a "Manage order" URL button at
+        # https://numueg.app/o/{order_id}. We pass event.order_id as the
+        # button substitution; the apex domain's redirector resolves the
+        # path to the tenant store's order-tracking page.
         result = await service.send_order_confirmation(
             recipient,
             event.order_number,
             f"{event.total:.2f} {event.currency}",
             extras["store_name"],
-            tracking_url=tracking_url,
+            order_id=str(event.order_id),
         )
 
         logger.info(
