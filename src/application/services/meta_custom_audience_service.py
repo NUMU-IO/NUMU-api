@@ -131,7 +131,7 @@ class MetaCustomAudienceService:
                 SELECT c.id, c.email, c.phone
                 FROM public.customers c
                 WHERE c.store_id = :sid
-                  AND c.total_spent_cents >= :threshold
+                  AND c.total_spent >= :threshold
                 """
             ),
             {"sid": str(store_id), "threshold": self.HIGH_LTV_THRESHOLD_CENTS},
