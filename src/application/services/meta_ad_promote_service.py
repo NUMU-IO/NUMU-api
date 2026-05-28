@@ -61,13 +61,14 @@ def _summarize_meta_error(body_text: str) -> str:
     Meta error envelope looks like::
 
         {"error": {"message": "...", "code": 100, "error_subcode": 33,
+                   "error_user_title": "...", "error_user_msg": "...",
                    "fbtrace_id": "..."}}
 
-    We surface ``error.message`` because that's what merchants need to
-    act on. ``error_subcode = 33`` in particular is the "missing
-    permissions" tell — most commonly the token lacks
-    ``ads_management``. We append actionable guidance for that case
-    so the route can surface a useful toast instead of a bare 502.
+    ``error_user_msg`` is Meta's merchant-friendly explanation when
+    present; ``message`` is the API-developer-flavored line. We
+    prefer the user-facing pair, falling back to ``message``. Known
+    subcodes get appended guidance pointing at the right setting to
+    flip.
     """
     import json as _json
 
@@ -77,15 +78,48 @@ def _summarize_meta_error(body_text: str) -> str:
         return body_text[:240] or "Meta returned an unstructured error."
     err = envelope.get("error") or {}
     message = err.get("message") or "Meta rejected the request."
+    user_title = err.get("error_user_title")
+    user_msg = err.get("error_user_msg")
     subcode = err.get("error_subcode")
+
+    # Compose the user-facing front of the message. ``error_user_msg``
+    # is Meta's human-readable explanation (e.g. "Select a Facebook
+    # Page to represent your business"). When present it's strictly
+    # more useful than ``message`` ("Invalid parameter").
+    if user_msg:
+        primary = (
+            f"{user_title}: {user_msg}"
+            if user_title and user_title not in user_msg
+            else user_msg
+        )
+    else:
+        primary = message
+
+    # Subcode-specific guidance — pointing at the right setting the
+    # merchant has to flip in Business Manager.
     if subcode == 33:
         return (
-            f"{message} (Meta error subcode 33: the saved access token "
+            f"{primary} (Meta error subcode 33: the saved access token "
             "likely lacks the 'ads_management' permission. Generate a "
             "new System User token with ads_management scope on the "
             "Ad Account and paste it in Settings → Tracking & Pixels.)"
         )
-    return message
+    if subcode == 1443121:
+        # "Facebook Page is missing" — either the stored page_id is
+        # wrong, or the Page isn't assigned to the System User in
+        # Business Manager (token snapshots permissions at generation
+        # time, so post-hoc assignments don't take effect until the
+        # token is regenerated).
+        return (
+            f"{primary} (Meta error subcode 1443121: open Business "
+            "Manager → Business Settings → Pages and confirm the Page "
+            "is added; then Users → System Users → assign the Page to "
+            "the user; then regenerate the System User token and paste "
+            "it in Settings → Tracking & Pixels. Also double-check the "
+            "Page ID stored in Settings → Tracking → Meta matches the "
+            "assigned Page.)"
+        )
+    return primary
 
 
 async def promote_campaign_on_meta(
