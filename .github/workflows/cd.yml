@@ -110,15 +110,20 @@ jobs:
       # Skips any key whose secret is empty so a half-configured env
       # doesn't blank an existing manual entry. Repeated runs converge.
       - name: Sync WhatsApp/Meta env vars to test droplet
+        # Accept BOTH `TEST_*` and `TESTING_*` prefixes — operators have
+        # set secrets under each convention over time. GHA's `||`
+        # returns the first non-empty value, so whichever was created
+        # last wins per-key. `TEST_*` is checked first (canonical), with
+        # `TESTING_*` as the fallback so existing setups keep working.
         env:
           REMOTE_FILE: /opt/numu/.env.test
-          WHATSAPP_ACCESS_TOKEN: ${{ secrets.TEST_WHATSAPP_ACCESS_TOKEN }}
-          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.TEST_WHATSAPP_PHONE_NUMBER_ID }}
-          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.TEST_WHATSAPP_BUSINESS_ACCOUNT_ID }}
-          WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${{ secrets.TEST_WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
-          WHATSAPP_APP_SECRET: ${{ secrets.TEST_WHATSAPP_APP_SECRET }}
-          WHATSAPP_ENABLED: ${{ secrets.TEST_WHATSAPP_ENABLED }}
-          META_APP_ID: ${{ secrets.TEST_META_APP_ID }}
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.TEST_WHATSAPP_ACCESS_TOKEN || secrets.TESTING_WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.TEST_WHATSAPP_PHONE_NUMBER_ID || secrets.TESTING_WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.TEST_WHATSAPP_BUSINESS_ACCOUNT_ID || secrets.TESTING_WHATSAPP_BUSINESS_ACCOUNT_ID }}
+          WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${{ secrets.TEST_WHATSAPP_WEBHOOK_VERIFY_TOKEN || secrets.TESTING_WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
+          WHATSAPP_APP_SECRET: ${{ secrets.TEST_WHATSAPP_APP_SECRET || secrets.TESTING_WHATSAPP_APP_SECRET }}
+          WHATSAPP_ENABLED: ${{ secrets.TEST_WHATSAPP_ENABLED || secrets.TESTING_WHATSAPP_ENABLED }}
+          META_APP_ID: ${{ secrets.TEST_META_APP_ID || secrets.TESTING_META_APP_ID }}
           WHATSAPP_BUSINESS_API_VERSION: v21.0
         run: |
           SNIPPET=""
@@ -137,21 +142,28 @@ jobs:
             echo "[whatsapp-env] No WhatsApp/Meta secrets configured — skipping sync."
             exit 0
           fi
-          printf '%s' "$SNIPPET" | ssh -i ~/.ssh/deploy_key \
+          # Bash quirk: `printf | ssh ... <<HEREDOC` has TWO stdin sources
+          # (pipe + heredoc). The heredoc wins, the SNIPPET is dropped, the
+          # remote `while read` loop iterates zero times and zero secrets
+          # are upserted. Fix: embed SNIPPET into the heredoc itself
+          # (unquoted outer heredoc → local $SNIPPET expands; quoted INNER
+          # heredoc → remote vars stay literal).
+          ssh -i ~/.ssh/deploy_key \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
-            "FILE='${REMOTE_FILE}' bash -s" <<'REMOTE_SCRIPT'
+            "FILE='${REMOTE_FILE}' bash -s" <<REMOTE_SCRIPT
           set -e
-          if [ ! -f "$FILE" ]; then
-            echo "[whatsapp-env] $FILE not found — bailing"; exit 1
+          if [ ! -f "\$FILE" ]; then
+            echo "[whatsapp-env] \$FILE not found — bailing"; exit 1
           fi
           while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            key="${line%%=*}"
-            grep -v "^${key}=" "$FILE" > "${FILE}.tmp"
-            printf '%s\n' "$line" >> "${FILE}.tmp"
-            mv "${FILE}.tmp" "$FILE"
-            echo "[whatsapp-env] upserted ${key} in $FILE"
-          done
+            [ -z "\$line" ] && continue
+            key="\${line%%=*}"
+            grep -v "^\${key}=" "\$FILE" > "\${FILE}.tmp"
+            printf '%s\n' "\$line" >> "\${FILE}.tmp"
+            mv "\${FILE}.tmp" "\$FILE"
+            echo "[whatsapp-env] upserted \${key} in \$FILE"
+          done <<'SNIPPET_EOF'
+          ${SNIPPET}SNIPPET_EOF
           REMOTE_SCRIPT
 
       - name: Deploy to test DO Droplet
@@ -287,21 +299,24 @@ jobs:
             echo "[whatsapp-env] No WhatsApp/Meta secrets configured for stage — skipping sync."
             exit 0
           fi
-          printf '%s' "$SNIPPET" | ssh -i ~/.ssh/deploy_key \
+          # See note on the test sync step — pipe-to-ssh-with-heredoc
+          # drops the SNIPPET silently. Inline it via nested heredoc.
+          ssh -i ~/.ssh/deploy_key \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
-            "FILE='${REMOTE_FILE}' bash -s" <<'REMOTE_SCRIPT'
+            "FILE='${REMOTE_FILE}' bash -s" <<REMOTE_SCRIPT
           set -e
-          if [ ! -f "$FILE" ]; then
-            echo "[whatsapp-env] $FILE not found — bailing"; exit 1
+          if [ ! -f "\$FILE" ]; then
+            echo "[whatsapp-env] \$FILE not found — bailing"; exit 1
           fi
           while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            key="${line%%=*}"
-            grep -v "^${key}=" "$FILE" > "${FILE}.tmp"
-            printf '%s\n' "$line" >> "${FILE}.tmp"
-            mv "${FILE}.tmp" "$FILE"
-            echo "[whatsapp-env] upserted ${key} in $FILE"
-          done
+            [ -z "\$line" ] && continue
+            key="\${line%%=*}"
+            grep -v "^\${key}=" "\$FILE" > "\${FILE}.tmp"
+            printf '%s\n' "\$line" >> "\${FILE}.tmp"
+            mv "\${FILE}.tmp" "\$FILE"
+            echo "[whatsapp-env] upserted \${key} in \$FILE"
+          done <<'SNIPPET_EOF'
+          ${SNIPPET}SNIPPET_EOF
           REMOTE_SCRIPT
 
       - name: Deploy to stage DO Droplet
@@ -447,21 +462,24 @@ jobs:
             echo "[whatsapp-env] No WhatsApp/Meta secrets configured for prod — skipping sync."
             exit 0
           fi
-          printf '%s' "$SNIPPET" | ssh -i ~/.ssh/deploy_key \
+          # See note on the test sync step — pipe-to-ssh-with-heredoc
+          # drops the SNIPPET silently. Inline it via nested heredoc.
+          ssh -i ~/.ssh/deploy_key \
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
-            "FILE='${REMOTE_FILE}' bash -s" <<'REMOTE_SCRIPT'
+            "FILE='${REMOTE_FILE}' bash -s" <<REMOTE_SCRIPT
           set -e
-          if [ ! -f "$FILE" ]; then
-            echo "[whatsapp-env] $FILE not found — bailing"; exit 1
+          if [ ! -f "\$FILE" ]; then
+            echo "[whatsapp-env] \$FILE not found — bailing"; exit 1
           fi
           while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            key="${line%%=*}"
-            grep -v "^${key}=" "$FILE" > "${FILE}.tmp"
-            printf '%s\n' "$line" >> "${FILE}.tmp"
-            mv "${FILE}.tmp" "$FILE"
-            echo "[whatsapp-env] upserted ${key} in $FILE"
-          done
+            [ -z "\$line" ] && continue
+            key="\${line%%=*}"
+            grep -v "^\${key}=" "\$FILE" > "\${FILE}.tmp"
+            printf '%s\n' "\$line" >> "\${FILE}.tmp"
+            mv "\${FILE}.tmp" "\$FILE"
+            echo "[whatsapp-env] upserted \${key} in \$FILE"
+          done <<'SNIPPET_EOF'
+          ${SNIPPET}SNIPPET_EOF
           REMOTE_SCRIPT
 
       - name: Deploy to apex DO Droplet
