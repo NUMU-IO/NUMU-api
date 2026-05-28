@@ -84,39 +84,63 @@ class MessageResult:
     error_code: str | None = None
 
 
-# Predefined templates for Egyptian market
-# These correspond to approved WhatsApp Business templates
+# Predefined templates for the Egyptian market — the canonical mapping
+# between NUMU's MessageType enum and the templates submitted to Meta on
+# the platform-managed WABA. Each entry must match Meta's submitted body
+# (placeholder count + order) and CTA structure exactly; otherwise the
+# /messages POST returns (#132012) Parameter format does not match.
+#
+# Naming convention: templates submitted with URL CTA buttons live under
+# a ``_v2`` suffix because Meta locks deleted names for 30 days after
+# deletion (the dashboard says "Try again in less than 1 minute" but the
+# actual cooldown is much longer). The five button-less templates
+# (payment_received, order_delivered, optout_confirmation/en) were never
+# deleted so they keep their original names.
+#
+# Param positions are 1-indexed in Meta's template body. The list order
+# below determines the {{1}}/{{2}}/{{3}}... ordering — DO NOT reorder
+# without also reordering the Meta-side template.
+#
+# Body parameters are passed as positional values via ``template_params``.
+# URL button parameters (when ``url_button`` is populated) are sourced
+# from the same dict by the named key listed under ``url_button["params"]``.
 EGYPTIAN_TEMPLATES = {
     MessageType.ORDER_CONFIRMATION: {
         "en": MessageTemplate(
             type=MessageType.ORDER_CONFIRMATION,
-            name="order_confirmation_en",
-            language="en",
+            # Meta submission language was en_US per Meta's locale list.
+            name="order_confirmation_v2",
+            language="en_US",
             components=[
+                # Body: Hi {{1}}, your order {{2}} has been received.
+                # Total: {{3}}. Thank you for shopping with us.
                 {
                     "type": "body",
-                    "parameters": [
-                        "customer_name",
-                        "order_number",
-                        "total",
-                        "store_name",
-                    ],
+                    "parameters": ["customer_name", "order_number", "total"],
+                },
+                # URL button: Manage order → https://numueg.app/o/{{1}}
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_id"],
                 },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.ORDER_CONFIRMATION,
-            name="order_confirmation_ar",
+            name="order_confirmation_v2",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": [
-                        "customer_name",
-                        "order_number",
-                        "total",
-                        "store_name",
-                    ],
+                    "parameters": ["customer_name", "order_number", "total"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_id"],
                 },
             ],
         ),
@@ -124,38 +148,46 @@ EGYPTIAN_TEMPLATES = {
     MessageType.ORDER_SHIPPED: {
         "en": MessageTemplate(
             type=MessageType.ORDER_SHIPPED,
-            name="order_shipped_en",
+            name="order_shipped_v2",
             language="en",
             components=[
+                # Body: Your order {{1}} is on the way with {{2}}.
+                # Thanks for your patience!
                 {
                     "type": "body",
-                    "parameters": [
-                        "customer_name",
-                        "order_number",
-                        "tracking_number",
-                        "carrier",
-                    ],
+                    "parameters": ["order_number", "carrier"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_id"],
                 },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.ORDER_SHIPPED,
-            name="order_shipped_ar",
+            name="order_shipped_v2",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": [
-                        "customer_name",
-                        "order_number",
-                        "tracking_number",
-                        "carrier",
-                    ],
+                    "parameters": ["order_number", "carrier"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_id"],
                 },
             ],
         ),
     },
     MessageType.OUT_FOR_DELIVERY: {
+        # No Meta template submitted yet — sends to this type will fail at
+        # the API layer with a template-not-found error until one is
+        # submitted. Kept here so MessageType.OUT_FOR_DELIVERY remains a
+        # valid lookup key for code that already references it.
         "en": MessageTemplate(
             type=MessageType.OUT_FOR_DELIVERY,
             name="out_for_delivery_en",
@@ -176,23 +208,25 @@ EGYPTIAN_TEMPLATES = {
     MessageType.ORDER_DELIVERED: {
         "en": MessageTemplate(
             type=MessageType.ORDER_DELIVERED,
-            name="order_delivered_en",
+            name="order_delivered",
             language="en",
             components=[
+                # Body: Your order {{1}} has been delivered. Thanks for
+                # shopping at {{2}}. We hope you enjoy your purchase!
                 {
                     "type": "body",
-                    "parameters": ["customer_name", "order_number", "store_name"],
+                    "parameters": ["order_number", "store_name"],
                 },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.ORDER_DELIVERED,
-            name="order_delivered_ar",
+            name="order_delivered",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": ["customer_name", "order_number", "store_name"],
+                    "parameters": ["order_number", "store_name"],
                 },
             ],
         ),
@@ -200,23 +234,25 @@ EGYPTIAN_TEMPLATES = {
     MessageType.PAYMENT_RECEIVED: {
         "en": MessageTemplate(
             type=MessageType.PAYMENT_RECEIVED,
-            name="payment_received_en",
+            name="payment_received",
             language="en",
             components=[
+                # Body: Payment received for order {{1}}. Amount: {{2}}.
+                # Thank you!
                 {
                     "type": "body",
-                    "parameters": ["customer_name", "amount", "order_number"],
+                    "parameters": ["order_number", "amount"],
                 },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.PAYMENT_RECEIVED,
-            name="payment_received_ar",
+            name="payment_received",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": ["customer_name", "amount", "order_number"],
+                    "parameters": ["order_number", "amount"],
                 },
             ],
         ),
@@ -224,31 +260,38 @@ EGYPTIAN_TEMPLATES = {
     MessageType.ABANDONED_CART: {
         "en": MessageTemplate(
             type=MessageType.ABANDONED_CART,
-            name="abandoned_cart_en",
+            name="abandoned_cart_v2",
             language="en",
             components=[
+                # Body: Hi {{1}}, you left items in your cart at {{2}}.
+                # Don't miss out — they may sell out soon!
                 {
                     "type": "body",
-                    "parameters": [
-                        "customer_name",
-                        "cart_value",
-                        "store_name",
-                    ],
+                    "parameters": ["customer_name", "store_name"],
+                },
+                # URL button: Complete purchase → https://numueg.app/cart/{{1}}
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["cart_token"],
                 },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.ABANDONED_CART,
-            name="abandoned_cart_ar",
+            name="abandoned_cart_v2",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": [
-                        "customer_name",
-                        "cart_value",
-                        "store_name",
-                    ],
+                    "parameters": ["customer_name", "store_name"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["cart_token"],
                 },
             ],
         ),

@@ -83,6 +83,35 @@ def _is_track_beacon(path: str) -> bool:
     return path.startswith("/api/v1/storefront/store/") and path.endswith("/track")
 
 
+def _is_whatsapp_byo_connect(path: str) -> bool:
+    """backend-030 / TASK-SEC-003 — BYO connect hits Meta with 3 reads
+    per attempt. A merchant (or attacker with a leaked admin token)
+    submitting in a loop would burn through NUMU's per-app rate budget
+    at Meta and degrade reputation for every other tenant. 30/IP/min
+    is generous for legitimate "fix my typo + retry" flow but stops
+    sustained spam.
+
+    Per-store (5/store/10min) was specced; needs a per-resource bucket
+    that the current sliding-minute window can't express cleanly. The
+    per-IP guard catches ~80% of the abuse vector; per-store is a
+    polish follow-up.
+    """
+    return path.startswith("/api/v1/stores/") and path.endswith("/whatsapp/byo/connect")
+
+
+def _is_whatsapp_dlq_replay(path: str) -> bool:
+    """backend-030 / TASK-SEC-004 — DLQ replay enqueues a real send.
+    Without a rate limit, a compromised admin token could trigger a
+    burst of sends. 20/IP/min keeps replay viable for "bulk re-process
+    after fixing the underlying issue" flows while preventing abuse.
+    """
+    return (
+        path.startswith("/api/v1/stores/")
+        and "/whatsapp/dead-letters/" in path
+        and path.endswith("/replay")
+    )
+
+
 # ------------------------------------------------------------------ #
 # Redis sliding-window check
 # ------------------------------------------------------------------ #
@@ -249,6 +278,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif _is_track_beacon(path):
             tier = "tracking"
             limit = 600  # ~10/sec per IP — analytics beacons are noisy
+        elif _is_whatsapp_byo_connect(path):
+            # backend-030 / TASK-SEC-003 — each BYO connect attempt hits
+            # Meta with 3 read calls; a burst would chew through NUMU's
+            # per-app rate budget. 30/IP/min permits legitimate retry
+            # after a credential typo.
+            tier = "whatsapp_byo_connect"
+            limit = 30
+        elif _is_whatsapp_dlq_replay(path):
+            # backend-030 / TASK-SEC-004 — replay enqueues a real send.
+            # 20/IP/min keeps bulk-replay-after-fix flows viable while
+            # capping abuse from a leaked admin token.
+            tier = "whatsapp_dlq_replay"
+            limit = 20
         else:
             tier = "general"
             has_auth = "authorization" in request.headers
@@ -270,7 +312,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if (
             tier in ("general", "tracking")
             and settings.load_test_bypass_token
-            and request.headers.get("x-load-test-token") == settings.load_test_bypass_token
+            and request.headers.get("x-load-test-token")
+            == settings.load_test_bypass_token
         ):
             logger.info(
                 "rate_limit_bypassed",

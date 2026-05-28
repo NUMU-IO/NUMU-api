@@ -5,6 +5,8 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+import httpx
+
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -23,30 +25,159 @@ def _run_async(coro):
 @celery_app.task(
     name="tasks.execute_whatsapp_campaign",
     bind=True,
-    max_retries=1,
-    default_retry_delay=60,
+    # backend-030 / US6 / FR-031 — exponential backoff. autoretry_for
+    # wires transient HTTP / network errors directly into the retry
+    # policy; non-retriable (NonRetriableWhatsAppError) is NOT in the
+    # autoretry tuple so it short-circuits to the DLQ writeback path
+    # (FR-032).
+    autoretry_for=(httpx.HTTPError, ConnectionError, TimeoutError),
+    retry_backoff=True,  # exponential: 1, 2, 4, 8, 16... seconds
+    retry_backoff_max=600,  # cap each retry delay at 10 min
+    retry_jitter=True,  # ±50% jitter to avoid thundering herd
+    max_retries=5,  # 5 retries span up to ~25 minutes total
     soft_time_limit=3600,  # 1 hour max
 )
 def execute_campaign_task(self, campaign_id: str, store_id: str) -> dict:
     """Execute a WhatsApp campaign — send template message to all recipients.
 
-    Rate-limited to avoid hitting WhatsApp API limits.
+    Retry/DLQ behavior (FR-031..FR-033 / US6):
+    - Transient httpx errors and HTTP 429/5xx → autoretry with
+      exponential backoff (up to ~25 min over 5 attempts).
+    - ``NonRetriableWhatsAppError`` → short-circuit to DLQ writeback,
+      no retries.
+    - Retries exhausted → final attempt writes a DLQ row before raising.
     """
+    import httpx
+
+    from src.core.services.whatsapp_error_classification import (
+        NonRetriableWhatsAppError,
+    )
+
     try:
         return _run_async(_execute(campaign_id, store_id))
+    except NonRetriableWhatsAppError as exc:
+        # Non-retriable — straight to DLQ, no retries.
+        logger.warning(
+            "campaign_non_retriable_error",
+            campaign_id=campaign_id,
+            classification=exc.classification,
+            code=exc.code,
+        )
+        try:
+            _run_async(_mark_failed(campaign_id))
+            _run_async(
+                _write_dlq_for_campaign(
+                    campaign_id, store_id, exc, classification=exc.classification
+                )
+            )
+        except Exception:
+            logger.exception("campaign_dlq_writeback_failed")
+        raise  # surfaces to Celery as a final failure; no retry
+    except (httpx.HTTPError, ConnectionError, TimeoutError) as exc:
+        # Retriable: Celery's retry machinery decides whether to retry
+        # again or move to the exhausted path.
+        if self.request.retries >= self.max_retries:
+            logger.error(
+                "campaign_retries_exhausted",
+                campaign_id=campaign_id,
+                retries=self.request.retries,
+                error=str(exc),
+            )
+            try:
+                _run_async(_mark_failed(campaign_id))
+                _run_async(
+                    _write_dlq_for_campaign(
+                        campaign_id,
+                        store_id,
+                        exc,
+                        classification="retriable_exhausted",
+                    )
+                )
+            except Exception:
+                logger.exception("campaign_dlq_writeback_failed")
+            raise
+        # Let Celery's autoretry_for handle the actual retry scheduling.
+        raise
     except Exception as exc:
+        # Unknown error class — treat as retriable but log loudly.
         logger.error(
-            "Campaign execution failed: campaign=%s error=%s",
-            campaign_id,
-            exc,
+            "campaign_unknown_error",
+            campaign_id=campaign_id,
+            error=str(exc),
             exc_info=True,
         )
-        # Mark campaign as failed
         try:
             _run_async(_mark_failed(campaign_id))
         except Exception:
             pass
         raise self.retry(exc=exc)
+
+
+async def _write_dlq_for_campaign(
+    campaign_id: str,
+    store_id: str,
+    exc: Exception,
+    *,
+    classification: str,
+) -> None:
+    """Write a single dead-letter row representing a failed campaign
+    execution. Per-recipient DLQ rows would explode the table; one
+    aggregate row keyed on the campaign keeps the audit tractable.
+    """
+    from uuid import UUID
+
+    import httpx
+    from sqlalchemy import select
+
+    from src.application.use_cases.whatsapp.write_dead_letter import (
+        build_error_history_entry,
+        write_dead_letter,
+    )
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.whatsapp_campaign import (
+        WhatsAppCampaignModel,
+    )
+    from src.infrastructure.tenancy.rls import RLSBypassContext
+
+    # Resolve tenant_id from the campaign row. Cross-tenant lookup needs
+    # the bypass; the actual DLQ insert opens its own session under RLS.
+    async with AsyncSessionLocal() as session:
+        async with RLSBypassContext(session):
+            row = (
+                await session.execute(
+                    select(WhatsAppCampaignModel).where(
+                        WhatsAppCampaignModel.id == UUID(campaign_id)
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            tenant_id = row.tenant_id
+
+    http_status = None
+    meta_code = None
+    if isinstance(exc, httpx.HTTPStatusError):
+        http_status = exc.response.status_code
+    if hasattr(exc, "code"):
+        meta_code = getattr(exc, "code", None)
+
+    await write_dead_letter(
+        tenant_id=tenant_id,
+        store_id=UUID(store_id),
+        phone="+0",  # campaign-level DLQ: not a single phone
+        originating_context="campaign",
+        originating_context_id=UUID(campaign_id),
+        error_classification=classification,
+        error_history=[
+            build_error_history_entry(
+                attempt_n=1,
+                http_status=http_status,
+                meta_error_code=meta_code,
+                error_message=str(exc),
+            )
+        ],
+        final_error_code=meta_code,
+    )
 
 
 async def _execute(campaign_id: str, store_id: str) -> dict:

@@ -9,6 +9,8 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 
+import httpx
+
 from src.config import settings
 from src.infrastructure.messaging.celery_app import celery_app
 
@@ -160,8 +162,15 @@ def _queue_abandoned_cart_notification(
 @celery_app.task(
     name="tasks.send_abandoned_cart_notification",
     bind=True,
-    max_retries=3,
-    default_retry_delay=60,
+    # backend-030 / US6 / FR-031 — exponential backoff over up to 5
+    # attempts. Non-retriable errors raised from the body skip the
+    # autoretry path (FR-032). DLQ writeback is wired into the task
+    # body's final-failure branch.
+    autoretry_for=(httpx.HTTPError, ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
+    max_retries=5,
 )
 def send_abandoned_cart_notification_task(
     self,

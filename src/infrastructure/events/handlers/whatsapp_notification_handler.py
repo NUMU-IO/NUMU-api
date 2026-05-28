@@ -280,7 +280,10 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             session,
             store_id=event.store_id,
             customer_id=event.customer_id,
-            template_name="order_confirmation",
+            # Must match the DB seed name exactly — that row carries the
+            # `status` field the send-guard reads (APPROVED → allow send).
+            # See _SYSTEM_TEMPLATES in the alembic migration.
+            template_name="order_confirmation_v2",
             idempotency_event_tag="order_created",
             order_id=event.order_id,
             notification_pref_key="order_confirmation",
@@ -309,16 +312,16 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             name=extras["customer_name"],
             language=extras["language"],
         )
-        # Tracking URL is built later (US3 wiring will pass it through);
-        # for now use the store's storefront origin if available.
-        tracking_url = None  # Order-tracking URL wiring: future task
-
+        # order_confirmation_v2 renders a "Manage order" URL button at
+        # https://numueg.app/o/{order_id}. We pass event.order_id as the
+        # button substitution; the apex domain's redirector resolves the
+        # path to the tenant store's order-tracking page.
         result = await service.send_order_confirmation(
             recipient,
             event.order_number,
             f"{event.total:.2f} {event.currency}",
             extras["store_name"],
-            tracking_url=tracking_url,
+            order_id=str(event.order_id),
         )
 
         logger.info(

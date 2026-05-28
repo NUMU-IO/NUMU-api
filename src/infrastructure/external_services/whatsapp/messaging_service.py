@@ -144,31 +144,79 @@ class WhatsAppMessagingService(IMessagingService):
         template_name: str,
         language: str,
         parameters: dict[str, Any],
+        template_components: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build WhatsApp template message payload.
 
         Args:
             template_name: Name of approved template
-            language: Language code (en, ar)
-            parameters: Template parameter values
+            language: Language code (en, ar, en_US, …)
+            parameters: Template parameter values, keyed by the named
+                placeholders declared in ``EGYPTIAN_TEMPLATES`` (e.g.
+                ``customer_name``, ``order_number``, ``order_id``).
+            template_components: When supplied, the template's
+                ``components`` list from ``EGYPTIAN_TEMPLATES``. Each
+                entry's ``parameters`` is a list of named keys; we
+                resolve those keys against ``parameters`` to build the
+                positional Meta payload. When None we fall back to the
+                legacy single-body shape (every value in ``parameters``
+                concatenated into one body component) for back-compat
+                with callers that haven't been migrated yet.
 
         Returns:
             Template message component dict
         """
-        # Convert parameters dict to ordered list for body component
-        body_params = [
-            {"type": "text", "text": str(value)} for value in parameters.values()
-        ]
+        if template_components is None:
+            # Legacy single-body shape. Insertion-ordered dict in Py3.7+
+            # gives a deterministic positional list.
+            body_params = [
+                {"type": "text", "text": str(value)} for value in parameters.values()
+            ]
+            return {
+                "name": template_name,
+                "language": {"code": language},
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": body_params,
+                    }
+                ],
+            }
+
+        # Component-aware shape — resolves each component's named
+        # parameter list against the ``parameters`` dict. Skips
+        # components whose parameter lookups all miss so we don't ship
+        # an empty button block to Meta.
+        components: list[dict[str, Any]] = []
+        for comp in template_components:
+            ctype = comp.get("type")
+            keys = comp.get("parameters") or []
+            resolved = [
+                {"type": "text", "text": str(parameters[k])}
+                for k in keys
+                if k in parameters
+            ]
+            if not resolved and ctype != "body":
+                # Body must always be present (Meta requires it); buttons
+                # are optional — silently drop a button with no params.
+                continue
+            if ctype == "button":
+                components.append({
+                    "type": "button",
+                    "sub_type": comp.get("sub_type", "url"),
+                    "index": str(comp.get("index", "0")),
+                    "parameters": resolved,
+                })
+            else:
+                components.append({
+                    "type": ctype or "body",
+                    "parameters": resolved,
+                })
 
         return {
             "name": template_name,
             "language": {"code": language},
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": body_params,
-                }
-            ],
+            "components": components,
         }
 
     async def send_message(
@@ -213,12 +261,15 @@ class WhatsAppMessagingService(IMessagingService):
                 error_message=f"No template found for {content.type}",
             )
 
-        # Build message payload
+        # Build message payload — pass the template's component layout so
+        # the builder can emit body + URL-button components keyed by the
+        # named placeholders the template declares.
         phone = self._format_phone_number(content.recipient.phone)
         template_message = self._build_template_message(
             template.name,
             template.language,
             content.template_params,
+            template_components=template.components,
         )
 
         payload = {
@@ -326,13 +377,16 @@ class WhatsAppMessagingService(IMessagingService):
         store_name: str,
         tracking_url: str | None = None,
         invoice_url: str | None = None,
+        order_id: str | None = None,
     ) -> MessageResult:
         """Send order confirmation message.
 
-        The WhatsApp template receives ``tracking_url`` as an additional
-        parameter. If the template is configured to use it (via a URL
-        button or body variable), it'll surface as a tap-to-open tracking
-        link — reflecting live status changes from the merchant dashboard.
+        The order_confirmation_v2 Meta template carries a "Manage order"
+        URL CTA button: ``https://numueg.app/o/{{1}}``. The ``order_id``
+        kwarg becomes the {{1}} substitution and routes the customer to
+        the universal order page on the apex domain. When ``order_id``
+        is omitted we fall back to ``order_number`` so callers haven't
+        yet migrated still produce a working link.
 
         When ``invoice_url`` is provided (backend-030 / FR-004), a
         follow-up document message is dispatched after the template send
@@ -344,16 +398,22 @@ class WhatsAppMessagingService(IMessagingService):
 
         Args:
             recipient: Customer contact info
-            order_number: Order reference number
+            order_number: Order reference number (body display)
             total: Formatted total (e.g., "EGP 250.00")
-            store_name: Store name
-            tracking_url: Persistent order-tracking URL, e.g.
-                ``https://<subdomain>.numueg.app/track/<order_id>``.
+            store_name: Store name (logged; not used in v2 body)
+            tracking_url: Persistent order-tracking URL — accepted for
+                back-compat with callers that built it from the old
+                inline-link template shape; not used by v2.
             invoice_url: Optional public URL of the order's invoice PDF.
+            order_id: UUID-or-id used as the button URL substitution.
 
         Returns:
             MessageResult — reflects the template (primary) send only.
         """
+        # store_name and tracking_url accepted for back-compat with
+        # callers that haven't migrated yet — v2 template doesn't use
+        # them. Avoid F841 by acknowledging the parameters.
+        _ = (store_name, tracking_url)
         content = MessageContent(
             type=MessageType.ORDER_CONFIRMATION,
             recipient=recipient,
@@ -361,8 +421,7 @@ class WhatsAppMessagingService(IMessagingService):
                 "customer_name": recipient.name or "Customer",
                 "order_number": order_number,
                 "total": total,
-                "store_name": store_name,
-                "tracking_url": tracking_url or "",
+                "order_id": str(order_id or order_number),
             },
         )
         result = await self.send_message(content)
@@ -399,31 +458,34 @@ class WhatsAppMessagingService(IMessagingService):
         order_number: str,
         tracking_number: str,
         carrier: str = "Bosta",
+        order_id: str | None = None,
     ) -> MessageResult:
         """Send shipping notification with tracking.
 
-        Example message (Arabic):
-        "مرحباً {name}! تم شحن طلبك #{order_number}.
-        رقم التتبع: {tracking_number}
-        شركة الشحن: {carrier}"
+        order_shipped_v2 body uses ``order_number`` + ``carrier``; the
+        tracking_number lives off-template (passed for back-compat /
+        logging only — the customer tracks via the button URL pointing
+        at ``numueg.app/o/{order_id}`` which the merchant's order page
+        deep-links to the carrier).
 
         Args:
             recipient: Customer contact info
-            order_number: Order reference number
-            tracking_number: Carrier tracking number
-            carrier: Shipping carrier name
+            order_number: Order reference number (body)
+            tracking_number: Carrier tracking number (logged only)
+            carrier: Shipping carrier name (body)
+            order_id: ID used as the button URL substitution.
 
         Returns:
             MessageResult
         """
+        _ = tracking_number  # back-compat param — not in v2 body
         content = MessageContent(
             type=MessageType.ORDER_SHIPPED,
             recipient=recipient,
             template_params={
-                "customer_name": recipient.name or "Customer",
                 "order_number": order_number,
-                "tracking_number": tracking_number,
                 "carrier": carrier,
+                "order_id": str(order_id or order_number),
             },
         )
         return await self.send_message(content)

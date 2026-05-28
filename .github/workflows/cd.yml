@@ -105,6 +105,55 @@ jobs:
           ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "test -f /opt/numu/.env.test || { echo 'ERROR: /opt/numu/.env.test not found'; exit 1; }"
 
+      # backend-030 / MVP wiring — idempotently upsert WhatsApp + Meta
+      # secrets into /opt/numu/.env.test from per-env GitHub secrets.
+      # Skips any key whose secret is empty so a half-configured env
+      # doesn't blank an existing manual entry. Repeated runs converge.
+      - name: Sync WhatsApp/Meta env vars to test droplet
+        env:
+          REMOTE_FILE: /opt/numu/.env.test
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.TEST_WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.TEST_WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.TEST_WHATSAPP_BUSINESS_ACCOUNT_ID }}
+          WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${{ secrets.TEST_WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
+          WHATSAPP_APP_SECRET: ${{ secrets.TEST_WHATSAPP_APP_SECRET }}
+          WHATSAPP_ENABLED: ${{ secrets.TEST_WHATSAPP_ENABLED }}
+          META_APP_ID: ${{ secrets.TEST_META_APP_ID }}
+          WHATSAPP_BUSINESS_API_VERSION: v21.0
+        run: |
+          SNIPPET=""
+          for KEY in WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID \
+                     WHATSAPP_BUSINESS_ACCOUNT_ID WHATSAPP_WEBHOOK_VERIFY_TOKEN \
+                     WHATSAPP_APP_SECRET WHATSAPP_ENABLED META_APP_ID \
+                     WHATSAPP_BUSINESS_API_VERSION; do
+            VAL="${!KEY}"
+            if [ -n "$VAL" ]; then
+              SNIPPET+="${KEY}=${VAL}"$'\n'
+            else
+              echo "[whatsapp-env] $KEY: no secret set; leaving .env.test untouched for this key"
+            fi
+          done
+          if [ -z "$SNIPPET" ]; then
+            echo "[whatsapp-env] No WhatsApp/Meta secrets configured — skipping sync."
+            exit 0
+          fi
+          printf '%s' "$SNIPPET" | ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "FILE='${REMOTE_FILE}' bash -s" <<'REMOTE_SCRIPT'
+          set -e
+          if [ ! -f "$FILE" ]; then
+            echo "[whatsapp-env] $FILE not found — bailing"; exit 1
+          fi
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            key="${line%%=*}"
+            grep -v "^${key}=" "$FILE" > "${FILE}.tmp"
+            printf '%s\n' "$line" >> "${FILE}.tmp"
+            mv "${FILE}.tmp" "$FILE"
+            echo "[whatsapp-env] upserted ${key} in $FILE"
+          done
+          REMOTE_SCRIPT
+
       - name: Deploy to test DO Droplet
         env:
           NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
@@ -207,6 +256,53 @@ jobs:
             ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }}:/opt/numu/docker/postgres/init-wal-archiving.sh
           ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "test -f /opt/numu/.env.stage || { echo 'ERROR: /opt/numu/.env.stage not found'; exit 1; }"
+
+      # backend-030 / MVP wiring — same upsert pattern as the test job,
+      # reading from STAGE_* secrets and writing to /opt/numu/.env.stage.
+      - name: Sync WhatsApp/Meta env vars to stage droplet
+        env:
+          REMOTE_FILE: /opt/numu/.env.stage
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.STAGE_WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.STAGE_WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.STAGE_WHATSAPP_BUSINESS_ACCOUNT_ID }}
+          WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${{ secrets.STAGE_WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
+          WHATSAPP_APP_SECRET: ${{ secrets.STAGE_WHATSAPP_APP_SECRET }}
+          WHATSAPP_ENABLED: ${{ secrets.STAGE_WHATSAPP_ENABLED }}
+          META_APP_ID: ${{ secrets.STAGE_META_APP_ID }}
+          WHATSAPP_BUSINESS_API_VERSION: v21.0
+        run: |
+          SNIPPET=""
+          for KEY in WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID \
+                     WHATSAPP_BUSINESS_ACCOUNT_ID WHATSAPP_WEBHOOK_VERIFY_TOKEN \
+                     WHATSAPP_APP_SECRET WHATSAPP_ENABLED META_APP_ID \
+                     WHATSAPP_BUSINESS_API_VERSION; do
+            VAL="${!KEY}"
+            if [ -n "$VAL" ]; then
+              SNIPPET+="${KEY}=${VAL}"$'\n'
+            else
+              echo "[whatsapp-env] $KEY: no secret set; leaving .env.stage untouched for this key"
+            fi
+          done
+          if [ -z "$SNIPPET" ]; then
+            echo "[whatsapp-env] No WhatsApp/Meta secrets configured for stage — skipping sync."
+            exit 0
+          fi
+          printf '%s' "$SNIPPET" | ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "FILE='${REMOTE_FILE}' bash -s" <<'REMOTE_SCRIPT'
+          set -e
+          if [ ! -f "$FILE" ]; then
+            echo "[whatsapp-env] $FILE not found — bailing"; exit 1
+          fi
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            key="${line%%=*}"
+            grep -v "^${key}=" "$FILE" > "${FILE}.tmp"
+            printf '%s\n' "$line" >> "${FILE}.tmp"
+            mv "${FILE}.tmp" "$FILE"
+            echo "[whatsapp-env] upserted ${key} in $FILE"
+          done
+          REMOTE_SCRIPT
 
       - name: Deploy to stage DO Droplet
         env:
@@ -316,6 +412,57 @@ jobs:
           # Ensure .env.staging exists (created once on server, never overwritten by deploys)
           ssh -i ~/.ssh/deploy_key ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
             "test -f /opt/numu/.env.staging || { echo 'ERROR: /opt/numu/.env.staging not found — create it from .env.staging.example'; exit 1; }"
+
+      # backend-030 / MVP wiring — upsert WhatsApp + Meta secrets into
+      # /opt/numu/.env.staging (the production env file) from STAGING_*
+      # GitHub secrets. Same idempotent upsert pattern as test/stage.
+      # Per project memory `feedback_cd_environment_scoping`, the production
+      # env uses STAGING_* secret prefix (not STAGE_*, which would resolve
+      # empty and silently skip everything).
+      - name: Sync WhatsApp/Meta env vars to apex (prod) droplet
+        env:
+          REMOTE_FILE: /opt/numu/.env.staging
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.STAGING_WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.STAGING_WHATSAPP_BUSINESS_ACCOUNT_ID }}
+          WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${{ secrets.STAGING_WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
+          WHATSAPP_APP_SECRET: ${{ secrets.STAGING_WHATSAPP_APP_SECRET }}
+          WHATSAPP_ENABLED: ${{ secrets.STAGING_WHATSAPP_ENABLED }}
+          META_APP_ID: ${{ secrets.STAGING_META_APP_ID }}
+          WHATSAPP_BUSINESS_API_VERSION: v21.0
+        run: |
+          SNIPPET=""
+          for KEY in WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID \
+                     WHATSAPP_BUSINESS_ACCOUNT_ID WHATSAPP_WEBHOOK_VERIFY_TOKEN \
+                     WHATSAPP_APP_SECRET WHATSAPP_ENABLED META_APP_ID \
+                     WHATSAPP_BUSINESS_API_VERSION; do
+            VAL="${!KEY}"
+            if [ -n "$VAL" ]; then
+              SNIPPET+="${KEY}=${VAL}"$'\n'
+            else
+              echo "[whatsapp-env] $KEY: no secret set; leaving .env.staging untouched for this key"
+            fi
+          done
+          if [ -z "$SNIPPET" ]; then
+            echo "[whatsapp-env] No WhatsApp/Meta secrets configured for prod — skipping sync."
+            exit 0
+          fi
+          printf '%s' "$SNIPPET" | ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "FILE='${REMOTE_FILE}' bash -s" <<'REMOTE_SCRIPT'
+          set -e
+          if [ ! -f "$FILE" ]; then
+            echo "[whatsapp-env] $FILE not found — bailing"; exit 1
+          fi
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            key="${line%%=*}"
+            grep -v "^${key}=" "$FILE" > "${FILE}.tmp"
+            printf '%s\n' "$line" >> "${FILE}.tmp"
+            mv "${FILE}.tmp" "$FILE"
+            echo "[whatsapp-env] upserted ${key} in $FILE"
+          done
+          REMOTE_SCRIPT
 
       - name: Deploy to apex DO Droplet
         # Using unquoted heredoc so $NUMU_API_IMAGE / $GHCR_TOKEN expand from

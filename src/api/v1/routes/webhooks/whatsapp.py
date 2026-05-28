@@ -143,7 +143,7 @@ async def whatsapp_callback(
 
             for change in changes:
                 field = change.get("field")
-                _value = change.get("value", {})
+                value = change.get("value", {})
 
                 if field == "messages":
                     # Delegate to the service which now persists via repo
@@ -156,9 +156,59 @@ async def whatsapp_callback(
                     await _upsert_conversations_from_webhook(
                         db, change.get("value", {})
                     )
+                elif field == "message_template_status_update":
+                    # backend-030 / US5 / FR-028 — template approval
+                    # status updates from Meta. Routed here by the
+                    # top-level field discriminator; idempotent per
+                    # TASK-SEC-008 (duplicate payloads = no-op).
+                    from src.infrastructure.external_services.meta.whatsapp_template_status_webhook import (
+                        handle_template_status_update,
+                    )
+
+                    await handle_template_status_update(
+                        db, waba_id=str(_account_id), value=value
+                    )
+                else:
+                    # Unknown field — log + 200 so we don't trigger Meta
+                    # retry storms on subscription fields we haven't
+                    # onboarded yet (CommunityRule, message_template_quality_update, etc.).
+                    logger.warning(
+                        "whatsapp_webhook_unhandled_field",
+                        extra={"field": field, "waba_id": str(_account_id)},
+                    )
+
+        # Commit any DB mutations made by the field handlers (template
+        # status updates, conversation upserts). The message-log persist
+        # path commits its own session inside the service; this commit is
+        # specifically for the template-status webhook handler's flushes.
+        #
+        # If the commit fails we MUST surface 5xx so Meta retries the
+        # delivery — the previous behaviour (bare except + 200) silently
+        # lost template approval status updates (sentry HIGH-1). We roll
+        # back the session before re-raising so subsequent requests on a
+        # pooled connection don't inherit a poisoned transaction.
+        try:
+            await db.commit()
+        except Exception as commit_err:
+            logger.error(
+                "whatsapp_webhook_commit_failed",
+                exc_info=commit_err,
+            )
+            try:
+                await db.rollback()
+            except Exception:
+                logger.exception("whatsapp_webhook_rollback_failed")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Webhook persistence failed",
+            ) from commit_err
 
         return {"status": "received"}
 
+    except HTTPException:
+        # Re-raise FastAPI HTTPExceptions verbatim — the 503 above must
+        # reach Meta as a 5xx so its retry queue picks it up.
+        raise
     except Exception as e:
         logger.error(f"WhatsApp webhook processing error: {e}", exc_info=True)
         # Return 200 to acknowledge receipt even on processing error

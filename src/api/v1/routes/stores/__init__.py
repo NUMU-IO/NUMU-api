@@ -87,6 +87,9 @@ from src.api.v1.routes.stores import webhooks as webhooks_module
 from src.api.v1.routes.stores import whatsapp as whatsapp_module
 from src.api.v1.routes.stores import whatsapp_campaigns as whatsapp_campaigns_module
 from src.api.v1.routes.stores import whatsapp_chat as whatsapp_chat_module
+from src.api.v1.routes.stores import (
+    whatsapp_dead_letters as whatsapp_dead_letters_module,
+)
 from src.api.v1.routes.stores import whatsapp_opt_ins as whatsapp_opt_ins_module
 from src.api.v1.routes.stores import (
     whatsapp_scheduled_sends as whatsapp_scheduled_sends_module,
@@ -186,6 +189,10 @@ router.include_router(whatsapp_opt_ins_module.router, tags=["Store WhatsApp Opt-
 router.include_router(
     whatsapp_scheduled_sends_module.router,
     tags=["Store WhatsApp Scheduled Sends"],
+)
+router.include_router(
+    whatsapp_dead_letters_module.router,
+    tags=["Store WhatsApp Dead-Letters"],
 )
 
 __all__ = ["router"]

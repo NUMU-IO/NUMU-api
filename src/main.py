@@ -28,6 +28,7 @@ from src.api.middleware import (
 )
 from src.api.short_link_redirect import router as short_link_redirect_router
 from src.api.v1.routes import api_router
+from src.api.v1.routes.order_redirect import router as order_redirect_router
 from src.config import settings
 from src.config.logging_config import configure_logging, get_logger
 from src.infrastructure.database import AsyncSessionLocal, engine
@@ -143,6 +144,39 @@ async def lifespan(app: FastAPI):
         environment=settings.environment,
         debug=settings.debug,
     )
+
+    # backend-030 / US5 / T093 — subscribe the platform Meta app to the
+    # ``message_template_status_update`` webhook field on NUMU's platform
+    # WABA so template approval-status updates push in near-real-time
+    # (FR-028 / research R1). Idempotent at Meta's end. Best-effort —
+    # failures here don't block app boot; the polling sync (T091)
+    # provides the fallback path.
+    try:
+        from src.infrastructure.external_services.meta.whatsapp_client import (
+            WhatsAppClient,
+        )
+
+        if (
+            settings.whatsapp_enabled
+            and settings.whatsapp_access_token
+            and settings.whatsapp_business_account_id
+            and settings.meta_app_id
+        ):
+            client = WhatsAppClient(
+                phone_number_id=settings.whatsapp_phone_number_id or "",
+                access_token=settings.whatsapp_access_token,
+                waba_id=settings.whatsapp_business_account_id,
+            )
+            try:
+                await client.subscribe_app_to_waba(settings.meta_app_id)
+                logger.info(
+                    "whatsapp_platform_app_subscribed_to_waba",
+                    waba_id=settings.whatsapp_business_account_id,
+                )
+            finally:
+                await client.close()
+    except Exception:
+        logger.warning("whatsapp_platform_app_subscribe_failed", exc_info=True)
 
     yield
 
@@ -321,6 +355,10 @@ def create_app() -> FastAPI:
     # Short-link redirector — mounted at app root (no /api/v1 prefix)
     # so the public URL stays clean: numueg.app/r/{short_code}.
     app.include_router(short_link_redirect_router)
+    # Order-link redirector — mounted at app root for the same reason:
+    # WhatsApp template CTA buttons point at numueg.app/o/{order_id}
+    # and resolve to the tenant store's /track/<id> page (backend-030).
+    app.include_router(order_redirect_router)
 
     # Serve local uploads in development (when R2 is not configured)
     if settings.debug and not settings.r2_account_id:
