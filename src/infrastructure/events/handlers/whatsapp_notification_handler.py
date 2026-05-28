@@ -141,7 +141,6 @@ async def _resolve_send_context(
 
     customer_phone = cust_row.phone
     customer_name = f"{cust_row.first_name} {cust_row.last_name}".strip()
-    language = "ar"  # Default per existing handler convention
     notification_prefs = cust_row.notification_prefs or {}
     whatsapp_prefs = notification_prefs.get("whatsapp", {}) or {}
     customer_pref_enabled = bool(whatsapp_prefs.get(notification_pref_key, True))
@@ -161,6 +160,21 @@ async def _resolve_send_context(
         )
         return None
     store_name = store_row.name
+    # Language used to drive (1) the DB template-row lookup below and
+    # (2) the Meta /messages language code at send time. The seeded
+    # system templates cover {ar, en_US}, so we map the store's
+    # default_language to whichever locale exists in the seed —
+    # English fans out to en_US (Meta's canonical en locale for our
+    # WABA), everything else stays as-is and falls back to ar if the
+    # store didn't pick a value. Sentry HIGH-4: previously hardcoded
+    # to "ar", so English-default stores never matched the en_US
+    # template row, send-guard saw template_status=None and skipped
+    # every order_confirmation send to English-speaking customers.
+    raw_lang = (store_row.default_language or "ar").lower()
+    if raw_lang.startswith("en"):
+        language = "en_US"
+    else:
+        language = "ar"
     store_settings = store_row.settings or {}
     store_whatsapp_notifications = (
         store_settings.get("whatsapp_notifications", {}) or {}
