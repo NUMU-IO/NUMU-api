@@ -602,6 +602,7 @@ async def track_analytics_event(
 async def _enrich_user_data_with_customer(
     user_data: dict,
     customer_id: UUID | str,
+    store_id: UUID | str,
     session,
 ) -> None:
     """Inject email / phone / name / city / zip from the customer record.
@@ -616,8 +617,28 @@ async def _enrich_user_data_with_customer(
     In-place mutation; explicit fields from the storefront body are
     not overwritten. Falls open on every failure — CAPI must never
     block /track.
+
+    Sentry CRITICAL — tenant scoping:
+        The /track endpoint is unauthenticated. Without a store_id
+        filter on the customer lookup, an attacker could forge any
+        store's customer_id and have the server fan their PII into
+        the attacker's Meta pixel. Both lookups (customer + address)
+        scope to ``store_id`` so a cross-store id silently 0-rows
+        and the function returns with no enrichment.
+
+    Sentry MEDIUM — query shape:
+        CustomerModel + CustomerAddressModel both have
+        ``lazy="selectin"`` relationships (store, orders, invoices,
+        addresses on Customer; customer on Address). Plain
+        ``select(Model)`` triggers all of those on every /track,
+        producing 4+ extra SELECTs per logged-in event. We use
+        ``load_only`` to fetch just the column subset we read and
+        ``raiseload("*")`` to make any accidental relationship
+        access fail loudly instead of silently re-introducing the
+        N+1.
     """
     from sqlalchemy import select
+    from sqlalchemy.orm import load_only, raiseload
 
     from src.infrastructure.database.models.tenant.address import (
         CustomerAddressModel,
@@ -632,9 +653,29 @@ async def _enrich_user_data_with_customer(
         return
 
     try:
+        store_uuid = store_id if isinstance(store_id, UUID) else UUID(str(store_id))
+    except (ValueError, TypeError):
+        return
+
+    try:
         customer = (
             await session.execute(
-                select(CustomerModel).where(CustomerModel.id == cust_uuid)
+                select(CustomerModel)
+                .where(
+                    CustomerModel.id == cust_uuid,
+                    CustomerModel.store_id == store_uuid,
+                )
+                .options(
+                    load_only(
+                        CustomerModel.id,
+                        CustomerModel.email,
+                        CustomerModel.phone,
+                        CustomerModel.first_name,
+                        CustomerModel.last_name,
+                        CustomerModel.default_address_id,
+                    ),
+                    raiseload("*"),
+                )
             )
         ).scalar_one_or_none()
     except Exception:
@@ -659,7 +700,20 @@ async def _enrich_user_data_with_customer(
     try:
         addr = (
             await session.execute(
-                select(CustomerAddressModel).where(CustomerAddressModel.id == addr_id)
+                select(CustomerAddressModel)
+                .where(
+                    CustomerAddressModel.id == addr_id,
+                    CustomerAddressModel.customer_id == cust_uuid,
+                )
+                .options(
+                    load_only(
+                        CustomerAddressModel.id,
+                        CustomerAddressModel.city,
+                        CustomerAddressModel.postal_code,
+                        CustomerAddressModel.country,
+                    ),
+                    raiseload("*"),
+                )
             )
         ).scalar_one_or_none()
     except Exception:
@@ -752,10 +806,14 @@ async def _maybe_enqueue_meta_capi(
         user_data["user_agent"] = user_agent
 
     # Server-side customer enrichment — see helper docstring. Catches
-    # broadly so a missing customer / DB blip never breaks /track.
+    # broadly so a missing customer / DB blip never breaks /track. The
+    # customer lookup is store-scoped (sentry CRITICAL) so a forged
+    # customer_id from another store silently 0-rows.
     if body.customer_id:
         try:
-            await _enrich_user_data_with_customer(user_data, body.customer_id, session)
+            await _enrich_user_data_with_customer(
+                user_data, body.customer_id, store.id, session
+            )
         except Exception:
             logger.exception(
                 "meta_capi_enrich_user_data_failed",
