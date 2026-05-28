@@ -28,6 +28,7 @@ from src.api.middleware import (
 )
 from src.api.short_link_redirect import router as short_link_redirect_router
 from src.api.v1.routes import api_router
+from src.api.v1.routes.order_redirect import router as order_redirect_router
 from src.config import settings
 from src.config.logging_config import configure_logging, get_logger
 from src.infrastructure.database import AsyncSessionLocal, engine
@@ -354,6 +355,10 @@ def create_app() -> FastAPI:
     # Short-link redirector — mounted at app root (no /api/v1 prefix)
     # so the public URL stays clean: numueg.app/r/{short_code}.
     app.include_router(short_link_redirect_router)
+    # Order-link redirector — mounted at app root for the same reason:
+    # WhatsApp template CTA buttons point at numueg.app/o/{order_id}
+    # and resolve to the tenant store's /track/<id> page (backend-030).
+    app.include_router(order_redirect_router)
 
     # Serve local uploads in development (when R2 is not configured)
     if settings.debug and not settings.r2_account_id:

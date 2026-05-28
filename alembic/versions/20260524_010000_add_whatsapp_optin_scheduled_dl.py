@@ -43,26 +43,37 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
     #      is not enough; there has to be at least one literal word.
     #      i.e. "{{2}}!" is REJECTED, "{{2}}. Thanks!" is accepted.
     #
-    # Templates with an action URL (order_confirmation, order_shipped,
-    # abandoned_cart) now render that URL as a CTA URL button rather than
+    # Templates with an action URL (order_confirmation_v2, order_shipped_v2,
+    # abandoned_cart_v2) render that URL as a CTA URL button rather than
     # an inline {{n}} placeholder. The button URL pattern is
-    # `https://numueg.app/o/{{1}}` (or `/cart/{{1}}` for abandoned_cart)
-    # — a numueg.app redirector route resolves the path segment to the
-    # tenant store. Handler responsibility: pass the path segment as the
-    # button URL parameter (NOT the full URL).
+    # `https://numueg.app/o/{{1}}` (or `/cart/{{1}}` for abandoned_cart_v2).
+    # Backend routes /o/{order_id} → tenant store via
+    # ``src/api/v1/routes/order_redirect.py``. Handler responsibility:
+    # pass the path segment as the button URL parameter (NOT the full URL).
+    #
+    # ``_v2`` suffix on three templates: Meta locks deleted template names
+    # for ~30 days after deletion before re-use. When we revised these
+    # three to use URL buttons (commit 66f956ff) the original names became
+    # un-resubmittable, so they live under a versioned name. The five
+    # button-less templates (payment_received, order_delivered, both langs;
+    # optout_confirmation/en) were never deleted and keep their original
+    # names. DB row name MUST match Meta-side template name exactly — the
+    # template-status webhook handler and polling sync key off (name,
+    # language) and EGYPTIAN_TEMPLATES.name (the messaging service's
+    # /messages POST payload) must agree across all three.
     #
     # Arabic bodies use Egyptian colloquial dialect (أهلاً يا / استلمنا /
     # شكراً ليك / انت سايب / اتسلم / بتاعة). Language code stays "ar" so
     # backend send-guard lookups in whatsapp_notification_handler.py + the
     # scheduled-send dispatcher continue to resolve.
     (
-        "order_confirmation",
-        "en",
+        "order_confirmation_v2",
+        "en_US",
         "UTILITY",
         "Hi {{1}}, your order {{2}} has been received. Total: {{3}}. Thank you for shopping with us.",
     ),
     (
-        "order_confirmation",
+        "order_confirmation_v2",
         "ar",
         "UTILITY",
         "أهلاً يا {{1}}، استلمنا طلبك رقم {{2}}. الإجمالي: {{3}}. شكراً ليك على ثقتك فينا.",
@@ -80,13 +91,13 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
         "استلمنا الدفع لطلبك رقم {{1}}. المبلغ: {{2}}. شكراً ليك!",
     ),
     (
-        "order_shipped",
+        "order_shipped_v2",
         "en",
         "UTILITY",
         "Your order {{1}} is on the way with {{2}}. Thanks for your patience!",
     ),
     (
-        "order_shipped",
+        "order_shipped_v2",
         "ar",
         "UTILITY",
         "طلبك رقم {{1}} في الطريق مع شركة {{2}}. شكراً لصبرك!",
@@ -104,13 +115,13 @@ _SYSTEM_TEMPLATES: list[dict[str, str]] = [
         "طلبك رقم {{1}} اتسلم بنجاح. شكراً إنك اتسوقت من {{2}}. نتمنالك تكون مبسوط بشرائك!",
     ),
     (
-        "abandoned_cart",
+        "abandoned_cart_v2",
         "en",
         "MARKETING",
         "Hi {{1}}, you left items in your cart at {{2}}. Don't miss out — they may sell out soon!",
     ),
     (
-        "abandoned_cart",
+        "abandoned_cart_v2",
         "ar",
         "MARKETING",
         "أهلاً يا {{1}}، انت سايب حاجات في عربتك على {{2}}. الحقها قبل ما تخلص الكميات!",

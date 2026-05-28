@@ -280,7 +280,10 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             session,
             store_id=event.store_id,
             customer_id=event.customer_id,
-            template_name="order_confirmation",
+            # Must match the DB seed name exactly — that row carries the
+            # `status` field the send-guard reads (APPROVED → allow send).
+            # See _SYSTEM_TEMPLATES in the alembic migration.
+            template_name="order_confirmation_v2",
             idempotency_event_tag="order_created",
             order_id=event.order_id,
             notification_pref_key="order_confirmation",
