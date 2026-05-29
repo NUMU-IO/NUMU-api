@@ -132,6 +132,13 @@ def create_event_bus() -> EventBus:
 
     bus = EventBus()
 
+    # Defer handler dispatch until the request transaction commits so handlers
+    # that open their own session see just-written rows (fixes the order
+    # activity FK race). Falls back to immediate dispatch outside a request.
+    from src.infrastructure.events.deferred_dispatch import deferred_scheduler
+
+    bus.scheduler = deferred_scheduler
+
     # Order status change - notifications + activity log + webhook
     bus.subscribe(OrderStatusChangedEvent, handle_email_notification)
     bus.subscribe(OrderStatusChangedEvent, handle_whatsapp_notification)
