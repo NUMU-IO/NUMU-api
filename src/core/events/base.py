@@ -36,6 +36,22 @@ class DomainEvent(BaseModel):
             object.__setattr__(self, "event_type", self.__class__.__name__)
 
 
+def _schedule_immediately(
+    bus: "EventBus", event: "DomainEvent", handlers: list[EventHandler]
+) -> None:
+    """Default scheduler: run every handler now as a fire-and-forget task.
+
+    This is the historical behaviour. The infrastructure layer may swap in a
+    scheduler that defers dispatch until the active DB transaction commits
+    (see ``infrastructure.events.deferred_dispatch``).
+    """
+    for handler in handlers:
+        asyncio.create_task(
+            bus._safe_invoke(handler, event),
+            name=f"event:{event.event_type}:{handler.__name__}",
+        )
+
+
 class EventBus:
     """In-process async event bus.
 
@@ -43,15 +59,26 @@ class EventBus:
     fire-and-forget tasks when an event is published. Handler failures
     are logged but never propagate to the publisher.
 
+    Dispatch timing is governed by ``self.scheduler``. By default handlers
+    run immediately; the infrastructure layer can replace it with a
+    commit-deferred scheduler so handlers that open their own session never
+    race the writer's transaction.
+
     Usage:
         bus = EventBus()
         bus.subscribe(OrderStatusChangedEvent, email_handler)
         bus.subscribe(OrderStatusChangedEvent, activity_log_handler)
-        await bus.publish(event)  # schedules handlers, returns immediately
+        bus.publish(event)  # schedules handlers, returns immediately
     """
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[EventHandler]] = defaultdict(list)
+        # Pluggable dispatch strategy: (bus, event, handlers) -> None.
+        # Default fires immediately; infrastructure may install a
+        # commit-deferred scheduler.
+        self.scheduler: Callable[[EventBus, DomainEvent, list[EventHandler]], None] = (
+            _schedule_immediately
+        )
 
     def subscribe(self, event_class: type[DomainEvent], handler: EventHandler) -> None:
         """Register a handler for an event type."""
@@ -62,20 +89,18 @@ class EventBus:
         )
 
     def publish(self, event: DomainEvent) -> None:
-        """Publish an event — schedules all handlers as background tasks.
+        """Publish an event — hands all handlers to the active scheduler.
 
-        Non-blocking: returns immediately after scheduling. Each handler
-        runs in its own asyncio task with isolated error handling.
+        Non-blocking: returns immediately. With the default scheduler each
+        handler runs right away in its own asyncio task; with a deferred
+        scheduler dispatch is held until the request transaction commits.
+        Handler errors are always isolated and never propagate.
         """
         handlers = self._handlers.get(event.event_type, [])
         if not handlers:
             return
 
-        for handler in handlers:
-            asyncio.create_task(
-                self._safe_invoke(handler, event),
-                name=f"event:{event.event_type}:{handler.__name__}",
-            )
+        self.scheduler(self, event, list(handlers))
 
         logger.info(
             "event_published",

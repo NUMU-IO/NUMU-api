@@ -36,6 +36,21 @@ _tenant_id: ContextVar[str | None] = ContextVar("tenant_id", default=None)
 # at request end. Consumed by `app.current_user` Postgres session var.
 _user_id: ContextVar[str | None] = ContextVar("user_id", default=None)
 
+# Context variable holding the request-scoped AsyncSession. Set by
+# `get_db_session` for the duration of a request so the event bus can defer
+# handler dispatch until this session commits (see
+# `infrastructure.events.deferred_dispatch`). None outside a request-scoped
+# session (background jobs, Celery tasks, handlers' own sessions), where
+# events dispatch immediately.
+_current_session: ContextVar["AsyncSession | None"] = ContextVar(
+    "current_session", default=None
+)
+
+
+def get_current_session() -> "AsyncSession | None":
+    """Return the AsyncSession bound to the current request, if any."""
+    return _current_session.get()
+
 
 def set_tenant_schema(schema_name: str) -> None:
     """Set the current tenant schema."""
@@ -262,6 +277,9 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     by tenant_id, the database will enforce tenant isolation.
     """
     async with AsyncSessionLocal() as session:
+        # Expose this session to the event bus so domain events published
+        # during the request are dispatched only after it commits.
+        _session_token = _current_session.set(session)
         # Set the search path for the session. Include `public` as a fallback
         # so shared objects (enum types like `service_type_enum`, public
         # tables like `users`/`tenants`) resolve when referenced unqualified
@@ -321,6 +339,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         finally:
+            _current_session.reset(_session_token)
             await session.close()
 
 
