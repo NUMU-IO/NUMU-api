@@ -47,6 +47,7 @@ class TestStoreRepository:
         model.social_links = kwargs.get("social_links", {})
         model.settings = kwargs.get("settings", {})
         model.theme_settings = kwargs.get("theme_settings", {})
+        model.business_hours = kwargs.get("business_hours", {})
         model.created_at = kwargs.get("created_at", datetime.utcnow())
         model.updated_at = kwargs.get("updated_at", datetime.utcnow())
         return model
