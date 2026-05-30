@@ -118,6 +118,10 @@ class StoreTheme(BaseEntity):
     css_url: str | None = None
     settings_schema: list[Any] | dict[str, Any] | None = None
     section_schemas: dict[str, Any] | None = None
+    # Active version's manifest presets ({"templates": {...}, "section_groups": {...}}).
+    # Denormalized from theme_version.manifest so the V3 editor can derive a
+    # renderable template when the stored customization is empty/type-mismatched.
+    presets: dict[str, Any] | None = None
     theme_thumbnail_url: str | None = None
 
     @property

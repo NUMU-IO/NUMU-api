@@ -600,3 +600,201 @@ async def admin_set_instapay_ocr_provider(
         ),
         message="OCR provider updated",
     )
+
+
+# ---------------------------------------------------------------------------
+# Theme snapshots — admin support tooling (Session C 2026-05-28)
+# ---------------------------------------------------------------------------
+#
+# Read-only listing of ``store_theme_snapshots`` for a single store.
+# Used by the numu-admin `/marketplace/snapshots/{storeId}` page so
+# support can inspect "what state was this store in before the merchant
+# switched themes." A snapshot is written automatically by the
+# ThemeActivationService whenever a destructive write fires — see
+# `src/infrastructure/repositories/store_theme_snapshot_repository.py`.
+#
+# NO RESTORE ENDPOINT in this session — restoring touches `store_themes`
+# and triggers a downstream chain. Session C UI shows the Restore button
+# as disabled-with-tooltip; the restore endpoint is deferred to a
+# follow-up session pending explicit user authorization.
+
+
+class AdminSnapshotItem(BaseModel):
+    """One row in the admin snapshot browser."""
+
+    id: str
+    store_id: str
+    theme_id: str | None = None
+    theme_version_id: str | None = None
+    reason: str
+    created_at: str
+    restored_at: str | None = None
+    # Sizing signals — let the UI render "4 sections customized" without
+    # downloading the full customization payload. Counts are derived
+    # server-side to keep the wire payload small (a fully-customized
+    # store_theme_snapshot.customization_v3 can be 50-100 KB).
+    section_count: int = 0
+    section_group_count: int = 0
+    # Optional resolved theme name for the UI's "transition" hint
+    # ("Bon Younes → Empire"). NULL when the snapshot's theme_id was
+    # SET NULL by a downstream theme delete (rare, but possible).
+    theme_name: str | None = None
+
+
+class AdminSnapshotListResponse(BaseModel):
+    snapshots: list[AdminSnapshotItem]
+
+
+@router.get(
+    "/{store_id}/themes/snapshots",
+    response_model=SuccessResponse[AdminSnapshotListResponse],
+    summary="List theme snapshots for a store (admin support tooling)",
+    operation_id="admin_list_store_theme_snapshots",
+)
+async def list_store_theme_snapshots(
+    store_id: Annotated[UUID, Path()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _admin: Annotated[dict, Depends(require_admin)],
+    limit: int = Query(20, ge=1, le=100),
+) -> SuccessResponse[AdminSnapshotListResponse]:
+    """List snapshots for a single store, newest first.
+
+    Read-only. The snapshot rows themselves are append-only; the only
+    mutation field is ``restored_at`` which gets stamped by the (future)
+    restore endpoint. Currently no restore endpoint exists; the
+    numu-admin UI surfaces the Restore button as disabled-with-tooltip.
+
+    Returns up to ``limit`` rows (default 20, max 100). Includes
+    restored snapshots in the list so the admin sees the full audit
+    trail.
+    """
+    from src.infrastructure.database.models.tenant.theme import (
+        ThemeModel,
+    )
+    from src.infrastructure.repositories.store_theme_snapshot_repository import (
+        StoreThemeSnapshotRepository,
+    )
+
+    snapshot_repo = StoreThemeSnapshotRepository(db)
+    rows = await snapshot_repo.list_for_store(store_id=store_id, limit=limit)
+
+    # Resolve theme names in a single bulk query so the UI can render
+    # the from-theme name on each row without N round-trips. The
+    # snapshot's theme_id points at `themes` (the runtime catalog) —
+    # see `core/entities/theme.py`. A NULL theme_id means the theme
+    # was deleted after the snapshot was taken (rare).
+    theme_ids = {r.theme_id for r in rows if r.theme_id is not None}
+    theme_name_by_id: dict[UUID, str] = {}
+    if theme_ids:
+        name_result = await db.execute(
+            select(ThemeModel.id, ThemeModel.name).where(ThemeModel.id.in_(theme_ids))
+        )
+        theme_name_by_id = dict(name_result.all())
+
+    items: list[AdminSnapshotItem] = []
+    for row in rows:
+        # Cheap section-count signals so the UI can show "N sections
+        # customized" badges without downloading the full payload.
+        cust_v3 = row.customization_v3 or {}
+        templates = cust_v3.get("templates", {}) if isinstance(cust_v3, dict) else {}
+        section_count = 0
+        if isinstance(templates, dict):
+            for tpl in templates.values():
+                if isinstance(tpl, dict):
+                    sections = tpl.get("sections", {})
+                    if isinstance(sections, dict):
+                        section_count += len(sections)
+                    elif isinstance(sections, list):
+                        section_count += len(sections)
+        section_groups = (
+            cust_v3.get("section_groups", {}) if isinstance(cust_v3, dict) else {}
+        )
+        section_group_count = (
+            len(section_groups) if isinstance(section_groups, dict) else 0
+        )
+
+        items.append(
+            AdminSnapshotItem(
+                id=str(row.id),
+                store_id=str(row.store_id),
+                theme_id=str(row.theme_id) if row.theme_id else None,
+                theme_version_id=(
+                    str(row.theme_version_id) if row.theme_version_id else None
+                ),
+                reason=row.reason,
+                created_at=row.created_at.isoformat() if row.created_at else "",
+                restored_at=(row.restored_at.isoformat() if row.restored_at else None),
+                section_count=section_count,
+                section_group_count=section_group_count,
+                theme_name=theme_name_by_id.get(row.theme_id) if row.theme_id else None,
+            )
+        )
+
+    return SuccessResponse(
+        data=AdminSnapshotListResponse(snapshots=items),
+        message=f"{len(items)} snapshot(s) retrieved",
+    )
+
+
+class AdminSnapshotPayloadResponse(BaseModel):
+    """Full snapshot detail — used by the [View JSON] modal."""
+
+    id: str
+    store_id: str
+    reason: str
+    created_at: str
+    restored_at: str | None = None
+    customization: dict
+    customization_v3: dict
+
+
+@router.get(
+    "/{store_id}/themes/snapshots/{snapshot_id}",
+    response_model=SuccessResponse[AdminSnapshotPayloadResponse],
+    summary="Get full snapshot payload (admin support tooling)",
+    operation_id="admin_get_store_theme_snapshot",
+)
+async def get_store_theme_snapshot(
+    store_id: Annotated[UUID, Path()],
+    snapshot_id: Annotated[UUID, Path()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _admin: Annotated[dict, Depends(require_admin)],
+) -> SuccessResponse[AdminSnapshotPayloadResponse]:
+    """Fetch a single snapshot's full JSON payload. Lets the admin
+    inspect ``customization`` + ``customization_v3`` for a forensic
+    look at what state the merchant's store was in before the
+    snapshot-triggering write.
+
+    Returns 404 if the snapshot doesn't belong to the named store
+    (defence in depth — the URL-level scoping prevents path-traversal
+    attempts).
+    """
+    from src.infrastructure.database.models.tenant.theme import (
+        StoreThemeSnapshotModel,
+    )
+
+    result = await db.execute(
+        select(StoreThemeSnapshotModel).where(
+            StoreThemeSnapshotModel.id == snapshot_id,
+            StoreThemeSnapshotModel.store_id == store_id,
+        )
+    )
+    snap = result.scalar_one_or_none()
+    if snap is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Snapshot not found for this store",
+        )
+
+    return SuccessResponse(
+        data=AdminSnapshotPayloadResponse(
+            id=str(snap.id),
+            store_id=str(snap.store_id),
+            reason=snap.reason,
+            created_at=snap.created_at.isoformat() if snap.created_at else "",
+            restored_at=(snap.restored_at.isoformat() if snap.restored_at else None),
+            customization=snap.customization or {},
+            customization_v3=snap.customization_v3 or {},
+        ),
+        message="Snapshot payload retrieved",
+    )

@@ -42,6 +42,7 @@ class StoreThemeRepository(IStoreThemeRepository):
         theme_thumbnail_url = None
         settings_schema = None
         section_schemas = None
+        presets = None
         theme_version_str = None
         bundle_url = None
         css_url = None
@@ -62,6 +63,13 @@ class StoreThemeRepository(IStoreThemeRepository):
             theme_version_str = model.theme_version.version
             bundle_url = model.theme_version.bundle_url
             css_url = model.theme_version.css_url
+            # Denormalize manifest presets so the V3 editor can derive a
+            # renderable template when stored customization is empty/mismatched.
+            _manifest = model.theme_version.manifest or {}
+            if isinstance(_manifest, dict) and isinstance(
+                _manifest.get("presets"), dict
+            ):
+                presets = copy.deepcopy(_manifest["presets"])
 
         return StoreTheme(
             id=UUID(str(model.id)),
@@ -85,6 +93,7 @@ class StoreThemeRepository(IStoreThemeRepository):
             theme_thumbnail_url=theme_thumbnail_url,
             settings_schema=settings_schema,
             section_schemas=section_schemas,
+            presets=presets,
             theme_version=theme_version_str,
             bundle_url=bundle_url,
             css_url=css_url,
@@ -195,7 +204,8 @@ class StoreThemeRepository(IStoreThemeRepository):
     async def get_installations_for_store(self, store_id: UUID) -> list[StoreTheme]:
         """Return all installations for a store (ordered by installation date)."""
         result = await self.session.execute(
-            self._base_query()
+            self
+            ._base_query()
             .where(StoreThemeModel.store_id == str(store_id))
             .order_by(
                 StoreThemeModel.is_active.desc(), StoreThemeModel.created_at.desc()
@@ -233,3 +243,73 @@ class StoreThemeRepository(IStoreThemeRepository):
             )
         )
         return result.scalar_one_or_none() is not None
+
+    async def upsert_active(
+        self,
+        *,
+        store_id: UUID,
+        tenant_id: UUID,
+        theme_id: UUID,
+        theme_version_id: UUID,
+        customization_v3: dict | None = None,
+    ) -> StoreTheme:
+        """Find-or-create the StoreTheme(store_id, theme_id) row and mark it active.
+
+        Caller is responsible for snapshotting + deactivating other rows
+        beforehand. ThemeActivationService.activate orchestrates that.
+        """
+        from uuid import uuid4
+
+        # Find existing row by (store_id, theme_id) — at most one per pair
+        # in practice, but we explicitly check before mutating to keep the
+        # write surface small.
+        existing = await self.session.execute(
+            select(StoreThemeModel).where(
+                StoreThemeModel.store_id == str(store_id),
+                StoreThemeModel.theme_id == str(theme_id),
+            )
+        )
+        model = existing.scalar_one_or_none()
+
+        now = datetime.now()
+
+        if model is not None:
+            # Reactivate the existing row. Bump version pointer; refresh
+            # activated_at; optionally replace customization payloads.
+            model.is_active = True
+            model.theme_version_id = str(theme_version_id)
+            model.activated_at = now
+            if customization_v3 is not None:
+                model.customization_v3 = customization_v3
+                model.draft_customization_v3 = customization_v3
+                # Legacy V2 customization mirror — kept in sync so any
+                # callers still reading the old column don't see stale
+                # data after a marketplace activate.
+                model.customization = customization_v3
+        else:
+            v3_payload = customization_v3 if customization_v3 is not None else {}
+            model = StoreThemeModel(
+                id=str(uuid4()),
+                tenant_id=str(tenant_id),
+                store_id=str(store_id),
+                theme_id=str(theme_id),
+                theme_version_id=str(theme_version_id),
+                is_active=True,
+                customization=v3_payload,
+                draft_customization={},
+                customization_v3=v3_payload,
+                draft_customization_v3=v3_payload,
+                installed_at=now,
+                activated_at=now,
+            )
+            self.session.add(model)
+
+        await self.session.flush()
+
+        # Reload with eager relationships so the returned entity has
+        # theme_slug / bundle_url / etc. populated.
+        result = await self.session.execute(
+            self._base_query().where(StoreThemeModel.id == model.id)
+        )
+        refreshed = result.scalar_one()
+        return self._to_entity(refreshed)

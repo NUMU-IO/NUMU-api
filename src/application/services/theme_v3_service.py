@@ -15,6 +15,7 @@ from src.application.services.theme_v3_mappers import (
     map_v3_to_legacy_store_settings,
     normalize_legacy_to_v3,
 )
+from src.application.services.theme_v3_presets import reconcile_v3_customization
 from src.core.entities.theme_customization_version import ThemeCustomizationVersion
 from src.core.entities.theme_settings_v3 import ThemeSettingsV3
 
@@ -81,19 +82,33 @@ class ThemeV3Service:
 
         etag = _etag_from(getattr(store_theme, "updated_at", None))
 
+        # Theme presets + known section types, used to repair a stored
+        # customization whose sections the active theme can't render (stale
+        # generic sections from a previous theme / snapshot restore). Mirrors
+        # the storefront bundle's selectTemplateSections fallback so the editor
+        # lists exactly what the storefront renders. Read-time + non-destructive.
+        section_schemas = getattr(store_theme, "section_schemas", None)
+        presets = getattr(store_theme, "presets", None)
+
         # Prefer V3 draft if present and well-formed
         if (
             store_theme.draft_customization_v3
             and store_theme.draft_customization_v3.get("schema_version") == 3
         ):
-            return {"draft": store_theme.draft_customization_v3, "etag": etag}
+            draft = reconcile_v3_customization(
+                store_theme.draft_customization_v3, section_schemas, presets
+            )
+            return {"draft": draft, "etag": etag}
 
         # Then V3 published
         if (
             store_theme.customization_v3
             and store_theme.customization_v3.get("schema_version") == 3
         ):
-            return {"draft": store_theme.customization_v3, "etag": etag}
+            published = reconcile_v3_customization(
+                store_theme.customization_v3, section_schemas, presets
+            )
+            return {"draft": published, "etag": etag}
 
         # Fall back to normalizing legacy data (Dual-Read)
         legacy = store_theme.customization or store_theme.draft_customization or {}
@@ -112,7 +127,11 @@ class ThemeV3Service:
             store_theme.customization_v3
             and store_theme.customization_v3.get("schema_version") == 3
         ):
-            return store_theme.customization_v3
+            return reconcile_v3_customization(
+                store_theme.customization_v3,
+                getattr(store_theme, "section_schemas", None),
+                getattr(store_theme, "presets", None),
+            )
         legacy = store_theme.customization or {}
         if legacy:
             return normalize_legacy_to_v3(legacy).model_dump()
@@ -280,6 +299,22 @@ class ThemeV3Service:
             }
             for v in versions
         ]
+
+    async def get_version_payload(
+        self,
+        store_id: UUID,
+        version_id: UUID,
+    ) -> dict[str, Any]:
+        """Return a single version's settings blob (read-only, for the diff view).
+
+        Used by the editor's PrePublishDiffDialog to load the last-published
+        snapshot to diff the current draft against. Tenant-scoped: a version
+        belonging to another store is treated as not found.
+        """
+        version = await self._version_repo.get_by_id(version_id)
+        if not version or version.store_id != store_id:
+            raise ValueError(f"Version {version_id} not found for store {store_id}")
+        return version.settings_blob or {}
 
     async def restore_version(
         self,

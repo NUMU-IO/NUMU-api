@@ -94,6 +94,16 @@ class VersionListResponse(BaseModel):
     per_page: int
 
 
+class VersionPayloadResponse(BaseModel):
+    """A single version's full settings blob — read-only, for the pre-publish /
+    version diff views. The editor's PrePublishDiffDialog fetches the newest
+    published version's payload to diff against the current draft; without this
+    endpoint that fetch 404s and the dialog can't compute a diff (which used to
+    block Publish)."""
+
+    payload: dict[str, Any]
+
+
 class DiscardDraftResponse(BaseModel):
     published: dict[str, Any]
 

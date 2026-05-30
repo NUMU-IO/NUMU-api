@@ -196,6 +196,57 @@ class StoreThemeModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         )
 
 
+class StoreThemeSnapshotModel(Base, UUIDMixin, TenantMixin):
+    """Snapshot of a store's theme customization, taken BEFORE a destructive
+    write (theme switch, dev-mode reconnect, marketplace activation).
+
+    The pipeline that overwrites ``store_themes.customization_v3`` first
+    writes a row here so the merchant can revert with one click. Critical
+    for sawsaw + rabbit during the Phase 1 V3 rollout — a bad theme
+    activation no longer means lost customization.
+
+    Schema mirrors `alembic/versions/20260525_020000_add_store_theme_snapshots.py`.
+    """
+
+    __tablename__ = "store_theme_snapshots"
+    __table_args__ = {"schema": "public"}
+
+    store_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    theme_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.themes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    theme_version_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.theme_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    customization: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    customization_v3: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    reason: Mapped[str] = mapped_column(String(60), nullable=False)
+    created_at: Mapped[str] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()"), nullable=False
+    )
+    restored_at: Mapped[str | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<StoreThemeSnapshotModel(store_id={self.store_id}, "
+            f"theme_id={self.theme_id}, reason={self.reason!r})>"
+        )
+
+
 class ThemeAssetModel(Base, UUIDMixin, TimestampMixin):
     """Static asset files for a specific theme version.
 

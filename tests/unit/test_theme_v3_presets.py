@@ -53,7 +53,7 @@ class TestByotPresets:
         )
         assert "home" in v3.templates
         assert len(v3.templates["home"].sections) == 2
-        assert v3.templates["home"].sections["hero_1"].settings["headline"] == "Welcome"
+        assert v3.templates["home"].sections["hero-0"].settings["headline"] == "Welcome"
         assert v3.external_theme is not None
         assert (
             v3.external_theme.bundle_url
@@ -82,12 +82,13 @@ class TestByotPresets:
             },
         }
         v3 = generate_initial_v3_customization(theme_id="custom", presets=presets)
-        section = v3.templates["home"].sections["rich-text_1"]
+        section = v3.templates["home"].sections["rich-text-0"]
         assert len(section.blocks) == 2
-        # Block IDs use the section-local enumerate index (1-based), not a
-        # per-type counter — see theme_v3_presets._block_id derivation.
-        assert section.block_order == ["heading_1", "paragraph_2"]
-        assert section.blocks["heading_1"].settings["text"] == "Title"
+        # Section + block ids use the shared `<type>-<idx>` (0-based) scheme so
+        # the editor draft and the storefront preview derive identical ids from
+        # the same preset (see theme_v3_presets._build_sections_from_list).
+        assert section.block_order == ["heading-0", "paragraph-1"]
+        assert section.blocks["heading-0"].settings["text"] == "Title"
 
     def test_byot_missing_header_gets_default(self):
         presets = {
