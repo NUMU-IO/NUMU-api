@@ -355,6 +355,12 @@ _NOTIFICATION_DEFAULTS = {
     "shipping_update": True,
     "delivery_confirmation": True,
     "abandoned_cart": False,
+    # Off by default — merchants opt in per store. When True, the
+    # OrderCreatedEvent handler sends `order_confirmation_request_v1`
+    # (interactive QUICK_REPLY) instead of `order_confirmation_v2`
+    # (receipt-style). Surfaces in the dashboard as a per-order
+    # confirmation status badge.
+    "require_order_confirmation": False,
 }
 
 
@@ -407,6 +413,12 @@ async def get_notification_settings(
                     "abandoned_cart", _NOTIFICATION_DEFAULTS["abandoned_cart"]
                 )
             ),
+            require_order_confirmation=NotificationToggle(
+                enabled=notifs.get(
+                    "require_order_confirmation",
+                    _NOTIFICATION_DEFAULTS["require_order_confirmation"],
+                )
+            ),
         ),
         message="Notification settings retrieved",
     )
@@ -438,6 +450,7 @@ async def update_notification_settings(
         "shipping_update",
         "delivery_confirmation",
         "abandoned_cart",
+        "require_order_confirmation",
     ):
         val = getattr(request, field, None)
         if val is not None:

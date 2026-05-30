@@ -134,6 +134,27 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     deposit_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # ── Customer-confirmation flow (backend-031) ─────────────────────
+    # When the store has settings.whatsapp_notifications.require_order_confirmation
+    # = True, OrderCreatedEvent sends an interactive WhatsApp template
+    # with a single QUICK_REPLY button. The customer's tap arrives as
+    # an inbound webhook → handler flips status to "confirmed" + stamps
+    # confirmed_at. Null = the store didn't opt into the flow for this
+    # order (or it predates the feature).
+    #
+    # Status string values (kept as String for forward-compat without
+    # an enum migration):
+    #   "pending"       — send went out, customer hasn't tapped yet
+    #   "confirmed"     — customer tapped Confirm
+    #   "declined"      — reserved (future "Cancel" button variant)
+    #   "no_response"   — reserved (future auto-aging job)
+    customer_confirmation_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, index=True
+    )
+    customer_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Notes
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
