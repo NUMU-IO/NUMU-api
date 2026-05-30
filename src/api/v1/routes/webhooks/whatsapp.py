@@ -16,6 +16,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import get_current_user_id
@@ -156,6 +157,13 @@ async def whatsapp_callback(
                     await _upsert_conversations_from_webhook(
                         db, change.get("value", {})
                     )
+
+                    # backend-031 — flip orders.customer_confirmation_status
+                    # to 'confirmed' when an inbound QUICK_REPLY button
+                    # arrives that's in reply to an order_confirmation_request
+                    # template send. Idempotent — re-applying 'confirmed'
+                    # is a no-op (we never downgrade off a terminal state).
+                    await _handle_order_confirmation_reply(db, change.get("value", {}))
                 elif field == "message_template_status_update":
                     # backend-030 / US5 / FR-028 — template approval
                     # status updates from Meta. Routed here by the
@@ -434,3 +442,132 @@ async def _send_optout_ack(
             phone_tail=phone[-4:],
             error=str(exc),
         )
+
+
+async def _handle_order_confirmation_reply(db: AsyncSession, value: dict) -> None:
+    """Detect a customer tapping the Confirm button on an
+    ``order_confirmation_request_v1`` template send and flip the
+    matching order's ``customer_confirmation_status`` to ``confirmed``.
+
+    Meta delivers QUICK_REPLY taps as a ``messages[]`` entry with
+    ``type == "button"`` and a ``context.id`` pointing at the original
+    template send's wamid. We use that wamid to look up the
+    ``message_logs`` row we wrote at send-time (PR #364's
+    ``_persist_message_log``) — its ``metadata.order_id`` tells us
+    which order to flip.
+
+    Idempotent — re-applying ``confirmed`` is a no-op. Failures are
+    swallowed (logged) so a stuck handler can never crash the webhook
+    and trigger Meta retry storms.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update as sa_update
+
+    from src.infrastructure.database.models.tenant.message_log import MessageLogModel
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    messages = (value or {}).get("messages") or []
+    for msg in messages:
+        # Only button replies are interesting. Text / image / etc.
+        # inbound messages already get persisted by the messaging
+        # service's webhook handler.
+        if msg.get("type") != "button":
+            continue
+        button = msg.get("button") or {}
+        ctx = msg.get("context") or {}
+        template_wamid = ctx.get("id")
+        if not template_wamid:
+            continue
+
+        try:
+            log_row = (
+                await db.execute(
+                    select(MessageLogModel).where(
+                        MessageLogModel.message_id == template_wamid
+                    )
+                )
+            ).scalar_one_or_none()
+        except Exception:
+            logger.exception(
+                "whatsapp_button_reply_log_lookup_failed",
+                extra={"wamid": template_wamid},
+            )
+            continue
+
+        if log_row is None:
+            # No matching outbound — could be a button on a template
+            # we didn't send (BYO store using their own WABA on the
+            # platform webhook URL, etc.). Silently ignore.
+            logger.info(
+                "whatsapp_button_reply_no_matching_log",
+                extra={"wamid": template_wamid},
+            )
+            continue
+
+        # Only the order-confirmation template should flip the order
+        # row. A future Cancel-button variant could route the same
+        # plumbing to a different status.
+        if log_row.template_name != "order_confirmation_request_v1":
+            logger.debug(
+                "whatsapp_button_reply_other_template",
+                extra={
+                    "template": log_row.template_name,
+                    "wamid": template_wamid,
+                },
+            )
+            continue
+
+        meta = log_row.metadata_ or {}
+        order_id_str = meta.get("order_id")
+        if not order_id_str:
+            logger.warning(
+                "whatsapp_button_reply_log_no_order_id",
+                extra={"wamid": template_wamid},
+            )
+            continue
+
+        try:
+            order_id = UUID(order_id_str)
+        except (TypeError, ValueError):
+            logger.warning(
+                "whatsapp_button_reply_bad_order_id",
+                extra={"order_id_raw": order_id_str},
+            )
+            continue
+
+        # The single button on this template is Confirm. If we add a
+        # second (Cancel etc.) later, branch on button.text or
+        # button.payload here. For now: any button tap on this
+        # template name means Confirm.
+        button_text = button.get("text") or button.get("payload") or "(unknown)"
+        try:
+            await db.execute(
+                sa_update(OrderModel)
+                .where(
+                    OrderModel.id == order_id,
+                    # Don't downgrade a more-terminal state.
+                    OrderModel.customer_confirmation_status.in_([None, "pending"]),
+                )
+                .values(
+                    customer_confirmation_status="confirmed",
+                    customer_confirmed_at=datetime.now(UTC),
+                )
+            )
+            logger.info(
+                "whatsapp_order_customer_confirmed",
+                extra={
+                    "order_id": str(order_id),
+                    "store_id": str(log_row.store_id),
+                    "button_text": button_text,
+                    "wamid": template_wamid,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "whatsapp_order_customer_confirm_failed",
+                extra={
+                    "order_id": str(order_id),
+                    "wamid": template_wamid,
+                },
+            )

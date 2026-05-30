@@ -28,6 +28,7 @@ this FastAPI container, matching the existing ``/api/`` proxy_pass
 pattern.
 """
 
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -51,17 +52,75 @@ router = APIRouter(tags=["public"])
 _APEX_FALLBACK = "https://numueg.app/"
 _PLATFORM_DOMAIN = "numueg.app"
 
+# Whitelist for the subdomain segment that may appear in the URL value
+# the WhatsApp button substitutes in. Constrained to the same character
+# class Meta enforces on phone-number-id style identifiers and the
+# subdomain column itself (DNS-safe + env suffix like `-test`).
+_SUBDOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
-@router.get("/o/{order_id}", include_in_schema=False)
+
+def _looks_like_uuid(s: str) -> bool:
+    """Sloppy UUID test — strict parse happens via UUID() below."""
+    try:
+        UUID(s)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+@router.get("/o/{path:path}", include_in_schema=False)
 async def redirect_to_order_page(
-    order_id: UUID,
+    path: str,
     db: AsyncSession = Depends(get_admin_db_session),
 ) -> RedirectResponse:
-    """Resolve an order id to the customer-facing tracking URL on its
-    store and return a 302 redirect. Always returns a redirect; never a
-    JSON body — Meta-side WhatsApp button taps expect a navigation
-    response.
+    """Resolve a WhatsApp template's URL-button substitution to the
+    customer-facing storefront order page and return a 302.
+
+    Two URL value formats are accepted (single route, branched by shape):
+
+    1. ``<subdomain>/<order_id>`` — the **self-describing format** the
+       order-created handler now passes. The redirector forwards to
+       ``https://<subdomain>.numueg.app/track/<order_id>`` without any
+       DB lookup, so a test-env order (stored in the test DB) still
+       resolves correctly even though the apex redirector itself runs
+       against the prod DB. ``<subdomain>`` already carries any env
+       suffix (e.g. ``mystore-test``) per the merchant-hub convention
+       documented in config/settings.py.
+
+    2. ``<uuid>`` — legacy single-segment value, kept for back-compat
+       with WhatsApp messages sent before the format-1 switch. Loads
+       the order from the prod DB and builds the URL from
+       ``store.custom_domain`` (preferred) or
+       ``store.subdomain``. This branch only works for prod orders.
+
+    Anything else (unknown id, ill-formed path, store with no host)
+    falls back to the apex marketing site so the customer always lands
+    on a NUMU surface rather than a 404.
     """
+    # Format 1 — self-describing subdomain/<id> value.
+    if "/" in path:
+        head, _, tail = path.partition("/")
+        if _SUBDOMAIN_RE.match(head) and tail:
+            target = f"https://{head}.{_PLATFORM_DOMAIN}/track/{tail}"
+            logger.info(
+                "order_redirect_self_describing",
+                subdomain=head,
+                order_id=tail,
+                target=target,
+            )
+            return RedirectResponse(url=target, status_code=302)
+        logger.info(
+            "order_redirect_malformed_path",
+            path=path,
+        )
+        return RedirectResponse(url=_APEX_FALLBACK, status_code=302)
+
+    # Format 2 — single UUID (legacy back-compat).
+    if not _looks_like_uuid(path):
+        logger.info("order_redirect_unparseable_path", path=path)
+        return RedirectResponse(url=_APEX_FALLBACK, status_code=302)
+
+    order_id = UUID(path)
     order = (
         await db.execute(select(OrderModel).where(OrderModel.id == order_id))
     ).scalar_one_or_none()
@@ -80,17 +139,11 @@ async def redirect_to_order_page(
         )
         return RedirectResponse(url=_APEX_FALLBACK, status_code=302)
 
-    # Prefer the custom domain when set, fall back to the platform
-    # subdomain. The storefront's /track/:orderId route handles its own
-    # auth gate before rendering sensitive details.
     if store.custom_domain:
         host = store.custom_domain.strip().rstrip("/")
     elif store.subdomain:
         host = f"{store.subdomain}.{_PLATFORM_DOMAIN}"
     else:
-        # Stores without a subdomain shouldn't exist (provisioning sets
-        # it), but the column is nullable in the schema — fail safe to
-        # the apex.
         logger.warning(
             "order_redirect_store_no_host",
             order_id=str(order_id),

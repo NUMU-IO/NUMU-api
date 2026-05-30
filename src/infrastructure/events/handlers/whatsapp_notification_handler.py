@@ -386,22 +386,74 @@ async def _resolve_send_context(
         "language": language,
         "tenant_id": tenant_id,
         "store_name": store_name,
+        # backend-031 — surfaced to the send callsite so the URL-button
+        # param for order_confirmation_v2 can be `{subdomain}/{order_id}`
+        # (env-aware, no DB lookup in the redirector). `subdomain`
+        # already carries the env suffix on test/stage stores per
+        # config/settings.py docstring (e.g. `mystore-test`).
+        "store_subdomain": store_row.subdomain,
+        "store_custom_domain": store_row.custom_domain,
     }
     return ctx, extras
 
 
 async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
-    """US1 / FR-001 — send a WhatsApp order-confirmation when an order is
-    created. Idempotent: replayed events do not produce duplicate sends.
-    Guard-gated: opt-out / merchant-setting-off / non-APPROVED template /
-    invalid phone all block the send with a structured skip-reason log
-    (FR-038 / FR-039).
+    """US1 / FR-001 / FR-041 — send a WhatsApp order-confirmation when
+    an order is created. Two flavours, chosen by the store-level toggle
+    ``store.settings.whatsapp_notifications.require_order_confirmation``:
+
+    * ``False`` (default) — receipt-style ``order_confirmation_v2`` send
+      with the Manage-order URL button. Customer just sees the order
+      details.
+    * ``True`` — interactive ``order_confirmation_request_v1`` send with
+      a single QUICK_REPLY button "Confirm order". Customer's tap
+      arrives as an inbound webhook that flips
+      ``orders.customer_confirmation_status`` to ``confirmed``.
+
+    Both branches are guard-gated (opt-out / merchant-setting-off /
+    non-APPROVED template / invalid phone) and idempotent via
+    message_log scan. Replayed events do not produce duplicate sends.
     """
+    from sqlalchemy import select as sa_select
+
     from src.core.interfaces.services.messaging_service import MessageRecipient
     from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.order import OrderModel
+    from src.infrastructure.database.models.tenant.store import StoreModel
     from src.infrastructure.external_services.whatsapp import get_whatsapp_service
 
     async with AsyncSessionLocal() as session:
+        # Peek at the store's settings to decide which template the
+        # order_created event maps to. Defensive on missing keys —
+        # require_order_confirmation defaults to False (current
+        # behaviour) so unaware merchants keep the receipt-style flow.
+        require_confirmation = False
+        try:
+            store_settings = (
+                await session.execute(
+                    sa_select(StoreModel.settings).where(
+                        StoreModel.id == event.store_id
+                    )
+                )
+            ).scalar_one_or_none() or {}
+            wa_notifs = store_settings.get("whatsapp_notifications", {}) or {}
+            require_confirmation = bool(
+                wa_notifs.get("require_order_confirmation", False)
+            )
+        except Exception:
+            logger.exception(
+                "whatsapp_order_created_settings_lookup_failed",
+                order_id=str(event.order_id),
+                store_id=str(event.store_id),
+            )
+
+        if require_confirmation:
+            template_name = "order_confirmation_request_v1"
+            event_tag = "order_created_request"
+        else:
+            template_name = "order_confirmation_v2"
+            event_tag = "order_created"
+
         resolution = await _resolve_send_context(
             session,
             store_id=event.store_id,
@@ -409,8 +461,8 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             # Must match the DB seed name exactly — that row carries the
             # `status` field the send-guard reads (APPROVED → allow send).
             # See _SYSTEM_TEMPLATES in the alembic migration.
-            template_name="order_confirmation_v2",
-            idempotency_event_tag="order_created",
+            template_name=template_name,
+            idempotency_event_tag=event_tag,
             order_id=event.order_id,
             notification_pref_key="order_confirmation",
         )
@@ -425,6 +477,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
                 order_id=str(event.order_id),
                 store_id=str(event.store_id),
                 event_type="order_created",
+                template=template_name,
                 reason=decision.reason.value if decision.reason else "unknown",
             )
             return
@@ -438,17 +491,72 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             name=extras["customer_name"],
             language=extras["language"],
         )
-        # order_confirmation_v2 renders a "Manage order" URL button at
-        # https://numueg.app/o/{order_id}. We pass event.order_id as the
-        # button substitution; the apex domain's redirector resolves the
-        # path to the tenant store's order-tracking page.
-        result = await service.send_order_confirmation(
-            recipient,
-            event.order_number,
-            f"{event.total:.2f} {event.currency}",
-            extras["store_name"],
-            order_id=str(event.order_id),
-        )
+
+        if require_confirmation:
+            # Interactive variant — fetch the order's shipping_address
+            # so the customer sees what they're being asked to confirm.
+            shipping_addr = (
+                await session.execute(
+                    sa_select(OrderModel.shipping_address).where(
+                        OrderModel.id == event.order_id
+                    )
+                )
+            ).scalar_one_or_none()
+            address_str = await _format_shipping_address(shipping_addr)
+
+            result = await service.send_order_confirmation_request(
+                recipient,
+                event.order_number,
+                f"{event.total:.2f} {event.currency}",
+                address_str,
+            )
+        else:
+            # Receipt-style send (current default). Manage-order URL
+            # button routes via numueg.app/o/<value> redirector, where
+            # <value> is `<subdomain>/<order_id>`. The redirector
+            # forwards directly to the store's storefront without a
+            # DB lookup, so test orders (in the test DB) still resolve
+            # — the URL itself is self-describing.
+            subdomain = extras.get("store_subdomain") or ""
+            if subdomain:
+                button_param = f"{subdomain}/{event.order_id}"
+            else:
+                # Legacy path — falls back to the redirector's UUID
+                # lookup. Only hits if a store somehow lost its
+                # subdomain.
+                button_param = str(event.order_id)
+            result = await service.send_order_confirmation(
+                recipient,
+                event.order_number,
+                f"{event.total:.2f} {event.currency}",
+                extras["store_name"],
+                order_id=button_param,
+            )
+
+        if result.success:
+            await _persist_message_log(
+                session,
+                tenant_id=extras["tenant_id"],
+                store_id=event.store_id,
+                phone=extras["customer_phone"],
+                template_name=template_name,
+                message_id=result.message_id,
+                status_str=str(getattr(result.status, "value", result.status)),
+                metadata={
+                    "order_id": str(event.order_id),
+                    "event_tag": event_tag,
+                },
+            )
+            if require_confirmation:
+                # Mark the order awaiting customer confirmation so the
+                # merchant-hub orders list can surface the pending
+                # badge. Webhook handler flips this to "confirmed" on
+                # button tap.
+                await _stamp_order_pending_confirmation(
+                    session,
+                    order_id=event.order_id,
+                    confirmation_message_id=result.message_id,
+                )
 
         if result.success:
             await _persist_message_log(
@@ -469,8 +577,67 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             "whatsapp_order_created_sent",
             order_id=str(event.order_id),
             store_id=str(event.store_id),
+            template=template_name,
             success=result.success,
             message_id=result.message_id,
+        )
+
+
+async def _format_shipping_address(addr: dict | None) -> str:
+    """One-line summary of an order's shipping_address JSONB for use in
+    a WhatsApp template body. Falls back to ``"-"`` when the shape is
+    incomplete so the template still renders.
+
+    Order matters — Egyptian customers expect ``area, governorate``
+    after the street. Pieces are filtered for truthiness so partial
+    addresses don't render double-commas.
+    """
+    if not addr or not isinstance(addr, dict):
+        return "-"
+    pieces = [
+        addr.get("address_line1") or addr.get("line1") or addr.get("address"),
+        addr.get("address_line2") or addr.get("line2"),
+        addr.get("area"),
+        addr.get("city"),
+        addr.get("governorate") or addr.get("state"),
+    ]
+    joined = ", ".join(p.strip() for p in pieces if p and str(p).strip())
+    return joined or "-"
+
+
+async def _stamp_order_pending_confirmation(
+    session: "AsyncSession",
+    *,
+    order_id: UUID,
+    confirmation_message_id: str | None,
+) -> None:
+    """Flip the order's customer_confirmation_status to 'pending' after
+    a successful interactive-confirmation send. Idempotent — leaves
+    'confirmed' / 'declined' alone (e.g. if the customer somehow
+    confirmed before the DB write lands, the webhook handler's value
+    wins).
+    """
+    try:
+        from sqlalchemy import update
+
+        from src.infrastructure.database.models.tenant.order import OrderModel
+
+        await session.execute(
+            update(OrderModel)
+            .where(
+                OrderModel.id == order_id,
+                # Don't overwrite a terminal state — webhook handler
+                # may have already flipped to 'confirmed'.
+                OrderModel.customer_confirmation_status.in_([None, "pending"]),
+            )
+            .values(customer_confirmation_status="pending")
+        )
+        await session.commit()
+        _ = confirmation_message_id  # message_id is already in message_log
+    except Exception:
+        logger.exception(
+            "whatsapp_order_pending_confirmation_stamp_failed",
+            order_id=str(order_id),
         )
 
 

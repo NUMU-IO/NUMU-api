@@ -452,6 +452,48 @@ class WhatsAppMessagingService(IMessagingService):
 
         return result
 
+    async def send_order_confirmation_request(
+        self,
+        recipient: MessageRecipient,
+        order_number: str,
+        total: str,
+        shipping_address: str,
+    ) -> MessageResult:
+        """Send the interactive order-confirmation template
+        (``order_confirmation_request_v1``) with a single QUICK_REPLY
+        button. Used in place of ``send_order_confirmation`` when the
+        store has opted into ``require_order_confirmation``.
+
+        The customer's tap arrives as an inbound webhook event with an
+        ``interactive.button_reply`` payload — the webhook handler
+        ``_handle_order_confirmation_reply`` (in routes/webhooks/whatsapp.py)
+        matches it back to the order via ``message_logs.metadata.order_id``
+        and flips ``orders.customer_confirmation_status`` to
+        ``confirmed``.
+
+        Args:
+            recipient: Customer contact (phone + name + language)
+            order_number: Display order number (body {{2}})
+            total: Formatted total — e.g. "EGP 250.00" (body {{3}})
+            shipping_address: One-line address (body {{4}})
+
+        Returns:
+            MessageResult with the template's wamid in message_id; that
+            id is later joined against the inbound button_reply event's
+            context.id to confirm which order the reply belongs to.
+        """
+        content = MessageContent(
+            type=MessageType.ORDER_CONFIRMATION_REQUEST,
+            recipient=recipient,
+            template_params={
+                "customer_name": recipient.name or "Customer",
+                "order_number": order_number,
+                "total": total,
+                "shipping_address": shipping_address,
+            },
+        )
+        return await self.send_message(content)
+
     async def send_shipping_notification(
         self,
         recipient: MessageRecipient,

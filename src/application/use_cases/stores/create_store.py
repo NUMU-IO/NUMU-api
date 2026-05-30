@@ -180,6 +180,10 @@ class CreateStoreUseCase:
                 "shipping_update": True,
                 "delivery_confirmation": True,
                 "abandoned_cart": False,
+                # Off by default — merchants opt in per store via
+                # `Require customer to confirm order` toggle in the
+                # merchant-hub WhatsApp settings page. See backend-031.
+                "require_order_confirmation": False,
             },
         }
 

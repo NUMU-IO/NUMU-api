@@ -125,6 +125,13 @@ class NotificationSettings(BaseModel):
         default_factory=lambda: NotificationToggle(enabled=True)
     )
     abandoned_cart: NotificationToggle = Field(default_factory=NotificationToggle)
+    # backend-031 / FR-041 — when enabled, the OrderCreatedEvent handler
+    # swaps the receipt-style ``order_confirmation_v2`` send for the
+    # interactive ``order_confirmation_request_v1`` send (one
+    # QUICK_REPLY button). Default OFF — merchants opt in per store.
+    require_order_confirmation: NotificationToggle = Field(
+        default_factory=NotificationToggle
+    )
 
 
 class UpdateNotificationSettingsRequest(BaseModel):
@@ -138,6 +145,7 @@ class UpdateNotificationSettingsRequest(BaseModel):
     shipping_update: bool | None = None
     delivery_confirmation: bool | None = None
     abandoned_cart: bool | None = None
+    require_order_confirmation: bool | None = None
 
 
 # ── Analytics ──

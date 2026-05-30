@@ -18,6 +18,11 @@ class MessageType(StrEnum):
     """Predefined message types."""
 
     ORDER_CONFIRMATION = "order_confirmation"
+    # Interactive variant — body shows the order + address and asks the
+    # customer to tap a single QUICK_REPLY button. Sent in place of
+    # ORDER_CONFIRMATION when the store has opted into
+    # store.settings.whatsapp_notifications.require_order_confirmation.
+    ORDER_CONFIRMATION_REQUEST = "order_confirmation_request"
     ORDER_SHIPPED = "order_shipped"
     OUT_FOR_DELIVERY = "out_for_delivery"
     ORDER_DELIVERED = "order_delivered"
@@ -141,6 +146,50 @@ EGYPTIAN_TEMPLATES = {
                     "sub_type": "url",
                     "index": "0",
                     "parameters": ["order_id"],
+                },
+            ],
+        ),
+    },
+    MessageType.ORDER_CONFIRMATION_REQUEST: {
+        # Interactive UTILITY template with one QUICK_REPLY button. The
+        # button has no parameters at send time — Meta returns it as
+        # `interactive.button_reply.title` on the inbound webhook when
+        # the customer taps it, which the order_confirmation webhook
+        # handler maps to a "confirmed" state on the order.
+        "en": MessageTemplate(
+            type=MessageType.ORDER_CONFIRMATION_REQUEST,
+            name="order_confirmation_request_v1",
+            language="en_US",
+            components=[
+                # Body: Hi {{1}}, your order {{2}} totals {{3}}. Shipping
+                # to: {{4}}. Please tap Confirm so we can ship it.
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "total",
+                        "shipping_address",
+                    ],
+                },
+                # No "parameters" entry needed for the button — Meta uses
+                # the template-side text verbatim; we ignore the button
+                # block on send.
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.ORDER_CONFIRMATION_REQUEST,
+            name="order_confirmation_request_v1",
+            language="ar",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "total",
+                        "shipping_address",
+                    ],
                 },
             ],
         ),
