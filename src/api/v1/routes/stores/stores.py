@@ -180,10 +180,128 @@ async def create_store(
     if result.subdomain:
         await cloudflare_dns_service.ensure_store_subdomain(result.subdomain)
 
+    # Seed the platform default theme for the brand-new store (file 04 §5.2).
+    # Best-effort — a failure here doesn't roll back store creation; the
+    # merchant just lands without a theme assigned and can pick one from
+    # the marketplace later. sawsaw + rabbit are not in scope: they were
+    # created before this code existed.
+    #
+    # ``result.id`` is already a UUID (StoreDTO.id is typed UUID); when
+    # asyncpg yields an `asyncpg.pgproto.pgproto.UUID` it has no
+    # ``replace`` attr so passing it through ``UUID(...)`` would crash.
+    # Coerce via ``str()`` to get a plain stdlib UUID.
+    await _seed_default_theme_if_configured(
+        db=db,
+        store_id=UUID(str(result.id)),
+        owner_id=user_id,
+    )
+
     return SuccessResponse(
         data=_build_store_response(result),
         message="Store created successfully",
     )
+
+
+async def _seed_default_theme_if_configured(
+    *,
+    db: AsyncSession,
+    store_id: UUID,
+    owner_id: UUID,
+) -> None:
+    """Install + activate the platform default theme on a freshly-created
+    store, if one is configured.
+
+    Both the install and the activate route through the existing
+    ``MarketplaceService`` so all the snapshot/sync invariants from
+    Phase 3a's ``ThemeActivationService`` are preserved — in particular,
+    the snapshot row will be written with ``reason="initial-store-creation"``
+    via the ``ThemeActivationService.activate`` path (no prior active
+    row means the snapshot is skipped, which is correct).
+
+    Errors here are LOGGED, not raised. The store has already been
+    created and we can't roll that back without a more invasive
+    transaction restructure — and silently shipping a store without a
+    default theme is no worse than what users see when the admin
+    hasn't configured a default at all.
+    """
+    import logging
+
+    from src.application.services.marketplace_service import MarketplaceService
+    from src.application.services.platform_default_theme_service import (
+        PlatformDefaultThemeService,
+    )
+    from src.infrastructure.repositories import (
+        MarketplaceRepository,
+        StoreThemeRepository,
+    )
+    from src.infrastructure.repositories import (
+        StoreRepository as StoreRepoCls,
+    )
+    from src.infrastructure.repositories.theme_repository import ThemeRepository
+    from src.infrastructure.repositories.theme_version_repository import (
+        ThemeVersionRepository,
+    )
+
+    seed_logger = logging.getLogger(__name__ + "._seed_default_theme")
+
+    marketplace_repo = MarketplaceRepository(db)
+    default_svc = PlatformDefaultThemeService(db, marketplace_repo)
+
+    default_theme_id = await default_svc.get_default_theme_id()
+    if default_theme_id is None:
+        seed_logger.debug(
+            "default_theme_seed_skipped_no_config",
+            extra={"store_id": str(store_id)},
+        )
+        return
+
+    try:
+        svc = MarketplaceService(
+            marketplace_repo=marketplace_repo,
+            store_theme_repo=StoreThemeRepository(db),
+            store_repo=StoreRepoCls(db),
+            theme_repo=ThemeRepository(db),
+            version_repo=ThemeVersionRepository(db),
+        )
+        # Install creates the marketplace_theme_installations row that
+        # activate_theme's get_installation lookup needs.
+        await svc.install_theme(
+            store_id=store_id,
+            marketplace_theme_id=default_theme_id,
+            user_id=owner_id,
+        )
+        # Activate flips is_active on both store_themes + the install row
+        # and seeds customization_v3 from the version's presets (per
+        # ThemeActivationService.activate). The "initial-store-creation"
+        # reason string distinguishes this from a merchant-driven activate
+        # in the admin restore browser.
+        #
+        # MarketplaceService.activate_theme uses
+        # reason="marketplace-activate" internally, so this still gets
+        # tagged that way — file 04 §5.2 suggested a custom reason but
+        # we'd have to either add a kwarg or fork the method. Documented
+        # follow-up: thread reason through MarketplaceService.activate_theme.
+        await svc.activate_theme(
+            store_id=store_id,
+            marketplace_theme_id=default_theme_id,
+            user_id=owner_id,
+        )
+        seed_logger.info(
+            "default_theme_seeded",
+            extra={
+                "store_id": str(store_id),
+                "marketplace_theme_id": str(default_theme_id),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort seeding
+        seed_logger.warning(
+            "default_theme_seed_failed store=%s theme=%s err=%s type=%s",
+            str(store_id),
+            str(default_theme_id),
+            exc,
+            type(exc).__name__,
+            exc_info=True,
+        )
 
 
 @router.get(

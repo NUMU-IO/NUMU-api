@@ -47,7 +47,6 @@ from src.application.services.theme_v3_presets import (
 )
 from src.core.entities.store import Store
 from src.core.entities.theme import (
-    StoreTheme,
     Theme,
     ThemeStatus,
     ThemeType,
@@ -266,7 +265,7 @@ async def connect_dev_server(
 
     Used for the local development workflow:
     1. Developer runs `numu-theme dev` in their theme repo
-    2. Developer pastes the URL (http://localhost:4321) into the dashboard
+    2. Developer pastes the URL (http://localhost:5173) into the dashboard
     3. Storefront loads from the dev URL, no caching
     4. Developer edits files → vite rebuilds → developer refreshes storefront
     """
@@ -450,15 +449,41 @@ async def connect_dev_server(
         )
         version_entity = await version_repo.create(version_entity)
 
-        # 3. Deactivate any other active install for this store, then
-        #    upsert a row for this theme marked active.
-        await store_theme_repo.deactivate_all_for_store(store.id)
+        # 3. Delegate to ThemeActivationService — single source of truth
+        #    for the snapshot → deactivate_all → upsert_active → mirror
+        #    sequence. Phase 3a (2026-05-26) replaced ~70 lines of
+        #    inline open-coded logic here with a service call that the
+        #    marketplace activate path and V2 ThemeService also use.
+        #    Behavior is identical: pre-dev-mode-switch / reconnect
+        #    snapshot reason, customization seeded from manifest presets,
+        #    is_active flipped on the matching store_themes row.
+        from src.application.services.theme_activation_service import (
+            ThemeActivationService,
+        )
+        from src.infrastructure.repositories.marketplace_repository import (
+            MarketplaceRepository,
+        )
+        from src.infrastructure.repositories.store_theme_snapshot_repository import (
+            StoreThemeSnapshotRepository,
+        )
 
-        existing_install = None
-        for inst in await store_theme_repo.get_installations_for_store(store.id):
-            if inst.theme_id == theme_entity.id:
-                existing_install = inst
-                break
+        snapshot_repo = StoreThemeSnapshotRepository(store_theme_repo.session)
+        marketplace_repo = MarketplaceRepository(store_theme_repo.session)
+        activation_svc = ThemeActivationService(
+            store_theme_repo=store_theme_repo,
+            snapshot_repo=snapshot_repo,
+            marketplace_repo=marketplace_repo,
+        )
+
+        # Distinguish switch vs reconnect so the snapshot reason matches
+        # the pre-refactor semantics (admin restore UI will eventually
+        # surface this).
+        prior_active = await store_theme_repo.get_active_for_store(store.id)
+        snapshot_reason = (
+            "pre-dev-mode-reconnect"
+            if prior_active is not None and prior_active.theme_id == theme_entity.id
+            else "pre-dev-mode-switch"
+        )
 
         # Seed V3 customization from theme.json presets so the editor
         # opens to the developer's intended starting layout.
@@ -473,32 +498,20 @@ async def connect_dev_server(
         )
         v3_dict = v3_payload.model_dump()
 
-        if existing_install is None:
-            install = StoreTheme(
-                id=uuid4(),
-                store_id=store.id,
-                tenant_id=store.tenant_id,
-                theme_id=theme_entity.id,
-                theme_version_id=version_entity.id,
-                is_active=True,
-                customization=v3_dict,  # legacy mirror
-                draft_customization={},
-                customization_v3=v3_dict,
-                draft_customization_v3=v3_dict,
-                installed_at=datetime.now(UTC),
-                activated_at=datetime.now(UTC),
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            )
-            await store_theme_repo.create(install)
-        else:
-            existing_install.theme_version_id = version_entity.id
-            existing_install.is_active = True
-            existing_install.activated_at = datetime.now(UTC)
-            existing_install.customization_v3 = v3_dict
-            existing_install.draft_customization_v3 = v3_dict
-            existing_install.customization = v3_dict
-            await store_theme_repo.update(existing_install)
+        await activation_svc.activate(
+            store_id=store.id,
+            tenant_id=store.tenant_id,
+            theme_id=theme_entity.id,
+            theme_version_id=version_entity.id,
+            reason=snapshot_reason,
+            # Dev-mode is non-marketplace — clear any stale marketplace
+            # install row so the storefront's two tables can't disagree.
+            marketplace_theme_id=None,
+            # Always reseed from manifest presets on a fresh dev-mode
+            # connect; the developer's bundle is the source of truth for
+            # the starting layout.
+            seed_customization_v3=v3_dict,
+        )
     except Exception as e:
         # The legacy `theme_settings.external_theme` was already saved
         # above, but without the V3 rows the customizer can't render

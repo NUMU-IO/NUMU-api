@@ -8,6 +8,7 @@ credentials are not configured.
 from pathlib import Path
 from uuid import uuid4
 
+from src.config import settings
 from src.core.interfaces.services.storage_service import (
     IStorageService,
     StorageBucket,
@@ -16,8 +17,6 @@ from src.core.interfaces.services.storage_service import (
 
 # Base directory for local uploads (project root / uploads)
 UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
-# Base URL served by FastAPI static mount
-LOCAL_BASE_URL = "http://localhost:8021/uploads"
 
 
 class LocalStorageService(IStorageService):
@@ -29,7 +28,7 @@ class LocalStorageService(IStorageService):
 
     def __init__(self, base_dir: Path | None = None, base_url: str | None = None):
         self.base_dir = base_dir or UPLOAD_DIR
-        self.base_url = base_url or LOCAL_BASE_URL
+        self.base_url = base_url or settings.local_storage_base_url
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _generate_key(self, filename: str, bucket: StorageBucket) -> str:

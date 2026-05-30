@@ -118,3 +118,11 @@ celerybeat-schedule*
 
 # HTTP test files
 app.http
+
+# local/runtime artifacts (never commit)
+*.stackdump
+dump.rdb
+openapi.json
+rendered_check.html
+response.txt
+uploads/

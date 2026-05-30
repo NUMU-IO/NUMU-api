@@ -51,10 +51,18 @@ class MarketplaceService:
         marketplace_repo,
         store_theme_repo=None,
         store_repo=None,
+        theme_repo=None,
+        version_repo=None,
     ):
         self._marketplace_repo = marketplace_repo
         self._store_theme_repo = store_theme_repo
         self._store_repo = store_repo
+        # Phase 3a: marketplace activate now bridges to the runtime
+        # themes / theme_versions tables (so store_themes.theme_id has
+        # somewhere to point). Optional for read-only routes that don't
+        # touch the activate path.
+        self._theme_repo = theme_repo
+        self._version_repo = version_repo
 
     # ── Developer flows ──────────────────────────────────────────────────────
 
@@ -383,6 +391,56 @@ class MarketplaceService:
             })
         return out
 
+    async def list_all_themes_admin(self) -> list[dict[str, Any]]:
+        """List every marketplace theme (any status) for admin flag UI.
+        Bypasses the catalog_visible filter so admins can see + flip
+        invisible themes."""
+        themes = await self._marketplace_repo.list_all()
+        return [_admin_theme_dict(t) for t in themes]
+
+    async def update_theme_flags(
+        self,
+        theme_id: UUID,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge ``patch`` into the theme's flags JSONB. Returns the
+        admin-facing dict for the updated theme."""
+        updated = await self._marketplace_repo.merge_flags(theme_id, patch)
+        if updated is None:
+            raise ValueError(f"theme not found: {theme_id}")
+        return _admin_theme_dict(updated)
+
+    async def update_theme_metadata(
+        self,
+        theme_id: UUID,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Patch admin-curated metadata on a marketplace theme (file 04 §6.1).
+
+        ``patch`` is expected to be the output of
+        ``AdminThemeMetadataPatch.model_dump(exclude_unset=True)`` so the
+        caller has already stripped unset fields and validated bounds
+        (``price_cents >= 0``, ``currency`` whitelist, image-URL allowlist).
+        This method just persists.
+
+        Returns the full admin-facing dict including the freshly-written
+        metadata fields. Used by the merchant-hub admin UI to refresh its
+        row in-place without a follow-up GET.
+
+        Raises:
+            ValueError: theme does not exist (the route maps to HTTP 404).
+        """
+        if not patch:
+            existing = await self._marketplace_repo.get_theme_by_id(theme_id)
+            if existing is None:
+                raise ValueError(f"theme not found: {theme_id}")
+            return _admin_metadata_dict(existing)
+
+        updated = await self._marketplace_repo.update_theme(theme_id, patch)
+        if updated is None:
+            raise ValueError(f"theme not found: {theme_id}")
+        return _admin_metadata_dict(updated)
+
     async def review_version(
         self,
         reviewer_id: UUID,
@@ -441,9 +499,10 @@ class MarketplaceService:
         page: int = 1,
         per_page: int = 20,
         category: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         themes, total = await self._marketplace_repo.list_published(
-            page, per_page, category
+            page, per_page, category, user_id=user_id
         )
         return {
             "themes": [self._theme_dict(t, public=True) for t in themes],
@@ -459,6 +518,9 @@ class MarketplaceService:
         latest = await self._marketplace_repo.get_latest_published_version(theme.id)
         return {
             **self._theme_dict(theme, public=True),
+            # File 04 §8 — MarketplaceThemeDetail extras over the card
+            "author_url": getattr(theme, "author_url", None),
+            "highlights": _highlights_to_dicts(getattr(theme, "highlights", []) or []),
             "latest_version": (
                 {
                     "id": str(latest.id),
@@ -623,12 +685,34 @@ class MarketplaceService:
     ) -> dict[str, Any]:
         """Activate an installed marketplace theme.
 
-        Side effects:
-        - Marks the install row active (deactivating any other marketplace
-          install for the store).
-        - Initializes the store's V3 draft from the version's presets so the
-          editor has something sensible to render on first open.
-        - Triggers Next.js cache invalidation (non-fatal).
+        Phase 3a closes gap #2 — this used to flip
+        ``marketplace_theme_installations.is_active`` only, leaving
+        ``store_themes`` pointing at the previous theme. The customizer
+        reads ``store_themes`` so merchants would see the OLD theme
+        after clicking Activate. The fix is to delegate the swap to the
+        shared ``ThemeActivationService``, which mutates both tables
+        in the right order with a snapshot in between.
+
+        The marketplace catalog table (``marketplace_themes``) is
+        separate from the runtime ``themes`` table (the customizer's
+        source of truth), so this method also has to bridge the two:
+        get-or-create a ``themes`` row by slug and a ``theme_versions``
+        row matching the marketplace version's bundle. Without that
+        bridge, ``store_themes.theme_id`` has nowhere valid to point.
+
+        Side effects after this method:
+        - ``store_themes.is_active=True`` on a row whose ``theme_id``
+          matches the runtime theme bridged from this marketplace theme.
+        - ``marketplace_theme_installations.is_active=True`` on the
+          named install (and ``False`` on every other marketplace install
+          for the store).
+        - A ``store_theme_snapshots`` row with
+          ``reason="marketplace-activate"`` when a prior different theme
+          was active.
+        - ``stores.settings.customization`` stamped with ``is_published``
+          + ``last_published_at`` so the merchant-hub Themes page renders
+          a fresh "Published · today" badge.
+        - Next.js storefront cache invalidation (non-fatal).
         """
         installation = await self._marketplace_repo.get_installation(
             store_id, marketplace_theme_id
@@ -644,54 +728,223 @@ class MarketplaceService:
                 "installed version is missing a bundle — reinstall the theme"
             )
 
-        await self._marketplace_repo.set_active_installation(
-            store_id, marketplace_theme_id
+        # The activate path needs the runtime theme / version repos to
+        # bridge marketplace_themes → themes. Callers that build this
+        # service without them (e.g. catalog-only routes) can't activate.
+        if (
+            self._store_theme_repo is None
+            or self._theme_repo is None
+            or self._version_repo is None
+        ):
+            raise ValueError(
+                "MarketplaceService.activate_theme requires store_theme_repo, "
+                "theme_repo, and version_repo to be wired (see "
+                "marketplace/store_install.py _svc dependency)."
+            )
+
+        # Get the catalog row so we have the slug + display name to
+        # mirror onto the runtime theme entity.
+        marketplace_theme = await self._marketplace_repo.get_theme_by_id(
+            marketplace_theme_id
+        )
+        if marketplace_theme is None:
+            raise ValueError("marketplace theme not found")
+
+        # 1) Bridge to the runtime themes table. The slug is the natural
+        #    bridging key — dev-mode also uses it (manifest.id ==
+        #    marketplace_theme.slug for any theme that was ever connected
+        #    locally). When this is the merchant's first time activating
+        #    via the marketplace, we create the row fresh.
+        #
+        # The runtime Theme entity has stricter types than the
+        # marketplace catalog version (author is a required str with
+        # default "NUMU"; section_schemas is dict|None). The
+        # marketplace version permits list-or-dict for section_schemas
+        # because Shopify ships them as arrays. Coerce list → {} so
+        # the runtime row stays dict-shaped; the editor reads the
+        # bundle's import-map for the canonical schemas anyway.
+        def _coerce_section_schemas(s):
+            if isinstance(s, dict):
+                return s
+            if isinstance(s, list):
+                # Shopify-style array of {type, name, settings, ...}
+                return {
+                    e.get("type", f"__noid_{i}"): e
+                    for i, e in enumerate(s)
+                    if isinstance(e, dict)
+                }
+            return {}
+
+        runtime_theme = await self._theme_repo.get_by_slug(marketplace_theme.slug)
+        if runtime_theme is None:
+            from uuid import uuid4 as _uuid4
+
+            from src.core.entities.theme import Theme, ThemeStatus, ThemeType
+
+            runtime_theme = Theme(
+                id=_uuid4(),
+                name=marketplace_theme.name,
+                slug=marketplace_theme.slug,
+                description=marketplace_theme.description,
+                author="Marketplace",
+                type=ThemeType.EXTERNAL,
+                status=ThemeStatus.PUBLISHED,
+                is_public=False,
+                settings_schema=(version.settings_schema or {}),
+                section_schemas=_coerce_section_schemas(version.section_schemas),
+                supported_features=marketplace_theme.supported_features or None,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+            runtime_theme = await self._theme_repo.create(runtime_theme)
+        else:
+            # Refresh schemas to the activated version's so the editor
+            # reflects the bundle the storefront will load. Marketplace
+            # themes can roll versions independently of the runtime row.
+            runtime_theme.settings_schema = version.settings_schema or {}
+            runtime_theme.section_schemas = _coerce_section_schemas(
+                version.section_schemas
+            )
+            runtime_theme.name = marketplace_theme.name
+            runtime_theme.description = marketplace_theme.description
+            runtime_theme = await self._theme_repo.update(runtime_theme)
+
+        # 2) Mint a runtime theme_versions row for the marketplace bundle.
+        #    Fresh row each activate so a re-activate after a publish
+        #    serves the latest bundle without stale caching.
+        from uuid import uuid4 as _uuid4_v
+
+        from src.core.entities.theme import ThemeVersion as _RuntimeThemeVersion
+
+        runtime_version = _RuntimeThemeVersion(
+            id=_uuid4_v(),
+            theme_id=runtime_theme.id,
+            version=f"{version.version_string}+mp.{int(datetime.now(UTC).timestamp())}",
+            bundle_url=version.bundle_url,
+            css_url=version.css_url,
+            manifest={
+                "id": marketplace_theme.slug,
+                "name": marketplace_theme.name,
+                "version": version.version_string,
+                "presets": version.presets or {},
+            },
+            is_latest=True,
+            checksum=version.checksum or "marketplace",
+            published_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        runtime_version = await self._version_repo.create(runtime_version)
+
+        # 3) Customization preservation logic (preserved from the
+        #    pre-Phase-3a behaviour): if the store had a published V3
+        #    customization for the SAME marketplace theme previously,
+        #    reuse it. Otherwise seed from the version's presets so the
+        #    editor opens to the developer's canonical layout.
+        existing_active = await self._store_theme_repo.get_active_for_store(store_id)
+        preserved: dict | None = None
+
+        # Only preserve a prior customization if the activated version can
+        # actually render it — i.e. at least one of its section types is in the
+        # version's section_schemas. A mismatched customization (theme switch,
+        # or generic sections left by legacy seeding/snapshot restore) would
+        # otherwise open the editor to un-editable sections that don't match
+        # the bundle, so we reseed from presets instead. When the version ships
+        # no section_schemas we can't judge → preserve (avoid a false reseed
+        # that could drop real merchant edits; the activation service also
+        # snapshots before any overwrite).
+        _known_types = set(_coerce_section_schemas(version.section_schemas).keys())
+
+        def _customization_is_renderable(cust: dict) -> bool:
+            if not _known_types:
+                return True
+            for tpl in (cust.get("templates") or {}).values():
+                if not isinstance(tpl, dict):
+                    continue
+                for sec in (tpl.get("sections") or {}).values():
+                    if isinstance(sec, dict) and sec.get("type") in _known_types:
+                        return True
+            return False
+
+        if (
+            existing_active is not None
+            and existing_active.theme_id == runtime_theme.id
+            and isinstance(existing_active.customization_v3, dict)
+            and existing_active.customization_v3.get("schema_version") == 3
+            and existing_active.customization_v3.get("templates")
+            and _customization_is_renderable(existing_active.customization_v3)
+        ):
+            preserved = existing_active.customization_v3
+
+        if preserved is not None:
+            seed = preserved
+            logger.info(
+                "marketplace_activate_restored_customization",
+                extra={
+                    "store_id": str(store_id),
+                    "marketplace_theme_id": str(marketplace_theme_id),
+                },
+            )
+        else:
+            # The ExternalThemeMetadata allowlist refuses
+            # ``http://localhost:5173/...`` in production mode (correct
+            # — prod bundles must come from the configured CDN). Locally,
+            # bon-younes ships from the dev vite server, so seeding a
+            # brand-new store would explode on the strict allowlist.
+            # Mirror the storefront's env convention: dev mode for
+            # anything below production.
+            from src.config import settings as _api_settings
+
+            v3 = generate_initial_v3_customization(
+                theme_id=str(runtime_theme.id),
+                presets=version.presets,
+                bundle_url=version.bundle_url,
+                css_url=version.css_url,
+                settings_schema=version.settings_schema,
+                section_schemas=version.section_schemas,
+                mode=(
+                    "production"
+                    if _api_settings.environment == "production"
+                    else "development"
+                ),
+            )
+            seed = v3.model_dump()
+
+        # 4) Look up the tenant_id off the store. The activation service
+        #    stamps it on snapshot and any newly-created store_themes row.
+        if self._store_repo is None:
+            raise ValueError(
+                "MarketplaceService.activate_theme requires store_repo (for tenant_id)"
+            )
+        store = await self._store_repo.get_by_id(store_id)
+        if store is None:
+            raise ValueError("store not found")
+
+        # 5) Hand off the swap to the shared activation service. It
+        #    snapshots → deactivate_all → upsert_active → mirrors
+        #    is_active to marketplace_theme_installations.
+        from src.application.services.theme_activation_service import (
+            ThemeActivationService,
+        )
+        from src.infrastructure.repositories.store_theme_snapshot_repository import (
+            StoreThemeSnapshotRepository,
         )
 
-        # Seed the V3 draft from the version's presets so the editor has
-        # the developer's canonical starting layout. This is the BYOT
-        # equivalent of activate_theme on a built-in theme.
-        #
-        # Customization preservation on reinstall: if this store had a
-        # previously-published customization for this theme, prefer that
-        # over the fresh preset. Merchants who experiment with multiple
-        # themes shouldn't lose their work just because they toggled
-        # to a different theme briefly. We use the published payload
-        # (customization_v3) as the new draft so the merchant resumes
-        # from their last good state; fresh-preset is only used when
-        # there's no prior customization to restore.
-        if self._store_theme_repo is not None:
-            store_theme = await self._store_theme_repo.get_active_for_store(store_id)
-            if store_theme is not None:
-                preserved = (
-                    store_theme.customization_v3
-                    if isinstance(store_theme.customization_v3, dict)
-                    and store_theme.customization_v3.get("schema_version") == 3
-                    and store_theme.customization_v3.get("templates")
-                    else None
-                )
-                if preserved:
-                    logger.info(
-                        "marketplace_activate_restored_customization",
-                        extra={
-                            "store_id": str(store_id),
-                            "marketplace_theme_id": str(marketplace_theme_id),
-                        },
-                    )
-                    store_theme.draft_customization_v3 = preserved
-                else:
-                    v3 = generate_initial_v3_customization(
-                        theme_id=str(marketplace_theme_id),
-                        presets=version.presets,
-                        bundle_url=version.bundle_url,
-                        css_url=version.css_url,
-                        settings_schema=version.settings_schema,
-                        section_schemas=version.section_schemas,
-                        error_template_url=version.error_template_url,
-                        loading_template_url=version.loading_template_url,
-                    )
-                    store_theme.draft_customization_v3 = v3.model_dump()
-                await self._store_theme_repo.update(store_theme)
+        snapshot_repo = StoreThemeSnapshotRepository(self._store_theme_repo.session)
+        activation_svc = ThemeActivationService(
+            store_theme_repo=self._store_theme_repo,
+            snapshot_repo=snapshot_repo,
+            marketplace_repo=self._marketplace_repo,
+        )
+        await activation_svc.activate(
+            store_id=store_id,
+            tenant_id=store.tenant_id,
+            theme_id=runtime_theme.id,
+            theme_version_id=runtime_version.id,
+            reason="marketplace-activate",
+            marketplace_theme_id=marketplace_theme_id,
+            seed_customization_v3=seed,
+        )
 
         # Stamp `is_published=True` and `last_published_at=now` on the
         # store's V1 customization JSONB (`store.settings.customization`).
@@ -704,15 +957,12 @@ class MarketplaceService:
         # not wired by the calling code path).
         if self._store_repo is not None:
             try:
-                from datetime import UTC
-                from datetime import datetime as _dt
-
                 store = await self._store_repo.get_by_id(store_id)
                 if store is not None:
                     settings_blob = dict(store.settings or {})
                     cust = dict(settings_blob.get("customization") or {})
                     cust["is_published"] = True
-                    cust["last_published_at"] = _dt.now(UTC).isoformat()
+                    cust["last_published_at"] = datetime.now(UTC).isoformat()
                     settings_blob["customization"] = cust
                     store.settings = settings_blob
                     await self._store_repo.update(store)
@@ -891,6 +1141,14 @@ class MarketplaceService:
             "install_count": t.install_count,
             "average_rating": t.average_rating,
             "review_count": t.review_count,
+            # File 04 §8 — extend MarketplaceThemeCard/Detail with the
+            # admin-curated metadata fields. Catalog list responses
+            # surface ``author_name``, ``screenshots``, ``feature_tags``;
+            # the detail endpoint additionally surfaces ``author_url``
+            # and ``highlights`` (see get_theme_detail below).
+            "author_name": getattr(t, "author_name", None),
+            "screenshots": _screenshots_to_dicts(getattr(t, "screenshots", []) or []),
+            "feature_tags": list(getattr(t, "feature_tags", []) or []),
         }
         if not public:
             base["developer_id"] = str(t.developer_id)
@@ -913,3 +1171,75 @@ class MarketplaceService:
                 "marketplace_revalidate_failed",
                 extra={"store_id": str(store_id), "error": str(exc)},
             )
+
+
+def _admin_theme_dict(t: Any) -> dict[str, Any]:
+    """Admin-facing serialisation. Includes the ``flags`` dict (the
+    public catalog hides it). Stays as a free function so the
+    MarketplaceService method can stay short."""
+    return {
+        "id": str(t.id),
+        "slug": t.slug,
+        "name": t.name,
+        "status": (t.status.value if hasattr(t.status, "value") else str(t.status)),
+        "price_cents": t.price_cents,
+        "flags": dict(t.flags or {}),
+        "install_count": t.install_count,
+        "created_at": (t.created_at.isoformat() if t.created_at else ""),
+    }
+
+
+def _screenshots_to_dicts(items: list[Any]) -> list[dict[str, Any]]:
+    """Coerce ``Screenshot`` entities (or already-dict screenshots) into
+    the plain JSON shape Pydantic models expect."""
+    out: list[dict[str, Any]] = []
+    for s in items:
+        if hasattr(s, "model_dump"):
+            out.append(s.model_dump())
+        elif isinstance(s, dict):
+            out.append(s)
+    return out
+
+
+def _highlights_to_dicts(items: list[Any]) -> list[dict[str, Any]]:
+    """Same shape coercion as ``_screenshots_to_dicts`` for highlights."""
+    out: list[dict[str, Any]] = []
+    for h in items:
+        if hasattr(h, "model_dump"):
+            out.append(h.model_dump())
+        elif isinstance(h, dict):
+            out.append(h)
+    return out
+
+
+def _admin_metadata_dict(t: Any) -> dict[str, Any]:
+    """Admin metadata serialisation — response body for
+    PATCH /marketplace/admin/themes/{id}.
+
+    Same shape as ``AdminThemeMetadataResponse`` in the schemas module.
+    Stays here (alongside ``_admin_theme_dict``) so MarketplaceService
+    doesn't have to import the API schema layer.
+    """
+    return {
+        "id": str(t.id),
+        "slug": t.slug,
+        "name": t.name,
+        "status": (t.status.value if hasattr(t.status, "value") else str(t.status)),
+        "price_cents": t.price_cents,
+        "currency": t.currency,
+        "description": t.description,
+        "short_description": t.short_description,
+        "thumbnail_url": t.thumbnail_url,
+        "demo_store_url": t.demo_store_url,
+        "author_name": getattr(t, "author_name", None),
+        "author_url": getattr(t, "author_url", None),
+        "screenshots": _screenshots_to_dicts(getattr(t, "screenshots", []) or []),
+        "highlights": _highlights_to_dicts(getattr(t, "highlights", []) or []),
+        "feature_tags": list(getattr(t, "feature_tags", []) or []),
+        "category": t.category,
+        "tags": list(t.tags or []),
+        "supported_languages": list(t.supported_languages or []),
+        "flags": dict(t.flags or {}),
+        "install_count": t.install_count,
+        "created_at": (t.created_at.isoformat() if t.created_at else ""),
+    }

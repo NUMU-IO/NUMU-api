@@ -75,6 +75,22 @@ def _validate_marketplace_image_url(value: str | None) -> str | None:
 # ── Common ────────────────────────────────────────────────────────────────────
 
 
+class ScreenshotOut(BaseModel):
+    """One screenshot entry surfaced on the marketplace card / detail page."""
+
+    url: str
+    alt: str | None = None
+    viewport: str = "desktop"  # "mobile" | "desktop"
+
+
+class HighlightOut(BaseModel):
+    """One Shopify-style highlight tile."""
+
+    title: str
+    body: str
+    video_url: str | None = None
+
+
 class MarketplaceThemeOut(BaseModel):
     id: str
     name: str
@@ -95,6 +111,12 @@ class MarketplaceThemeOut(BaseModel):
     average_rating: float = 0.0
     review_count: int = 0
     developer_id: str | None = None  # Hidden from public catalog
+    # Admin-curated metadata (Session A 2026-05-27, file 04 §6 + §8).
+    # Surfaced on both catalog cards (author_name, screenshots, feature_tags)
+    # and the detail page (author_url, highlights — see ThemeDetailResponse).
+    author_name: str | None = None
+    screenshots: list[ScreenshotOut] = Field(default_factory=list)
+    feature_tags: list[str] = Field(default_factory=list)
 
 
 # ── Catalog ───────────────────────────────────────────────────────────────────
@@ -108,7 +130,12 @@ class CatalogListResponse(BaseModel):
 
 
 class ThemeDetailResponse(MarketplaceThemeOut):
+    """File 04 §8 — MarketplaceThemeDetail. Inherits the card fields and
+    adds the detail-page extras (highlights, author_url, latest_version)."""
+
     latest_version: dict[str, Any] | None = None
+    author_url: str | None = None
+    highlights: list[HighlightOut] = Field(default_factory=list)
 
 
 # ── Developer ─────────────────────────────────────────────────────────────────
@@ -293,6 +320,128 @@ class ReviewDecisionRequest(BaseModel):
 class ReviewDecisionResponse(BaseModel):
     version_id: str
     status: str
+
+
+# ── Admin flag management (Phase 1 soft-migration rollout) ────────────────────
+
+
+class ThemeFlagsPayload(BaseModel):
+    """Per-theme feature flags. All fields optional — PATCH semantics:
+    only the keys present in the request body are updated."""
+
+    catalog_visible: bool | None = None
+    installable: bool | None = None
+    activatable: bool | None = None
+    visible_to_user_ids: list[str] | None = None
+    visible_to_pct: int | None = None  # 0-100; validated server-side
+
+
+class AdminThemeListItem(BaseModel):
+    """One row in the admin's flag-management table."""
+
+    id: str
+    slug: str
+    name: str
+    status: str
+    price_cents: int
+    flags: dict
+    install_count: int
+    created_at: str
+
+
+class AdminThemeListResponse(BaseModel):
+    themes: list[AdminThemeListItem]
+
+
+# ── Admin metadata editor (Session A 2026-05-27, file 04 §6.1) ───────────────
+
+
+_ALLOWED_CURRENCIES = {"EGP", "USD", "AED", "SAR", "EUR", "GBP"}
+
+
+class AdminThemeMetadataPatch(BaseModel):
+    """PATCH body for /api/v1/marketplace/admin/themes/{id}.
+
+    Every field is optional. Only fields explicitly present in the
+    request body are written — omitting a field preserves the current
+    value (true PATCH semantics).
+
+    Validation:
+      * ``price_cents`` must be >= 0 (no negative prices).
+      * ``currency`` must be in the ``_ALLOWED_CURRENCIES`` whitelist
+        (matches the storefront's accepted currency list).
+      * ``thumbnail_url``/``demo_store_url`` go through the same
+        marketplace image-host allowlist as developer-side mutations,
+        so an admin can't accidentally point a listing at
+        ``attacker.example/img.png``.
+
+    Screenshots, highlights, and feature_tags are arbitrary payloads —
+    we don't enforce a max length here because (a) the admin is
+    trusted, (b) the frontend caps these visually anyway.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    short_description: str | None = Field(default=None, max_length=500)
+    price_cents: int | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=10)
+    thumbnail_url: str | None = None
+    demo_store_url: str | None = None
+    author_name: str | None = Field(default=None, max_length=128)
+    author_url: str | None = Field(default=None, max_length=512)
+    screenshots: list[ScreenshotOut] | None = None
+    highlights: list[HighlightOut] | None = None
+    feature_tags: list[str] | None = None
+    category: str | None = Field(default=None, max_length=100)
+    tags: list[str] | None = None
+    supported_languages: list[str] | None = None
+
+    _check_thumbnail = field_validator("thumbnail_url")(
+        lambda cls, v: _validate_marketplace_image_url(v)  # type: ignore[misc]
+    )
+    _check_demo = field_validator("demo_store_url")(
+        lambda cls, v: _validate_marketplace_image_url(v)  # type: ignore[misc]
+    )
+
+    @field_validator("currency")
+    @classmethod
+    def _check_currency(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v.upper() not in _ALLOWED_CURRENCIES:
+            raise ValueError(
+                f"currency must be one of {sorted(_ALLOWED_CURRENCIES)}, got {v!r}"
+            )
+        return v.upper()
+
+
+class AdminThemeMetadataResponse(BaseModel):
+    """PATCH response — echoes the updated row in admin-list shape plus
+    the freshly-changed metadata fields so the UI can refresh the row in
+    place without a follow-up GET.
+    """
+
+    id: str
+    slug: str
+    name: str
+    status: str
+    price_cents: int
+    currency: str
+    description: str | None = None
+    short_description: str | None = None
+    thumbnail_url: str | None = None
+    demo_store_url: str | None = None
+    author_name: str | None = None
+    author_url: str | None = None
+    screenshots: list[ScreenshotOut] = Field(default_factory=list)
+    highlights: list[HighlightOut] = Field(default_factory=list)
+    feature_tags: list[str] = Field(default_factory=list)
+    category: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    supported_languages: list[str] = Field(default_factory=list)
+    flags: dict[str, Any] = Field(default_factory=dict)
+    install_count: int = 0
+    created_at: str
 
 
 # ── Store install ─────────────────────────────────────────────────────────────

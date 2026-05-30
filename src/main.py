@@ -360,8 +360,11 @@ def create_app() -> FastAPI:
     # and resolve to the tenant store's /track/<id> page (backend-030).
     app.include_router(order_redirect_router)
 
-    # Serve local uploads in development (when R2 is not configured)
-    if settings.debug and not settings.r2_account_id:
+    # Serve local uploads in development (when object storage is not
+    # configured). Gated on the same ``object_storage_configured`` signal as
+    # the storage factory so the mount exists exactly when LocalStorageService
+    # is in use.
+    if settings.debug and not settings.object_storage_configured:
         from pathlib import Path
 
         from starlette.staticfiles import StaticFiles
