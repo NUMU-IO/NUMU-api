@@ -37,10 +37,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 
-from src.api.dependencies import get_current_user
+from src.api.dependencies.auth import get_current_user_id
 from src.config import settings
 from src.config.logging_config import get_logger
-from src.core.entities.user import User
 from src.infrastructure.external_services.meta.oauth_client import (
     META_OAUTH_SCOPES,
     MetaOAuthClient,
@@ -89,7 +88,7 @@ def _client_or_503() -> MetaOAuthClient:
 async def meta_oauth_start(
     store_id: Annotated[UUID, Query(description="Store the connection is for")],
     request: Request,
-    current_user: Annotated[User, Depends(get_current_user)],  # noqa: ARG001
+    _user_id: Annotated[UUID, Depends(get_current_user_id)],
 ):
     """Redirect the merchant to Meta's consent page.
 
