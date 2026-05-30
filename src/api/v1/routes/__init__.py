@@ -56,6 +56,7 @@ from src.api.v1.routes.marketplace import (
     marketplace_reviews_router,
     marketplace_store_install_router,
 )
+from src.api.v1.routes.oauth.meta import router as meta_oauth_router
 
 # Omnichannel routes
 from src.api.v1.routes.omnichannel import (
@@ -229,6 +230,15 @@ api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores")
+
+# Meta (Facebook/Instagram) OAuth for the business scopes — ads_management,
+# business_management, catalog_management, pages_show_list, instagram_basic.
+# /oauth/meta/start (auth'd) redirects to Meta consent; /oauth/meta/callback
+# completes the token exchange. Requires META_APP_ID + META_APP_SECRET and
+# PUBLIC_API_URL (the callback host) to be configured.
+api_router.include_router(
+    meta_oauth_router, prefix="/oauth/meta", tags=["OAuth - Meta"]
+)
 
 # Omnichannel - inbox (channels, threads, messages under store scope)
 api_router.include_router(
