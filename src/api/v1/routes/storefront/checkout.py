@@ -1946,6 +1946,14 @@ async def checkout(
                     store_name=store.name,
                     language=store.default_language,
                     tracking_url=_wa_tracking_url,
+                    # Required for the order_confirmation_v2 template's
+                    # "Manage order" URL button — the redirector at
+                    # numueg.app/o/<id> expects the order UUID. Without
+                    # this kwarg, the messaging service falls back to
+                    # ``order_number`` (e.g. "ORD-000017"), which the
+                    # redirector can't resolve → customer lands on the
+                    # apex marketing page.
+                    order_id=str(created_order.id),
                 )
     except Exception as e:
         logger.warning(f"Failed to dispatch WhatsApp notification: {e}")

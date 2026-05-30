@@ -414,6 +414,21 @@ class WhatsAppMessagingService(IMessagingService):
         # callers that haven't migrated yet — v2 template doesn't use
         # them. Avoid F841 by acknowledging the parameters.
         _ = (store_name, tracking_url)
+        # Reject the silent fallback path that used to substitute
+        # ``order_number`` (display id like "ORD-000017") into the
+        # Manage-order URL button. The redirector at numueg.app/o/<id>
+        # only resolves UUIDs (or the self-describing <subdomain>/<uuid>
+        # format) — order_number routed there always lands on the apex
+        # marketing site. Loudly log + skip the button substitution so
+        # the issue is visible in Sentry instead of a confused customer.
+        if not order_id:
+            logger.warning(
+                "whatsapp_order_confirmation_missing_order_id",
+                extra={
+                    "order_number": order_number,
+                    "phone_tail": recipient.phone[-4:] if recipient.phone else "",
+                },
+            )
         content = MessageContent(
             type=MessageType.ORDER_CONFIRMATION,
             recipient=recipient,
@@ -421,6 +436,12 @@ class WhatsAppMessagingService(IMessagingService):
                 "customer_name": recipient.name or "Customer",
                 "order_number": order_number,
                 "total": total,
+                # Pass the UUID when supplied; when missing, fall back
+                # to the order_number so the URL still renders something
+                # (Meta requires every declared button param to be set).
+                # The redirector will detect non-UUID values and try
+                # an order_number lookup as a last-resort match — see
+                # routes/order_redirect.py.
                 "order_id": str(order_id or order_number),
             },
         )

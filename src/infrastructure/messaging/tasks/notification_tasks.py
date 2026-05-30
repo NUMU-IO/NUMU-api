@@ -504,17 +504,24 @@ def send_whatsapp_order_confirmation_task(
     store_name: str,
     language: str = "ar",
     tracking_url: str | None = None,
+    order_id: str | None = None,
 ):
     """Send order confirmation via WhatsApp asynchronously.
 
     Args:
         phone: Customer phone number.
         customer_name: Customer display name.
-        order_number: Order reference number.
+        order_number: Order reference number (body).
         total: Formatted total amount (e.g. "EGP 250.00").
         store_name: Store name.
         language: Preferred language code.
-        tracking_url: Persistent tracking URL to embed in the message.
+        tracking_url: Persistent tracking URL (legacy — unused by v2).
+        order_id: UUID for the Manage-order URL button substitution.
+            When omitted, the messaging service falls back to
+            ``order_number`` which produces ``numueg.app/o/ORD-NNN``
+            URLs that the redirector can't resolve (it expects a
+            UUID). Always pass this from callers — keyword-only so
+            older callers don't silently regress to the bad fallback.
     """
     from src.core.interfaces.services.messaging_service import MessageRecipient
     from src.infrastructure.external_services.whatsapp.messaging_service import (
@@ -531,6 +538,7 @@ def send_whatsapp_order_confirmation_task(
                 total,
                 store_name,
                 tracking_url=tracking_url,
+                order_id=order_id,
             )
         )
         logger.info(
