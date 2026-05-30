@@ -344,6 +344,20 @@ async def get_status(
 # ── Notification Settings ──
 
 
+# Canonical default object — must stay in sync with the seed in
+# create_store.py and the backfill migration
+# (20260729_010000_backfill_wa_notif_defaults.py). The handler reads
+# the same keys via _resolve_send_context, so any drift between the
+# three would re-introduce Gap B (toggle-key mismatch).
+_NOTIFICATION_DEFAULTS = {
+    "order_confirmation": True,
+    "payment_received": True,
+    "shipping_update": True,
+    "delivery_confirmation": True,
+    "abandoned_cart": False,
+}
+
+
 @router.get(
     "/notifications",
     response_model=SuccessResponse[NotificationSettings],
@@ -353,28 +367,45 @@ async def get_status(
 async def get_notification_settings(
     store: Annotated[Store, Depends(get_current_store)],
 ):
-    """Get per-notification-type toggles."""
+    """Get per-notification-type toggles.
+
+    Reads from ``store.settings.whatsapp_notifications`` — the same path
+    the backend order-lifecycle handlers consult. The legacy path
+    ``store.settings.whatsapp.notification_toggles`` is no longer
+    read or written; backfill migration 20260729_010000 seeded the
+    canonical path for existing stores, and create_store.py seeds it
+    for new stores.
+    """
     store_settings = store.settings or {}
-    wa = store_settings.get("whatsapp", {})
-    notifs = wa.get("notification_toggles", {})
+    notifs = store_settings.get("whatsapp_notifications", {}) or {}
 
     return SuccessResponse(
         data=NotificationSettings(
             order_confirmation=NotificationToggle(
-                enabled=notifs.get("order_confirmation", True)
-            ),
-            order_shipped=NotificationToggle(enabled=notifs.get("order_shipped", True)),
-            out_for_delivery=NotificationToggle(
-                enabled=notifs.get("out_for_delivery", False)
-            ),
-            order_delivered=NotificationToggle(
-                enabled=notifs.get("order_delivered", True)
+                enabled=notifs.get(
+                    "order_confirmation", _NOTIFICATION_DEFAULTS["order_confirmation"]
+                )
             ),
             payment_received=NotificationToggle(
-                enabled=notifs.get("payment_received", False)
+                enabled=notifs.get(
+                    "payment_received", _NOTIFICATION_DEFAULTS["payment_received"]
+                )
+            ),
+            shipping_update=NotificationToggle(
+                enabled=notifs.get(
+                    "shipping_update", _NOTIFICATION_DEFAULTS["shipping_update"]
+                )
+            ),
+            delivery_confirmation=NotificationToggle(
+                enabled=notifs.get(
+                    "delivery_confirmation",
+                    _NOTIFICATION_DEFAULTS["delivery_confirmation"],
+                )
             ),
             abandoned_cart=NotificationToggle(
-                enabled=notifs.get("abandoned_cart", False)
+                enabled=notifs.get(
+                    "abandoned_cart", _NOTIFICATION_DEFAULTS["abandoned_cart"]
+                )
             ),
         ),
         message="Notification settings retrieved",
@@ -392,17 +423,20 @@ async def update_notification_settings(
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Toggle individual notification types on/off."""
+    """Toggle individual notification types on/off.
+
+    Writes to ``store.settings.whatsapp_notifications.{key}`` — the same
+    path the backend handlers read at send-time. Partial update: only
+    keys present (non-None) in the request body are written.
+    """
     store_settings = store.settings or {}
-    wa = store_settings.setdefault("whatsapp", {})
-    toggles = wa.setdefault("notification_toggles", {})
+    toggles = store_settings.setdefault("whatsapp_notifications", {})
 
     for field in (
         "order_confirmation",
-        "order_shipped",
-        "out_for_delivery",
-        "order_delivered",
         "payment_received",
+        "shipping_update",
+        "delivery_confirmation",
         "abandoned_cart",
     ):
         val = getattr(request, field, None)

@@ -37,68 +37,180 @@ logger = get_logger(__name__)
 
 _WHATSAPP_STATUSES = {"shipped", "delivered"}
 
+# Map order status → the canonical whatsapp_notifications toggle key the
+# merchant sees in the dashboard. Used as the lookup into
+# store.settings.whatsapp_notifications inside _resolve_send_context.
 _WA_PREF_KEYS = {
     "shipped": "shipping_update",
     "delivered": "delivery_confirmation",
 }
 
+# Map order status → the seeded DB template name (the same name Meta has
+# approved). Used as the lookup into whatsapp_templates for the
+# send-guard's APPROVED check.
+_WA_TEMPLATE_NAMES = {
+    "shipped": "order_shipped_v2",
+    "delivered": "order_delivered",
+}
+
+
+async def _persist_message_log(
+    session: "AsyncSession",
+    *,
+    tenant_id: UUID,
+    store_id: UUID,
+    phone: str,
+    template_name: str,
+    message_id: str | None,
+    status_str: str,
+    metadata: dict,
+) -> None:
+    """Write a row to ``message_logs`` after a successful template send.
+
+    This is the other half of the idempotency contract: ``_resolve_send_context``
+    scans recent rows for a matching ``(template_name, metadata.order_id,
+    metadata.event_tag)`` tuple to detect replays. Without this write the
+    scan never finds anything and replays send duplicate templates.
+
+    Failures here are swallowed (logged) — message_log is an audit trail,
+    not part of the send-success contract. The worst case is one extra
+    send on the next event replay; that's exactly what we're already
+    fixing, so don't make it worse by raising.
+    """
+    if not message_id:
+        # Send succeeded but Meta didn't return an id (rare). Skip the
+        # log — without an id the row violates a NOT NULL constraint.
+        return
+    try:
+        from src.core.entities.message_log import (
+            MessageDirection,
+            MessageLog,
+            MessageStatus,
+        )
+        from src.infrastructure.repositories.message_log_repository import (
+            MessageLogRepository,
+        )
+
+        try:
+            status_enum = MessageStatus(status_str)
+        except (ValueError, KeyError):
+            status_enum = MessageStatus.SENT
+
+        repo = MessageLogRepository(session)
+        await repo.create(
+            MessageLog(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                phone=phone,
+                metadata=metadata,
+                message_id=message_id,
+                direction=MessageDirection.OUTBOUND,
+                template_name=template_name,
+                status=status_enum,
+            )
+        )
+        await session.commit()
+    except Exception:
+        logger.exception(
+            "whatsapp_message_log_persist_failed",
+            store_id=str(store_id),
+            template_name=template_name,
+            message_id=message_id,
+        )
+
 
 async def handle_whatsapp_notification(event: OrderStatusChangedEvent) -> None:
-    """Send WhatsApp notification for shipped/delivered status changes."""
+    """Send WhatsApp notification for shipped/delivered status changes.
+
+    Routes through ``_resolve_send_context`` + the central send-guard so
+    merchant-side toggles (``store.settings.whatsapp_notifications.{shipping_update,
+    delivery_confirmation}``), customer opt-outs, template-approval status,
+    and message_log idempotency all apply consistently with the
+    order_created / order_paid handlers.
+    """
     if event.new_status not in _WHATSAPP_STATUSES:
         return
 
-    if not event.customer_phone:
-        return
-
-    pref_key = _WA_PREF_KEYS.get(event.new_status, event.new_status)
-    if not event.whatsapp_prefs.get(pref_key, True):
-        return
+    pref_key = _WA_PREF_KEYS[event.new_status]
+    template_name = _WA_TEMPLATE_NAMES[event.new_status]
+    event_tag = f"order_{event.new_status}"
 
     from src.core.interfaces.services.messaging_service import MessageRecipient
-    from src.infrastructure.external_services.whatsapp.messaging_service import (
-        WhatsAppMessagingService,
-    )
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.external_services.whatsapp import get_whatsapp_service
 
-    # Use per-store resolver when possible, fall back to global
-    service = WhatsAppMessagingService()
-    try:
-        from src.infrastructure.database.connection import AsyncSessionLocal
-        from src.infrastructure.external_services.whatsapp import get_whatsapp_service
-
-        async with AsyncSessionLocal() as session:
-            service = await get_whatsapp_service(event.store_id, session)
-    except Exception:
-        pass  # Fall back to global service
-    recipient = MessageRecipient(
-        phone=event.customer_phone,
-        name=event.customer_name or "",
-        language=event.language,
-    )
-
-    if event.new_status == "shipped":
-        result = await service.send_shipping_notification(
-            recipient,
-            event.order_number,
-            event.tracking_number or "N/A",
-            event.carrier or "Bosta",
+    async with AsyncSessionLocal() as session:
+        resolution = await _resolve_send_context(
+            session,
+            store_id=event.store_id,
+            customer_id=event.customer_id,
+            template_name=template_name,
+            idempotency_event_tag=event_tag,
+            order_id=event.order_id,
+            notification_pref_key=pref_key,
         )
-    elif event.new_status == "delivered":
-        result = await service.send_delivery_notification(
-            recipient,
-            event.order_number,
-            event.store_name,
-        )
-    else:
-        return
+        if resolution is None:
+            return
+        ctx, extras = resolution
 
-    logger.info(
-        "whatsapp_order_notification_sent",
-        order_id=str(event.order_id),
-        status=event.new_status,
-        phone=event.customer_phone,
-        success=result.success,
-    )
+        decision = check(ctx)
+        if not decision.allowed:
+            logger.info(
+                "whatsapp_order_status_skipped",
+                order_id=str(event.order_id),
+                store_id=str(event.store_id),
+                status=event.new_status,
+                reason=decision.reason.value if decision.reason else "unknown",
+            )
+            return
+
+        service = await get_whatsapp_service(
+            event.store_id, session, extras["tenant_id"]
+        )
+        recipient = MessageRecipient(
+            phone=extras["customer_phone"],
+            name=extras["customer_name"],
+            language=extras["language"],
+        )
+
+        if event.new_status == "shipped":
+            result = await service.send_shipping_notification(
+                recipient,
+                event.order_number,
+                event.tracking_number or "N/A",
+                event.carrier or "Bosta",
+                order_id=str(event.order_id),
+            )
+        else:  # delivered
+            result = await service.send_delivery_notification(
+                recipient,
+                event.order_number,
+                extras["store_name"],
+            )
+
+        if result.success:
+            await _persist_message_log(
+                session,
+                tenant_id=extras["tenant_id"],
+                store_id=event.store_id,
+                phone=extras["customer_phone"],
+                template_name=template_name,
+                message_id=result.message_id,
+                status_str=str(getattr(result.status, "value", result.status)),
+                metadata={
+                    "order_id": str(event.order_id),
+                    "event_tag": event_tag,
+                },
+            )
+
+        logger.info(
+            "whatsapp_order_notification_sent",
+            order_id=str(event.order_id),
+            status=event.new_status,
+            phone=extras["customer_phone"],
+            success=result.success,
+            message_id=result.message_id,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -338,6 +450,21 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             order_id=str(event.order_id),
         )
 
+        if result.success:
+            await _persist_message_log(
+                session,
+                tenant_id=extras["tenant_id"],
+                store_id=event.store_id,
+                phone=extras["customer_phone"],
+                template_name="order_confirmation_v2",
+                message_id=result.message_id,
+                status_str=str(getattr(result.status, "value", result.status)),
+                metadata={
+                    "order_id": str(event.order_id),
+                    "event_tag": "order_created",
+                },
+            )
+
         logger.info(
             "whatsapp_order_created_sent",
             order_id=str(event.order_id),
@@ -395,6 +522,21 @@ async def handle_order_paid_whatsapp(event: OrderPaidEvent) -> None:
             event.order_number,
             f"{event.total:.2f}",
         )
+
+        if result.success:
+            await _persist_message_log(
+                session,
+                tenant_id=extras["tenant_id"],
+                store_id=event.store_id,
+                phone=extras["customer_phone"],
+                template_name="payment_received",
+                message_id=result.message_id,
+                status_str=str(getattr(result.status, "value", result.status)),
+                metadata={
+                    "order_id": str(event.order_id),
+                    "event_tag": "order_paid",
+                },
+            )
 
         logger.info(
             "whatsapp_order_paid_sent",
