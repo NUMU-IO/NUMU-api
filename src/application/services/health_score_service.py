@@ -24,6 +24,14 @@ from src.infrastructure.database.models.tenant.shipment import ShipmentModel
 
 logger = logging.getLogger(__name__)
 
+# Rolling window the score is computed over. 90 days (rather than 30) because
+# COD delivery + return cycles in-market routinely run 2-4 weeks, so a 30-day
+# window rarely accumulates enough *settled* shipments/orders to clear the
+# minimum-sample gates below — leaving established but lower-frequency stores
+# with a permanently blank score. 90 days keeps the metric recent while giving
+# real stores enough settled data to produce a number.
+HEALTH_SCORE_WINDOW_DAYS = 90
+
 # Score weights (must sum to 1.0)
 WEIGHTS = {
     "delivery_success": 0.30,
@@ -189,10 +197,27 @@ def build_recommendations(
     return recs
 
 
+def build_empty_state_message(lang: str, days: int = HEALTH_SCORE_WINDOW_DAYS) -> str:
+    """Copy shown when there's no order/shipment data in the window.
+
+    Localised (ar default, en) and references the window length so the empty
+    state reads as intentional ("no recent activity") rather than broken.
+    """
+    if lang == "en":
+        return (
+            f"No orders in the last {days} days yet — your health score will "
+            "appear once you have recent activity."
+        )
+    return (
+        f"لا توجد طلبات خلال آخر {days} يومًا — ستظهر درجة صحة متجرك "
+        "بمجرد توفّر نشاط حديث."
+    )
+
+
 async def calculate_store_health_score(
     session: AsyncSession,
     store_id: UUID,
-    days: int = 30,
+    days: int = HEALTH_SCORE_WINDOW_DAYS,
     lang: str = "ar",
 ) -> dict:
     """Calculate health score for a store over the given period.
@@ -208,6 +233,8 @@ async def calculate_store_health_score(
             "recommendations": list[str],
             "orders_analyzed": int,
             "shipments_analyzed": int,
+            "window_days": int,  # rolling window the score covers
+            "empty_state_message": str | None,  # set when insufficient_data
             "calculated_at": str (ISO),
         }
     """
@@ -451,5 +478,9 @@ async def calculate_store_health_score(
         "recommendations": recommendations,
         "orders_analyzed": total_orders,
         "shipments_analyzed": total_shipments,
+        "window_days": days,
+        "empty_state_message": (
+            build_empty_state_message(lang, days) if insufficient_data else None
+        ),
         "calculated_at": now.isoformat(),
     }

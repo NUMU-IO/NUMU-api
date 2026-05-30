@@ -25,6 +25,8 @@ from src.api.dependencies.repositories import (
 )
 from src.api.responses import SuccessResponse
 from src.application.services.health_score_service import (
+    HEALTH_SCORE_WINDOW_DAYS,
+    build_empty_state_message,
     build_recommendations,
     calculate_store_health_score,
 )
@@ -670,6 +672,8 @@ class HealthScoreResponse(BaseModel):
     recommendations: list[str]
     orders_analyzed: int
     shipments_analyzed: int
+    window_days: int = HEALTH_SCORE_WINDOW_DAYS
+    empty_state_message: str | None = None
     calculated_at: str | None
 
 
@@ -723,13 +727,23 @@ async def get_health_score(
             # Backfill flags for caches written before this field existed.
             cached.setdefault("insufficient_data", False)
             cached.setdefault("insufficient_metrics", [])
-            # Regenerate recommendations in the requested language so the
-            # merchant sees Arabic/English consistently with their UI.
+            cached.setdefault("window_days", HEALTH_SCORE_WINDOW_DAYS)
+            # Regenerate recommendations + empty-state copy in the requested
+            # language so the merchant sees Arabic/English consistently with
+            # their UI (both are language-dependent, the rest is numeric).
             cached["recommendations"] = build_recommendations(
                 sub_scores=cached.get("sub_scores", {}),
                 final_score=cached.get("score") or 0,
                 insufficient_metrics=set(cached.get("insufficient_metrics", [])),
                 lang=normalized_lang,
+            )
+            cached["empty_state_message"] = (
+                build_empty_state_message(
+                    normalized_lang,
+                    cached.get("window_days", HEALTH_SCORE_WINDOW_DAYS),
+                )
+                if cached.get("insufficient_data")
+                else None
             )
             return SuccessResponse(
                 data=HealthScoreResponse(**cached),
@@ -741,7 +755,7 @@ async def get_health_score(
     score_data = await calculate_store_health_score(
         session=order_repo.session,
         store_id=store.id,
-        days=30,
+        days=HEALTH_SCORE_WINDOW_DAYS,
         lang=normalized_lang,
     )
 
