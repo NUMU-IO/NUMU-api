@@ -3,12 +3,53 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _user_passes_pct_gate(theme: Any, user_id: str) -> bool:
+    """Deterministic percentage rollout gate.
+
+    Hashes ``(user_id, theme_slug)`` to a stable 0-99 bucket. The user
+    sees the theme iff ``bucket < flags.visible_to_pct``. Same user
+    always lands on the same side — no flapping. Different users see
+    different themes at different rollout %s.
+
+    When ``visible_to_pct`` is absent or 0, returns True iff the theme
+    is already gated visible (catalog_visible or in user_ids allowlist),
+    which the SQL layer has already enforced.
+
+    The internal allowlist (``visible_to_user_ids``) bypasses this gate
+    entirely — internal users see everything regardless of rollout %.
+    """
+    flags = getattr(theme, "flags", None) or {}
+    if not isinstance(flags, dict):
+        return True
+
+    allowlist = flags.get("visible_to_user_ids") or []
+    if isinstance(allowlist, list) and user_id in allowlist:
+        return True
+
+    pct_raw = flags.get("visible_to_pct")
+    if not isinstance(pct_raw, int) or pct_raw <= 0:
+        # No percentage gate → respect SQL-side filter (catalog_visible
+        # was already true to reach this code path).
+        return True
+    if pct_raw >= 100:
+        return True
+
+    slug = getattr(theme, "slug", "") or ""
+    bucket_seed = f"{user_id}:{slug}".encode()
+    digest = hashlib.sha256(bucket_seed).digest()
+    bucket = int.from_bytes(digest[:4], "big") % 100
+    return bucket < pct_raw
+
 
 from src.core.entities.marketplace_theme import (
     MarketplacePurchaseStatus,
@@ -38,6 +79,10 @@ class MarketplaceRepository:
     # ── Mapping ───────────────────────────────────────────────────────────────
 
     def _theme_to_entity(self, m: MarketplaceThemeModel) -> MarketplaceTheme:
+        # ``screenshots``/``highlights``/``feature_tags`` were added in
+        # migration 20260527_020000. ``getattr(..., default)`` keeps the
+        # mapper happy for any pre-migration test fixtures still using
+        # an older ORM session — defensive but cheap.
         return MarketplaceTheme(
             id=m.id,
             created_at=m.created_at,
@@ -60,6 +105,12 @@ class MarketplaceRepository:
             install_count=m.install_count,
             average_rating=m.average_rating,
             review_count=m.review_count,
+            flags=copy.deepcopy(m.flags or {}),
+            author_name=getattr(m, "author_name", None),
+            author_url=getattr(m, "author_url", None),
+            screenshots=copy.deepcopy(getattr(m, "screenshots", []) or []),
+            highlights=copy.deepcopy(getattr(m, "highlights", []) or []),
+            feature_tags=copy.deepcopy(getattr(m, "feature_tags", []) or []),
         )
 
     def _version_to_entity(
@@ -122,11 +173,57 @@ class MarketplaceRepository:
         return self._theme_to_entity(m) if m else None
 
     async def list_published(
-        self, page: int = 1, per_page: int = 20, category: str | None = None
+        self,
+        page: int = 1,
+        per_page: int = 20,
+        category: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[list[MarketplaceTheme], int]:
+        """List themes visible in the public catalog.
+
+        Visibility is gated by ``marketplace_themes.flags`` JSONB on
+        top of ``status = 'published'``:
+
+          - ``flags.catalog_visible = true`` (mandatory for public listing)
+          - OR ``user_id`` is in ``flags.visible_to_user_ids`` (internal
+            allowlist, bypasses catalog_visible)
+          - AND a probabilistic visible_to_pct gate (deterministic hash
+            of user_id mod 100 < flags.visible_to_pct). When pct is
+            absent or 0, only catalog_visible governs visibility.
+
+        Themes with ``flags = {}`` (the default for newly-published
+        listings) are INVISIBLE until admin explicitly flips a flag.
+        This is the production safety guarantee for sawsaw + rabbit:
+        no theme appears in their dashboard until someone with
+        super-admin rights consciously enables it.
+        """
         base = select(MarketplaceThemeModel).where(
             MarketplaceThemeModel.status == MarketplaceThemeStatus.PUBLISHED.value
         )
+
+        # Visibility filter — either catalog_visible OR user is on the
+        # internal allowlist. SQL-side so we don't load 100s of rows
+        # only to discard them in Python.
+        #
+        # `@>` needs the right-hand side typed as JSONB. We can't pass a
+        # raw Python string — asyncpg wraps it in extra quotes when
+        # encoding, so the JSON ends up double-encoded. Use a Postgres
+        # literal cast (`'<json>'::jsonb`) via sa.text(); it stays
+        # inline in the SQL and avoids parameter binding altogether.
+        visibility_clauses = [
+            MarketplaceThemeModel.flags.op("@>")(
+                sa.text("'{\"catalog_visible\": true}'::jsonb")
+            ),
+        ]
+        if user_id:
+            # JSONB array element existence: `flags->'visible_to_user_ids' ? '<uid>'`.
+            # The ``?`` operator name collides with SQLAlchemy's positional
+            # parameter marker on some dialects, so we cast first then op.
+            visibility_clauses.append(
+                MarketplaceThemeModel.flags["visible_to_user_ids"].op("?")(user_id)
+            )
+        base = base.where(sa.or_(*visibility_clauses))
+
         if category:
             base = base.where(MarketplaceThemeModel.category == category)
 
@@ -134,12 +231,21 @@ class MarketplaceRepository:
         total = (await self._session.execute(count_q)).scalar() or 0
 
         q = (
-            base.order_by(desc(MarketplaceThemeModel.install_count))
+            base
+            .order_by(desc(MarketplaceThemeModel.install_count))
             .offset((page - 1) * per_page)
             .limit(per_page)
         )
         result = await self._session.execute(q)
-        return [self._theme_to_entity(m) for m in result.scalars().all()], total
+        themes = [self._theme_to_entity(m) for m in result.scalars().all()]
+
+        # Apply the percentage gate in Python — postgres-side stable
+        # hashing isn't worth the complexity for a 100-row catalog. The
+        # hash MUST be deterministic so a given (user, theme) pair
+        # always lands on the same side of the cutoff (no flapping).
+        if user_id:
+            themes = [t for t in themes if _user_passes_pct_gate(t, user_id)]
+        return themes, len(themes) if user_id else total
 
     async def list_by_developer(self, developer_id: UUID) -> list[MarketplaceTheme]:
         result = await self._session.execute(
@@ -148,6 +254,36 @@ class MarketplaceRepository:
             .order_by(desc(MarketplaceThemeModel.created_at))
         )
         return [self._theme_to_entity(m) for m in result.scalars().all()]
+
+    async def list_all(self) -> list[MarketplaceTheme]:
+        """Admin-only: every marketplace theme regardless of status or
+        flags. Used by the admin flag-management UI which must see
+        invisible themes to flip them visible."""
+        result = await self._session.execute(
+            select(MarketplaceThemeModel).order_by(
+                desc(MarketplaceThemeModel.created_at)
+            )
+        )
+        return [self._theme_to_entity(m) for m in result.scalars().all()]
+
+    async def merge_flags(self, theme_id: UUID, patch: dict) -> MarketplaceTheme | None:
+        """Shallow-merge ``patch`` into the row's ``flags`` JSONB. We
+        do the merge in Python and write the full dict back so we get
+        deterministic behavior for None-clearing semantics — Postgres'
+        `jsonb_set` would also work but only one key at a time and
+        doesn't remove keys without an extra `?` operator."""
+        result = await self._session.execute(
+            select(MarketplaceThemeModel).where(MarketplaceThemeModel.id == theme_id)
+        )
+        m = result.scalar_one_or_none()
+        if m is None:
+            return None
+        current = dict(m.flags or {})
+        current.update(patch)
+        m.flags = current
+        m.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return self._theme_to_entity(m)
 
     async def list_pending_review(self) -> list[MarketplaceThemeVersion]:
         result = await self._session.execute(
@@ -643,7 +779,8 @@ class MarketplaceRepository:
         total = (await self._session.execute(count_q)).scalar() or 0
 
         q = (
-            base.order_by(desc(MarketplaceThemeReviewModel.created_at))
+            base
+            .order_by(desc(MarketplaceThemeReviewModel.created_at))
             .offset((page - 1) * per_page)
             .limit(per_page)
         )

@@ -79,6 +79,27 @@ class Settings(BaseSettings):
     process_role: str = "api"
 
     @property
+    def object_storage_configured(self) -> bool:
+        """True when real S3/R2 object-storage credentials are present.
+
+        Single source of truth shared by the storage factory
+        (``_get_storage``) and the dev ``/uploads`` static mount, so the two
+        never disagree about whether object storage is available. When this is
+        ``False`` the app uses ``LocalStorageService`` and serves files from
+        the local ``/uploads`` mount. We require the full credential triple — a
+        partially-filled or placeholder config (e.g. a Docker-only ``minio``
+        endpoint with no real secret) counts as *not* configured, which is what
+        previously made the factory pick the S3 client and 500 on every upload.
+        """
+        has_s3 = bool(
+            self.s3_endpoint_url and self.s3_access_key_id and self.s3_secret_access_key
+        )
+        has_r2 = bool(
+            self.r2_account_id and self.r2_access_key_id and self.r2_secret_access_key
+        )
+        return has_s3 or has_r2
+
+    @property
     def database_url(self) -> str:
         """Construct async PostgreSQL connection URL."""
         return str(
@@ -145,7 +166,11 @@ class Settings(BaseSettings):
     jwt_private_key: str = Field(default="")
     jwt_public_key: str = Field(default="")
     jwt_algorithm: str = "RS256"
-    access_token_expire_minutes: int = 30
+    # Bumped 30 → 480 (8h) on 2026-05-26 for dev-friendly QA sessions —
+    # the CLI token in ~/.numurc had no refresh_token field so an
+    # expired access token forced the user to re-login mid-session.
+    # 8h covers a full working day; refresh tokens still rotate at 7d.
+    access_token_expire_minutes: int = 480
     refresh_token_expire_days: int = 7
 
     # Legacy HS256 secret (kept for backwards-compatible token verification during migration)
@@ -390,6 +415,14 @@ class Settings(BaseSettings):
     # Database Backups (uses R2 credentials for storage)
     r2_backup_bucket_name: str = "numu-db-backups"
     backup_retention_days: int = 30
+
+    # Local-dev asset base URL. When object storage is NOT configured (see
+    # ``object_storage_configured``), uploads are written to
+    # ``<project_root>/uploads`` and served by the FastAPI ``/uploads`` static
+    # mount. Must match the API's own public origin (the mount lives on the API
+    # app). Default targets the dev API port; override behind a reverse proxy
+    # or when the API runs on a non-default port.
+    local_storage_base_url: str = "http://localhost:8001/uploads"
 
     # Shippo
     shippo_api_key: str | None = None

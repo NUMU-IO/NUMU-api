@@ -34,6 +34,30 @@ class MarketplaceVersionStatus(StrEnum):
     PUBLISHED = "published"
 
 
+class Screenshot(BaseEntity):
+    """One frame in the theme-detail page's screenshot carousel.
+
+    ``viewport`` indicates whether the asset is sized for desktop or
+    mobile presentation — the UI fans them into separate carousels.
+    """
+
+    url: str
+    alt: str | None = None
+    viewport: str = "desktop"  # "mobile" | "desktop"
+
+
+class Highlight(BaseEntity):
+    """One tile in the Shopify-style "3 highlights" feature spotlight.
+
+    ``video_url`` is optional — if present, the tile plays an inline
+    loop instead of rendering plain copy.
+    """
+
+    title: str
+    body: str
+    video_url: str | None = None
+
+
 class MarketplaceTheme(BaseEntity):
     """A theme listing in the NUMU marketplace."""
 
@@ -55,6 +79,22 @@ class MarketplaceTheme(BaseEntity):
     install_count: int = 0
     average_rating: float = 0.0
     review_count: int = 0
+    # Per-theme feature flags for the production rollout pipeline. See
+    # alembic/versions/20260525_010000_add_marketplace_theme_flags.py
+    # and infrastructure.repositories.marketplace_repository._user_passes_pct_gate
+    # for the visibility logic. Default ``{}`` means "invisible in
+    # public catalog" — admin must explicitly flip catalog_visible.
+    flags: dict[str, Any] = Field(default_factory=dict)
+
+    # Admin-curated metadata (Session A 2026-05-27, file 04 §6). All
+    # optional; default lists are empty so themes created before this
+    # column existed still load cleanly. Populated via PATCH
+    # /marketplace/admin/themes/{id}.
+    author_name: str | None = Field(default=None, max_length=128)
+    author_url: str | None = Field(default=None, max_length=512)
+    screenshots: list[Screenshot] = Field(default_factory=list)
+    highlights: list[Highlight] = Field(default_factory=list)
+    feature_tags: list[str] = Field(default_factory=list)
 
 
 class MarketplaceThemeVersion(BaseEntity):

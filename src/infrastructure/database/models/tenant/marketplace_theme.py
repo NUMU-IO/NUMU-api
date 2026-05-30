@@ -71,6 +71,34 @@ class MarketplaceThemeModel(Base, UUIDMixin):
     review_count: Mapped[int] = mapped_column(
         Integer, server_default="0", nullable=False
     )
+    # Per-theme feature flags for the soft-migration rollout. Schema:
+    #   {
+    #     "catalog_visible": bool,
+    #     "installable": bool,
+    #     "activatable": bool,
+    #     "visible_to_user_ids": [str],
+    #     "visible_to_pct": int (0-100),
+    #   }
+    # Default ``{}`` ⇒ theme is INVISIBLE in the public catalog. Themes
+    # only become visible after explicit admin flip. Protects sawsaw +
+    # rabbit from auto-rolled-out themes that may not be production-ready.
+    flags: Mapped[dict] = mapped_column(JSONB, server_default="{}", nullable=False)
+
+    # Admin-curated metadata (Session A 2026-05-27, file 04 §6). All
+    # optional; populated via PATCH /marketplace/admin/themes/{id}.
+    # Catalog response surfaces ``author_name`` + ``screenshots`` +
+    # ``feature_tags``; detail page also surfaces ``author_url`` +
+    # ``highlights``.
+    author_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    author_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    screenshots: Mapped[list] = mapped_column(
+        JSONB, server_default="[]", nullable=False
+    )
+    highlights: Mapped[list] = mapped_column(JSONB, server_default="[]", nullable=False)
+    feature_tags: Mapped[list] = mapped_column(
+        JSONB, server_default="[]", nullable=False
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()"), nullable=False
     )

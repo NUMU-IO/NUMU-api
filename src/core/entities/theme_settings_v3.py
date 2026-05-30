@@ -81,11 +81,16 @@ def _is_allowed_bundle_url(url: str, mode: str) -> bool:
         return False
     host = parsed.hostname.lower()
 
-    # Dev mode: localhost only, http or https
+    # Dev mode: localhost + the dev R2 canary (managed r2.dev subdomain),
+    # http or https. DEV-ONLY — production delivery uses *.numueg.app /
+    # the configured CDN; r2.dev is never accepted in production mode.
+    # (Mirrors the storefront external-loader DEV allow-list — Session G.)
     if mode == "development":
         if parsed.scheme not in ("http", "https"):
             return False
-        return host in _DEV_HOSTS
+        if host in _DEV_HOSTS:
+            return True
+        return host == "r2.dev" or host.endswith(".r2.dev")
 
     # Production mode: HTTPS only, allowlisted host or suffix
     if parsed.scheme != "https":

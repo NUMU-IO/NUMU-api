@@ -164,21 +164,17 @@ async def get_paymob_service_for_store(store_settings: dict):
 
 
 def _get_storage():
-    """Return S3 storage if configured, otherwise local filesystem storage."""
-    # Prefer new s3_* settings, fall back to legacy r2_* settings
-    has_s3 = (
-        settings.s3_endpoint_url
-        and settings.s3_access_key_id
-        and settings.s3_secret_access_key
-    )
-    has_r2 = (
-        settings.r2_account_id
-        and settings.r2_access_key_id
-        and settings.r2_secret_access_key
-    )
-    if has_s3 or has_r2:
+    """Return S3/R2 storage if configured, otherwise local filesystem storage.
+
+    ``settings.object_storage_configured`` is the single source of truth (also
+    gates the dev ``/uploads`` static mount in ``main.py``), so the factory and
+    the mount can never disagree. A placeholder/partial config counts as *not*
+    configured and falls back to local rather than handing back an S3 client
+    that 500s on the first upload.
+    """
+    if settings.object_storage_configured:
         return CloudflareR2StorageService()
-    _logger.info("S3 storage not configured — using local filesystem storage")
+    _logger.info("Object storage not configured — using local filesystem storage")
     return LocalStorageService()
 
 

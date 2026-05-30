@@ -399,13 +399,38 @@ def build_marketplace_theme(self, version_id: str) -> dict:
         )
 
         # ── Extract schemas + presets ─────────────────────────────────────
-        # Theme schemas are Shopify-style arrays (a list of setting/section
-        # definitions). The columns are JSONB so they accept either shape;
-        # type the locals broadly to match.
+        # The @numueg/theme-plugin embeds the canonical, MERGED schema set in
+        # dist/manifest.json — settings_schema + section_schemas (a {type: def}
+        # map, each section carrying its own `blocks`) + presets. That is the
+        # authoritative source the editor consumes (themes.{settings_schema,
+        # section_schemas} ← version row ← here), so prefer it. Fall back to
+        # loose root files only for older/hand-authored themes that predate the
+        # plugin's manifest embed. Columns are JSONB so list-or-dict is fine.
+        #
+        # Before this, the task read a loose `sections.json` that the plugin
+        # never writes (per-section schemas live in schemas/sections/*.json and
+        # are merged into dist/manifest.json) — so section_schemas came out {}
+        # and the editor had nothing to render. See SESSION-T2A-AUDIT.md.
         settings_schema: list | dict = {}
         section_schemas: list | dict = {}
         presets: list | dict = {}
 
+        dist_manifest = dist / "manifest.json"
+        if dist_manifest.exists():
+            try:
+                dm = json.loads(dist_manifest.read_text(encoding="utf-8"))
+                if isinstance(dm, dict):
+                    settings_schema = dm.get("settings_schema") or settings_schema
+                    section_schemas = dm.get("section_schemas") or section_schemas
+                    presets = dm.get("presets") or presets
+            except Exception as exc:
+                logger.warning(
+                    "marketplace_build_bad_manifest",
+                    extra={"file": "dist/manifest.json", "error": str(exc)},
+                )
+
+        # Fallback for themes without a plugin manifest: loose root files,
+        # filling only what the manifest didn't already provide.
         for fname, target in (
             ("settings_schema.json", "settings_schema"),
             ("sections.json", "section_schemas"),
@@ -416,11 +441,11 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 continue
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
-                if target == "settings_schema":
+                if target == "settings_schema" and not settings_schema:
                     settings_schema = data
-                elif target == "section_schemas":
+                elif target == "section_schemas" and not section_schemas:
                     section_schemas = data
-                else:
+                elif target == "presets" and not presets:
                     presets = data
             except Exception as exc:
                 logger.warning(

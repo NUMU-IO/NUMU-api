@@ -151,12 +151,38 @@ class ThemeService:
     ) -> StoreTheme:
         """Activate an installed theme.
 
-        Steps:
-        1. Verify the installation belongs to this store
-        2. Deactivate any current active theme
-        3. Activate the selected installation
-        4. Denormalize to stores.theme_settings (backward compat)
+        Delegates the actual swap (snapshot → deactivate_all →
+        upsert_active → mirror to marketplace_theme_installations) to
+        ``ThemeActivationService`` so the three activate entrypoints —
+        marketplace, dev-mode, V2 — go through one path. The pre-Phase-3a
+        implementation open-coded the same snapshot/deactivate dance
+        here; gap #2 closed it because the marketplace path was missing
+        the dance entirely and the two implementations had drifted.
+
+        Steps after the refactor:
+        1. Look up the installation to grab its theme_id / version_id
+           (the installation_id is a ``store_themes.id``; the
+           activation service operates on the underlying theme + version
+           pointers).
+        2. Delegate to ``ThemeActivationService.activate``. Preserve
+           existing customization by passing
+           ``seed_customization_v3=None`` — the V2 path is "merchant
+           toggles between already-installed themes", not "fresh
+           install" — wiping their customization here would surprise
+           them.
+        3. Denormalize to ``stores.theme_settings`` (backward compat).
+        4. Trigger Next.js on-demand revalidation.
         """
+        from src.application.services.theme_activation_service import (
+            ThemeActivationService,
+        )
+        from src.infrastructure.repositories.marketplace_repository import (
+            MarketplaceRepository,
+        )
+        from src.infrastructure.repositories.store_theme_snapshot_repository import (
+            StoreThemeSnapshotRepository,
+        )
+
         installation = await self.store_theme_repo.get_installation(
             store_id, installation_id
         )
@@ -166,12 +192,30 @@ class ThemeService:
                 detail="Installation not found",
             )
 
-        # Deactivate current active (if any)
-        await self.store_theme_repo.deactivate_all_for_store(store_id)
+        snapshot_repo = StoreThemeSnapshotRepository(self.store_theme_repo.session)
+        marketplace_repo = MarketplaceRepository(self.store_theme_repo.session)
+        activation_svc = ThemeActivationService(
+            store_theme_repo=self.store_theme_repo,
+            snapshot_repo=snapshot_repo,
+            marketplace_repo=marketplace_repo,
+        )
 
-        # Activate selected
-        installation.activate()
-        updated = await self.store_theme_repo.update(installation)
+        updated = await activation_svc.activate(
+            store_id=store_id,
+            tenant_id=installation.tenant_id,
+            theme_id=installation.theme_id,
+            theme_version_id=installation.theme_version_id,
+            reason="pre-activation",
+            # V2 path is non-marketplace by definition: clear any
+            # stale marketplace install. The activation service
+            # handles the None case by deactivating all marketplace
+            # rows for the store.
+            marketplace_theme_id=None,
+            # None preserves existing customization on the upserted
+            # row — the merchant flipped an already-installed theme;
+            # they should land on whatever they had configured.
+            seed_customization_v3=None,
+        )
 
         # Backward-compat: denormalize to stores.theme_settings JSONB
         await self._denormalize_to_store(store_id, updated, store_repo)

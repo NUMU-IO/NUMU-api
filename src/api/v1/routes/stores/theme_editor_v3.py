@@ -43,6 +43,7 @@ from src.api.v1.schemas.tenant.theme_v3 import (
     PublishResponse,
     SchemaResponse,
     VersionListResponse,
+    VersionPayloadResponse,
     customization_payload_size,
 )
 from src.application.services.theme_v3_service import StaleEtagError, ThemeV3Service
@@ -236,6 +237,31 @@ async def list_versions(
     return SuccessResponse(
         data=VersionListResponse(versions=versions, page=page, per_page=per_page),
         message="Versions retrieved",
+    )
+
+
+@router.get(
+    "/versions/{version_id}",
+    response_model=SuccessResponse[VersionPayloadResponse],
+)
+async def get_version_payload(
+    store_id: UUID,
+    version_id: UUID,
+    svc: Annotated[ThemeV3Service, Depends(_get_v3_service)],
+):
+    """Return a single version's payload — the snapshot the pre-publish /
+    version diff compares the current draft against. Without this, the editor's
+    diff fetch 404s and PrePublishDiffDialog can't compute a diff (which blocked
+    Publish with a misleading "0 changes")."""
+    try:
+        payload = await svc.get_version_payload(
+            store_id=store_id, version_id=version_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return SuccessResponse(
+        data=VersionPayloadResponse(payload=payload),
+        message="Version payload retrieved",
     )
 
 

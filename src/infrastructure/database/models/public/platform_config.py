@@ -4,8 +4,11 @@ Stores platform-wide configuration as key-value pairs with JSONB values.
 Used for landing page section visibility and other global settings.
 """
 
-from sqlalchemy import Integer, String, Text
+from uuid import UUID
+
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.database.connection import Base
@@ -44,3 +47,18 @@ class PlatformConfigModel(Base, TimestampMixin):
     )
     value: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Platform-wide default theme reference (Session A 2026-05-27, file 04 §5).
+    # Only the row keyed ``platform_default_theme`` is expected to hold a
+    # non-NULL value; all other rows leave it NULL. Setting it null reverts
+    # new-store seeding to the legacy V2 fallback (sawsaw/rabbit-safe — they
+    # were created before this column existed and are never touched).
+    default_marketplace_theme_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "public.marketplace_themes.id",  # schema-qualified — matches __table_args__
+            ondelete="SET NULL",
+            name="fk_platform_config_default_marketplace_theme",
+        ),
+        nullable=True,
+    )

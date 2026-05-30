@@ -93,3 +93,30 @@ class IStoreThemeRepository(BaseRepository[StoreTheme]):
     async def installation_exists(self, store_id: UUID, theme_id: UUID) -> bool:
         """Check if a theme is already installed on this store."""
         ...
+
+    @abstractmethod
+    async def upsert_active(
+        self,
+        *,
+        store_id: UUID,
+        tenant_id: UUID,
+        theme_id: UUID,
+        theme_version_id: UUID,
+        customization_v3: dict | None = None,
+    ) -> StoreTheme:
+        """Find-or-create the StoreTheme(store_id, theme_id) row and mark it active.
+
+        Assumes ``deactivate_all_for_store`` has already been called by
+        the caller (the activation service). Does NOT itself deactivate
+        other rows — keeps the deactivate / activate steps separable so
+        callers can interleave a snapshot between them.
+
+        - If ``customization_v3`` is None: preserve any existing
+          ``customization_v3`` on the row (or default to ``{}`` when
+          creating fresh).
+        - If a dict is provided: replace ``customization_v3``,
+          ``draft_customization_v3``, and the legacy ``customization``
+          mirror with it.
+        - Always bumps ``activated_at`` and ``theme_version_id``.
+        """
+        ...
