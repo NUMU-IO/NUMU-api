@@ -44,6 +44,7 @@ async def _calculate_all_scores() -> dict:
     from sqlalchemy import select, update
 
     from src.application.services.health_score_service import (
+        HEALTH_SCORE_WINDOW_DAYS,
         calculate_store_health_score,
     )
     from src.infrastructure.database.connection import AsyncSessionLocal
@@ -69,7 +70,7 @@ async def _calculate_all_scores() -> dict:
                 score_data = await calculate_store_health_score(
                     session=session,
                     store_id=store_id,
-                    days=30,
+                    days=HEALTH_SCORE_WINDOW_DAYS,
                 )
 
                 # Persist in store.settings["health_score"]

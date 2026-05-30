@@ -18,6 +18,7 @@ from uuid import uuid4
 import pytest
 
 from src.application.services.health_score_service import (
+    HEALTH_SCORE_WINDOW_DAYS,
     build_recommendations,
     calculate_store_health_score,
 )
@@ -257,6 +258,29 @@ async def test_empty_store_returns_insufficient_data(test_session):
     }
     # Empty-state should produce no recommendations
     assert result["recommendations"] == []
+    # ...but should carry a human-readable, localised empty-state message
+    assert result["empty_state_message"]
+    assert "30 days" in result["empty_state_message"]
+    assert result["window_days"] == 30
+
+
+@pytest.mark.asyncio
+async def test_default_window_is_90_days_and_empty_state_localised(test_session):
+    """Default window is 90 days; empty state carries localised copy that names
+    the window, and is absent (None) only matters when data exists."""
+    store_id = uuid4()
+
+    en = await calculate_store_health_score(test_session, store_id, lang="en")
+    assert en["window_days"] == HEALTH_SCORE_WINDOW_DAYS == 90
+    assert en["insufficient_data"] is True
+    assert en["empty_state_message"] and "90 days" in en["empty_state_message"]
+
+    ar = await calculate_store_health_score(test_session, store_id, lang="ar")
+    # Arabic copy is different text and references the window in Arabic digits/word
+    assert (
+        ar["empty_state_message"]
+        and ar["empty_state_message"] != en["empty_state_message"]
+    )
 
 
 @pytest.mark.asyncio
