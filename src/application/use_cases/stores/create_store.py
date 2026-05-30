@@ -165,6 +165,24 @@ class CreateStoreUseCase:
             "productCardStyle": "modern",
         }
 
+        # Seed canonical WhatsApp notification toggles so the order-lifecycle
+        # handlers find an explicit boolean per key (instead of falling
+        # through to the dict.get(..., True) default which is fragile and
+        # masks intent). New platform-managed stores get all 4 order-related
+        # toggles ON for the seamless out-of-box experience; abandoned_cart
+        # stays OFF until the scheduled-send dispatcher (US3) ships.
+        # connect_byo_credentials.py resets the same keys to all-False
+        # when the merchant later opts into BYO mode (per FR-019a).
+        default_settings = {
+            "whatsapp_notifications": {
+                "order_confirmation": True,
+                "payment_received": True,
+                "shipping_update": True,
+                "delivery_confirmation": True,
+                "abandoned_cart": False,
+            },
+        }
+
         # tenant.is_active gates TenantMiddleware routing — never leave a
         # brand-new store's tenant inactive, or the owner 404s on their own dashboard.
         tenant = await self.tenant_service.create_tenant(
@@ -187,6 +205,7 @@ class CreateStoreUseCase:
             contact_email=dto.contact_email,
             contact_phone=dto.contact_phone,
             theme_settings=default_theme_settings,
+            settings=default_settings,
             tenant_id=tenant.id,
         )
 

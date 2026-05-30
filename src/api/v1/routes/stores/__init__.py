@@ -83,6 +83,7 @@ from src.api.v1.routes.stores import theme_editor_v3 as theme_editor_v3_module
 from src.api.v1.routes.stores import theme_installations as theme_installations_module
 from src.api.v1.routes.stores import themes as themes_module
 from src.api.v1.routes.stores import upsells as upsells_module
+from src.api.v1.routes.stores import variants as variants_module
 from src.api.v1.routes.stores import webhooks as webhooks_module
 from src.api.v1.routes.stores import whatsapp as whatsapp_module
 from src.api.v1.routes.stores import whatsapp_campaigns as whatsapp_campaigns_module
@@ -105,6 +106,10 @@ router.include_router(stores_module.router, prefix="", tags=["Stores"])
 
 # Nested resources - products, orders, dashboard, customers, invoices under specific store
 router.include_router(products_module.router, tags=["Store Products"])
+# Variants live UNDER products (/products/{id}/variants) — must be
+# registered separately because the products router itself doesn't
+# mount it (was missing entirely until this PR).
+router.include_router(variants_module.router, tags=["Store Product Variants"])
 # payment_proofs must be registered BEFORE orders: it owns the static
 # path ``/{store_id}/orders/pending-instapay-review`` which would
 # otherwise be shadowed by the orders router's catch-all

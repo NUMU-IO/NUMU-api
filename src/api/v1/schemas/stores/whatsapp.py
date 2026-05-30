@@ -100,30 +100,43 @@ class NotificationToggle(BaseModel):
 
 
 class NotificationSettings(BaseModel):
-    """All notification toggles."""
+    """All notification toggles.
+
+    Field names MUST match the canonical keys under
+    ``store.settings.whatsapp_notifications`` (the same keys the backend
+    handlers read via ``_resolve_send_context.notification_pref_key``).
+    The merchant-hub TS interface uses these field names verbatim.
+
+    ``abandoned_cart`` is exposed but the v1 merchant-hub doesn't render
+    it (US3 hasn't shipped the scheduled-send dispatcher). The field
+    lives here so US3 can light up the UI without an API contract bump.
+    """
 
     order_confirmation: NotificationToggle = Field(
         default_factory=lambda: NotificationToggle(enabled=True)
     )
-    order_shipped: NotificationToggle = Field(
+    payment_received: NotificationToggle = Field(
         default_factory=lambda: NotificationToggle(enabled=True)
     )
-    out_for_delivery: NotificationToggle = Field(default_factory=NotificationToggle)
-    order_delivered: NotificationToggle = Field(
+    shipping_update: NotificationToggle = Field(
         default_factory=lambda: NotificationToggle(enabled=True)
     )
-    payment_received: NotificationToggle = Field(default_factory=NotificationToggle)
+    delivery_confirmation: NotificationToggle = Field(
+        default_factory=lambda: NotificationToggle(enabled=True)
+    )
     abandoned_cart: NotificationToggle = Field(default_factory=NotificationToggle)
 
 
 class UpdateNotificationSettingsRequest(BaseModel):
-    """Update notification toggles (partial update)."""
+    """Update notification toggles (partial update). Field names match
+    NotificationSettings exactly — only the supplied keys are written;
+    omitted keys keep their current value.
+    """
 
     order_confirmation: bool | None = None
-    order_shipped: bool | None = None
-    out_for_delivery: bool | None = None
-    order_delivered: bool | None = None
     payment_received: bool | None = None
+    shipping_update: bool | None = None
+    delivery_confirmation: bool | None = None
     abandoned_cart: bool | None = None
 
 
