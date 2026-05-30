@@ -386,6 +386,13 @@ async def _resolve_send_context(
         "language": language,
         "tenant_id": tenant_id,
         "store_name": store_name,
+        # backend-031 — surfaced to the send callsite so the URL-button
+        # param for order_confirmation_v2 can be `{subdomain}/{order_id}`
+        # (env-aware, no DB lookup in the redirector). `subdomain`
+        # already carries the env suffix on test/stage stores per
+        # config/settings.py docstring (e.g. `mystore-test`).
+        "store_subdomain": store_row.subdomain,
+        "store_custom_domain": store_row.custom_domain,
     }
     return ctx, extras
 
@@ -505,13 +512,25 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             )
         else:
             # Receipt-style send (current default). Manage-order URL
-            # button routes via numueg.app/o/<order_id> redirector.
+            # button routes via numueg.app/o/<value> redirector, where
+            # <value> is `<subdomain>/<order_id>`. The redirector
+            # forwards directly to the store's storefront without a
+            # DB lookup, so test orders (in the test DB) still resolve
+            # — the URL itself is self-describing.
+            subdomain = extras.get("store_subdomain") or ""
+            if subdomain:
+                button_param = f"{subdomain}/{event.order_id}"
+            else:
+                # Legacy path — falls back to the redirector's UUID
+                # lookup. Only hits if a store somehow lost its
+                # subdomain.
+                button_param = str(event.order_id)
             result = await service.send_order_confirmation(
                 recipient,
                 event.order_number,
                 f"{event.total:.2f} {event.currency}",
                 extras["store_name"],
-                order_id=str(event.order_id),
+                order_id=button_param,
             )
 
         if result.success:
