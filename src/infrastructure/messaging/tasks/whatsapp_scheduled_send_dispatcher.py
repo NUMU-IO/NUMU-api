@@ -31,6 +31,41 @@ logger = get_logger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
 
+# Map a system template name to the merchant-facing notification toggle that
+# gates it (store.settings.whatsapp_notifications.<key>). Mirrors the
+# order-lifecycle handler's notification_pref_key wiring so a scheduled send
+# honours the SAME per-message-type switch the merchant sees on the WhatsApp
+# Overview page. Templates not in this map (ad-hoc win-back / review-request
+# follow-ups) fall back to the generic "marketing" umbrella.
+_TEMPLATE_PREF_KEY = {
+    "order_confirmation_v2": "order_confirmation",
+    "payment_received": "payment_received",
+    "order_shipped_v2": "shipping_update",
+    "order_delivered": "delivery_confirmation",
+    "abandoned_cart_v2": "abandoned_cart",
+}
+
+
+def _resolve_language(store_settings: dict, default_language: str | None) -> str:
+    """Resolve the WhatsApp send language to one of {"en", "ar"}.
+
+    Honours the store-level message-language override
+    (store.settings.whatsapp.message_language) exactly like the
+    order-lifecycle path: "ar"/"en" force that language; "auto" (default)
+    follows the store's default_language. Kept in {en, ar} so it matches
+    the EGYPTIAN_TEMPLATES keys and the system templates' seeded locales.
+    """
+    pref = str(
+        (store_settings.get("whatsapp") or {}).get("message_language") or "auto"
+    ).lower()
+    if pref == "ar":
+        raw = "ar"
+    elif pref == "en":
+        raw = "en"
+    else:  # auto
+        raw = (default_language or "ar").lower()
+    return "en" if raw.startswith("en") else "ar"
+
 
 def _run_async(coro: Any) -> Any:
     global _task_loop
@@ -126,7 +161,9 @@ async def _dispatch_for_tenant(tenant_id: Any) -> dict[str, int]:
 
             for row in due_rows:
                 try:
-                    decision = await _evaluate_guard(session, optin_repo, row, now=now)
+                    decision, language = await _evaluate_guard(
+                        session, optin_repo, row, now=now
+                    )
                     if not decision.allowed:
                         await repo.mark_skipped(
                             row.id,
@@ -146,7 +183,7 @@ async def _dispatch_for_tenant(tenant_id: Any) -> dict[str, int]:
                         continue
 
                     # Allowed — dispatch through the per-store resolver
-                    sent_ok = await _dispatch_one(session, row)
+                    sent_ok = await _dispatch_one(session, row, language)
                     if sent_ok:
                         await repo.mark_sent(row.id)
                         stats["dispatched"] += 1
@@ -188,12 +225,6 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
     ).scalar_one_or_none()
     store_settings = (store_row.settings if store_row else None) or {}
     notif = store_settings.get("whatsapp_notifications", {}) or {}
-    # Use a generic key for ad-hoc / scheduled sends — the merchant can
-    # disable all WhatsApp sends via the per-message-type toggle; for
-    # scheduled follow-ups we map to the abandoned_cart key by default
-    # (the most common use case is review-request / win-back follow-ups
-    # which the merchant would configure under the marketing umbrella).
-    notification_enabled = bool(notif.get("marketing", True))
 
     # Template lookup
     template_status: str | None = None
@@ -214,6 +245,15 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
                 template_category = TemplateCategory(tmpl.category)
             except ValueError:
                 template_category = TemplateCategory.UTILITY
+
+    # Honour the per-message-type merchant toggle this send maps to (e.g. an
+    # abandoned_cart_v2 scheduled send is gated by the "Abandoned cart" switch
+    # on the WhatsApp Overview page). The guard is re-evaluated at dispatch
+    # time, so flipping the toggle OFF after a row was scheduled correctly
+    # skips it. Templates with no specific mapping fall back to the generic
+    # marketing umbrella. Defaults follow NotificationSettings (all True).
+    pref_key = _TEMPLATE_PREF_KEY.get(template_name or "", "marketing")
+    notification_enabled = bool(notif.get(pref_key, True))
 
     # Opt-in / opt-out
     has_active_opt_in = (
@@ -236,16 +276,25 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
         window_is_open=True,
         already_sent=False,  # scheduled-send is its own idempotency unit
     )
-    return check(ctx)
+    language = _resolve_language(
+        store_settings, store_row.default_language if store_row else None
+    )
+    return check(ctx), language
 
 
-async def _dispatch_one(session, row) -> bool:
-    """Issue the actual Meta send. Returns True on success."""
+async def _dispatch_one(session, row, language: str = "ar") -> bool:
+    """Issue the actual Meta send. Returns True on success.
+
+    ``language`` is resolved by the guard from the store's message-language
+    setting (override → default_language); it replaces the previously
+    hardcoded "ar" so a store configured for English (or "auto" on an
+    English store) sends in the right language.
+    """
     from src.core.interfaces.services.messaging_service import MessageRecipient
     from src.infrastructure.external_services.whatsapp import get_whatsapp_service
 
     service = await get_whatsapp_service(row.store_id, session, row.tenant_id)
-    recipient = MessageRecipient(phone=row.phone, name="", language="ar")
+    recipient = MessageRecipient(phone=row.phone, name="", language=language)
 
     if row.template_id is not None:
         # Template send. For Phase 1 we only support templates whose

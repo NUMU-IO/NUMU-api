@@ -346,9 +346,25 @@ async def notify_whatsapp(
     phone = checkout.phone
 
     # abandoned_cart_v2 is seeded for {"en", "ar"} (NOT en_US). Resolve the
-    # store's language to one of those so both the DB template-status lookup
+    # send language to one of those so both the DB template-status lookup
     # and the messaging service's EGYPTIAN_TEMPLATES key match.
-    raw_lang = (store.default_language or "ar").lower()
+    #
+    # Honor the store-level message-language override (the "send in which
+    # language" control on the WhatsApp Overview page, persisted at
+    # store.settings.whatsapp.message_language) exactly like the
+    # order-lifecycle path in whatsapp_notification_handler. "ar"/"en" force
+    # that language; "auto" (default) follows store.default_language. Without
+    # this, a merchant who set Arabic still got English here because we only
+    # looked at default_language.
+    wa_lang_pref = str(
+        ((store.settings or {}).get("whatsapp") or {}).get("message_language") or "auto"
+    ).lower()
+    if wa_lang_pref == "ar":
+        raw_lang = "ar"
+    elif wa_lang_pref == "en":
+        raw_lang = "en"
+    else:  # auto
+        raw_lang = (store.default_language or "ar").lower()
     language = "en" if raw_lang.startswith("en") else "ar"
 
     # Template approval status (FR-029) — guards against a 400 from Meta.
@@ -424,6 +440,42 @@ async def notify_whatsapp(
             logger.warning(
                 "abandoned_cart_whatsapp_stamp_failed checkout=%s", checkout_id
             )
+
+        # Persist an OUTBOUND message_log so this manual nudge shows up in the
+        # WhatsApp dashboard's Sent count + Recent-messages feed (both read
+        # message_logs filtered by store_id). The order-lifecycle path does
+        # this via _persist_message_log; the manual abandoned-cart path
+        # previously skipped it, so successful nudges were invisible in the UI.
+        # Audit-only — never let a logging failure fail the send.
+        if result.message_id:
+            try:
+                from src.core.entities.message_log import (
+                    MessageDirection,
+                    MessageLog,
+                    MessageStatus,
+                )
+                from src.infrastructure.repositories.message_log_repository import (
+                    MessageLogRepository,
+                )
+
+                await MessageLogRepository(db).create(
+                    MessageLog(
+                        tenant_id=store.tenant_id,
+                        store_id=store.id,
+                        phone=phone,
+                        metadata={"checkout_id": str(checkout_id)},
+                        message_id=result.message_id,
+                        direction=MessageDirection.OUTBOUND,
+                        template_name="abandoned_cart_v2",
+                        status=MessageStatus.SENT,
+                    )
+                )
+                await db.commit()
+            except Exception:
+                logger.warning(
+                    "abandoned_cart_whatsapp_log_failed checkout=%s", checkout_id
+                )
+
         return NotifyWhatsAppResponse(sent=True, message_id=result.message_id)
 
     logger.warning(
