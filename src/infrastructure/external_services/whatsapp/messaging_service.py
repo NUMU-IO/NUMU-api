@@ -589,6 +589,48 @@ class WhatsAppMessagingService(IMessagingService):
         )
         return await self.send_message(content)
 
+    async def send_abandoned_cart(
+        self,
+        recipient: MessageRecipient,
+        store_name: str,
+        cart_token: str,
+    ) -> MessageResult:
+        """Send an abandoned-cart recovery nudge.
+
+        Uses the ``abandoned_cart_v2`` MARKETING template:
+          body:   Hi {{1}}, you left items in your cart at {{2}}. ...
+          button: Complete purchase → ``https://numueg.app/cart/{{1}}``
+
+        ``cart_token`` is the *path segment* substituted into the button —
+        the store subdomain, NOT a full URL. The apex redirector route
+        ``/cart/<subdomain>`` (routes/order_redirect.py) 302s it to the
+        store's storefront where the cart persists. Passing the bare
+        subdomain (rather than a full URL) keeps it consistent with the
+        ``/o/`` order-button pattern and avoids the landing-page fallback.
+
+        Args:
+            recipient: Customer contact info.
+            store_name: Store display name (body {{2}}).
+            cart_token: Store subdomain for the button path segment.
+
+        Returns:
+            MessageResult
+        """
+        content = MessageContent(
+            type=MessageType.ABANDONED_CART,
+            recipient=recipient,
+            template_params={
+                "customer_name": recipient.name or "Customer",
+                "store_name": store_name,
+                # The abandoned_cart_v2 button component declares its param
+                # under the key "cart_token" (see EGYPTIAN_TEMPLATES). We
+                # substitute the store subdomain there; the apex
+                # /cart/<subdomain> redirector forwards to the storefront.
+                "cart_token": cart_token,
+            },
+        )
+        return await self.send_message(content)
+
     async def send_text_message(
         self,
         phone: str,
