@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -538,6 +539,9 @@ class ResendEmailService(IEmailService):
         from src.infrastructure.external_services.resend.email_templates.notifications import (
             ORDER_CONFIRMATION_TEMPLATE,
         )
+        from src.infrastructure.external_services.resend.email_templates.order_summary_email import (
+            new_order_email_html,
+        )
 
         items = order_details.get("items", [])
         total = order_details.get("total", 0)
@@ -553,16 +557,39 @@ class ResendEmailService(IEmailService):
         # a customer who closed the tab can still pay from this email.
         instapay = order_details.get("instapay")
 
-        legacy_html = ORDER_CONFIRMATION_TEMPLATE["html_fn"](
+        # Map the order_details contract → the shared rich renderer. Prices in
+        # order_details["items"] are in MAJOR units (price = unit_price / 100),
+        # so convert per-line to cents. The optional *_cents / created_at keys
+        # are added by the storefront checkout; older callers omit them and the
+        # template degrades gracefully (no date line; products value = total).
+        rich_items = [
+            {
+                "name": it.get("name", ""),
+                "quantity": it.get("quantity", 1),
+                "total_cents": round(
+                    float(it.get("price", 0)) * 100 * it.get("quantity", 1)
+                ),
+                "image_url": it.get("image_url"),
+            }
+            for it in items
+        ]
+        total_cents = order_details.get("total_cents", round(float(total) * 100))
+        products_value_cents = order_details.get("subtotal_cents", total_cents)
+        legacy_html = new_order_email_html(
+            audience="customer",
             order_number=order_number,
-            items=items,
-            total=total,
+            items=rich_items,
+            products_value_cents=products_value_cents,
             currency=currency,
             store_name=store_name,
-            customer_name=customer_name,
-            language=language,
-            tracking_url=tracking_url,
+            recipient_name=customer_name,
+            created_at=order_details.get("created_at"),
+            timezone_name=order_details.get("timezone") or "Africa/Cairo",
+            order_url=tracking_url,
+            shipping_cents=order_details.get("shipping_cents"),
+            total_cents=total_cents,
             instapay=instapay,
+            language=language,
         )
         legacy_subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](
             order_number, store_name, language
@@ -627,34 +654,48 @@ class ResendEmailService(IEmailService):
         email: str,
         order_number: str,
         store_name: str,
-        total_cents: float,
+        products_value_cents: int,
         currency: str = "EGP",
+        items: list[dict] | None = None,
         customer_name: str | None = None,
         order_url: str | None = None,
+        created_at: datetime | None = None,
+        timezone_name: str = "Africa/Cairo",
+        shipping_cents: int | None = None,
+        total_cents: int | None = None,
         language: str = "ar",
         store_id: UUID | None = None,
         tenant_id: UUID | None = None,
     ) -> bool:
         """Notify the merchant (store owner) that a new order came in.
 
-        ``total_cents`` is the order total in minor units — matches
-        ``OrderCreatedEvent.total``. Routes through ``_render_or_legacy``
-        so a merchant can override the template once the bus runs with a
-        renderer, and writes an ``email_logs`` audit row when a store_id
-        is supplied.
+        Uses the shared rich "new order" template (same layout as the customer
+        confirmation: status badge, tracking illustration, step tracker,
+        products table, order summary). ``*_cents`` are minor units. Routes
+        through ``_render_or_legacy`` so a merchant can override the template
+        once the bus runs with a renderer, and writes an ``email_logs`` audit
+        row when a store_id is supplied.
         """
         from src.infrastructure.external_services.resend.email_templates.merchant_notifications import (
-            merchant_new_order_html,
             merchant_new_order_subject,
         )
+        from src.infrastructure.external_services.resend.email_templates.order_summary_email import (
+            new_order_email_html,
+        )
 
-        legacy_html = merchant_new_order_html(
+        legacy_html = new_order_email_html(
+            audience="merchant",
             order_number=order_number,
-            store_name=store_name,
-            total_cents=total_cents,
+            items=items or [],
+            products_value_cents=products_value_cents,
             currency=currency,
-            customer_name=customer_name,
+            store_name=store_name,
+            recipient_name=customer_name,
+            created_at=created_at,
+            timezone_name=timezone_name,
             order_url=order_url,
+            shipping_cents=shipping_cents,
+            total_cents=total_cents,
             language=language,
         )
         legacy_subject = merchant_new_order_subject(
@@ -668,7 +709,7 @@ class ResendEmailService(IEmailService):
             variables={
                 "order_number": order_number,
                 "store_name": store_name,
-                "order_total": (total_cents or 0) / 100,
+                "order_total": (total_cents or products_value_cents or 0) / 100,
                 "currency": currency,
                 "customer_name": customer_name or "",
                 "order_url": order_url or "#",

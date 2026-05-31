@@ -22,7 +22,7 @@ from src.config.logging_config import get_logger
 from src.core.events.order_events import OrderCreatedEvent
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.public.user import UserModel
-from src.infrastructure.database.models.tenant.customer import CustomerModel
+from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.store import StoreModel
 
 logger = get_logger(__name__)
@@ -84,19 +84,46 @@ async def handle_merchant_order_notification(event: OrderCreatedEvent) -> None:
             )
             return
 
-        # ── Customer name (best-effort, for a friendlier email) ─────────
-        customer: CustomerModel | None = (
+        # ── Order: line items + totals + creation date for the summary ──
+        order: OrderModel | None = (
             await session.execute(
-                select(CustomerModel).where(CustomerModel.id == event.customer_id)
+                select(OrderModel).where(OrderModel.id == event.order_id)
             )
         ).scalar_one_or_none()
-        customer_name = (
-            f"{customer.first_name} {customer.last_name}".strip() if customer else None
-        )
+        if order is not None:
+            items = [
+                {
+                    "name": li.get("product_name") or "",
+                    "quantity": li.get("quantity", 1),
+                    "total_cents": li.get("total_price")
+                    or (li.get("unit_price", 0) * li.get("quantity", 1)),
+                }
+                for li in (order.line_items or [])
+            ]
+            products_value_cents = order.subtotal
+            total_cents = order.total
+            shipping_cents = order.shipping_cost or None
+            currency = order.currency or event.currency
+            created_at = order.created_at
+        else:
+            # Order row not visible yet (shouldn't happen post-commit) — fall
+            # back to the event's total so the merchant still gets notified.
+            items = []
+            products_value_cents = int(event.total or 0)
+            total_cents = int(event.total or 0)
+            shipping_cents = None
+            currency = event.currency
+            created_at = None
+
+        # Greet the merchant by their own name (the recipient), not the
+        # customer's. Owner may be None when we fell back to contact_email.
+        owner_name = owner.first_name if owner else None
 
         tenant_id: UUID | None = store.tenant_id
         store_name = store.name
         language = _normalize_language(store.default_language)
+        # Per-store timezone for the order-date line (Egypt UTC+2 default).
+        timezone_name = (store_settings.get("timezone") or "").strip() or "Africa/Cairo"
 
     # Deep link to the order in the merchant hub (route: /orders/:orderId).
     order_url = f"{settings.merchant_hub_url.rstrip('/')}/orders/{event.order_id}"
@@ -111,10 +138,15 @@ async def handle_merchant_order_notification(event: OrderCreatedEvent) -> None:
             email=recipient,
             order_number=event.order_number,
             store_name=store_name,
-            total_cents=event.total,
-            currency=event.currency,
-            customer_name=customer_name,
+            products_value_cents=products_value_cents,
+            currency=currency,
+            items=items,
+            customer_name=owner_name,
             order_url=order_url,
+            created_at=created_at,
+            timezone_name=timezone_name,
+            shipping_cents=shipping_cents,
+            total_cents=total_cents,
             language=language,
             store_id=event.store_id,
             tenant_id=tenant_id,

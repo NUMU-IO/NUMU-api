@@ -1877,6 +1877,14 @@ async def checkout(
                 "store_name": store.name,
                 "customer_name": current_customer.full_name,
                 "tracking_url": order_tracking_url,
+                # Rich-template extras (cents): drive the order-date line and
+                # the "ملخص الطلب" summary. Older callers omit these and the
+                # template degrades gracefully.
+                "created_at": created_order.created_at,
+                "subtotal_cents": created_order.subtotal,
+                "shipping_cents": created_order.shipping_cost or None,
+                "total_cents": created_order.total,
+                "timezone": (store.settings or {}).get("timezone"),
             }
 
             # InstaPay: include IPA / ref / amount / expiry + a direct
