@@ -556,8 +556,13 @@ class OrderRepository(IOrderRepository):
         had at least one *real* order.
 
         Powers the dashboard "order streak" counter. Draft / cancelled /
-        refunded / payment-failed orders don't count as a real sale, so they
-        are excluded. ``created_at`` is stored in UTC; we convert to
+        refunded orders don't count as a real sale, so they are excluded.
+        (``PAYMENT_FAILED`` is intentionally NOT referenced: the ORM maps
+        OrderStatus by member name, but the ``orderstatus`` Postgres enum only
+        ever got the lowercase ``payment_failed`` value — never the uppercase
+        one — so naming it in a WHERE clause raises InvalidTextRepresentation.
+        Orders can't be persisted with that uppercase value either, so none
+        exist to exclude.) ``created_at`` is stored in UTC; we convert to
         ``timezone`` before truncating to a date so "a day" follows the
         merchant's wall clock (Egypt is UTC+2) rather than UTC midnight —
         otherwise late-evening Cairo orders would land on the wrong day and
@@ -576,7 +581,6 @@ class OrderRepository(IOrderRepository):
                     OrderStatus.DRAFT,
                     OrderStatus.CANCELLED,
                     OrderStatus.REFUNDED,
-                    OrderStatus.PAYMENT_FAILED,
                 ]),
             )
             .group_by(local_day)
