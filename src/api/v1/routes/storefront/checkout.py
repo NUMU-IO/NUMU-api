@@ -688,6 +688,10 @@ async def checkout(
     # merchants should either configure per-product weights or use an
     # open-ended band with sensible defaults.
     cart_weight_g: int = 0
+    # product_id → first image URL, captured here so the confirmation email's
+    # line-item thumbnails can render the real product photo (line items don't
+    # persist an image; we'd otherwise show the "no image" placeholder).
+    product_image_map: dict = {}
     for item in request.line_items:
         product = await product_repo.get_by_id(item.product_id)
         if not product:
@@ -705,6 +709,9 @@ async def checkout(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {product.name} is not available",
             )
+        product_image_map[item.product_id] = (
+            product.images[0] if getattr(product, "images", None) else None
+        )
 
         # ── Stock pre-check ──
         # Three modes:
@@ -1869,6 +1876,7 @@ async def checkout(
                         "name": li.product_name,
                         "quantity": li.quantity,
                         "price": li.unit_price / 100,
+                        "image_url": product_image_map.get(li.product_id),
                     }
                     for li in order_line_items
                 ],

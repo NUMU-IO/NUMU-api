@@ -518,7 +518,8 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
         result = await service.send_order_confirmation(
             recipient,
             event.order_number,
-            f"{event.total:.2f} {event.currency}",
+            # event.total is in CENTS — divide for the human-readable amount.
+            f"{event.total / 100:.2f} {event.currency}",
             extras["store_name"],
             order_id=_order_ref,
         )
@@ -593,7 +594,8 @@ async def handle_order_paid_whatsapp(event: OrderPaidEvent) -> None:
         result = await service.send_payment_received(
             recipient,
             event.order_number,
-            f"{event.total:.2f}",
+            # event.total is in CENTS — divide for the human-readable amount.
+            f"{event.total / 100:.2f}",
         )
 
         if result.success:

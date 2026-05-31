@@ -91,14 +91,42 @@ async def handle_merchant_order_notification(event: OrderCreatedEvent) -> None:
             )
         ).scalar_one_or_none()
         if order is not None:
+            line_items = order.line_items or []
+            # Resolve product → first image URL so the email's line-item
+            # thumbnails show the real photo (line items don't persist one).
+            image_map: dict[str, str | None] = {}
+            product_ids: list[UUID] = []
+            for li in line_items:
+                pid = li.get("product_id")
+                if pid:
+                    try:
+                        product_ids.append(UUID(str(pid)))
+                    except (ValueError, TypeError):
+                        pass
+            if product_ids:
+                from src.infrastructure.database.models.tenant.product import (
+                    ProductModel,
+                )
+
+                rows = (
+                    await session.execute(
+                        select(ProductModel.id, ProductModel.images).where(
+                            ProductModel.id.in_(product_ids)
+                        )
+                    )
+                ).all()
+                image_map = {
+                    str(pid): (imgs[0] if imgs else None) for pid, imgs in rows
+                }
             items = [
                 {
                     "name": li.get("product_name") or "",
                     "quantity": li.get("quantity", 1),
                     "total_cents": li.get("total_price")
                     or (li.get("unit_price", 0) * li.get("quantity", 1)),
+                    "image_url": image_map.get(str(li.get("product_id"))),
                 }
-                for li in (order.line_items or [])
+                for li in line_items
             ]
             products_value_cents = order.subtotal
             total_cents = order.total
