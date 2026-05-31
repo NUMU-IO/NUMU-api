@@ -231,8 +231,7 @@ class MarketplaceRepository:
         total = (await self._session.execute(count_q)).scalar() or 0
 
         q = (
-            base
-            .order_by(desc(MarketplaceThemeModel.install_count))
+            base.order_by(desc(MarketplaceThemeModel.install_count))
             .offset((page - 1) * per_page)
             .limit(per_page)
         )
@@ -779,8 +778,7 @@ class MarketplaceRepository:
         total = (await self._session.execute(count_q)).scalar() or 0
 
         q = (
-            base
-            .order_by(desc(MarketplaceThemeReviewModel.created_at))
+            base.order_by(desc(MarketplaceThemeReviewModel.created_at))
             .offset((page - 1) * per_page)
             .limit(per_page)
         )
