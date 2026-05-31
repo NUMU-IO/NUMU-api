@@ -204,8 +204,7 @@ class StoreThemeRepository(IStoreThemeRepository):
     async def get_installations_for_store(self, store_id: UUID) -> list[StoreTheme]:
         """Return all installations for a store (ordered by installation date)."""
         result = await self.session.execute(
-            self
-            ._base_query()
+            self._base_query()
             .where(StoreThemeModel.store_id == str(store_id))
             .order_by(
                 StoreThemeModel.is_active.desc(), StoreThemeModel.created_at.desc()
