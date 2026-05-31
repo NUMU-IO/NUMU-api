@@ -23,6 +23,8 @@ from src.api.v1.schemas.stores.whatsapp import (
     WhatsAppAnalytics,
     WhatsAppConnectionStatus,
     WhatsAppDayStat,
+    WhatsAppMessageLogItem,
+    WhatsAppMessageLogList,
 )
 from src.api.v1.schemas.stores.whatsapp_connection import (
     BYOConnectRequest,
@@ -544,6 +546,60 @@ async def get_analytics(
             daily_stats=daily_stats,
         ),
         message="Analytics retrieved",
+    )
+
+
+# ── Message activity feed ──
+
+
+@router.get(
+    "/messages",
+    response_model=SuccessResponse[WhatsAppMessageLogList],
+    summary="List recent WhatsApp messages",
+    operation_id="list_whatsapp_messages",
+)
+async def list_messages(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: AsyncSession = Depends(get_db),
+    direction: str | None = Query(
+        None,
+        pattern="^(inbound|outbound)$",
+        description="Filter by message direction; omit for both.",
+    ),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Recent sent/received WhatsApp messages from ``message_logs``.
+
+    This is the full record of what actually went out (and came in),
+    including automated order-lifecycle notifications that never created
+    a conversation thread. Ordered newest-first.
+    """
+    base = select(MessageLogModel).where(MessageLogModel.store_id == store.id)
+    if direction is not None:
+        base = base.where(MessageLogModel.direction == direction)
+
+    total = await db.execute(select(func.count()).select_from(base.subquery()))
+
+    rows = await db.execute(
+        base.order_by(MessageLogModel.created_at.desc()).offset(skip).limit(limit)
+    )
+    messages = [
+        WhatsAppMessageLogItem(
+            id=m.id,
+            phone=m.phone,
+            direction=m.direction,
+            template_name=m.template_name,
+            content=m.content,
+            status=m.status,
+            created_at=m.created_at,
+        )
+        for m in rows.scalars().all()
+    ]
+
+    return SuccessResponse(
+        data=WhatsAppMessageLogList(messages=messages, total=total.scalar() or 0),
+        message="Messages retrieved",
     )
 
 

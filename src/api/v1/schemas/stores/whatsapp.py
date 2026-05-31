@@ -169,6 +169,34 @@ class WhatsAppAnalytics(BaseModel):
     by_template: dict[str, dict[str, int]] = {}
 
 
+# ── Message log feed ──
+
+
+class WhatsAppMessageLogItem(BaseModel):
+    """A single sent/received WhatsApp message for the activity feed.
+
+    Sourced from ``message_logs`` — unlike conversations, this includes
+    every automated order-lifecycle notification (order confirmation,
+    payment, shipping, delivery) even when the customer never replied, so
+    the merchant sees the full record of what actually went out.
+    """
+
+    id: UUID
+    phone: str
+    direction: str  # "inbound" | "outbound"
+    template_name: str | None = None
+    content: str | None = None
+    status: str  # queued | sent | delivered | read | failed
+    created_at: datetime
+
+
+class WhatsAppMessageLogList(BaseModel):
+    """Paginated message-log feed for a store."""
+
+    messages: list[WhatsAppMessageLogItem] = []
+    total: int = 0
+
+
 # ── Templates ──
 
 

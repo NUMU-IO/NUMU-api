@@ -1938,6 +1938,19 @@ async def checkout(
                     else f"https://{store.subdomain}.numueg.app"
                 )
                 _wa_tracking_url = f"{_wa_base_url}/track/{created_order.id}"
+                # Self-describing ``<subdomain>/<order_id>`` value for the
+                # order_confirmation_v2 "Manage order" URL button. The apex
+                # redirector (numueg.app/o/...) routes this straight to THIS
+                # store's order-tracking page WITHOUT a DB lookup. A bare
+                # UUID forces the redirector's prod-DB lookup branch, which
+                # can't find test/stage orders and falls back to the apex
+                # landing page — the "broken track link" bug. Bare UUID only
+                # when the store has no subdomain (custom-domain-only store).
+                _wa_order_ref = (
+                    f"{store.subdomain}/{created_order.id}"
+                    if store.subdomain
+                    else str(created_order.id)
+                )
                 send_whatsapp_order_confirmation_task.delay(
                     phone=customer_phone,
                     customer_name=current_customer.full_name,
@@ -1946,14 +1959,7 @@ async def checkout(
                     store_name=store.name,
                     language=store.default_language,
                     tracking_url=_wa_tracking_url,
-                    # Required for the order_confirmation_v2 template's
-                    # "Manage order" URL button — the redirector at
-                    # numueg.app/o/<id> expects the order UUID. Without
-                    # this kwarg, the messaging service falls back to
-                    # ``order_number`` (e.g. "ORD-000017"), which the
-                    # redirector can't resolve → customer lands on the
-                    # apex marketing page.
-                    order_id=str(created_order.id),
+                    order_id=_wa_order_ref,
                 )
     except Exception as e:
         logger.warning(f"Failed to dispatch WhatsApp notification: {e}")

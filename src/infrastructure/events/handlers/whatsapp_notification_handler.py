@@ -174,12 +174,20 @@ async def handle_whatsapp_notification(event: OrderStatusChangedEvent) -> None:
         )
 
         if event.new_status == "shipped":
+            # Self-describing ``<subdomain>/<order_id>`` button value so the
+            # apex redirector resolves to this store's order page without a
+            # prod-DB lookup (see handle_order_created_whatsapp for why).
+            _order_ref = (
+                f"{extras['store_subdomain']}/{event.order_id}"
+                if extras.get("store_subdomain")
+                else str(event.order_id)
+            )
             result = await service.send_shipping_notification(
                 recipient,
                 event.order_number,
                 event.tracking_number or "N/A",
                 event.carrier or "Bosta",
-                order_id=str(event.order_id),
+                order_id=_order_ref,
             )
         else:  # delivered
             result = await service.send_delivery_notification(
@@ -402,6 +410,10 @@ async def _resolve_send_context(
         "language": language,
         "tenant_id": tenant_id,
         "store_name": store_name,
+        # Subdomain drives the self-describing ``<subdomain>/<order_id>``
+        # button value built at the call sites below — see the comment
+        # there for why the bare UUID isn't enough.
+        "store_subdomain": store_row.subdomain,
     }
     return ctx, extras
 
@@ -455,15 +467,24 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             language=extras["language"],
         )
         # order_confirmation_v2 renders a "Manage order" URL button at
-        # https://numueg.app/o/{order_id}. We pass event.order_id as the
-        # button substitution; the apex domain's redirector resolves the
-        # path to the tenant store's order-tracking page.
+        # https://numueg.app/o/{{1}}. We substitute the self-describing
+        # ``<subdomain>/<order_id>`` value so the apex redirector routes
+        # straight to THIS store's order-tracking page WITHOUT a prod-DB
+        # lookup. A bare UUID forces the redirector's DB-lookup branch,
+        # which can't find test/stage orders (they live in another DB) and
+        # falls back to the apex landing page — the "broken track link" bug.
+        # Bare UUID only when the store has no subdomain (custom-domain-only).
+        _order_ref = (
+            f"{extras['store_subdomain']}/{event.order_id}"
+            if extras.get("store_subdomain")
+            else str(event.order_id)
+        )
         result = await service.send_order_confirmation(
             recipient,
             event.order_number,
             f"{event.total:.2f} {event.currency}",
             extras["store_name"],
-            order_id=str(event.order_id),
+            order_id=_order_ref,
         )
 
         if result.success:
