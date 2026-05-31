@@ -621,6 +621,98 @@ class ResendEmailService(IEmailService):
             )
             raise
 
+    async def send_merchant_new_order(
+        self,
+        *,
+        email: str,
+        order_number: str,
+        store_name: str,
+        total_cents: float,
+        currency: str = "EGP",
+        customer_name: str | None = None,
+        order_url: str | None = None,
+        language: str = "ar",
+        store_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+    ) -> bool:
+        """Notify the merchant (store owner) that a new order came in.
+
+        ``total_cents`` is the order total in minor units — matches
+        ``OrderCreatedEvent.total``. Routes through ``_render_or_legacy``
+        so a merchant can override the template once the bus runs with a
+        renderer, and writes an ``email_logs`` audit row when a store_id
+        is supplied.
+        """
+        from src.infrastructure.external_services.resend.email_templates.merchant_notifications import (
+            merchant_new_order_html,
+            merchant_new_order_subject,
+        )
+
+        legacy_html = merchant_new_order_html(
+            order_number=order_number,
+            store_name=store_name,
+            total_cents=total_cents,
+            currency=currency,
+            customer_name=customer_name,
+            order_url=order_url,
+            language=language,
+        )
+        legacy_subject = merchant_new_order_subject(
+            order_number, store_name, language=language
+        )
+
+        rendered = await self._render_or_legacy(
+            event_type="merchant_new_order",
+            language=language,
+            store_id=store_id,
+            variables={
+                "order_number": order_number,
+                "store_name": store_name,
+                "order_total": (total_cents or 0) / 100,
+                "currency": currency,
+                "customer_name": customer_name or "",
+                "order_url": order_url or "#",
+            },
+            legacy_subject=legacy_subject,
+            legacy_html=legacy_html,
+        )
+
+        message = EmailMessage(
+            to=email,
+            subject=rendered.subject,
+            html_content=rendered.html,
+            from_name=rendered.from_name,
+            reply_to=rendered.reply_to,
+        )
+        try:
+            ok = await self.send_email(message)
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="merchant_new_order",
+                language=language,
+                subject=rendered.subject,
+                status="sent" if ok else "failed",
+                used_custom_template=rendered.used_custom,
+                template_id=rendered.template_id,
+            )
+            return ok
+        except Exception as exc:
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="merchant_new_order",
+                language=language,
+                subject=rendered.subject,
+                status="failed",
+                used_custom_template=rendered.used_custom,
+                template_id=rendered.template_id,
+                error_code=str(exc)[:100],
+            )
+            raise
+
     async def send_invoice_email(
         self,
         email: str,

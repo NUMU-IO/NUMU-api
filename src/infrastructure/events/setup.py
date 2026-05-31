@@ -61,6 +61,9 @@ from src.infrastructure.events.handlers.instapay_notification_handler import (
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
 )
+from src.infrastructure.events.handlers.merchant_notification_handler import (
+    handle_merchant_order_notification,
+)
 from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
     handle_order_status_changed_for_meta_capi,
 )
@@ -159,6 +162,9 @@ def create_event_bus() -> EventBus:
     # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
     bus.subscribe(OrderCreatedEvent, handle_order_created_activity)
+    # Email the store owner ("you got a new order") on every new order.
+    # Opt-out per store via store.settings.email_notifications.new_order.
+    bus.subscribe(OrderCreatedEvent, handle_merchant_order_notification)
     # backend-030 / US1 — WhatsApp order-confirmation on order creation
     bus.subscribe(OrderCreatedEvent, handle_order_created_whatsapp)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
