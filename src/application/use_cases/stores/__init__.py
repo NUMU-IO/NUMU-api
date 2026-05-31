@@ -8,6 +8,10 @@ from src.application.use_cases.stores.get_dashboard_stats import (
     RevenueDataPoint,
     TopProductDTO,
 )
+from src.application.use_cases.stores.get_order_streak import (
+    GetOrderStreakUseCase,
+    OrderStreakDTO,
+)
 from src.application.use_cases.stores.get_store import GetStoreUseCase
 from src.application.use_cases.stores.list_stores import ListStoresUseCase
 from src.application.use_cases.stores.update_store import UpdateStoreUseCase
@@ -22,4 +26,6 @@ __all__ = [
     "DashboardStatsDTO",
     "RevenueDataPoint",
     "TopProductDTO",
+    "GetOrderStreakUseCase",
+    "OrderStreakDTO",
 ]

@@ -544,6 +544,46 @@ class OrderRepository(IOrderRepository):
             (row.day, int(row.revenue or 0), int(row.orders or 0)) for row in result
         ]
 
+    async def get_order_day_set(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        *,
+        timezone: str = "Africa/Cairo",
+    ) -> set[date]:
+        """Return the set of local-timezone calendar dates on which the store
+        had at least one *real* order.
+
+        Powers the dashboard "order streak" counter. Draft / cancelled /
+        refunded / payment-failed orders don't count as a real sale, so they
+        are excluded. ``created_at`` is stored in UTC; we convert to
+        ``timezone`` before truncating to a date so "a day" follows the
+        merchant's wall clock (Egypt is UTC+2) rather than UTC midnight —
+        otherwise late-evening Cairo orders would land on the wrong day and
+        spuriously break the streak.
+        """
+        local_day = cast(func.timezone(timezone, OrderModel.created_at), SqlDate).label(
+            "day"
+        )
+        query = (
+            select(local_day)
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+                OrderModel.status.notin_([
+                    OrderStatus.DRAFT,
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                    OrderStatus.PAYMENT_FAILED,
+                ]),
+            )
+            .group_by(local_day)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return {row.day for row in result}
+
     async def get_customer_order_stats(
         self, store_id: UUID
     ) -> dict[UUID, tuple[int, int]]:

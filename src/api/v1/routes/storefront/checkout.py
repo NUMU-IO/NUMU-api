@@ -1964,6 +1964,33 @@ async def checkout(
     except Exception as e:
         logger.warning(f"Failed to dispatch WhatsApp notification: {e}")
 
+    # Merchant "new order" email — notify the store owner that an order just
+    # landed (per store). The storefront checkout path doesn't publish
+    # OrderCreatedEvent (unlike the merchant-side CreateOrderUseCase), so we
+    # invoke the OrderCreated handler directly with a constructed event. It
+    # opens its own session, resolves the owner email + store name, honours
+    # the per-store opt-out (store.settings.email_notifications.new_order),
+    # and sends — same as the bus-driven path.
+    try:
+        import asyncio
+
+        from src.core.events.order_events import OrderCreatedEvent
+        from src.infrastructure.events.handlers.merchant_notification_handler import (
+            handle_merchant_order_notification,
+        )
+
+        _merchant_event = OrderCreatedEvent(
+            order_id=created_order.id,
+            order_number=created_order.order_number,
+            store_id=created_order.store_id,
+            customer_id=created_order.customer_id,
+            total=float(created_order.total),
+            currency=currency,
+        )
+        asyncio.create_task(handle_merchant_order_notification(_merchant_event))
+    except Exception as e:
+        logger.warning(f"Failed to dispatch merchant new-order email: {e}")
+
     # Invoices are deferred: we no longer issue an invoice at checkout —
     # not for COD (the merchant collects cash on delivery, so no invoice
     # until they mark the order paid) and not for prepaid (issued after
