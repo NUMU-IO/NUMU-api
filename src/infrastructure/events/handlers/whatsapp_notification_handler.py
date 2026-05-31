@@ -342,15 +342,51 @@ async def _resolve_send_context(
         WhatsAppTemplateModel,
     )
 
-    tmpl_row = (
-        await session.execute(
-            select(WhatsAppTemplateModel).where(
-                WhatsAppTemplateModel.store_id == store_id,
-                WhatsAppTemplateModel.name == template_name,
-                WhatsAppTemplateModel.language == language,
+    # The DB template rows are seeded with INCONSISTENT English locale
+    # codes: order_confirmation_v2 is seeded "en_US" while order_shipped_v2
+    # and order_delivered are seeded "en" (see _SYSTEM_TEMPLATES in
+    # 20260524_010000_add_whatsapp_optin_scheduled_dl.py). We resolve an
+    # English store to "en_US" above, so an exact-match lookup finds the
+    # confirmation row but MISSES the shipped/delivered rows → the
+    # send-guard sees template_status=None → every shipped/delivered send
+    # to an English-default store is silently blocked with
+    # TEMPLATE_NOT_APPROVED. Match either locale variant so the lookup is
+    # robust to the seed drift. (Arabic is unaffected — "ar" everywhere.)
+    lang_candidates = [language]
+    if language == "en_US":
+        lang_candidates.append("en")
+    elif language == "en":
+        lang_candidates.append("en_US")
+
+    tmpl_rows = (
+        (
+            await session.execute(
+                select(WhatsAppTemplateModel).where(
+                    WhatsAppTemplateModel.store_id == store_id,
+                    WhatsAppTemplateModel.name == template_name,
+                    WhatsAppTemplateModel.language.in_(lang_candidates),
+                )
             )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .all()
+    )
+    # Prefer an exact language match, then an APPROVED row, else any row.
+    tmpl_row = (
+        next(
+            (t for t in tmpl_rows if t.language == language),
+            None,
+        )
+        or next(
+            (
+                t
+                for t in tmpl_rows
+                if getattr(t.status, "value", t.status) == "APPROVED"
+            ),
+            None,
+        )
+        or (tmpl_rows[0] if tmpl_rows else None)
+    )
     template_status = tmpl_row.status if tmpl_row is not None else None
 
     # Credentials check — done via the resolver later. The guard only needs
