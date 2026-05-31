@@ -1926,59 +1926,19 @@ async def checkout(
         except Exception as e:
             logger.warning(f"Failed to dispatch order confirmation email: {e}")
 
-    # WhatsApp notification (via Celery — optional)
-    try:
-        customer_phone = str(current_customer.phone) if current_customer.phone else None
-        if customer_phone:
-            prefs = current_customer.metadata.get("notification_preferences", {})
-            whatsapp_prefs = prefs.get("whatsapp", {})
-            if whatsapp_prefs.get("order_confirmation", True):
-                from src.infrastructure.messaging.tasks.notification_tasks import (
-                    send_whatsapp_order_confirmation_task,
-                )
-
-                total_display = f"{currency} {created_order.total / 100:.2f}"
-                # Reuse the same tracking URL the email uses so both
-                # channels point at the same page.
-                _wa_base_url = (
-                    f"https://{store.custom_domain}"
-                    if store.custom_domain
-                    else f"https://{store.subdomain}.numueg.app"
-                )
-                _wa_tracking_url = f"{_wa_base_url}/track/{created_order.id}"
-                # Self-describing ``<subdomain>/<order_id>`` value for the
-                # order_confirmation_v2 "Manage order" URL button. The apex
-                # redirector (numueg.app/o/...) routes this straight to THIS
-                # store's order-tracking page WITHOUT a DB lookup. A bare
-                # UUID forces the redirector's prod-DB lookup branch, which
-                # can't find test/stage orders and falls back to the apex
-                # landing page — the "broken track link" bug. Bare UUID only
-                # when the store has no subdomain (custom-domain-only store).
-                _wa_order_ref = (
-                    f"{store.subdomain}/{created_order.id}"
-                    if store.subdomain
-                    else str(created_order.id)
-                )
-                send_whatsapp_order_confirmation_task.delay(
-                    phone=customer_phone,
-                    customer_name=current_customer.full_name,
-                    order_number=created_order.order_number,
-                    total=total_display,
-                    store_name=store.name,
-                    language=store.default_language,
-                    tracking_url=_wa_tracking_url,
-                    order_id=_wa_order_ref,
-                )
-    except Exception as e:
-        logger.warning(f"Failed to dispatch WhatsApp notification: {e}")
-
-    # Merchant "new order" email — notify the store owner that an order just
-    # landed (per store). The storefront checkout path doesn't publish
+    # New-order notifications — customer WhatsApp confirmation + merchant
+    # "new order" email. The storefront checkout path doesn't publish
     # OrderCreatedEvent (unlike the merchant-side CreateOrderUseCase), so we
-    # invoke the OrderCreated handler directly with a constructed event. It
-    # opens its own session, resolves the owner email + store name, honours
-    # the per-store opt-out (store.settings.email_notifications.new_order),
-    # and sends — same as the bus-driven path.
+    # invoke the OrderCreated handlers directly with one constructed event.
+    #
+    # handle_order_created_whatsapp resolves per-store WhatsApp credentials,
+    # runs the central send-guard (opt-out / merchant-toggle / template-approval),
+    # sends the order_confirmation_v2 template, AND persists a message_log row
+    # — so the confirmation shows in the merchant hub's WhatsApp inbox, with
+    # replay-safe idempotency. This replaces the legacy
+    # send_whatsapp_order_confirmation_task, which bypassed the guard, the
+    # per-store credential resolver, and the message_log (so its sends never
+    # appeared in the inbox and BYO stores sent from the shared number).
     try:
         import asyncio
 
@@ -1986,8 +1946,11 @@ async def checkout(
         from src.infrastructure.events.handlers.merchant_notification_handler import (
             handle_merchant_order_notification,
         )
+        from src.infrastructure.events.handlers.whatsapp_notification_handler import (
+            handle_order_created_whatsapp,
+        )
 
-        _merchant_event = OrderCreatedEvent(
+        _order_created_event = OrderCreatedEvent(
             order_id=created_order.id,
             order_number=created_order.order_number,
             store_id=created_order.store_id,
@@ -1995,9 +1958,12 @@ async def checkout(
             total=float(created_order.total),
             currency=currency,
         )
-        asyncio.create_task(handle_merchant_order_notification(_merchant_event))
+        # Customer WhatsApp order-confirmation (guarded + logged + idempotent).
+        asyncio.create_task(handle_order_created_whatsapp(_order_created_event))
+        # Merchant "new order" email (honours store email_notifications opt-out).
+        asyncio.create_task(handle_merchant_order_notification(_order_created_event))
     except Exception as e:
-        logger.warning(f"Failed to dispatch merchant new-order email: {e}")
+        logger.warning(f"Failed to dispatch new-order notifications: {e}")
 
     # Invoices are deferred: we no longer issue an invoice at checkout —
     # not for COD (the merchant collects cash on delivery, so no invoice
