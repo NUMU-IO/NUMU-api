@@ -282,12 +282,28 @@ async def _resolve_send_context(
     # to "ar", so English-default stores never matched the en_US
     # template row, send-guard saw template_status=None and skipped
     # every order_confirmation send to English-speaking customers.
-    raw_lang = (store_row.default_language or "ar").lower()
+    store_settings = store_row.settings or {}
+    # Store-level message-language override — the "send in which language"
+    # control on the WhatsApp Overview page. Persisted at
+    # store.settings.whatsapp.message_language by PATCH /whatsapp/settings.
+    # "ar"/"en" force that language for every automated notification;
+    # "auto" (default) follows store.default_language. Customers carry no
+    # per-recipient language column, so "auto" resolves to the store
+    # default — which is also the pre-override behaviour, keeping existing
+    # stores unchanged.
+    wa_lang_pref = str(
+        (store_settings.get("whatsapp") or {}).get("message_language") or "auto"
+    ).lower()
+    if wa_lang_pref == "ar":
+        raw_lang = "ar"
+    elif wa_lang_pref == "en":
+        raw_lang = "en"
+    else:  # auto
+        raw_lang = (store_row.default_language or "ar").lower()
     if raw_lang.startswith("en"):
         language = "en_US"
     else:
         language = "ar"
-    store_settings = store_row.settings or {}
     store_whatsapp_notifications = (
         store_settings.get("whatsapp_notifications", {}) or {}
     )

@@ -27,6 +27,7 @@ from src.api.v1.schemas.stores.whatsapp import (
 from src.api.v1.schemas.stores.whatsapp_connection import (
     BYOConnectRequest,
     BYOValidationFailure,
+    WhatsAppSettingsUpdate,
     WhatsAppStatus,
 )
 from src.config import settings
@@ -663,6 +664,7 @@ async def byo_status(
     notifs = store_settings.get("whatsapp_notifications") or {}
     wa_settings = store_settings.get("whatsapp") or {}
     credential_error = wa_settings.get("credential_error")
+    message_language = wa_settings.get("message_language") or "auto"
 
     if cred and cred.extra_metadata:
         return WhatsAppStatus(
@@ -673,6 +675,7 @@ async def byo_status(
             waba_id=cred.extra_metadata.get("waba_id"),
             last_validated_at=cred.last_validated_at,
             credential_error=credential_error,
+            message_language=message_language,
             notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
         )
 
@@ -685,6 +688,76 @@ async def byo_status(
         waba_id=None,
         last_validated_at=None,
         credential_error=None,
+        message_language=message_language,
+        notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
+    )
+
+
+@router.patch(
+    "/settings",
+    summary="Update store-level WhatsApp preferences (e.g. message language)",
+    operation_id="update_whatsapp_settings",
+)
+async def update_whatsapp_settings(
+    body: WhatsAppSettingsUpdate,
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Partial update of ``store.settings.whatsapp.*`` store-level prefs.
+
+    Currently exposes ``message_language`` (auto | ar | en) — the language
+    the automated order-lifecycle notifications are sent in. Honored at
+    send time by ``whatsapp_notification_handler._resolve_send_context``;
+    'auto' follows ``store.default_language``.
+    """
+    from src.api.v1.schemas.stores.whatsapp_connection import (
+        NotificationSettings as NotifSettings,
+    )
+    from src.api.v1.schemas.stores.whatsapp_connection import WhatsAppStatus
+
+    store_settings = dict(store.settings or {})
+    wa_settings = dict(store_settings.get("whatsapp") or {})
+    if body.message_language is not None:
+        wa_settings["message_language"] = body.message_language
+    store_settings["whatsapp"] = wa_settings
+    store.settings = store_settings
+
+    store_repo = StoreRepository(db)
+    await store_repo.update(store)
+
+    # Re-derive the connection status so the UI gets a consistent shape back.
+    notifs = store_settings.get("whatsapp_notifications") or {}
+    cred = (
+        await db.execute(
+            select(ServiceCredential).where(
+                ServiceCredential.tenant_id == store.tenant_id,
+                ServiceCredential.service_type == ServiceType.WHATSAPP,
+                ServiceCredential.service_name == ServiceName.WHATSAPP_BUSINESS,
+                ServiceCredential.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if cred and cred.extra_metadata:
+        return WhatsAppStatus(
+            mode="byo",
+            connected=True,
+            phone_display_name=cred.extra_metadata.get("display_name"),
+            display_phone_number=cred.extra_metadata.get("phone_number"),
+            waba_id=cred.extra_metadata.get("waba_id"),
+            last_validated_at=cred.last_validated_at,
+            credential_error=wa_settings.get("credential_error"),
+            message_language=wa_settings.get("message_language") or "auto",
+            notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
+        )
+    return WhatsAppStatus(
+        mode="platform_managed",
+        connected=bool(settings.whatsapp_enabled and settings.whatsapp_phone_number_id),
+        phone_display_name="NUMU" if settings.whatsapp_enabled else None,
+        display_phone_number=None,
+        waba_id=None,
+        last_validated_at=None,
+        credential_error=None,
+        message_language=wa_settings.get("message_language") or "auto",
         notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
     )
 

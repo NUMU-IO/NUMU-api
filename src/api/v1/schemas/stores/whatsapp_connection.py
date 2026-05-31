@@ -26,6 +26,15 @@ class NotificationSettings(BaseModel):
     marketing: bool = False
 
 
+# Language the automated order-lifecycle notifications are sent in.
+# "auto" follows the store's default_language; "ar"/"en" force every
+# notification to that language regardless of the store default. Read +
+# honored at send time in
+# whatsapp_notification_handler._resolve_send_context. Persisted at
+# store.settings.whatsapp.message_language.
+MessageLanguage = Literal["auto", "ar", "en"]
+
+
 class WhatsAppStatus(BaseModel):
     """Per-store WhatsApp connection status (GET /whatsapp/status)."""
 
@@ -43,7 +52,21 @@ class WhatsAppStatus(BaseModel):
         default=None,
         description="Set when last send failed with a credential-class Meta error; cleared on next successful validation.",
     )
+    message_language: MessageLanguage = Field(
+        default="auto",
+        description=(
+            "Language for automated order notifications. 'auto' follows the"
+            " store default language; 'ar'/'en' force that language."
+        ),
+    )
     notifications: NotificationSettings
+
+
+class WhatsAppSettingsUpdate(BaseModel):
+    """Body for PATCH /whatsapp/settings — partial update of store-level
+    WhatsApp preferences that are not per-message toggles."""
+
+    message_language: MessageLanguage | None = None
 
 
 class BYOConnectRequest(BaseModel):
