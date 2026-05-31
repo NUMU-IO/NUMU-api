@@ -41,7 +41,7 @@ class NotifyWhatsAppResponse(BaseModel):
     sent: bool
     # Machine-readable skip reason when sent is False so the merchant hub
     # can show a precise toast (no_phone, opt_out, no_credentials,
-    # template_not_approved, send_failed, …).
+    # template_not_approved, already_notified_recently, send_failed, …).
     reason: str | None = None
     message_id: str | None = None
 
@@ -345,6 +345,44 @@ async def notify_whatsapp(
 
     phone = checkout.phone
 
+    # Per-customer cooldown — shares the 24h key the scheduled abandoned-cart
+    # task sets. abandoned_cart_v2 is a MARKETING template; Meta frequency-caps
+    # marketing sends per recipient and silently drops repeats with error
+    # 131049 ("not delivered to maintain healthy ecosystem engagement"). So
+    # nudging several of one customer's carts would deliver only the first.
+    # Gate the manual action on the same key so the merchant gets a clear
+    # "already nudged this customer" response instead of firing a send Meta
+    # will drop. Keyed by customer_id when known (shares the auto-task key),
+    # else by phone for guest checkouts (manual-to-manual dedup).
+    from src.config import settings as _settings
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+    from src.infrastructure.messaging.tasks.abandoned_cart_tasks import (
+        NOTIFICATION_COOLDOWN_KEY,
+        NOTIFICATION_COOLDOWN_SECONDS,
+    )
+
+    if checkout.customer_id is not None:
+        cooldown_key = NOTIFICATION_COOLDOWN_KEY.format(
+            store_id=store.id, customer_id=checkout.customer_id
+        )
+    else:
+        cooldown_key = f"abandoned_cart_notified:{store.id}:phone:{phone}"
+
+    if _settings.redis_host:
+        _cache = RedisCacheService()
+        try:
+            if await _cache.exists(cooldown_key):
+                logger.info(
+                    "abandoned_cart_whatsapp_cooldown store=%s checkout=%s",
+                    store.id,
+                    checkout_id,
+                )
+                return NotifyWhatsAppResponse(
+                    sent=False, reason="already_notified_recently"
+                )
+        finally:
+            await _cache.close()
+
     # abandoned_cart_v2 is seeded for {"en", "ar"} (NOT en_US). Resolve the
     # send language to one of those so both the DB template-status lookup
     # and the messaging service's EGYPTIAN_TEMPLATES key match.
@@ -429,6 +467,17 @@ async def notify_whatsapp(
     )
 
     if result.success:
+        # Set the per-customer cooldown (same key the scheduled task uses) so
+        # further manual nudges to any of this customer's carts are
+        # short-circuited for 24h instead of hitting Meta's frequency cap.
+        if _settings.redis_host:
+            _cache = RedisCacheService()
+            try:
+                await _cache.set(
+                    cooldown_key, "1", expire=NOTIFICATION_COOLDOWN_SECONDS
+                )
+            finally:
+                await _cache.close()
         # Stamp the row so the UI / cooldown logic can see it was nudged.
         checkout.extra_data = {
             **(checkout.extra_data or {}),

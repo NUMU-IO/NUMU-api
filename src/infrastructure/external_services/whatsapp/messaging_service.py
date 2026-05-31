@@ -952,12 +952,41 @@ class WhatsAppMessagingService(IMessagingService):
                                 logger.error(f"Failed to update message status: {e}")
 
                     if status_value == "failed":
+                        # Some Meta "failed" codes mean "accepted but
+                        # deliberately not delivered", not a bug we should be
+                        # paged for. 131049 = per-user MARKETING frequency cap
+                        # ("not delivered to maintain healthy ecosystem
+                        # engagement") — expected when several abandoned-cart
+                        # nudges target one customer. 131050 = recipient opted
+                        # out of marketing. Log these at WARNING (no Sentry
+                        # page) with a human-readable reason; everything else
+                        # stays ERROR.
+                        _benign_codes = {131049, 131050}
+                        _friendly = {
+                            131049: (
+                                "blocked by Meta's per-user marketing frequency cap"
+                            ),
+                            131050: "recipient opted out of marketing messages",
+                        }
                         for error in status_update.get("errors", []):
-                            logger.error(
-                                f"WhatsApp message failed: {wa_message_id}, "
-                                f"code={error.get('code')}, "
-                                f"title={error.get('title')}, "
-                                f"message={error.get('message')}"
+                            raw_code = error.get("code")
+                            try:
+                                code_int = int(raw_code)
+                            except (TypeError, ValueError):
+                                code_int = None
+                            log = (
+                                logger.warning
+                                if code_int in _benign_codes
+                                else logger.error
+                            )
+                            log(
+                                "WhatsApp message not delivered: %s, code=%s, "
+                                "title=%s, reason=%s, message=%s",
+                                wa_message_id,
+                                raw_code,
+                                error.get("title"),
+                                _friendly.get(code_int, "send failed"),
+                                error.get("message"),
                             )
 
                 # ── Incoming customer messages ──
