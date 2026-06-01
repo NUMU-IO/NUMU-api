@@ -413,6 +413,7 @@ def new_order_email_html(
     products_value_cents: int = 0,
     currency: str = "EGP",
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     recipient_name: str | None = None,
     created_at: datetime | None = None,
     timezone_name: str = "Africa/Cairo",
@@ -532,7 +533,7 @@ def new_order_email_html(
     )
 
     body = f"""
-    {header(title, subtitle, badge=f"#{order_number}", language=lang)}
+    {header(title, subtitle, badge=f"#{order_number}", language=lang, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         {date_line}
         <p class="lead">{greeting}</p>
@@ -548,4 +549,4 @@ def new_order_email_html(
     </div>"""
 
     preheader = c["preheader_merchant"] if is_merchant else c["preheader_customer"]
-    return wrap(body, language=lang, preheader=preheader)
+    return wrap(body, language=lang, preheader=preheader, brand_name=store_name)

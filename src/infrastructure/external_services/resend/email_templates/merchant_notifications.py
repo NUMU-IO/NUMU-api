@@ -37,6 +37,7 @@ def merchant_new_order_html(
     customer_name: str | None = None,
     order_url: str | None = None,
     language: str = "ar",
+    logo_url: str | None = None,
 ) -> str:
     """Render the new-order merchant alert body.
 
@@ -89,7 +90,7 @@ def merchant_new_order_html(
     )
 
     body = f"""
-    {header(title, store_name, language=language)}
+    {header(title, language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{lead}</p>
         <p>{intro}</p>
@@ -108,4 +109,4 @@ def merchant_new_order_html(
         <p class="muted" style="margin-top:24px;">{outro}</p>
     </div>"""
 
-    return wrap(body, language=language, preheader=preheader)
+    return wrap(body, language=language, preheader=preheader, brand_name=store_name)

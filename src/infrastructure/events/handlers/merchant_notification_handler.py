@@ -149,6 +149,7 @@ async def handle_merchant_order_notification(event: OrderCreatedEvent) -> None:
 
         tenant_id: UUID | None = store.tenant_id
         store_name = store.name
+        store_logo_url = store.logo_url
         language = _normalize_language(store.default_language)
         # Per-store timezone for the order-date line (Egypt UTC+2 default).
         timezone_name = (store_settings.get("timezone") or "").strip() or "Africa/Cairo"
@@ -178,6 +179,7 @@ async def handle_merchant_order_notification(event: OrderCreatedEvent) -> None:
             language=language,
             store_id=event.store_id,
             tenant_id=tenant_id,
+            logo_url=store_logo_url,
         )
     except Exception:
         logger.exception(

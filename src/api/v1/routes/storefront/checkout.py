@@ -1876,6 +1876,7 @@ async def checkout(
                 "total": created_order.total / 100,
                 "currency": currency,
                 "store_name": store.name,
+                "store_logo_url": store.logo_url,
                 "customer_name": current_customer.full_name,
                 "tracking_url": order_tracking_url,
                 # Rich-template extras (cents): drive the order-date line and

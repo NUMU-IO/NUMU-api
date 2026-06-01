@@ -13,6 +13,8 @@ provided as a secondary fallback.
 
 from __future__ import annotations
 
+import html
+
 # ──────────────────────────────────────────────────────────────────────────
 # Brand palette
 # ──────────────────────────────────────────────────────────────────────────
@@ -68,13 +70,44 @@ def _wordmark_url() -> str:
 # rendering is preserved across every email client, even when Google
 # Fonts are blocked or stripped).
 # ──────────────────────────────────────────────────────────────────────────
-def _logo_block(language: str = "ar") -> str:
-    """Render the NUMU brand mark as pure styled text.
+def _logo_block(
+    language: str = "ar",
+    brand_name: str | None = None,
+    logo_url: str | None = None,
+) -> str:
+    """Render the brand mark in the email header.
 
-    No images — just an inline-styled table cell so it renders
-    identically on every email client (Gmail, Outlook, Yahoo, Apple Mail).
-    Uses the Aref Ruqaa web font with safe fallbacks.
+    When ``brand_name`` is given (store-related emails) the store's brand is
+    shown: its logo image (when ``logo_url`` is a public URL) above the store
+    name in text. When ``brand_name`` is None the NUMU wordmark is rendered
+    (platform emails), preserving the original behaviour.
+
+    Pure inline styles / text so it renders identically on every email
+    client (Gmail, Outlook, Yahoo, Apple Mail).
     """
+    # "NUMU" is the platform default (no store supplied) — render the NUMU
+    # wordmark, not a store-style brand block.
+    if brand_name and brand_name != "NUMU":
+        font_family = FONT_AR if language == "ar" else FONT_LATIN
+        safe_name = html.escape(brand_name)
+        logo_img = (
+            f'<img src="{html.escape(logo_url, quote=True)}" alt="{safe_name}" '
+            f'style="max-height:54px;max-width:200px;margin:0 auto 10px;'
+            f'display:block;border:0;outline:none;">'
+            if logo_url
+            else ""
+        )
+        return f"""
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
+      <tr>
+        <td align="center" style="text-align:center;padding-bottom:4px;">
+          {logo_img}
+          <span style="font-family:{font_family};font-size:24px;font-weight:700;color:#ffffff;line-height:1.3;display:inline-block;">{safe_name}</span>
+        </td>
+      </tr>
+    </table>
+    """
+
     return f"""
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
       <tr>
@@ -248,8 +281,31 @@ _FOOTER_COPY = {
 }
 
 
-def _footer(language: str) -> str:
+def _footer(language: str, brand_name: str | None = None) -> str:
     f = _FOOTER_COPY.get(language, _FOOTER_COPY["ar"])
+
+    # Store-branded footer: the store's name as the wordmark + a small,
+    # muted "Sent by NUMU" attribution line. The store name uses the body
+    # font (not the Arabic calligraphic brand font, which only suits "نُمو").
+    # "NUMU" is the platform default → fall through to the NUMU footer.
+    if brand_name and brand_name != "NUMU":
+        font_family = FONT_AR if language == "ar" else FONT_LATIN
+        safe_name = html.escape(brand_name)
+        rights = (
+            f"جميع الحقوق محفوظة &copy; 2026 {safe_name}."
+            if language == "ar"
+            else f"&copy; 2026 {safe_name}. All rights reserved."
+        )
+        sent_by = "أُرسلت عبر نُمو" if language == "ar" else "Sent by NUMU"
+        return f"""
+<div class="footer">
+  <div class="mark" style="font-family:{font_family};">{safe_name}</div>
+  <p style="margin-top:10px;">{f["help"]}</p>
+  <p style="margin-top:14px;">{rights}</p>
+  <p style="margin-top:8px;font-size:11px;color:{MUTED};">{sent_by}</p>
+</div>
+"""
+
     return f"""
 <div class="footer">
   <div class="mark">نُمو</div>
@@ -270,11 +326,14 @@ def header(
     subtitle: str | None = None,
     badge: str | None = None,
     language: str = "ar",
+    brand_name: str | None = None,
+    logo_url: str | None = None,
 ) -> str:
     """Build a branded header using only inline styles, solid colors, and text.
 
-    No images, no gradients, no VML — renders identically on Gmail,
-    Outlook, Yahoo, Apple Mail, and every mobile client.
+    When ``brand_name`` is provided the store's brand (logo + name) is shown
+    instead of the NUMU wordmark. No gradients / VML — renders identically on
+    Gmail, Outlook, Yahoo, Apple Mail, and every mobile client.
     """
     font_family = FONT_AR if language == "ar" else FONT_LATIN
 
@@ -301,7 +360,7 @@ def header(
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{HERO_BG}" class="gmail-fix" style="background-color:{HERO_BG};">
       <tr>
         <td bgcolor="{HERO_BG}" align="center" valign="middle" class="gmail-fix" style="background-color:{HERO_BG};padding:32px 28px 24px;text-align:center;color:#ffffff;">
-          {_logo_block(language)}
+          {_logo_block(language, brand_name=brand_name, logo_url=logo_url)}
           <h1 style="color:#ffffff;margin:14px 0 4px;font-size:21px;font-weight:700;font-family:{font_family};line-height:1.4;mso-line-height-rule:exactly;">{title}</h1>
           {sub_html}
           {badge_html}
@@ -320,14 +379,24 @@ def header(
 # ──────────────────────────────────────────────────────────────────────────
 # Wrapper — call this from every template
 # ──────────────────────────────────────────────────────────────────────────
-def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) -> str:
+def wrap(
+    inner_html: str,
+    language: str = "ar",
+    preheader: str | None = None,
+    brand_name: str | None = None,
+    logo_url: str | None = None,
+) -> str:
     """Wrap rendered template body in a full HTML document with brand chrome.
 
     Args:
         inner_html: The template body (header + body sections).
         language: 'ar' (default, Egyptian Arabic, RTL) or 'en'.
         preheader: Optional inbox preview text.
+        brand_name: Store name for per-store footer branding; None → NUMU.
+        logo_url: Accepted for signature symmetry with ``header`` (the footer
+            doesn't render the logo, but callers pass both together).
     """
+    _ = logo_url  # footer is text-only; logo lives in the header
     is_ar = language == "ar"
     direction = "rtl" if is_ar else "ltr"
     preheader_html = (
@@ -378,7 +447,7 @@ def wrap(inner_html: str, language: str = "ar", preheader: str | None = None) ->
         <tr>
           <td>
             {inner_html}
-            {_footer(language)}
+            {_footer(language, brand_name=brand_name)}
           </td>
         </tr>
       </table>

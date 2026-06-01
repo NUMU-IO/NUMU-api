@@ -64,6 +64,7 @@ def order_confirmation_html(
     total: float,
     currency: str = "EGP",
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     language: str = "ar",
     tracking_url: str | None = None,
@@ -109,7 +110,7 @@ def order_confirmation_html(
         )
 
     body = f"""
-    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
+    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{greeting}</p>
         <p>{c["intro"]}</p>
@@ -147,7 +148,9 @@ def order_confirmation_html(
             <a href="{tracking_url or "#"}" class="btn-outline">{c["btn"]}</a>
         </p>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(
+        body, language=language, preheader=c["preheader"], brand_name=store_name
+    )
 
 
 def _order_confirmation_subject(
@@ -215,6 +218,7 @@ def shipping_notification_html(
     tracking_number: str | None = None,
     carrier: str | None = None,
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     language: str = "ar",
     **_kwargs,
@@ -236,7 +240,7 @@ def shipping_notification_html(
         </div>"""
 
     body = f"""
-    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
+    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{greeting}</p>
         <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
@@ -283,7 +287,9 @@ def shipping_notification_html(
             <a href="#" class="btn">{c["btn"]}</a>
         </p>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(
+        body, language=language, preheader=c["preheader"], brand_name=store_name
+    )
 
 
 def _shipping_subject(
@@ -343,6 +349,7 @@ _DELIVERY = {
 def delivery_confirmation_html(
     order_number: str,
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     language: str = "ar",
     **_kwargs,
@@ -355,7 +362,7 @@ def delivery_confirmation_html(
     )
 
     body = f"""
-    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
+    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{greeting}</p>
         <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
@@ -395,7 +402,9 @@ def delivery_confirmation_html(
         <p>{c["enjoy"]}</p>
         <p>{c["thanks"].format(store_name=store_name)}</p>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(
+        body, language=language, preheader=c["preheader"], brand_name=store_name
+    )
 
 
 def _delivery_subject(
@@ -443,6 +452,7 @@ _CONFIRMED = {
 def order_confirmed_html(
     order_number: str,
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     language: str = "ar",
     **_kwargs,
@@ -454,7 +464,7 @@ def order_confirmed_html(
         else c["greeting_default"]
     )
     body = f"""
-    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
+    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{greeting}</p>
         <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
@@ -462,7 +472,9 @@ def order_confirmed_html(
         <p><strong>{c["what_next"]}</strong></p>
         <p>{c["what_next_body"]}</p>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(
+        body, language=language, preheader=c["preheader"], brand_name=store_name
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -494,6 +506,7 @@ _PROCESSING = {
 def order_processing_html(
     order_number: str,
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     language: str = "ar",
     **_kwargs,
@@ -505,14 +518,16 @@ def order_processing_html(
         else c["greeting_default"]
     )
     body = f"""
-    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
+    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{greeting}</p>
         <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
         <hr class="divider">
         <p>{c["note"]}</p>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(
+        body, language=language, preheader=c["preheader"], brand_name=store_name
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -548,6 +563,7 @@ _CANCELLED = {
 def order_cancelled_html(
     order_number: str,
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     reason: str | None = None,
     language: str = "ar",
@@ -569,7 +585,7 @@ def order_cancelled_html(
         </div>"""
 
     body = f"""
-    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
+    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{greeting}</p>
         <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
@@ -578,7 +594,9 @@ def order_cancelled_html(
         <p>{c["note"]}</p>
         <p class="muted">{c["refund_note"]}</p>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(
+        body, language=language, preheader=c["preheader"], brand_name=store_name
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -612,6 +630,7 @@ _REFUNDED = {
 def order_refunded_html(
     order_number: str,
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     reason: str | None = None,
     language: str = "ar",
@@ -633,7 +652,7 @@ def order_refunded_html(
         </div>"""
 
     body = f"""
-    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
+    {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language, brand_name=store_name, logo_url=logo_url)}
     <div class="body">
         <p class="lead">{greeting}</p>
         <p>{c["intro"].format(order_number=order_number, store_name=store_name)}</p>
@@ -641,7 +660,9 @@ def order_refunded_html(
         <hr class="divider">
         <p>{c["note"]}</p>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(
+        body, language=language, preheader=c["preheader"], brand_name=store_name
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -689,6 +710,7 @@ def order_status_email(
     status: str,
     order_number: str,
     store_name: str = "NUMU",
+    logo_url: str | None = None,
     customer_name: str | None = None,
     tracking_number: str | None = None,
     carrier: str | None = None,
@@ -711,6 +733,7 @@ def order_status_email(
     html = html_fn(
         order_number=order_number,
         store_name=store_name,
+        logo_url=logo_url,
         customer_name=customer_name,
         tracking_number=tracking_number,
         carrier=carrier,

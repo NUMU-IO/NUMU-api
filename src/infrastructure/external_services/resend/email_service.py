@@ -582,6 +582,7 @@ class ResendEmailService(IEmailService):
             products_value_cents=products_value_cents,
             currency=currency,
             store_name=store_name,
+            logo_url=order_details.get("store_logo_url"),
             recipient_name=customer_name,
             created_at=order_details.get("created_at"),
             timezone_name=order_details.get("timezone") or "Africa/Cairo",
@@ -605,6 +606,7 @@ class ResendEmailService(IEmailService):
                 "order_total": total,
                 "currency": currency,
                 "store_name": store_name,
+                "store_logo_url": order_details.get("store_logo_url"),
                 "items": items,
                 "track_url": tracking_url or "#",
             },
@@ -666,6 +668,7 @@ class ResendEmailService(IEmailService):
         language: str = "ar",
         store_id: UUID | None = None,
         tenant_id: UUID | None = None,
+        logo_url: str | None = None,
     ) -> bool:
         """Notify the merchant (store owner) that a new order came in.
 
@@ -690,6 +693,7 @@ class ResendEmailService(IEmailService):
             products_value_cents=products_value_cents,
             currency=currency,
             store_name=store_name,
+            logo_url=logo_url,
             recipient_name=customer_name,
             created_at=created_at,
             timezone_name=timezone_name,
@@ -713,6 +717,7 @@ class ResendEmailService(IEmailService):
                 "currency": currency,
                 "customer_name": customer_name or "",
                 "order_url": order_url or "#",
+                "store_logo_url": logo_url,
             },
             legacy_subject=legacy_subject,
             legacy_html=legacy_html,
@@ -1119,6 +1124,7 @@ class ResendEmailService(IEmailService):
         language: str = "ar",
         store_id: UUID | None = None,
         tenant_id: UUID | None = None,
+        logo_url: str | None = None,
     ) -> bool:
         """Send an arbitrary order-status email.
 
@@ -1158,6 +1164,7 @@ class ResendEmailService(IEmailService):
             audience="customer",
             order_number=order_number,
             store_name=store_name,
+            logo_url=logo_url,
             recipient_name=customer_name,
             status=status,
             tracking_number=tracking_number,
