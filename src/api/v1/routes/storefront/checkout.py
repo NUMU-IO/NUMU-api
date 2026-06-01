@@ -1941,15 +1941,15 @@ async def checkout(
     # per-store credential resolver, and the message_log (so its sends never
     # appeared in the inbox and BYO stores sent from the shared number).
     try:
-        import asyncio
-
         from src.core.events.order_events import OrderCreatedEvent
+        from src.infrastructure.events.deferred_dispatch import deferred_scheduler
         from src.infrastructure.events.handlers.merchant_notification_handler import (
             handle_merchant_order_notification,
         )
         from src.infrastructure.events.handlers.whatsapp_notification_handler import (
             handle_order_created_whatsapp,
         )
+        from src.infrastructure.events.setup import get_event_bus
 
         _order_created_event = OrderCreatedEvent(
             order_id=created_order.id,
@@ -1959,10 +1959,29 @@ async def checkout(
             total=float(created_order.total),
             currency=currency,
         )
-        # Customer WhatsApp order-confirmation (guarded + logged + idempotent).
-        asyncio.create_task(handle_order_created_whatsapp(_order_created_event))
-        # Merchant "new order" email (honours store email_notifications opt-out).
-        asyncio.create_task(handle_merchant_order_notification(_order_created_event))
+        # Dispatch the two order-created notifications (customer WhatsApp
+        # confirmation + merchant "new order" email) through the
+        # commit-deferred scheduler rather than firing them immediately.
+        #
+        # These handlers open their OWN DB session and read the order back
+        # (e.g. handle_order_created_whatsapp must load the order to decide
+        # COD-confirm vs the passive notice, and to resolve the shipping
+        # address). Firing them with ``asyncio.create_task`` raced this
+        # request's commit: the order was still flushed-but-uncommitted, so
+        # the handler's separate session saw no order and silently fell back
+        # to the passive path (the "confirm request never sent" bug).
+        # ``deferred_scheduler`` buffers them on the request session and
+        # flushes from its ``after_commit`` hook, so they only run once the
+        # order is durable and visible (falls back to immediate dispatch when
+        # there's no request-scoped session, e.g. tests). We invoke only
+        # these two handlers directly (not ``bus.publish``) to avoid firing
+        # the other OrderCreatedEvent subscribers (webhook / activity), which
+        # the storefront path handles separately.
+        deferred_scheduler(
+            get_event_bus(),
+            _order_created_event,
+            [handle_order_created_whatsapp, handle_merchant_order_notification],
+        )
     except Exception as e:
         logger.warning(f"Failed to dispatch new-order notifications: {e}")
 
