@@ -49,8 +49,8 @@ _WA_PREF_KEYS = {
 # approved). Used as the lookup into whatsapp_templates for the
 # send-guard's APPROVED check.
 _WA_TEMPLATE_NAMES = {
-    "shipped": "order_shipped_v2",
-    "delivered": "order_delivered",
+    "shipped": "order_shipped_v3",
+    "delivered": "order_delivered_v2",
 }
 
 
@@ -502,7 +502,7 @@ async def _maybe_send_cod_confirm_request(
         session,
         store_id=event.store_id,
         customer_id=event.customer_id,
-        template_name="order_confirmation_request_v1",
+        template_name="order_confirmation_request_v2",
         idempotency_event_tag="order_confirm_request",
         order_id=event.order_id,
         notification_pref_key="require_order_confirmation",
@@ -550,6 +550,15 @@ async def _maybe_send_cod_confirm_request(
     )
     now = datetime.now(UTC)
 
+    # Rich-template detail fields ({{5}} payment, {{6}} item count). Derived
+    # from the order so the Bosta-style body renders fully.
+    from src.infrastructure.external_services.whatsapp.messaging_service import (
+        payment_label,
+    )
+
+    payment_label_str = payment_label(order_row.payment_method, extras["language"])
+    item_count_str = str(len(order_row.line_items or []))
+
     if delay_minutes > 0:
         repo = WhatsAppScheduledSendRepository(session)
         await repo.create(
@@ -560,8 +569,11 @@ async def _maybe_send_cod_confirm_request(
             template_id=extras["template_id"],
             template_params={
                 "customer_name": extras["customer_name"],
+                "store_name": extras["store_name"],
                 "order_number": event.order_number,
                 "total": total_str,
+                "payment_label": payment_label_str,
+                "item_count": item_count_str,
                 "address": address_str,
                 "confirm_payload": confirm_payload,
             },
@@ -592,6 +604,9 @@ async def _maybe_send_cod_confirm_request(
         total_str,
         address_str,
         confirm_payload,
+        store_name=extras["store_name"],
+        payment_label_text=payment_label_str,
+        item_count=item_count_str,
     )
 
     if result.success:
@@ -603,7 +618,7 @@ async def _maybe_send_cod_confirm_request(
             tenant_id=extras["tenant_id"],
             store_id=event.store_id,
             phone=extras["customer_phone"],
-            template_name="order_confirmation_request_v1",
+            template_name="order_confirmation_request_v2",
             message_id=result.message_id,
             status_str=str(getattr(result.status, "value", result.status)),
             metadata={
@@ -649,7 +664,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             # Must match the DB seed name exactly — that row carries the
             # `status` field the send-guard reads (APPROVED → allow send).
             # See _SYSTEM_TEMPLATES in the alembic migration.
-            template_name="order_confirmation_v2",
+            template_name="order_confirmation_v3",
             idempotency_event_tag="order_created",
             order_id=event.order_id,
             notification_pref_key="order_confirmation",
@@ -657,6 +672,23 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
         if resolution is None:
             return
         ctx, extras = resolution
+
+        # Resolve the order's payment method for the v3 body's "Payment"
+        # line ({{5}}). The OrderCreatedEvent doesn't carry it, so read the
+        # order row.
+        from src.infrastructure.database.models.tenant.order import OrderModel
+        from src.infrastructure.external_services.whatsapp.messaging_service import (
+            payment_label,
+        )
+
+        _order_row = (
+            await session.execute(
+                select(OrderModel).where(OrderModel.id == event.order_id)
+            )
+        ).scalar_one_or_none()
+        payment_label_str = payment_label(
+            _order_row.payment_method if _order_row else None, extras["language"]
+        )
 
         decision = check(ctx)
         if not decision.allowed:
@@ -698,6 +730,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             f"{event.total / 100:.2f} {event.currency}",
             extras["store_name"],
             order_id=_order_ref,
+            payment_label_text=payment_label_str,
         )
 
         if result.success:
@@ -706,7 +739,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
                 tenant_id=extras["tenant_id"],
                 store_id=event.store_id,
                 phone=extras["customer_phone"],
-                template_name="order_confirmation_v2",
+                template_name="order_confirmation_v3",
                 message_id=result.message_id,
                 status_str=str(getattr(result.status, "value", result.status)),
                 metadata={
@@ -738,7 +771,7 @@ async def handle_order_paid_whatsapp(event: OrderPaidEvent) -> None:
             session,
             store_id=event.store_id,
             customer_id=event.customer_id,
-            template_name="payment_received",
+            template_name="payment_received_v2",
             idempotency_event_tag="order_paid",
             order_id=event.order_id,
             notification_pref_key="payment_received",
@@ -780,7 +813,7 @@ async def handle_order_paid_whatsapp(event: OrderPaidEvent) -> None:
                 tenant_id=extras["tenant_id"],
                 store_id=event.store_id,
                 phone=extras["customer_phone"],
-                template_name="payment_received",
+                template_name="payment_received_v2",
                 message_id=result.message_id,
                 status_str=str(getattr(result.status, "value", result.status)),
                 metadata={

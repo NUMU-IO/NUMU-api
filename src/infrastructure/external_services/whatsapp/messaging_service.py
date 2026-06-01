@@ -43,6 +43,37 @@ logger = logging.getLogger(__name__)
 WHATSAPP_API_BASE = "https://graph.facebook.com/v18.0"
 
 
+# Localized, human-readable payment-method labels for the rich templates'
+# "Payment" line ({{5}} on the confirmation templates). Keyed by the raw
+# ``order.payment_method`` string (lower-cased); unknown methods fall back to
+# a title-cased version of the raw value so we never render an empty line.
+_PAYMENT_LABELS: dict[str, dict[str, str]] = {
+    "cod": {"en": "Cash on delivery", "ar": "الدفع عند الاستلام"},
+    "cash": {"en": "Cash on delivery", "ar": "الدفع عند الاستلام"},
+    "card": {"en": "Card", "ar": "بطاقة"},
+    "paymob": {"en": "Card", "ar": "بطاقة"},
+    "kashier": {"en": "Card", "ar": "بطاقة"},
+    "instapay": {"en": "InstaPay", "ar": "إنستاباي"},
+    "wallet": {"en": "Mobile wallet", "ar": "محفظة إلكترونية"},
+}
+
+
+def payment_label(method: str | None, language: str) -> str:
+    """Return a localized payment-method label for a template body line.
+
+    ``language`` may be any locale variant ("en", "en_US", "ar"); only the
+    leading "ar"/"en" matters. Unknown methods are title-cased so the line
+    still renders something meaningful.
+    """
+    lang = "ar" if str(language or "").lower().startswith("ar") else "en"
+    key = str(method or "").strip().lower()
+    if key in _PAYMENT_LABELS:
+        return _PAYMENT_LABELS[key][lang]
+    if not key:
+        return "—"
+    return key.replace("_", " ").title()
+
+
 class WhatsAppMessagingService(IMessagingService):
     """WhatsApp Business API messaging service.
 
@@ -391,6 +422,7 @@ class WhatsAppMessagingService(IMessagingService):
         tracking_url: str | None = None,
         invoice_url: str | None = None,
         order_id: str | None = None,
+        payment_label_text: str = "",
     ) -> MessageResult:
         """Send order confirmation message.
 
@@ -423,10 +455,10 @@ class WhatsAppMessagingService(IMessagingService):
         Returns:
             MessageResult — reflects the template (primary) send only.
         """
-        # store_name and tracking_url accepted for back-compat with
-        # callers that haven't migrated yet — v2 template doesn't use
-        # them. Avoid F841 by acknowledging the parameters.
-        _ = (store_name, tracking_url)
+        # tracking_url accepted for back-compat with callers that haven't
+        # migrated yet — the v3 template doesn't use it. store_name +
+        # payment_label_text ARE used by the v3 body. Avoid F841.
+        _ = tracking_url
         # Reject the silent fallback path that used to substitute
         # ``order_number`` (display id like "ORD-000017") into the
         # Manage-order URL button. The redirector at numueg.app/o/<id>
@@ -447,8 +479,10 @@ class WhatsAppMessagingService(IMessagingService):
             recipient=recipient,
             template_params={
                 "customer_name": recipient.name or "Customer",
+                "store_name": store_name,
                 "order_number": order_number,
                 "total": total,
+                "payment_label": payment_label_text,
                 # Pass the UUID when supplied; when missing, fall back
                 # to the order_number so the URL still renders something
                 # (Meta requires every declared button param to be set).
@@ -493,36 +527,55 @@ class WhatsAppMessagingService(IMessagingService):
         total: str,
         address: str,
         confirm_payload: str,
+        store_name: str = "",
+        payment_label_text: str = "",
+        item_count: str = "",
     ) -> MessageResult:
-        """Send the COD "tap to confirm" request (order_confirmation_request_v1).
+        """Send the COD "tap to confirm" request (order_confirmation_request_v2).
 
-        Body carries 4 variables — {{1}} name, {{2}} order number, {{3}}
-        total, {{4}} delivery address — plus a QUICK_REPLY "Confirm" button
-        whose payload is ``confirm_payload`` (a self-describing
-        ``<subdomain>/<order_id>`` value, falling back to the bare order id).
-        When the customer taps Confirm, Meta echoes that payload to our
-        inbound webhook, which resolves the order and transitions it
-        PENDING → CONFIRMED.
+        Body carries 7 variables — {{1}} name, {{2}} store, {{3}} order
+        number, {{4}} total, {{5}} payment label, {{6}} item count, {{7}}
+        delivery address — plus THREE quick-reply buttons (Confirm / Postpone
+        / Cancel).
+
+        ``confirm_payload`` is the *base order locator* — a self-describing
+        ``<subdomain>/<order_id>`` value (falling back to the bare order id).
+        We derive each button's distinct payload from it by prefixing the
+        action: ``confirm:<loc>`` / ``postpone:<loc>`` / ``cancel:<loc>``. When
+        the customer taps a button, Meta echoes that prefixed payload to our
+        inbound webhook, which parses the action and routes it (confirm →
+        PENDING→CONFIRMED, cancel → PENDING→CANCELLED, postpone → snooze).
 
         Args:
             recipient: Customer contact info
             order_number: Order reference number (body display)
             total: Formatted total (e.g., "EGP 250.00")
-            address: One-line delivery address (body {{4}})
-            confirm_payload: Quick-reply button payload (order locator)
+            address: One-line delivery address (body {{7}})
+            confirm_payload: Base order-locator for the button payloads
+            store_name: Store display name (body {{2}})
+            payment_label_text: Localized payment-method label (body {{5}})
+            item_count: Number of line items, as a string (body {{6}})
 
         Returns:
             MessageResult
         """
+        # Strip any pre-existing action prefix so we don't double-prefix a
+        # locator that already carries one, then build the three payloads.
+        base_loc = confirm_payload.split(":", 1)[-1] if confirm_payload else ""
         content = MessageContent(
             type=MessageType.ORDER_CONFIRMATION_REQUEST,
             recipient=recipient,
             template_params={
                 "customer_name": recipient.name or "Customer",
+                "store_name": store_name,
                 "order_number": order_number,
                 "total": total,
+                "payment_label": payment_label_text,
+                "item_count": item_count,
                 "address": address,
-                "confirm_payload": confirm_payload,
+                "confirm_payload": f"confirm:{base_loc}",
+                "postpone_payload": f"postpone:{base_loc}",
+                "cancel_payload": f"cancel:{base_loc}",
             },
         )
         return await self.send_message(content)
@@ -537,29 +590,29 @@ class WhatsAppMessagingService(IMessagingService):
     ) -> MessageResult:
         """Send shipping notification with tracking.
 
-        order_shipped_v2 body uses ``order_number`` + ``carrier``; the
-        tracking_number lives off-template (passed for back-compat /
-        logging only — the customer tracks via the button URL pointing
-        at ``numueg.app/o/{order_id}`` which the merchant's order page
-        deep-links to the carrier).
+        order_shipped_v3 body shows {{1}} name, {{2}} order number, {{3}}
+        carrier, {{4}} tracking number. The "Track order" button still
+        points at ``numueg.app/o/{order_id}`` which the merchant's order
+        page deep-links to the carrier.
 
         Args:
             recipient: Customer contact info
             order_number: Order reference number (body)
-            tracking_number: Carrier tracking number (logged only)
+            tracking_number: Carrier tracking number (body {{4}})
             carrier: Shipping carrier name (body)
             order_id: ID used as the button URL substitution.
 
         Returns:
             MessageResult
         """
-        _ = tracking_number  # back-compat param — not in v2 body
         content = MessageContent(
             type=MessageType.ORDER_SHIPPED,
             recipient=recipient,
             template_params={
+                "customer_name": recipient.name or "Customer",
                 "order_number": order_number,
                 "carrier": carrier,
+                "tracking_number": tracking_number or "—",
                 "order_id": str(order_id or order_number),
             },
         )

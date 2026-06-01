@@ -256,18 +256,29 @@ async def get_message_status(
 
 
 async def _process_confirm_replies(db: AsyncSession, value: dict) -> None:
-    """Confirm COD orders from inbound quick-reply button taps.
+    """Handle COD action taps (Confirm / Postpone / Cancel) from inbound
+    quick-reply button messages.
 
     Template quick-reply buttons arrive as ``type == "button"`` messages
-    carrying ``button.payload`` — the ``<subdomain>/<order_id>`` value we
-    set when sending order_confirmation_request_v1. Each is routed to the
-    order-confirmation service, which is idempotent and defensive (bad
-    payload / wrong phone / already-confirmed all no-op). Failures are
-    swallowed so a confirm error never blocks the 200 the webhook owes Meta.
+    carrying ``button.payload`` — the ``<action>:<subdomain>/<order_id>``
+    value we set when sending order_confirmation_request_v2. The action
+    prefix selects the handler; legacy _v1 payloads (no prefix) resolve to
+    "confirm". Each handler is idempotent and defensive (bad payload / wrong
+    phone / already-acted all no-op). Failures are swallowed so a reply error
+    never blocks the 200 the webhook owes Meta.
     """
     from src.application.services.order_confirmation_service import (
+        cancel_order_from_whatsapp,
         confirm_order_from_whatsapp,
+        parse_quick_reply_action,
+        postpone_order_from_whatsapp,
     )
+
+    _action_handlers = {
+        "confirm": confirm_order_from_whatsapp,
+        "postpone": postpone_order_from_whatsapp,
+        "cancel": cancel_order_from_whatsapp,
+    }
 
     for message in value.get("messages", []):
         if message.get("type") != "button":
@@ -276,10 +287,11 @@ async def _process_confirm_replies(db: AsyncSession, value: dict) -> None:
         from_number = message.get("from")
         if not payload or not from_number:
             continue
+        handler = _action_handlers.get(
+            parse_quick_reply_action(payload), confirm_order_from_whatsapp
+        )
         try:
-            await confirm_order_from_whatsapp(
-                db, payload=payload, from_phone=from_number
-            )
+            await handler(db, payload=payload, from_phone=from_number)
         except Exception:
             logger.exception("whatsapp_confirm_reply_failed")
 

@@ -38,6 +38,15 @@ _task_loop: asyncio.AbstractEventLoop | None = None
 # Overview page. Templates not in this map (ad-hoc win-back / review-request
 # follow-ups) fall back to the generic "marketing" umbrella.
 _TEMPLATE_PREF_KEY = {
+    # Current (rich) template names.
+    "order_confirmation_v3": "order_confirmation",
+    "order_confirmation_request_v2": "require_order_confirmation",
+    "payment_received_v2": "payment_received",
+    "order_shipped_v3": "shipping_update",
+    "order_delivered_v2": "delivery_confirmation",
+    "abandoned_cart_v3": "abandoned_cart",
+    # Legacy names — kept so in-flight scheduled rows created before the
+    # rich-template cutover still map to the right merchant toggle.
     "order_confirmation_v2": "order_confirmation",
     "order_confirmation_request_v1": "require_order_confirmation",
     "payment_received": "payment_received",
@@ -296,6 +305,7 @@ async def _dispatch_one(session, row, language: str = "ar") -> bool:
 
     service = await get_whatsapp_service(row.store_id, session, row.tenant_id)
     recipient = MessageRecipient(phone=row.phone, name="", language=language)
+    tmpl_name: str | None = None
 
     if row.template_id is not None:
         # Resolve the template name so structured templates dispatch as real
@@ -315,9 +325,15 @@ async def _dispatch_one(session, row, language: str = "ar") -> bool:
         tmpl_name = tmpl.name if tmpl is not None else None
         params = row.template_params or {}
 
-        if tmpl_name == "order_confirmation_request_v1":
+        if tmpl_name in (
+            "order_confirmation_request_v2",
+            "order_confirmation_request_v1",
+        ):
             # Real template send — a flattened-text fallback would drop the
-            # quick-reply Confirm button (the whole point of this template).
+            # quick-reply buttons (the whole point of this template). The
+            # send method derives the 3 button payloads from the stored
+            # base ``confirm_payload`` and renders the rich detail lines from
+            # the params persisted when the row was scheduled.
             recipient = MessageRecipient(
                 phone=row.phone,
                 name=str(params.get("customer_name") or ""),
@@ -329,6 +345,9 @@ async def _dispatch_one(session, row, language: str = "ar") -> bool:
                 str(params.get("total") or ""),
                 str(params.get("address") or "-"),
                 str(params.get("confirm_payload") or ""),
+                store_name=str(params.get("store_name") or ""),
+                payment_label_text=str(params.get("payment_label") or ""),
+                item_count=str(params.get("item_count") or ""),
             )
         else:
             # Interim text fallback for templates without a structured send
@@ -337,7 +356,75 @@ async def _dispatch_one(session, row, language: str = "ar") -> bool:
             result = await service.send_text_message(recipient, text)
     else:
         result = await service.send_text_message(recipient, row.text_message or "")
+
+    # Persist an outbound message_logs row so delivery/read status webhooks
+    # (keyed on the Meta message_id) have a row to update. Without this, a
+    # scheduled send (e.g. the delayed COD confirm-request) leaves no audit
+    # trail and its delivered/read status is silently lost. Fail-open — the
+    # send already succeeded; logging is best-effort.
+    if result.success and result.message_id:
+        await _persist_scheduled_message_log(
+            session,
+            row=row,
+            template_name=tmpl_name,
+            message_id=result.message_id,
+            status_str=str(getattr(result.status, "value", result.status)),
+        )
+
     return bool(result.success)
+
+
+async def _persist_scheduled_message_log(
+    session,
+    *,
+    row,
+    template_name: str | None,
+    message_id: str,
+    status_str: str,
+) -> None:
+    """Write an outbound message_logs row for a dispatched scheduled send.
+
+    Mirrors the order-lifecycle handler's ``_persist_message_log`` so the
+    status-update webhook can resolve and update the row. Tagged with the
+    related order id + ``scheduled_send`` event tag for traceability.
+    """
+    try:
+        from src.core.entities.message_log import (
+            MessageDirection,
+            MessageLog,
+            MessageStatus,
+        )
+        from src.infrastructure.repositories.message_log_repository import (
+            MessageLogRepository,
+        )
+
+        try:
+            status_enum = MessageStatus(status_str)
+        except (ValueError, KeyError):
+            status_enum = MessageStatus.SENT
+
+        await MessageLogRepository(session).create(
+            MessageLog(
+                tenant_id=row.tenant_id,
+                store_id=row.store_id,
+                phone=row.phone,
+                metadata={
+                    "order_id": str(row.related_order_id)
+                    if row.related_order_id
+                    else None,
+                    "event_tag": "scheduled_send",
+                    "scheduled_send_id": str(row.id),
+                },
+                message_id=message_id,
+                direction=MessageDirection.OUTBOUND,
+                template_name=template_name,
+                status=status_enum,
+            )
+        )
+    except Exception:
+        logger.exception(
+            "scheduled_send_message_log_persist_failed", send_id=str(row.id)
+        )
 
 
 def _flatten_params(params: dict[str, Any]) -> str:

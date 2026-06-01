@@ -113,16 +113,23 @@ EGYPTIAN_TEMPLATES = {
         "en": MessageTemplate(
             type=MessageType.ORDER_CONFIRMATION,
             # Meta submission language was en_US per Meta's locale list.
-            name="order_confirmation_v2",
+            name="order_confirmation_v3",
             language="en_US",
             components=[
-                # Body: Hi {{1}}, your order {{2}} has been received.
-                # Total: {{3}}. Thank you for shopping with us.
+                # Body (rich): greeting + bold "Order summary" header + emoji
+                # detail lines. {{1}} name, {{2}} store, {{3}} order number,
+                # {{4}} total, {{5}} payment label.
                 {
                     "type": "body",
-                    "parameters": ["customer_name", "order_number", "total"],
+                    "parameters": [
+                        "customer_name",
+                        "store_name",
+                        "order_number",
+                        "total",
+                        "payment_label",
+                    ],
                 },
-                # URL button: Manage order → https://numueg.app/o/{{1}}
+                # URL button: Track order → https://numueg.app/o/{{1}}
                 {
                     "type": "button",
                     "sub_type": "url",
@@ -133,12 +140,18 @@ EGYPTIAN_TEMPLATES = {
         ),
         "ar": MessageTemplate(
             type=MessageType.ORDER_CONFIRMATION,
-            name="order_confirmation_v2",
+            name="order_confirmation_v3",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": ["customer_name", "order_number", "total"],
+                    "parameters": [
+                        "customer_name",
+                        "store_name",
+                        "order_number",
+                        "total",
+                        "payment_label",
+                    ],
                 },
                 {
                     "type": "button",
@@ -153,42 +166,63 @@ EGYPTIAN_TEMPLATES = {
         "en": MessageTemplate(
             type=MessageType.ORDER_CONFIRMATION_REQUEST,
             # Meta submission language was en_US per Meta's locale list.
-            name="order_confirmation_request_v1",
+            name="order_confirmation_request_v2",
             language="en_US",
             components=[
-                # Body: Hi {{1}}, your order {{2}} totals {{3}}, delivering to
-                # {{4}}. Tap Confirm so we start preparing it.
+                # Body (rich): greeting + bold "Order details" header + emoji
+                # detail lines. {{1}} name, {{2}} store, {{3}} order number,
+                # {{4}} total, {{5}} payment label, {{6}} item count,
+                # {{7}} delivery address.
                 {
                     "type": "body",
                     "parameters": [
                         "customer_name",
+                        "store_name",
                         "order_number",
                         "total",
+                        "payment_label",
+                        "item_count",
                         "address",
                     ],
                 },
-                # Quick-reply "Confirm" button. Unlike a URL CTA, the param
-                # is a payload (not display text) echoed back to us in the
-                # inbound webhook so we can resolve and confirm the order.
+                # Three quick-reply buttons. Each param is a payload (not
+                # display text) echoed back to us in the inbound webhook; the
+                # ``<action>:<subdomain>/<order_id>`` prefix tells the webhook
+                # which action the customer tapped (confirm/postpone/cancel).
                 {
                     "type": "button",
                     "sub_type": "quick_reply",
                     "index": "0",
                     "parameters": ["confirm_payload"],
                 },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "1",
+                    "parameters": ["postpone_payload"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "2",
+                    "parameters": ["cancel_payload"],
+                },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.ORDER_CONFIRMATION_REQUEST,
-            name="order_confirmation_request_v1",
+            name="order_confirmation_request_v2",
             language="ar",
             components=[
                 {
                     "type": "body",
                     "parameters": [
                         "customer_name",
+                        "store_name",
                         "order_number",
                         "total",
+                        "payment_label",
+                        "item_count",
                         "address",
                     ],
                 },
@@ -197,6 +231,18 @@ EGYPTIAN_TEMPLATES = {
                     "sub_type": "quick_reply",
                     "index": "0",
                     "parameters": ["confirm_payload"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "1",
+                    "parameters": ["postpone_payload"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "2",
+                    "parameters": ["cancel_payload"],
                 },
             ],
         ),
@@ -204,14 +250,19 @@ EGYPTIAN_TEMPLATES = {
     MessageType.ORDER_SHIPPED: {
         "en": MessageTemplate(
             type=MessageType.ORDER_SHIPPED,
-            name="order_shipped_v2",
+            name="order_shipped_v3",
             language="en",
             components=[
-                # Body: Your order {{1}} is on the way with {{2}}.
-                # Thanks for your patience!
+                # Body (rich): {{1}} name, {{2}} order number, {{3}} carrier,
+                # {{4}} tracking number.
                 {
                     "type": "body",
-                    "parameters": ["order_number", "carrier"],
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "carrier",
+                        "tracking_number",
+                    ],
                 },
                 {
                     "type": "button",
@@ -223,12 +274,17 @@ EGYPTIAN_TEMPLATES = {
         ),
         "ar": MessageTemplate(
             type=MessageType.ORDER_SHIPPED,
-            name="order_shipped_v2",
+            name="order_shipped_v3",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": ["order_number", "carrier"],
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "carrier",
+                        "tracking_number",
+                    ],
                 },
                 {
                     "type": "button",
@@ -264,25 +320,24 @@ EGYPTIAN_TEMPLATES = {
     MessageType.ORDER_DELIVERED: {
         "en": MessageTemplate(
             type=MessageType.ORDER_DELIVERED,
-            name="order_delivered",
+            name="order_delivered_v2",
             language="en",
             components=[
-                # Body: Your order {{1}} has been delivered. Thanks for
-                # shopping at {{2}}. We hope you enjoy your purchase!
+                # Body (rich): {{1}} name, {{2}} order number, {{3}} store.
                 {
                     "type": "body",
-                    "parameters": ["order_number", "store_name"],
+                    "parameters": ["customer_name", "order_number", "store_name"],
                 },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.ORDER_DELIVERED,
-            name="order_delivered",
+            name="order_delivered_v2",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": ["order_number", "store_name"],
+                    "parameters": ["customer_name", "order_number", "store_name"],
                 },
             ],
         ),
@@ -290,25 +345,24 @@ EGYPTIAN_TEMPLATES = {
     MessageType.PAYMENT_RECEIVED: {
         "en": MessageTemplate(
             type=MessageType.PAYMENT_RECEIVED,
-            name="payment_received",
+            name="payment_received_v2",
             language="en",
             components=[
-                # Body: Payment received for order {{1}}. Amount: {{2}}.
-                # Thank you!
+                # Body (rich): {{1}} name, {{2}} order number, {{3}} amount.
                 {
                     "type": "body",
-                    "parameters": ["order_number", "amount"],
+                    "parameters": ["customer_name", "order_number", "amount"],
                 },
             ],
         ),
         "ar": MessageTemplate(
             type=MessageType.PAYMENT_RECEIVED,
-            name="payment_received",
+            name="payment_received_v2",
             language="ar",
             components=[
                 {
                     "type": "body",
-                    "parameters": ["order_number", "amount"],
+                    "parameters": ["customer_name", "order_number", "amount"],
                 },
             ],
         ),
@@ -316,7 +370,7 @@ EGYPTIAN_TEMPLATES = {
     MessageType.ABANDONED_CART: {
         "en": MessageTemplate(
             type=MessageType.ABANDONED_CART,
-            name="abandoned_cart_v2",
+            name="abandoned_cart_v3",
             language="en",
             components=[
                 # Body: Hi {{1}}, you left items in your cart at {{2}}.
@@ -336,7 +390,7 @@ EGYPTIAN_TEMPLATES = {
         ),
         "ar": MessageTemplate(
             type=MessageType.ABANDONED_CART,
-            name="abandoned_cart_v2",
+            name="abandoned_cart_v3",
             language="ar",
             components=[
                 {
