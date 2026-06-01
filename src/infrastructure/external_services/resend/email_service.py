@@ -612,6 +612,7 @@ class ResendEmailService(IEmailService):
             },
             legacy_subject=legacy_subject,
             legacy_html=legacy_html,
+            legacy_from_name=store_name,
         )
 
         message = EmailMessage(
@@ -721,6 +722,7 @@ class ResendEmailService(IEmailService):
             },
             legacy_subject=legacy_subject,
             legacy_html=legacy_html,
+            legacy_from_name=store_name,
         )
 
         message = EmailMessage(
@@ -1188,6 +1190,7 @@ class ResendEmailService(IEmailService):
             "customer_name": customer_name or "",
             "order_number": order_number,
             "store_name": store_name,
+            "store_logo_url": logo_url,
         }
         if event_type == "shipping_notification":
             variables["tracking_number"] = tracking_number or ""
@@ -1202,6 +1205,7 @@ class ResendEmailService(IEmailService):
             variables=variables,
             legacy_subject=legacy["subject"],
             legacy_html=legacy["html"],
+            legacy_from_name=store_name,
         )
 
         message = EmailMessage(
