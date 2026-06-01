@@ -396,18 +396,11 @@ async def checkout(
             detail="Please verify your email address before placing orders.",
         )
 
-    # Require OTP verification for COD orders (skip for guests)
+    # COD orders no longer gate on a phone-verification OTP. Trust now comes
+    # from the post-order WhatsApp "tap to confirm" flow (when the merchant
+    # enables it). ``is_cod`` is still used downstream for deposit / fraud
+    # logic, so keep deriving it.
     is_cod = not request.payment_method or request.payment_method == "cod"
-    if not is_guest and is_cod and _cache_service:
-        from src.api.v1.routes.storefront.otp import _otp_verified_key
-
-        verified_key = _otp_verified_key(store_id, current_customer.id)
-        is_verified = await _cache_service.exists(verified_key)
-        if not is_verified:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="يرجى تأكيد رقم الموبايل أولاً لإتمام طلب الدفع عند الاستلام.",
-            )
 
     # Verify the customer belongs to this store
     if current_customer.store_id != store_id:
@@ -2081,12 +2074,6 @@ async def checkout(
 
     _checkout_cart_repo = RedisCartRepository()
     await _checkout_cart_repo.delete_by_customer_id(current_customer.id, store_id)
-
-    # Clear OTP verified flag (one-time use per checkout)
-    if is_cod and _cache_service:
-        from src.api.v1.routes.storefront.otp import _otp_verified_key
-
-        await _cache_service.delete(_otp_verified_key(store_id, current_customer.id))
 
     checkout_response = CheckoutResponse(
         order_id=str(created_order.id),

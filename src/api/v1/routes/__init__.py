@@ -134,9 +134,6 @@ from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
 )
 from src.api.v1.routes.storefront import (
-    otp_router as storefront_otp_router,
-)
-from src.api.v1.routes.storefront import (
     payment_proofs_router as storefront_payment_proofs_router,
 )
 from src.api.v1.routes.storefront import (
@@ -437,13 +434,6 @@ api_router.include_router(
     storefront_tracking_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Tracking"],
-)
-
-# Storefront - COD OTP verification (authenticated customer, scoped to store)
-api_router.include_router(
-    storefront_otp_router,
-    prefix="/storefront/store/{store_id}/checkout",
-    tags=["Storefront - Checkout"],
 )
 
 # Storefront - shipping rate quotes (public, scoped to store, legacy)

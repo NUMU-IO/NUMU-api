@@ -450,8 +450,176 @@ async def _resolve_send_context(
         # button value built at the call sites below — see the comment
         # there for why the bare UUID isn't enough.
         "store_subdomain": store_row.subdomain,
+        # Resolved template row id — used by the COD confirm-request path to
+        # enqueue a delayed scheduled send against the right template.
+        "template_id": tmpl_row.id if tmpl_row is not None else None,
     }
     return ctx, extras
+
+
+async def _maybe_send_cod_confirm_request(
+    session: "AsyncSession", event: OrderCreatedEvent
+) -> bool:
+    """COD "tap to confirm" path (order_confirmation_request_v1).
+
+    When the merchant has enabled ``require_order_confirmation`` for the store, a COD
+    order gets the active confirm-request (with a quick-reply button)
+    instead of the passive order_confirmation_v2 notice. Returns True when
+    this handled the order — the caller then skips the v2 send. Returns
+    False for non-COD orders or stores without the feature enabled.
+
+    Honours the merchant's timing choice: ``confirm_order_delay_minutes``
+    of 0 sends immediately, >0 enqueues a scheduled send (the dispatcher
+    re-checks the guard and dispatches the real template at fire-time).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from src.core.interfaces.services.messaging_service import MessageRecipient
+    from src.infrastructure.database.models.tenant.order import OrderModel
+    from src.infrastructure.database.models.tenant.store import StoreModel
+    from src.infrastructure.external_services.whatsapp import get_whatsapp_service
+    from src.infrastructure.repositories.whatsapp_scheduled_send_repository import (
+        WhatsAppScheduledSendRepository,
+    )
+
+    order_row = (
+        await session.execute(select(OrderModel).where(OrderModel.id == event.order_id))
+    ).scalar_one_or_none()
+    if order_row is None or (order_row.payment_method or "").lower() != "cod":
+        return False
+
+    store_row = (
+        await session.execute(select(StoreModel).where(StoreModel.id == event.store_id))
+    ).scalar_one_or_none()
+    store_settings = (store_row.settings if store_row else None) or {}
+    notif = store_settings.get("whatsapp_notifications", {}) or {}
+    if not bool(notif.get("require_order_confirmation", False)):
+        return False
+
+    # From here this IS the confirm-order flow: even if the guard skips the
+    # send below, return True so we don't also fire order_confirmation_v2.
+    resolution = await _resolve_send_context(
+        session,
+        store_id=event.store_id,
+        customer_id=event.customer_id,
+        template_name="order_confirmation_request_v1",
+        idempotency_event_tag="order_confirm_request",
+        order_id=event.order_id,
+        notification_pref_key="require_order_confirmation",
+    )
+    if resolution is None:
+        return True
+    ctx, extras = resolution
+
+    decision = check(ctx)
+    if not decision.allowed:
+        logger.info(
+            "whatsapp_order_confirm_request_skipped",
+            order_id=str(event.order_id),
+            store_id=str(event.store_id),
+            reason=decision.reason.value if decision.reason else "unknown",
+        )
+        return True
+
+    # Self-describing payload so the inbound webhook resolves the order
+    # without a prod-DB lookup — mirrors the /o/ redirect convention.
+    confirm_payload = (
+        f"{extras['store_subdomain']}/{event.order_id}"
+        if extras.get("store_subdomain")
+        else str(event.order_id)
+    )
+    # event.total is in CENTS — divide for the human-readable amount.
+    total_str = f"{event.total / 100:.2f} {event.currency}"
+    # One-line delivery address for body {{4}}. shipping_address is the
+    # stored JSONB dict (address_line1/line2/city/...).
+    _addr = order_row.shipping_address or {}
+    address_str = (
+        ", ".join(
+            str(p).strip()
+            for p in (
+                _addr.get("address_line1"),
+                _addr.get("address_line2"),
+                _addr.get("city"),
+            )
+            if p and str(p).strip()
+        )
+        or "-"
+    )
+    delay_minutes = int(
+        (store_settings.get("whatsapp") or {}).get("confirm_order_delay_minutes") or 0
+    )
+    now = datetime.now(UTC)
+
+    if delay_minutes > 0:
+        repo = WhatsAppScheduledSendRepository(session)
+        await repo.create(
+            tenant_id=extras["tenant_id"],
+            store_id=event.store_id,
+            phone=extras["customer_phone"],
+            scheduled_for=now + timedelta(minutes=delay_minutes),
+            template_id=extras["template_id"],
+            template_params={
+                "customer_name": extras["customer_name"],
+                "order_number": event.order_number,
+                "total": total_str,
+                "address": address_str,
+                "confirm_payload": confirm_payload,
+            },
+            customer_id=event.customer_id,
+            related_order_id=event.order_id,
+        )
+        order_row.customer_confirmation_status = "pending"
+        order_row.customer_confirmation_requested_at = now
+        await session.commit()
+        logger.info(
+            "whatsapp_order_confirm_request_scheduled",
+            order_id=str(event.order_id),
+            store_id=str(event.store_id),
+            delay_minutes=delay_minutes,
+        )
+        return True
+
+    # Immediate send.
+    service = await get_whatsapp_service(event.store_id, session, extras["tenant_id"])
+    recipient = MessageRecipient(
+        phone=extras["customer_phone"],
+        name=extras["customer_name"],
+        language=extras["language"],
+    )
+    result = await service.send_order_confirmation_request(
+        recipient,
+        event.order_number,
+        total_str,
+        address_str,
+        confirm_payload,
+    )
+
+    if result.success:
+        order_row.customer_confirmation_status = "pending"
+        order_row.customer_confirmation_requested_at = now
+        await session.commit()
+        await _persist_message_log(
+            session,
+            tenant_id=extras["tenant_id"],
+            store_id=event.store_id,
+            phone=extras["customer_phone"],
+            template_name="order_confirmation_request_v1",
+            message_id=result.message_id,
+            status_str=str(getattr(result.status, "value", result.status)),
+            metadata={
+                "order_id": str(event.order_id),
+                "event_tag": "order_confirm_request",
+            },
+        )
+
+    logger.info(
+        "whatsapp_order_confirm_request_sent",
+        order_id=str(event.order_id),
+        store_id=str(event.store_id),
+        success=result.success,
+        message_id=result.message_id,
+    )
+    return True
 
 
 async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
@@ -460,12 +628,20 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
     Guard-gated: opt-out / merchant-setting-off / non-APPROVED template /
     invalid phone all block the send with a structured skip-reason log
     (FR-038 / FR-039).
+
+    COD orders on stores with the "confirm order in WhatsApp" feature
+    enabled take the active confirm-request path instead (see
+    ``_maybe_send_cod_confirm_request``).
     """
     from src.core.interfaces.services.messaging_service import MessageRecipient
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.external_services.whatsapp import get_whatsapp_service
 
     async with AsyncSessionLocal() as session:
+        # COD "tap to confirm" flow supersedes the passive v2 notice.
+        if await _maybe_send_cod_confirm_request(session, event):
+            return
+
         resolution = await _resolve_send_context(
             session,
             store_id=event.store_id,

@@ -118,6 +118,10 @@ class OrderDTO(BaseDTO):
     delivered_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # WhatsApp COD "tap to confirm" state (backend-031): None | "pending" |
+    # "confirmed". Lets the merchant hub flag orders awaiting confirmation.
+    customer_confirmation_status: str | None = None
+    customer_confirmed_at: datetime | None = None
 
     @classmethod
     def from_entity(cls, entity: Order) -> "OrderDTO":
@@ -160,6 +164,8 @@ class OrderDTO(BaseDTO):
             delivered_at=entity.delivered_at,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
+            customer_confirmation_status=entity.customer_confirmation_status,
+            customer_confirmed_at=entity.customer_confirmed_at,
         )
 
 
@@ -187,6 +193,8 @@ class OrderListItemDTO(BaseDTO):
     # round-trip.
     campaign_id: UUID | None = None
     campaign_name: str | None = None
+    customer_confirmation_status: str | None = None
+    customer_confirmed_at: datetime | None = None
 
     @classmethod
     def from_entity(
@@ -211,6 +219,8 @@ class OrderListItemDTO(BaseDTO):
             created_at=entity.created_at,
             campaign_id=entity.campaign_id,
             campaign_name=campaign_name,
+            customer_confirmation_status=entity.customer_confirmation_status,
+            customer_confirmed_at=entity.customer_confirmed_at,
         )
 
 

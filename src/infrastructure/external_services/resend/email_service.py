@@ -1133,6 +1133,9 @@ class ResendEmailService(IEmailService):
         from src.infrastructure.external_services.resend.email_templates.notifications import (
             order_status_email,
         )
+        from src.infrastructure.external_services.resend.email_templates.order_summary_email import (
+            new_order_email_html,
+        )
 
         legacy = order_status_email(
             status=status,
@@ -1146,6 +1149,21 @@ class ResendEmailService(IEmailService):
         )
         if not legacy:
             return False
+
+        # Render the body with the shared rich template (status badge +
+        # advanced tracker + illustration) so every order-status email matches
+        # the confirmation design. Keep the legacy subject. No line items here
+        # (the status event doesn't carry them) → products/summary are omitted.
+        legacy["html"] = new_order_email_html(
+            audience="customer",
+            order_number=order_number,
+            store_name=store_name,
+            recipient_name=customer_name,
+            status=status,
+            tracking_number=tracking_number,
+            carrier=carrier,
+            language=language,
+        )
 
         # Map order-status -> registry event_type. Both 'order_confirmed'
         # and the legacy 'confirmed' status string round-trip cleanly.

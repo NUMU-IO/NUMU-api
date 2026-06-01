@@ -362,6 +362,15 @@ class OrderResponse(BaseModel):
     delivered_at: str | None = Field(description="ISO 8601 delivery timestamp")
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
+    # backend-031 — WhatsApp customer-confirmation state. Null unless the
+    # store enabled require_order_confirmation for this (COD) order.
+    customer_confirmation_status: str | None = Field(
+        default=None,
+        description="None | 'pending' | 'confirmed' (WhatsApp COD confirm flow)",
+    )
+    customer_confirmed_at: str | None = Field(
+        default=None, description="ISO 8601 timestamp of the customer's confirm tap"
+    )
 
 
 class OrderCampaignRef(BaseModel):
@@ -400,6 +409,15 @@ class OrderListItemResponse(BaseModel):
     campaign: OrderCampaignRef | None = Field(
         default=None,
         description="Resolved marketing campaign for this order, if any",
+    )
+    # backend-031 — surfaced on the list row so the merchant sees at a
+    # glance which orders are still awaiting a WhatsApp Confirm tap.
+    customer_confirmation_status: str | None = Field(
+        default=None,
+        description="None | 'pending' | 'confirmed' (WhatsApp COD confirm flow)",
+    )
+    customer_confirmed_at: str | None = Field(
+        default=None, description="ISO 8601 timestamp of the customer's confirm tap"
     )
 
 

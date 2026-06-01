@@ -190,12 +190,25 @@ class WhatsAppMessagingService(IMessagingService):
         components: list[dict[str, Any]] = []
         for comp in template_components:
             ctype = comp.get("type")
+            sub_type = comp.get("sub_type", "url")
             keys = comp.get("parameters") or []
-            resolved = [
-                {"type": "text", "text": str(parameters[k])}
-                for k in keys
-                if k in parameters
-            ]
+            # QUICK_REPLY button params are echoed back to us in the inbound
+            # webhook, so Meta wants them as ``{"type":"payload","payload":…}``
+            # rather than the ``{"type":"text","text":…}`` used by body and
+            # URL-CTA params. Emitting text here yields (#132012) Parameter
+            # format does not match for the button component.
+            if ctype == "button" and sub_type == "quick_reply":
+                resolved = [
+                    {"type": "payload", "payload": str(parameters[k])}
+                    for k in keys
+                    if k in parameters
+                ]
+            else:
+                resolved = [
+                    {"type": "text", "text": str(parameters[k])}
+                    for k in keys
+                    if k in parameters
+                ]
             if not resolved and ctype != "body":
                 # Body must always be present (Meta requires it); buttons
                 # are optional — silently drop a button with no params.
@@ -203,7 +216,7 @@ class WhatsAppMessagingService(IMessagingService):
             if ctype == "button":
                 components.append({
                     "type": "button",
-                    "sub_type": comp.get("sub_type", "url"),
+                    "sub_type": sub_type,
                     "index": str(comp.get("index", "0")),
                     "parameters": resolved,
                 })
@@ -472,6 +485,47 @@ class WhatsAppMessagingService(IMessagingService):
                 )
 
         return result
+
+    async def send_order_confirmation_request(
+        self,
+        recipient: MessageRecipient,
+        order_number: str,
+        total: str,
+        address: str,
+        confirm_payload: str,
+    ) -> MessageResult:
+        """Send the COD "tap to confirm" request (order_confirmation_request_v1).
+
+        Body carries 4 variables — {{1}} name, {{2}} order number, {{3}}
+        total, {{4}} delivery address — plus a QUICK_REPLY "Confirm" button
+        whose payload is ``confirm_payload`` (a self-describing
+        ``<subdomain>/<order_id>`` value, falling back to the bare order id).
+        When the customer taps Confirm, Meta echoes that payload to our
+        inbound webhook, which resolves the order and transitions it
+        PENDING → CONFIRMED.
+
+        Args:
+            recipient: Customer contact info
+            order_number: Order reference number (body display)
+            total: Formatted total (e.g., "EGP 250.00")
+            address: One-line delivery address (body {{4}})
+            confirm_payload: Quick-reply button payload (order locator)
+
+        Returns:
+            MessageResult
+        """
+        content = MessageContent(
+            type=MessageType.ORDER_CONFIRMATION_REQUEST,
+            recipient=recipient,
+            template_params={
+                "customer_name": recipient.name or "Customer",
+                "order_number": order_number,
+                "total": total,
+                "address": address,
+                "confirm_payload": confirm_payload,
+            },
+        )
+        return await self.send_message(content)
 
     async def send_shipping_notification(
         self,

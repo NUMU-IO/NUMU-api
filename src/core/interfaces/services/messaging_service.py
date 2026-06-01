@@ -18,6 +18,10 @@ class MessageType(StrEnum):
     """Predefined message types."""
 
     ORDER_CONFIRMATION = "order_confirmation"
+    # Active "tap to confirm" request for COD orders (distinct from the
+    # passive ORDER_CONFIRMATION notice). Carries a quick-reply button whose
+    # payload encodes the order so the inbound webhook can confirm it.
+    ORDER_CONFIRMATION_REQUEST = "order_confirmation_request"
     ORDER_SHIPPED = "order_shipped"
     OUT_FOR_DELIVERY = "out_for_delivery"
     ORDER_DELIVERED = "order_delivered"
@@ -141,6 +145,58 @@ EGYPTIAN_TEMPLATES = {
                     "sub_type": "url",
                     "index": "0",
                     "parameters": ["order_id"],
+                },
+            ],
+        ),
+    },
+    MessageType.ORDER_CONFIRMATION_REQUEST: {
+        "en": MessageTemplate(
+            type=MessageType.ORDER_CONFIRMATION_REQUEST,
+            # Meta submission language was en_US per Meta's locale list.
+            name="order_confirmation_request_v1",
+            language="en_US",
+            components=[
+                # Body: Hi {{1}}, your order {{2}} totals {{3}}, delivering to
+                # {{4}}. Tap Confirm so we start preparing it.
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "total",
+                        "address",
+                    ],
+                },
+                # Quick-reply "Confirm" button. Unlike a URL CTA, the param
+                # is a payload (not display text) echoed back to us in the
+                # inbound webhook so we can resolve and confirm the order.
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": ["confirm_payload"],
+                },
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.ORDER_CONFIRMATION_REQUEST,
+            name="order_confirmation_request_v1",
+            language="ar",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "total",
+                        "address",
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": ["confirm_payload"],
                 },
             ],
         ),

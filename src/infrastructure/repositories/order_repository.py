@@ -162,6 +162,9 @@ class OrderRepository(IOrderRepository):
             deposit_expires_at=model.deposit_expires_at,
             deposit_gateway=model.deposit_gateway,
             deposit_payment_id=model.deposit_payment_id,
+            customer_confirmation_status=model.customer_confirmation_status,
+            customer_confirmation_requested_at=model.customer_confirmation_requested_at,
+            customer_confirmed_at=model.customer_confirmed_at,
             tracking_number=model.tracking_number,
             notes=model.notes,
             customer_notes=model.customer_notes,
@@ -216,6 +219,9 @@ class OrderRepository(IOrderRepository):
             deposit_expires_at=entity.deposit_expires_at,
             deposit_gateway=entity.deposit_gateway,
             deposit_payment_id=entity.deposit_payment_id,
+            customer_confirmation_status=entity.customer_confirmation_status,
+            customer_confirmation_requested_at=entity.customer_confirmation_requested_at,
+            customer_confirmed_at=entity.customer_confirmed_at,
             tracking_number=entity.tracking_number,
             notes=entity.notes,
             customer_notes=entity.customer_notes,
@@ -294,6 +300,11 @@ class OrderRepository(IOrderRepository):
             model.payment_method = entity.payment_method
             model.payment_id = entity.payment_id
             model.shipping_method = entity.shipping_method
+            model.customer_confirmation_status = entity.customer_confirmation_status
+            model.customer_confirmation_requested_at = (
+                entity.customer_confirmation_requested_at
+            )
+            model.customer_confirmed_at = entity.customer_confirmed_at
             model.tracking_number = entity.tracking_number
             model.notes = entity.notes
             model.customer_notes = entity.customer_notes

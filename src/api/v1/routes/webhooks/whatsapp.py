@@ -156,6 +156,10 @@ async def whatsapp_callback(
                     await _upsert_conversations_from_webhook(
                         db, change.get("value", {})
                     )
+
+                    # COD "tap to confirm": process quick-reply button taps
+                    # on order_confirmation_request_v1 messages.
+                    await _process_confirm_replies(db, change.get("value", {}))
                 elif field == "message_template_status_update":
                     # backend-030 / US5 / FR-028 — template approval
                     # status updates from Meta. Routed here by the
@@ -249,6 +253,35 @@ async def get_message_status(
         "status": "unknown",
         "note": "No log entry found for this message ID",
     }
+
+
+async def _process_confirm_replies(db: AsyncSession, value: dict) -> None:
+    """Confirm COD orders from inbound quick-reply button taps.
+
+    Template quick-reply buttons arrive as ``type == "button"`` messages
+    carrying ``button.payload`` — the ``<subdomain>/<order_id>`` value we
+    set when sending order_confirmation_request_v1. Each is routed to the
+    order-confirmation service, which is idempotent and defensive (bad
+    payload / wrong phone / already-confirmed all no-op). Failures are
+    swallowed so a confirm error never blocks the 200 the webhook owes Meta.
+    """
+    from src.application.services.order_confirmation_service import (
+        confirm_order_from_whatsapp,
+    )
+
+    for message in value.get("messages", []):
+        if message.get("type") != "button":
+            continue
+        payload = (message.get("button") or {}).get("payload")
+        from_number = message.get("from")
+        if not payload or not from_number:
+            continue
+        try:
+            await confirm_order_from_whatsapp(
+                db, payload=payload, from_phone=from_number
+            )
+        except Exception:
+            logger.exception("whatsapp_confirm_reply_failed")
 
 
 async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> None:

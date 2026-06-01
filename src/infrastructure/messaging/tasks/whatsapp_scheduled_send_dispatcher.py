@@ -39,6 +39,7 @@ _task_loop: asyncio.AbstractEventLoop | None = None
 # follow-ups) fall back to the generic "marketing" umbrella.
 _TEMPLATE_PREF_KEY = {
     "order_confirmation_v2": "order_confirmation",
+    "order_confirmation_request_v1": "require_order_confirmation",
     "payment_received": "payment_received",
     "order_shipped_v2": "shipping_update",
     "order_delivered": "delivery_confirmation",
@@ -297,17 +298,43 @@ async def _dispatch_one(session, row, language: str = "ar") -> bool:
     recipient = MessageRecipient(phone=row.phone, name="", language=language)
 
     if row.template_id is not None:
-        # Template send. For Phase 1 we only support templates whose
-        # body params are passed through the EGYPTIAN_TEMPLATES path —
-        # broader template-by-id dispatch comes with the templates UI
-        # (Phase 2). For now we delegate to send_text_message inside
-        # the window (the schedule UI will tighten this in US5).
-        # The text_message branch below handles non-template sends.
-        # If row has only template_id (no text), build a minimal body
-        # from template_params and send as text — works inside the
-        # 24h window which the guard verified is open.
-        text = _flatten_params(row.template_params or {})
-        result = await service.send_text_message(recipient, text)
+        # Resolve the template name so structured templates dispatch as real
+        # template messages (preserving buttons) rather than the interim
+        # flattened-text fallback.
+        from src.infrastructure.database.models.tenant.whatsapp_template import (
+            WhatsAppTemplateModel,
+        )
+
+        tmpl = (
+            await session.execute(
+                select(WhatsAppTemplateModel).where(
+                    WhatsAppTemplateModel.id == row.template_id
+                )
+            )
+        ).scalar_one_or_none()
+        tmpl_name = tmpl.name if tmpl is not None else None
+        params = row.template_params or {}
+
+        if tmpl_name == "order_confirmation_request_v1":
+            # Real template send — a flattened-text fallback would drop the
+            # quick-reply Confirm button (the whole point of this template).
+            recipient = MessageRecipient(
+                phone=row.phone,
+                name=str(params.get("customer_name") or ""),
+                language=language,
+            )
+            result = await service.send_order_confirmation_request(
+                recipient,
+                str(params.get("order_number") or ""),
+                str(params.get("total") or ""),
+                str(params.get("address") or "-"),
+                str(params.get("confirm_payload") or ""),
+            )
+        else:
+            # Interim text fallback for templates without a structured send
+            # path. Works inside the 24h window the guard verified is open.
+            text = _flatten_params(params)
+            result = await service.send_text_message(recipient, text)
     else:
         result = await service.send_text_message(recipient, row.text_message or "")
     return bool(result.success)

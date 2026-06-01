@@ -239,6 +239,10 @@ class Order(BaseEntity):
     deposit_expires_at: datetime | None = None
     deposit_gateway: str | None = None  # one of DepositGateway literals
     deposit_payment_id: str | None = None  # external txn id for the deposit
+    # WhatsApp "tap to confirm" COD flow: None | "pending" | "confirmed".
+    customer_confirmation_status: str | None = None
+    customer_confirmation_requested_at: datetime | None = None
+    customer_confirmed_at: datetime | None = None
     tracking_number: str | None = None
     tracking_url: str | None = None
     notes: str | None = None

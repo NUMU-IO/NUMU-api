@@ -132,6 +132,22 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     deposit_gateway: Mapped[str | None] = mapped_column(String(32), nullable=True)
     deposit_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ── WhatsApp "tap to confirm" COD flow (backend-031) ──────────
+    # Plain string (not a DB enum) to dodge the enum-name/value pitfalls.
+    # NULL = feature not in play for this order; "pending" = confirm
+    # request sent / scheduled, awaiting the customer's tap; "confirmed"
+    # = customer tapped Confirm (order moved PENDING → CONFIRMED).
+    # Field names match the merchant-hub orders.customer_confirmation_status
+    # contract.
+    customer_confirmation_status: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+    customer_confirmation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    customer_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Notes

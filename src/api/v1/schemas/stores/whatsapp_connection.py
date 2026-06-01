@@ -24,6 +24,11 @@ class NotificationSettings(BaseModel):
     delivery_confirmation: bool = True
     abandoned_cart: bool = True
     marketing: bool = False
+    # COD "tap to confirm" flow (backend-031, order_confirmation_request_v1).
+    # Opt-in, so it defaults OFF. When ON, COD orders get the active confirm
+    # request instead of the passive order_confirmation notice. Key matches
+    # the merchant-hub contract.
+    require_order_confirmation: bool = False
 
 
 # Language the automated order-lifecycle notifications are sent in.
@@ -59,6 +64,15 @@ class WhatsAppStatus(BaseModel):
             " store default language; 'ar'/'en' force that language."
         ),
     )
+    confirm_order_delay_minutes: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Delay before the COD confirm-order request is sent. 0 = send"
+            " immediately on order creation; >0 schedules it that many"
+            " minutes later via the WhatsApp scheduled-send queue."
+        ),
+    )
     notifications: NotificationSettings
 
 
@@ -67,6 +81,7 @@ class WhatsAppSettingsUpdate(BaseModel):
     WhatsApp preferences that are not per-message toggles."""
 
     message_language: MessageLanguage | None = None
+    confirm_order_delay_minutes: int | None = Field(default=None, ge=0)
 
 
 class BYOConnectRequest(BaseModel):

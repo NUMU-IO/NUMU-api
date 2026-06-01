@@ -721,6 +721,7 @@ async def byo_status(
     wa_settings = store_settings.get("whatsapp") or {}
     credential_error = wa_settings.get("credential_error")
     message_language = wa_settings.get("message_language") or "auto"
+    confirm_delay = int(wa_settings.get("confirm_order_delay_minutes") or 0)
 
     if cred and cred.extra_metadata:
         return WhatsAppStatus(
@@ -732,6 +733,7 @@ async def byo_status(
             last_validated_at=cred.last_validated_at,
             credential_error=credential_error,
             message_language=message_language,
+            confirm_order_delay_minutes=confirm_delay,
             notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
         )
 
@@ -745,6 +747,7 @@ async def byo_status(
         last_validated_at=None,
         credential_error=None,
         message_language=message_language,
+        confirm_order_delay_minutes=confirm_delay,
         notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
     )
 
@@ -775,6 +778,8 @@ async def update_whatsapp_settings(
     wa_settings = dict(store_settings.get("whatsapp") or {})
     if body.message_language is not None:
         wa_settings["message_language"] = body.message_language
+    if body.confirm_order_delay_minutes is not None:
+        wa_settings["confirm_order_delay_minutes"] = body.confirm_order_delay_minutes
     store_settings["whatsapp"] = wa_settings
     store.settings = store_settings
 
@@ -793,6 +798,7 @@ async def update_whatsapp_settings(
             )
         )
     ).scalar_one_or_none()
+    confirm_delay = int(wa_settings.get("confirm_order_delay_minutes") or 0)
     if cred and cred.extra_metadata:
         return WhatsAppStatus(
             mode="byo",
@@ -803,6 +809,7 @@ async def update_whatsapp_settings(
             last_validated_at=cred.last_validated_at,
             credential_error=wa_settings.get("credential_error"),
             message_language=wa_settings.get("message_language") or "auto",
+            confirm_order_delay_minutes=confirm_delay,
             notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
         )
     return WhatsAppStatus(
@@ -814,6 +821,7 @@ async def update_whatsapp_settings(
         last_validated_at=None,
         credential_error=None,
         message_language=wa_settings.get("message_language") or "auto",
+        confirm_order_delay_minutes=confirm_delay,
         notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
     )
 
