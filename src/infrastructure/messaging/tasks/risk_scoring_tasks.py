@@ -145,6 +145,13 @@ def compute_full_risk_score(
 
         # ── 2. Enrich customer_cancellation_rate from store history ────────
         enriched_cancel_rate = customer_cancellation_rate
+        # Local per-store trust signals for this customer, derived from the
+        # store's own risk-assessment history. Initialised here so they are
+        # always defined for the TrustInputs construction below — the previous
+        # `"cancel_count" in dir()` introspection hack was fragile and broke
+        # the moment the block structure changed (P0-1).
+        cancel_count = 0
+        prepaid_count = 0
         async with AsyncSessionLocal() as enrich_session:
             await enrich_session.execute(text("SET search_path TO public"))
             # Read the current assessment to get customer_email
@@ -176,6 +183,30 @@ def compute_full_risk_score(
                     )
                 )
                 cancel_count = cancel_row.scalar_one() or 0
+
+                # Prepaid-order count is a positive trust signal (the customer
+                # has paid online before). Counted at the same granularity as
+                # the cancellation enrichment above (one assessment ≈ one
+                # order). The alias list mirrors ``_score_payment_method`` in
+                # the scoring engine — keep them in sync.
+                prepaid_row = await enrich_session.execute(
+                    select(sa_func.count()).where(
+                        RiskAssessmentModel.store_id == sid,
+                        RiskAssessmentModel.customer_email == assessment.customer_email,
+                        sa_func.lower(RiskAssessmentModel.payment_method).in_([
+                            "paymob",
+                            "card",
+                            "credit_card",
+                            "wallet",
+                            "instapay",
+                            "fawry",
+                            "kashier",
+                            "fawaterak",
+                            "stripe",
+                        ]),
+                    )
+                )
+                prepaid_count = prepaid_row.scalar_one() or 0
 
                 if total_count > 0:
                     enriched_cancel_rate = cancel_count / total_count
@@ -256,17 +287,27 @@ def compute_full_risk_score(
                                 rep_row.total_refunds or 0
                             )
 
-        local_lifetime_refusals = int(cancel_count) if "cancel_count" in dir() else 0
-
+        # Build the deterministic trust inputs. Each signal is counted EXACTLY
+        # once. The prior code fed ``net_pos`` into BOTH ``successful_deliveries``
+        # (×4) and ``network_positive_events`` (×3), inflating every network
+        # delivery to a ×7 contribution (P0-1). ``net_pos`` is the customer's
+        # NETWORK-wide successful-delivery count, so it belongs in
+        # ``network_positive_events`` only. ``successful_deliveries`` is reserved
+        # for a per-store delivered-order count, which this Shopify-scoring path
+        # has no cheap source for — left at 0 rather than double-counting the
+        # network signal.
         trust_result = compute_customer_trust(
             TrustInputs(
-                successful_deliveries=net_pos,
-                prepaid_orders=0,
+                successful_deliveries=0,
+                prepaid_orders=int(prepaid_count),
+                # TODO(P1-4): source the WhatsApp response rate from the
+                # confirmation/OTP engagement history. Not reachable cheaply
+                # from this Shopify-scoring task — wired in Phase B.
                 whatsapp_response_rate_pct=0.0,
                 network_positive_events=net_pos,
                 network_negative_events=net_neg,
                 local_recent_refusals=0,
-                local_lifetime_refusals=local_lifetime_refusals,
+                local_lifetime_refusals=int(cancel_count),
             )
         )
 
@@ -467,6 +508,9 @@ def compute_full_risk_score(
             from src.core.events.risk_events import RiskAssessmentFinalisedEvent
             from src.infrastructure.database.models.tenant.store import StoreModel
             from src.infrastructure.events.setup import get_event_bus
+            from src.infrastructure.repositories.shopify_repository import (
+                ShopifySubscriptionRepository,
+            )
 
             tenant_uuid = (
                 assessment.tenant_id if (assessment and assessment.tenant_id) else None
@@ -493,6 +537,23 @@ def compute_full_risk_score(
                     if hasattr(settings, "recovery_enabled"):
                         recovery_on = bool(getattr(settings, "recovery_enabled", True))
 
+                # Real subscription gate (P1-5): recovery flows must not fire
+                # for stores without an active paid plan. Fail-closed — a failed
+                # lookup is treated as "no subscription" so paid recovery
+                # features are never extended to a possibly-unpaid store.
+                # Replaces the previous hardcoded ``subscription_active=True``.
+                subscription_active = False
+                try:
+                    async with AsyncSessionLocal() as sub_session:
+                        await sub_session.execute(text("SET search_path TO public"))
+                        sub_row = await ShopifySubscriptionRepository(
+                            sub_session
+                        ).get_active(sid)
+                        subscription_active = sub_row is not None
+                except Exception as sub_exc:  # noqa: BLE001 — fail-closed for billing
+                    logger.warning("subscription lookup failed: %s", sub_exc)
+                    subscription_active = False
+
                 event = RiskAssessmentFinalisedEvent(
                     assessment_id=UUID(assessment_id),
                     tenant_id=tenant_uuid,
@@ -507,7 +568,7 @@ def compute_full_risk_score(
                     score_type="final",
                     recovery_enabled=recovery_on,
                     has_payment_gateway=has_gateway,
-                    subscription_active=True,  # TODO(spec-002): query subscription
+                    subscription_active=subscription_active,
                 )
                 get_event_bus().publish(event)
         except Exception as publish_exc:
