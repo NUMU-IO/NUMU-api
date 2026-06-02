@@ -91,7 +91,8 @@ class CreateProductDTO(BaseDTO):
     short_description: str | None = None
     product_type: str = "physical"
     status: str | None = None
-    price_currency: str = "USD"
+    # None → inherit the store's default currency at creation time.
+    price_currency: str | None = None
     compare_at_price: Decimal | None = None
     cost_price: Decimal | None = None
     quantity: int = 0

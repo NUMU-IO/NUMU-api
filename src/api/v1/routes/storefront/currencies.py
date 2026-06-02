@@ -60,7 +60,17 @@ async def get_currency_config(
         )
 
     settings = getattr(store, "settings", {}) or {}
-    base = getattr(store, "currency", None) or settings.get("currency") or "EGP"
+    # The store entity exposes the capture currency as ``default_currency``
+    # (a Currency StrEnum), NOT ``currency`` — reading the wrong attribute
+    # silently pinned every store's base to EGP, so a Saudi (SAR) store
+    # presented prices in the wrong currency. ``getattr(..., "value", ...)``
+    # unwraps the enum to its ISO code while tolerating a plain string.
+    base_currency = getattr(store, "default_currency", None)
+    base = (
+        getattr(base_currency, "value", base_currency)
+        or settings.get("currency")
+        or "EGP"
+    )
     presentment_raw = settings.get("presentment_currencies") or [base]
     # De-dupe and force the base currency to be present so themes can
     # always render in the merchant's home currency without an extra

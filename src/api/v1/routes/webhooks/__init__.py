@@ -9,6 +9,7 @@ from src.api.v1.routes.webhooks.instapay import router as instapay_router
 from src.api.v1.routes.webhooks.jt import router as jt_router
 from src.api.v1.routes.webhooks.kashier import router as kashier_router
 from src.api.v1.routes.webhooks.meta import router as meta_router
+from src.api.v1.routes.webhooks.moyasar import router as moyasar_router
 from src.api.v1.routes.webhooks.mylerz import router as mylerz_router
 from src.api.v1.routes.webhooks.paymob import router as paymob_router
 from src.api.v1.routes.webhooks.resend import router as resend_router
@@ -29,6 +30,7 @@ router.include_router(kashier_router, prefix="/kashier", tags=["Webhooks - Kashi
 router.include_router(
     fawaterak_router, prefix="/fawaterak", tags=["Webhooks - Fawaterak"]
 )
+router.include_router(moyasar_router, prefix="/moyasar", tags=["Webhooks - Moyasar"])
 router.include_router(resend_router, prefix="/resend", tags=["Webhooks - Resend"])
 
 __all__ = ["router"]

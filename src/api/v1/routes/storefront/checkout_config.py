@@ -36,6 +36,31 @@ async def get_public_checkout_config(
         raise EntityNotFoundError("Store", str(store_id))
     config = resolve_config(store.settings)
 
+    # Surface the enabled + market-allowed payment providers so the
+    # storefront's payment step renders the right options (e.g. Moyasar
+    # for a Saudi store) instead of falling back to a hardcoded default.
+    # Mirrors the gating in get_store_payment_methods: a provider shows
+    # when it's enabled in settings AND offered in the store's market;
+    # outside production we surface merely-enabled (not-yet-configured)
+    # providers so merchants can preview their onboarding selections.
+    from src.application.services.market_registry import get_market
+    from src.config import settings as app_settings
+
+    market = get_market(getattr(store, "country", None))
+    allowed_providers = list(market.payment_providers)
+    if "cod" not in allowed_providers:
+        allowed_providers.append("cod")
+    payment_settings = (store.settings or {}).get("payment", {})
+
+    enabled_methods: list[str] = []
+    for provider in allowed_providers:
+        cfg = payment_settings.get(provider, {})
+        if not cfg.get("enabled"):
+            continue
+        if cfg.get("is_configured") or app_settings.environment != "production":
+            enabled_methods.append(provider)
+    config["enabled_payment_methods"] = enabled_methods
+
     # When the merchant has cod_trust enabled, phone becomes non-optional
     # at COD checkout — surface this so the storefront form can mark the
     # field required up-front instead of letting the user discover it via

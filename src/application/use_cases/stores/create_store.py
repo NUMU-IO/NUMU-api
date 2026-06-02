@@ -7,6 +7,7 @@ from uuid import UUID
 from slugify import slugify
 
 from src.application.dto.store import CreateStoreDTO, StoreDTO
+from src.application.services.market_registry import get_market
 from src.core.entities.store import Store, StoreStatus
 from src.core.exceptions import EntityAlreadyExistsError, ValidationError
 from src.core.interfaces.repositories.onboarding_repository import (
@@ -146,11 +147,20 @@ class CreateStoreUseCase:
             # Append a random suffix to make it unique
             slug = f"{slug}-{str(uuid.uuid4())[:8]}"
 
-        # Parse currency
+        # Resolve the store's market from the requested country code,
+        # falling back to Egypt (the v1 launch market) for unknown or
+        # missing values. The market drives the tax jurisdiction and
+        # the gateway allow-list downstream.
+        market = get_market(dto.country)
+
+        # Parse currency. When the request omits an explicit currency
+        # (still the schema default "EGP"), prefer the market's default
+        # so a Saudi store onboards in SAR without the client having to
+        # restate it. An explicit, valid currency always wins.
         try:
             currency = Currency(dto.default_currency)
         except ValueError:
-            currency = Currency.EGP  # Default to EGP for Egyptian market
+            currency = market.default_currency
 
         # Default theme settings for NUMU-shop
         default_theme_settings = {
@@ -201,6 +211,7 @@ class CreateStoreUseCase:
             description=dto.description,
             status=StoreStatus.ACTIVE,
             default_currency=currency,
+            country=market.country,
             default_language=dto.default_language,
             contact_email=dto.contact_email,
             contact_phone=dto.contact_phone,

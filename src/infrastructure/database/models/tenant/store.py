@@ -52,6 +52,12 @@ class StoreModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         default=Currency.EGP,
         nullable=False,
     )
+    # ISO 3166-1 alpha-2 market the store operates in. Drives the
+    # default currency/language at onboarding, the tax jurisdiction
+    # (14% EG VAT vs 15% SA VAT + ZATCA), and the payment-gateway
+    # allow-list. Plain String (not an enum) so adding a market is a
+    # registry change, not a DB migration. See market_registry.py.
+    country: Mapped[str] = mapped_column(String(2), nullable=False, server_default="EG")
     default_language: Mapped[str] = mapped_column(
         String(5), nullable=False, server_default="ar"
     )

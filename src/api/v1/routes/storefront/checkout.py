@@ -57,7 +57,10 @@ from src.application.services.network_reputation_service import (
     write_network_event,
 )
 from src.application.services.shipping_resolver import ShippingResolver
-from src.application.services.tax_resolver import TaxLineInput, TaxResolver
+from src.application.services.tax_resolver import (
+    TaxLineInput,
+    tax_resolver_for_country,
+)
 from src.config import settings
 from src.core.checkout_fields import (
     resolve_config as resolve_checkout_config,
@@ -1064,7 +1067,7 @@ async def checkout(
     # invoice/ETA reporting; ``tax_to_add_cents`` is always 0 and is
     # NOT used in the total formula. The order's ``tax_amount`` field
     # records the included VAT as informational accounting only.
-    tax_resolver = TaxResolver()
+    tax_resolver = tax_resolver_for_country(getattr(store, "country", None))
     tax_resolution = tax_resolver.resolve(
         store_settings=store.settings,
         line_items=[

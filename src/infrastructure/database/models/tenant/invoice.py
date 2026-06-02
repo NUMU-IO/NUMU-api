@@ -135,7 +135,7 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     shipping_fee: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     grand_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    # ETA submission details
+    # ETA submission details (Egypt — egyptian tax authority)
     eta_uuid: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     eta_long_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     eta_submission_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -143,6 +143,19 @@ class InvoiceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     eta_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     eta_status_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     eta_status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ZATCA / Fatoora submission details (Saudi Arabia). Mirrors the ETA
+    # block; the shared qr_code_*/signature_* columns below carry the
+    # TLV-encoded QR and the XAdES signature. ``zatca_previous_hash`` (PIH)
+    # chains each invoice to the prior one per ZATCA Phase 2.
+    zatca_uuid: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    zatca_invoice_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    zatca_previous_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    zatca_submission_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    zatca_status_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    zatca_status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # QR Code
     qr_code_data: Mapped[str | None] = mapped_column(Text, nullable=True)

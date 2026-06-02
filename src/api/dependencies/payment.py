@@ -40,6 +40,14 @@ PROVIDER_SERVICE_MAP: dict[str, tuple[ServiceType, ServiceName]] = {
     "fawry": (ServiceType.PAYMENT_GATEWAY, ServiceName.FAWRY),
     "stripe": (ServiceType.PAYMENT_GATEWAY, ServiceName.STRIPE),
     "fawaterak": (ServiceType.PAYMENT_GATEWAY, ServiceName.FAWATERAK),
+    # Saudi (KSA) gateways — Phase 3. Moyasar is wired end-to-end; the
+    # others are registered so credentials can be stored, but their
+    # builders raise until the integration lands.
+    "moyasar": (ServiceType.PAYMENT_GATEWAY, ServiceName.MOYASAR),
+    "hyperpay": (ServiceType.PAYMENT_GATEWAY, ServiceName.HYPERPAY),
+    "tabby": (ServiceType.PAYMENT_GATEWAY, ServiceName.TABBY),
+    "tamara": (ServiceType.PAYMENT_GATEWAY, ServiceName.TAMARA),
+    "stcpay": (ServiceType.PAYMENT_GATEWAY, ServiceName.STC_PAY),
 }
 
 
@@ -88,12 +96,47 @@ def _build_fawry(creds: dict[str, Any]):
     )
 
 
+def _build_moyasar(creds: dict[str, Any]):
+    """Build MoyasarPaymentService from decrypted credentials."""
+    from src.infrastructure.external_services.moyasar import MoyasarPaymentService
+
+    return MoyasarPaymentService(
+        secret_key=creds.get("secret_key"),
+        publishable_key=creds.get("publishable_key"),
+        webhook_secret=creds.get("webhook_secret"),
+        currency=creds.get("currency", "SAR"),
+    )
+
+
+def _unimplemented_builder(provider: str):
+    """Return a builder that raises — for registered-but-unbuilt gateways.
+
+    Keeps the Saudi-rail seam complete (credentials can be stored and the
+    provider resolves through the same path) while making it explicit that
+    the integration isn't live yet, instead of silently falling back to a
+    different gateway.
+    """
+
+    def _builder(_creds: dict[str, Any]):
+        raise NotImplementedError(
+            f"Payment provider '{provider}' is registered but not yet "
+            f"implemented (Phase 3 in progress)."
+        )
+
+    return _builder
+
+
 # Maps provider string to a builder function
 PROVIDER_BUILDERS: dict[str, Any] = {
     "kashier": _build_kashier,
     "paymob": _build_paymob,
     "fawry": _build_fawry,
     "fawaterak": _build_fawaterak,
+    "moyasar": _build_moyasar,
+    "hyperpay": _unimplemented_builder("hyperpay"),
+    "tabby": _unimplemented_builder("tabby"),
+    "tamara": _unimplemented_builder("tamara"),
+    "stcpay": _unimplemented_builder("stcpay"),
 }
 
 
