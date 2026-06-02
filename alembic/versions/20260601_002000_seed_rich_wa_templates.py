@@ -50,12 +50,18 @@ def upgrade() -> None:
         """
         INSERT INTO public.whatsapp_templates
           (tenant_id, store_id, name, language, category, status,
-           body_text, footer_text, buttons, is_system, created_at, updated_at)
+           body_text, footer_text, buttons, is_system,
+           submitted_at, created_at, updated_at)
         SELECT s.tenant_id, s.id,
                CAST(:name AS text), CAST(:lang AS text),
                CAST(:cat AS text), 'PENDING',
                CAST(:body AS text), CAST(:footer AS text),
-               CAST(:buttons AS jsonb), true, NOW(), NOW()
+               CAST(:buttons AS jsonb), true,
+               -- submitted_at must be set so the PENDING-template poller
+               -- (filters on submitted_at <= now-5m) actually considers these
+               -- system rows and syncs their Meta status. Without it the rows
+               -- stay PENDING in the hub forever.
+               NOW(), NOW(), NOW()
         FROM public.stores s
         WHERE NOT EXISTS (
             SELECT 1 FROM public.whatsapp_templates t

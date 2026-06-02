@@ -185,11 +185,26 @@ async def _poll_for_tenant(tenant_id: Any) -> dict[str, int]:
 
             meta_templates = response.get("data", []) if response else []
             by_id = {str(t.get("id")): t for t in meta_templates if t.get("id")}
+            # Seeded system templates are inserted WITHOUT a meta_template_id
+            # (Meta assigns it at submission, out-of-band of the seed). Match
+            # those by (name, language) so they still sync, and backfill the
+            # id so subsequent polls + status webhooks can match by id.
+            by_name_lang = {
+                (t.get("name"), t.get("language")): t
+                for t in meta_templates
+                if t.get("name")
+            }
 
             for row in pending_rows:
-                if not row.meta_template_id:
-                    continue
-                meta = by_id.get(str(row.meta_template_id))
+                meta = (
+                    by_id.get(str(row.meta_template_id))
+                    if row.meta_template_id
+                    else None
+                )
+                if meta is None:
+                    meta = by_name_lang.get((row.name, row.language))
+                    if meta is not None and meta.get("id") and not row.meta_template_id:
+                        row.meta_template_id = str(meta["id"])
                 if meta is None:
                     continue
                 new_status = (meta.get("status") or "PENDING").upper()

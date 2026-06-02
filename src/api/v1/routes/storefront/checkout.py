@@ -1794,6 +1794,44 @@ async def checkout(
                 detail="InstaPay is not available for this store. Please choose another payment method.",
             )
 
+    elif _dispatch_method == "moyasar":
+        # Moyasar (KSA) — credentials live in store.settings, like Paymob/
+        # Kashier. Create a hosted invoice and hand the storefront its URL
+        # via ``payment_url`` so the customer is redirected to pay.
+        try:
+            from src.infrastructure.external_services.moyasar.payment_service import (
+                MoyasarPaymentService,
+                get_merchant_moyasar_credentials,
+            )
+
+            creds = await get_merchant_moyasar_credentials(store.settings)
+            moyasar_service = MoyasarPaymentService(
+                secret_key=creds.get("secret_key"),
+                publishable_key=creds.get("publishable_key"),
+                webhook_secret=creds.get("webhook_secret"),
+                currency=currency,
+            )
+
+            created_order.payment_id = str(created_order.id)
+            await order_repo.update(created_order)
+
+            customer_email_str = (
+                str(current_customer.email) if current_customer.email else None
+            )
+            intent = await moyasar_service.create_payment_intent(
+                amount=_gateway_amount,
+                currency=currency,
+                customer_email=customer_email_str,
+                metadata={"order_id": str(created_order.id)},
+            )
+            payment_url = intent.client_secret
+        except Exception as e:
+            logger.error(f"Moyasar payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Online payment is not available for this store. Please choose another payment method.",
+            )
+
     elif _dispatch_method and _dispatch_method != "cod":
         # Other payment providers via tenant credentials
         try:

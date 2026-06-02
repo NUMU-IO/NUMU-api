@@ -116,6 +116,7 @@ class UpdatePaymentSettingsRequest(BaseModel):
     paymob_enabled: bool | None = None
     kashier_enabled: bool | None = None
     instapay_enabled: bool | None = None
+    moyasar_enabled: bool | None = None
     vodafone_cash_enabled: bool | None = None
     bank_transfer_enabled: bool | None = None
     # Send the full policy object to replace it; omit to leave unchanged.
@@ -300,6 +301,30 @@ class FawaterakCredentialsResponse(BaseModel):
     api_key_masked: str | None = None
     vendor_key_masked: str | None = None
     environment: str | None = None
+    last_configured: str | None = None
+
+
+class SaveMoyasarCredentialsRequest(BaseModel):
+    """Save Moyasar (KSA) gateway credentials for a store.
+
+    - secret_key: server-side API key (sk_…), used for HTTP Basic auth.
+    - publishable_key: client key (pk_…), optional.
+    - webhook_secret: the shared ``secret_token`` configured on the Moyasar
+      webhook, used to authenticate inbound webhooks.
+    """
+
+    secret_key: str = Field(..., min_length=5, max_length=500)
+    publishable_key: str | None = Field(None, max_length=500)
+    webhook_secret: str | None = Field(None, max_length=500)
+
+
+class MoyasarCredentialsResponse(BaseModel):
+    """Moyasar credentials status (masked, never returns real keys)."""
+
+    is_configured: bool
+    secret_key_masked: str | None = None
+    publishable_key_masked: str | None = None
+    webhook_secret_masked: str | None = None
     last_configured: str | None = None
 
 

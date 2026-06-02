@@ -29,7 +29,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.payment import get_tenant_payment_service
 from src.config import settings
 from src.config.logging_config import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -127,12 +126,22 @@ async def moyasar_callback(
 
     log = log.bind(order_id=str(order.id), order_number=order.order_number)
 
-    # ── Authenticate via the tenant's Moyasar webhook secret ─────────
-    # Build the merchant's service (loads per-tenant creds) and let it
-    # compare the payload's secret_token. Fails closed when no secret is
-    # configured.
+    # ── Authenticate via the merchant's Moyasar webhook secret ───────
+    # Credentials live in store.settings (like Paymob/Kashier); build the
+    # service from them and let it compare the payload's secret_token.
+    # Fails closed when no secret is configured.
+    store = await store_repo.get_by_id(order.store_id)
     try:
-        svc = await get_tenant_payment_service("moyasar", order.tenant_id, db)
+        from src.infrastructure.external_services.moyasar.payment_service import (
+            MoyasarPaymentService,
+            get_merchant_moyasar_credentials,
+        )
+
+        creds = await get_merchant_moyasar_credentials(store.settings if store else {})
+        svc = MoyasarPaymentService(
+            secret_key=creds.get("secret_key"),
+            webhook_secret=creds.get("webhook_secret"),
+        )
         verified = svc.verify_webhook_signature(payload, "")
     except Exception as e:  # pragma: no cover - defensive
         log.warning("webhook_verify_error", error=str(e))

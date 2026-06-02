@@ -34,6 +34,42 @@ logger = logging.getLogger(__name__)
 
 MOYASAR_API_BASE = "https://api.moyasar.com"
 
+
+async def get_merchant_moyasar_credentials(store_settings: dict) -> dict:
+    """Decrypt and return a merchant's Moyasar credentials from store settings.
+
+    Returns a dict with keys: secret_key, publishable_key, webhook_secret.
+
+    Raises:
+        ValueError: If credentials are not configured or decryption fails.
+    """
+    import base64
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    moyasar_settings = (store_settings or {}).get("payment", {}).get("moyasar", {})
+
+    if not moyasar_settings.get("encrypted_credentials"):
+        raise ValueError(
+            "Moyasar credentials not configured for this store. "
+            "Please configure the payment gateway in store settings."
+        )
+
+    secrets_manager = get_secrets_manager()
+    key_id = moyasar_settings["encryption_key_id"]
+    encrypted = base64.b64decode(moyasar_settings["encrypted_credentials"])
+
+    try:
+        return await secrets_manager.decrypt(encrypted, key_id)
+    except Exception as e:
+        logger.error("Failed to decrypt Moyasar credentials: %s", e)
+        raise ValueError(
+            "Failed to read Moyasar credentials. Please re-save them."
+        ) from e
+
+
 # Moyasar invoice/payment statuses that mean the funds were captured.
 _PAID_STATUSES = {"paid"}
 
