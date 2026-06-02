@@ -27,6 +27,21 @@ class UploadedFile:
     content_type: str
 
 
+def sanitize_object_key(key: str) -> str:
+    """Normalise a caller-supplied object key.
+
+    Strips leading/trailing slashes, backslashes, and any ``.``/``..``
+    segments so a caller-provided key can never traverse outside its
+    intended prefix (or, for local storage, outside the uploads dir).
+    """
+    parts = [
+        segment
+        for segment in key.replace("\\", "/").split("/")
+        if segment not in ("", ".", "..")
+    ]
+    return "/".join(parts)
+
+
 class IStorageService(ABC):
     """File storage service interface."""
 
@@ -37,8 +52,16 @@ class IStorageService(ABC):
         filename: str,
         content_type: str,
         bucket: StorageBucket = StorageBucket.PRODUCTS,
+        key: str | None = None,
     ) -> UploadedFile:
-        """Upload a file to storage."""
+        """Upload a file to storage.
+
+        When ``key`` is given it is used as the object key verbatim (after
+        ``sanitize_object_key``); otherwise a unique key is generated under
+        ``bucket``. Callers that need the object to land under a specific
+        prefix (e.g. ``customization/{store_id}/``) MUST pass ``key`` — the
+        ``bucket`` default would otherwise discard that prefix.
+        """
         ...
 
     @abstractmethod

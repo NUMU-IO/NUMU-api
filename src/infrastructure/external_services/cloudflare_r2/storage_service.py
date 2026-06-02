@@ -12,6 +12,7 @@ from src.core.interfaces.services.storage_service import (
     IStorageService,
     StorageBucket,
     UploadedFile,
+    sanitize_object_key,
 )
 
 
@@ -114,24 +115,31 @@ class CloudflareR2StorageService(IStorageService):
         filename: str,
         content_type: str,
         bucket: StorageBucket = StorageBucket.PRODUCTS,
+        key: str | None = None,
     ) -> UploadedFile:
         """Upload a file to S3-compatible storage."""
         if not self.client:
             raise ExternalServiceError("S3 Storage", "Storage not configured")
 
         try:
-            key = self._generate_key(filename, bucket)
+            object_key = (
+                sanitize_object_key(key)
+                if key
+                else self._generate_key(filename, bucket)
+            )
 
-            # Keys are content-addressed (uuid4 hex prefix per `_generate_key`),
-            # so the object at a given key is effectively immutable — any edit
+            # Generated keys are content-addressed (uuid4 hex per
+            # `_generate_key`) and caller-supplied keys (e.g.
+            # `customization/{store_id}/...`) already carry a uuid suffix, so
+            # the object at a given key is effectively immutable — any edit
             # produces a new key. Tell Cloudflare + browsers to cache for a
-            # year so repeat product page loads serve from the edge without
+            # year so repeat page loads serve from the edge without
             # revalidation. Without this, CF falls back to its 4h default,
             # which Lighthouse flags as a short cache lifetime.
             self.client.upload_fileobj(
                 BytesIO(file_content),
                 self.bucket_name,
-                key,
+                object_key,
                 ExtraArgs={
                     "ContentType": content_type,
                     "CacheControl": "public, max-age=31536000, immutable",
@@ -139,8 +147,8 @@ class CloudflareR2StorageService(IStorageService):
             )
 
             return UploadedFile(
-                key=key,
-                url=self.get_public_url(key),
+                key=object_key,
+                url=self.get_public_url(object_key),
                 size=len(file_content),
                 content_type=content_type,
             )

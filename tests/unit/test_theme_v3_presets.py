@@ -5,6 +5,7 @@ Tests BYOT preset generation, built-in theme defaults, and section group creatio
 
 from src.application.services.theme_v3_presets import (
     generate_initial_v3_customization,
+    reconcile_v3_customization,
 )
 
 
@@ -140,3 +141,186 @@ class TestEdgeCases:
         )
         assert v3.templates == {}
         assert "header" in v3.section_groups
+
+
+class TestByotChromeGroups:
+    """Phase 2.5 — BYOT bundles render chrome in-template, so the generic
+    header/footer groups must NOT be synthesised (they'd be un-editable
+    phantom tiles). The signal is `bundle_url` (a real BYOT bundle)."""
+
+    def test_byot_bundle_no_preset_groups_skips_phantom_groups(self):
+        presets = {
+            "templates": {"home": {"sections": [{"type": "by-header", "settings": {}}]}}
+        }
+        v3 = generate_initial_v3_customization(
+            theme_id="bon-younes-v3",
+            presets=presets,
+            bundle_url="https://cdn.numueg.app/themes/by/theme.js",
+        )
+        assert v3.section_groups == {}
+
+    def test_byot_bundle_keeps_declared_preset_groups(self):
+        presets = {
+            "templates": {"home": {"sections": []}},
+            "section_groups": {
+                "header": {"sections": [{"type": "header", "settings": {}}]}
+            },
+        }
+        v3 = generate_initial_v3_customization(
+            theme_id="custom",
+            presets=presets,
+            bundle_url="https://cdn.numueg.app/themes/custom/theme.js",
+        )
+        assert "header" in v3.section_groups
+        # Footer was not declared and the theme is BYOT → not synthesised.
+        assert "footer" not in v3.section_groups
+
+
+class TestReconcileChromeGroups:
+    """Phase 2.5 — reconcile clears phantom groups for in-template themes and
+    never resurrects a group the theme's presets don't declare."""
+
+    def test_reconcile_clears_phantom_groups_for_in_template_theme(self):
+        # A store activated before Phase 2.5 still carries generic
+        # header/footer groups. With NO preset section_groups (in-template),
+        # reconcile must clear them.
+        customization = {
+            "schema_version": 3,
+            "templates": {
+                "home": {
+                    "sections": {"by-header-0": {"type": "by-header"}},
+                    "order": ["by-header-0"],
+                }
+            },
+            "section_groups": {
+                "header": {
+                    "sections": {"header_1": {"type": "header"}},
+                    "order": ["header_1"],
+                },
+                "footer": {
+                    "sections": {"footer_1": {"type": "footer"}},
+                    "order": ["footer_1"],
+                },
+            },
+        }
+        section_schemas = {"by-header": {"name": "Header", "settings": []}}
+        presets = {
+            "templates": {"home": {"sections": [{"type": "by-header", "settings": {}}]}}
+        }
+        result = reconcile_v3_customization(customization, section_schemas, presets)
+        assert result["section_groups"] == {}
+
+    def test_reconcile_keeps_groups_for_group_based_theme(self):
+        # A theme that declares preset groups whose stored sections are
+        # renderable is left untouched (no clobber).
+        customization = {
+            "schema_version": 3,
+            "templates": {
+                "home": {
+                    "sections": {"hero-0": {"type": "hero"}},
+                    "order": ["hero-0"],
+                }
+            },
+            "section_groups": {
+                "header": {
+                    "sections": {"h1": {"type": "site-header"}},
+                    "order": ["h1"],
+                }
+            },
+        }
+        section_schemas = {"hero": {}, "site-header": {}}
+        presets = {
+            "templates": {"home": {"sections": [{"type": "hero", "settings": {}}]}},
+            "section_groups": {
+                "header": {"sections": [{"type": "site-header", "settings": {}}]}
+            },
+        }
+        result = reconcile_v3_customization(customization, section_schemas, presets)
+        groups = result.get("section_groups") if result else None
+        assert groups and "header" in groups
+
+
+class TestReconcileTemplates:
+    """Core reconcile contract: heal empty/stale templates from the theme's
+    preset, but never clobber a template that has at least one renderable
+    section (preserves real merchant edits)."""
+
+    PRESETS = {
+        "templates": {
+            "home": {
+                "name": "Home",
+                "sections": [
+                    {"type": "by-hero", "settings": {"headline": "Hi"}},
+                    {"type": "by-grid", "settings": {}},
+                ],
+            }
+        }
+    }
+    SCHEMAS = {"by-hero": {}, "by-grid": {}}
+
+    def test_empty_template_healed_from_preset(self):
+        cust = {
+            "schema_version": 3,
+            "templates": {"home": {"sections": {}, "order": []}},
+        }
+        out = reconcile_v3_customization(cust, self.SCHEMAS, self.PRESETS)
+        secs = out["templates"]["home"]["sections"]
+        # Deterministic <type>-<idx> ids (must match storefront/preview).
+        assert "by-hero-0" in secs and "by-grid-1" in secs
+        assert out["templates"]["home"]["order"] == ["by-hero-0", "by-grid-1"]
+
+    def test_all_unknown_template_replaced(self):
+        # A stale `legacy-hero` from a previous theme — unknown to this
+        # theme's schemas → replaced by the preset.
+        cust = {
+            "schema_version": 3,
+            "templates": {
+                "home": {
+                    "sections": {"hero_1": {"type": "legacy-hero"}},
+                    "order": ["hero_1"],
+                }
+            },
+        }
+        out = reconcile_v3_customization(cust, self.SCHEMAS, self.PRESETS)
+        assert "hero_1" not in out["templates"]["home"]["sections"]
+        assert "by-hero-0" in out["templates"]["home"]["sections"]
+
+    def test_partial_known_template_kept_untouched(self):
+        # One known + one unknown section → has a renderable section → keep
+        # (no clobber). reconcile returns the SAME object (cheap no-op).
+        cust = {
+            "schema_version": 3,
+            "templates": {
+                "home": {
+                    "sections": {"x": {"type": "by-hero"}, "y": {"type": "legacy"}},
+                    "order": ["x", "y"],
+                }
+            },
+        }
+        out = reconcile_v3_customization(cust, self.SCHEMAS, self.PRESETS)
+        assert out is cust
+
+    def test_missing_template_is_created_from_preset(self):
+        cust = {"schema_version": 3, "templates": {}}
+        out = reconcile_v3_customization(cust, self.SCHEMAS, self.PRESETS)
+        assert "home" in out["templates"]
+        assert out["templates"]["home"]["order"] == ["by-hero-0", "by-grid-1"]
+
+    def test_no_presets_returns_unchanged(self):
+        cust = {"schema_version": 3, "templates": {"home": {"sections": {}}}}
+        assert reconcile_v3_customization(cust, self.SCHEMAS, None) is cust
+        assert reconcile_v3_customization(cust, self.SCHEMAS, {}) is cust
+
+    def test_no_schema_info_keeps_existing_nonempty(self):
+        # Empty `known` set → "can't judge type-compat" → keep existing.
+        cust = {
+            "schema_version": 3,
+            "templates": {
+                "home": {"sections": {"x": {"type": "anything"}}, "order": ["x"]}
+            },
+        }
+        assert reconcile_v3_customization(cust, {}, self.PRESETS) is cust
+
+    def test_non_dict_customization_returned_asis(self):
+        assert reconcile_v3_customization(None, self.SCHEMAS, self.PRESETS) is None
+        assert reconcile_v3_customization("oops", self.SCHEMAS, self.PRESETS) == "oops"

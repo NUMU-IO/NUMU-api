@@ -73,6 +73,27 @@ STOREFRONT_BASE_URL = _read_env(
 )
 
 
+def theme_cache_tag(store_id: str) -> str:
+    """Cache tag for a store's theme/customization-dependent pages.
+
+    MUST stay byte-identical to the tag the storefront attaches to its theme
+    fetch — ``theme-${storeId}`` in ``numu-storefront/src/lib/api-client.ts``.
+    A prior mismatch (``theme:{id}`` colon here vs ``theme-{id}`` hyphen
+    there) made ``revalidateTag`` a no-op, so Publish never refreshed the
+    live store until the ISR window lapsed.
+    """
+    return f"theme-{store_id}"
+
+
+def store_cache_tag(subdomain: str) -> str:
+    """Cache tag for a store's base data.
+
+    Matches the storefront's ``store-${subdomain}`` tag in ``api-client.ts``
+    (hyphen, not colon).
+    """
+    return f"store-{subdomain}"
+
+
 async def revalidate_store(
     subdomain: str,
     paths: list[str] | None = None,
@@ -180,7 +201,7 @@ async def revalidate_on_theme_activate(subdomain: str, store_id: str) -> None:
     await revalidate_store(
         subdomain=subdomain,
         paths=["/"],
-        tags=[f"theme:{store_id}", f"store:{subdomain}"],
+        tags=[theme_cache_tag(store_id), store_cache_tag(subdomain)],
         scope="layout",
     )
 
@@ -190,8 +211,37 @@ async def revalidate_on_customization_publish(subdomain: str, store_id: str) -> 
     await revalidate_store(
         subdomain=subdomain,
         paths=["/"],
-        tags=[f"theme:{store_id}"],
+        tags=[theme_cache_tag(store_id)],
         scope="layout",
+    )
+
+
+async def revalidate_on_menu_change(subdomain: str, store_id: str) -> None:
+    """Call when a store's navigation menu changes.
+
+    Busts the storefront's cached menu fetch (tagged ``menus-{store_id}``)
+    plus the theme/layout so header/footer nav refresh without waiting out
+    the ISR window.
+    """
+    await revalidate_store(
+        subdomain=subdomain,
+        paths=["/"],
+        tags=[f"menus-{store_id}", theme_cache_tag(store_id)],
+        scope="layout",
+    )
+
+
+async def revalidate_on_page_change(subdomain: str, store_id: str, handle: str) -> None:
+    """Call when a merchant content page is created/updated/deleted.
+
+    Busts the storefront's cached page fetch (tagged ``pages-{store_id}``)
+    plus the specific page path so ``/pages/<handle>`` refreshes without
+    waiting out the ISR window.
+    """
+    await revalidate_store(
+        subdomain=subdomain,
+        paths=[f"/pages/{handle}"],
+        tags=[f"pages-{store_id}", theme_cache_tag(store_id)],
     )
 
 

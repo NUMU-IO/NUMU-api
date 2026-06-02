@@ -1,0 +1,78 @@
+# V3 theme + engine unit tests (Phase 5.4).
+#
+# The repo's main ci.yml gates ruff + a Docker build + a k6 load smoke, but
+# does NOT run pytest, so the V3 theme/engine paths (recursive nested-block
+# round-trip, reconcile, storage-key namespace, revalidate-tag agreement,
+# menu/page repositories) were ungated. This additive workflow runs that
+# subset against the in-memory SQLite test engine (no external services).
+name: theme-tests
+
+on:
+  push:
+    branches: [dev, stage, prod]
+  pull_request:
+    branches: [dev, stage, prod]
+    paths:
+      - "src/application/services/theme_v3_presets.py"
+      - "src/application/services/theme_v3_service.py"
+      - "src/application/services/theme_update_classifier.py"
+      - "src/application/services/theme_update_service.py"
+      - "src/api/v1/routes/stores/theme_updates.py"
+      - "src/infrastructure/repositories/theme_update_notification_repository.py"
+      - "src/core/entities/theme_settings_v3.py"
+      - "src/core/entities/menu.py"
+      - "src/core/entities/page.py"
+      - "src/infrastructure/repositories/menu_repository.py"
+      - "src/infrastructure/repositories/page_repository.py"
+      - "src/infrastructure/external_services/local_storage.py"
+      - "src/infrastructure/external_services/nextjs_revalidation.py"
+      - "src/core/interfaces/services/storage_service.py"
+      - "tests/unit/test_theme_*.py"
+      - "tests/unit/test_menu_repository.py"
+      - "tests/unit/test_page_repository.py"
+      - "tests/unit/test_storage_object_key.py"
+      - "tests/unit/test_revalidation_tags.py"
+      - ".github/workflows/theme-tests.yml"
+
+concurrency:
+  group: theme-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  pytest:
+    name: V3 theme + engine tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Provision test env
+        # Mirror local: pydantic-settings reads .env; the example template
+        # carries dev placeholders for every required setting.
+        run: cp .env.example .env
+
+      - name: Run V3 theme + engine unit tests
+        run: |
+          pytest -p no:logging \
+            tests/unit/test_theme_settings_v3.py \
+            tests/unit/test_theme_v3_presets.py \
+            tests/unit/test_theme_v3_mappers.py \
+            tests/unit/test_theme_autosave_etag.py \
+            tests/unit/test_storage_object_key.py \
+            tests/unit/test_revalidation_tags.py \
+            tests/unit/test_menu_repository.py \
+            tests/unit/test_page_repository.py \
+            tests/unit/test_theme_update_classifier.py \
+            tests/unit/test_theme_update_service.py \
+            tests/unit/test_theme_update_notification_repository.py

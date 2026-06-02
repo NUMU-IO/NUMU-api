@@ -43,7 +43,11 @@ from src.api.dependencies import (
 )
 from src.api.dependencies.database import get_db
 from src.api.dependencies.feature_flags import _read_feature_flags
-from src.api.dependencies.repositories import get_product_subscription_repository
+from src.api.dependencies.repositories import (
+    get_menu_repository,
+    get_page_repository,
+    get_product_subscription_repository,
+)
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import (
     clear_customer_auth_cookies,
@@ -84,6 +88,8 @@ from src.infrastructure.repositories import (
     ProductRepository,
     StoreRepository,
 )
+from src.infrastructure.repositories.menu_repository import MenuRepository
+from src.infrastructure.repositories.page_repository import PageRepository
 
 router = APIRouter()
 
@@ -107,6 +113,121 @@ def _customer_response(c) -> CustomerResponse:
         default_address_id=str(c.default_address_id) if c.default_address_id else None,
         created_at=str(c.created_at) if c.created_at else None,
         updated_at=str(c.updated_at) if c.updated_at else None,
+    )
+
+
+# ============================================================================
+# Navigation menus (public, no auth) — Phase 2.4 storefront resolver
+# ============================================================================
+
+
+@router.get(
+    "/menus",
+    response_model=SuccessResponse[list[dict[str, Any]]],
+    summary="List store navigation menus",
+    operation_id="list_store_menus_public",
+)
+async def list_store_menus_public(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    menu_repo: Annotated[MenuRepository, Depends(get_menu_repository)],
+) -> SuccessResponse[list[dict[str, Any]]]:
+    """Public navigation menus for a store (header/footer link lists).
+
+    Returns active menus only — each with a bilingual ``title`` and a
+    nested list of pre-resolved ``items`` (``{id, label, url, type,
+    resource_id, children}``). The Next.js storefront fetches this
+    server-side (ISR-tagged ``menus-{store_id}``) and injects it into the
+    BYOT mount context so a theme's ``useNavigation(handle)`` resolves
+    synchronously without a client round-trip.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    menus = await menu_repo.get_by_store(store_id, include_inactive=False)
+    return SuccessResponse(
+        data=[
+            {
+                "id": str(menu.id),
+                "handle": menu.handle,
+                "title": menu.title,
+                "items": menu.items,
+                "is_active": menu.is_active,
+            }
+            for menu in menus
+        ],
+        message="Menus retrieved successfully",
+    )
+
+
+# ============================================================================
+# Content pages (public, no auth) — Phase 4.4b storefront resolver
+# ============================================================================
+
+
+def _public_page(page: Any) -> dict[str, Any]:
+    return {
+        "id": str(page.id),
+        "handle": page.handle,
+        "title": page.title,
+        "body": page.body,
+        "seo": page.seo,
+        "template": page.template,
+    }
+
+
+@router.get(
+    "/pages",
+    response_model=SuccessResponse[list[dict[str, Any]]],
+    summary="List published store pages",
+    operation_id="list_store_pages_public",
+)
+async def list_store_pages_public(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    page_repo: Annotated[PageRepository, Depends(get_page_repository)],
+) -> SuccessResponse[list[dict[str, Any]]]:
+    """Published content pages for a store (PUBLISHED only).
+
+    The Next.js storefront fetches this server-side (ISR-tagged
+    ``pages-{store_id}``) to render ``/pages/<handle>`` with real content
+    and to drive the page picker. Drafts (unpublished) are excluded so a
+    work-in-progress page never leaks to shoppers.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    pages = await page_repo.get_by_store(store_id, include_unpublished=False)
+    return SuccessResponse(
+        data=[_public_page(p) for p in pages],
+        message="Pages retrieved successfully",
+    )
+
+
+@router.get(
+    "/pages/{handle}",
+    response_model=SuccessResponse[dict[str, Any]],
+    summary="Get a published store page by handle",
+    operation_id="get_store_page_public",
+)
+async def get_store_page_public(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    handle: Annotated[str, Path(description="Page handle")],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    page_repo: Annotated[PageRepository, Depends(get_page_repository)],
+) -> SuccessResponse[dict[str, Any]]:
+    """A single published page by handle, for ``/pages/<handle>``."""
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    page = await page_repo.get_by_handle(store_id, handle)
+    if not page or not page.is_published:
+        raise EntityNotFoundError("Page", handle)
+    return SuccessResponse(
+        data=_public_page(page), message="Page retrieved successfully"
     )
 
 

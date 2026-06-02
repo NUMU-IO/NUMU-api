@@ -206,10 +206,22 @@ def setup_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ExternalServiceError)
     async def storage_error_handler(request: Request, exc: ExternalServiceError):
+        # Always log the real cause — this was previously swallowed, so an
+        # upload/storage 500 surfaced to the merchant as the generic message
+        # with zero clue why (e.g. an R2 SignatureDoesNotMatch). In debug/dev
+        # we also return the underlying reason so it's diagnosable from the
+        # client (image picker); production keeps the generic message and
+        # ``_safe_error_body`` strips ``details`` to avoid leaking infra info.
+        logger.error("External service error: %s", exc, exc_info=True)
+        message = (
+            f"External service operation failed: {exc}"
+            if settings.debug
+            else "External service operation failed"
+        )
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=_error_body(
-                "EXTERNAL_SERVICE_ERROR", "External service operation failed"
+            content=_safe_error_body(
+                "EXTERNAL_SERVICE_ERROR", message, {"detail": str(exc)}
             ),
         )
 
