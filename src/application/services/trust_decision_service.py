@@ -117,3 +117,13 @@ def decide(inputs: DecisionInputs) -> TrustDecisionState:
 
     # 6. Low risk — clear it.
     return TrustDecisionState.AUTO_APPROVED
+
+
+def native_block_equivalent(state: TrustDecisionState) -> bool:
+    """Map an FSM decision to the native checkout's binary block/allow outcome.
+
+    The native storefront only blocks-or-allows COD (it has no hold / confirm /
+    cancel surface), so for shadow comparison every non-``BLOCKED`` FSM state
+    maps to "allow".
+    """
+    return state == TrustDecisionState.BLOCKED

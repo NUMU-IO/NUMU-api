@@ -641,6 +641,46 @@ async def checkout(
             trust_decision.confidence,
             [f["code"] for f in trust_decision.factors],
         )
+
+        # ── Phase C shadow mode (read-only) ────────────────────────────────
+        # Run the canonical decision FSM alongside the live cod_trust decision
+        # and log whether they agree. Acts on NOTHING — the live decision below
+        # is still authoritative. This produces the "FSM agrees on N% of COD
+        # orders" metric that gates the eventual cutover (strangler R1).
+        try:
+            from src.application.services.trust_decision_service import (
+                DecisionInputs,
+                decide,
+                native_block_equivalent,
+            )
+
+            _fsm_state = decide(
+                DecisionInputs(
+                    risk_score=trust_decision.score or 0,
+                    confidence=trust_decision.confidence or "low",
+                    block_enabled=(_cod_trust_cfg["action"] == "block"),
+                    block_threshold=int(_cod_trust_cfg["threshold"]),
+                    min_confidence_to_act=_cod_trust_cfg["min_confidence"],
+                )
+            )
+            _fsm_blocks = native_block_equivalent(_fsm_state)
+            _live_blocks = not trust_decision.allowed
+            logger.info(
+                "trust_fsm_shadow surface=native_checkout fsm=%s fsm_blocks=%s "
+                "live_blocks=%s agree=%s score=%s confidence=%s",
+                _fsm_state.value,
+                _fsm_blocks,
+                _live_blocks,
+                _fsm_blocks == _live_blocks,
+                trust_decision.score,
+                trust_decision.confidence,
+            )
+        except Exception as _shadow_exc:  # noqa: BLE001 — shadow never affects checkout
+            logger.warning(
+                "trust_fsm_shadow_error surface=native_checkout error=%s",
+                _shadow_exc,
+            )
+
         if not trust_decision.allowed:
             # Persist the blocked decision before raising so the merchant
             # sees the action in their COD-trust decisions feed even though

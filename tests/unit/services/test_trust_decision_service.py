@@ -7,7 +7,13 @@ system do at score X?".
 
 from __future__ import annotations
 
-from src.application.services.trust_decision_service import DecisionInputs, decide
+import pytest
+
+from src.application.services.trust_decision_service import (
+    DecisionInputs,
+    decide,
+    native_block_equivalent,
+)
 from src.core.entities.trust_decision import TrustDecisionState
 
 
@@ -122,3 +128,44 @@ class TestRiskLadder:
 
     def test_just_below_confirm_auto_approves(self):
         assert decide(DecisionInputs(risk_score=29)) == TrustDecisionState.AUTO_APPROVED
+
+
+class TestNativeBlockEquivalent:
+    """The native checkout shadow maps FSM states to a binary block/allow."""
+
+    def test_blocked_maps_to_block(self):
+        assert native_block_equivalent(TrustDecisionState.BLOCKED) is True
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            TrustDecisionState.AUTO_APPROVED,
+            TrustDecisionState.CONFIRM_PENDING,
+            TrustDecisionState.HELD,
+            TrustDecisionState.CONFIRMED,
+        ],
+    )
+    def test_non_blocked_maps_to_allow(self, state):
+        assert native_block_equivalent(state) is False
+
+    def test_new_customer_low_confidence_is_allow(self):
+        # Baseline score 55, low confidence, native block mode, min medium →
+        # the FSM does not block on thin data → allow, matching the native path.
+        d = DecisionInputs(
+            risk_score=55,
+            confidence="low",
+            block_enabled=True,
+            block_threshold=70,
+            min_confidence_to_act="medium",
+        )
+        assert native_block_equivalent(decide(d)) is False
+
+    def test_confident_high_risk_is_block(self):
+        d = DecisionInputs(
+            risk_score=80,
+            confidence="high",
+            block_enabled=True,
+            block_threshold=70,
+            min_confidence_to_act="medium",
+        )
+        assert native_block_equivalent(decide(d)) is True
