@@ -1185,6 +1185,23 @@ async def checkout(
 
     created_order = await order_repo.create(order)
 
+    # ── COD-trust "recover" flow ──────────────────────────────────────
+    # A high-risk COD order the merchant chose to CONVERT rather than block:
+    # the order is created as COD, and we schedule a WhatsApp pay-online offer
+    # (with the merchant's promo) to turn it prepaid. Best-effort — never
+    # blocks the order that was just created.
+    if trust_decision is not None and getattr(trust_decision, "recover", False):
+        from src.application.services.cod_recovery_service import (
+            schedule_cod_recovery_offer,
+        )
+
+        await schedule_cod_recovery_offer(
+            order_repo.session,
+            order=created_order,
+            store=store,
+            customer=current_customer,
+        )
+
     # ── Feature 001 — seed customer's first-touch attribution ─────────
     # Set once on the first attributed order, never overwritten. Used
     # by future LTV-by-acquisition-channel analytics. We update via
