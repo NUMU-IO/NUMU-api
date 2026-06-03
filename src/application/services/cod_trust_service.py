@@ -36,12 +36,16 @@ DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "threshold": 70,
     "min_confidence": "medium",  # never block on "low" confidence
-    "action": "block",  # "block" | "warn"
+    "action": "block",  # "block" | "warn" | "recover"
 }
 
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 _VALID_CONFIDENCE = {"low", "medium", "high"}
-_VALID_ACTIONS = {"block", "warn"}
+# "block"   → reject COD, force prepaid.
+# "warn"    → allow + log (no buyer-facing change).
+# "recover" → allow the COD order, then fire a WhatsApp payment-link offer
+#             (with a promo) to convert it to prepaid — the second flow.
+_VALID_ACTIONS = {"block", "warn", "recover"}
 _BASELINE_SCORE = 55  # matches network_reputation_service baseline
 
 # Location-signal weights added to the network reputation score. Individually
@@ -95,6 +99,10 @@ class CodTrustDecision:
     # Contributing signals: each factor is ``{"code": str, "weight": int,
     # "detail": str}``. Caller can persist to RiskAssessmentModel.factors.
     factors: list[dict[str, Any]] = field(default_factory=list)
+    # True when the merchant chose action="recover" AND the order is high-risk:
+    # the order is ALLOWED as COD, but the caller should fire the WhatsApp
+    # payment-link recovery offer to convert it to prepaid.
+    recover: bool = False
 
 
 def get_cod_trust_settings(store_settings: dict | None) -> dict[str, Any]:
@@ -318,17 +326,26 @@ async def check_customer_trust(
     # merchant chose to warn on rather than block.
     min_conf_rank = _CONFIDENCE_RANK[settings["min_confidence"]]
     actual_conf_rank = _CONFIDENCE_RANK.get(confidence, 0)
+    recover = False
     if actual_conf_rank < min_conf_rank:
         reason = "low_confidence"
     elif adjusted_score >= settings["threshold"]:
-        reason = "warned_high_risk"
-        logger.warning(
-            "cod_trust_warned_high_risk score=%s confidence=%s label=%s factors=%s",
-            adjusted_score,
-            confidence,
-            label,
-            [f["code"] for f in location_factors],
-        )
+        # High-risk, but the merchant chose NOT to block — the second flow.
+        # "recover" allows the COD order and signals the caller to fire the
+        # WhatsApp payment-link offer (convert to prepaid with a promo);
+        # "warn" simply allows + logs.
+        if settings["action"] == "recover":
+            reason = "recover_high_risk"
+            recover = True
+        else:
+            reason = "warned_high_risk"
+            logger.warning(
+                "cod_trust_warned_high_risk score=%s confidence=%s label=%s factors=%s",
+                adjusted_score,
+                confidence,
+                label,
+                [f["code"] for f in location_factors],
+            )
     elif is_new_customer:
         reason = "new_customer"
     else:
@@ -341,6 +358,7 @@ async def check_customer_trust(
         confidence=confidence,
         label=label,
         factors=location_factors,
+        recover=recover,
     )
     _set_sentry_context(decision)
     return decision
