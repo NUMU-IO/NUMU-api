@@ -65,3 +65,22 @@ class RiskAssessmentFinalisedEvent(DomainEvent):
     recovery_enabled: bool = False
     has_payment_gateway: bool = False
     subscription_active: bool = False
+
+
+class TrustKillSwitchFiredEvent(DomainEvent):
+    """Emitted when the daily kill-switch disables trust auto-approve (P1-3).
+
+    The in-app banner is driven by the persisted ``auto_disabled_at`` /
+    ``auto_disabled_reason`` columns on ``shopify_app_settings``; that banner
+    is passive (a merchant who doesn't open the app won't see it). This event
+    is the active-notification seam — consumers can email the merchant, raise
+    a dashboard incident, or feed the moat-metrics "kill-switch incidents"
+    count so a silently-disabled automation never goes unnoticed.
+    """
+
+    store_id: UUID
+    tenant_id: UUID
+    auto_approve_count: int
+    rto_count: int
+    rate_pct: float
+    reason: str
