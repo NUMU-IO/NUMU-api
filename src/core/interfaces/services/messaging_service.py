@@ -34,6 +34,8 @@ class MessageType(StrEnum):
     PASSWORD_RESET = "password_reset"
     CUSTOM = "custom"
     ABANDONED_CART = "abandoned_cart"
+    # COD-to-prepaid recovery offer (the "recover" cod_trust flow).
+    COD_RECOVERY_OFFER = "cod_recovery_offer"
 
 
 class MessageStatus(StrEnum):
@@ -402,6 +404,56 @@ EGYPTIAN_TEMPLATES = {
                     "sub_type": "url",
                     "index": "0",
                     "parameters": ["cart_token"],
+                },
+            ],
+        ),
+    },
+    MessageType.COD_RECOVERY_OFFER: {
+        "en": MessageTemplate(
+            type=MessageType.COD_RECOVERY_OFFER,
+            name="cod_recovery_offer_v1",
+            language="en",
+            components=[
+                # Body: {{1}} name, {{2}} order number, {{3}} store, {{4}} total,
+                # {{5}} promo. URL button suffix: pay_payload ("<sub>/<order_id>").
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "store_name",
+                        "total",
+                        "promo",
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["pay_payload"],
+                },
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.COD_RECOVERY_OFFER,
+            name="cod_recovery_offer_v1",
+            language="ar",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        "customer_name",
+                        "order_number",
+                        "store_name",
+                        "total",
+                        "promo",
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["pay_payload"],
                 },
             ],
         ),
