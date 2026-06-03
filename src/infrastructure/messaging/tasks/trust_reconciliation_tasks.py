@@ -172,6 +172,9 @@ async def _reconcile_one_store_async(*, store_id, tenant_id, since) -> int:
                 store_id=order.store_id,
                 event_type=event_type,  # type: ignore[arg-type]
                 network_repo=network_repo,
+                # Same key the courier + manual paths use, so a backfill can
+                # never double-count an outcome a live write already recorded.
+                dedup_key=f"{order.store_id}:{order.id}:{event_type}",
             )
 
             order.metadata[f"network_{event_type}_recorded"] = True

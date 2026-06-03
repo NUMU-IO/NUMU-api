@@ -216,6 +216,8 @@ class UpdateOrderStatusUseCase:
                 store_id=order.store_id,
                 event_type=event_type,
                 network_repo=self.network_repository,
+                # Shared key with the courier + reconciliation paths (P1-2).
+                dedup_key=f"{order.store_id}:{order.id}:{event_type}",
             )
 
             order.metadata = {**metadata, flag_key: True}

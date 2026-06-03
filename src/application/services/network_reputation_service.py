@@ -136,6 +136,7 @@ async def write_network_event(
     event_type: Literal["order", "rto", "delivery", "refund"],
     network_repo: NetworkReputationRepository,
     settings_repo: ShopifyAppSettingsRepository | None = None,
+    dedup_key: str | None = None,
 ) -> None:
     """Write a network reputation event and refresh aggregates.
 
@@ -168,12 +169,15 @@ async def write_network_event(
         )
 
     if event_type == "order":
-        await network_repo.upsert_order(phone_hash=phone_hash, store_id=store_id)
+        await network_repo.upsert_order(
+            phone_hash=phone_hash, store_id=store_id, dedup_key=dedup_key
+        )
     else:
         await network_repo.record_event(
             phone_hash=phone_hash,
             store_id=store_id,
             event_type=event_type,
+            dedup_key=dedup_key,
         )
 
     # Update contributing store count and recompute cached score

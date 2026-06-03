@@ -189,6 +189,9 @@ async def _record_network_event_from_order(
             store_id=order.store_id,
             event_type=event_type,
             network_repo=repo,
+            # Shared key with the manual + reconciliation paths (P1-2): a Bosta
+            # webhook and a later backfill can't double-count the same outcome.
+            dedup_key=f"{order.store_id}:{order.id}:{event_type}",
         )
 
         # Stamp BOTH shipment.metadata (legacy flag, cheap to keep) and

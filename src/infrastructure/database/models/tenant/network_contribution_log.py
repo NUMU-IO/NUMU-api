@@ -23,6 +23,9 @@ class NetworkContributionLogModel(Base, UUIDMixin):
     __table_args__ = (
         Index("ix_ncl_store_id", "store_id"),
         Index("ix_ncl_phone_hash", "phone_hash"),
+        # Idempotency anchor (P1-2): unique over non-null keys only, so legacy
+        # NULL-key rows are unaffected and keyed writes dedupe at the DB level.
+        Index("uq_ncl_dedup_key", "dedup_key", unique=True),
         {"schema": "public"},
     )
 
@@ -37,6 +40,13 @@ class NetworkContributionLogModel(Base, UUIDMixin):
     event_type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
+    )
+    # Optional per-(order, event) idempotency key. When supplied by the caller,
+    # a duplicate write conflicts on the unique index above and is skipped so
+    # the counter is never incremented twice for the same outcome (P1-2).
+    dedup_key: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
