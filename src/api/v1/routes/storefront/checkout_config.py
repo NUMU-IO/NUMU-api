@@ -11,12 +11,19 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path
+from pydantic import BaseModel
 
-from src.api.dependencies.repositories import get_store_repository
+from src.api.dependencies.repositories import (
+    get_network_reputation_repository,
+    get_store_repository,
+)
 from src.api.responses import SuccessResponse
 from src.core.checkout_fields import resolve_config
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.repositories import StoreRepository
+from src.infrastructure.repositories.shopify_repository import (
+    NetworkReputationRepository,
+)
 
 router = APIRouter()
 
@@ -77,4 +84,88 @@ async def get_public_checkout_config(
     return SuccessResponse(
         data=config,
         message="Checkout config retrieved",
+    )
+
+
+class CodEligibilityRequest(BaseModel):
+    """Pre-flight COD-check input — the buyer's contact phone + optional map pin."""
+
+    phone: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    accuracy: float | None = None
+    source: str | None = None
+
+
+@router.post(
+    "/cod-eligibility",
+    response_model=SuccessResponse[dict],
+    summary="Pre-flight COD availability check for a buyer",
+    operation_id="check_cod_eligibility",
+)
+async def check_cod_eligibility(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    body: CodEligibilityRequest,
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    network_repo: Annotated[
+        NetworkReputationRepository,
+        Depends(get_network_reputation_repository),
+    ],
+):
+    """Return whether COD is available for this buyer BEFORE they submit.
+
+    Lets the storefront disable / hide the COD option proactively (offering the
+    prepaid fallbacks) instead of letting the buyer reach a hard 403 at order
+    submit — the differentiator made graceful. It reuses the exact same
+    FSM-backed decision the checkout endpoint enforces, so the pre-flight answer
+    matches the final one.
+
+    Privacy: only a coarse ``cod_available`` is returned — never the internal
+    reason codes or the network score. The merchant feed gets the detail; the
+    buyer just needs to know whether to pay online. Fail-open: any error returns
+    ``cod_available=true`` so this never blocks a legitimate purchase.
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    cod_trust = (store.settings or {}).get("cod_trust") or {}
+    if not (isinstance(cod_trust, dict) and cod_trust.get("enabled")):
+        # Feature off — nothing to pre-check; COD is always available.
+        return SuccessResponse(
+            data={"cod_available": True, "fallback_payment_methods": []},
+            message="COD eligibility",
+        )
+
+    try:
+        from src.application.services.cod_trust_service import (
+            LocationSignals,
+            check_customer_trust,
+        )
+
+        decision = await check_customer_trust(
+            phone=body.phone,
+            store_settings=store.settings,
+            network_repo=network_repo,
+            location=LocationSignals(
+                latitude=body.latitude,
+                longitude=body.longitude,
+                accuracy=body.accuracy,
+                source=body.source,
+            ),
+        )
+        available = decision.allowed
+    except Exception:  # noqa: BLE001 — fraud filtering never blocks on error
+        available = True
+
+    return SuccessResponse(
+        data={
+            "cod_available": available,
+            # Mirror the checkout endpoint's 403 fallback list so the storefront
+            # offers the same prepaid options it would after a hard block.
+            "fallback_payment_methods": []
+            if available
+            else ["paymob_card", "paymob_wallet"],
+        },
+        message="COD eligibility",
     )
