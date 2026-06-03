@@ -12,9 +12,27 @@ import pytest
 from src.application.services.trust_decision_service import (
     DecisionInputs,
     decide,
+    fsm_to_suggested_action,
     native_block_equivalent,
 )
 from src.core.entities.trust_decision import TrustDecisionState
+
+
+class TestFsmToSuggestedAction:
+    """The Shopify display-strangle mapping (FSM state → suggested_action)."""
+
+    def test_each_state_maps_to_a_ladder_action(self):
+        assert (
+            fsm_to_suggested_action(TrustDecisionState.AUTO_APPROVED) == "auto_approve"
+        )
+        assert fsm_to_suggested_action(TrustDecisionState.CONFIRMED) == "auto_approve"
+        assert (
+            fsm_to_suggested_action(TrustDecisionState.CONFIRM_PENDING)
+            == "whatsapp_confirm"
+        )
+        assert fsm_to_suggested_action(TrustDecisionState.HELD) == "hold"
+        assert fsm_to_suggested_action(TrustDecisionState.BLOCKED) == "cancel"
+        assert fsm_to_suggested_action(TrustDecisionState.CANCELLED) == "cancel"
 
 
 def _trusted(**over) -> DecisionInputs:

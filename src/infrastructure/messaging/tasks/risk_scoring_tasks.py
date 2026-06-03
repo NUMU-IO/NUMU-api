@@ -466,6 +466,21 @@ def compute_full_risk_score(
                     full_result.risk_score,
                     trust_result.customer_trust,
                 )
+
+                # Display-strangle (flag-gated cutover): persist the FSM's
+                # decision as the assessment's suggested_action instead of the
+                # raw ladder. Default off until the shadow log validates
+                # FSM-vs-ladder agreement in production.
+                if get_settings().trust_fsm_decision_enabled:
+                    from src.application.services.trust_decision_service import (
+                        fsm_to_suggested_action,
+                    )
+
+                    await session.execute(
+                        update(RiskAssessmentModel)
+                        .where(RiskAssessmentModel.id == UUID(assessment_id))
+                        .values(suggested_action=fsm_to_suggested_action(_fsm_state))
+                    )
             except Exception as _shadow_exc:  # noqa: BLE001 — shadow never affects scoring
                 logger.warning(
                     "trust_fsm_shadow_error surface=shopify error=%s", _shadow_exc

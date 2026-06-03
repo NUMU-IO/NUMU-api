@@ -127,3 +127,22 @@ def native_block_equivalent(state: TrustDecisionState) -> bool:
     maps to "allow".
     """
     return state == TrustDecisionState.BLOCKED
+
+
+# Map an FSM state to the Shopify-path ``suggested_action`` vocabulary
+# (``risk_scoring_engine._suggested_action``). Used by the flag-gated Shopify
+# display-strangle: when ``trust_fsm_decision_enabled`` is on, the persisted
+# ``suggested_action`` comes from the FSM instead of the raw risk ladder.
+_FSM_TO_SUGGESTED_ACTION = {
+    TrustDecisionState.AUTO_APPROVED: "auto_approve",
+    TrustDecisionState.CONFIRMED: "auto_approve",
+    TrustDecisionState.CONFIRM_PENDING: "whatsapp_confirm",
+    TrustDecisionState.HELD: "hold",
+    TrustDecisionState.BLOCKED: "cancel",
+    TrustDecisionState.CANCELLED: "cancel",
+}
+
+
+def fsm_to_suggested_action(state: TrustDecisionState) -> str:
+    """Map an FSM decision to the Shopify ``suggested_action`` string."""
+    return _FSM_TO_SUGGESTED_ACTION.get(state, "whatsapp_confirm")
