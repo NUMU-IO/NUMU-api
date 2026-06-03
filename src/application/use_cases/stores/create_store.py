@@ -223,6 +223,22 @@ class CreateStoreUseCase:
         # Save store
         created_store = await self.store_repository.create(store)
 
+        # Seed default navigation menus (main-menu + footer, bilingual) so a
+        # new store's header/footer have sensible nav out of the box. Reuses
+        # the store repository's session (same transaction). Best-effort — a
+        # seed failure must never block store creation.
+        try:
+            from src.core.entities.menu import build_default_menus
+            from src.infrastructure.repositories.menu_repository import (
+                MenuRepository,
+            )
+
+            menu_repo = MenuRepository(self.store_repository.session)
+            for menu in build_default_menus(created_store.id, tenant.id):
+                await menu_repo.create(menu)
+        except Exception:
+            pass
+
         # Initialize onboarding with create_store step already completed
         if self.onboarding_repository:
             from src.application.use_cases.onboarding.auto_complete import (

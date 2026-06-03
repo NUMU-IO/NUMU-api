@@ -13,6 +13,7 @@ from src.core.interfaces.services.storage_service import (
     IStorageService,
     StorageBucket,
     UploadedFile,
+    sanitize_object_key,
 )
 
 # Base directory for local uploads (project root / uploads)
@@ -43,14 +44,17 @@ class LocalStorageService(IStorageService):
         filename: str,
         content_type: str,
         bucket: StorageBucket = StorageBucket.PRODUCTS,
+        key: str | None = None,
     ) -> UploadedFile:
-        key = self._generate_key(filename, bucket)
-        file_path = self.base_dir / key
+        object_key = (
+            sanitize_object_key(key) if key else self._generate_key(filename, bucket)
+        )
+        file_path = self.base_dir / object_key
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(file_content)
         return UploadedFile(
-            key=key,
-            url=self.get_public_url(key),
+            key=object_key,
+            url=self.get_public_url(object_key),
             size=len(file_content),
             content_type=content_type,
         )

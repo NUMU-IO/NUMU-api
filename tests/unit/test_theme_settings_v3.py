@@ -245,3 +245,140 @@ class TestThemeSettingsV3:
             .settings["text"]
             == "Shop Now"
         )
+
+
+# ─── Nested blocks (Phase 4.1 keystone) ────────────────────────────────────────
+
+
+class TestNestedBlockRoundtrip:
+    """``BlockInstance`` is self-referential, so a block can hold child
+    ``blocks`` to arbitrary depth. This is the KEYSTONE of Phase 4.1: the
+    autosave path does ``ThemeSettingsV3(**payload).model_dump()`` — a
+    NON-recursive model would silently strip the nested ``blocks`` /
+    ``block_order`` on every save, so these tests lock the recursion in."""
+
+    def test_block_nests_recursively(self):
+        block = BlockInstance(
+            type="column",
+            settings={"heading": "Shop"},
+            blocks={"link_1": BlockInstance(type="link", settings={"url": "/x"})},
+            block_order=["link_1"],
+        )
+        assert block.blocks["link_1"].type == "link"
+        assert block.block_order == ["link_1"]
+
+    def test_block_roundtrips_dump_then_validate(self):
+        block = BlockInstance(
+            type="column",
+            blocks={
+                "link_1": BlockInstance(
+                    type="link",
+                    settings={"url": "/products"},
+                    blocks={
+                        "icon_1": BlockInstance(type="icon", settings={"name": "cart"})
+                    },
+                    block_order=["icon_1"],
+                ),
+            },
+            block_order=["link_1"],
+        )
+        restored = BlockInstance(**block.model_dump())
+        link = restored.blocks["link_1"]
+        assert link.block_order == ["icon_1"]
+        assert link.blocks["icon_1"].settings["name"] == "cart"
+
+    def test_deeply_nested_blocks_survive_themesettings_roundtrip(self):
+        v3 = ThemeSettingsV3(
+            theme_id="bon-younes-v3",
+            templates={
+                "home": PageTemplate(
+                    name="Home",
+                    order=["footer_1"],
+                    sections={
+                        "footer_1": SectionInstance(
+                            type="by-footer",
+                            block_order=["col_1"],
+                            blocks={
+                                "col_1": BlockInstance(
+                                    type="column",
+                                    settings={"heading": "Shop"},
+                                    block_order=["link_1"],
+                                    blocks={
+                                        "link_1": BlockInstance(
+                                            type="link",
+                                            settings={
+                                                "url": "/products",
+                                                "label": "All",
+                                            },
+                                        ),
+                                    },
+                                ),
+                            },
+                        ),
+                    },
+                ),
+            },
+        )
+        # Mirror the autosave path exactly (theme_v3_service).
+        restored = ThemeSettingsV3(**v3.model_dump())
+        col = restored.templates["home"].sections["footer_1"].blocks["col_1"]
+        assert col.type == "column"
+        assert col.block_order == ["link_1"]
+        link = col.blocks["link_1"]
+        assert link.type == "link"
+        assert link.settings["url"] == "/products"
+
+    def test_raw_json_dict_preserves_nesting(self):
+        # The autosave PUT body arrives as JSON → a plain dict. Validating
+        # it must preserve nested blocks (no recursion → they'd be dropped).
+        payload = {
+            "schema_version": 3,
+            "theme_id": "x",
+            "templates": {
+                "home": {
+                    "name": "Home",
+                    "order": ["s1"],
+                    "sections": {
+                        "s1": {
+                            "type": "rich-text",
+                            "block_order": ["b1"],
+                            "blocks": {
+                                "b1": {
+                                    "type": "group",
+                                    "block_order": ["b2"],
+                                    "blocks": {
+                                        "b2": {"type": "text", "settings": {"t": "hi"}},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        v3 = ThemeSettingsV3(**payload)
+        b1 = v3.templates["home"].sections["s1"].blocks["b1"]
+        assert b1.blocks["b2"].settings["t"] == "hi"
+        dumped = v3.model_dump()
+        assert (
+            dumped["templates"]["home"]["sections"]["s1"]["blocks"]["b1"]["blocks"][
+                "b2"
+            ]["type"]
+            == "text"
+        )
+
+    def test_leaf_block_back_compat(self):
+        # A one-level block from before the recursive change (no blocks key)
+        # validates and gets empty defaults — additive, no migration needed.
+        b = BlockInstance(**{"type": "heading", "settings": {"text": "Hi"}})
+        assert b.blocks == {}
+        assert b.block_order == []
+
+    def test_app_block_validation_fires_on_nested_block(self):
+        # @app block-type validation still runs when the bad block is nested.
+        with pytest.raises(ValidationError, match="@app block type must be"):
+            BlockInstance(**{
+                "type": "column",
+                "block_order": ["bad"],
+                "blocks": {"bad": {"type": "@app/x"}},
+            })

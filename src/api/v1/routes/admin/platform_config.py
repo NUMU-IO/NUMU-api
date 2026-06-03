@@ -40,6 +40,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 META_CONFIG_KEY = "meta_credentials"
+# Phase 5.2 — theme-engine platform flags (e.g. App-embeds tab visibility).
+THEME_ENGINE_KEY = "theme_engine"
+
+
+async def _get_theme_engine_config(db: AsyncSession) -> dict:
+    """Read the theme_engine platform config value (or {} if unset)."""
+    result = await db.execute(
+        select(PlatformConfigModel).where(PlatformConfigModel.key == THEME_ENGINE_KEY)
+    )
+    row = result.scalar_one_or_none()
+    return row.value if (row and isinstance(row.value, dict)) else {}
+
+
+async def _set_app_embeds_enabled(db: AsyncSession, enabled: bool) -> None:
+    """Upsert theme_engine.app_embeds_tab_enabled (race-safe)."""
+    existing = await _get_theme_engine_config(db)
+    merged = {**existing, "app_embeds_tab_enabled": bool(enabled)}
+    stmt = (
+        pg_insert(PlatformConfigModel)
+        .values(
+            key=THEME_ENGINE_KEY,
+            value=merged,
+            description="Theme engine platform flags (App-embeds tab, …)",
+        )
+        .on_conflict_do_update(index_elements=["key"], set_={"value": merged})
+    )
+    await db.execute(stmt)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +149,9 @@ class UpdatePlatformConfigPayload(BaseModel):
     # Distinguishing "omitted" from "explicit null" is done via
     # ``model_fields_set`` below.
     default_marketplace_theme_id: UUID | None = None
+    # Phase 5.2 — toggle the merchant editor's "App embeds" tab platform-wide.
+    # Omitted = leave untouched; explicit bool = set.
+    app_embeds_tab_enabled: bool | None = None
 
 
 class PlatformConfigSnapshot(BaseModel):
@@ -132,6 +163,8 @@ class PlatformConfigSnapshot(BaseModel):
 
     default_marketplace_theme_id: UUID | None = None
     default_marketplace_theme: dict[str, str | None] | None = None
+    # Phase 5.2 — App-embeds tab visibility (default False → hidden).
+    app_embeds_tab_enabled: bool = False
 
 
 @router.get(
@@ -154,11 +187,15 @@ async def get_platform_config(
 
     default_id = await svc.get_default_theme_id()
     summary = await svc.get_default_theme_summary() if default_id else None
+    theme_engine = await _get_theme_engine_config(db)
 
     return SuccessResponse(
         data=PlatformConfigSnapshot(
             default_marketplace_theme_id=default_id,
             default_marketplace_theme=summary,
+            app_embeds_tab_enabled=bool(
+                theme_engine.get("app_embeds_tab_enabled", False)
+            ),
         ),
         message="Platform config retrieved",
     )
@@ -208,13 +245,27 @@ async def update_platform_config(
             },
         )
 
+    if "app_embeds_tab_enabled" in fields_set:
+        await _set_app_embeds_enabled(db, bool(payload.app_embeds_tab_enabled))
+        logger.info(
+            "platform_app_embeds_tab_toggled",
+            extra={
+                "admin_email": admin.get("email", "unknown"),
+                "new_value": bool(payload.app_embeds_tab_enabled),
+            },
+        )
+
     default_id = await svc.get_default_theme_id()
     summary = await svc.get_default_theme_summary() if default_id else None
+    theme_engine = await _get_theme_engine_config(db)
 
     return SuccessResponse(
         data=PlatformConfigSnapshot(
             default_marketplace_theme_id=default_id,
             default_marketplace_theme=summary,
+            app_embeds_tab_enabled=bool(
+                theme_engine.get("app_embeds_tab_enabled", False)
+            ),
         ),
         message="Platform config updated",
     )

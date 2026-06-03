@@ -761,6 +761,33 @@ async def get_current_user(
 
         tenant_q = select(TenantModel).where(TenantModel.owner_id == user.id)
         tenant = (await db.execute(tenant_q)).scalar_one_or_none()
+
+        # Phase 5.2 — platform-wide App-embeds tab toggle. Super-admin
+        # controls it via /admin/platform-config (key "theme_engine"); we
+        # merge it into the per-tenant feature_flags channel so the merchant
+        # hub's existing useFeatureFlag("theme_app_embeds") reads it with no
+        # new fetch. Default OFF → the editor hides the dead "App embeds"
+        # tab until an app platform exists.
+        platform_flags: dict[str, bool] = {}
+        try:
+            from src.infrastructure.database.models.public.platform_config import (
+                PlatformConfigModel,
+            )
+
+            cfg = (
+                await db.execute(
+                    select(PlatformConfigModel).where(
+                        PlatformConfigModel.key == "theme_engine"
+                    )
+                )
+            ).scalar_one_or_none()
+            if cfg and isinstance(cfg.value, dict):
+                platform_flags["theme_app_embeds"] = bool(
+                    cfg.value.get("app_embeds_tab_enabled", False)
+                )
+        except Exception:
+            pass  # Missing config row → flag simply absent (tab hidden).
+
         if tenant:
             tenant_info = TenantInfoResponse(
                 id=str(tenant.id),
@@ -775,7 +802,7 @@ async def get_current_user(
                 expires_at=tenant.expires_at.isoformat() if tenant.expires_at else None,
                 days_remaining=tenant.days_remaining,
                 demo_email=tenant.demo_email,
-                feature_flags=tenant.feature_flags or {},
+                feature_flags={**(tenant.feature_flags or {}), **platform_flags},
             )
     except Exception:
         pass  # Non-critical — old tenants without lifecycle columns still work

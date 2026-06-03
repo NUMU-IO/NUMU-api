@@ -33,6 +33,7 @@ from src.api.v1.schemas.tenant.settings import (
     CustomizationResponse,
     CustomizationSocialLinks,
     CustomizationTheme,
+    DeleteAssetRequest,
     FawaterakCredentialsResponse,
     InstapayCredentialsResponse,
     InvoiceSettingsResponse,
@@ -52,6 +53,7 @@ from src.api.v1.schemas.tenant.settings import (
     ShippingSettingsResponse,
     ShippingZone,
     StoreSettingsResponse,
+    UpdateAssetMetaRequest,
     UpdateCodTrustRequest,
     UpdateCustomizationRequest,
     UpdateInvoiceSettingsRequest,
@@ -2221,6 +2223,42 @@ async def reset_customization(
     )
 
 
+async def _warm_public_asset_url(
+    url: str, *, attempts: int = 6, budget_seconds: float = 1.5
+) -> bool:
+    """Block until a freshly-uploaded public asset serves HTTP 200/206.
+
+    Cloudflare R2's public ``*.r2.dev`` edge can return 403 for a short
+    window right after an object is written. Polling here means the URL we
+    hand back to the editor's image picker is already warm, so it never
+    shows a 403 flicker. Uses a 1-byte ranged GET so we don't pull the whole
+    object. Best-effort: if it never warms within the budget we return
+    ``False`` and let the caller return the URL anyway (the object exists and
+    the edge warms within a few seconds). Local storage is served by the
+    API's own ``/uploads`` mount and never calls this.
+    """
+    import asyncio
+
+    import httpx
+
+    delay = budget_seconds / attempts
+    try:
+        async with httpx.AsyncClient(timeout=2.0, follow_redirects=True) as client:
+            for attempt in range(attempts):
+                try:
+                    resp = await client.get(url, headers={"Range": "bytes=0-0"})
+                    if resp.status_code in (200, 206):
+                        return True
+                except httpx.HTTPError:
+                    pass
+                if attempt < attempts - 1:
+                    await asyncio.sleep(delay)
+    except Exception:
+        # Never let warm-up failure break an otherwise-successful upload.
+        pass
+    return False
+
+
 @router.post(
     "/customization/assets",
     response_model=SuccessResponse[dict],
@@ -2316,26 +2354,39 @@ async def upload_customization_asset(
             detail=f"File size exceeds {max_size // (1024 * 1024)}MB limit",
         )
 
-    # Generate a unique filename
+    # Build the object key under the store's customization prefix. This MUST
+    # be passed as ``key=`` (not ``filename=``) — otherwise the storage
+    # service generates its own ``stores/<uuid>`` key and discards this
+    # prefix, so the list endpoint (which queries ``customization/{id}/``)
+    # would never find the upload → the Library tab shows nothing.
     ext = (
         file.filename.rsplit(".", 1)[-1]
         if file.filename and "." in file.filename
         else "png"
     )
-    filename = f"customization/{store.id}/{asset_type}_{uuid.uuid4().hex[:8]}.{ext}"
+    object_key = f"customization/{store.id}/{asset_type}_{uuid.uuid4().hex[:8]}.{ext}"
 
     # Upload to configured storage (Cloudflare R2 / MinIO / local)
     from src.api.dependencies.services import get_storage_service
+    from src.config import settings as app_settings
     from src.core.interfaces.services.storage_service import StorageBucket
 
     storage = get_storage_service()
     result = await storage.upload_file(
         file_content=content,
-        filename=filename,
+        filename=file.filename or object_key,
         content_type=file.content_type or "image/png",
         bucket=StorageBucket.STORES,
+        key=object_key,
     )
     url = result.url
+
+    # On object storage (R2), wait until the public URL serves before
+    # returning it, so the editor's image picker never previews a just-
+    # uploaded object during R2's brief edge-propagation 403 window. Local
+    # storage is served immediately by the /uploads mount, so it's skipped.
+    if app_settings.object_storage_configured:
+        await _warm_public_asset_url(url)
 
     return SuccessResponse(
         data={"url": url, "asset_type": asset_type, "filename": file.filename},
@@ -2352,17 +2403,135 @@ async def upload_customization_asset(
 async def list_customization_assets(
     store: Annotated[Store, Depends(get_current_store)],
 ):
-    """List all uploaded theme/customization assets for this store."""
+    """List all uploaded theme/customization assets for this store.
+
+    Each asset is enriched with the merchant-authored ``alt`` text and
+    friendly ``name`` from ``store.settings.asset_meta`` (keyed by object
+    key) so the Media manager can render and edit them.
+    """
     from src.api.dependencies.services import get_storage_service
 
     storage = get_storage_service()
     prefix = f"customization/{store.id}/"
 
+    # NOTE: assets uploaded before the key-namespace fix landed under the
+    # bucket-level ``stores/<uuid>`` prefix (the store id wasn't encoded), so
+    # they won't appear here. We deliberately do NOT scan/backfill the legacy
+    # ``stores/`` prefix or bulk-move objects — it isn't store-scoped (a
+    # cross-tenant read risk) and most stores have no legacy customization
+    # assets. New uploads land under this prefix and list correctly.
     try:
         assets = await storage.list_files(prefix)
-        return SuccessResponse(data=assets, message="Assets retrieved successfully")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list assets: {str(e)}")
+
+    asset_meta = (store.settings or {}).get("asset_meta", {}) or {}
+    for asset in assets:
+        meta = asset_meta.get(asset.get("key"), {}) or {}
+        asset["alt"] = meta.get("alt", "")
+        asset["name"] = meta.get("name", "")
+    return SuccessResponse(data=assets, message="Assets retrieved successfully")
+
+
+def _assert_owns_asset_key(store: Store, key: str) -> str:
+    """Guard that ``key`` belongs to this store's customization prefix.
+
+    Prevents a merchant from mutating/deleting another tenant's object by
+    passing an arbitrary key. Returns the sanitized key.
+    """
+    from src.core.interfaces.services.storage_service import sanitize_object_key
+
+    safe = sanitize_object_key(key)
+    expected_prefix = f"customization/{store.id}/"
+    if not safe.startswith(expected_prefix):
+        raise HTTPException(
+            status_code=403,
+            detail="Asset does not belong to this store.",
+        )
+    return safe
+
+
+@router.patch(
+    "/customization/assets",
+    response_model=SuccessResponse[dict],
+    summary="Update an asset's alt text / display name",
+    operation_id="update_customization_asset_meta",
+)
+async def update_customization_asset_meta(
+    request: UpdateAssetMetaRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Persist library metadata (alt text + friendly name) for one asset.
+
+    Stored in ``store.settings.asset_meta[key]``. The object key / URL is
+    never changed — only the metadata. Existing image settings that read
+    the URL keep working; the alt here seeds the default alt for the
+    image picker.
+    """
+    safe_key = _assert_owns_asset_key(store, request.key)
+
+    settings = dict(store.settings) if store.settings else {}
+    asset_meta = dict(settings.get("asset_meta", {}) or {})
+    entry = dict(asset_meta.get(safe_key, {}) or {})
+
+    if request.alt is not None:
+        entry["alt"] = request.alt
+    if request.name is not None:
+        entry["name"] = request.name
+
+    asset_meta[safe_key] = entry
+    settings["asset_meta"] = asset_meta
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data={"key": safe_key, **entry},
+        message="Asset updated successfully",
+    )
+
+
+@router.delete(
+    "/customization/assets",
+    response_model=SuccessResponse[dict],
+    summary="Delete a customization asset",
+    operation_id="delete_customization_asset",
+)
+async def delete_customization_asset(
+    request: DeleteAssetRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Delete an uploaded asset from storage and drop its metadata.
+
+    The merchant is responsible for ensuring the asset isn't still
+    referenced by a published section (Shopify behaves the same way — it
+    warns but allows). We only verify the key is this store's.
+    """
+    safe_key = _assert_owns_asset_key(store, request.key)
+
+    from src.api.dependencies.services import get_storage_service
+
+    storage = get_storage_service()
+    try:
+        await storage.delete_file(safe_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete asset: {str(e)}")
+
+    # Drop any stored metadata for this key so a future re-upload to the
+    # same (randomised) key never inherits a stale alt/name.
+    settings = dict(store.settings) if store.settings else {}
+    asset_meta = dict(settings.get("asset_meta", {}) or {})
+    if safe_key in asset_meta:
+        asset_meta.pop(safe_key, None)
+        settings["asset_meta"] = asset_meta
+        store.settings = settings
+        await store_repo.update(store)
+
+    return SuccessResponse(
+        data={"key": safe_key},
+        message="Asset deleted successfully",
+    )
 
 
 # ============ Checkout Fields Config ============

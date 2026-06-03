@@ -139,6 +139,35 @@ def get_coupon_repository(
     return CouponRepository(session)
 
 
+def get_menu_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get menu (store navigation) repository dependency."""
+    from src.infrastructure.repositories.menu_repository import MenuRepository
+
+    return MenuRepository(session)
+
+
+def get_page_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get page (merchant content page) repository dependency."""
+    from src.infrastructure.repositories.page_repository import PageRepository
+
+    return PageRepository(session)
+
+
+def get_theme_update_notification_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get theme-update notification repository dependency (Phase 5.1)."""
+    from src.infrastructure.repositories.theme_update_notification_repository import (
+        ThemeUpdateNotificationRepository,
+    )
+
+    return ThemeUpdateNotificationRepository(session)
+
+
 def get_promotion_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> PromotionRepository:

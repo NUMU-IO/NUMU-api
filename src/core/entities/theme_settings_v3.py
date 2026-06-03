@@ -106,11 +106,23 @@ def _is_allowed_bundle_url(url: str, mode: str) -> bool:
 
 
 class BlockInstance(BaseModel):
-    """A single block within a section."""
+    """A single block within a section.
+
+    Blocks nest: a block may contain its own child ``blocks`` +
+    ``block_order`` (e.g. a footer "column" block holding "link" blocks,
+    or a mega-menu). The shape is identical to a section's block
+    container, so the same editor/storefront walk handles any depth. The
+    customizer caps practical depth (see ``MAX_BLOCK_DEPTH`` there); the
+    model itself is unbounded so old/new payloads both validate. Leaf
+    blocks simply carry empty ``blocks``/``block_order`` (additive — a
+    one-level block from before this change round-trips unchanged).
+    """
 
     type: str  # e.g., "button", "heading", "@app/reviews/star-rating"
     disabled: bool = False
     settings: dict[str, Any] = Field(default_factory=dict)
+    blocks: dict[str, BlockInstance] = Field(default_factory=dict)
+    block_order: list[str] = Field(default_factory=list)
 
     @field_validator("type")
     @classmethod
@@ -122,6 +134,12 @@ class BlockInstance(BaseModel):
                     f"@app block type must be '@app/{{slug}}/{{type}}', got '{v}'"
                 )
         return v
+
+
+# Self-referential model: resolve the forward ref to ``BlockInstance``
+# now that the class is fully defined (required under
+# ``from __future__ import annotations``).
+BlockInstance.model_rebuild()
 
 
 class SectionInstance(BaseModel):

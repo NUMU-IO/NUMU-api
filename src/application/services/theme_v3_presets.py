@@ -137,26 +137,28 @@ def generate_initial_v3_customization(
                 order=grp_order,
             )
 
-    # Ensure default header/footer groups exist. Kept unconditional (built-in
-    # AND BYOT) for backward-compatibility. BYOT themes that model header/footer
-    # as in-template sections (e.g. bon-younes' by-header/by-footer) would get
-    # phantom generic "Header/Footer" groups here, but those are stripped at
-    # read time — by reconcile_v3_customization (editor) and the storefront's
-    # resolve-theme sanitiser (SSR) — because their "header"/"footer" types
-    # aren't in the theme's section_schemas. So the editor/preview stay clean
-    # without coupling the seed to a per-theme structural assumption.
-    if "header" not in section_groups:
-        section_groups["header"] = SectionGroup(
-            name="Header Group",
-            sections={"header_1": SectionInstance(type="header", settings={})},
-            order=["header_1"],
-        )
-    if "footer" not in section_groups:
-        section_groups["footer"] = SectionGroup(
-            name="Footer Group",
-            sections={"footer_1": SectionInstance(type="footer", settings={})},
-            order=["footer_1"],
-        )
+    # Default header/footer groups exist ONLY for built-in (non-BYOT) themes.
+    # Built-in themes render chrome from `section_groups.{header,footer}` in the
+    # storefront layout, so they genuinely need these groups. BYOT bundles
+    # render header/footer IN-TEMPLATE (e.g. bon-younes' by-header/by-footer
+    # sections inside every PageTemplate), so synthesising generic
+    # "header"/"footer" groups here only produces un-editable PHANTOM tiles in
+    # the customizer (Phase 2.5). A BYOT theme that genuinely uses section
+    # groups declares them in its presets (built above, lines ~129-138), so
+    # those are preserved — we only skip the generic fallbacks for bundles.
+    if not bundle_url:
+        if "header" not in section_groups:
+            section_groups["header"] = SectionGroup(
+                name="Header Group",
+                sections={"header_1": SectionInstance(type="header", settings={})},
+                order=["header_1"],
+            )
+        if "footer" not in section_groups:
+            section_groups["footer"] = SectionGroup(
+                name="Footer Group",
+                sections={"footer_1": SectionInstance(type="footer", settings={})},
+                order=["footer_1"],
+            )
 
     # For built-in themes without presets, generate a default home template
     if not presets and not templates:
@@ -249,14 +251,24 @@ def reconcile_v3_customization(
         ).model_dump()
         changed = True
 
-    # Phantom section groups: V3 bundles render header/footer from templates,
-    # not from section_groups. If the stored groups hold only types the theme
-    # can't render (the generic header/footer left by legacy seeding), rebuild
-    # them from the theme's preset groups (usually none → cleared), so the
-    # editor stops showing un-editable phantom groups.
+    # Phantom section groups (Phase 2.5): V3 BYOT bundles render header/footer
+    # IN-TEMPLATE, not from `section_groups`. So:
+    #   - A theme that declares NO preset section_groups is in-template, so any
+    #     stored groups are phantom (the generic header/footer left by legacy
+    #     seeding or a snapshot restore). Clear them — the customizer then never
+    #     shows un-editable group tiles and reconcile never resurrects a dead
+    #     group. (Independent of `known`, so it also heals when section_schemas
+    #     are momentarily unavailable.)
+    #   - A theme that DOES declare preset groups but whose STORED groups hold
+    #     only unrenderable types → rebuild from the preset groups.
     new_groups = None
     groups = customization.get("section_groups") or {}
-    if groups and known:
+    preset_groups = presets.get("section_groups") or {}
+    if groups and not preset_groups:
+        # In-template theme — section groups are never rendered; drop phantoms.
+        new_groups = {}
+        changed = True
+    elif groups and preset_groups and known:
         group_types = [
             s.get("type")
             for g in groups.values()
@@ -265,7 +277,6 @@ def reconcile_v3_customization(
             if isinstance(s, dict)
         ]
         if group_types and not any(t in known for t in group_types):
-            preset_groups = presets.get("section_groups") or {}
             rebuilt: dict[str, Any] = {}
             for gname, gdata in preset_groups.items():
                 secs, order = _build_sections_from_list(gdata.get("sections", []))
