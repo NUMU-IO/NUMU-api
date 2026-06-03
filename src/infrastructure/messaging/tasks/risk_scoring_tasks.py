@@ -422,6 +422,55 @@ def compute_full_risk_score(
                         days_since,
                     )
 
+            # ── Phase C Shopify shadow (read-only) ─────────────────────────
+            # Log the canonical FSM decision next to the live suggested_action
+            # so agreement can be measured before the Shopify path is cut over
+            # (strangler). Acts on nothing. The FSM folds in the safety gates
+            # (final / install-grace / manual-approve) the raw suggested_action
+            # ladder does not, so some divergence is expected and informative.
+            # NOTE: trust auto-approve stays inert until merchant manual
+            # approvals are recorded — manual_approve_count is the activation
+            # precondition, pinned at 0 here.
+            try:
+                from src.application.services.trust_decision_service import (
+                    DecisionInputs,
+                    decide,
+                )
+
+                _fsm_state = decide(
+                    DecisionInputs(
+                        risk_score=full_result.risk_score,
+                        customer_trust=trust_result.customer_trust,
+                        score_type="final",
+                        auto_approve_on_trust_enabled=bool(
+                            getattr(settings, "auto_approve_on_trust_enabled", False)
+                        ),
+                        auto_approve_trust_threshold=int(
+                            getattr(settings, "auto_approve_trust_threshold", 80)
+                        ),
+                        install_grace_active=not cancel_allowed,
+                        manual_approve_count=0,
+                        cancel_threshold=int(
+                            getattr(settings, "auto_cancel_threshold", 90)
+                        ),
+                        hold_threshold=int(
+                            getattr(settings, "auto_hold_threshold", 70)
+                        ),
+                    )
+                )
+                logger.info(
+                    "trust_fsm_shadow surface=shopify fsm=%s suggested=%s "
+                    "risk=%s trust=%s",
+                    _fsm_state.value,
+                    full_result.suggested_action,
+                    full_result.risk_score,
+                    trust_result.customer_trust,
+                )
+            except Exception as _shadow_exc:  # noqa: BLE001 — shadow never affects scoring
+                logger.warning(
+                    "trust_fsm_shadow_error surface=shopify error=%s", _shadow_exc
+                )
+
             if (
                 settings
                 and settings.cod_risk_scoring_enabled
