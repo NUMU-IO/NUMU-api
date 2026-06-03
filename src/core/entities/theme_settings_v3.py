@@ -90,7 +90,17 @@ def _is_allowed_bundle_url(url: str, mode: str) -> bool:
             return False
         if host in _DEV_HOSTS:
             return True
-        return host == "r2.dev" or host.endswith(".r2.dev")
+        if host == "r2.dev" or host.endswith(".r2.dev"):
+            return True
+        # Also accept our OWN configured delivery hosts (S3_PUBLIC_URL /
+        # *.numueg.app / NUMU_BYOT_BUNDLE_HOSTS) in dev — a non-prod env
+        # (test/staging) serves real marketplace bundles from cdn.numueg.app,
+        # so activation must validate them. This only ever adds first-party
+        # hosts, never arbitrary ones.
+        hosts, suffixes = _allowed_bundle_hosts()
+        return host in hosts or any(
+            host == s or host.endswith("." + s) for s in suffixes
+        )
 
     # Production mode: HTTPS only, allowlisted host or suffix
     if parsed.scheme != "https":
