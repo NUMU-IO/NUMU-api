@@ -36,6 +36,58 @@ def _run_async(coro):
     return _task_loop.run_until_complete(coro)
 
 
+async def _wa_confirmation_response_rate(
+    tenant_id: UUID | None, store_id: UUID, phone: str | None
+) -> float:
+    """Per-store WhatsApp order-confirmation response rate for a customer (P1-4).
+
+    Of the orders where we sent this customer a WhatsApp confirmation request
+    (``customer_confirmation_requested_at`` set), what fraction did they respond
+    to — tap Confirm / Postpone / Cancel? A buyer who reliably answers WhatsApp
+    is reachable, which is a positive COD trust signal (the formula's
+    ``whatsapp_response_rate_pct`` input). Best-effort: returns 0.0 on any issue
+    so scoring never breaks on it.
+    """
+    if not (tenant_id and phone):
+        return 0.0
+    try:
+        from sqlalchemy import func as sa_func
+        from sqlalchemy import select
+
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.database.models.tenant.order import OrderModel
+        from src.infrastructure.tenancy.rls import narrow_to_tenant
+
+        async with AsyncSessionLocal() as session:
+            await narrow_to_tenant(session, tenant_id)
+            requested_where = (
+                OrderModel.store_id == store_id,
+                OrderModel.shipping_address["phone"].astext == phone,
+                OrderModel.customer_confirmation_requested_at.isnot(None),
+            )
+            requested = await session.scalar(
+                select(sa_func.count()).select_from(OrderModel).where(*requested_where)
+            )
+            if not requested:
+                return 0.0
+            responded = await session.scalar(
+                select(sa_func.count())
+                .select_from(OrderModel)
+                .where(
+                    *requested_where,
+                    OrderModel.customer_confirmation_status.in_((
+                        "confirmed",
+                        "postponed",
+                        "cancelled",
+                    )),
+                )
+            )
+            return (responded or 0) / requested * 100.0
+    except Exception as exc:  # noqa: BLE001 — best-effort; never break scoring
+        logger.warning("wa_confirmation_rate_lookup_failed: %s", exc)
+        return 0.0
+
+
 @celery_app.task(
     name="tasks.compute_full_risk_score",
     bind=True,
@@ -287,6 +339,13 @@ def compute_full_risk_score(
                                 rep_row.total_refunds or 0
                             )
 
+        # WhatsApp order-confirmation responsiveness (P1-4): a reachable buyer
+        # who answers our WhatsApp confirmation requests is a positive COD trust
+        # signal. Per-store, best-effort (0.0 when unknown).
+        wa_response_rate = await _wa_confirmation_response_rate(
+            assessment.tenant_id if assessment else None, sid, phone
+        )
+
         # Build the deterministic trust inputs. Each signal is counted EXACTLY
         # once. The prior code fed ``net_pos`` into BOTH ``successful_deliveries``
         # (×4) and ``network_positive_events`` (×3), inflating every network
@@ -300,10 +359,7 @@ def compute_full_risk_score(
             TrustInputs(
                 successful_deliveries=0,
                 prepaid_orders=int(prepaid_count),
-                # TODO(P1-4): source the WhatsApp response rate from the
-                # confirmation/OTP engagement history. Not reachable cheaply
-                # from this Shopify-scoring task — wired in Phase B.
-                whatsapp_response_rate_pct=0.0,
+                whatsapp_response_rate_pct=wa_response_rate,
                 network_positive_events=net_pos,
                 network_negative_events=net_neg,
                 local_recent_refusals=0,
