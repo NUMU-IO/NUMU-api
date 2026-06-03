@@ -276,18 +276,33 @@ async def check_customer_trust(
     adjusted_score = min(100, max(0, score + location_adjustment))
     is_new_customer = score == _BASELINE_SCORE and label == "new_to_network"
 
-    # 4. Confidence too low to act on. New customers always have confidence
-    # "low" — with the default `min_confidence="medium"` they'll bail here,
-    # which is exactly what we want (don't block someone with no history).
-    # Merchants who explicitly set `min_confidence="low"` opt into letting
-    # location signals alone push a new customer over the threshold —
-    # the single biggest unlock at pre-volume scale.
-    min_conf_rank = _CONFIDENCE_RANK[settings["min_confidence"]]
-    actual_conf_rank = _CONFIDENCE_RANK.get(confidence, 0)
-    if actual_conf_rank < min_conf_rank:
+    # 4-7. Decision via the canonical FSM (Phase C cutover). The FSM is now the
+    # single decision authority — the prior inline block/warn ladder is gone.
+    # Native checkout only blocks-or-allows, so map the FSM state to that binary
+    # and derive the merchant-facing reason. Behaviour is pinned by
+    # tests/unit/services/test_trust_decision_native_equivalence.py (85 cases):
+    # the FSM reproduces the old decision exactly, so this is a behaviour-
+    # preserving cutover, not a change.
+    from src.application.services.trust_decision_service import (
+        DecisionInputs,
+        decide,
+        native_block_equivalent,
+    )
+
+    fsm_state = decide(
+        DecisionInputs(
+            risk_score=adjusted_score,
+            confidence=confidence,
+            block_enabled=(settings["action"] == "block"),
+            block_threshold=int(settings["threshold"]),
+            min_confidence_to_act=settings["min_confidence"],
+        )
+    )
+
+    if native_block_equivalent(fsm_state):
         decision = CodTrustDecision(
-            allowed=True,
-            reason="low_confidence",
+            allowed=False,
+            reason="blocked_high_risk",
             score=adjusted_score,
             confidence=confidence,
             label=label,
@@ -296,20 +311,17 @@ async def check_customer_trust(
         _set_sentry_context(decision)
         return decision
 
-    # 5 & 6. High-risk score (after location adjustment) → block or warn
-    if adjusted_score >= settings["threshold"]:
-        if settings["action"] == "block":
-            decision = CodTrustDecision(
-                allowed=False,
-                reason="blocked_high_risk",
-                score=adjusted_score,
-                confidence=confidence,
-                label=label,
-                factors=location_factors,
-            )
-            _set_sentry_context(decision)
-            return decision
-        # warn mode — allow but log
+    # Allowed — derive the informative reason for the merchant decisions feed.
+    # New customers always have confidence "low"; with the default
+    # min_confidence="medium" they fall in "low_confidence" (we don't block
+    # someone with no history). "warned_high_risk" is the high-score case a
+    # merchant chose to warn on rather than block.
+    min_conf_rank = _CONFIDENCE_RANK[settings["min_confidence"]]
+    actual_conf_rank = _CONFIDENCE_RANK.get(confidence, 0)
+    if actual_conf_rank < min_conf_rank:
+        reason = "low_confidence"
+    elif adjusted_score >= settings["threshold"]:
+        reason = "warned_high_risk"
         logger.warning(
             "cod_trust_warned_high_risk score=%s confidence=%s label=%s factors=%s",
             adjusted_score,
@@ -317,24 +329,14 @@ async def check_customer_trust(
             label,
             [f["code"] for f in location_factors],
         )
-        decision = CodTrustDecision(
-            allowed=True,
-            reason="warned_high_risk",
-            score=adjusted_score,
-            confidence=confidence,
-            label=label,
-            factors=location_factors,
-        )
-        _set_sentry_context(decision)
-        return decision
+    elif is_new_customer:
+        reason = "new_customer"
+    else:
+        reason = "below_threshold"
 
-    # 7. Below threshold — all clear. Surface the "new_customer" reason
-    # when the customer has no record yet so the merchant feed can
-    # distinguish "we cleared a known-good buyer" from "we cleared a
-    # first-time buyer who had no signals against them".
     decision = CodTrustDecision(
         allowed=True,
-        reason="new_customer" if is_new_customer else "below_threshold",
+        reason=reason,
         score=adjusted_score,
         confidence=confidence,
         label=label,
