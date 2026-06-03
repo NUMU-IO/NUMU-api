@@ -471,12 +471,13 @@ def compute_full_risk_score(
                     "trust_fsm_shadow_error surface=shopify error=%s", _shadow_exc
                 )
 
-            if (
+            auto_cancelled = bool(
                 settings
                 and settings.cod_risk_scoring_enabled
                 and full_result.risk_score >= settings.auto_cancel_threshold
                 and cancel_allowed
-            ):
+            )
+            if auto_cancelled:
                 await session.execute(
                     update(RiskAssessmentModel)
                     .where(RiskAssessmentModel.id == UUID(assessment_id))
@@ -488,6 +489,60 @@ def compute_full_risk_score(
                     full_result.risk_score,
                     settings.auto_cancel_threshold,
                 )
+
+            # ── 5b. Trust-based auto-approve (P0-2 — wire the dormant gate) ──
+            # The headline trust value-prop, finally live. A high-trust customer
+            # with acceptable risk is auto-approved when the merchant has opted
+            # in AND proven trust (>=5 manual "approve" actions via the Shopify
+            # app) AND we're past the 30-day install grace.
+            # ``should_auto_approve_trusted`` encodes every gate (spec 010
+            # FR-002 / CL-001). We RECORD the decision + the
+            # ``action_taken_by="system_trust_auto"`` marker the daily
+            # kill-switch counts — but never mutate the Shopify order here.
+            elif settings and getattr(settings, "auto_approve_on_trust_enabled", False):
+                from src.application.services.customer_trust_formula import (
+                    should_auto_approve_trusted,
+                )
+
+                manual_approve_count = int(
+                    await session.scalar(
+                        select(sa_func.count())
+                        .select_from(RiskAssessmentModel)
+                        .where(
+                            RiskAssessmentModel.store_id == sid,
+                            RiskAssessmentModel.action_taken == "approve",
+                            RiskAssessmentModel.action_taken_by == "shopify_app",
+                        )
+                    )
+                    or 0
+                )
+                if should_auto_approve_trusted(
+                    customer_trust=trust_result.customer_trust,
+                    risk_score=full_result.risk_score,
+                    auto_approve_on_trust_enabled=True,
+                    auto_approve_trust_threshold=int(
+                        getattr(settings, "auto_approve_trust_threshold", 80)
+                    ),
+                    install_grace_active=not cancel_allowed,
+                    manual_approve_count=manual_approve_count,
+                ):
+                    await session.execute(
+                        update(RiskAssessmentModel)
+                        .where(RiskAssessmentModel.id == UUID(assessment_id))
+                        .values(
+                            action_taken="auto_approved",
+                            action_taken_by="system_trust_auto",
+                            action_taken_at=datetime.now(UTC),
+                        )
+                    )
+                    logger.info(
+                        "Trust auto-approve applied: assessment=%s trust=%d risk=%d "
+                        "manual_approves=%d",
+                        assessment_id,
+                        trust_result.customer_trust,
+                        full_result.risk_score,
+                        manual_approve_count,
+                    )
 
             # ── 6. Run automation rules (risk_scored trigger) ──────────────
             rules_result = await session.execute(
