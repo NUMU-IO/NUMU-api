@@ -88,9 +88,17 @@ async def schedule_cod_recovery_offer(
         template_id = (approved or rows[0]).id
 
         # Optional merchant promo shown in the offer (e.g. "10% off if you pay
-        # online"). Lives alongside the other cod_trust settings.
+        # online"). Lives alongside the other cod_trust settings. Meta rejects
+        # blank template variables, so fall back to a localized default line
+        # when the merchant set no promo.
         cod_trust = (getattr(store, "settings", None) or {}).get("cod_trust") or {}
-        promo = str(cod_trust.get("recovery_promo") or "").strip()
+        language = (getattr(store, "default_language", "ar") or "ar").lower()
+        default_promo = (
+            "ادفع أونلاين لتأكيد طلبك."
+            if language.startswith("ar")
+            else "Pay online to secure your order."
+        )
+        promo = str(cod_trust.get("recovery_promo") or "").strip() or default_promo
 
         subdomain = getattr(store, "subdomain", None)
         base_loc = f"{subdomain}/{order.id}" if subdomain else str(order.id)

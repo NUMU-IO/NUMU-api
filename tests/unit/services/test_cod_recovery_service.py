@@ -112,3 +112,16 @@ async def test_error_is_graceful():
         session, order=_order(), store=_store(), customer=_customer()
     )
     assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_defaults_promo_when_merchant_set_none(monkeypatch):
+    # Meta rejects blank template variables — a non-empty default must be used.
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_Result([_Tmpl("APPROVED")]))
+    repo = _patch_repo(monkeypatch)
+    ok = await schedule_cod_recovery_offer(
+        session, order=_order(), store=_store(promo=None), customer=_customer()
+    )
+    assert ok is True
+    assert repo.create.await_args.kwargs["template_params"]["promo"]
