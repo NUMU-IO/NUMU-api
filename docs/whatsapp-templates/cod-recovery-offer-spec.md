@@ -148,8 +148,25 @@ A force-dynamic tenant route on the storefront (`<sub>.numueg.app/pay/<order_id>
    exposes the trust score or network internals.
 
 Backend support already present: `Order.mark_as_paid`, the Paymob/InstaPay
-payment flow used by checkout, and promotions. Net-new is the thin `/pay` route
-+ wiring the gateway callback to `mark_as_paid` for an existing order.
+payment flow used by checkout, and promotions.
+
+**Shipped** (`api/v1/routes/storefront/pay.py`):
+- `GET  /storefront/store/{store_id}/pay/{order_id}` — the pay-view (sanitised
+  order, amount due, `recovery_promo` copy, enabled online methods, payable
+  guard). UUID + store scoped, no auth (mirrors order-tracking).
+- `POST /storefront/store/{store_id}/pay/{order_id}` — initiate Paymob (hosted
+  Unified Checkout `payment_url`) or Kashier (session URL) for the existing
+  order; stamps `metadata.cod_recovery_initiated`.
+- `webhooks/paymob.py` — on success, when the charge was recovery-initiated,
+  stamps `metadata.cod_recovered`; `mark_as_paid` flips `payment_method`
+  COD → paymob. (9 unit tests in `tests/unit/api/test_pay_order.py`.)
+- Storefronts: `numu-storefront` `/[domain]/pay/[orderId]` and bazaar
+  `app/(store)/pay/[orderId]` both ship the page.
+
+> v1 charges the **full order total** (the moat value is the prepaid
+> conversion). A monetary discount from the promo is a documented follow-up —
+> it needs proper order-level adjustment modelling to keep accounting
+> consistent; `recovery_promo` is shown as incentive copy only.
 
 ---
 
@@ -173,10 +190,10 @@ promo = str(cod_trust.get("recovery_promo") or "").strip() \
 - [ ] On **APPROVED**, seed the `whatsapp_templates` row per store (name +
       `meta_template_id` + `status=APPROVED`) — the scheduler resolves by name
       and prefers APPROVED.
-- [ ] Add the `EGYPTIAN_TEMPLATES` entry (§3).
-- [ ] Add the nginx `/pay/<sub>/<oid>` 302 (§4) + reload.
-- [ ] Ship the storefront `/pay` page (§5) on both storefronts.
-- [ ] Apply the `promo` non-empty fallback (§6).
+- [x] Add the `EGYPTIAN_TEMPLATES` entry (§3). *(shipped)*
+- [ ] Add the nginx `/pay/<sub>/<oid>` 302 (§4) + reload. *(ops)*
+- [x] Ship the storefront `/pay` page (§5) on both storefronts. *(shipped — backend endpoints + both storefront pages)*
+- [x] Apply the `promo` non-empty fallback (§6). *(shipped in `cod_recovery_service`)*
 - [ ] Per store: set `cod_trust.action = "recover"` + `recovery_promo`.
 
 ---
