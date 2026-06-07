@@ -162,6 +162,12 @@ class Settings(BaseSettings):
     metrics_endpoint_enabled: bool = False
     metrics_auth_token: str | None = None
 
+    # Phase C cutover: when True, the Shopify final-score path persists the
+    # canonical FSM's decision as the assessment's `suggested_action` instead
+    # of the raw `_suggested_action` ladder (the display-strangle). Default off
+    # — flip once the shadow log shows acceptable FSM-vs-ladder agreement.
+    trust_fsm_decision_enabled: bool = False
+
     # JWT Authentication (RS256 asymmetric signing)
     jwt_private_key: str = Field(default="")
     jwt_public_key: str = Field(default="")

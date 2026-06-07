@@ -360,6 +360,50 @@ class TestOrderEntity:
         with pytest.raises(ValueError, match="cannot be refunded"):
             order.refund()
 
+    def test_status_history_recorded_on_confirm(self):
+        """P0-5 — confirm() records the transition in status_history."""
+        order = self._create_order(status=OrderStatus.PENDING)
+        order.confirm()
+
+        history = order.metadata.get("status_history", [])
+        assert len(history) == 1
+        assert history[0]["from"] == "pending"
+        assert history[0]["to"] == "confirmed"
+        assert history[0]["reason"] == "confirmed"
+        assert history[0]["timestamp"]
+
+    def test_status_history_records_full_lifecycle(self):
+        """P0-5 — a pending→delivered walk leaves a complete, ordered trail."""
+        order = self._create_order(status=OrderStatus.PENDING)
+        order.confirm()
+        order.start_processing()
+        order.ship(tracking_number="TRK1")
+        order.deliver()
+
+        transitions = [
+            (h["from"], h["to"]) for h in order.metadata.get("status_history", [])
+        ]
+        assert transitions == [
+            ("pending", "confirmed"),
+            ("confirmed", "processing"),
+            ("processing", "shipped"),
+            ("shipped", "delivered"),
+        ]
+
+    def test_status_history_recorded_on_cancel_and_refund(self):
+        """P0-5 — terminal transitions are auditable with their reasons."""
+        cancelled = self._create_order(status=OrderStatus.PENDING)
+        cancelled.cancel(reason="Customer request")
+        assert cancelled.metadata["status_history"][-1]["to"] == "cancelled"
+        assert cancelled.metadata["status_history"][-1]["reason"] == "Customer request"
+
+        refunded = self._create_order(
+            status=OrderStatus.DELIVERED, payment_status=PaymentStatus.PAID
+        )
+        refunded.refund(reason="Defective product")
+        assert refunded.metadata["status_history"][-1]["to"] == "refunded"
+        assert refunded.payment_status == PaymentStatus.REFUNDED
+
     def test_order_partial_refund(self):
         """Test partial_refund method."""
         order = self._create_order(payment_status=PaymentStatus.PAID)

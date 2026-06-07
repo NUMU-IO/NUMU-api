@@ -182,6 +182,26 @@ async def _evaluate_one_store_async(*, store_id: UUID, tenant_id: UUID) -> dict:
         )
         await session.commit()
 
+    # Publish the firing so an active notification (merchant email) + any
+    # dashboard / digest consumers can react. The in-app banner itself is
+    # already covered by the persisted auto_disabled_* columns above (P1-3).
+    try:
+        from src.core.events.risk_events import TrustKillSwitchFiredEvent
+        from src.infrastructure.events.setup import get_event_bus
+
+        get_event_bus().publish(
+            TrustKillSwitchFiredEvent(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                auto_approve_count=auto_approve_count,
+                rto_count=rto_count,
+                rate_pct=rate_pct,
+                reason=reason,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — notification must never block the evaluator
+        logger.warning("trust_kill_switch_event_publish_failed: %s", exc)
+
     logger.info(
         "trust_kill_switch_fired",
         extra={

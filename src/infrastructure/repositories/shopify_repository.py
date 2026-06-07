@@ -709,10 +709,62 @@ class NetworkReputationRepository:
         )
         return result.scalar_one_or_none()
 
+    async def _claim_contribution(
+        self,
+        *,
+        phone_hash: str,
+        store_id: UUID,
+        event_type: str,
+        dedup_key: str | None,
+    ) -> bool:
+        """Append the contribution-log row; return False if it's a dedup'd dup.
+
+        With a ``dedup_key`` this uses INSERT ... ON CONFLICT DO NOTHING, so a
+        second write carrying the same key is a no-op (returns False) and the
+        caller MUST skip the counter increment — the DB-level idempotency that
+        stops a courier webhook and the nightly reconciliation sweep
+        double-counting the same outcome (P1-2). Without a key it always
+        appends (the legacy append-only ledger behaviour).
+        """
+        if dedup_key is None:
+            self.session.add(
+                NetworkContributionLogModel(
+                    store_id=store_id,
+                    phone_hash=phone_hash,
+                    event_type=event_type,
+                )
+            )
+            return True
+        claim = (
+            pg_insert(NetworkContributionLogModel)
+            .values(
+                store_id=store_id,
+                phone_hash=phone_hash,
+                event_type=event_type,
+                dedup_key=dedup_key,
+            )
+            .on_conflict_do_nothing(index_elements=["dedup_key"])
+        )
+        res = await self.session.execute(claim)
+        return bool(res.rowcount)
+
     async def upsert_order(
-        self, *, phone_hash: str, store_id: UUID
-    ) -> NetworkReputationModel:
-        """Record a new order event for a phone hash."""
+        self, *, phone_hash: str, store_id: UUID, dedup_key: str | None = None
+    ) -> NetworkReputationModel | None:
+        """Record a new order event for a phone hash.
+
+        Idempotent when ``dedup_key`` is supplied: a duplicate is skipped so the
+        counter isn't double-incremented (P1-2). Returns the current reputation
+        (which may be None) on a dedup'd duplicate.
+        """
+        if not await self._claim_contribution(
+            phone_hash=phone_hash,
+            store_id=store_id,
+            event_type="order",
+            dedup_key=dedup_key,
+        ):
+            return await self.get_by_phone_hash(phone_hash)
+
         stmt = (
             pg_insert(NetworkReputationModel)
             .values(
@@ -734,15 +786,6 @@ class NetworkReputationRepository:
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one()
-
-        # Append contribution log (append-only ledger)
-        self.session.add(
-            NetworkContributionLogModel(
-                store_id=store_id,
-                phone_hash=phone_hash,
-                event_type="order",
-            )
-        )
         await self.session.flush()
         return model
 
@@ -752,8 +795,9 @@ class NetworkReputationRepository:
         phone_hash: str,
         store_id: UUID,
         event_type: str,
+        dedup_key: str | None = None,
     ) -> None:
-        """Record an rto, delivery, or refund event."""
+        """Record an rto, delivery, or refund event (idempotent if keyed)."""
         col_map = {
             "rto": "total_network_rtos",
             "delivery": "total_successful_deliveries",
@@ -763,6 +807,14 @@ class NetworkReputationRepository:
         if not col_name:
             logger.warning("Unknown network event type: %s", event_type)
             return
+
+        if not await self._claim_contribution(
+            phone_hash=phone_hash,
+            store_id=store_id,
+            event_type=event_type,
+            dedup_key=dedup_key,
+        ):
+            return  # Duplicate — already counted (P1-2).
 
         timestamp_map = {
             "rto": {"last_rto_at": func.now()},
@@ -775,15 +827,6 @@ class NetworkReputationRepository:
             .values(
                 **{col_name: getattr(NetworkReputationModel, col_name) + 1},
                 **extra_values,
-            )
-        )
-
-        # Append contribution log
-        self.session.add(
-            NetworkContributionLogModel(
-                store_id=store_id,
-                phone_hash=phone_hash,
-                event_type=event_type,
             )
         )
         await self.session.flush()

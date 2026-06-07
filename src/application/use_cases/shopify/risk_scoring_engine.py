@@ -1,15 +1,27 @@
 """Risk scoring engine for COD orders.
 
-Scores orders on a 0–100 scale using weighted factors:
-  - customer_history  (0.35)
-  - order_value       (0.20)
-  - cancellation_rate (0.20)
-  - address_quality   (0.15)
-  - phone_validation  (0.10)
+Two deterministic entry points (constitution Principle IV — no ML in v1):
 
-The engine is stateless — it receives order data and returns a score with
-factor breakdowns.  In production you would enrich from the DB; for now it
-derives heuristic scores from the order payload.
+* ``score_order_fast`` — synchronous 2-factor "fast score" (<200ms) that
+  acknowledges the Shopify ``orders/create`` webhook inside its 5s timeout:
+    - network_reputation (0.60)
+    - order_value        (0.40)
+
+* ``score_order`` — the full 9-factor score (weights sum to 1.00) computed
+  asynchronously via Celery (backend-016):
+    - network_reputation (0.25)
+    - customer_history   (0.20)
+    - order_value        (0.15)
+    - cancellation_rate  (0.13)
+    - payment_method     (0.07)
+    - address_quality    (0.05)
+    - phone_validation   (0.05)
+    - time_pattern       (0.05)
+    - product_risk       (0.05)
+
+Every factor returns ``{score 0-100, weight, reason}`` so the result is fully
+explainable. The engine is stateless — callers enrich the inputs (network
+lookup, store history) and pass them in.
 """
 
 from __future__ import annotations

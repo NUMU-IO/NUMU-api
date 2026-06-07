@@ -134,7 +134,8 @@ async def _record_network_event_from_order(
 ) -> None:
     """Record an rto/delivery event in the cross-merchant network reputation.
 
-    COD-only and idempotent: flags are written to BOTH
+    RTO fires for any returned shipment; the positive ``delivery`` event is
+    COD-only (P0-4). Idempotent: flags are written to BOTH
     ``shipment.metadata`` and ``order.metadata`` after the first
     successful write so the manual-mark path in
     ``UpdateOrderStatusUseCase`` and Bosta webhook replays share the
@@ -147,7 +148,12 @@ async def _record_network_event_from_order(
     """
     if not order or not shipment:
         return
-    if not shipment.cod_amount or shipment.cod_amount <= 0:
+    # RTO is a negative delivery-reliability signal for EVERY returned
+    # shipment, COD or prepaid (P0-4): a refused / uncollected prepaid order is
+    # still a failed delivery the network should learn from. The COD-only
+    # restriction stays for the positive "delivery" signal, where COD
+    # cash-collected is the meaningful event.
+    if event_type != "rto" and (not shipment.cod_amount or shipment.cod_amount <= 0):
         return
 
     flag_key = f"network_{event_type}_recorded"
@@ -183,6 +189,9 @@ async def _record_network_event_from_order(
             store_id=order.store_id,
             event_type=event_type,
             network_repo=repo,
+            # Shared key with the manual + reconciliation paths (P1-2): a Bosta
+            # webhook and a later backfill can't double-count the same outcome.
+            dedup_key=f"{order.store_id}:{order.id}:{event_type}",
         )
 
         # Stamp BOTH shipment.metadata (legacy flag, cheap to keep) and

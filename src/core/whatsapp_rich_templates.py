@@ -23,6 +23,9 @@ not here — the ``QUICK_REPLY`` button definitions only carry the display text.
 # Apex redirector targets for URL buttons (see routes/order_redirect.py).
 _TRACK_URL = "https://numueg.app/o/{{1}}"
 _CART_URL = "https://numueg.app/cart/{{1}}"
+# COD-recovery pay deep-link (apex → tenant /pay redirect; see the recover-flow
+# spec). Suffix is "<subdomain>/<order_id>".
+_PAY_URL = "https://numueg.app/pay/{{1}}"
 
 
 # Each entry: name, language, category, body, footer, buttons (Meta format).
@@ -292,5 +295,57 @@ RICH_TEMPLATES: list[dict] = [
             }
         ],
         "body_examples": ["أحمد", "متجر القاهرة"],
+    },
+    # COD-to-prepaid recovery offer — the "recover" flow. URL button → /pay.
+    # UTILITY (order-centric) to dodge the MARKETING frequency cap.
+    {
+        "name": "cod_recovery_offer_v1",
+        "language": "en",
+        "category": "UTILITY",
+        "body": (
+            "Hi {{1}}, your order {{2}} from *{{3}}* is {{4}}. {{5}} Pay online "
+            "now to secure your order — it's quick and safe. 💳"
+        ),
+        "footer": "Prefer cash? No problem — your order stays as is.",
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "Pay online",
+                "url": _PAY_URL,
+                "example": ["https://numueg.app/pay/cairo-style/ord-42"],
+            }
+        ],
+        "body_examples": [
+            "Sara",
+            "ORD-000042",
+            "Cairo Style",
+            "EGP 250.00",
+            "Get 10% off when you pay online.",
+        ],
+    },
+    {
+        "name": "cod_recovery_offer_v1",
+        "language": "ar",
+        "category": "UTILITY",
+        "body": (
+            "مرحباً يا {{1}}، طلبك {{2}} من *{{3}}* قيمته {{4}}. {{5}} ادفع "
+            "أونلاين الآن لتأكيد طلبك — سريع وآمن. 💳"
+        ),
+        "footer": "تفضل الدفع كاش؟ مفيش مشكلة — طلبك زي ما هو.",
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "ادفع أونلاين",
+                "url": _PAY_URL,
+                "example": ["https://numueg.app/pay/cairo-style/ord-42"],
+            }
+        ],
+        "body_examples": [
+            "سارة",
+            "ORD-000042",
+            "Cairo Style",
+            "EGP 250.00",
+            "خصم 10% عند الدفع أونلاين.",
+        ],
     },
 ]

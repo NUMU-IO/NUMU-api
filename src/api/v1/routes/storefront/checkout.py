@@ -641,6 +641,10 @@ async def checkout(
             trust_decision.confidence,
             [f["code"] for f in trust_decision.factors],
         )
+
+        # The native cod_trust decision is now produced by the canonical FSM
+        # inside check_customer_trust (Phase C cutover) — no separate shadow
+        # comparison is needed here any more.
         if not trust_decision.allowed:
             # Persist the blocked decision before raising so the merchant
             # sees the action in their COD-trust decisions feed even though
@@ -1180,6 +1184,23 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # ── COD-trust "recover" flow ──────────────────────────────────────
+    # A high-risk COD order the merchant chose to CONVERT rather than block:
+    # the order is created as COD, and we schedule a WhatsApp pay-online offer
+    # (with the merchant's promo) to turn it prepaid. Best-effort — never
+    # blocks the order that was just created.
+    if trust_decision is not None and getattr(trust_decision, "recover", False):
+        from src.application.services.cod_recovery_service import (
+            schedule_cod_recovery_offer,
+        )
+
+        await schedule_cod_recovery_offer(
+            order_repo.session,
+            order=created_order,
+            store=store,
+            customer=current_customer,
+        )
 
     # ── Feature 001 — seed customer's first-touch attribution ─────────
     # Set once on the first attributed order, never overwritten. Used
