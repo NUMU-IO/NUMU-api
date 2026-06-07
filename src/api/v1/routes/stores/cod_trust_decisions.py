@@ -8,11 +8,12 @@ order-creation paths. Lets merchants see what the filter has actually
 been doing without leaving the payment setup page.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import verify_store_ownership
@@ -53,6 +54,80 @@ class CodTrustDecisionsResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class TrustStatsResponse(BaseModel):
+    """Per-store COD trust impact over a rolling window. Merchant-facing —
+    a store only ever sees its own numbers (never the network-wide moat
+    metrics, which are internal)."""
+
+    period_days: int
+    screened: int  # COD orders the trust filter evaluated
+    high_risk: int  # blocked + warned (+ recover-flagged)
+    blocked: int  # hard-stopped at checkout
+    warned: int  # allowed but flagged
+    recovered: int  # COD → prepaid conversions via the /pay recover flow
+
+
+@router.get(
+    "/{store_id}/cod-trust/stats",
+    response_model=SuccessResponse[TrustStatsResponse],
+    summary="Per-store COD trust impact stats",
+    operation_id="get_cod_trust_stats",
+)
+async def get_cod_trust_stats(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    period_days: int = Query(30, ge=1, le=365),
+):
+    """Aggregate the store's own COD trust decisions over the last
+    ``period_days``. Same scoping as the decisions feed (cod + cod_trust
+    author), counted by action, plus the recover-flow conversions read
+    from ``order.extra_data.cod_recovered``."""
+    cutoff = datetime.now(UTC) - timedelta(days=period_days)
+
+    base_filter = (
+        (RiskAssessmentModel.store_id == store.id)
+        & (RiskAssessmentModel.payment_method == "cod")
+        & (RiskAssessmentModel.action_taken_by == "cod_trust")
+        & (RiskAssessmentModel.action_taken.is_not(None))
+        & (RiskAssessmentModel.created_at >= cutoff)
+    )
+
+    rows = await session.execute(
+        select(RiskAssessmentModel.action_taken, func.count())
+        .where(base_filter)
+        .group_by(RiskAssessmentModel.action_taken)
+    )
+    by_action = dict(rows.all())
+    screened = sum(by_action.values())
+    blocked = by_action.get("blocked_high_risk", 0)
+    warned = by_action.get("warned_high_risk", 0)
+    recover_flagged = sum(c for a, c in by_action.items() if a and "recover" in a)
+    high_risk = blocked + warned + recover_flagged
+
+    recovered_q = await session.execute(
+        select(func.count())
+        .select_from(OrderModel)
+        .where(
+            (OrderModel.store_id == store.id)
+            & (OrderModel.extra_data["cod_recovered"].astext == "true")
+            & (OrderModel.created_at >= cutoff)
+        )
+    )
+    recovered = recovered_q.scalar() or 0
+
+    return SuccessResponse(
+        data=TrustStatsResponse(
+            period_days=period_days,
+            screened=screened,
+            high_risk=high_risk,
+            blocked=blocked,
+            warned=warned,
+            recovered=recovered,
+        ),
+        message="COD trust stats retrieved",
+    )
 
 
 @router.get(
