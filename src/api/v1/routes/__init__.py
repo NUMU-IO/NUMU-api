@@ -134,6 +134,9 @@ from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
 )
 from src.api.v1.routes.storefront import (
+    pay_router as storefront_pay_router,
+)
+from src.api.v1.routes.storefront import (
     payment_proofs_router as storefront_payment_proofs_router,
 )
 from src.api.v1.routes.storefront import (
@@ -347,6 +350,13 @@ api_router.include_router(
     storefront_checkout_config_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Checkout"],
+)
+
+# Storefront - recovery payment page (no auth, scoped to store + order UUID)
+api_router.include_router(
+    storefront_pay_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Recovery Payment"],
 )
 
 # Storefront - checkout-session token issue (anonymous; authenticated by

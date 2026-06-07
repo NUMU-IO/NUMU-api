@@ -193,6 +193,12 @@ async def paymob_callback(
             payment_id=str(transaction_id),
             payment_method="paymob",
         )
+        # COD → prepaid recovery: when this charge was initiated from the
+        # /pay recovery page, attribute the conversion so the merchant feed +
+        # moat-metrics can credit the recovery flow (spec §5.5). mark_as_paid
+        # already flipped payment_method COD → paymob.
+        if (order.metadata or {}).get("cod_recovery_initiated"):
+            order.metadata = {**(order.metadata or {}), "cod_recovered": True}
         await order_repo.update(order)
 
         # Update real-time revenue counter
