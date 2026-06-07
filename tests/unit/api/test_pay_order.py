@@ -167,6 +167,10 @@ async def test_post_paymob_initiates_and_stamps_recovery(monkeypatch):
     assert resp.data["provider"] == "paymob"
     assert resp.data["client_secret"] == "cs_abc"
     assert resp.data["public_key"] == "pk_test"
+    assert resp.data["payment_url"].startswith(
+        "https://accept.paymob.com/unifiedcheckout/"
+    )
+    assert "clientSecret=cs_abc" in resp.data["payment_url"]
     # The recovery marker + payment ref were persisted for the callback.
     assert order.metadata["cod_recovery_initiated"] is True
     assert order.payment_id == "intent_123"

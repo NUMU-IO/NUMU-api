@@ -56,6 +56,10 @@ router = APIRouter()
 # excluded from v1 — COD is obviously never an option here.
 _SUPPORTED_RECOVERY_GATEWAYS = ("paymob", "kashier")
 
+# Paymob hosted "Unified Checkout" page — the redirect target built from the
+# intention's public key + client secret (matches accept.paymob.com base).
+_PAYMOB_UNIFIED_CHECKOUT = "https://accept.paymob.com/unifiedcheckout/"
+
 # An order is still payable while it is open and unpaid.
 _PAYABLE_STATUSES = frozenset({
     OrderStatus.PENDING,
@@ -307,10 +311,18 @@ async def _initiate_paymob(
             detail="Online payment is not available right now. Please try again later.",
         )
 
+    # Hosted Paymob Unified Checkout URL so the storefront can redirect
+    # uniformly (no inline SDK). client_secret + public_key are also returned
+    # for any surface that prefers the inline Pixel.
+    payment_url = (
+        f"{_PAYMOB_UNIFIED_CHECKOUT}?publicKey={credentials['public_key']}"
+        f"&clientSecret={intent.client_secret}"
+    )
     return SuccessResponse(
         data={
             "provider": "paymob",
-            "type": "inline",
+            "type": "redirect",
+            "payment_url": payment_url,
             "client_secret": intent.client_secret,
             "public_key": credentials["public_key"],
             "amount": f"{amount_due / 100:.2f}",
