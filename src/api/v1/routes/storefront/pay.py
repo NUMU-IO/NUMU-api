@@ -368,6 +368,11 @@ async def _initiate_kashier(
             customer_email=str(customer_email) if customer_email else None,
             metadata={"order_id": str(order.id)},
         )
+        # Kashier keys off the order UUID as its merchantOrderId (mirrors
+        # checkout.py), and the webhook resolves the order by it
+        # (get_by_id(UUID(merchant_order_id))). The real gateway transaction id
+        # is written by the callback on payment success — so we deliberately
+        # stamp the order id here, NOT intent.id (which is the kashierOrderId).
         await _stamp_recovery_initiated(order, order_repo, str(order.id))
     except HTTPException:
         raise
