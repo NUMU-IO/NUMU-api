@@ -390,6 +390,28 @@ class UpdateShippingZoneRequest(BaseModel):
     estimated_days: str | None = Field(None, min_length=1, max_length=50)
 
 
+# Customization Assets (Media / Files manager)
+class UpdateAssetMetaRequest(BaseModel):
+    """Update an uploaded asset's library metadata.
+
+    Only the friendly display *name* and *alt text* are editable — the
+    object key (and therefore the public URL) is immutable, because that
+    URL may already be embedded in a published section's settings.
+    Renaming the object would silently break those references, so
+    ``name`` here is a label stored in metadata, not a key change.
+    """
+
+    key: str = Field(..., min_length=1, max_length=1024)
+    alt: str | None = Field(None, max_length=2000)
+    name: str | None = Field(None, max_length=255)
+
+
+class DeleteAssetRequest(BaseModel):
+    """Delete an uploaded asset by its object key."""
+
+    key: str = Field(..., min_length=1, max_length=1024)
+
+
 # Bosta Shipping Credentials
 class SaveBostaCredentialsRequest(BaseModel):
     """Save Bosta shipping credentials for a store."""

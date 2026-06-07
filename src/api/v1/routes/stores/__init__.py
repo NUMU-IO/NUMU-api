@@ -58,9 +58,11 @@ from src.api.v1.routes.stores import (
 from src.api.v1.routes.stores import (
     marketing_send_times as marketing_send_times_module,
 )
+from src.api.v1.routes.stores import menus as menus_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
+from src.api.v1.routes.stores import pages as pages_module
 
 # Import all routers
 from src.api.v1.routes.stores import payment_proofs as payment_proofs_module
@@ -81,6 +83,7 @@ from src.api.v1.routes.stores import (
 from src.api.v1.routes.stores import stores as stores_module
 from src.api.v1.routes.stores import theme_editor_v3 as theme_editor_v3_module
 from src.api.v1.routes.stores import theme_installations as theme_installations_module
+from src.api.v1.routes.stores import theme_updates as theme_updates_module
 from src.api.v1.routes.stores import themes as themes_module
 from src.api.v1.routes.stores import upsells as upsells_module
 from src.api.v1.routes.stores import variants as variants_module
@@ -154,6 +157,9 @@ router.include_router(
 )
 router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
+router.include_router(menus_module.router, tags=["Store Menus"])
+router.include_router(pages_module.router, tags=["Store Pages"])
+router.include_router(theme_updates_module.router, tags=["Store Theme Updates"])
 router.include_router(promotions_module.router, tags=["Store Promotions"])
 router.include_router(settings_module.router, tags=["Store Settings"])
 router.include_router(

@@ -58,6 +58,7 @@ from src.infrastructure.database.models.tenant.location import LocationModel
 from src.infrastructure.database.models.tenant.marketing_campaign import (
     MarketingCampaignModel,
 )
+from src.infrastructure.database.models.tenant.menu import MenuModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.meta_event_log import MetaEventLogModel
 from src.infrastructure.database.models.tenant.network_contribution_log import (
@@ -116,6 +117,9 @@ from src.infrastructure.database.models.tenant.theme import (
     ThemeModel,
     ThemeVersionModel,
 )
+from src.infrastructure.database.models.tenant.theme_update_notification import (
+    ThemeUpdateNotificationModel,
+)
 from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
 from src.infrastructure.database.models.tenant.variant import VariantModel
 from src.infrastructure.database.models.tenant.webhook import (
@@ -155,6 +159,7 @@ __all__ = [
     "InvoiceModel",
     "LocationModel",
     "MarketingCampaignModel",
+    "MenuModel",
     "MessageLogModel",
     "MetaEventLogModel",
     "NetworkContributionLogModel",
@@ -202,6 +207,7 @@ __all__ = [
     "ThemeVersionModel",
     "StoreThemeModel",
     "ThemeAssetModel",
+    "ThemeUpdateNotificationModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",
     # WhatsApp models
