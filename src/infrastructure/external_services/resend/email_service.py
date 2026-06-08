@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -538,6 +539,9 @@ class ResendEmailService(IEmailService):
         from src.infrastructure.external_services.resend.email_templates.notifications import (
             ORDER_CONFIRMATION_TEMPLATE,
         )
+        from src.infrastructure.external_services.resend.email_templates.order_summary_email import (
+            new_order_email_html,
+        )
 
         items = order_details.get("items", [])
         total = order_details.get("total", 0)
@@ -553,16 +557,40 @@ class ResendEmailService(IEmailService):
         # a customer who closed the tab can still pay from this email.
         instapay = order_details.get("instapay")
 
-        legacy_html = ORDER_CONFIRMATION_TEMPLATE["html_fn"](
+        # Map the order_details contract → the shared rich renderer. Prices in
+        # order_details["items"] are in MAJOR units (price = unit_price / 100),
+        # so convert per-line to cents. The optional *_cents / created_at keys
+        # are added by the storefront checkout; older callers omit them and the
+        # template degrades gracefully (no date line; products value = total).
+        rich_items = [
+            {
+                "name": it.get("name", ""),
+                "quantity": it.get("quantity", 1),
+                "total_cents": round(
+                    float(it.get("price", 0)) * 100 * it.get("quantity", 1)
+                ),
+                "image_url": it.get("image_url"),
+            }
+            for it in items
+        ]
+        total_cents = order_details.get("total_cents", round(float(total) * 100))
+        products_value_cents = order_details.get("subtotal_cents", total_cents)
+        legacy_html = new_order_email_html(
+            audience="customer",
             order_number=order_number,
-            items=items,
-            total=total,
+            items=rich_items,
+            products_value_cents=products_value_cents,
             currency=currency,
             store_name=store_name,
-            customer_name=customer_name,
-            language=language,
-            tracking_url=tracking_url,
+            logo_url=order_details.get("store_logo_url"),
+            recipient_name=customer_name,
+            created_at=order_details.get("created_at"),
+            timezone_name=order_details.get("timezone") or "Africa/Cairo",
+            order_url=tracking_url,
+            shipping_cents=order_details.get("shipping_cents"),
+            total_cents=total_cents,
             instapay=instapay,
+            language=language,
         )
         legacy_subject = ORDER_CONFIRMATION_TEMPLATE["subject_fn"](
             order_number, store_name, language
@@ -578,11 +606,13 @@ class ResendEmailService(IEmailService):
                 "order_total": total,
                 "currency": currency,
                 "store_name": store_name,
+                "store_logo_url": order_details.get("store_logo_url"),
                 "items": items,
                 "track_url": tracking_url or "#",
             },
             legacy_subject=legacy_subject,
             legacy_html=legacy_html,
+            legacy_from_name=store_name,
         )
 
         message = EmailMessage(
@@ -612,6 +642,116 @@ class ResendEmailService(IEmailService):
                 tenant_id=tenant_id,
                 recipient=email,
                 event_type="order_confirmation",
+                language=language,
+                subject=rendered.subject,
+                status="failed",
+                used_custom_template=rendered.used_custom,
+                template_id=rendered.template_id,
+                error_code=str(exc)[:100],
+            )
+            raise
+
+    async def send_merchant_new_order(
+        self,
+        *,
+        email: str,
+        order_number: str,
+        store_name: str,
+        products_value_cents: int,
+        currency: str = "EGP",
+        items: list[dict] | None = None,
+        customer_name: str | None = None,
+        order_url: str | None = None,
+        created_at: datetime | None = None,
+        timezone_name: str = "Africa/Cairo",
+        shipping_cents: int | None = None,
+        total_cents: int | None = None,
+        language: str = "ar",
+        store_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        logo_url: str | None = None,
+    ) -> bool:
+        """Notify the merchant (store owner) that a new order came in.
+
+        Uses the shared rich "new order" template (same layout as the customer
+        confirmation: status badge, tracking illustration, step tracker,
+        products table, order summary). ``*_cents`` are minor units. Routes
+        through ``_render_or_legacy`` so a merchant can override the template
+        once the bus runs with a renderer, and writes an ``email_logs`` audit
+        row when a store_id is supplied.
+        """
+        from src.infrastructure.external_services.resend.email_templates.merchant_notifications import (
+            merchant_new_order_subject,
+        )
+        from src.infrastructure.external_services.resend.email_templates.order_summary_email import (
+            new_order_email_html,
+        )
+
+        legacy_html = new_order_email_html(
+            audience="merchant",
+            order_number=order_number,
+            items=items or [],
+            products_value_cents=products_value_cents,
+            currency=currency,
+            store_name=store_name,
+            logo_url=logo_url,
+            recipient_name=customer_name,
+            created_at=created_at,
+            timezone_name=timezone_name,
+            order_url=order_url,
+            shipping_cents=shipping_cents,
+            total_cents=total_cents,
+            language=language,
+        )
+        legacy_subject = merchant_new_order_subject(
+            order_number, store_name, language=language
+        )
+
+        rendered = await self._render_or_legacy(
+            event_type="merchant_new_order",
+            language=language,
+            store_id=store_id,
+            variables={
+                "order_number": order_number,
+                "store_name": store_name,
+                "order_total": (total_cents or products_value_cents or 0) / 100,
+                "currency": currency,
+                "customer_name": customer_name or "",
+                "order_url": order_url or "#",
+                "store_logo_url": logo_url,
+            },
+            legacy_subject=legacy_subject,
+            legacy_html=legacy_html,
+            legacy_from_name=store_name,
+        )
+
+        message = EmailMessage(
+            to=email,
+            subject=rendered.subject,
+            html_content=rendered.html,
+            from_name=rendered.from_name,
+            reply_to=rendered.reply_to,
+        )
+        try:
+            ok = await self.send_email(message)
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="merchant_new_order",
+                language=language,
+                subject=rendered.subject,
+                status="sent" if ok else "failed",
+                used_custom_template=rendered.used_custom,
+                template_id=rendered.template_id,
+            )
+            return ok
+        except Exception as exc:
+            await self._log_send(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                recipient=email,
+                event_type="merchant_new_order",
                 language=language,
                 subject=rendered.subject,
                 status="failed",
@@ -986,6 +1126,7 @@ class ResendEmailService(IEmailService):
         language: str = "ar",
         store_id: UUID | None = None,
         tenant_id: UUID | None = None,
+        logo_url: str | None = None,
     ) -> bool:
         """Send an arbitrary order-status email.
 
@@ -1000,6 +1141,9 @@ class ResendEmailService(IEmailService):
         from src.infrastructure.external_services.resend.email_templates.notifications import (
             order_status_email,
         )
+        from src.infrastructure.external_services.resend.email_templates.order_summary_email import (
+            new_order_email_html,
+        )
 
         legacy = order_status_email(
             status=status,
@@ -1013,6 +1157,22 @@ class ResendEmailService(IEmailService):
         )
         if not legacy:
             return False
+
+        # Render the body with the shared rich template (status badge +
+        # advanced tracker + illustration) so every order-status email matches
+        # the confirmation design. Keep the legacy subject. No line items here
+        # (the status event doesn't carry them) → products/summary are omitted.
+        legacy["html"] = new_order_email_html(
+            audience="customer",
+            order_number=order_number,
+            store_name=store_name,
+            logo_url=logo_url,
+            recipient_name=customer_name,
+            status=status,
+            tracking_number=tracking_number,
+            carrier=carrier,
+            language=language,
+        )
 
         # Map order-status -> registry event_type. Both 'order_confirmed'
         # and the legacy 'confirmed' status string round-trip cleanly.
@@ -1030,6 +1190,7 @@ class ResendEmailService(IEmailService):
             "customer_name": customer_name or "",
             "order_number": order_number,
             "store_name": store_name,
+            "store_logo_url": logo_url,
         }
         if event_type == "shipping_notification":
             variables["tracking_number"] = tracking_number or ""
@@ -1044,6 +1205,7 @@ class ResendEmailService(IEmailService):
             variables=variables,
             legacy_subject=legacy["subject"],
             legacy_html=legacy["html"],
+            legacy_from_name=store_name,
         )
 
         message = EmailMessage(

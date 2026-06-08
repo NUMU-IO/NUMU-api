@@ -24,6 +24,7 @@ class StoreDTO(BaseDTO):
     banner_url: str | None
     status: str
     default_currency: str
+    country: str
     default_language: str
     contact_email: str | None
     contact_phone: str | None
@@ -51,6 +52,7 @@ class StoreDTO(BaseDTO):
             banner_url=entity.banner_url,
             status=entity.status.value,
             default_currency=entity.default_currency.value,
+            country=entity.country,
             default_language=entity.default_language,
             contact_email=entity.contact_email,
             contact_phone=entity.contact_phone,
@@ -75,6 +77,7 @@ class CreateStoreDTO(BaseDTO):
     slug: str | None = None
     description: str | None = None
     default_currency: str = "EGP"
+    country: str = "EG"
     default_language: str = "ar"
     contact_email: str | None = None
     contact_phone: str | None = None

@@ -36,7 +36,7 @@ from src.api.v1.routes.storefront.locations import (
 )
 from src.api.v1.routes.storefront.meta_feed import router as meta_feed_router
 from src.api.v1.routes.storefront.order_tracking import router as order_tracking_router
-from src.api.v1.routes.storefront.otp import router as otp_router
+from src.api.v1.routes.storefront.pay import router as pay_router
 from src.api.v1.routes.storefront.payment_proofs import (
     router as payment_proofs_router,
 )
@@ -80,7 +80,7 @@ __all__ = [
     "checkout_router",
     "coupon_router",
     "upsell_router",
-    "otp_router",
+    "pay_router",
     "payment_proofs_router",
     "promotions_router",
     "tracking_router",

@@ -57,7 +57,10 @@ from src.application.services.network_reputation_service import (
     write_network_event,
 )
 from src.application.services.shipping_resolver import ShippingResolver
-from src.application.services.tax_resolver import TaxLineInput, TaxResolver
+from src.application.services.tax_resolver import (
+    TaxLineInput,
+    tax_resolver_for_country,
+)
 from src.config import settings
 from src.core.checkout_fields import (
     resolve_config as resolve_checkout_config,
@@ -396,18 +399,11 @@ async def checkout(
             detail="Please verify your email address before placing orders.",
         )
 
-    # Require OTP verification for COD orders (skip for guests)
+    # COD orders no longer gate on a phone-verification OTP. Trust now comes
+    # from the post-order WhatsApp "tap to confirm" flow (when the merchant
+    # enables it). ``is_cod`` is still used downstream for deposit / fraud
+    # logic, so keep deriving it.
     is_cod = not request.payment_method or request.payment_method == "cod"
-    if not is_guest and is_cod and _cache_service:
-        from src.api.v1.routes.storefront.otp import _otp_verified_key
-
-        verified_key = _otp_verified_key(store_id, current_customer.id)
-        is_verified = await _cache_service.exists(verified_key)
-        if not is_verified:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="يرجى تأكيد رقم الموبايل أولاً لإتمام طلب الدفع عند الاستلام.",
-            )
 
     # Verify the customer belongs to this store
     if current_customer.store_id != store_id:
@@ -645,6 +641,10 @@ async def checkout(
             trust_decision.confidence,
             [f["code"] for f in trust_decision.factors],
         )
+
+        # The native cod_trust decision is now produced by the canonical FSM
+        # inside check_customer_trust (Phase C cutover) — no separate shadow
+        # comparison is needed here any more.
         if not trust_decision.allowed:
             # Persist the blocked decision before raising so the merchant
             # sees the action in their COD-trust decisions feed even though
@@ -688,6 +688,10 @@ async def checkout(
     # merchants should either configure per-product weights or use an
     # open-ended band with sensible defaults.
     cart_weight_g: int = 0
+    # product_id → first image URL, captured here so the confirmation email's
+    # line-item thumbnails can render the real product photo (line items don't
+    # persist an image; we'd otherwise show the "no image" placeholder).
+    product_image_map: dict = {}
     for item in request.line_items:
         product = await product_repo.get_by_id(item.product_id)
         if not product:
@@ -705,6 +709,9 @@ async def checkout(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {product.name} is not available",
             )
+        product_image_map[item.product_id] = (
+            product.images[0] if getattr(product, "images", None) else None
+        )
 
         # ── Stock pre-check ──
         # Three modes:
@@ -1064,7 +1071,7 @@ async def checkout(
     # invoice/ETA reporting; ``tax_to_add_cents`` is always 0 and is
     # NOT used in the total formula. The order's ``tax_amount`` field
     # records the included VAT as informational accounting only.
-    tax_resolver = TaxResolver()
+    tax_resolver = tax_resolver_for_country(getattr(store, "country", None))
     tax_resolution = tax_resolver.resolve(
         store_settings=store.settings,
         line_items=[
@@ -1177,6 +1184,23 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # ── COD-trust "recover" flow ──────────────────────────────────────
+    # A high-risk COD order the merchant chose to CONVERT rather than block:
+    # the order is created as COD, and we schedule a WhatsApp pay-online offer
+    # (with the merchant's promo) to turn it prepaid. Best-effort — never
+    # blocks the order that was just created.
+    if trust_decision is not None and getattr(trust_decision, "recover", False):
+        from src.application.services.cod_recovery_service import (
+            schedule_cod_recovery_offer,
+        )
+
+        await schedule_cod_recovery_offer(
+            order_repo.session,
+            order=created_order,
+            store=store,
+            customer=current_customer,
+        )
 
     # ── Feature 001 — seed customer's first-touch attribution ─────────
     # Set once on the first attributed order, never overwritten. Used
@@ -1791,6 +1815,44 @@ async def checkout(
                 detail="InstaPay is not available for this store. Please choose another payment method.",
             )
 
+    elif _dispatch_method == "moyasar":
+        # Moyasar (KSA) — credentials live in store.settings, like Paymob/
+        # Kashier. Create a hosted invoice and hand the storefront its URL
+        # via ``payment_url`` so the customer is redirected to pay.
+        try:
+            from src.infrastructure.external_services.moyasar.payment_service import (
+                MoyasarPaymentService,
+                get_merchant_moyasar_credentials,
+            )
+
+            creds = await get_merchant_moyasar_credentials(store.settings)
+            moyasar_service = MoyasarPaymentService(
+                secret_key=creds.get("secret_key"),
+                publishable_key=creds.get("publishable_key"),
+                webhook_secret=creds.get("webhook_secret"),
+                currency=currency,
+            )
+
+            created_order.payment_id = str(created_order.id)
+            await order_repo.update(created_order)
+
+            customer_email_str = (
+                str(current_customer.email) if current_customer.email else None
+            )
+            intent = await moyasar_service.create_payment_intent(
+                amount=_gateway_amount,
+                currency=currency,
+                customer_email=customer_email_str,
+                metadata={"order_id": str(created_order.id)},
+            )
+            payment_url = intent.client_secret
+        except Exception as e:
+            logger.error(f"Moyasar payment initiation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Online payment is not available for this store. Please choose another payment method.",
+            )
+
     elif _dispatch_method and _dispatch_method != "cod":
         # Other payment providers via tenant credentials
         try:
@@ -1869,14 +1931,24 @@ async def checkout(
                         "name": li.product_name,
                         "quantity": li.quantity,
                         "price": li.unit_price / 100,
+                        "image_url": product_image_map.get(li.product_id),
                     }
                     for li in order_line_items
                 ],
                 "total": created_order.total / 100,
                 "currency": currency,
                 "store_name": store.name,
+                "store_logo_url": store.logo_url,
                 "customer_name": current_customer.full_name,
                 "tracking_url": order_tracking_url,
+                # Rich-template extras (cents): drive the order-date line and
+                # the "ملخص الطلب" summary. Older callers omit these and the
+                # template degrades gracefully.
+                "created_at": created_order.created_at,
+                "subtotal_cents": created_order.subtotal,
+                "shipping_cents": created_order.shipping_cost or None,
+                "total_cents": created_order.total,
+                "timezone": (store.settings or {}).get("timezone"),
             }
 
             # InstaPay: include IPA / ref / amount / expiry + a direct
@@ -1918,45 +1990,63 @@ async def checkout(
         except Exception as e:
             logger.warning(f"Failed to dispatch order confirmation email: {e}")
 
-    # WhatsApp notification (via Celery — optional)
+    # New-order notifications — customer WhatsApp confirmation + merchant
+    # "new order" email. The storefront checkout path doesn't publish
+    # OrderCreatedEvent (unlike the merchant-side CreateOrderUseCase), so we
+    # invoke the OrderCreated handlers directly with one constructed event.
+    #
+    # handle_order_created_whatsapp resolves per-store WhatsApp credentials,
+    # runs the central send-guard (opt-out / merchant-toggle / template-approval),
+    # sends the order_confirmation_v2 template, AND persists a message_log row
+    # — so the confirmation shows in the merchant hub's WhatsApp inbox, with
+    # replay-safe idempotency. This replaces the legacy
+    # send_whatsapp_order_confirmation_task, which bypassed the guard, the
+    # per-store credential resolver, and the message_log (so its sends never
+    # appeared in the inbox and BYO stores sent from the shared number).
     try:
-        customer_phone = str(current_customer.phone) if current_customer.phone else None
-        if customer_phone:
-            prefs = current_customer.metadata.get("notification_preferences", {})
-            whatsapp_prefs = prefs.get("whatsapp", {})
-            if whatsapp_prefs.get("order_confirmation", True):
-                from src.infrastructure.messaging.tasks.notification_tasks import (
-                    send_whatsapp_order_confirmation_task,
-                )
+        from src.core.events.order_events import OrderCreatedEvent
+        from src.infrastructure.events.deferred_dispatch import deferred_scheduler
+        from src.infrastructure.events.handlers.merchant_notification_handler import (
+            handle_merchant_order_notification,
+        )
+        from src.infrastructure.events.handlers.whatsapp_notification_handler import (
+            handle_order_created_whatsapp,
+        )
+        from src.infrastructure.events.setup import get_event_bus
 
-                total_display = f"{currency} {created_order.total / 100:.2f}"
-                # Reuse the same tracking URL the email uses so both
-                # channels point at the same page.
-                _wa_base_url = (
-                    f"https://{store.custom_domain}"
-                    if store.custom_domain
-                    else f"https://{store.subdomain}.numueg.app"
-                )
-                _wa_tracking_url = f"{_wa_base_url}/track/{created_order.id}"
-                send_whatsapp_order_confirmation_task.delay(
-                    phone=customer_phone,
-                    customer_name=current_customer.full_name,
-                    order_number=created_order.order_number,
-                    total=total_display,
-                    store_name=store.name,
-                    language=store.default_language,
-                    tracking_url=_wa_tracking_url,
-                    # Required for the order_confirmation_v2 template's
-                    # "Manage order" URL button — the redirector at
-                    # numueg.app/o/<id> expects the order UUID. Without
-                    # this kwarg, the messaging service falls back to
-                    # ``order_number`` (e.g. "ORD-000017"), which the
-                    # redirector can't resolve → customer lands on the
-                    # apex marketing page.
-                    order_id=str(created_order.id),
-                )
+        _order_created_event = OrderCreatedEvent(
+            order_id=created_order.id,
+            order_number=created_order.order_number,
+            store_id=created_order.store_id,
+            customer_id=created_order.customer_id,
+            total=float(created_order.total),
+            currency=currency,
+        )
+        # Dispatch the two order-created notifications (customer WhatsApp
+        # confirmation + merchant "new order" email) through the
+        # commit-deferred scheduler rather than firing them immediately.
+        #
+        # These handlers open their OWN DB session and read the order back
+        # (e.g. handle_order_created_whatsapp must load the order to decide
+        # COD-confirm vs the passive notice, and to resolve the shipping
+        # address). Firing them with ``asyncio.create_task`` raced this
+        # request's commit: the order was still flushed-but-uncommitted, so
+        # the handler's separate session saw no order and silently fell back
+        # to the passive path (the "confirm request never sent" bug).
+        # ``deferred_scheduler`` buffers them on the request session and
+        # flushes from its ``after_commit`` hook, so they only run once the
+        # order is durable and visible (falls back to immediate dispatch when
+        # there's no request-scoped session, e.g. tests). We invoke only
+        # these two handlers directly (not ``bus.publish``) to avoid firing
+        # the other OrderCreatedEvent subscribers (webhook / activity), which
+        # the storefront path handles separately.
+        deferred_scheduler(
+            get_event_bus(),
+            _order_created_event,
+            [handle_order_created_whatsapp, handle_merchant_order_notification],
+        )
     except Exception as e:
-        logger.warning(f"Failed to dispatch WhatsApp notification: {e}")
+        logger.warning(f"Failed to dispatch new-order notifications: {e}")
 
     # Invoices are deferred: we no longer issue an invoice at checkout —
     # not for COD (the merchant collects cash on delivery, so no invoice
@@ -2066,12 +2156,6 @@ async def checkout(
 
     _checkout_cart_repo = RedisCartRepository()
     await _checkout_cart_repo.delete_by_customer_id(current_customer.id, store_id)
-
-    # Clear OTP verified flag (one-time use per checkout)
-    if is_cod and _cache_service:
-        from src.api.v1.routes.storefront.otp import _otp_verified_key
-
-        await _cache_service.delete(_otp_verified_key(store_id, current_customer.id))
 
     checkout_response = CheckoutResponse(
         order_id=str(created_order.id),

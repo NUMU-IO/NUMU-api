@@ -49,8 +49,8 @@ _WA_PREF_KEYS = {
 # approved). Used as the lookup into whatsapp_templates for the
 # send-guard's APPROVED check.
 _WA_TEMPLATE_NAMES = {
-    "shipped": "order_shipped_v2",
-    "delivered": "order_delivered",
+    "shipped": "order_shipped_v3",
+    "delivered": "order_delivered_v2",
 }
 
 
@@ -174,12 +174,20 @@ async def handle_whatsapp_notification(event: OrderStatusChangedEvent) -> None:
         )
 
         if event.new_status == "shipped":
+            # Self-describing ``<subdomain>/<order_id>`` button value so the
+            # apex redirector resolves to this store's order page without a
+            # prod-DB lookup (see handle_order_created_whatsapp for why).
+            _order_ref = (
+                f"{extras['store_subdomain']}/{event.order_id}"
+                if extras.get("store_subdomain")
+                else str(event.order_id)
+            )
             result = await service.send_shipping_notification(
                 recipient,
                 event.order_number,
                 event.tracking_number or "N/A",
                 event.carrier or "Bosta",
-                order_id=str(event.order_id),
+                order_id=_order_ref,
             )
         else:  # delivered
             result = await service.send_delivery_notification(
@@ -334,15 +342,51 @@ async def _resolve_send_context(
         WhatsAppTemplateModel,
     )
 
-    tmpl_row = (
-        await session.execute(
-            select(WhatsAppTemplateModel).where(
-                WhatsAppTemplateModel.store_id == store_id,
-                WhatsAppTemplateModel.name == template_name,
-                WhatsAppTemplateModel.language == language,
+    # The DB template rows are seeded with INCONSISTENT English locale
+    # codes: order_confirmation_v2 is seeded "en_US" while order_shipped_v2
+    # and order_delivered are seeded "en" (see _SYSTEM_TEMPLATES in
+    # 20260524_010000_add_whatsapp_optin_scheduled_dl.py). We resolve an
+    # English store to "en_US" above, so an exact-match lookup finds the
+    # confirmation row but MISSES the shipped/delivered rows → the
+    # send-guard sees template_status=None → every shipped/delivered send
+    # to an English-default store is silently blocked with
+    # TEMPLATE_NOT_APPROVED. Match either locale variant so the lookup is
+    # robust to the seed drift. (Arabic is unaffected — "ar" everywhere.)
+    lang_candidates = [language]
+    if language == "en_US":
+        lang_candidates.append("en")
+    elif language == "en":
+        lang_candidates.append("en_US")
+
+    tmpl_rows = (
+        (
+            await session.execute(
+                select(WhatsAppTemplateModel).where(
+                    WhatsAppTemplateModel.store_id == store_id,
+                    WhatsAppTemplateModel.name == template_name,
+                    WhatsAppTemplateModel.language.in_(lang_candidates),
+                )
             )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .all()
+    )
+    # Prefer an exact language match, then an APPROVED row, else any row.
+    tmpl_row = (
+        next(
+            (t for t in tmpl_rows if t.language == language),
+            None,
+        )
+        or next(
+            (
+                t
+                for t in tmpl_rows
+                if getattr(t.status, "value", t.status) == "APPROVED"
+            ),
+            None,
+        )
+        or (tmpl_rows[0] if tmpl_rows else None)
+    )
     template_status = tmpl_row.status if tmpl_row is not None else None
 
     # Credentials check — done via the resolver later. The guard only needs
@@ -402,8 +446,195 @@ async def _resolve_send_context(
         "language": language,
         "tenant_id": tenant_id,
         "store_name": store_name,
+        # Subdomain drives the self-describing ``<subdomain>/<order_id>``
+        # button value built at the call sites below — see the comment
+        # there for why the bare UUID isn't enough.
+        "store_subdomain": store_row.subdomain,
+        # Resolved template row id — used by the COD confirm-request path to
+        # enqueue a delayed scheduled send against the right template.
+        "template_id": tmpl_row.id if tmpl_row is not None else None,
     }
     return ctx, extras
+
+
+async def _maybe_send_cod_confirm_request(
+    session: "AsyncSession", event: OrderCreatedEvent
+) -> bool:
+    """COD "tap to confirm" path (order_confirmation_request_v1).
+
+    When the merchant has enabled ``require_order_confirmation`` for the store, a COD
+    order gets the active confirm-request (with a quick-reply button)
+    instead of the passive order_confirmation_v2 notice. Returns True when
+    this handled the order — the caller then skips the v2 send. Returns
+    False for non-COD orders or stores without the feature enabled.
+
+    Honours the merchant's timing choice: ``confirm_order_delay_minutes``
+    of 0 sends immediately, >0 enqueues a scheduled send (the dispatcher
+    re-checks the guard and dispatches the real template at fire-time).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from src.core.interfaces.services.messaging_service import MessageRecipient
+    from src.infrastructure.database.models.tenant.order import OrderModel
+    from src.infrastructure.database.models.tenant.store import StoreModel
+    from src.infrastructure.external_services.whatsapp import get_whatsapp_service
+    from src.infrastructure.repositories.whatsapp_scheduled_send_repository import (
+        WhatsAppScheduledSendRepository,
+    )
+
+    order_row = (
+        await session.execute(select(OrderModel).where(OrderModel.id == event.order_id))
+    ).scalar_one_or_none()
+    if order_row is None or (order_row.payment_method or "").lower() != "cod":
+        return False
+
+    store_row = (
+        await session.execute(select(StoreModel).where(StoreModel.id == event.store_id))
+    ).scalar_one_or_none()
+    store_settings = (store_row.settings if store_row else None) or {}
+    notif = store_settings.get("whatsapp_notifications", {}) or {}
+    if not bool(notif.get("require_order_confirmation", False)):
+        return False
+
+    # From here this IS the confirm-order flow: even if the guard skips the
+    # send below, return True so we don't also fire order_confirmation_v2.
+    resolution = await _resolve_send_context(
+        session,
+        store_id=event.store_id,
+        customer_id=event.customer_id,
+        template_name="order_confirmation_request_v2",
+        idempotency_event_tag="order_confirm_request",
+        order_id=event.order_id,
+        notification_pref_key="require_order_confirmation",
+    )
+    if resolution is None:
+        return True
+    ctx, extras = resolution
+
+    decision = check(ctx)
+    if not decision.allowed:
+        logger.info(
+            "whatsapp_order_confirm_request_skipped",
+            order_id=str(event.order_id),
+            store_id=str(event.store_id),
+            reason=decision.reason.value if decision.reason else "unknown",
+        )
+        return True
+
+    # Self-describing payload so the inbound webhook resolves the order
+    # without a prod-DB lookup — mirrors the /o/ redirect convention.
+    confirm_payload = (
+        f"{extras['store_subdomain']}/{event.order_id}"
+        if extras.get("store_subdomain")
+        else str(event.order_id)
+    )
+    # event.total is in CENTS — divide for the human-readable amount.
+    total_str = f"{event.total / 100:.2f} {event.currency}"
+    # One-line delivery address for body {{4}}. shipping_address is the
+    # stored JSONB dict (address_line1/line2/city/...).
+    _addr = order_row.shipping_address or {}
+    address_str = (
+        ", ".join(
+            str(p).strip()
+            for p in (
+                _addr.get("address_line1"),
+                _addr.get("address_line2"),
+                _addr.get("city"),
+            )
+            if p and str(p).strip()
+        )
+        or "-"
+    )
+    delay_minutes = int(
+        (store_settings.get("whatsapp") or {}).get("confirm_order_delay_minutes") or 0
+    )
+    now = datetime.now(UTC)
+
+    # Rich-template detail fields ({{5}} payment, {{6}} item count). Derived
+    # from the order so the Bosta-style body renders fully.
+    from src.infrastructure.external_services.whatsapp.messaging_service import (
+        payment_label,
+    )
+
+    payment_label_str = payment_label(order_row.payment_method, extras["language"])
+    item_count_str = str(len(order_row.line_items or []))
+
+    if delay_minutes > 0:
+        repo = WhatsAppScheduledSendRepository(session)
+        await repo.create(
+            tenant_id=extras["tenant_id"],
+            store_id=event.store_id,
+            phone=extras["customer_phone"],
+            scheduled_for=now + timedelta(minutes=delay_minutes),
+            template_id=extras["template_id"],
+            template_params={
+                "customer_name": extras["customer_name"],
+                "store_name": extras["store_name"],
+                "order_number": event.order_number,
+                "total": total_str,
+                "payment_label": payment_label_str,
+                "item_count": item_count_str,
+                "address": address_str,
+                "confirm_payload": confirm_payload,
+            },
+            customer_id=event.customer_id,
+            related_order_id=event.order_id,
+        )
+        order_row.customer_confirmation_status = "pending"
+        order_row.customer_confirmation_requested_at = now
+        await session.commit()
+        logger.info(
+            "whatsapp_order_confirm_request_scheduled",
+            order_id=str(event.order_id),
+            store_id=str(event.store_id),
+            delay_minutes=delay_minutes,
+        )
+        return True
+
+    # Immediate send.
+    service = await get_whatsapp_service(event.store_id, session, extras["tenant_id"])
+    recipient = MessageRecipient(
+        phone=extras["customer_phone"],
+        name=extras["customer_name"],
+        language=extras["language"],
+    )
+    result = await service.send_order_confirmation_request(
+        recipient,
+        event.order_number,
+        total_str,
+        address_str,
+        confirm_payload,
+        store_name=extras["store_name"],
+        payment_label_text=payment_label_str,
+        item_count=item_count_str,
+    )
+
+    if result.success:
+        order_row.customer_confirmation_status = "pending"
+        order_row.customer_confirmation_requested_at = now
+        await session.commit()
+        await _persist_message_log(
+            session,
+            tenant_id=extras["tenant_id"],
+            store_id=event.store_id,
+            phone=extras["customer_phone"],
+            template_name="order_confirmation_request_v2",
+            message_id=result.message_id,
+            status_str=str(getattr(result.status, "value", result.status)),
+            metadata={
+                "order_id": str(event.order_id),
+                "event_tag": "order_confirm_request",
+            },
+        )
+
+    logger.info(
+        "whatsapp_order_confirm_request_sent",
+        order_id=str(event.order_id),
+        store_id=str(event.store_id),
+        success=result.success,
+        message_id=result.message_id,
+    )
+    return True
 
 
 async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
@@ -412,12 +643,20 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
     Guard-gated: opt-out / merchant-setting-off / non-APPROVED template /
     invalid phone all block the send with a structured skip-reason log
     (FR-038 / FR-039).
+
+    COD orders on stores with the "confirm order in WhatsApp" feature
+    enabled take the active confirm-request path instead (see
+    ``_maybe_send_cod_confirm_request``).
     """
     from src.core.interfaces.services.messaging_service import MessageRecipient
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.external_services.whatsapp import get_whatsapp_service
 
     async with AsyncSessionLocal() as session:
+        # COD "tap to confirm" flow supersedes the passive v2 notice.
+        if await _maybe_send_cod_confirm_request(session, event):
+            return
+
         resolution = await _resolve_send_context(
             session,
             store_id=event.store_id,
@@ -425,7 +664,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             # Must match the DB seed name exactly — that row carries the
             # `status` field the send-guard reads (APPROVED → allow send).
             # See _SYSTEM_TEMPLATES in the alembic migration.
-            template_name="order_confirmation_v2",
+            template_name="order_confirmation_v3",
             idempotency_event_tag="order_created",
             order_id=event.order_id,
             notification_pref_key="order_confirmation",
@@ -433,6 +672,23 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
         if resolution is None:
             return
         ctx, extras = resolution
+
+        # Resolve the order's payment method for the v3 body's "Payment"
+        # line ({{5}}). The OrderCreatedEvent doesn't carry it, so read the
+        # order row.
+        from src.infrastructure.database.models.tenant.order import OrderModel
+        from src.infrastructure.external_services.whatsapp.messaging_service import (
+            payment_label,
+        )
+
+        _order_row = (
+            await session.execute(
+                select(OrderModel).where(OrderModel.id == event.order_id)
+            )
+        ).scalar_one_or_none()
+        payment_label_str = payment_label(
+            _order_row.payment_method if _order_row else None, extras["language"]
+        )
 
         decision = check(ctx)
         if not decision.allowed:
@@ -455,15 +711,26 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             language=extras["language"],
         )
         # order_confirmation_v2 renders a "Manage order" URL button at
-        # https://numueg.app/o/{order_id}. We pass event.order_id as the
-        # button substitution; the apex domain's redirector resolves the
-        # path to the tenant store's order-tracking page.
+        # https://numueg.app/o/{{1}}. We substitute the self-describing
+        # ``<subdomain>/<order_id>`` value so the apex redirector routes
+        # straight to THIS store's order-tracking page WITHOUT a prod-DB
+        # lookup. A bare UUID forces the redirector's DB-lookup branch,
+        # which can't find test/stage orders (they live in another DB) and
+        # falls back to the apex landing page — the "broken track link" bug.
+        # Bare UUID only when the store has no subdomain (custom-domain-only).
+        _order_ref = (
+            f"{extras['store_subdomain']}/{event.order_id}"
+            if extras.get("store_subdomain")
+            else str(event.order_id)
+        )
         result = await service.send_order_confirmation(
             recipient,
             event.order_number,
-            f"{event.total:.2f} {event.currency}",
+            # event.total is in CENTS — divide for the human-readable amount.
+            f"{event.total / 100:.2f} {event.currency}",
             extras["store_name"],
-            order_id=str(event.order_id),
+            order_id=_order_ref,
+            payment_label_text=payment_label_str,
         )
 
         if result.success:
@@ -472,7 +739,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
                 tenant_id=extras["tenant_id"],
                 store_id=event.store_id,
                 phone=extras["customer_phone"],
-                template_name="order_confirmation_v2",
+                template_name="order_confirmation_v3",
                 message_id=result.message_id,
                 status_str=str(getattr(result.status, "value", result.status)),
                 metadata={
@@ -504,7 +771,7 @@ async def handle_order_paid_whatsapp(event: OrderPaidEvent) -> None:
             session,
             store_id=event.store_id,
             customer_id=event.customer_id,
-            template_name="payment_received",
+            template_name="payment_received_v2",
             idempotency_event_tag="order_paid",
             order_id=event.order_id,
             notification_pref_key="payment_received",
@@ -536,7 +803,8 @@ async def handle_order_paid_whatsapp(event: OrderPaidEvent) -> None:
         result = await service.send_payment_received(
             recipient,
             event.order_number,
-            f"{event.total:.2f}",
+            # event.total is in CENTS — divide for the human-readable amount.
+            f"{event.total / 100:.2f}",
         )
 
         if result.success:
@@ -545,7 +813,7 @@ async def handle_order_paid_whatsapp(event: OrderPaidEvent) -> None:
                 tenant_id=extras["tenant_id"],
                 store_id=event.store_id,
                 phone=extras["customer_phone"],
-                template_name="payment_received",
+                template_name="payment_received_v2",
                 message_id=result.message_id,
                 status_str=str(getattr(result.status, "value", result.status)),
                 metadata={

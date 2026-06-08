@@ -239,6 +239,10 @@ class Order(BaseEntity):
     deposit_expires_at: datetime | None = None
     deposit_gateway: str | None = None  # one of DepositGateway literals
     deposit_payment_id: str | None = None  # external txn id for the deposit
+    # WhatsApp "tap to confirm" COD flow: None | "pending" | "confirmed".
+    customer_confirmation_status: str | None = None
+    customer_confirmation_requested_at: datetime | None = None
+    customer_confirmed_at: datetime | None = None
     tracking_number: str | None = None
     tracking_url: str | None = None
     notes: str | None = None
@@ -483,13 +487,15 @@ class Order(BaseEntity):
 
         self.touch()
 
-    # State transition methods (legacy - now use validate_transition internally)
+    # State transition methods — all route through ``transition_to`` so every
+    # status change is recorded in ``status_history`` for a complete audit
+    # trail (P0-5). Each keeps its explicit guard so the caller-facing error
+    # message is unchanged.
     def confirm(self) -> None:
         """Confirm the order."""
         if self.status != OrderStatus.PENDING:
             raise ValueError(f"Cannot confirm order in {self.status} status")
-        self.status = OrderStatus.CONFIRMED
-        self.touch()
+        self.transition_to(OrderStatus.CONFIRMED, reason="confirmed")
 
     def mark_as_paid(self, payment_id: str, payment_method: str | None = None) -> None:
         """Mark a gateway charge as successful.
@@ -550,8 +556,7 @@ class Order(BaseEntity):
         """Start processing the order."""
         if self.status not in (OrderStatus.CONFIRMED, OrderStatus.PENDING):
             raise ValueError(f"Cannot start processing order in {self.status} status")
-        self.status = OrderStatus.PROCESSING
-        self.touch()
+        self.transition_to(OrderStatus.PROCESSING, reason="processing")
 
     def ship(
         self, tracking_number: str | None = None, tracking_url: str | None = None
@@ -564,15 +569,13 @@ class Order(BaseEntity):
         """
         if self.status != OrderStatus.PROCESSING:
             raise ValueError(f"Cannot ship order in {self.status} status")
-        self.status = OrderStatus.SHIPPED
-        self.fulfillment_status = FulfillmentStatus.FULFILLED
+        # transition_to records status_history (P0-5) and sets shipped_at /
+        # fulfilled_at / fulfillment_status = FULFILLED.
+        self.transition_to(OrderStatus.SHIPPED, reason="shipped")
         if tracking_number:
             self.tracking_number = tracking_number
         if tracking_url:
             self.tracking_url = tracking_url
-        self.shipped_at = datetime.now(UTC)
-        self.fulfilled_at = datetime.now(UTC)
-        self.touch()
 
     def deliver(self) -> None:
         """Mark order as delivered.
@@ -582,16 +585,9 @@ class Order(BaseEntity):
         """
         if self.status != OrderStatus.SHIPPED:
             raise ValueError(f"Cannot deliver order in {self.status} status")
-        self.status = OrderStatus.DELIVERED
-        self.delivered_at = datetime.now(UTC)
-        # COD: cash collected at delivery -> mark as paid
-        if (
-            self.payment_method == "cod"
-            and self.payment_status == PaymentStatus.PENDING
-        ):
-            self.payment_status = PaymentStatus.PAID
-            self.paid_at = datetime.now(UTC)
-        self.touch()
+        # transition_to records status_history (P0-5), sets delivered_at, and
+        # applies the COD cash-collected-at-delivery → PAID side-effect.
+        self.transition_to(OrderStatus.DELIVERED, reason="delivered")
 
     def cancel(self, reason: str | None = None) -> None:
         """Cancel the order.
@@ -601,11 +597,12 @@ class Order(BaseEntity):
         """
         if not self.can_be_cancelled:
             raise ValueError(f"Cannot cancel order in {self.status} status")
-        self.status = OrderStatus.CANCELLED
-        self.cancelled_at = datetime.now(UTC)
+        # transition_to records status_history (P0-5) and sets cancelled_at.
+        # The can_be_cancelled guard is intentionally STRICTER than the
+        # transition table (it excludes DRAFT / PAYMENT_FAILED), so it stays.
+        self.transition_to(OrderStatus.CANCELLED, reason=reason)
         if reason:
             self.metadata["cancellation_reason"] = reason
-        self.touch()
 
     def return_to_origin(self, reason: str | None = None) -> None:
         """Mark a shipped order as returned (RTO).
@@ -628,11 +625,12 @@ class Order(BaseEntity):
         """
         if not self.can_be_refunded:
             raise ValueError("Order cannot be refunded")
-        self.status = OrderStatus.REFUNDED
+        # transition_to records status_history (P0-5); payment_status is set to
+        # REFUNDED here since that is not a status-driven side-effect.
+        self.transition_to(OrderStatus.REFUNDED, reason=reason)
         self.payment_status = PaymentStatus.REFUNDED
         if reason:
             self.metadata["refund_reason"] = reason
-        self.touch()
 
     def partial_refund(self, amount: int, reason: str | None = None) -> None:
         """Process a partial refund.

@@ -37,6 +37,10 @@ class Store(BaseEntity):
     banner_url: str | None = None
     status: StoreStatus = StoreStatus.PENDING_APPROVAL
     default_currency: Currency = Currency.EGP
+    # ISO 3166-1 alpha-2 market code (e.g. "EG", "SA"). Drives tax
+    # jurisdiction, default currency/language, and the gateway
+    # allow-list via market_registry.get_market().
+    country: str = "EG"
     default_language: Literal["en", "ar"] = "ar"
     contact_email: str | None = None
     contact_phone: str | None = None

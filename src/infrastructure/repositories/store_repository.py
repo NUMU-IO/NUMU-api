@@ -31,6 +31,7 @@ class StoreRepository(IStoreRepository):
             banner_url=model.banner_url,
             status=model.status,
             default_currency=model.default_currency,
+            country=model.country,
             default_language=model.default_language,
             contact_email=model.contact_email,
             contact_phone=model.contact_phone,
@@ -64,6 +65,7 @@ class StoreRepository(IStoreRepository):
             banner_url=entity.banner_url,
             status=entity.status,
             default_currency=entity.default_currency,
+            country=entity.country,
             default_language=entity.default_language,
             contact_email=entity.contact_email,
             contact_phone=entity.contact_phone,
@@ -127,6 +129,7 @@ class StoreRepository(IStoreRepository):
             model.banner_url = entity.banner_url
             model.status = entity.status
             model.default_currency = entity.default_currency
+            model.country = entity.country
             model.default_language = entity.default_language
             model.contact_email = entity.contact_email
             model.contact_phone = entity.contact_phone

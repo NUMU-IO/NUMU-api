@@ -28,7 +28,10 @@ from src.core.events.recovery_events import (
     RecoveryStartedEvent,
     RecoverySucceededEvent,
 )
-from src.core.events.risk_events import RiskAssessmentFinalisedEvent
+from src.core.events.risk_events import (
+    RiskAssessmentFinalisedEvent,
+    TrustKillSwitchFiredEvent,
+)
 from src.core.events.staff_events import (
     AccessRequestApprovedEvent,
     AccessRequestCreatedEvent,
@@ -60,6 +63,9 @@ from src.infrastructure.events.handlers.instapay_notification_handler import (
 )
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
+)
+from src.infrastructure.events.handlers.merchant_notification_handler import (
+    handle_merchant_order_notification,
 )
 from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
     handle_order_status_changed_for_meta_capi,
@@ -99,6 +105,9 @@ from src.infrastructure.events.handlers.staff_event_handlers import (
     handle_staff_role_revoked,
     handle_temporary_access_granted,
     handle_temporary_access_revoked,
+)
+from src.infrastructure.events.handlers.trust_kill_switch_notification_handler import (
+    handle_trust_kill_switch_fired,
 )
 from src.infrastructure.events.handlers.trust_signal_handler import (
     handle_recovery_succeeded_trust_signal,
@@ -159,6 +168,9 @@ def create_event_bus() -> EventBus:
     # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
     bus.subscribe(OrderCreatedEvent, handle_order_created_activity)
+    # Email the store owner ("you got a new order") on every new order.
+    # Opt-out per store via store.settings.email_notifications.new_order.
+    bus.subscribe(OrderCreatedEvent, handle_merchant_order_notification)
     # backend-030 / US1 — WhatsApp order-confirmation on order creation
     bus.subscribe(OrderCreatedEvent, handle_order_created_whatsapp)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
@@ -205,6 +217,10 @@ def create_event_bus() -> EventBus:
     from src.core.events.otp_events import OtpVerifiedEvent
 
     bus.subscribe(OtpVerifiedEvent, handle_otp_verified_trust_signal)
+
+    # P1-3: active merchant notification when the trust auto-approve
+    # kill-switch fires — the persisted banner alone is passive.
+    bus.subscribe(TrustKillSwitchFiredEvent, handle_trust_kill_switch_fired)
 
     # Promotions — cache invalidation. The Redis client is fetched lazily
     # so import-time test environments without Redis don't crash.

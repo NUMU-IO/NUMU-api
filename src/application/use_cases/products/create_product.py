@@ -232,11 +232,19 @@ class CreateProductUseCase:
                 candidate = f"{base}-{counter}"
             slug = candidate
 
-        # Parse currency and create Money
+        # Parse currency and create Money. When the caller omits a
+        # currency, inherit the store's default so products are priced
+        # in the merchant's market currency (SAR for a Saudi store)
+        # instead of a hardcoded fallback. An explicit, valid currency
+        # always wins; an explicit-but-invalid one falls back to the
+        # store currency too.
+        raw_currency = (dto.price_currency or "").strip().upper()
         try:
-            currency = Currency(dto.price_currency.upper())
+            currency = (
+                Currency(raw_currency) if raw_currency else store.default_currency
+            )
         except ValueError:
-            currency = Currency.USD
+            currency = store.default_currency
 
         price = Money(amount=dto.price, currency=currency)
         compare_at_price = (

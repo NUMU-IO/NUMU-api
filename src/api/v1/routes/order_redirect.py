@@ -187,3 +187,31 @@ async def redirect_to_order_page(
         },
     )
     return RedirectResponse(url=target, status_code=302)
+
+
+@router.get("/cart/{path:path}", include_in_schema=False)
+async def redirect_to_cart(path: str) -> RedirectResponse:
+    """Resolve an abandoned-cart template's URL-button substitution to the
+    customer-facing storefront and return a 302.
+
+    The ``abandoned_cart_v2`` Meta template button is
+    ``https://numueg.app/cart/{{1}}`` where ``{{1}}`` is the store
+    **subdomain** (self-describing, no DB lookup — the messaging service
+    substitutes ``store.subdomain``). We forward to the storefront home on
+    that subdomain, where the cart persists client-side. Subdomain already
+    carries the env suffix on test/stage stores, so this resolves across
+    environments without consulting the prod DB.
+
+    Anything that doesn't look like a subdomain falls back to the apex
+    marketing site so the customer always lands on a NUMU surface.
+    """
+    head = path.split("/", 1)[0]
+    if head and _SUBDOMAIN_RE.match(head):
+        target = f"https://{head}.{_PLATFORM_DOMAIN}/"
+        logger.info(
+            "cart_redirect_resolved",
+            extra={"subdomain": head, "target": target},
+        )
+        return RedirectResponse(url=target, status_code=302)
+    logger.info("cart_redirect_malformed_path", extra={"path": path})
+    return RedirectResponse(url=_APEX_FALLBACK, status_code=302)

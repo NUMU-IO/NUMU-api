@@ -116,6 +116,7 @@ class UpdatePaymentSettingsRequest(BaseModel):
     paymob_enabled: bool | None = None
     kashier_enabled: bool | None = None
     instapay_enabled: bool | None = None
+    moyasar_enabled: bool | None = None
     vodafone_cash_enabled: bool | None = None
     bank_transfer_enabled: bool | None = None
     # Send the full policy object to replace it; omit to leave unchanged.
@@ -129,7 +130,10 @@ class CodTrustResponse(BaseModel):
     enabled: bool = False
     threshold: int = 70
     min_confidence: Literal["low", "medium", "high"] = "medium"
-    action: Literal["block", "warn"] = "block"
+    action: Literal["block", "warn", "recover"] = "block"
+    # Optional promo shown in the WhatsApp pay-online offer for the "recover"
+    # flow (e.g. "10% off if you pay online now").
+    recovery_promo: str | None = None
     # Auto-RTO sweep: when a COD order has been SHIPPED for longer than
     # `auto_rto_days` and the merchant hasn't marked it delivered or
     # returned, a daily Celery beat task auto-flags it as RETURNED so
@@ -144,7 +148,8 @@ class UpdateCodTrustRequest(BaseModel):
     enabled: bool | None = None
     threshold: int | None = Field(None, ge=0, le=100)
     min_confidence: Literal["low", "medium", "high"] | None = None
-    action: Literal["block", "warn"] | None = None
+    action: Literal["block", "warn", "recover"] | None = None
+    recovery_promo: str | None = None
     auto_rto_disabled: bool | None = None
     auto_rto_days: int | None = Field(None, ge=7, le=60)
 
@@ -300,6 +305,30 @@ class FawaterakCredentialsResponse(BaseModel):
     api_key_masked: str | None = None
     vendor_key_masked: str | None = None
     environment: str | None = None
+    last_configured: str | None = None
+
+
+class SaveMoyasarCredentialsRequest(BaseModel):
+    """Save Moyasar (KSA) gateway credentials for a store.
+
+    - secret_key: server-side API key (sk_…), used for HTTP Basic auth.
+    - publishable_key: client key (pk_…), optional.
+    - webhook_secret: the shared ``secret_token`` configured on the Moyasar
+      webhook, used to authenticate inbound webhooks.
+    """
+
+    secret_key: str = Field(..., min_length=5, max_length=500)
+    publishable_key: str | None = Field(None, max_length=500)
+    webhook_secret: str | None = Field(None, max_length=500)
+
+
+class MoyasarCredentialsResponse(BaseModel):
+    """Moyasar credentials status (masked, never returns real keys)."""
+
+    is_configured: bool
+    secret_key_masked: str | None = None
+    publishable_key_masked: str | None = None
+    webhook_secret_masked: str | None = None
     last_configured: str | None = None
 
 

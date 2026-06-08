@@ -23,6 +23,8 @@ from src.api.v1.schemas.stores.whatsapp import (
     WhatsAppAnalytics,
     WhatsAppConnectionStatus,
     WhatsAppDayStat,
+    WhatsAppMessageLogItem,
+    WhatsAppMessageLogList,
 )
 from src.api.v1.schemas.stores.whatsapp_connection import (
     BYOConnectRequest,
@@ -547,6 +549,60 @@ async def get_analytics(
     )
 
 
+# ── Message activity feed ──
+
+
+@router.get(
+    "/messages",
+    response_model=SuccessResponse[WhatsAppMessageLogList],
+    summary="List recent WhatsApp messages",
+    operation_id="list_whatsapp_messages",
+)
+async def list_messages(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: AsyncSession = Depends(get_db),
+    direction: str | None = Query(
+        None,
+        pattern="^(inbound|outbound)$",
+        description="Filter by message direction; omit for both.",
+    ),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Recent sent/received WhatsApp messages from ``message_logs``.
+
+    This is the full record of what actually went out (and came in),
+    including automated order-lifecycle notifications that never created
+    a conversation thread. Ordered newest-first.
+    """
+    base = select(MessageLogModel).where(MessageLogModel.store_id == store.id)
+    if direction is not None:
+        base = base.where(MessageLogModel.direction == direction)
+
+    total = await db.execute(select(func.count()).select_from(base.subquery()))
+
+    rows = await db.execute(
+        base.order_by(MessageLogModel.created_at.desc()).offset(skip).limit(limit)
+    )
+    messages = [
+        WhatsAppMessageLogItem(
+            id=m.id,
+            phone=m.phone,
+            direction=m.direction,
+            template_name=m.template_name,
+            content=m.content,
+            status=m.status,
+            created_at=m.created_at,
+        )
+        for m in rows.scalars().all()
+    ]
+
+    return SuccessResponse(
+        data=WhatsAppMessageLogList(messages=messages, total=total.scalar() or 0),
+        message="Messages retrieved",
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────
 # US4 — Bring-Your-Own Meta WABA (FR-019 .. FR-025, backend-030)
 # ─────────────────────────────────────────────────────────────────────
@@ -665,6 +721,7 @@ async def byo_status(
     wa_settings = store_settings.get("whatsapp") or {}
     credential_error = wa_settings.get("credential_error")
     message_language = wa_settings.get("message_language") or "auto"
+    confirm_delay = int(wa_settings.get("confirm_order_delay_minutes") or 0)
 
     if cred and cred.extra_metadata:
         return WhatsAppStatus(
@@ -676,6 +733,7 @@ async def byo_status(
             last_validated_at=cred.last_validated_at,
             credential_error=credential_error,
             message_language=message_language,
+            confirm_order_delay_minutes=confirm_delay,
             notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
         )
 
@@ -689,6 +747,7 @@ async def byo_status(
         last_validated_at=None,
         credential_error=None,
         message_language=message_language,
+        confirm_order_delay_minutes=confirm_delay,
         notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
     )
 
@@ -719,6 +778,8 @@ async def update_whatsapp_settings(
     wa_settings = dict(store_settings.get("whatsapp") or {})
     if body.message_language is not None:
         wa_settings["message_language"] = body.message_language
+    if body.confirm_order_delay_minutes is not None:
+        wa_settings["confirm_order_delay_minutes"] = body.confirm_order_delay_minutes
     store_settings["whatsapp"] = wa_settings
     store.settings = store_settings
 
@@ -737,6 +798,7 @@ async def update_whatsapp_settings(
             )
         )
     ).scalar_one_or_none()
+    confirm_delay = int(wa_settings.get("confirm_order_delay_minutes") or 0)
     if cred and cred.extra_metadata:
         return WhatsAppStatus(
             mode="byo",
@@ -747,6 +809,7 @@ async def update_whatsapp_settings(
             last_validated_at=cred.last_validated_at,
             credential_error=wa_settings.get("credential_error"),
             message_language=wa_settings.get("message_language") or "auto",
+            confirm_order_delay_minutes=confirm_delay,
             notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
         )
     return WhatsAppStatus(
@@ -758,6 +821,7 @@ async def update_whatsapp_settings(
         last_validated_at=None,
         credential_error=None,
         message_language=wa_settings.get("message_language") or "auto",
+        confirm_order_delay_minutes=confirm_delay,
         notifications=NotifSettings(**notifs) if notifs else NotifSettings(),
     )
 

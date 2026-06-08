@@ -92,6 +92,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.trust_kill_switch_tasks",
         # backend-023 — nightly per-store courier stats rollup.
         "src.infrastructure.messaging.tasks.courier_stats_tasks",
+        # P1-1 — nightly trust-network reconciliation (backfill missed events).
+        "src.infrastructure.messaging.tasks.trust_reconciliation_tasks",
         # Meta Conversions — per-event fan-out + orphan-purchase sweep
         "src.infrastructure.messaging.tasks.meta_capi",
         # offers-v2 — promotion lifecycle + analytics maintenance.
@@ -133,6 +135,13 @@ celery_app.conf.beat_schedule = {
     "daily-database-backup": {
         "task": "tasks.backup_database",
         "schedule": crontab(hour=3, minute=0),  # Every day at 03:00 UTC
+    },
+    "nightly-trust-network-reconciliation": {
+        # P1-1 — backfill any delivery/rto network events missed by a dropped
+        # webhook or a courier that doesn't wire network recording.
+        "task": "tasks.trust_network.reconcile_missed_events",
+        "schedule": crontab(hour=3, minute=45),  # Every day at 03:45 UTC
+        "kwargs": {"lookback_days": 7},
     },
     "process-slack-alert-queue": {
         "task": "tasks.process_slack_alert_queue",

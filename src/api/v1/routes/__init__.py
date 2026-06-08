@@ -134,7 +134,7 @@ from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
 )
 from src.api.v1.routes.storefront import (
-    otp_router as storefront_otp_router,
+    pay_router as storefront_pay_router,
 )
 from src.api.v1.routes.storefront import (
     payment_proofs_router as storefront_payment_proofs_router,
@@ -352,6 +352,13 @@ api_router.include_router(
     tags=["Storefront - Checkout"],
 )
 
+# Storefront - recovery payment page (no auth, scoped to store + order UUID)
+api_router.include_router(
+    storefront_pay_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Recovery Payment"],
+)
+
 # Storefront - checkout-session token issue (anonymous; authenticated by
 # the existing numu_cart_session cookie via get_cart_owner). Used by phone-
 # bound storefront endpoints — currently the WhatsApp opt-in (FR-007a/b).
@@ -437,13 +444,6 @@ api_router.include_router(
     storefront_tracking_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Tracking"],
-)
-
-# Storefront - COD OTP verification (authenticated customer, scoped to store)
-api_router.include_router(
-    storefront_otp_router,
-    prefix="/storefront/store/{store_id}/checkout",
-    tags=["Storefront - Checkout"],
 )
 
 # Storefront - shipping rate quotes (public, scoped to store, legacy)

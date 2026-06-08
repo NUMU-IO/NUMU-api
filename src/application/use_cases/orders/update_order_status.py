@@ -173,14 +173,19 @@ class UpdateOrderStatusUseCase:
     async def _record_network_event(self, order, new_status: OrderStatus, log) -> None:
         """Write a delivery/RTO event to ``network_reputation``.
 
-        Only fires for COD orders transitioning into DELIVERED or
-        RETURNED. Idempotent via ``order.metadata`` so the same outcome
+        DELIVERED fires only for COD (cash-collected is the positive
+        signal); RETURNED (RTO) fires for any payment method, since a
+        refused delivery is a reliability signal regardless of how it was
+        paid (P0-4). Idempotent via ``order.metadata`` so the same outcome
         can't be double-counted by Bosta + manual marks.
         """
         event_type = _NETWORK_EVENT_FOR_STATUS.get(new_status)
         if not event_type:
             return
-        if order.payment_method != "cod":
+        # RTO fires for every returned order, COD or prepaid (P0-4): a refused
+        # delivery is a reliability signal regardless of how it was paid. The
+        # COD-only restriction is kept for the positive "delivery" signal.
+        if event_type != "rto" and order.payment_method != "cod":
             return
         if not self.network_repository:
             return
@@ -211,6 +216,8 @@ class UpdateOrderStatusUseCase:
                 store_id=order.store_id,
                 event_type=event_type,
                 network_repo=self.network_repository,
+                # Shared key with the courier + reconciliation paths (P1-2).
+                dedup_key=f"{order.store_id}:{order.id}:{event_type}",
             )
 
             order.metadata = {**metadata, flag_key: True}

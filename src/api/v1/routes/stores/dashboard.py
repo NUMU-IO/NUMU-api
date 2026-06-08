@@ -18,7 +18,10 @@ from src.api.dependencies import (
 from src.api.dependencies.date_range import DateRangeWindow, get_date_range_window
 from src.api.dependencies.repositories import get_page_view_repository
 from src.api.responses import SuccessResponse
-from src.application.use_cases.stores import GetDashboardStatsUseCase
+from src.application.use_cases.stores import (
+    GetDashboardStatsUseCase,
+    GetOrderStreakUseCase,
+)
 from src.core.entities.store import Store
 from src.infrastructure.repositories import (
     CustomerRepository,
@@ -84,6 +87,15 @@ class DashboardTopProductResponse(BaseModel):
     sku: str | None
     quantity_sold: int
     revenue: int
+
+
+class OrderStreakResponse(BaseModel):
+    """Daily order-streak response."""
+
+    current_streak: int
+    longest_streak: int
+    last_order_date: str | None
+    active_today: bool
 
 
 @router.get(
@@ -227,4 +239,36 @@ async def get_dashboard_top_products(
             for product in result
         ],
         message="Top products retrieved successfully",
+    )
+
+
+@router.get(
+    "/streak",
+    response_model=SuccessResponse[OrderStreakResponse],
+    summary="Get daily order streak",
+    operation_id="get_order_streak",
+)
+async def get_order_streak(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Get the store's consecutive-days-with-orders streak."""
+    use_case = GetOrderStreakUseCase(
+        order_repository=order_repo,
+        store_repository=store_repo,
+    )
+
+    result = await use_case.execute(store_id=store.id, user_id=store.owner_id)
+
+    return SuccessResponse(
+        data=OrderStreakResponse(
+            current_streak=result.current_streak,
+            longest_streak=result.longest_streak,
+            last_order_date=(
+                str(result.last_order_date) if result.last_order_date else None
+            ),
+            active_today=result.active_today,
+        ),
+        message="Order streak retrieved successfully",
     )

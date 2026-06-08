@@ -234,12 +234,18 @@ async def _send_notification(
         if not store:
             return {"sent": False, "reason": "store_not_found"}
 
-        # Check store notification preferences
+        # Check store notification preferences. The canonical merchant
+        # toggle lives at store.settings.whatsapp_notifications.abandoned_cart
+        # — the same path the merchant-hub WhatsApp settings page writes and
+        # the order-lifecycle handlers read. (The legacy
+        # settings.notifications.whatsapp.* path was never written by the UI,
+        # so the toggle here was effectively always-on regardless of the
+        # merchant's choice.)
         store_settings = store.settings or {}
-        notification_settings = store_settings.get("notifications", {}).get(
-            "whatsapp", {}
-        )
-        abandoned_cart_enabled = notification_settings.get("abandoned_cart", True)
+        wa_notifs = store_settings.get("whatsapp_notifications", {}) or {}
+        # Default OFF: abandoned cart is a MARKETING send; the merchant must
+        # explicitly opt in via the WhatsApp settings toggle.
+        abandoned_cart_enabled = bool(wa_notifs.get("abandoned_cart", False))
 
         customer_name = (
             f"{customer.first_name or ''} {customer.last_name or ''}".strip()
@@ -249,59 +255,49 @@ async def _send_notification(
         customer_email = customer.email
         store_name = store.name
         store_language = store.default_language or "ar"
+        # abandoned_cart_v2 is seeded for {"en", "ar"} — normalize the store
+        # language to one of those for the template lookup.
+        wa_language = "en" if store_language.lower().startswith("en") else "ar"
         cart_value = f"{cart_currency} {cart_subtotal / 100:.2f}"
+        _ = cart_value  # retained for the email fallback below
 
         sent = False
         channel = "none"
 
-        # Try WhatsApp first
+        # Try WhatsApp first — via the shared messaging service so the
+        # send uses the approved abandoned_cart_v2 template (body +
+        # Complete-purchase URL button) instead of an ad-hoc payload with a
+        # non-existent template name.
         if abandoned_cart_enabled and settings.whatsapp_enabled and customer_phone:
             try:
+                from src.core.interfaces.services.messaging_service import (
+                    MessageRecipient,
+                )
                 from src.infrastructure.external_services.whatsapp.messaging_service import (
                     WhatsAppMessagingService,
                 )
 
                 wa_service = WhatsAppMessagingService()
-                phone = wa_service._format_phone_number(str(customer_phone))
-
-                import httpx
-
-                url = f"https://graph.facebook.com/v18.0/{wa_service.phone_number_id}/messages"
-                payload = {
-                    "messaging_product": "whatsapp",
-                    "to": phone,
-                    "type": "template",
-                    "template": {
-                        "name": f"abandoned_cart_{store_language}",
-                        "language": {"code": store_language},
-                        "components": [
-                            {
-                                "type": "body",
-                                "parameters": [
-                                    {"type": "text", "text": customer_name},
-                                    {"type": "text", "text": cart_value},
-                                    {"type": "text", "text": store_name},
-                                ],
-                            },
-                        ],
-                    },
-                }
-
-                async with httpx.AsyncClient() as http_client:
-                    resp = await http_client.post(
-                        url,
-                        json=payload,
-                        headers=wa_service._get_headers(),
-                        timeout=10.0,
+                recipient = MessageRecipient(
+                    phone=str(customer_phone),
+                    name=customer_name,
+                    language=wa_language,
+                )
+                # cart_token = store subdomain; apex /cart/<subdomain>
+                # redirector forwards to the storefront.
+                result = await wa_service.send_abandoned_cart(
+                    recipient,
+                    store_name,
+                    cart_token=store.subdomain or "",
+                )
+                if result.success:
+                    sent = True
+                    channel = "whatsapp"
+                    logger.info(f"Abandoned cart WhatsApp sent to {customer_phone}")
+                else:
+                    logger.warning(
+                        f"WhatsApp abandoned cart failed: {result.error_message}"
                     )
-                    if resp.status_code == 200:
-                        sent = True
-                        channel = "whatsapp"
-                        logger.info(f"Abandoned cart WhatsApp sent to {phone}")
-                    else:
-                        logger.warning(
-                            f"WhatsApp abandoned cart failed: {resp.status_code}"
-                        )
             except Exception as e:
                 logger.warning(f"WhatsApp abandoned cart error: {e}")
 

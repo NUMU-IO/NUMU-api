@@ -582,6 +582,7 @@ def _serialize_public_store(
         "default_currency": store.default_currency.value
         if hasattr(store.default_currency, "value")
         else str(store.default_currency),
+        "country": getattr(store, "country", "EG"),
         "default_language": store.default_language,
         "social_links": store.social_links,
         "use_nextjs_storefront": getattr(store, "use_nextjs_storefront", False),
@@ -1882,9 +1883,18 @@ async def get_store_payment_methods(
     # In non-production environments, surface methods that are merely `enabled`
     # (without `is_configured`) so merchants see what they selected during onboarding
     # before they've finished credential setup.
+    from src.application.services.market_registry import get_market
     from src.config import settings as app_settings
 
+    # Gateways are also gated by the store's market — an Egyptian store
+    # never offers Moyasar, a Saudi store never offers Fawry. COD is always
+    # permitted regardless of market.
+    market = get_market(getattr(store, "country", None))
+    allowed_providers = set(market.payment_providers) | {"cod"}
+
     def _show(provider: str) -> bool:
+        if provider not in allowed_providers:
+            return False
         cfg = payment_settings.get(provider, {})
         if not cfg.get("enabled"):
             return False
@@ -1938,6 +1948,15 @@ async def get_store_payment_methods(
             "label": "فواتيرك",
             "label_en": "Fawaterak",
             "type": "fawaterak",
+        })
+
+    # Moyasar — KSA card / mada / Apple Pay via a hosted payment page.
+    if _show("moyasar"):
+        methods.append({
+            "id": "moyasar",
+            "label": "بطاقة / مدى / Apple Pay",
+            "label_en": "Card / mada / Apple Pay",
+            "type": "moyasar",
         })
 
     # InstaPay — customers transfer to the merchant's IPA from their

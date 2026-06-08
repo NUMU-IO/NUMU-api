@@ -17,6 +17,7 @@ class CreateStoreRequest(BaseModel):
                 "subdomain": "nilefashion",
                 "description": "Premium Egyptian fashion and accessories",
                 "default_currency": "EGP",
+                "country": "EG",
                 "default_language": "ar",
                 "contact_email": "hello@nilefashion.com",
                 "contact_phone": "+201001234567",
@@ -42,10 +43,25 @@ class CreateStoreRequest(BaseModel):
     default_currency: str = Field(
         default="EGP", max_length=3, description="ISO 4217 default currency"
     )
+    country: str = Field(
+        default="EG",
+        pattern="^[A-Za-z]{2}$",
+        description=(
+            "ISO 3166-1 alpha-2 market code (e.g. 'EG', 'SA'). Drives the "
+            "tax jurisdiction, default currency/language, and gateway "
+            "allow-list. Unknown codes fall back to Egypt."
+        ),
+    )
     default_language: str = Field(
         default="en", pattern="^(en|ar)$", description="Default language: en or ar"
     )
     contact_email: EmailStr | None = Field(None, description="Public contact email")
+
+    @field_validator("country", mode="after")
+    @classmethod
+    def _uppercase_country(cls, v: str) -> str:
+        return v.upper()
+
     contact_phone: PhoneField = Field(
         None,
         description=(
@@ -138,6 +154,7 @@ class StoreResponse(BaseModel):
                 "banner_url": None,
                 "status": "active",
                 "default_currency": "EGP",
+                "country": "EG",
                 "default_language": "ar",
                 "contact_email": "hello@nilefashion.com",
                 "contact_phone": "+201001234567",
@@ -162,6 +179,7 @@ class StoreResponse(BaseModel):
     banner_url: str | None = Field(description="Banner image URL")
     status: str = Field(description="Store status: active, inactive, suspended")
     default_currency: str = Field(description="Default ISO 4217 currency")
+    country: str = Field(default="EG", description="ISO 3166-1 alpha-2 market code")
     default_language: str = Field(description="Default language: en or ar")
     contact_email: str | None = Field(description="Public contact email")
     contact_phone: str | None = Field(description="Public contact phone")

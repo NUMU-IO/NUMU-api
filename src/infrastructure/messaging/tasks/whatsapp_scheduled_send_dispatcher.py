@@ -31,6 +31,51 @@ logger = get_logger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
 
+# Map a system template name to the merchant-facing notification toggle that
+# gates it (store.settings.whatsapp_notifications.<key>). Mirrors the
+# order-lifecycle handler's notification_pref_key wiring so a scheduled send
+# honours the SAME per-message-type switch the merchant sees on the WhatsApp
+# Overview page. Templates not in this map (ad-hoc win-back / review-request
+# follow-ups) fall back to the generic "marketing" umbrella.
+_TEMPLATE_PREF_KEY = {
+    # Current (rich) template names.
+    "order_confirmation_v3": "order_confirmation",
+    "order_confirmation_request_v2": "require_order_confirmation",
+    "payment_received_v2": "payment_received",
+    "order_shipped_v3": "shipping_update",
+    "order_delivered_v2": "delivery_confirmation",
+    "abandoned_cart_v3": "abandoned_cart",
+    # Legacy names — kept so in-flight scheduled rows created before the
+    # rich-template cutover still map to the right merchant toggle.
+    "order_confirmation_v2": "order_confirmation",
+    "order_confirmation_request_v1": "require_order_confirmation",
+    "payment_received": "payment_received",
+    "order_shipped_v2": "shipping_update",
+    "order_delivered": "delivery_confirmation",
+    "abandoned_cart_v2": "abandoned_cart",
+}
+
+
+def _resolve_language(store_settings: dict, default_language: str | None) -> str:
+    """Resolve the WhatsApp send language to one of {"en", "ar"}.
+
+    Honours the store-level message-language override
+    (store.settings.whatsapp.message_language) exactly like the
+    order-lifecycle path: "ar"/"en" force that language; "auto" (default)
+    follows the store's default_language. Kept in {en, ar} so it matches
+    the EGYPTIAN_TEMPLATES keys and the system templates' seeded locales.
+    """
+    pref = str(
+        (store_settings.get("whatsapp") or {}).get("message_language") or "auto"
+    ).lower()
+    if pref == "ar":
+        raw = "ar"
+    elif pref == "en":
+        raw = "en"
+    else:  # auto
+        raw = (default_language or "ar").lower()
+    return "en" if raw.startswith("en") else "ar"
+
 
 def _run_async(coro: Any) -> Any:
     global _task_loop
@@ -126,7 +171,9 @@ async def _dispatch_for_tenant(tenant_id: Any) -> dict[str, int]:
 
             for row in due_rows:
                 try:
-                    decision = await _evaluate_guard(session, optin_repo, row, now=now)
+                    decision, language = await _evaluate_guard(
+                        session, optin_repo, row, now=now
+                    )
                     if not decision.allowed:
                         await repo.mark_skipped(
                             row.id,
@@ -146,7 +193,7 @@ async def _dispatch_for_tenant(tenant_id: Any) -> dict[str, int]:
                         continue
 
                     # Allowed — dispatch through the per-store resolver
-                    sent_ok = await _dispatch_one(session, row)
+                    sent_ok = await _dispatch_one(session, row, language)
                     if sent_ok:
                         await repo.mark_sent(row.id)
                         stats["dispatched"] += 1
@@ -188,12 +235,6 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
     ).scalar_one_or_none()
     store_settings = (store_row.settings if store_row else None) or {}
     notif = store_settings.get("whatsapp_notifications", {}) or {}
-    # Use a generic key for ad-hoc / scheduled sends — the merchant can
-    # disable all WhatsApp sends via the per-message-type toggle; for
-    # scheduled follow-ups we map to the abandoned_cart key by default
-    # (the most common use case is review-request / win-back follow-ups
-    # which the merchant would configure under the marketing umbrella).
-    notification_enabled = bool(notif.get("marketing", True))
 
     # Template lookup
     template_status: str | None = None
@@ -214,6 +255,15 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
                 template_category = TemplateCategory(tmpl.category)
             except ValueError:
                 template_category = TemplateCategory.UTILITY
+
+    # Honour the per-message-type merchant toggle this send maps to (e.g. an
+    # abandoned_cart_v2 scheduled send is gated by the "Abandoned cart" switch
+    # on the WhatsApp Overview page). The guard is re-evaluated at dispatch
+    # time, so flipping the toggle OFF after a row was scheduled correctly
+    # skips it. Templates with no specific mapping fall back to the generic
+    # marketing umbrella. Defaults follow NotificationSettings (all True).
+    pref_key = _TEMPLATE_PREF_KEY.get(template_name or "", "marketing")
+    notification_enabled = bool(notif.get(pref_key, True))
 
     # Opt-in / opt-out
     has_active_opt_in = (
@@ -236,32 +286,145 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
         window_is_open=True,
         already_sent=False,  # scheduled-send is its own idempotency unit
     )
-    return check(ctx)
+    language = _resolve_language(
+        store_settings, store_row.default_language if store_row else None
+    )
+    return check(ctx), language
 
 
-async def _dispatch_one(session, row) -> bool:
-    """Issue the actual Meta send. Returns True on success."""
+async def _dispatch_one(session, row, language: str = "ar") -> bool:
+    """Issue the actual Meta send. Returns True on success.
+
+    ``language`` is resolved by the guard from the store's message-language
+    setting (override → default_language); it replaces the previously
+    hardcoded "ar" so a store configured for English (or "auto" on an
+    English store) sends in the right language.
+    """
     from src.core.interfaces.services.messaging_service import MessageRecipient
     from src.infrastructure.external_services.whatsapp import get_whatsapp_service
 
     service = await get_whatsapp_service(row.store_id, session, row.tenant_id)
-    recipient = MessageRecipient(phone=row.phone, name="", language="ar")
+    recipient = MessageRecipient(phone=row.phone, name="", language=language)
+    tmpl_name: str | None = None
 
     if row.template_id is not None:
-        # Template send. For Phase 1 we only support templates whose
-        # body params are passed through the EGYPTIAN_TEMPLATES path —
-        # broader template-by-id dispatch comes with the templates UI
-        # (Phase 2). For now we delegate to send_text_message inside
-        # the window (the schedule UI will tighten this in US5).
-        # The text_message branch below handles non-template sends.
-        # If row has only template_id (no text), build a minimal body
-        # from template_params and send as text — works inside the
-        # 24h window which the guard verified is open.
-        text = _flatten_params(row.template_params or {})
-        result = await service.send_text_message(recipient, text)
+        # Resolve the template name so structured templates dispatch as real
+        # template messages (preserving buttons) rather than the interim
+        # flattened-text fallback.
+        from src.infrastructure.database.models.tenant.whatsapp_template import (
+            WhatsAppTemplateModel,
+        )
+
+        tmpl = (
+            await session.execute(
+                select(WhatsAppTemplateModel).where(
+                    WhatsAppTemplateModel.id == row.template_id
+                )
+            )
+        ).scalar_one_or_none()
+        tmpl_name = tmpl.name if tmpl is not None else None
+        params = row.template_params or {}
+
+        if tmpl_name in (
+            "order_confirmation_request_v2",
+            "order_confirmation_request_v1",
+        ):
+            # Real template send — a flattened-text fallback would drop the
+            # quick-reply buttons (the whole point of this template). The
+            # send method derives the 3 button payloads from the stored
+            # base ``confirm_payload`` and renders the rich detail lines from
+            # the params persisted when the row was scheduled.
+            recipient = MessageRecipient(
+                phone=row.phone,
+                name=str(params.get("customer_name") or ""),
+                language=language,
+            )
+            result = await service.send_order_confirmation_request(
+                recipient,
+                str(params.get("order_number") or ""),
+                str(params.get("total") or ""),
+                str(params.get("address") or "-"),
+                str(params.get("confirm_payload") or ""),
+                store_name=str(params.get("store_name") or ""),
+                payment_label_text=str(params.get("payment_label") or ""),
+                item_count=str(params.get("item_count") or ""),
+            )
+        else:
+            # Interim text fallback for templates without a structured send
+            # path. Works inside the 24h window the guard verified is open.
+            text = _flatten_params(params)
+            result = await service.send_text_message(recipient, text)
     else:
         result = await service.send_text_message(recipient, row.text_message or "")
+
+    # Persist an outbound message_logs row so delivery/read status webhooks
+    # (keyed on the Meta message_id) have a row to update. Without this, a
+    # scheduled send (e.g. the delayed COD confirm-request) leaves no audit
+    # trail and its delivered/read status is silently lost. Fail-open — the
+    # send already succeeded; logging is best-effort.
+    if result.success and result.message_id:
+        await _persist_scheduled_message_log(
+            session,
+            row=row,
+            template_name=tmpl_name,
+            message_id=result.message_id,
+            status_str=str(getattr(result.status, "value", result.status)),
+        )
+
     return bool(result.success)
+
+
+async def _persist_scheduled_message_log(
+    session,
+    *,
+    row,
+    template_name: str | None,
+    message_id: str,
+    status_str: str,
+) -> None:
+    """Write an outbound message_logs row for a dispatched scheduled send.
+
+    Mirrors the order-lifecycle handler's ``_persist_message_log`` so the
+    status-update webhook can resolve and update the row. Tagged with the
+    related order id + ``scheduled_send`` event tag for traceability.
+    """
+    try:
+        from src.core.entities.message_log import (
+            MessageDirection,
+            MessageLog,
+            MessageStatus,
+        )
+        from src.infrastructure.repositories.message_log_repository import (
+            MessageLogRepository,
+        )
+
+        try:
+            status_enum = MessageStatus(status_str)
+        except (ValueError, KeyError):
+            status_enum = MessageStatus.SENT
+
+        await MessageLogRepository(session).create(
+            MessageLog(
+                tenant_id=row.tenant_id,
+                store_id=row.store_id,
+                phone=row.phone,
+                metadata={
+                    "order_id": str(row.related_order_id)
+                    if row.related_order_id
+                    else None,
+                    "event_tag": "scheduled_send",
+                    "scheduled_send_id": str(row.id),
+                },
+                message_id=message_id,
+                direction=MessageDirection.OUTBOUND,
+                template_name=template_name,
+                status=status_enum,
+            )
+        )
+    except Exception:
+        logger.exception(
+            "scheduled_send_message_log_persist_failed", send_id=str(row.id)
+        )
 
 
 def _flatten_params(params: dict[str, Any]) -> str:

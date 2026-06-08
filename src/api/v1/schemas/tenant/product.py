@@ -126,8 +126,14 @@ class CreateProductRequest(BaseModel):
         default="physical", description="Product type: physical or digital"
     )
     price: Decimal = Field(..., ge=0, description="Product price in the store currency")
-    price_currency: str = Field(
-        default="EGP", max_length=3, description="ISO 4217 currency code"
+    price_currency: str | None = Field(
+        default=None,
+        max_length=3,
+        description=(
+            "ISO 4217 currency code. Defaults to the store's currency "
+            "when omitted, so products inherit the merchant's market "
+            "(EGP for an Egyptian store, SAR for a Saudi one)."
+        ),
     )
     compare_at_price: Decimal | None = Field(
         None, ge=0, description="Original price before discount (strike-through price)"

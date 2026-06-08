@@ -230,8 +230,22 @@ class EmailTemplateRenderer:
                     if spec is not None
                     else "NUMU"
                 )
-                header_html = _email_header(title=title, language=language)
-                rendered_body = wrap(header_html + rendered_body, language=language)
+                # Per-store branding: header shows the store (logo + name),
+                # footer carries the small "Sent by NUMU" attribution. Falls
+                # back to NUMU chrome when no store name is supplied.
+                brand_name = filtered_vars.get("store_name") or None
+                brand_logo = variables.get("store_logo_url")
+                header_html = _email_header(
+                    title=title,
+                    language=language,
+                    brand_name=brand_name,
+                    logo_url=brand_logo,
+                )
+                rendered_body = wrap(
+                    header_html + rendered_body,
+                    language=language,
+                    brand_name=brand_name,
+                )
             except Exception as exc:
                 # Wrap failure shouldn't happen but should never block.
                 logger.warning(

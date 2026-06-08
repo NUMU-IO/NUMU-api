@@ -309,18 +309,19 @@ async def mylerz_callback(
         log.info("delivery_returned")
         if order:
             try:
-                if order.can_be_cancelled:
+                # A carrier return is an RTO, not a cancellation. For a shipped
+                # order use the guarded SHIPPED -> RETURNED transition so the
+                # status, status_history, and the downstream network rto signal
+                # are all correct (P0-4/P0-5). The previous code marked it
+                # CANCELLED via an illegal direct status set that bypassed the
+                # transition table. Pre-ship returns (anomalous) fall back to
+                # cancel — the only legal terminal from those states.
+                if order.status == OrderStatus.SHIPPED:
+                    order.return_to_origin(reason="Returned by carrier (Mylerz)")
+                elif order.can_be_cancelled:
                     order.cancel(reason="Returned by carrier (Mylerz)")
-                elif order.status == OrderStatus.SHIPPED:
-                    order.status = OrderStatus.CANCELLED
-                    order.metadata.setdefault("status_history", []).append({
-                        "from": OrderStatus.SHIPPED.value,
-                        "to": OrderStatus.CANCELLED.value,
-                        "reason": "Returned by carrier (Mylerz)",
-                    })
-                    order.touch()
                 await order_repo.update(order)
-                log.info("order_cancelled_return", order_id=str(order.id))
+                log.info("order_returned", order_id=str(order.id))
             except Exception as e:
                 log.error("return_order_update_failed", error=str(e))
 

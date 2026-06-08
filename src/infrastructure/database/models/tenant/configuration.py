@@ -63,6 +63,14 @@ class ServiceName(StrEnum):
     TAP = "tap"
     KASHIER = "kashier"
     FAWATERAK = "fawaterak"
+    # Saudi (KSA) gateways — Phase 3. Values are lowercase because the
+    # service_name_enum column uses values_callable (stores member values).
+    # New values require an ALTER TYPE ... ADD VALUE migration.
+    MOYASAR = "moyasar"
+    HYPERPAY = "hyperpay"
+    TABBY = "tabby"
+    TAMARA = "tamara"
+    STC_PAY = "stcpay"
 
     # Shipping Carriers
     ARAMEX = "aramex"

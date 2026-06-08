@@ -18,6 +18,12 @@ class PaymentProvider(StrEnum):
     KASHIER = "kashier"  # Kashier payment gateway
     FAWATERAK = "fawaterak"  # Fawaterak payment gateway
     INSTAPAY = "instapay"  # InstaPay (manual IPA + proof upload)
+    # Saudi (KSA) payment methods — Phase 3
+    MOYASAR = "moyasar"  # Moyasar gateway (card, mada, Apple Pay) — implemented
+    HYPERPAY = "hyperpay"  # HyperPay/COPYandPAY (card, mada, Apple Pay) — stub
+    TABBY = "tabby"  # Tabby BNPL — stub
+    TAMARA = "tamara"  # Tamara BNPL — stub
+    STC_PAY = "stcpay"  # STC Pay wallet — stub
 
 
 class PaymentMethod(StrEnum):

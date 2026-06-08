@@ -270,3 +270,19 @@ class TaxResolver:
         for i in residuals[:leftover]:
             floored[i] += 1
         return floored
+
+
+def tax_resolver_for_country(country: str | None) -> TaxResolver:
+    """Build a TaxResolver whose platform-default rate matches the market.
+
+    The store's ``country`` selects the jurisdiction's standard VAT rate
+    (14% EG, 15% SA, …) from the market registry. A merchant's own
+    ``tax_settings.default_rate`` / ``zone_overrides`` still override this
+    per-store; the market rate is only the fallback when the store hasn't
+    customized tax. Unknown countries fall back to Egypt via the registry.
+    """
+    # Imported lazily to keep this module free of an import cycle with the
+    # market registry (which imports core value objects only).
+    from src.application.services.market_registry import get_market
+
+    return TaxResolver(default_rate=get_market(country).default_vat_rate)

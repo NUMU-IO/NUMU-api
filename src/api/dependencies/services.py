@@ -135,6 +135,12 @@ def get_payment_service_for_provider(provider: str):
             )
 
             return FawaterakPaymentService()
+        case "moyasar":
+            from src.infrastructure.external_services.moyasar import (
+                MoyasarPaymentService,
+            )
+
+            return MoyasarPaymentService()
         case _:
             raise ValueError(f"Unknown payment provider: {provider}")
 

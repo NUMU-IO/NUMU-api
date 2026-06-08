@@ -225,6 +225,35 @@ async def test_non_cod_order_does_not_fire_network_event():
 
 
 @pytest.mark.asyncio
+async def test_returned_non_cod_order_fires_rto_event():
+    """P0-4 — a returned PREPAID order still feeds the network an rto signal.
+
+    A refused / uncollected delivery is a reliability signal regardless of
+    how the order was paid; only the positive ``delivery`` event stays
+    COD-only.
+    """
+    order = _build_order(status=OrderStatus.SHIPPED, payment_method="paymob_card")
+    network_repo = AsyncMock()
+    network_repo.upsert_order = AsyncMock()
+    network_repo.record_event = AsyncMock()
+    network_repo.update_store_count = AsyncMock()
+    network_repo.recompute_cached_score = AsyncMock()
+
+    use_case, store, _ = _build_use_case(order=order, network_repo=network_repo)
+    await use_case.execute(
+        order_id=order.id,
+        dto=UpdateOrderStatusDTO(status="returned", reason="customer refused"),
+        store_id=order.store_id,
+        user_id=store.owner_id,
+    )
+
+    network_repo.record_event.assert_awaited_once()
+    call_kwargs = network_repo.record_event.await_args.kwargs
+    assert call_kwargs["event_type"] == "rto"
+    assert order.metadata.get("network_rto_recorded") is True
+
+
+@pytest.mark.asyncio
 async def test_no_network_repo_skips_event_silently():
     """Use case is backwards-compatible: callers that don't pass a
     network repo don't hit a NoneType error."""

@@ -26,7 +26,11 @@ class TestCreateProductRequest:
 
         assert request.name == "Test Product"
         assert request.price == Decimal("19.99")
-        assert request.price_currency == "EGP"  # Default
+        # Currency is left unset (None) at the schema layer so the
+        # create-product use case can inherit the store's currency
+        # (EGP for an EG store, SAR for a SA store) instead of a
+        # hardcoded default.
+        assert request.price_currency is None
         assert request.quantity == 0  # Default
 
     def test_valid_full_product(self):

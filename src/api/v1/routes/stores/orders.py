@@ -217,6 +217,12 @@ def _order_to_response(order_dto) -> OrderResponse:
         delivered_at=str(order_dto.delivered_at) if order_dto.delivered_at else None,
         created_at=str(order_dto.created_at),
         updated_at=str(order_dto.updated_at),
+        customer_confirmation_status=order_dto.customer_confirmation_status,
+        customer_confirmed_at=(
+            str(order_dto.customer_confirmed_at)
+            if order_dto.customer_confirmed_at
+            else None
+        ),
     )
 
 
@@ -243,6 +249,12 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
         payment_method=order_dto.payment_method,
         created_at=str(order_dto.created_at),
         campaign=campaign_ref,
+        customer_confirmation_status=order_dto.customer_confirmation_status,
+        customer_confirmed_at=(
+            str(order_dto.customer_confirmed_at)
+            if order_dto.customer_confirmed_at
+            else None
+        ),
     )
 
 

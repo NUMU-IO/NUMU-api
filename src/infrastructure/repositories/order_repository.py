@@ -162,6 +162,9 @@ class OrderRepository(IOrderRepository):
             deposit_expires_at=model.deposit_expires_at,
             deposit_gateway=model.deposit_gateway,
             deposit_payment_id=model.deposit_payment_id,
+            customer_confirmation_status=model.customer_confirmation_status,
+            customer_confirmation_requested_at=model.customer_confirmation_requested_at,
+            customer_confirmed_at=model.customer_confirmed_at,
             tracking_number=model.tracking_number,
             notes=model.notes,
             customer_notes=model.customer_notes,
@@ -216,6 +219,9 @@ class OrderRepository(IOrderRepository):
             deposit_expires_at=entity.deposit_expires_at,
             deposit_gateway=entity.deposit_gateway,
             deposit_payment_id=entity.deposit_payment_id,
+            customer_confirmation_status=entity.customer_confirmation_status,
+            customer_confirmation_requested_at=entity.customer_confirmation_requested_at,
+            customer_confirmed_at=entity.customer_confirmed_at,
             tracking_number=entity.tracking_number,
             notes=entity.notes,
             customer_notes=entity.customer_notes,
@@ -294,6 +300,11 @@ class OrderRepository(IOrderRepository):
             model.payment_method = entity.payment_method
             model.payment_id = entity.payment_id
             model.shipping_method = entity.shipping_method
+            model.customer_confirmation_status = entity.customer_confirmation_status
+            model.customer_confirmation_requested_at = (
+                entity.customer_confirmation_requested_at
+            )
+            model.customer_confirmed_at = entity.customer_confirmed_at
             model.tracking_number = entity.tracking_number
             model.notes = entity.notes
             model.customer_notes = entity.customer_notes
@@ -543,6 +554,50 @@ class OrderRepository(IOrderRepository):
         return [
             (row.day, int(row.revenue or 0), int(row.orders or 0)) for row in result
         ]
+
+    async def get_order_day_set(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        *,
+        timezone: str = "Africa/Cairo",
+    ) -> set[date]:
+        """Return the set of local-timezone calendar dates on which the store
+        had at least one *real* order.
+
+        Powers the dashboard "order streak" counter. Draft / cancelled /
+        refunded orders don't count as a real sale, so they are excluded.
+        (``PAYMENT_FAILED`` is intentionally NOT referenced: the ORM maps
+        OrderStatus by member name, but the ``orderstatus`` Postgres enum only
+        ever got the lowercase ``payment_failed`` value — never the uppercase
+        one — so naming it in a WHERE clause raises InvalidTextRepresentation.
+        Orders can't be persisted with that uppercase value either, so none
+        exist to exclude.) ``created_at`` is stored in UTC; we convert to
+        ``timezone`` before truncating to a date so "a day" follows the
+        merchant's wall clock (Egypt is UTC+2) rather than UTC midnight —
+        otherwise late-evening Cairo orders would land on the wrong day and
+        spuriously break the streak.
+        """
+        local_day = cast(func.timezone(timezone, OrderModel.created_at), SqlDate).label(
+            "day"
+        )
+        query = (
+            select(local_day)
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+                OrderModel.status.notin_([
+                    OrderStatus.DRAFT,
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                ]),
+            )
+            .group_by(local_day)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return {row.day for row in result}
 
     async def get_customer_order_stats(
         self, store_id: UUID

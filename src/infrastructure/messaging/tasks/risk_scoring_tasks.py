@@ -36,6 +36,58 @@ def _run_async(coro):
     return _task_loop.run_until_complete(coro)
 
 
+async def _wa_confirmation_response_rate(
+    tenant_id: UUID | None, store_id: UUID, phone: str | None
+) -> float:
+    """Per-store WhatsApp order-confirmation response rate for a customer (P1-4).
+
+    Of the orders where we sent this customer a WhatsApp confirmation request
+    (``customer_confirmation_requested_at`` set), what fraction did they respond
+    to — tap Confirm / Postpone / Cancel? A buyer who reliably answers WhatsApp
+    is reachable, which is a positive COD trust signal (the formula's
+    ``whatsapp_response_rate_pct`` input). Best-effort: returns 0.0 on any issue
+    so scoring never breaks on it.
+    """
+    if not (tenant_id and phone):
+        return 0.0
+    try:
+        from sqlalchemy import func as sa_func
+        from sqlalchemy import select
+
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.database.models.tenant.order import OrderModel
+        from src.infrastructure.tenancy.rls import narrow_to_tenant
+
+        async with AsyncSessionLocal() as session:
+            await narrow_to_tenant(session, tenant_id)
+            requested_where = (
+                OrderModel.store_id == store_id,
+                OrderModel.shipping_address["phone"].astext == phone,
+                OrderModel.customer_confirmation_requested_at.isnot(None),
+            )
+            requested = await session.scalar(
+                select(sa_func.count()).select_from(OrderModel).where(*requested_where)
+            )
+            if not requested:
+                return 0.0
+            responded = await session.scalar(
+                select(sa_func.count())
+                .select_from(OrderModel)
+                .where(
+                    *requested_where,
+                    OrderModel.customer_confirmation_status.in_((
+                        "confirmed",
+                        "postponed",
+                        "cancelled",
+                    )),
+                )
+            )
+            return (responded or 0) / requested * 100.0
+    except Exception as exc:  # noqa: BLE001 — best-effort; never break scoring
+        logger.warning("wa_confirmation_rate_lookup_failed: %s", exc)
+        return 0.0
+
+
 @celery_app.task(
     name="tasks.compute_full_risk_score",
     bind=True,
@@ -145,6 +197,13 @@ def compute_full_risk_score(
 
         # ── 2. Enrich customer_cancellation_rate from store history ────────
         enriched_cancel_rate = customer_cancellation_rate
+        # Local per-store trust signals for this customer, derived from the
+        # store's own risk-assessment history. Initialised here so they are
+        # always defined for the TrustInputs construction below — the previous
+        # `"cancel_count" in dir()` introspection hack was fragile and broke
+        # the moment the block structure changed (P0-1).
+        cancel_count = 0
+        prepaid_count = 0
         async with AsyncSessionLocal() as enrich_session:
             await enrich_session.execute(text("SET search_path TO public"))
             # Read the current assessment to get customer_email
@@ -176,6 +235,30 @@ def compute_full_risk_score(
                     )
                 )
                 cancel_count = cancel_row.scalar_one() or 0
+
+                # Prepaid-order count is a positive trust signal (the customer
+                # has paid online before). Counted at the same granularity as
+                # the cancellation enrichment above (one assessment ≈ one
+                # order). The alias list mirrors ``_score_payment_method`` in
+                # the scoring engine — keep them in sync.
+                prepaid_row = await enrich_session.execute(
+                    select(sa_func.count()).where(
+                        RiskAssessmentModel.store_id == sid,
+                        RiskAssessmentModel.customer_email == assessment.customer_email,
+                        sa_func.lower(RiskAssessmentModel.payment_method).in_([
+                            "paymob",
+                            "card",
+                            "credit_card",
+                            "wallet",
+                            "instapay",
+                            "fawry",
+                            "kashier",
+                            "fawaterak",
+                            "stripe",
+                        ]),
+                    )
+                )
+                prepaid_count = prepaid_row.scalar_one() or 0
 
                 if total_count > 0:
                     enriched_cancel_rate = cancel_count / total_count
@@ -256,17 +339,31 @@ def compute_full_risk_score(
                                 rep_row.total_refunds or 0
                             )
 
-        local_lifetime_refusals = int(cancel_count) if "cancel_count" in dir() else 0
+        # WhatsApp order-confirmation responsiveness (P1-4): a reachable buyer
+        # who answers our WhatsApp confirmation requests is a positive COD trust
+        # signal. Per-store, best-effort (0.0 when unknown).
+        wa_response_rate = await _wa_confirmation_response_rate(
+            assessment.tenant_id if assessment else None, sid, phone
+        )
 
+        # Build the deterministic trust inputs. Each signal is counted EXACTLY
+        # once. The prior code fed ``net_pos`` into BOTH ``successful_deliveries``
+        # (×4) and ``network_positive_events`` (×3), inflating every network
+        # delivery to a ×7 contribution (P0-1). ``net_pos`` is the customer's
+        # NETWORK-wide successful-delivery count, so it belongs in
+        # ``network_positive_events`` only. ``successful_deliveries`` is reserved
+        # for a per-store delivered-order count, which this Shopify-scoring path
+        # has no cheap source for — left at 0 rather than double-counting the
+        # network signal.
         trust_result = compute_customer_trust(
             TrustInputs(
-                successful_deliveries=net_pos,
-                prepaid_orders=0,
-                whatsapp_response_rate_pct=0.0,
+                successful_deliveries=0,
+                prepaid_orders=int(prepaid_count),
+                whatsapp_response_rate_pct=wa_response_rate,
                 network_positive_events=net_pos,
                 network_negative_events=net_neg,
                 local_recent_refusals=0,
-                local_lifetime_refusals=local_lifetime_refusals,
+                local_lifetime_refusals=int(cancel_count),
             )
         )
 
@@ -325,12 +422,77 @@ def compute_full_risk_score(
                         days_since,
                     )
 
-            if (
+            # ── Phase C Shopify shadow (read-only) ─────────────────────────
+            # Log the canonical FSM decision next to the live suggested_action
+            # so agreement can be measured before the Shopify path is cut over
+            # (strangler). Acts on nothing. The FSM folds in the safety gates
+            # (final / install-grace / manual-approve) the raw suggested_action
+            # ladder does not, so some divergence is expected and informative.
+            # NOTE: trust auto-approve stays inert until merchant manual
+            # approvals are recorded — manual_approve_count is the activation
+            # precondition, pinned at 0 here.
+            try:
+                from src.application.services.trust_decision_service import (
+                    DecisionInputs,
+                    decide,
+                )
+
+                _fsm_state = decide(
+                    DecisionInputs(
+                        risk_score=full_result.risk_score,
+                        customer_trust=trust_result.customer_trust,
+                        score_type="final",
+                        auto_approve_on_trust_enabled=bool(
+                            getattr(settings, "auto_approve_on_trust_enabled", False)
+                        ),
+                        auto_approve_trust_threshold=int(
+                            getattr(settings, "auto_approve_trust_threshold", 80)
+                        ),
+                        install_grace_active=not cancel_allowed,
+                        manual_approve_count=0,
+                        cancel_threshold=int(
+                            getattr(settings, "auto_cancel_threshold", 90)
+                        ),
+                        hold_threshold=int(
+                            getattr(settings, "auto_hold_threshold", 70)
+                        ),
+                    )
+                )
+                logger.info(
+                    "trust_fsm_shadow surface=shopify fsm=%s suggested=%s "
+                    "risk=%s trust=%s",
+                    _fsm_state.value,
+                    full_result.suggested_action,
+                    full_result.risk_score,
+                    trust_result.customer_trust,
+                )
+
+                # Display-strangle (flag-gated cutover): persist the FSM's
+                # decision as the assessment's suggested_action instead of the
+                # raw ladder. Default off until the shadow log validates
+                # FSM-vs-ladder agreement in production.
+                if get_settings().trust_fsm_decision_enabled:
+                    from src.application.services.trust_decision_service import (
+                        fsm_to_suggested_action,
+                    )
+
+                    await session.execute(
+                        update(RiskAssessmentModel)
+                        .where(RiskAssessmentModel.id == UUID(assessment_id))
+                        .values(suggested_action=fsm_to_suggested_action(_fsm_state))
+                    )
+            except Exception as _shadow_exc:  # noqa: BLE001 — shadow never affects scoring
+                logger.warning(
+                    "trust_fsm_shadow_error surface=shopify error=%s", _shadow_exc
+                )
+
+            auto_cancelled = bool(
                 settings
                 and settings.cod_risk_scoring_enabled
                 and full_result.risk_score >= settings.auto_cancel_threshold
                 and cancel_allowed
-            ):
+            )
+            if auto_cancelled:
                 await session.execute(
                     update(RiskAssessmentModel)
                     .where(RiskAssessmentModel.id == UUID(assessment_id))
@@ -342,6 +504,60 @@ def compute_full_risk_score(
                     full_result.risk_score,
                     settings.auto_cancel_threshold,
                 )
+
+            # ── 5b. Trust-based auto-approve (P0-2 — wire the dormant gate) ──
+            # The headline trust value-prop, finally live. A high-trust customer
+            # with acceptable risk is auto-approved when the merchant has opted
+            # in AND proven trust (>=5 manual "approve" actions via the Shopify
+            # app) AND we're past the 30-day install grace.
+            # ``should_auto_approve_trusted`` encodes every gate (spec 010
+            # FR-002 / CL-001). We RECORD the decision + the
+            # ``action_taken_by="system_trust_auto"`` marker the daily
+            # kill-switch counts — but never mutate the Shopify order here.
+            elif settings and getattr(settings, "auto_approve_on_trust_enabled", False):
+                from src.application.services.customer_trust_formula import (
+                    should_auto_approve_trusted,
+                )
+
+                manual_approve_count = int(
+                    await session.scalar(
+                        select(sa_func.count())
+                        .select_from(RiskAssessmentModel)
+                        .where(
+                            RiskAssessmentModel.store_id == sid,
+                            RiskAssessmentModel.action_taken == "approve",
+                            RiskAssessmentModel.action_taken_by == "shopify_app",
+                        )
+                    )
+                    or 0
+                )
+                if should_auto_approve_trusted(
+                    customer_trust=trust_result.customer_trust,
+                    risk_score=full_result.risk_score,
+                    auto_approve_on_trust_enabled=True,
+                    auto_approve_trust_threshold=int(
+                        getattr(settings, "auto_approve_trust_threshold", 80)
+                    ),
+                    install_grace_active=not cancel_allowed,
+                    manual_approve_count=manual_approve_count,
+                ):
+                    await session.execute(
+                        update(RiskAssessmentModel)
+                        .where(RiskAssessmentModel.id == UUID(assessment_id))
+                        .values(
+                            action_taken="auto_approved",
+                            action_taken_by="system_trust_auto",
+                            action_taken_at=datetime.now(UTC),
+                        )
+                    )
+                    logger.info(
+                        "Trust auto-approve applied: assessment=%s trust=%d risk=%d "
+                        "manual_approves=%d",
+                        assessment_id,
+                        trust_result.customer_trust,
+                        full_result.risk_score,
+                        manual_approve_count,
+                    )
 
             # ── 6. Run automation rules (risk_scored trigger) ──────────────
             rules_result = await session.execute(
@@ -467,6 +683,9 @@ def compute_full_risk_score(
             from src.core.events.risk_events import RiskAssessmentFinalisedEvent
             from src.infrastructure.database.models.tenant.store import StoreModel
             from src.infrastructure.events.setup import get_event_bus
+            from src.infrastructure.repositories.shopify_repository import (
+                ShopifySubscriptionRepository,
+            )
 
             tenant_uuid = (
                 assessment.tenant_id if (assessment and assessment.tenant_id) else None
@@ -493,6 +712,23 @@ def compute_full_risk_score(
                     if hasattr(settings, "recovery_enabled"):
                         recovery_on = bool(getattr(settings, "recovery_enabled", True))
 
+                # Real subscription gate (P1-5): recovery flows must not fire
+                # for stores without an active paid plan. Fail-closed — a failed
+                # lookup is treated as "no subscription" so paid recovery
+                # features are never extended to a possibly-unpaid store.
+                # Replaces the previous hardcoded ``subscription_active=True``.
+                subscription_active = False
+                try:
+                    async with AsyncSessionLocal() as sub_session:
+                        await sub_session.execute(text("SET search_path TO public"))
+                        sub_row = await ShopifySubscriptionRepository(
+                            sub_session
+                        ).get_active(sid)
+                        subscription_active = sub_row is not None
+                except Exception as sub_exc:  # noqa: BLE001 — fail-closed for billing
+                    logger.warning("subscription lookup failed: %s", sub_exc)
+                    subscription_active = False
+
                 event = RiskAssessmentFinalisedEvent(
                     assessment_id=UUID(assessment_id),
                     tenant_id=tenant_uuid,
@@ -507,7 +743,7 @@ def compute_full_risk_score(
                     score_type="final",
                     recovery_enabled=recovery_on,
                     has_payment_gateway=has_gateway,
-                    subscription_active=True,  # TODO(spec-002): query subscription
+                    subscription_active=subscription_active,
                 )
                 get_event_bus().publish(event)
         except Exception as publish_exc:

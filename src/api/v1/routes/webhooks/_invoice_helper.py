@@ -108,6 +108,23 @@ async def generate_invoice_for_paid_order(
 
         invoice_number = await invoice_repo.get_next_invoice_number(store_id)
 
+        # Resolve the VAT percentage for this invoice's line items. Prefer
+        # the rate actually applied at checkout (persisted in the order's
+        # tax_breakdown) so the invoice reconciles to what the customer
+        # paid — including any per-store override. Fall back to the store's
+        # market default (14% EG / 15% SA) keyed off store.country.
+        from src.application.services.market_registry import get_market
+
+        market = get_market(getattr(store, "country", None))
+        order_meta = getattr(order, "metadata", None) or {}
+        tax_breakdown = (
+            order_meta.get("tax_breakdown") if isinstance(order_meta, dict) else None
+        )
+        applied_rate_fraction = (
+            tax_breakdown.get("rate") if isinstance(tax_breakdown, dict) else None
+        ) or market.default_vat_rate
+        vat_rate_pct = Decimal(str(round(float(applied_rate_fraction) * 100, 2)))
+
         # Simulate ETA QR
         eta_uuid = str(uuid4())
 
@@ -142,7 +159,29 @@ async def generate_invoice_for_paid_order(
                 item_code=str(sku),
                 quantity=Decimal(str(qty)),
                 unit_price=Decimal(str(unit_price_cents)) / Decimal("100"),
-                vat_rate=Decimal("14"),
+                vat_rate=vat_rate_pct,
+            )
+
+        # ZATCA Phase 1 QR for Saudi invoices. Encodes the 5 mandatory
+        # Fatoora fields (seller, TRN, timestamp, total incl. VAT, VAT) as a
+        # Base64 TLV string; the storefront / PDF renders it as a QR. Stored
+        # in the shared qr_code_data column. Phase 2 (clearance/reporting)
+        # is a separate step — see ZATCAInvoiceService.
+        if market.tax_country_code == "SA":
+            from datetime import UTC, datetime
+
+            from src.infrastructure.external_services.zatca import (
+                ZATCAInvoiceService,
+            )
+
+            zatca = ZATCAInvoiceService()
+            invoice.qr_code_data = zatca.generate_qr_for_invoice(
+                seller_name=seller.name,
+                vat_number=seller.tax_id or "",
+                timestamp=datetime.now(UTC).isoformat(),
+                total_with_vat_cents=invoice.grand_total or order.total,
+                vat_total_cents=invoice.vat_amount,
+                decimals=2,
             )
 
         created_inv = await invoice_repo.create(invoice)

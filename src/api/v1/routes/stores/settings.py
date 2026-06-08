@@ -38,6 +38,7 @@ from src.api.v1.schemas.tenant.settings import (
     InstapayCredentialsResponse,
     InvoiceSettingsResponse,
     KashierCredentialsResponse,
+    MoyasarCredentialsResponse,
     NotificationTemplate,
     PaymentMethodStatus,
     PaymentSettingsResponse,
@@ -46,6 +47,7 @@ from src.api.v1.schemas.tenant.settings import (
     SaveFawaterakCredentialsRequest,
     SaveInstapayCredentialsRequest,
     SaveKashierCredentialsRequest,
+    SaveMoyasarCredentialsRequest,
     SavePaymobCredentialsRequest,
     ShippingCarrierStatus,
     ShippingSettingsResponse,
@@ -410,6 +412,13 @@ async def update_payment_settings(
                 detail="InstaPay is not configured. Save your IPA first.",
             )
         payment_settings["instapay"]["enabled"] = request.instapay_enabled
+    if getattr(request, "moyasar_enabled", None) is not None:
+        if not payment_settings.get("moyasar", {}).get("is_configured"):
+            raise HTTPException(
+                status_code=400,
+                detail="Moyasar is not configured. Contact administrator.",
+            )
+        payment_settings.setdefault("moyasar", {})["enabled"] = request.moyasar_enabled
     if request.vodafone_cash_enabled is not None:
         if not payment_settings["vodafone_cash"]["is_configured"]:
             raise HTTPException(
@@ -1018,6 +1027,172 @@ async def delete_fawaterak_credentials(
     return SuccessResponse(
         data=FawaterakCredentialsResponse(is_configured=False),
         message="Fawaterak credentials removed successfully",
+    )
+
+
+# ============ Moyasar Credentials (KSA) ============
+
+
+@router.put(
+    "/payment/moyasar/credentials",
+    response_model=SuccessResponse[MoyasarCredentialsResponse],
+    summary="Save Moyasar credentials",
+    operation_id="save_moyasar_credentials",
+)
+async def save_moyasar_credentials(
+    request: SaveMoyasarCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save or update Moyasar payment gateway credentials for the store."""
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = await secrets.get_current_key_id()
+
+    credential_data = {
+        "secret_key": request.secret_key,
+        "publishable_key": request.publishable_key,
+        "webhook_secret": request.webhook_secret,
+    }
+
+    encrypted = await secrets.encrypt(credential_data, key_id)
+    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
+
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["moyasar"] = {
+        "enabled": True,
+        "is_configured": True,
+        "last_configured": datetime.now(UTC).isoformat(),
+        "encrypted_credentials": encrypted_b64,
+        "encryption_key_id": key_id,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+    )
+
+    logger.info(f"Moyasar credentials saved for store {store.id}")
+
+    return SuccessResponse(
+        data=MoyasarCredentialsResponse(
+            is_configured=True,
+            secret_key_masked=secrets.mask_credential(request.secret_key),
+            publishable_key_masked=(
+                secrets.mask_credential(request.publishable_key)
+                if request.publishable_key
+                else None
+            ),
+            webhook_secret_masked=(
+                secrets.mask_credential(request.webhook_secret)
+                if request.webhook_secret
+                else None
+            ),
+            last_configured=payment_settings["moyasar"]["last_configured"],
+        ),
+        message="Moyasar credentials saved successfully",
+    )
+
+
+@router.get(
+    "/payment/moyasar/credentials",
+    response_model=SuccessResponse[MoyasarCredentialsResponse],
+    summary="Get Moyasar credentials status",
+    operation_id="get_moyasar_credentials",
+)
+async def get_moyasar_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked Moyasar credential status for the store."""
+    settings = store.settings or {}
+    moyasar_settings = settings.get("payment", {}).get("moyasar", {})
+
+    if not moyasar_settings.get("encrypted_credentials"):
+        return SuccessResponse(
+            data=MoyasarCredentialsResponse(is_configured=False),
+            message="Moyasar credentials not configured",
+        )
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    secrets = get_secrets_manager()
+    key_id = moyasar_settings["encryption_key_id"]
+    encrypted = base64.b64decode(moyasar_settings["encrypted_credentials"])
+
+    try:
+        creds = await secrets.decrypt(encrypted, key_id)
+    except Exception:
+        logger.error(f"Failed to decrypt Moyasar credentials for store {store.id}")
+        return SuccessResponse(
+            data=MoyasarCredentialsResponse(
+                is_configured=True,
+                last_configured=moyasar_settings.get("last_configured"),
+            ),
+            message="Credentials configured but could not be read. Please re-save.",
+        )
+
+    return SuccessResponse(
+        data=MoyasarCredentialsResponse(
+            is_configured=True,
+            secret_key_masked=secrets.mask_credential(creds.get("secret_key", "")),
+            publishable_key_masked=(
+                secrets.mask_credential(creds["publishable_key"])
+                if creds.get("publishable_key")
+                else None
+            ),
+            webhook_secret_masked=(
+                secrets.mask_credential(creds["webhook_secret"])
+                if creds.get("webhook_secret")
+                else None
+            ),
+            last_configured=moyasar_settings.get("last_configured"),
+        ),
+        message="Moyasar credentials retrieved successfully",
+    )
+
+
+@router.delete(
+    "/payment/moyasar/credentials",
+    response_model=SuccessResponse[MoyasarCredentialsResponse],
+    summary="Remove Moyasar credentials",
+    operation_id="delete_moyasar_credentials",
+)
+async def delete_moyasar_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove Moyasar credentials and disable Moyasar payments."""
+    settings = store.settings or {}
+    payment_settings = settings.get("payment", _get_default_payment_settings())
+
+    payment_settings["moyasar"] = {
+        "enabled": False,
+        "is_configured": False,
+        "last_configured": None,
+    }
+
+    settings["payment"] = payment_settings
+    store.settings = settings
+    await store_repo.update(store)
+
+    logger.info(f"Moyasar credentials removed for store {store.id}")
+
+    return SuccessResponse(
+        data=MoyasarCredentialsResponse(is_configured=False),
+        message="Moyasar credentials removed successfully",
     )
 
 

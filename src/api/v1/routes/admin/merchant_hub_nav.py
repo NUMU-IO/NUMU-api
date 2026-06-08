@@ -27,32 +27,98 @@ router = APIRouter()
 
 CONFIG_KEY = "merchant_hub_nav"
 
-# Authoritative tab registry. Keep in sync with NAV_TABS in the merchant hub.
-# order here defines the default ordering; admin can reorder at runtime.
+# Authoritative tab registry. Keep in sync with NAV_REGISTRY in the merchant
+# hub (AppSidebar) and the admin client (merchantHubNavApi.ts).
+#
+# Convention:
+#   - Top-level tabs use a bare slug ("orders", "marketing", …).
+#   - Sub-tabs use a dotted "parent.child" key ("orders.drafts",
+#     "marketing.coupons", …) so the admin UI can group them under their
+#     parent and the hub can gate each child independently.
+#   - `order` defines the default ordering (children follow their parent);
+#     admins can reorder at runtime.
+_KEYS: list[str] = [
+    # ── Pinned ──────────────────────────────────────────────────────────
+    "dashboard",
+    "orders",
+    "orders.all",
+    "orders.drafts",
+    "orders.abandoned",
+    "orders.shipping-labels",
+    "products",
+    "products.all",
+    "products.categories",
+    "customers",
+    # ── Sell & grow ─────────────────────────────────────────────────────
+    "online-store",
+    "online-store.overview",
+    "online-store.themes",
+    "online-store.pages",
+    "online-store.navigation",
+    "online-store.preferences",
+    "online-store.checkout-fields",
+    "online-store.my-themes",
+    "marketing",
+    "marketing.overview",
+    "marketing.coupons",
+    "marketing.promotions",
+    "marketing.gift-cards",
+    "marketing.campaigns",
+    "marketing.whatsapp",
+    "marketing.email-templates",
+    "marketing.attribution",
+    "marketing.audiences",
+    "marketing.referrals",
+    "analytics",
+    "analytics.overview",
+    "analytics.sales",
+    "analytics.orders",
+    "analytics.customers",
+    "analytics.products",
+    "analytics.funnel",
+    "analytics.reports",
+    "analytics.live",
+    "analytics.insights",
+    "analytics.forecast",
+    "analytics.journey",
+    "analytics.health",
+    # ── Money ───────────────────────────────────────────────────────────
+    "payments",
+    "payments.overview",
+    "payments.payouts",
+    "payments.store-balance",
+    "payments.invoices",
+    "payments.payment-setup",
+    "payments.billing",
+    "cod",
+    # ── Operations ──────────────────────────────────────────────────────
+    "logistics",
+    "logistics.shipments",
+    "logistics.zones",
+    "logistics.locations",
+    "channels",
+    "channels.inbox",
+    "channels.social",
+    "whatsapp",
+    "whatsapp.inbox",
+    "whatsapp.campaigns",
+    "whatsapp.templates",
+    "whatsapp.opt-ins",
+    "whatsapp.byo",
+    "whatsapp.dead-letters",
+    "staff",
+    "staff.members",
+    "staff.roles",
+    "apps",
+    # ── Footer ──────────────────────────────────────────────────────────
+    "notifications",
+    "settings",
+    "store",
+]
+
 DEFAULT_TABS: list[dict[str, object]] = [
-    {"key": "dashboard", "visible": True, "coming_soon": False, "order": 0},
-    {"key": "orders", "visible": True, "coming_soon": False, "order": 1},
-    {"key": "products", "visible": True, "coming_soon": False, "order": 2},
-    {"key": "categories", "visible": True, "coming_soon": False, "order": 3},
-    {"key": "customers", "visible": True, "coming_soon": False, "order": 4},
-    {"key": "marketing", "visible": True, "coming_soon": False, "order": 5},
-    {"key": "referrals", "visible": True, "coming_soon": False, "order": 6},
-    {"key": "payments", "visible": True, "coming_soon": False, "order": 7},
-    {"key": "whatsapp", "visible": True, "coming_soon": False, "order": 8},
-    {"key": "analytics", "visible": True, "coming_soon": False, "order": 9},
-    {"key": "online-store", "visible": True, "coming_soon": False, "order": 10},
-    {"key": "staff", "visible": True, "coming_soon": False, "order": 11},
-    {"key": "channels", "visible": True, "coming_soon": False, "order": 12},
-    {"key": "inbox", "visible": True, "coming_soon": False, "order": 13},
-    {"key": "payment-setup", "visible": True, "coming_soon": False, "order": 14},
-    {"key": "logistics", "visible": True, "coming_soon": False, "order": 15},
-    {"key": "cod", "visible": True, "coming_soon": False, "order": 16},
-    {"key": "social", "visible": True, "coming_soon": False, "order": 17},
-    {"key": "invoices", "visible": True, "coming_soon": False, "order": 18},
-    {"key": "billing", "visible": True, "coming_soon": False, "order": 19},
-    {"key": "notifications", "visible": True, "coming_soon": False, "order": 20},
-    {"key": "settings", "visible": True, "coming_soon": False, "order": 21},
-    {"key": "store", "visible": True, "coming_soon": False, "order": 22},
+    {"key": key, "visible": True, "coming_soon": False, "order": i}
+    for i, key in enumerate(_KEYS)
 ]
 
 DEFAULT_CONFIG = {"tabs": DEFAULT_TABS}
