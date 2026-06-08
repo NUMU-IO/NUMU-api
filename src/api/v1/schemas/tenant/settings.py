@@ -362,19 +362,46 @@ class UpdateShippingZoneRequest(BaseModel):
 
 
 # Customization Assets (Media / Files manager)
+class AssetFocalPoint(BaseModel):
+    """Normalized focal point (0..1) — the subject's position in the image."""
+
+    x: float = Field(..., ge=0.0, le=1.0)
+    y: float = Field(..., ge=0.0, le=1.0)
+
+
+class AssetTransform(BaseModel):
+    """Per-asset DEFAULT non-destructive transform (focal/zoom/rotation).
+
+    Stored in ``asset_meta[key].transform`` and used to SEED a new image
+    placement's transform when the merchant first picks this asset from the
+    library. All scalars are aspect-independent, so the same default applies
+    across hero/card/promo placements. Strictly validated here (the editor
+    already clamps before sending); the free-form customization path uses a
+    lenient clamp instead — see ``application/services/image_transform.py``.
+    """
+
+    v: int = Field(1)
+    focal: AssetFocalPoint | None = None
+    zoom: float | None = Field(None, ge=1.0, le=4.0)
+    rotation: int | None = Field(None, ge=0, le=359)
+    fit: Literal["cover", "contain"] | None = None
+
+
 class UpdateAssetMetaRequest(BaseModel):
     """Update an uploaded asset's library metadata.
 
-    Only the friendly display *name* and *alt text* are editable — the
-    object key (and therefore the public URL) is immutable, because that
-    URL may already be embedded in a published section's settings.
-    Renaming the object would silently break those references, so
-    ``name`` here is a label stored in metadata, not a key change.
+    Only the friendly display *name*, *alt text* and a default focal/zoom
+    *transform* are editable — the object key (and therefore the public URL)
+    is immutable, because that URL may already be embedded in a published
+    section's settings. Renaming the object would silently break those
+    references, so ``name`` here is a label stored in metadata, not a key
+    change.
     """
 
     key: str = Field(..., min_length=1, max_length=1024)
     alt: str | None = Field(None, max_length=2000)
     name: str | None = Field(None, max_length=255)
+    transform: AssetTransform | None = None
 
 
 class DeleteAssetRequest(BaseModel):

@@ -2255,6 +2255,9 @@ async def list_customization_assets(
         meta = asset_meta.get(asset.get("key"), {}) or {}
         asset["alt"] = meta.get("alt", "")
         asset["name"] = meta.get("name", "")
+        transform = meta.get("transform")
+        if transform:
+            asset["transform"] = transform
     return SuccessResponse(data=assets, message="Assets retrieved successfully")
 
 
@@ -2304,6 +2307,15 @@ async def update_customization_asset_meta(
         entry["alt"] = request.alt
     if request.name is not None:
         entry["name"] = request.name
+    # `transform` is tri-state: absent in the body = leave unchanged; present as
+    # an object = set the default focal/zoom; present as null = CLEAR it. We use
+    # model_fields_set to tell "absent" from "explicit null" (both deserialize
+    # to None on the model). exclude_none keeps the stored blob compact.
+    if "transform" in request.model_fields_set:
+        if request.transform is not None:
+            entry["transform"] = request.transform.model_dump(exclude_none=True)
+        else:
+            entry.pop("transform", None)
 
     asset_meta[safe_key] = entry
     settings["asset_meta"] = asset_meta

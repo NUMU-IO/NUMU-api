@@ -877,12 +877,34 @@ class MarketplaceService:
             preserved = existing_active.customization_v3
 
         if preserved is not None:
-            seed = preserved
+            # Keep the merchant's templates / global_settings / section_groups,
+            # but REFRESH external_theme to the version being activated. The
+            # storefront loads customization_v3.external_theme.bundle_url, so if
+            # we preserved the stale pointer the rendered store would keep
+            # loading the OLD bundle after a same-theme update (theme-update
+            # channel) — the apply would update theme_version yet never reach
+            # the customer. Spread the existing block to retain its shape
+            # (mode/theme_id/templates URLs) and overwrite the version fields.
+            seed = dict(preserved)
+            existing_ext = (
+                seed.get("external_theme")
+                if isinstance(seed.get("external_theme"), dict)
+                else {}
+            )
+            seed["external_theme"] = {
+                **existing_ext,
+                "bundle_url": version.bundle_url,
+                "css_url": version.css_url,
+                "settings_schema": version.settings_schema,
+                "section_schemas": version.section_schemas,
+                "presets": version.presets,
+            }
             logger.info(
                 "marketplace_activate_restored_customization",
                 extra={
                     "store_id": str(store_id),
                     "marketplace_theme_id": str(marketplace_theme_id),
+                    "refreshed_bundle_url": version.bundle_url,
                 },
             )
         else:
