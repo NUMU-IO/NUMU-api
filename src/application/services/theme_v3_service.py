@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from src.application.services.image_transform import sanitize_transform_settings
 from src.application.services.theme_v3_mappers import (
     map_v3_to_legacy_store_settings,
     normalize_legacy_to_v3,
@@ -179,7 +180,10 @@ class ThemeV3Service:
         # Validate V3 payload (raises ValidationError on bad input — caller
         # converts to 400). Includes external_theme URL allowlist enforcement.
         v3 = ThemeSettingsV3(**payload)
-        v3_dict = v3.model_dump()
+        # Clamp any image focal/zoom/rotation transform to safe ranges so a
+        # buggy/hostile client can't persist out-of-range metadata (the
+        # storefront also clamps at render — this is defense-in-depth).
+        v3_dict = sanitize_transform_settings(v3.model_dump())
 
         # Idempotency guard: skip the write if nothing changed.
         prev_draft = store_theme.draft_customization_v3 or {}
@@ -243,7 +247,7 @@ class ThemeV3Service:
         # been written under an older schema and we don't want to publish it
         # without validation).
         v3 = ThemeSettingsV3(**draft_v3)
-        v3_dict = v3.model_dump()
+        v3_dict = sanitize_transform_settings(v3.model_dump())
 
         # DUAL-WRITE: Publish V3
         store_theme.customization_v3 = v3_dict
