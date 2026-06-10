@@ -32,7 +32,10 @@ flowchart TB
     LP[numu-landing-page]
     MH[numo-merchant-hub]
     AD[numu-admin]
-    BZ[numu-egyptian-bazaar]
+    SF[numu-storefront · V3 BYOT]
+    BZ[numu-egyptian-bazaar · V2]
+    MA[numu-merchant-app · Expo]
+    PI[numu-payments-intelligence · Shopify app]
   end
 
   subgraph API["NUMU-api · FastAPI"]
@@ -55,15 +58,13 @@ flowchart TB
   end
 
   subgraph External["External services"]
-    PM[Paymob]
-    FW[Fawry]
-    ST[Stripe / Tap]
-    BO[Bosta]
-    SH[Shippo]
-    RS[Resend email]
+    PM[Paymob · Fawry · InstaPay<br/>Kashier · Moyasar · Tap · JT · Stripe]
+    BO[Bosta · MyLerz · Shippo]
+    RS[Resend · Twilio]
     WA[WhatsApp Business]
-    OAI[OpenAI]
-    ETA[Egyptian Tax Authority]
+    MT[Meta · Pixel/CAPI/OAuth]
+    OAI[OpenAI · HF Vision OCR]
+    ETA[ETA Egypt · ZATCA Saudi · Fawaterak]
     SE[Sentry / Slack]
   end
 
@@ -78,10 +79,8 @@ flowchart TB
   Workers --> WA
   Workers --> SE
   INFRA --> PM
-  INFRA --> FW
-  INFRA --> ST
   INFRA --> BO
-  INFRA --> SH
+  INFRA --> MT
   INFRA --> OAI
   INFRA --> ETA
 ```
@@ -226,21 +225,23 @@ Routes are grouped under `/api/v1/`:
 |--------|--------|
 | `/auth/` | Register · login · refresh · logout · CSRF · 2FA · email verification · password reset |
 | `/stores/` | Store CRUD (owner) |
-| `/stores/{id}/products/` | Product catalog |
-| `/stores/{id}/orders/` | Order processing |
-| `/stores/{id}/customers/` | Customer management |
-| `/stores/{id}/categories/` | Category CRUD |
-| `/stores/{id}/coupons/` | Coupons & discounts |
-| `/stores/{id}/invoices/` | ETA e-invoicing |
-| `/stores/{id}/analytics/` | Reporting |
-| `/stores/{id}/settings/` | Store config + theme customization |
-| `/storefront/store/{id}/` | Public catalog · customer auth · checkout |
-| `/storefront/me/` | Customer profile · addresses · cart · orders |
-| `/admin/` | Super-admin: tenants, waitlist, feedback, dashboard |
-| `/tenants/` | Tenant registration & subdomain check |
-| `/public/` | Waitlist signup · landing-page config |
-| `/webhooks/` | Paymob · Fawry · Bosta · WhatsApp |
-| `/health` | Liveness probe |
+| `/stores/{id}/…` | Commerce: products · variants · categories · orders (+drafts · import · returns · refunds) · customers · inventory (+levels · transfers) · locations · gift_cards · bundles · shipments · shipping (+zones) |
+| `/stores/{id}/…` | Growth: coupons · promotions (offers v2) · marketing campaigns/audiences · email_templates · upsells · abandoned_checkouts · social · analytics (+realtime) · dashboard · ai |
+| `/stores/{id}/…` | Content: menus · pages · settings · onboarding · invoices · payment_proofs · payments · reconciliation · apps · order_import |
+| `/stores/{id}/…` | WhatsApp & omnichannel: whatsapp (+campaigns · chat · templates · opt_ins · scheduled_sends) · channels · threads · messages · capi |
+| `/stores/{id}/…` | Themes V3: themes · theme_editor_v3 · theme_installations · theme_updates · customizer_undo |
+| `/themes` + `/marketplace/` | Theme marketplace: upload/build · developer submissions · admin review · catalog · purchases · reviews · store install |
+| `/storefront/store/{id}/` | Public catalog · search · reviews · customer auth · checkout (+session) · gift cards · shipping rates · locations · payment proofs · pay · tracking |
+| `/storefront/me/` | Customer profile · addresses · cart · checkout · wishlist · returns · saved cards · data rights |
+| `/storefront/…` | `store-by-subdomain/{subdomain}` · theme_resolution · meta_feed (Meta Commerce XML) |
+| `/staff/` + `/roles` + `/permissions` | Staff invitations · sessions · access requests · policies · RBAC |
+| `/admin/` | Super-admin: tenants, waitlist, feedback, dashboard, platform config |
+| `/tenants/` · `/public/` | Tenant registration & subdomain check · waitlist · landing config |
+| `/billing` · `/referrals` · `/risk` | Subscriptions · merchant referrals · trust-network risk |
+| `/shopify/` | Shopify app surface (11 sub-routers) |
+| `/oauth/meta` | Meta OAuth for business scopes |
+| `/webhooks/` | paymob · fawry · instapay · kashier · moyasar · jt · bosta · mylerz · meta · whatsapp · fawaterak · resend |
+| `/ws` · `/health` | WebSocket realtime (inbox) · liveness probe |
 
 ---
 
@@ -274,15 +275,16 @@ See `src/config/settings.py` for the complete list.
 
 | Category | Services |
 |----------|----------|
-| **Payments** | Paymob (cards + mobile wallets) · Fawry · Stripe · Tap · Cash on Delivery |
-| **Shipping** | Bosta (Egyptian courier) · Shippo |
-| **Email** | Resend |
-| **Messaging** | WhatsApp Business API |
+| **Payments** | Paymob (cards + wallets) · Fawry · InstaPay · Kashier · Moyasar · Tap · JT · Stripe · Cash on Delivery |
+| **Shipping** | Bosta · MyLerz (Egyptian couriers) · Shippo |
+| **Email / SMS** | Resend · Twilio |
+| **Messaging** | WhatsApp Business API (templates · campaigns · omnichannel inbox) |
+| **Marketing** | Meta — Pixel, Conversions API, OAuth, custom/lookalike audiences, Messenger/Instagram inbox |
 | **Storage** | Cloudflare R2 / MinIO / AWS S3 |
-| **AI** | OpenAI (product descriptions, Arabic + English) |
-| **Tax** | Egyptian Tax Authority (ETA) e-invoicing |
+| **AI** | OpenAI (product descriptions, insights) · Hugging Face Vision (payment-proof OCR) |
+| **Tax / e-invoicing** | ETA (Egypt) · ZATCA (Saudi Arabia) · Fawaterak |
 | **Maps** | Self-hosted Nominatim *(or)* LocationIQ |
-| **Monitoring** | Sentry · Slack (7 webhook channels, batched every 30s) |
+| **Monitoring** | Sentry · Slack (webhook channels, batched every 30s) |
 
 ### Self-hosted Nominatim
 
@@ -301,16 +303,23 @@ The first run downloads ~200 MB and imports the Egypt OSM extract (~5 GB on disk
 ```mermaid
 flowchart LR
   API[NUMU-api] -- enqueue --> R[(Redis broker)]
-  R --> Q1[default queue<br/>notifications · Slack alerts]
-  R --> Q2[images queue<br/>product image optimization]
-  R --> Q3[scheduled<br/>daily DB backup 03:00 UTC]
-
-  Q1 --> Email[Resend email]
-  Q1 --> WA[WhatsApp Business]
-  Q1 --> Slack[Slack webhooks · batched 30s]
-  Q2 --> Store[(R2 / S3 / MinIO)]
-  Q3 --> Backup[(Backup target)]
+  R --> W[Celery workers<br/>~57 task modules]
+  W --> Email[Resend email]
+  W --> WA[WhatsApp Business]
+  W --> Slack[Slack webhooks · batched 30s]
+  W --> Store[(R2 / S3 / MinIO)]
+  W --> Meta[Meta CAPI]
 ```
+
+| Area | Tasks (selection) |
+|------|-------------------|
+| Commerce | abandoned-cart recovery · back-in-stock · shipments · order webhooks |
+| WhatsApp | campaign sends · scheduled dispatcher (60s) · template poll (15m) · dead-letter purge (daily) |
+| Payments / risk | InstaPay expiry · COD deposit expiry · auto-RTO · risk scoring · fraud detection |
+| Marketing | campaigns · promotions · Meta CAPI dispatch · social |
+| Analytics | daily rollups · event ingest · retention purge · courier stats |
+| Themes | theme build · upload · marketplace tasks |
+| Lifecycle | demo cleanup · trial expiry · data retention · daily DB backup (03:00 UTC) · image processing |
 
 ---
 
