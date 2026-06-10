@@ -145,7 +145,7 @@ jobs:
             scripts/load/storefront_load.js
 
       - name: Download last green baseline
-        uses: dawidd6/action-download-artifact@v3
+        uses: dawidd6/action-download-artifact@v6
         with:
           workflow: load-test-weekly.yml
           name: load-summary-green
