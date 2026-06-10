@@ -16,6 +16,7 @@ from src.api.dependencies.auth import get_current_customer
 from src.api.dependencies.repositories import (
     get_funnel_event_repository,
     get_product_repository,
+    get_store_repository,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.storefront.cart import (
@@ -34,8 +35,54 @@ from src.infrastructure.repositories.cart_repository import RedisCartRepository
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
 )
+from src.infrastructure.repositories.store_repository import StoreRepository
 
 logger = logging.getLogger(__name__)
+
+
+async def emit_add_to_cart_event(
+    funnel_repo: FunnelEventRepository,
+    store_repo: StoreRepository,
+    *,
+    store_id: UUID,
+    customer_id: UUID | None,
+    step_data: dict,
+) -> None:
+    """Best-effort ``add_to_cart`` funnel event — MUST NEVER break the cart.
+
+    Two safeguards, both learned from a P0 that 500'd every guest add-to-cart:
+
+    1. Correct ``tenant_id``. ``funnel_events.tenant_id`` FKs to ``tenants``;
+       storefront guest requests carry no tenant context (``get_tenant_id()``
+       is ``None``), so the old code fell back to ``store_id`` — which is NOT a
+       ``tenants`` row → ForeignKeyViolation. We resolve the store's real
+       owning tenant instead, and skip the event entirely if we can't.
+
+    2. SAVEPOINT isolation. The insert runs inside ``begin_nested()`` and is
+       flushed there, so a failure rolls back only the savepoint — the cart
+       write + the cart-response read on the same session stay intact (a bare
+       ``try/except`` left the session in a PendingRollback state → 500).
+    """
+    try:
+        tid = get_tenant_id()
+        tenant_id: UUID | None = UUID(tid) if tid else None
+        if tenant_id is None:
+            store = await store_repo.get_by_id(store_id)
+            tenant_id = store.tenant_id if store else None
+        if tenant_id is None:
+            return  # can't attribute the event — skip rather than poison
+        async with funnel_repo.session.begin_nested():
+            await funnel_repo.create(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                step="add_to_cart",
+                customer_id=customer_id,
+                step_data=step_data,
+            )
+            await funnel_repo.session.flush()
+    except Exception:  # noqa: BLE001 — telemetry must never break the cart
+        pass
+
 
 router = APIRouter()
 
@@ -192,6 +239,7 @@ async def add_cart_item(
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Add a product to the customer's cart.
 
@@ -267,23 +315,19 @@ async def add_cart_item(
     cart.add_item(new_item)
     await _cart_repo.save(cart)
 
-    # Emit funnel event
-    try:
-        tid = get_tenant_id()
-        await funnel_repo.create(
-            tenant_id=UUID(tid) if tid else current_customer.store_id,
-            store_id=current_customer.store_id,
-            step="add_to_cart",
-            customer_id=current_customer.id,
-            step_data={
-                "product_id": str(request.product_id),
-                "product_name": product.name,
-                "quantity": request.quantity,
-                "unit_price": product.price.cents,
-            },
-        )
-    except Exception:
-        pass
+    # Emit funnel event (best-effort, savepoint-isolated, correct tenant_id)
+    await emit_add_to_cart_event(
+        funnel_repo,
+        store_repo,
+        store_id=current_customer.store_id,
+        customer_id=current_customer.id,
+        step_data={
+            "product_id": str(request.product_id),
+            "product_name": product.name,
+            "quantity": request.quantity,
+            "unit_price": product.price.cents,
+        },
+    )
 
     return await _build_cart_response(cart, product_repo)
 

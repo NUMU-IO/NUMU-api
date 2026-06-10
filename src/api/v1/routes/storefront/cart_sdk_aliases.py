@@ -33,6 +33,7 @@ from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_funnel_event_repository,
     get_product_repository,
+    get_store_repository,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront._cart_owner import CartOwner, get_cart_owner
@@ -41,16 +42,17 @@ from src.api.v1.routes.storefront.cart import (
     _cart_repo,
     _get_or_create_cart,
     _get_or_create_guest_cart,
+    emit_add_to_cart_event,
 )
 from src.api.v1.schemas.storefront.cart import CartResponse
 from src.core.entities.product import ProductStatus
 from src.core.value_objects.cart_item import CartItem
-from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.repositories import ProductRepository
 from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
 )
+from src.infrastructure.repositories.store_repository import StoreRepository
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,7 @@ async def sdk_add_cart_item(
     owner: Annotated[CartOwner, Depends(get_cart_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     product = await product_repo.get_by_id(request.product_id)
     if not product:
@@ -165,27 +168,23 @@ async def sdk_add_cart_item(
     )
     await _cart_repo.save(cart)
 
-    # Best-effort funnel event — never fail the cart write on telemetry.
-    # `customer_id` is omitted for guest carts; we still log the event
-    # against the store + (optional) session_id for funnel analytics.
-    try:
-        tid = get_tenant_id()
-        await funnel_repo.create(
-            tenant_id=UUID(tid) if tid else owner.store_id,
-            store_id=owner.store_id,
-            step="add_to_cart",
-            customer_id=owner.customer_id,
-            step_data={
-                "product_id": str(request.product_id),
-                "product_name": product.name,
-                "quantity": request.quantity,
-                "unit_price": product.price.cents,
-                "is_guest": owner.is_guest,
-                "session_id": str(owner.session_id) if owner.session_id else None,
-            },
-        )
-    except Exception:
-        pass
+    # Best-effort funnel event — savepoint-isolated + correct tenant_id so it
+    # can never poison the cart write (see emit_add_to_cart_event). customer_id
+    # is omitted for guest carts; we still log the store + session_id.
+    await emit_add_to_cart_event(
+        funnel_repo,
+        store_repo,
+        store_id=owner.store_id,
+        customer_id=owner.customer_id,
+        step_data={
+            "product_id": str(request.product_id),
+            "product_name": product.name,
+            "quantity": request.quantity,
+            "unit_price": product.price.cents,
+            "is_guest": owner.is_guest,
+            "session_id": str(owner.session_id) if owner.session_id else None,
+        },
+    )
 
     return await _build_cart_response(cart, product_repo)
 
