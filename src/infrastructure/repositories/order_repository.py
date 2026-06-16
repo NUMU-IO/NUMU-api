@@ -168,6 +168,9 @@ class OrderRepository(IOrderRepository):
             tracking_number=model.tracking_number,
             notes=model.notes,
             customer_notes=model.customer_notes,
+            coupon_code=model.coupon_code,
+            coupon_id=model.coupon_id,
+            applied_promotions=model.applied_promotions or [],
             metadata=model.extra_data or {},
             utm_source=model.utm_source,
             utm_medium=model.utm_medium,
@@ -224,6 +227,9 @@ class OrderRepository(IOrderRepository):
             customer_confirmed_at=entity.customer_confirmed_at,
             tracking_number=entity.tracking_number,
             notes=entity.notes,
+            coupon_code=entity.coupon_code,
+            coupon_id=entity.coupon_id,
+            applied_promotions=entity.applied_promotions,
             customer_notes=entity.customer_notes,
             extra_data=entity.metadata,
             utm_source=entity.utm_source,
@@ -297,6 +303,9 @@ class OrderRepository(IOrderRepository):
             model.discount_amount = entity.discount_amount
             model.total = entity.total
             model.currency = entity.currency
+            model.coupon_code = entity.coupon_code
+            model.coupon_id = entity.coupon_id
+            model.applied_promotions = entity.applied_promotions
             model.payment_method = entity.payment_method
             model.payment_id = entity.payment_id
             model.shipping_method = entity.shipping_method

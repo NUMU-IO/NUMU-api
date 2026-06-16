@@ -24,6 +24,15 @@ class TestCacheTagFormat:
     def test_store_tag_format(self):
         assert rv.store_cache_tag("sawsaw") == "store-sawsaw"
 
+    def test_store_cache_tags_subdomain_only(self):
+        assert rv.store_cache_tags("sawsaw") == ["store-sawsaw"]
+
+    def test_store_cache_tags_with_custom_domain(self):
+        assert rv.store_cache_tags("sawsaw", "shop.mybrand.com") == [
+            "store-sawsaw",
+            "store-shop.mybrand.com",
+        ]
+
 
 class TestRevalidateHelperTags:
     @pytest.fixture
@@ -49,10 +58,23 @@ class TestRevalidateHelperTags:
         assert captured[0]["scope"] == "layout"
 
     @pytest.mark.asyncio
-    async def test_publish_busts_theme_tag(self, captured):
+    async def test_publish_busts_theme_and_store_tags(self, captured):
+        # Publish must bust the base store payload tag too — store name, logo,
+        # SEO, social and theme_settings ride the 300s `store-` cache entry.
         await rv.revalidate_on_customization_publish("mystore", "s1")
-        assert captured[0]["tags"] == ["theme-s1"]
+        assert captured[0]["tags"] == ["theme-s1", "store-mystore"]
         assert captured[0]["scope"] == "layout"
+
+    @pytest.mark.asyncio
+    async def test_publish_busts_custom_domain_tag(self, captured):
+        await rv.revalidate_on_customization_publish(
+            "mystore", "s1", custom_domain="shop.mybrand.com"
+        )
+        assert captured[0]["tags"] == [
+            "theme-s1",
+            "store-mystore",
+            "store-shop.mybrand.com",
+        ]
 
     @pytest.mark.asyncio
     async def test_menu_change_busts_menus_and_theme(self, captured):

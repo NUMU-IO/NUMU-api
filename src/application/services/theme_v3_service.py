@@ -366,7 +366,11 @@ class ThemeV3Service:
             store = await self._store_repo.get_by_id(store_id)
             if not store or not store.subdomain:
                 return
-            await revalidate_on_customization_publish(store.subdomain, str(store_id))
+            await revalidate_on_customization_publish(
+                store.subdomain,
+                str(store_id),
+                custom_domain=getattr(store, "custom_domain", None),
+            )
         except Exception as exc:
             logger.warning(
                 "v3_storefront_revalidate_failed",

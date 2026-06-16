@@ -97,6 +97,15 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         nullable=True,
         index=True,
     )
+    # Offers-v2 (commerce-correctness Phase 1) — snapshot of the automatic /
+    # free-shipping promotions the offers engine applied at checkout. JSONB
+    # list of {id, title, title_ar?, amount(cents)}. Defaults to [] so legacy
+    # rows and the flag-off path carry an empty list, never NULL surprises in
+    # the read mapper. Not a FK — promotions can be edited/removed later and
+    # this is an immutable order-time snapshot (same rationale as line_items).
+    applied_promotions: Mapped[list[dict] | None] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'::jsonb"
+    )
 
     # Payment
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)

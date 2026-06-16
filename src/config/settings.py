@@ -168,6 +168,17 @@ class Settings(BaseSettings):
     # — flip once the shadow log shows acceptable FSM-vs-ladder agreement.
     trust_fsm_decision_enabled: bool = False
 
+    # Commerce-correctness Phase 1: when True, the storefront checkout runs
+    # the offers-v2 engine (CalculateCartDiscountsUseCase / DiscountCalculator)
+    # against the cart at order-create time and folds the resulting automatic
+    # discount + free-shipping into the order total, persisting the applied
+    # promotion ids on the order. When False (the default) checkout keeps the
+    # legacy single-coupon-only behaviour and never touches the offers engine,
+    # so the change is a no-op until explicitly enabled per environment. The
+    # discount applied at order-create reconciles with what
+    # POST /cart/discounts returns for the same cart.
+    ff_apply_offers_at_checkout: bool = False
+
     # JWT Authentication (RS256 asymmetric signing)
     jwt_private_key: str = Field(default="")
     jwt_public_key: str = Field(default="")

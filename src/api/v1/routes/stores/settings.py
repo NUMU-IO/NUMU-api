@@ -2154,7 +2154,11 @@ async def publish_customization(
                 revalidate_on_customization_publish,
             )
 
-            await revalidate_on_customization_publish(store.subdomain, str(store.id))
+            await revalidate_on_customization_publish(
+                store.subdomain,
+                str(store.id),
+                custom_domain=store.custom_domain,
+            )
         except Exception:
             logger.warning(
                 "Failed to revalidate storefront for %s after publish",

@@ -563,6 +563,7 @@ async def update_notification_preferences(
 from src.api.v1.schemas.tenant.common import PaginatedListResponse
 from src.api.v1.schemas.tenant.order import (
     OrderAddressResponse,
+    OrderAppliedPromotion,
     OrderLineItemResponse,
     OrderListItemResponse,
     OrderResponse,
@@ -616,6 +617,17 @@ def _order_to_response(order_dto) -> OrderResponse:
         shipping_cost=order_dto.shipping_cost,
         tax_amount=order_dto.tax_amount,
         discount_amount=order_dto.discount_amount,
+        coupon_code=order_dto.coupon_code,
+        coupon_id=str(order_dto.coupon_id) if order_dto.coupon_id else None,
+        applied_promotions=[
+            OrderAppliedPromotion(
+                id=str(p.get("id")),
+                title=p.get("title") or "",
+                title_ar=p.get("title_ar"),
+                amount=int(p.get("amount") or 0),
+            )
+            for p in (order_dto.applied_promotions or [])
+        ],
         total=order_dto.total,
         currency=order_dto.currency,
         payment_method=order_dto.payment_method,
@@ -673,6 +685,7 @@ async def list_customer_orders(
             item_count=o.item_count,
             payment_method=o.payment_method,
             created_at=str(o.created_at),
+            discount_amount=o.discount_amount,
         )
         for o in orders
     ]
@@ -783,9 +796,7 @@ async def reorder_customer_order(
     if not order or order.customer_id != current_customer.id:
         raise EntityNotFoundError("Order", str(order_id))
 
-    cart = await _get_or_create_cart(
-        current_customer.id, current_customer.store_id
-    )
+    cart = await _get_or_create_cart(current_customer.id, current_customer.store_id)
 
     added = 0
     skipped: list[ReorderSkippedItem] = []

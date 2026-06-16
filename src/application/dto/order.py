@@ -118,6 +118,13 @@ class OrderDTO(BaseDTO):
     delivered_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # Coupon + offers surface (commerce-correctness Phase 1). coupon_code /
+    # coupon_id mirror the single-code redemption persisted on the entity;
+    # applied_promotions is the (possibly stacked) automatic / free-shipping
+    # offers-engine result, each {id, title, title_ar?, amount(cents)}.
+    coupon_code: str | None = None
+    coupon_id: UUID | None = None
+    applied_promotions: list[dict] | None = None
     # WhatsApp COD "tap to confirm" state (backend-031): None | "pending" |
     # "confirmed". Lets the merchant hub flag orders awaiting confirmation.
     customer_confirmation_status: str | None = None
@@ -164,6 +171,9 @@ class OrderDTO(BaseDTO):
             delivered_at=entity.delivered_at,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
+            coupon_code=entity.coupon_code,
+            coupon_id=entity.coupon_id,
+            applied_promotions=list(entity.applied_promotions or []),
             customer_confirmation_status=entity.customer_confirmation_status,
             customer_confirmed_at=entity.customer_confirmed_at,
         )
@@ -185,6 +195,10 @@ class OrderListItemDTO(BaseDTO):
     item_count: int
     payment_method: str | None
     created_at: datetime
+    # Commerce-correctness Phase 1 — total discount in cents (coupon +
+    # offers), so the orders list can show the savings without loading the
+    # full order. 0 when nothing was discounted.
+    discount_amount: int = 0
     # Feature 001 — attribution surface for the merchant orders list.
     # Both fields are None when the order has no campaign_id FK
     # (untracked / direct / customer-share traffic). When the FK is set,
@@ -217,6 +231,7 @@ class OrderListItemDTO(BaseDTO):
             item_count=entity.item_count,
             payment_method=entity.payment_method,
             created_at=entity.created_at,
+            discount_amount=entity.discount_amount,
             campaign_id=entity.campaign_id,
             campaign_name=campaign_name,
             customer_confirmation_status=entity.customer_confirmation_status,
