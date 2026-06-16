@@ -36,6 +36,9 @@ from src.api.dependencies.repositories import (
     get_onboarding_repository,
     get_order_repository,
     get_product_repository,
+    get_promotion_event_repository,
+    get_promotion_repository,
+    get_promotion_target_repository,
     get_shipping_zone_repository,
     get_store_repository,
 )
@@ -88,6 +91,13 @@ from src.infrastructure.repositories import (
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
 )
+from src.infrastructure.repositories.promotion_event_repository import (
+    PromotionEventRepository,
+)
+from src.infrastructure.repositories.promotion_repository import (
+    PromotionRepository,
+    PromotionTargetRepository,
+)
 from src.infrastructure.repositories.shopify_repository import (
     NetworkReputationRepository,
 )
@@ -113,6 +123,51 @@ def _risk_level_from_score(score: int | None) -> str:
     if score >= 40:
         return "medium"
     return "low"
+
+
+async def _build_applied_promotions(
+    promotion_repo: "PromotionRepository",
+    store_id: UUID,
+    promotion_ids: list,
+    total_automatic_cents: int,
+) -> list[dict]:
+    """Build the order's applied-promotions snapshot from the offers result.
+
+    Each entry is ``{id, title, title_ar?, amount(cents)}``. The offers-v2
+    calculator returns a single aggregate ``automatic_discount_cents`` rather
+    than a per-promotion breakdown, so we attribute the whole automatic
+    discount to the first applied promotion and 0 to any others — the sum of
+    ``amount`` across the list always reconciles to the discount applied on
+    the order. Titles are resolved from the promotion's ``name`` (and Arabic
+    headline when a translation exists). A promotion that can't be loaded
+    still produces an entry (id + generic title) rather than failing checkout.
+    """
+    snapshot: list[dict] = []
+    for idx, pid in enumerate(promotion_ids):
+        promo = None
+        try:
+            promo = await promotion_repo.get_by_id(store_id, pid)
+        except Exception:  # noqa: BLE001 — snapshot is best-effort
+            promo = None
+
+        title = getattr(promo, "name", None) or "Discount"
+        title_ar: str | None = None
+        translations = getattr(promo, "translations", None) or {}
+        ar = translations.get("ar") if isinstance(translations, dict) else None
+        if ar is not None and getattr(ar, "headline", None) is not None:
+            # LocalizedString → prefer its Arabic value, fall back to str().
+            headline = ar.headline
+            title_ar = getattr(headline, "ar", None) or str(headline)
+
+        entry: dict = {
+            "id": str(pid),
+            "title": title,
+            "amount": total_automatic_cents if idx == 0 else 0,
+        }
+        if title_ar:
+            entry["title_ar"] = title_ar
+        snapshot.append(entry)
+    return snapshot
 
 
 def _suggested_action_from_decision(decision: "CodTrustDecision") -> str:
@@ -213,6 +268,13 @@ async def checkout(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
+    promotion_repo: Annotated["PromotionRepository", Depends(get_promotion_repository)],
+    promotion_target_repo: Annotated[
+        "PromotionTargetRepository", Depends(get_promotion_target_repository)
+    ],
+    promotion_event_repo: Annotated[
+        "PromotionEventRepository", Depends(get_promotion_event_repository)
+    ],
     funnel_repo: Annotated[
         "FunnelEventRepository", Depends(get_funnel_event_repository)
     ],
@@ -939,11 +1001,33 @@ async def checkout(
     discount_amount = 0
     coupon_code = None
     coupon_id = None
+    # Free shipping can be granted by either a FREE_SHIPPING coupon or an
+    # offers-v2 promotion. When set, the resolved shipping cost is zeroed
+    # below (after server-side rate resolution). Captured here so both the
+    # coupon path and the offers path can flip it.
+    free_shipping = False
+    # Offers-v2 snapshot persisted on the order: list of
+    # {id, title, title_ar?, amount(cents)}. Populated only when the
+    # ff_apply_offers_at_checkout flag is on and an automatic promotion
+    # matched. coupon_* above remain the single-code surface.
+    applied_promotions: list[dict] = []
     # If the redeemed coupon was issued under a marketing campaign,
     # we want to attribute the order to that campaign when no
     # UTM-resolved campaign won first. Captured here, applied below
     # after the UTM resolver has run.
     _coupon_campaign_id = None
+
+    # Line-item view the discount engines consume. Integer cents, matches
+    # the prices the customer was shown. Used both by BUY_X_GET_Y coupons
+    # (apply_coupon line_items) and the offers-v2 calculator (Cart items).
+    _discount_line_items = [
+        {
+            "product_id": li.product_id,
+            "unit_price": li.unit_price,
+            "quantity": li.quantity,
+        }
+        for li in line_items
+    ]
 
     if request.coupon_code:
         from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
@@ -954,11 +1038,113 @@ async def checkout(
             code=request.coupon_code,
             order_amount=Decimal(str(subtotal)),
             for_update=True,
+            # Pass line items so BUY_X_GET_Y coupons can compute the
+            # cheapest-unit discount; ignored for simpler coupon types.
+            line_items=_discount_line_items,
         )
         discount_amount = int(coupon_result.discount_amount)
         coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
         _coupon_campaign_id = coupon_result.campaign_id
+        # Honor the coupon's free-shipping flag — a FREE_SHIPPING coupon
+        # carries a zero monetary discount but must zero the shipping line.
+        if coupon_result.free_shipping:
+            free_shipping = True
+
+    # ── Offers-v2 engine at order-create (feature-flagged) ─────────────
+    # When ff_apply_offers_at_checkout is on, run the SAME calculator the
+    # storefront's POST /cart/discounts uses so the discount applied to the
+    # order reconciles with what the cart drawer showed. We fold the
+    # automatic discount in on top of any coupon (the calculator already
+    # caps total non-shipping discount at the subtotal), honor its
+    # free-shipping result, and snapshot the applied automatic promotions
+    # onto the order. The single-coupon code is still applied above via
+    # ApplyCouponUseCase (which also records usage + row-locks); we pass the
+    # code through to the calculator only so its at-most-one code-discount
+    # rule is reconciled — its code_discount is NOT re-added to the total to
+    # avoid double-counting the coupon.
+    # current_customer is guaranteed non-None here: guests get a created
+    # customer above. Narrow it for the offers block + downstream order build.
+    _customer_id = current_customer.id if current_customer else None
+    if settings.ff_apply_offers_at_checkout and store.tenant_id is not None:
+        from src.application.dto.promotion_resolution import VisitorContextInput
+        from src.application.use_cases.promotions.calculate_cart_discounts import (
+            CalculateCartDiscountsUseCase,
+        )
+        from src.core.entities.cart import Cart
+        from src.core.services.discount_calculator import DiscountCalculator
+        from src.core.services.promotion_eligibility_checker import (
+            PromotionEligibilityChecker,
+        )
+        from src.core.value_objects.cart_item import CartItem
+
+        _offers_cart = Cart(
+            session_id=(request.session_fingerprint or "checkout"),
+            store_id=store_id,
+            customer_id=_customer_id,
+            items=[
+                CartItem(
+                    product_id=li.product_id,
+                    product_name=li.product_name,
+                    quantity=li.quantity,
+                    unit_price=li.unit_price,
+                )
+                for li in line_items
+            ],
+        )
+        _offers_visitor = VisitorContextInput(
+            customer_id=_customer_id,
+            is_logged_in=not is_guest,
+            cart_subtotal_cents=subtotal,
+            cart_product_ids=[li.product_id for li in line_items],
+        )
+        _offers_use_case = CalculateCartDiscountsUseCase(
+            promotion_repo=promotion_repo,
+            target_repo=promotion_target_repo,
+            coupon_repo=coupon_repo,
+            eligibility_checker=PromotionEligibilityChecker(),
+            calculator=DiscountCalculator(),
+            event_repo=promotion_event_repo,
+        )
+        try:
+            _offers_out = await _offers_use_case.execute(
+                store_id=store_id,
+                tenant_id=store.tenant_id,
+                cart=_offers_cart,
+                applied_coupon_codes=[coupon_code] if coupon_code else [],
+                visitor=_offers_visitor,
+            )
+        except Exception as exc:  # noqa: BLE001 — offers must never block checkout
+            logger.warning("offers_at_checkout_error store=%s err=%s", store_id, exc)
+            _offers_out = None
+
+        if _offers_out is not None:
+            _auto_cents = int(_offers_out.automatic_discount_cents)
+            if _offers_out.free_shipping:
+                free_shipping = True
+            # Cap the combined non-shipping discount at the subtotal so the
+            # total can never go negative even if a coupon + automatic promo
+            # together exceed the cart value.
+            _auto_cents = max(0, min(_auto_cents, subtotal - discount_amount))
+            if _auto_cents > 0:
+                discount_amount += _auto_cents
+                # Snapshot the automatic promotions that fired. Resolve each
+                # promotion's title for the order read; amount is the engine's
+                # total automatic discount attributed to the applied set.
+                applied_promotions = await _build_applied_promotions(
+                    promotion_repo,
+                    store_id,
+                    list(_offers_out.applied_promotion_ids),
+                    _auto_cents,
+                )
+            logger.info(
+                "offers_at_checkout_applied store=%s auto_cents=%s free_shipping=%s "
+                "promo_count=%s",
+                str(store_id),
+                _auto_cents,
+                free_shipping,
+                len(applied_promotions),
+            )
 
     # Atomically deduct stock BEFORE creating the order. Variant combos
     # use a row-lock path (deduct_variant_stock); non-variant flows keep
@@ -1064,6 +1250,21 @@ async def checkout(
         resolved_rate_id = resolution.rate_id
         resolved_label = resolution.label
 
+    # Free shipping granted by a FREE_SHIPPING coupon or an offers-v2
+    # promotion zeroes the resolved shipping cost. We keep the resolved
+    # zone/rate snapshot (so the merchant still sees which rate was chosen)
+    # and only zero the charged amount. Applied here — after server-side
+    # rate resolution — so the customer can never inflate the discount by
+    # claiming free shipping on a rate that didn't resolve.
+    if free_shipping and shipping_cost_cents > 0:
+        logger.info(
+            "free_shipping_applied store=%s rate=%s waived_cents=%s",
+            str(store_id),
+            str(resolved_rate_id),
+            shipping_cost_cents,
+        )
+        shipping_cost_cents = 0
+
     # Server-side tax resolution under the platform's VAT-INCLUSIVE
     # pricing policy: merchant-listed prices already include 14% VAT,
     # so we NEVER add tax on top of the subtotal. The resolver runs in
@@ -1141,6 +1342,7 @@ async def checkout(
         discount_amount=discount_amount,
         coupon_code=coupon_code,
         coupon_id=coupon_id,
+        applied_promotions=applied_promotions,
         total=total,
         currency=currency,
         payment_method=request.payment_method,

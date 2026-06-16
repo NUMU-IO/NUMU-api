@@ -94,6 +94,26 @@ def store_cache_tag(subdomain: str) -> str:
     return f"store-{subdomain}"
 
 
+def store_cache_tags(
+    subdomain: str | None, custom_domain: str | None = None
+) -> list[str]:
+    """All cache tags the storefront uses for a store's base payload.
+
+    The storefront tags its store fetch ``store-${subdomain}`` AND, for
+    custom-domain stores, ``store-${host}`` (``api-client.ts`` lines 82/87).
+    A publish that only busts ``theme-{id}`` leaves merchant-editable fields
+    that ride the base payload (store name, logo, SEO, social, ``theme_settings``)
+    behind the un-busted 300s ``store-`` cache entry, so they wait out the full
+    ISR window. Bust both.
+    """
+    tags: list[str] = []
+    if subdomain:
+        tags.append(store_cache_tag(subdomain))
+    if custom_domain:
+        tags.append(f"store-{custom_domain}")
+    return tags
+
+
 async def revalidate_store(
     subdomain: str,
     paths: list[str] | None = None,
@@ -105,8 +125,13 @@ async def revalidate_store(
     Returns True on success, False on any failure (non-fatal).
     """
     if not REVALIDATION_SECRET:
-        logger.debug(
-            "REVALIDATION_SECRET not set — skipping revalidation for %s", subdomain
+        # WARNING, not DEBUG: a missing secret silently degrades every publish
+        # to "wait out the ISR window" with no operator-visible signal, while
+        # the publish endpoint still returns 200. Make it loud.
+        logger.warning(
+            "REVALIDATION_SECRET not set — storefront cache will NOT be busted "
+            "on publish; merchant edits wait out the ISR window. subdomain=%s",
+            subdomain,
         )
         return False
 
@@ -206,12 +231,22 @@ async def revalidate_on_theme_activate(subdomain: str, store_id: str) -> None:
     )
 
 
-async def revalidate_on_customization_publish(subdomain: str, store_id: str) -> None:
-    """Call when a merchant publishes draft customization."""
+async def revalidate_on_customization_publish(
+    subdomain: str, store_id: str, custom_domain: str | None = None
+) -> None:
+    """Call when a merchant publishes draft customization.
+
+    Busts both the ``theme-{id}`` tag (the V3 customization fetch) AND the
+    ``store-{subdomain}`` / ``store-{custom_domain}`` tags, because several
+    merchant-editable fields (name, logo, SEO, social, ``theme_settings``) are
+    served from the base store payload behind a 300s ISR window. Dropped the
+    old ``paths=["/"]`` arg — the live storefront's tenant routes are
+    ``/[domain]/…`` (host→path rewrite), not ``/`` (that's the apex marketing
+    page), so revalidating ``/`` did nothing for stores; tags carry the load.
+    """
     await revalidate_store(
         subdomain=subdomain,
-        paths=["/"],
-        tags=[theme_cache_tag(store_id)],
+        tags=[theme_cache_tag(store_id), *store_cache_tags(subdomain, custom_domain)],
         scope="layout",
     )
 

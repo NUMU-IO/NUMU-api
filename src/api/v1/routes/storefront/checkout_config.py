@@ -28,10 +28,36 @@ from src.infrastructure.repositories.shopify_repository import (
 router = APIRouter()
 
 
+# Bilingual labels for the payment providers surfaced at checkout. Keys are the
+# provider codes used in store.settings["payment"] + the market registry. Any
+# provider missing here falls back to a title-cased code so a newly-added
+# gateway still renders rather than crashing the endpoint.
+_PROVIDER_LABELS: dict[str, tuple[str, str]] = {
+    "cod": ("Cash on Delivery", "الدفع عند الاستلام"),
+    "paymob": ("Card / Wallet (Paymob)", "بطاقة / محفظة (باي موب)"),
+    "fawry": ("Fawry", "فوري"),
+    "fawaterak": ("Fawaterak", "فواتيرك"),
+    "kashier": ("Card (Kashier)", "بطاقة (كاشير)"),
+    "instapay": ("InstaPay", "انستا باي"),
+    "vodafone_cash": ("Vodafone Cash", "فودافون كاش"),
+    "bank_transfer": ("Bank Transfer", "تحويل بنكي"),
+    "moyasar": ("Card (Moyasar)", "بطاقة (ميسر)"),
+    "hyperpay": ("HyperPay", "هايبر باي"),
+    "tabby": ("Tabby", "تابي"),
+    "tamara": ("Tamara", "تمارا"),
+    "stcpay": ("STC Pay", "إس تي سي باي"),
+}
+
+# Card-tokenizing gateways. Saved cards ("Pay with •••• 4242") are only
+# offered when at least one of these is enabled — the others (COD, InstaPay,
+# bank transfer, BNPL) don't produce a reusable card token.
+_CARD_TOKEN_PROVIDERS: frozenset[str] = frozenset({"paymob", "kashier", "moyasar"})
+
+
 @router.get(
     "/checkout-config",
     response_model=SuccessResponse[dict],
-    summary="Get public checkout field config",
+    summary="Get public checkout field + payment config",
     operation_id="get_public_checkout_config",
 )
 async def get_public_checkout_config(
@@ -67,6 +93,52 @@ async def get_public_checkout_config(
         if cfg.get("is_configured") or app_settings.environment != "production":
             enabled_methods.append(provider)
     config["enabled_payment_methods"] = enabled_methods
+
+    # ── Structured payment config (commerce-correctness Phase 1) ───────
+    # A richer, storefront-friendly shape alongside the legacy
+    # `enabled_payment_methods` list. Built from the SAME merchant payment
+    # settings + COD deposit policy that power the merchant payment-settings
+    # screen — no invented data. The COD deposit policy lives nested under
+    # settings.payment.cod.deposit_policy (see stores/settings.py).
+    cod_block = payment_settings.get("cod") or {}
+    deposit_raw = cod_block.get("deposit_policy") or {}
+    deposit_enabled = bool(deposit_raw.get("enabled", False))
+    deposit_gateways = [
+        g for g in (deposit_raw.get("allowed_gateways") or []) if isinstance(g, str)
+    ]
+    cod_enabled = "cod" in enabled_methods
+
+    payment_methods: list[dict] = []
+    for provider in enabled_methods:
+        label, label_ar = _PROVIDER_LABELS.get(
+            provider, (provider.replace("_", " ").title(), provider)
+        )
+        # A method "requires_deposit" when it's COD and the merchant turned on
+        # the deposit-to-confirm policy. Online methods never require a
+        # separate deposit — they capture up-front.
+        payment_methods.append({
+            "code": provider,
+            "label": label,
+            "label_ar": label_ar,
+            "requires_deposit": provider == "cod" and deposit_enabled,
+        })
+
+    currency = (
+        store.default_currency.value
+        if getattr(store, "default_currency", None)
+        else market.default_currency.value
+    )
+
+    config["payment_methods"] = payment_methods
+    config["cod"] = {
+        "enabled": cod_enabled,
+        "deposit_required": cod_enabled and deposit_enabled,
+        "deposit_gateways": deposit_gateways,
+    }
+    config["currency"] = currency
+    config["saved_cards_enabled"] = any(
+        p in _CARD_TOKEN_PROVIDERS for p in enabled_methods
+    )
 
     # When the merchant has cod_trust enabled, phone becomes non-optional
     # at COD checkout — surface this so the storefront form can mark the

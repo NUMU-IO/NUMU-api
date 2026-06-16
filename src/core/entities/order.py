@@ -248,6 +248,14 @@ class Order(BaseEntity):
     notes: str | None = None
     coupon_code: str | None = None
     coupon_id: UUID | None = None
+    # Offers-v2 (commerce-correctness Phase 1): the automatic / free-shipping
+    # promotions the offers engine applied to this order at checkout time,
+    # snapshotted so the order read can render them without re-running the
+    # calculator. Each entry is {id, title, title_ar?, amount} where ``amount``
+    # is integer cents. Empty list when the ff_apply_offers_at_checkout flag is
+    # off or no automatic promotion matched. ``coupon_*`` above stay the
+    # single-code surface; this is the (possibly stacked) automatic surface.
+    applied_promotions: list[dict[str, Any]] = Field(default_factory=list)
     customer_notes: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     # UTM attribution tracking

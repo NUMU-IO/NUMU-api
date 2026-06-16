@@ -198,6 +198,17 @@ def _order_to_response(order_dto) -> OrderResponse:
         shipping_cost=order_dto.shipping_cost,
         tax_amount=order_dto.tax_amount,
         discount_amount=order_dto.discount_amount,
+        coupon_code=order_dto.coupon_code,
+        coupon_id=str(order_dto.coupon_id) if order_dto.coupon_id else None,
+        applied_promotions=[
+            OrderAppliedPromotion(
+                id=str(p.get("id")),
+                title=p.get("title") or "",
+                title_ar=p.get("title_ar"),
+                amount=int(p.get("amount") or 0),
+            )
+            for p in (order_dto.applied_promotions or [])
+        ],
         total=order_dto.total,
         currency=order_dto.currency,
         payment_method=order_dto.payment_method,
@@ -248,6 +259,7 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
         item_count=order_dto.item_count,
         payment_method=order_dto.payment_method,
         created_at=str(order_dto.created_at),
+        discount_amount=order_dto.discount_amount,
         campaign=campaign_ref,
         customer_confirmation_status=order_dto.customer_confirmation_status,
         customer_confirmed_at=(
@@ -920,6 +932,7 @@ from src.api.v1.schemas.tenant.order import (
     CreateOrderCommentRequest,
     OrderActivitiesResponse,
     OrderActivityResponse,
+    OrderAppliedPromotion,
     OrderTimelineEvent,
     OrderTimelineResponse,
 )

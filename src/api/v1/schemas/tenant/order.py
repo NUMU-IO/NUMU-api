@@ -293,6 +293,23 @@ class OrderAddressResponse(BaseModel):
     )
 
 
+class OrderAppliedPromotion(BaseModel):
+    """One automatic / free-shipping promotion the offers engine applied.
+
+    Commerce-correctness Phase 1. ``amount`` is integer cents (the discount
+    this promotion contributed). ``title_ar`` is optional — present when the
+    promotion carries an Arabic title. The list is empty when no automatic
+    promotion matched or the ``ff_apply_offers_at_checkout`` flag is off.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str = Field(description="Promotion UUID")
+    title: str = Field(description="Promotion title")
+    title_ar: str | None = Field(default=None, description="Arabic promotion title")
+    amount: int = Field(description="Discount contributed by this promotion, in cents")
+
+
 class OrderResponse(BaseModel):
     """Full order response schema."""
 
@@ -341,6 +358,13 @@ class OrderResponse(BaseModel):
     shipping_cost: int = Field(description="Shipping cost in cents")
     tax_amount: int = Field(description="Tax amount in cents")
     discount_amount: int = Field(description="Discount amount in cents")
+    # Commerce-correctness Phase 1 — coupon + offers surface on the order read.
+    coupon_code: str | None = Field(default=None, description="Applied coupon code")
+    coupon_id: str | None = Field(default=None, description="Applied coupon UUID")
+    applied_promotions: list[OrderAppliedPromotion] = Field(
+        default_factory=list,
+        description="Automatic / free-shipping promotions applied at checkout",
+    )
     total: int = Field(description="Grand total in cents")
     currency: str = Field(description="ISO 4217 currency code")
     payment_method: str | None = Field(description="Payment method used")
@@ -403,6 +427,10 @@ class OrderListItemResponse(BaseModel):
     item_count: int = Field(description="Total items")
     payment_method: str | None = Field(description="Payment method")
     created_at: str = Field(description="ISO 8601 creation timestamp")
+    # Commerce-correctness Phase 1 — total discount (coupon + offers) in cents.
+    # 0 when nothing was discounted. Lets the orders list render savings
+    # without loading each full order.
+    discount_amount: int = Field(default=0, description="Total discount in cents")
     # Feature 001 — campaign attribution. Null when this order has no
     # resolved campaign. Hub renders "via {campaign.name}" subtitle
     # when present (SEC-009: standard JSX text interpolation only).

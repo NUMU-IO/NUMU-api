@@ -508,7 +508,9 @@ class ThemeService:
                 await revalidate_on_theme_activate(store.subdomain, str(store_id))
             elif kind == "customization_publish":
                 await revalidate_on_customization_publish(
-                    store.subdomain, str(store_id)
+                    store.subdomain,
+                    str(store_id),
+                    custom_domain=getattr(store, "custom_domain", None),
                 )
         except Exception as exc:
             logger.warning(
