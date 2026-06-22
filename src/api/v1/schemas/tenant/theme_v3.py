@@ -75,6 +75,19 @@ class DraftResponse(BaseModel):
 
 class PublishResponse(BaseModel):
     published: dict[str, Any]
+    # Published-revision fingerprint. `revision_id` is the new published
+    # version row; `content_hash` is a stable sha256 of the published payload
+    # the hub can use as a `?v=` cache-buster when opening the live storefront.
+    revision_id: str | None = None
+    content_hash: str | None = None
+    # True when a separate DB session confirmed the new payload is committed
+    # and visible before the storefront was revalidated.
+    verified: bool = False
+    # Structured outcome of the Next.js storefront revalidation. `None` only
+    # if revalidation was never attempted. Lets the hub render an honest
+    # "Live" vs "Saved, storefront refresh delayed" state instead of a
+    # misleading success.
+    revalidation: dict[str, Any] | None = None
 
 
 class VersionListItem(BaseModel):

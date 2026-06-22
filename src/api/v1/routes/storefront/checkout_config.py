@@ -85,6 +85,21 @@ async def get_public_checkout_config(
         allowed_providers.append("cod")
     payment_settings = (store.settings or {}).get("payment", {})
 
+    # An enabled gateway must NEVER be hidden just because the market registry
+    # doesn't list it for this country (e.g. vodafone_cash / bank_transfer for
+    # an EG store — both have merchant enable endpoints + settings defaults but
+    # aren't in EGYPT.payment_providers). The market list governs which
+    # providers we OFFER during onboarding; a provider the merchant has
+    # explicitly switched on is always surfaced at checkout. Non-dict entries
+    # like `bank_accounts_count` are skipped by the isinstance guard.
+    for provider, cfg in payment_settings.items():
+        if (
+            isinstance(cfg, dict)
+            and cfg.get("enabled")
+            and provider not in allowed_providers
+        ):
+            allowed_providers.append(provider)
+
     enabled_methods: list[str] = []
     for provider in allowed_providers:
         cfg = payment_settings.get(provider, {})

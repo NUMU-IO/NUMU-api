@@ -73,6 +73,13 @@ class CartDiscountsOutput(BaseModel):
     automatic_discount_cents: int = 0
     free_shipping: bool = False
     applied_promotion_ids: list[UUID] = Field(default_factory=list)
+    # Named snapshot of the AUTOMATIC promotions that fired — mirrors the
+    # order's persisted `applied_promotions` ({id, title, title_ar?, amount}),
+    # so the storefront summary can show the real promo name (e.g. "Welcome
+    # 10 −EGP 30") instead of a generic "Offer" line. The whole automatic
+    # discount is attributed to the first applied promo (0 to the rest) so the
+    # amounts still sum to `automatic_discount_cents`.
+    applied_promotions: list[dict] = Field(default_factory=list)
     rejected: list[dict[str, str]] = Field(default_factory=list)
 
     @property

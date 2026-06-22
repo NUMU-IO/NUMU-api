@@ -11,6 +11,7 @@ This module provides:
 import logging
 import re
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from uuid import UUID
 
@@ -340,6 +341,77 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             _current_session.reset(_session_token)
+            await session.close()
+
+
+async def commit_and_restore_rls(session: AsyncSession) -> None:
+    """Commit the current transaction NOW, then re-apply the transaction-local
+    RLS GUCs that the commit cleared.
+
+    Why this exists — the publish/activate cache-freshness bug:
+    ``get_db_session`` commits in its dependency *finalizer*, i.e. AFTER the
+    route handler returns. Any cache invalidation (Redis) or Next.js
+    revalidation triggered inside the handler therefore fires while the write
+    is still UNCOMMITTED. A concurrent storefront read (the live-preview
+    iframe, the merchant's own reload, a bot) then re-populates Next's data
+    cache + Redis with the OLD pre-commit row, and — because
+    ``revalidateTag(tag, {expire:0})`` only expires the tag once — the stale
+    entry is served fresh again until the 60s ISR safety-net elapses.
+
+    Callers that must invalidate caches / revalidate the storefront against
+    COMMITTED data call this immediately after their writes and before any
+    cache work, so the ordering becomes: persist → commit → invalidate →
+    revalidate.
+
+    ``SET search_path`` is session-level and survives the commit; the
+    ``app.current_tenant`` / ``app.current_user`` GUCs were set with
+    ``is_local=true`` (transaction-scoped) and ARE dropped by the commit, so
+    we re-set them here. Without this, any tenant-scoped read later in the
+    same request session (e.g. ``store_repo.get_by_id`` inside a
+    ``_revalidate`` helper) would be filtered to zero rows by RLS.
+    """
+    await session.commit()
+    tenant_id = get_tenant_id()
+    await session.execute(
+        text("SELECT set_config('app.current_tenant', :v, true)"),
+        {"v": tenant_id or ""},
+    )
+    user_id = get_user_id()
+    await session.execute(
+        text("SELECT set_config('app.current_user', :v, true)"),
+        {"v": user_id or ""},
+    )
+
+
+@asynccontextmanager
+async def tenant_scoped_session() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a FRESH, independent session that mirrors the current request's
+    tenant RLS context.
+
+    Used for post-commit freshness read-backs: reading the just-published row
+    from a *separate* session proves the write is actually committed and
+    visible to other connections (exactly what the storefront's next fetch
+    does) — not merely flushed inside the request's own open transaction.
+
+    Read-only by convention; the caller may commit if it writes. The session
+    is always closed on exit.
+    """
+    async with AsyncSessionLocal() as session:
+        schema = _validate_schema_name(get_tenant_schema())
+        await session.execute(text(f"SET search_path TO {schema}, public"))
+        tenant_id = get_tenant_id()
+        await session.execute(
+            text("SELECT set_config('app.current_tenant', :v, true)"),
+            {"v": tenant_id or ""},
+        )
+        user_id = get_user_id()
+        await session.execute(
+            text("SELECT set_config('app.current_user', :v, true)"),
+            {"v": user_id or ""},
+        )
+        try:
+            yield session
+        finally:
             await session.close()
 
 

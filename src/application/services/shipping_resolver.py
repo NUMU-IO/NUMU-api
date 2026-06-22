@@ -74,6 +74,17 @@ class ResolverOutput:
     free_shipping_progress: FreeShippingProgress | None
 
 
+# Synthetic shipping rate surfaced when a store has not configured any
+# shipping zones yet. Free + COD-supported so a fresh store can take orders
+# from anywhere out of the box; the checkout endpoint recognises a no-zones
+# store and accepts it without re-resolving against a (non-existent) rate row.
+# Stable IDs so the option is idempotent across the /options → /checkout trip.
+DEFAULT_SHIPPING_RATE_ID = UUID("00000000-0000-0000-0000-000000005401")
+_DEFAULT_ZONE_ID = UUID("00000000-0000-0000-0000-000000005402")
+_DEFAULT_SHIPPING_LABEL = "Standard Shipping"
+_DEFAULT_SHIPPING_LABEL_AR = "الشحن العادي"
+
+
 class ShippingResolver:
     """Pure evaluator for a store's shipping rules."""
 
@@ -95,6 +106,7 @@ class ShippingResolver:
         cart_subtotal_cents: int,
         cart_weight_g: int,
         cod_requested: bool = False,
+        restrict_to_zones: bool = False,
         location_id: UUID | None = None,
     ) -> ResolverOutput:
         """Return every available rate option for this cart+destination.
@@ -115,10 +127,17 @@ class ShippingResolver:
         zone = await self.repository.get_zone_for_governorate(
             store_id, governorate_code
         )
-        if zone is None:
-            return ResolverOutput(options=[], free_shipping_progress=None)
-
-        rates = await self.repository.list_rates_by_zone(zone.id)
+        # When no zone covers this destination there are no configured rates to
+        # evaluate; the "never dead-end" backstop below then surfaces the free
+        # default. Keeping `zone` optional means a store with NO zones at all
+        # and a store whose zones simply don't reach this governorate take the
+        # same always-shippable path — matching "every destination is buyable
+        # by default; the merchant prices the ones they want to charge for".
+        rates = (
+            await self.repository.list_rates_by_zone(zone.id)
+            if zone is not None
+            else []
+        )
         options: list[ResolvedOption] = []
         lowest_free_over_threshold: int | None = None
 
@@ -147,6 +166,20 @@ class ShippingResolver:
                 ):
                     lowest_free_over_threshold = cfg.free_when_subtotal_gte_cents
 
+        # Never dead-end the customer with "No shipping options available". If
+        # no configured rate applied to this destination — no zone covers it,
+        # the zone has no active rates, or every rate was filtered out (e.g. by
+        # COD policy) — fall back to a free "Standard Shipping" default so every
+        # address can always check out. The merchant overrides this the moment
+        # they configure a zone + rate that covers the destination.
+        #
+        # Exception: a merchant who turned on `restrict_to_zones` wants the
+        # opposite — ship ONLY where they've configured a zone — so we skip the
+        # default and let the empty list surface "no options" for uncovered
+        # destinations.
+        if not options and not restrict_to_zones:
+            options.append(self._default_ships_everywhere_option())
+
         progress: FreeShippingProgress | None = None
         if lowest_free_over_threshold is not None:
             progress = FreeShippingProgress(
@@ -154,6 +187,28 @@ class ShippingResolver:
                 threshold_cents=lowest_free_over_threshold,
             )
         return ResolverOutput(options=options, free_shipping_progress=progress)
+
+    def _default_ships_everywhere_option(self) -> ResolvedOption:
+        """A free 'ships everywhere' option for a store with no zones yet.
+
+        Surfaced by `resolve_options` so checkout is never blocked before the
+        merchant configures shipping. Free (0 cents) so it never fabricates a
+        charge the merchant didn't set, and COD-supported so the COD payment
+        method stays available. Checkout treats a no-zones store specially and
+        does NOT re-resolve this synthetic rate against a rate row.
+        """
+        return ResolvedOption(
+            rate_id=DEFAULT_SHIPPING_RATE_ID,
+            zone_id=_DEFAULT_ZONE_ID,
+            label=_DEFAULT_SHIPPING_LABEL,
+            label_ar=_DEFAULT_SHIPPING_LABEL_AR,
+            amount_cents=0,
+            currency=self.currency,
+            estimated_days_min=2,
+            estimated_days_max=5,
+            cod_supported=True,
+            rate_type=RateType.FLAT,
+        )
 
     async def resolve_one(
         self,

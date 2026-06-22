@@ -13,7 +13,10 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import get_shipping_zone_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.shipping import (
@@ -28,6 +31,7 @@ from src.core.value_objects.geography import (
     EGYPTIAN_GOVERNORATES,
     resolve_governorate,
 )
+from src.infrastructure.database.models import StoreModel
 from src.infrastructure.repositories.shipping_zone_repository import (
     ShippingZoneRepository,
 )
@@ -88,6 +92,7 @@ async def get_shipping_options(
     store_id: Annotated[UUID, Path()],
     request: ShippingOptionsRequest,
     repo: Annotated[ShippingZoneRepository, Depends(get_shipping_zone_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Fire on governorate change; re-fire on cart mutation.
 
@@ -111,6 +116,17 @@ async def get_shipping_options(
             ),
         )
 
+    # Per-store "restrict to zones" toggle (stores.settings.shipping): when on,
+    # uncovered governorates get NO option (a hard restriction); when off
+    # (default) the resolver falls back to a free default so every destination
+    # stays shippable.
+    store_settings = (
+        await db.execute(select(StoreModel.settings).where(StoreModel.id == store_id))
+    ).scalar_one_or_none() or {}
+    restrict_to_zones = bool(
+        (store_settings.get("shipping") or {}).get("restrict_to_zones", False)
+    )
+
     resolver = ShippingResolver(repo, currency="EGP")
     result = await resolver.resolve_options(
         store_id=store_id,
@@ -118,6 +134,7 @@ async def get_shipping_options(
         cart_subtotal_cents=request.cart_subtotal_cents,
         cart_weight_g=request.cart_weight_g,
         cod_requested=request.cod_requested,
+        restrict_to_zones=restrict_to_zones,
         location_id=request.location_id,
     )
 

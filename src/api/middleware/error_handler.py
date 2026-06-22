@@ -116,10 +116,35 @@ def setup_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-        """Override default HTTPException handler to ensure consistent format."""
+        """Override default HTTPException handler to ensure consistent format.
+
+        When ``detail`` is a plain string we wrap it as the message. When it's
+        a **dict** (structured client contracts like ``cod_trust_blocked`` /
+        ``phone_required_for_cod`` / ``custom_field_errors`` which carry
+        ``code`` + ``message_en`` + ``message_ar`` + ``errors``), we PRESERVE
+        those fields on the error object instead of ``str()``-ing the dict into
+        an opaque "{'code': ...}" blob — otherwise the storefront can't localize
+        or branch on the code and ends up showing the raw envelope to the buyer.
+        """
+        detail = exc.detail
+        if isinstance(detail, dict):
+            code = str(detail.get("code") or "HTTP_ERROR")
+            message = (
+                detail.get("message")
+                or detail.get("message_en")
+                or detail.get("message_ar")
+                or "Request failed"
+            )
+            body = _error_body(code, str(message))
+            # Carry the remaining structured fields (message_en/message_ar/
+            # errors/…) so the client can localize + render field errors.
+            body["error"].update({
+                k: v for k, v in detail.items() if k not in ("code", "message")
+            })
+            return JSONResponse(status_code=exc.status_code, content=body)
         return JSONResponse(
             status_code=exc.status_code,
-            content=_error_body("HTTP_ERROR", str(exc.detail)),
+            content=_error_body("HTTP_ERROR", str(detail)),
         )
 
     @app.exception_handler(EntityNotFoundError)

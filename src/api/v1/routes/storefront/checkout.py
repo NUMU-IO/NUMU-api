@@ -59,7 +59,10 @@ from src.application.services.network_reputation_service import (
     extract_phone_hash_from_string,
     write_network_event,
 )
-from src.application.services.shipping_resolver import ShippingResolver
+from src.application.services.shipping_resolver import (
+    DEFAULT_SHIPPING_RATE_ID,
+    ShippingResolver,
+)
 from src.application.services.tax_resolver import (
     TaxLineInput,
     tax_resolver_for_country,
@@ -1199,14 +1202,37 @@ async def checkout(
     resolved_rate_id: UUID | None = None
     resolved_label: str | None = request.shipping_method
 
+    store_has_zones = await shipping_repo.has_active_zones(store_id)
+    # Per-store "restrict to zones" toggle (stores.settings.shipping). When ON,
+    # the resolver does NOT surface the synthetic free default — so a payload
+    # carrying it is a tamper attempt and must NOT be accepted as free; it falls
+    # through to the resolve_one path below, which rejects it (no rate row → 400).
+    _ship_settings = (getattr(store, "settings", None) or {}).get("shipping") or {}
+    restrict_to_zones = bool(_ship_settings.get("restrict_to_zones", False))
+
     if not request.selected_shipping_rate_id:
-        if await shipping_repo.has_active_zones(store_id):
+        if store_has_zones:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=("Please select a shipping option before placing your order."),
             )
 
-    if request.selected_shipping_rate_id:
+    elif (
+        not restrict_to_zones
+        and request.selected_shipping_rate_id == DEFAULT_SHIPPING_RATE_ID
+    ):
+        # The storefront's /shipping/options served the synthetic free
+        # "Standard Shipping" default — surfaced whenever no configured rate
+        # covers the destination (unconfigured store, or a governorate the
+        # merchant's zones don't reach). There is no real rate row to
+        # re-resolve, so accept it as free — 0 is the floor, so nothing can be
+        # under-charged — and leave resolved_rate_id/zone_id None so we never
+        # persist a synthetic FK. The merchant overrides this by configuring a
+        # zone + rate that covers the destination.
+        resolved_label = request.shipping_method or "Standard Shipping"
+        shipping_cost_cents = 0
+
+    else:
         # Resolve the destination governorate from the shipping address.
         # `resolve_governorate` accepts either an ISO 3166-2 code (e.g.
         # "EG-C" — what the storefront sends after the UI overhaul) or

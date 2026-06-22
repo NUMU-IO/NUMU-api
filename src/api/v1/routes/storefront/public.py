@@ -8,6 +8,7 @@ These routes are publicly accessible without authentication:
 - Customer registration and login
 """
 
+import re
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -121,6 +122,57 @@ def _customer_response(c) -> CustomerResponse:
 # ============================================================================
 
 
+_PAGES_URL_RE = re.compile(r"^/pages/([^/?#]+)")
+
+
+def _menu_item_page_handle(item: dict[str, Any]) -> str | None:
+    """Return the CMS-page handle a menu item targets, or None.
+
+    A menu item is a "CMS page link" when it points at ``/pages/<handle>``
+    (how the hub's page picker stores them). Built-in routes (``/about``,
+    ``/contact``, ``/products`` …) and external/product/collection links are
+    NOT CMS pages and are never hidden by publish state.
+    """
+    url = item.get("url")
+    if isinstance(url, str):
+        m = _PAGES_URL_RE.match(url.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
+def _annotate_menu_visibility(
+    items: list[dict[str, Any]], published_handles: set[str]
+) -> list[dict[str, Any]]:
+    """Annotate each menu item (recursively) with ``target_visible``.
+
+    Hide-page → hide-nav-link (§5): an item that targets a CMS page
+    (``/pages/<handle>``) is visible only when that page is currently
+    published. Unpublishing OR deleting the page drops the handle from
+    ``published_handles`` → the link is marked ``target_visible: false``
+    and every theme's chrome filters it out (and prunes now-empty footer
+    columns). All other item types default to visible, so this is additive
+    and never hides a link it shouldn't.
+    """
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        handle = _menu_item_page_handle(item)
+        visible = True if handle is None else (handle in published_handles)
+        children = item.get("children")
+        new_item = {
+            **item,
+            "target_visible": visible,
+            "children": _annotate_menu_visibility(
+                children if isinstance(children, list) else [],
+                published_handles,
+            ),
+        }
+        out.append(new_item)
+    return out
+
+
 @router.get(
     "/menus",
     response_model=SuccessResponse[list[dict[str, Any]]],
@@ -131,6 +183,7 @@ async def list_store_menus_public(
     store_id: Annotated[UUID, Path(description="Store ID")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     menu_repo: Annotated[MenuRepository, Depends(get_menu_repository)],
+    page_repo: Annotated[PageRepository, Depends(get_page_repository)],
 ) -> SuccessResponse[list[dict[str, Any]]]:
     """Public navigation menus for a store (header/footer link lists).
 
@@ -140,10 +193,17 @@ async def list_store_menus_public(
     server-side (ISR-tagged ``menus-{store_id}``) and injects it into the
     BYOT mount context so a theme's ``useNavigation(handle)`` resolves
     synchronously without a client round-trip.
+
+    Each item also carries ``target_visible`` (§5 hide-page → hide-nav-link):
+    a link to a ``/pages/<handle>`` CMS page is ``false`` when that page is
+    unpublished or deleted, so themes drop the dead link automatically.
     """
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
+
+    pages = await page_repo.get_by_store(store_id, include_unpublished=False)
+    published_handles = {p.handle for p in pages if getattr(p, "handle", None)}
 
     menus = await menu_repo.get_by_store(store_id, include_inactive=False)
     return SuccessResponse(
@@ -152,7 +212,10 @@ async def list_store_menus_public(
                 "id": str(menu.id),
                 "handle": menu.handle,
                 "title": menu.title,
-                "items": menu.items,
+                "items": _annotate_menu_visibility(
+                    menu.items if isinstance(menu.items, list) else [],
+                    published_handles,
+                ),
                 "is_active": menu.is_active,
             }
             for menu in menus
@@ -585,6 +648,11 @@ def _serialize_public_store(
         "country": getattr(store, "country", "EG"),
         "default_language": store.default_language,
         "social_links": store.social_links,
+        # Merchant-set contact channels (hub → Store settings) so themes can
+        # render the store's real email/phone on the contact page without the
+        # merchant re-entering them in the theme editor.
+        "contact_email": getattr(store, "contact_email", None),
+        "contact_phone": getattr(store, "contact_phone", None),
         "use_nextjs_storefront": getattr(store, "use_nextjs_storefront", False),
         "tenant_feature_flags": tenant_feature_flags or {},
     }

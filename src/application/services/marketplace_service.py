@@ -1180,14 +1180,24 @@ class MarketplaceService:
         if not self._store_repo:
             return
         try:
+            from src.infrastructure.database.connection import commit_and_restore_rls
             from src.infrastructure.external_services.nextjs_revalidation import (
                 revalidate_on_theme_activate,
             )
 
+            # Commit the activation writes BEFORE revalidating so the
+            # storefront's refetch reads the new active theme, not the
+            # pre-commit row (see commit_and_restore_rls).
+            await commit_and_restore_rls(self._store_repo.session)
+
             store = await self._store_repo.get_by_id(store_id)
             if not store or not store.subdomain:
                 return
-            await revalidate_on_theme_activate(store.subdomain, str(store_id))
+            await revalidate_on_theme_activate(
+                store.subdomain,
+                str(store_id),
+                custom_domain=getattr(store, "custom_domain", None),
+            )
         except Exception as exc:
             logger.warning(
                 "marketplace_revalidate_failed",
