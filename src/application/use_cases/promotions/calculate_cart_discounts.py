@@ -32,6 +32,22 @@ from src.core.services.promotion_eligibility_checker import (
 from src.core.value_objects.discount_rule import CartLine, DiscountContext
 
 
+def _promo_title_ar(promo: Promotion) -> str | None:
+    """Best-effort Arabic title for a promotion — its translated headline.
+
+    Mirrors the order snapshot builder (`_build_applied_promotions`): read
+    `translations["ar"].headline`, preferring a LocalizedString's `.ar`. Any
+    shape we don't recognise yields None (the summary falls back to the English
+    title), never raises.
+    """
+    translations = getattr(promo, "translations", None) or {}
+    ar = translations.get("ar") if isinstance(translations, dict) else None
+    headline = getattr(ar, "headline", None) if ar is not None else None
+    if headline is None:
+        return None
+    return getattr(headline, "ar", None) or str(headline)
+
+
 class CalculateCartDiscountsUseCase:
     """Recompute the cart's discount given current promos + applied codes."""
 
@@ -165,11 +181,37 @@ class CalculateCartDiscountsUseCase:
             targets_by_promotion=targets_by_promotion,
         )
 
+        # Named snapshot of the AUTOMATIC promotions that fired, so the
+        # storefront summary can show the real promo name. We have the
+        # Promotion entities already (`eligible`) — no repo round-trip. The
+        # calculator only returns an aggregate automatic discount, so (like the
+        # order snapshot) we attribute the whole amount to the first applied
+        # automatic promo and 0 to the rest; the sum reconciles to
+        # `automatic_discount_cents`.
+        by_id = {p.id: p for p in eligible}
+        applied_promotions: list[dict] = []
+        first_auto = True
+        for pid in result.applied_promotion_ids:
+            promo = by_id.get(pid)
+            if promo is None or promo.surface != PromotionSurface.AUTOMATIC:
+                continue
+            entry: dict = {
+                "id": str(pid),
+                "title": getattr(promo, "name", None) or "Discount",
+                "amount": result.automatic_discount_cents if first_auto else 0,
+            }
+            title_ar = _promo_title_ar(promo)
+            if title_ar:
+                entry["title_ar"] = title_ar
+            applied_promotions.append(entry)
+            first_auto = False
+
         return CartDiscountsOutput(
             code_discount_cents=result.code_discount_cents,
             automatic_discount_cents=result.automatic_discount_cents,
             free_shipping=result.free_shipping,
             applied_promotion_ids=result.applied_promotion_ids,
+            applied_promotions=applied_promotions,
             rejected=[
                 {"promotion_id": str(pid), "reason": reason}
                 for pid, reason in result.rejected

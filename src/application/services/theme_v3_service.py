@@ -6,6 +6,8 @@ restore, and BYOT initialization.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -39,6 +41,18 @@ class StaleEtagError(Exception):
         )
         self.current_etag = current_etag
         self.current_draft = current_draft
+
+
+def _customization_hash(payload: dict[str, Any] | None) -> str:
+    """Stable content hash of a customization payload.
+
+    Used as the published-revision fingerprint: the publish response carries
+    it so the hub can cache-bust the storefront with ``?v=<hash>`` and so the
+    post-commit freshness read-back can confirm a *separate* session sees the
+    exact bytes we published.
+    """
+    canonical = json.dumps(payload or {}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _etag_from(value: datetime | str | None) -> str | None:
@@ -234,7 +248,23 @@ class ThemeV3Service:
         store_id: UUID,
         user_id: UUID | None = None,
     ) -> dict[str, Any]:
-        """Publish V3 draft with Dual-Write to all columns."""
+        """Publish V3 draft with Dual-Write to all columns.
+
+        Ordering contract (the cache-freshness fix): this method PERSISTS and
+        then COMMITS the transaction before returning, so the caller's cache
+        invalidation + storefront revalidation run strictly against committed
+        data. It does NOT itself invalidate Redis or revalidate the storefront
+        — the route owns that (it already holds the store + cache) and runs it
+        after this returns. See :func:`commit_and_restore_rls`.
+
+        Returns a dict:
+            {
+              "published": <v3 dict>,
+              "revision_id": <published version id>,
+              "content_hash": <sha256 of published payload>,
+              "verified": <bool: a separate session can read the new payload>,
+            }
+        """
         store_theme = await self._store_theme_repo.get_active_for_store(store_id)
         if not store_theme:
             raise ValueError(f"No active theme for store {store_id}")
@@ -272,11 +302,70 @@ class ThemeV3Service:
         )
         await self._version_repo.create(version)
 
-        # Trigger Next.js cache invalidation (non-fatal)
-        await self._revalidate_storefront(store_id)
+        content_hash = _customization_hash(v3_dict)
 
-        logger.info("v3_published", extra={"store_id": str(store_id)})
-        return v3_dict
+        # ── COMMIT before any cache/revalidation work happens ───────────────
+        # The request session otherwise commits in get_db_session's finalizer
+        # AFTER the handler returns — i.e. AFTER the route revalidates the
+        # storefront, which would let a racing read re-cache the stale row.
+        from src.infrastructure.database.connection import commit_and_restore_rls
+
+        session = self._store_theme_repo.session
+        await commit_and_restore_rls(session)
+
+        # ── Freshness read-back from a SEPARATE session ─────────────────────
+        # Proves the published bytes are committed and visible to other
+        # connections (exactly what the storefront's next fetch will see),
+        # not merely flushed inside our own open transaction.
+        verified = await self._verify_published(store_id, content_hash)
+        if not verified:
+            logger.warning(
+                "v3_publish_freshness_unverified",
+                extra={"store_id": str(store_id), "content_hash": content_hash},
+            )
+
+        logger.info(
+            "v3_published",
+            extra={
+                "store_id": str(store_id),
+                "revision_id": str(version.id),
+                "content_hash": content_hash,
+                "verified": verified,
+            },
+        )
+        return {
+            "published": v3_dict,
+            "revision_id": str(version.id),
+            "content_hash": content_hash,
+            "verified": verified,
+        }
+
+    async def _verify_published(self, store_id: UUID, expected_hash: str) -> bool:
+        """Confirm a separate DB session can read the just-published payload.
+
+        Opens an independent tenant-scoped session and re-hashes the persisted
+        ``customization_v3``; returns True iff it matches ``expected_hash``.
+        Any error degrades to False (logged by the caller) — the publish still
+        succeeds, the merchant just gets a "refresh may be delayed" signal.
+        """
+        from src.infrastructure.database.connection import tenant_scoped_session
+        from src.infrastructure.repositories.store_theme_repository import (
+            StoreThemeRepository,
+        )
+
+        try:
+            async with tenant_scoped_session() as session:
+                repo = StoreThemeRepository(session)
+                fresh = await repo.get_active_for_store(store_id)
+                if not fresh:
+                    return False
+                return _customization_hash(fresh.customization_v3) == expected_hash
+        except Exception as exc:  # pragma: no cover — non-fatal best effort
+            logger.warning(
+                "v3_publish_verify_failed",
+                extra={"store_id": str(store_id), "error": str(exc)},
+            )
+            return False
 
     async def get_versions(
         self,
@@ -349,30 +438,3 @@ class ThemeV3Service:
         store_theme.draft_customization = {}
         await self._store_theme_repo.update(store_theme)
         return published
-
-    async def _revalidate_storefront(self, store_id: UUID) -> None:
-        """Trigger Next.js ISR cache invalidation after publish.
-
-        Non-fatal — if the storefront is unreachable or the secret is missing,
-        log and continue. The ISR window will catch up within ~60s.
-        """
-        if not self._store_repo:
-            return
-        try:
-            from src.infrastructure.external_services.nextjs_revalidation import (
-                revalidate_on_customization_publish,
-            )
-
-            store = await self._store_repo.get_by_id(store_id)
-            if not store or not store.subdomain:
-                return
-            await revalidate_on_customization_publish(
-                store.subdomain,
-                str(store_id),
-                custom_domain=getattr(store, "custom_domain", None),
-            )
-        except Exception as exc:
-            logger.warning(
-                "v3_storefront_revalidate_failed",
-                extra={"store_id": str(store_id), "error": str(exc)},
-            )

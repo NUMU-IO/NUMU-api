@@ -197,11 +197,21 @@ async def publish(
 ):
     """Publish V3 draft with Dual-Write to all columns.
 
-    Triggers Next.js ISR cache invalidation after successful publish
-    (non-fatal if the storefront is unreachable).
+    Freshness-safe ordering (the cache-staleness fix):
+      1. ``svc.publish`` persists AND commits the transaction, then confirms a
+         separate session can read the new payload (``verified``).
+      2. We invalidate the backend Redis caches (post-commit).
+      3. We revalidate the Next.js storefront tags (post-commit) and capture a
+         structured summary.
+      4. The response reports the revalidation outcome so the hub can show an
+         honest "Live" vs "Saved, storefront refresh delayed" state rather than
+         a misleading success.
+
+    Revalidation is intentionally NOT fired before the commit — doing so let a
+    racing storefront read re-cache the stale, pre-commit row.
     """
     try:
-        data = await svc.publish(store_id=store_id, user_id=user_id)
+        result = await svc.publish(store_id=store_id, user_id=user_id)
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -210,6 +220,7 @@ async def publish(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
+    # (2) Backend Redis caches — safe to bust now: the write is committed.
     await cache.invalidate_store(
         store_id=store.id,
         subdomain=store.subdomain,
@@ -217,8 +228,31 @@ async def publish(
     )
     await cache.invalidate_theme(store.id)
 
+    # (3) Next.js storefront tags — committed data is now visible to the
+    # storefront's refetch, so the immediate ``{expire:0}`` bust can't be
+    # re-poisoned with the old row.
+    revalidation: dict | None = None
+    if store.subdomain:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_customization_publish_traced,
+        )
+
+        summary = await revalidate_on_customization_publish_traced(
+            store.subdomain,
+            str(store.id),
+            custom_domain=store.custom_domain,
+        )
+        revalidation = summary.as_dict()
+
     return SuccessResponse(
-        data=PublishResponse(published=data), message="Published successfully"
+        data=PublishResponse(
+            published=result["published"],
+            revision_id=result.get("revision_id"),
+            content_hash=result.get("content_hash"),
+            verified=bool(result.get("verified")),
+            revalidation=revalidation,
+        ),
+        message="Published successfully",
     )
 
 

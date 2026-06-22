@@ -495,17 +495,27 @@ class ThemeService:
         its revalidate window (60s).
         """
         try:
+            from src.infrastructure.database.connection import commit_and_restore_rls
             from src.infrastructure.external_services.nextjs_revalidation import (
                 revalidate_on_customization_publish,
                 revalidate_on_theme_activate,
             )
+
+            # Commit the activation/publish writes BEFORE revalidating so the
+            # storefront refetch reads committed data, not the pre-commit row
+            # (see commit_and_restore_rls).
+            await commit_and_restore_rls(store_repo.session)
 
             store = await store_repo.get_by_id(store_id)
             if not store or not store.subdomain:
                 return
 
             if kind == "theme_activate":
-                await revalidate_on_theme_activate(store.subdomain, str(store_id))
+                await revalidate_on_theme_activate(
+                    store.subdomain,
+                    str(store_id),
+                    custom_domain=getattr(store, "custom_domain", None),
+                )
             elif kind == "customization_publish":
                 await revalidate_on_customization_publish(
                     store.subdomain,

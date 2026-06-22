@@ -260,7 +260,13 @@ async def sdk_update_cart_item(
         if request.quantity == 0:
             cart.remove_item(product_id, variant_id)
         else:
-            cart.set_item_quantity(product_id, variant_id, request.quantity)
+            # The Cart entity exposes `update_item_quantity(product_id,
+            # quantity, variant_id?)` — there is NO `set_item_quantity`.
+            # Calling the missing method raised AttributeError → 500 on every
+            # quantity change (the cart +/- stepper). Note the arg order:
+            # (product_id, quantity, variant_id), not (product_id, variant_id,
+            # quantity).
+            cart.update_item_quantity(product_id, request.quantity, variant_id)
         changed = True
 
     if request.note is not None:

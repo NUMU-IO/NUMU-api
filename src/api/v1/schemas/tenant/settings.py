@@ -360,6 +360,11 @@ class ShippingSettingsResponse(BaseModel):
     manual: ShippingCarrierStatus
     zones: list[ShippingZone] = []
     free_shipping_threshold: float = 0
+    # When True, the storefront only offers shipping to governorates the
+    # merchant has a zone for — uncovered destinations show "no options"
+    # (a hard restriction). When False (default) every destination is
+    # shippable: uncovered governorates fall back to a free default rate.
+    restrict_to_zones: bool = False
 
 
 class UpdateShippingSettingsRequest(BaseModel):
@@ -370,6 +375,7 @@ class UpdateShippingSettingsRequest(BaseModel):
     mylerz_enabled: bool | None = None
     manual_enabled: bool | None = None
     free_shipping_threshold: float | None = None
+    restrict_to_zones: bool | None = None
 
 
 class CreateShippingZoneRequest(BaseModel):

@@ -32,11 +32,43 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+from dataclasses import dataclass, field
 from typing import Literal
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RevalidationSummary:
+    """Structured outcome of a single storefront revalidation call.
+
+    Surfaced in the publish API response so the merchant hub can show an
+    honest state ("Live" vs "Saved, storefront refresh delayed") instead of
+    a misleading "live" success when the bust silently no-op'd (missing
+    secret, storefront down, tag mismatch).
+    """
+
+    requested: bool = False  # we actually attempted the POST (secret + tags present)
+    succeeded: bool = False  # storefront returned 200
+    tags_requested: list[str] = field(default_factory=list)
+    tags_revalidated: list[str] = field(default_factory=list)
+    duration_ms: int = 0
+    status_code: int | None = None
+    error: str | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "requested": self.requested,
+            "succeeded": self.succeeded,
+            "tags_requested": self.tags_requested,
+            "tags_revalidated": self.tags_revalidated,
+            "duration_ms": self.duration_ms,
+            "status_code": self.status_code,
+            "error": self.error,
+        }
 
 
 def _read_env(name: str, default: str = "") -> str:
@@ -180,6 +212,115 @@ async def revalidate_store(
         return False
 
 
+async def revalidate_store_traced(
+    subdomain: str,
+    paths: list[str] | None = None,
+    tags: list[str] | None = None,
+    scope: Literal["layout", "page"] | None = None,
+) -> RevalidationSummary:
+    """Like :func:`revalidate_store` but returns a :class:`RevalidationSummary`.
+
+    Use on the publish path where the caller wants to report the freshness
+    outcome back to the merchant UI rather than treating the bust as
+    fire-and-forget.
+    """
+    summary = RevalidationSummary(tags_requested=list(tags or []))
+    if not REVALIDATION_SECRET:
+        logger.warning(
+            "REVALIDATION_SECRET not set — storefront cache will NOT be busted "
+            "on publish; merchant edits wait out the ISR window. subdomain=%s",
+            subdomain,
+        )
+        summary.error = "revalidation_secret_not_configured"
+        return summary
+
+    if not (paths or tags):
+        summary.error = "no_paths_or_tags"
+        return summary
+
+    if "{subdomain}" in STOREFRONT_BASE_URL:
+        base = STOREFRONT_BASE_URL.format(subdomain=subdomain)
+    else:
+        base = STOREFRONT_BASE_URL
+    url = base.rstrip("/") + "/api/revalidate"
+    payload: dict[str, object] = {}
+    if paths:
+        payload["paths"] = paths
+    if tags:
+        payload["tags"] = tags
+    if scope:
+        payload["scope"] = scope
+
+    summary.requested = True
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "x-revalidation-secret": REVALIDATION_SECRET,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        summary.duration_ms = int((time.monotonic() - started) * 1000)
+        summary.status_code = response.status_code
+        if response.status_code != 200:
+            summary.error = f"http_{response.status_code}: {response.text[:200]}"
+            logger.warning(
+                "Revalidation failed for %s: %s %s",
+                subdomain,
+                response.status_code,
+                response.text[:200],
+            )
+            return summary
+        # Parse the storefront's structured response to confirm WHICH tags it
+        # actually expired. Tolerant of both the new (`tagsRevalidated`) and
+        # legacy (`revalidated.tags`) shapes.
+        try:
+            body = response.json()
+        except Exception:
+            body = {}
+        revalidated = body.get("revalidated") if isinstance(body, dict) else None
+        if isinstance(body, dict) and isinstance(body.get("tagsRevalidated"), list):
+            summary.tags_revalidated = [str(t) for t in body["tagsRevalidated"]]
+        elif isinstance(revalidated, dict) and isinstance(
+            revalidated.get("tags"), list
+        ):
+            summary.tags_revalidated = [str(t) for t in revalidated["tags"]]
+        else:
+            # Storefront didn't echo tags — assume it honored the request.
+            summary.tags_revalidated = list(tags or [])
+        summary.succeeded = True
+        logger.info(
+            "Revalidation succeeded for %s in %dms",
+            subdomain,
+            summary.duration_ms,
+            extra={"tags": summary.tags_revalidated},
+        )
+        return summary
+    except httpx.HTTPError as e:
+        summary.duration_ms = int((time.monotonic() - started) * 1000)
+        summary.error = f"http_error: {e}"
+        logger.warning("Revalidation HTTP error for %s: %s", subdomain, e)
+        return summary
+
+
+async def revalidate_on_customization_publish_traced(
+    subdomain: str, store_id: str, custom_domain: str | None = None
+) -> RevalidationSummary:
+    """Traced variant of :func:`revalidate_on_customization_publish`.
+
+    Returns the structured outcome so the publish endpoint can include a
+    revalidation summary in its response.
+    """
+    return await revalidate_store_traced(
+        subdomain=subdomain,
+        tags=[theme_cache_tag(store_id), *store_cache_tags(subdomain, custom_domain)],
+        scope="layout",
+    )
+
+
 # ── High-level helpers ────────────────────────────────────────────────────────
 
 
@@ -221,12 +362,19 @@ async def revalidate_on_product_change(
     )
 
 
-async def revalidate_on_theme_activate(subdomain: str, store_id: str) -> None:
-    """Call when a store activates a new theme."""
+async def revalidate_on_theme_activate(
+    subdomain: str, store_id: str, custom_domain: str | None = None
+) -> None:
+    """Call when a store activates a new theme.
+
+    Busts the theme tag plus the base store payload tags for BOTH the
+    subdomain and (when present) the custom domain, so custom-domain stores
+    don't keep rendering the old theme until the ISR window lapses.
+    """
     await revalidate_store(
         subdomain=subdomain,
         paths=["/"],
-        tags=[theme_cache_tag(store_id), store_cache_tag(subdomain)],
+        tags=[theme_cache_tag(store_id), *store_cache_tags(subdomain, custom_domain)],
         scope="layout",
     )
 

@@ -155,6 +155,7 @@ def _get_default_shipping_settings() -> dict:
             },
         ],
         "free_shipping_threshold": 500,
+        "restrict_to_zones": False,
     }
 
 
@@ -256,6 +257,7 @@ def _build_shipping_response(settings: dict) -> ShippingSettingsResponse:
         manual=ShippingCarrierStatus(**merged.get("manual", defaults["manual"])),
         zones=zones,
         free_shipping_threshold=merged.get("free_shipping_threshold", 500),
+        restrict_to_zones=bool(merged.get("restrict_to_zones", False)),
     )
 
 
@@ -1262,6 +1264,8 @@ async def update_shipping_settings(
         shipping_settings["manual"]["enabled"] = request.manual_enabled
     if request.free_shipping_threshold is not None:
         shipping_settings["free_shipping_threshold"] = request.free_shipping_threshold
+    if request.restrict_to_zones is not None:
+        shipping_settings["restrict_to_zones"] = request.restrict_to_zones
 
     # Save settings
     settings["shipping"] = shipping_settings
@@ -2137,6 +2141,15 @@ async def publish_customization(
     settings["customization"] = customization
     store.settings = settings
     await store_repo.update(store)
+
+    # Commit the publish write BEFORE busting any cache, so both the Redis
+    # invalidation and the Next.js revalidation run against committed data.
+    # Otherwise the request session commits only in get_db_session's finalizer
+    # (after this handler returns), letting a racing storefront read re-cache
+    # the stale, pre-commit row. See commit_and_restore_rls.
+    from src.infrastructure.database.connection import commit_and_restore_rls
+
+    await commit_and_restore_rls(store_repo.session)
 
     await cache.invalidate_store(
         store_id=store.id,
