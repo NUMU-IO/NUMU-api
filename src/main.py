@@ -377,6 +377,15 @@ def create_app() -> FastAPI:
     # landing-page nginx location at https://numueg.app/numu-logo-*.png
     # — see brand_assets_base_url in settings.py.
 
+    # Convenience redirect: the app runs with redirect_slashes=False, so a bare
+    # "/admin" would 404 (SQLAdmin's index lives at "/admin/"). Register this
+    # BEFORE the admin mount so it matches "/admin" before the mount swallows it.
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/admin", include_in_schema=False)
+    async def _admin_index_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/admin/", status_code=307)
+
     # Setup admin panel (public schema only)
     setup_admin(app)
 

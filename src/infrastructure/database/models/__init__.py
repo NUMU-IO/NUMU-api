@@ -22,6 +22,18 @@ from src.infrastructure.database.models.public import (
     WebhookEventModel,
 )
 
+# Access-control graph (public schema). UserModel and TenantMembershipModel have
+# relationships through the ``membership_roles`` M2M, so these must be imported
+# here for the SQLAlchemy mapper graph to resolve from the package alone (e.g. in
+# scripts/create_superuser.py) — not only when the whole app is loaded.
+from src.infrastructure.database.models.public.membership_override import (
+    MembershipRoleModel,  # noqa: F401 -- association table; imported for mapper
+)
+from src.infrastructure.database.models.public.role import RoleModel
+from src.infrastructure.database.models.public.tenant_membership import (
+    TenantMembershipModel,
+)
+
 # Tenant-scoped models (with tenant_id discriminator)
 from src.infrastructure.database.models.tenant import (
     AutomationLogModel,
@@ -77,6 +89,8 @@ __all__ = [
     "UserModel",
     "WaitlistModel",
     "AuditLogModel",
+    "TenantMembershipModel",
+    "RoleModel",
     # Omnichannel
     "ChannelConnectionModel",
     "MessageThreadModel",

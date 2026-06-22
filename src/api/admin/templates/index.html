@@ -1,0 +1,67 @@
+{% extends "sqladmin/layout.html" %}
+
+{# The layout already nests this block inside `.row.row-deck.row-cards`. Wrap in
+   a plain container (as list.html does) so our own grid rows aren't stretched by
+   `row-deck`'s flex stretching — otherwise the metric cards collapse to ~1 char
+   wide. #}
+{% block content %}
+<div class="container-fluid">
+
+  <div class="row mb-3">
+    <div class="col-12">
+      <h2 class="page-title">Dashboard</h2>
+      <div class="text-secondary mt-1">
+        Welcome to NUMU Admin — {{ admin.views | length }} models across your platform.
+      </div>
+    </div>
+  </div>
+
+  {# ── Headline metric cards ─────────────────────────────────────────── #}
+  <div class="row row-cards">
+    {% for m in metrics %}
+    <div class="col-6 col-sm-4 col-xl-2">
+      <a class="card card-sm" href="{{ url_for('admin:list', identity=m.slug) }}">
+        <div class="card-body">
+          <div class="row align-items-center flex-nowrap">
+            <div class="col-auto">
+              <span class="bg-primary text-white avatar"><i class="{{ m.icon }}"></i></span>
+            </div>
+            <div class="col text-truncate">
+              <div class="h1 mb-0">{{ m.count if m.count is not none else '—' }}</div>
+              <div class="text-secondary text-truncate">{{ m.label }}</div>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ── Browse every model, grouped by section ────────────────────────── #}
+  <div class="row row-cards mt-3">
+    {% for category, items in admin.views | groupby('category') %}
+    <div class="col-md-6 col-xl-4">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">{{ category or 'Other' }}</h3>
+          <span class="badge bg-secondary-lt ms-2">{{ items | list | length }}</span>
+        </div>
+        <div class="list-group list-group-flush">
+          {% for v in items %}
+          <a class="list-group-item list-group-item-action d-flex align-items-center"
+             href="{{ url_for('admin:list', identity=v.identity) }}">
+            <i class="{{ v.icon or 'fa-solid fa-table' }} text-secondary me-2"></i>
+            <span class="text-truncate">{{ v.name_plural }}</span>
+            {% if not v.can_edit and not v.can_create %}
+            <span class="badge bg-secondary-lt ms-auto">read-only</span>
+            {% endif %}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+{% endblock %}
