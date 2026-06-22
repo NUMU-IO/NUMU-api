@@ -21,6 +21,11 @@ from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.external_services.password_service import password_service
 
+# Windows terminals default to cp1252 and crash on the ✅/❌ emoji printed below
+# (UnicodeEncodeError). Force UTF-8 so the script runs in any console.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 def validate_email(email: str) -> bool:
     """Validate email format."""
