@@ -89,6 +89,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
 
+    # Relaxed CSP for the SQLAdmin panel. /admin renders HTML and loads its own
+    # same-origin CSS/JS/fonts from /admin/statics; the default `default-src
+    # 'none'` blocks all of them, leaving the page completely unstyled.
+    ADMIN_CSP = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+
     async def dispatch(
         self,
         request: Request,
@@ -108,11 +123,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Use relaxed CSP for API documentation pages in debug mode
         is_docs_path = request.url.path in self.DOCS_PATHS
+        # /admin is the SQLAdmin panel — HTML UI loading its own same-origin assets
+        is_admin_path = request.url.path.startswith("/admin")
         # /uploads/ serves static assets that must be loadable from storefront/dashboard origins
         is_uploads_path = request.url.path.startswith("/uploads/")
         self._add_security_headers(
             response,
             use_docs_csp=is_docs_path,
+            use_admin_csp=is_admin_path,
             is_public_asset=is_uploads_path,
         )
 
@@ -123,6 +141,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response: Response,
         *,
         use_docs_csp: bool = False,
+        use_admin_csp: bool = False,
         is_public_asset: bool = False,
     ) -> None:
         """Add all security headers to the response.
@@ -150,7 +169,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Content-Security-Policy: Control resources the browser can load
         # Mitigates XSS, data injection, and other attacks
-        csp = self.DOCS_CSP if use_docs_csp else self.csp
+        if use_docs_csp:
+            csp = self.DOCS_CSP
+        elif use_admin_csp:
+            csp = self.ADMIN_CSP
+        else:
+            csp = self.csp
         response.headers["Content-Security-Policy"] = csp
 
         # X-XSS-Protection: Legacy XSS filter (deprecated but still useful)

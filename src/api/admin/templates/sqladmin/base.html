@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  {% block head_meta %}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  {% endblock %}
+  {# Dark mode — set data-bs-theme BEFORE stylesheets load to avoid a flash of
+     light theme. Honors a saved choice, else the OS preference. #}
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('numu-admin-theme');
+        var dark = saved ? saved === 'dark'
+                         : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.setAttribute('data-bs-theme', 'dark');
+      } catch (e) {}
+    })();
+  </script>
+  {% block head_css %}
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/tabler.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/tabler-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/fontawesome.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/select2.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/flatpickr.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/main.css') }}">
+  {% endblock %}
+  {% if admin.favicon_url %}
+  <link rel="icon" href="{{ admin.favicon_url }}">
+  {% endif %}
+  <title>{{ admin.title }}</title>
+  {% block head %}{% endblock %}
+  {% block head_tail %}{% endblock %}
+</head>
+
+<body>
+  {% block body %}
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+  {% endblock %}
+
+  {# Floating light/dark toggle — works on every admin page #}
+  <button id="numu-theme-toggle" type="button" title="Toggle light / dark" aria-label="Toggle theme"
+    style="position:fixed;right:1rem;bottom:1rem;z-index:1080;border:0;border-radius:999px;width:42px;height:42px;
+           cursor:pointer;box-shadow:0 .25rem .75rem rgba(0,0,0,.3);background:#206bc4;color:#fff;font-size:1.15rem;line-height:1;">
+    🌓
+  </button>
+
+  {% block tail_js %}
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/jquery.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/tabler.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/select2.full.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/flatpickr.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/main.js') }}"></script>
+  {% endblock %}
+  <script>
+    (function () {
+      var btn = document.getElementById('numu-theme-toggle');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var el = document.documentElement;
+        if (el.getAttribute('data-bs-theme') === 'dark') {
+          el.removeAttribute('data-bs-theme');
+          try { localStorage.setItem('numu-admin-theme', 'light'); } catch (e) {}
+        } else {
+          el.setAttribute('data-bs-theme', 'dark');
+          try { localStorage.setItem('numu-admin-theme', 'dark'); } catch (e) {}
+        }
+      });
+    })();
+  </script>
+  {% block tail %}{% endblock %}
+</body>
+
+</html>

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from sqladmin import Admin
+from sqladmin.authentication import login_required
 from sqlalchemy import func, select, text
 from starlette.requests import Request
 from starlette.responses import Response
@@ -47,6 +48,7 @@ class DashboardAdmin(Admin):
     our own ``index.html`` (found first via ``templates_dir``) with live counts.
     """
 
+    @login_required
     async def index(self, request: Request) -> Response:
         from src.infrastructure.database.models import (
             CustomerModel,
