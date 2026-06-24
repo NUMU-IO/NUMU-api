@@ -316,6 +316,45 @@ def _run_in_docker(theme_dir: Path, timeout: int = 300) -> subprocess.CompletedP
     )
 
 
+def _maybe_render_gate_host(theme_dir: Path) -> None:
+    """Render gate for the NON-docker (host) build path.
+
+    The docker path renders inside the sandbox (entrypoint), so this only runs
+    for host builds (dev / test-staging where USE_DOCKER is false). Gated by
+    NUMU_THEME_RENDER_GATE. Skips safely if the invoker script or node is
+    missing (so enabling the flag never hard-breaks a misconfigured worker);
+    only a real render failure raises.
+    """
+    if os.getenv("NUMU_THEME_RENDER_GATE", "0") != "1" or USE_DOCKER:
+        return
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "docker"
+        / "theme-builder"
+        / "verify_theme_render.mjs"
+    )
+    node = shutil.which("node")
+    if not script.exists() or not node:
+        logger.warning(
+            "render gate enabled but %s — skipping host render",
+            "node not on PATH" if not node else f"{script} missing",
+        )
+        return
+    proc = subprocess.run(  # nosec B603 — fixed argv, no shell
+        [node, str(script), str(theme_dir)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if proc.stdout:
+        logger.info("render-gate: %s", proc.stdout.strip()[:2000])
+    if proc.returncode != 0:
+        raise ThemeBuildError(
+            "Render verification failed: "
+            + (proc.stdout or proc.stderr or "").strip()[:500]
+        )
+
+
 def _run_local_build(
     theme_dir: Path, timeout: int = 300
 ) -> subprocess.CompletedProcess:
@@ -574,6 +613,10 @@ def build_theme_from_zip(
             raise ThemeBuildError(
                 "Theme contract validation failed: " + "; ".join(contract_errors)
             )
+
+        # ── Render gate (host path) ─────────────────────────────────────────
+        # Docker builds render inside the sandbox; host builds render here.
+        _maybe_render_gate_host(theme_dir)
 
         # ── Compute checksum ────────────────────────────────────────────────
         bundle_bytes = bundle_path.read_bytes()
