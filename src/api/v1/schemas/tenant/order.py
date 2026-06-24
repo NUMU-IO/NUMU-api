@@ -59,8 +59,11 @@ class OrderAddressRequest(BaseModel):
     first_name: SanitizedStr = Field(
         ..., min_length=1, max_length=100, description="Recipient first name"
     )
-    last_name: SanitizedStr = Field(
-        ..., min_length=1, max_length=100, description="Recipient last name"
+    # Optional: the merchant can disable the last-name field in Checkout
+    # Fields (only first_name/phone/address/governorate are locked-enabled),
+    # so the storefront may legitimately send it empty. Kept length-capped.
+    last_name: SanitizedStr | None = Field(
+        "", max_length=100, description="Recipient last name (optional)"
     )
     address_line1: SanitizedStr = Field(
         ..., min_length=1, max_length=255, description="Street address line 1"
@@ -68,8 +71,10 @@ class OrderAddressRequest(BaseModel):
     address_line2: SanitizedStr | None = Field(
         None, max_length=255, description="Apartment, suite, floor, etc."
     )
-    city: SanitizedStr = Field(
-        ..., min_length=1, max_length=100, description="City name"
+    # Optional for the same reason — the "area" field maps to city and is not
+    # locked-enabled. EG zones resolve by governorate (`state`), not city.
+    city: SanitizedStr | None = Field(
+        "", max_length=100, description="City / area (optional)"
     )
     state: str | None = Field(None, max_length=100, description="State or governorate")
     postal_code: str | None = Field(
@@ -135,6 +140,14 @@ class OrderAddressRequest(BaseModel):
         if v is None:
             return None
         return v.strip() or None
+
+    @field_validator("last_name", "city", mode="before")
+    @classmethod
+    def _optional_name_to_empty(cls, v: object) -> object:
+        # last_name / city are optional (merchant can disable them) but the
+        # order-address columns are NOT NULL — coerce a missing/None value to
+        # "" so a disabled field never trips a DB constraint.
+        return "" if v is None else v
 
     @model_validator(mode="after")
     def _check_postal_against_country(self) -> "OrderAddressRequest":
