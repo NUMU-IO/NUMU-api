@@ -559,6 +559,17 @@ def build_theme_from_zip(
         if violations:
             raise ThemeBuildError(f"Security scan failed: {'; '.join(violations[:5])}")
 
+        # ── Theme-contract gate ─────────────────────────────────────────────
+        # Validate the emitted dist manifest/import-map against the platform
+        # contract before publishing the bundle.
+        from src.core.theme_contract import validate_dist_bundle
+
+        contract_errors = validate_dist_bundle(dist)
+        if contract_errors:
+            raise ThemeBuildError(
+                "Theme contract validation failed: " + "; ".join(contract_errors)
+            )
+
         # ── Compute checksum ────────────────────────────────────────────────
         bundle_bytes = bundle_path.read_bytes()
         checksum = hashlib.sha256(bundle_bytes).hexdigest()

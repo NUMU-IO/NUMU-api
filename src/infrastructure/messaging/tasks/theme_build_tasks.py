@@ -232,6 +232,19 @@ def build_external_theme(
         if violations:
             raise ValueError(f"Security scan failed: {'; '.join(violations)}")
 
+        # ── Step 5.5: Theme-contract gate ────────────────────────────────
+        # Validate the emitted dist/manifest.json + dist/import-map.json
+        # against the platform contract (manifest fields, preset→section
+        # coverage, contract-version compat). Defends against a bundle built
+        # by a bypassed/old plugin even though the plugin also self-checks.
+        from src.core.theme_contract import validate_dist_bundle
+
+        contract_errors = validate_dist_bundle(dist_dir)
+        if contract_errors:
+            raise ValueError(
+                "Theme contract validation failed: " + "; ".join(contract_errors)
+            )
+
         # ── Step 6: Upload to CDN ────────────────────────────────────────
         _update_build_status(build_id, status="uploading")
         logger.info("Uploading theme bundle to CDN")
