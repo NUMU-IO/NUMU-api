@@ -2379,11 +2379,24 @@ async def checkout(
     except Exception as e:
         logger.warning(f"Failed to dispatch fraud check task: {e}")
 
-    # Clear the customer's cart only after the entire checkout succeeds
+    # Clear the cart only after the entire checkout succeeds.
     from src.infrastructure.repositories.cart_repository import RedisCartRepository
 
     _checkout_cart_repo = RedisCartRepository()
     await _checkout_cart_repo.delete_by_customer_id(current_customer.id, store_id)
+    # Guest carts are keyed by the `numu_cart_session` cookie (see
+    # _cart_owner.CART_SESSION_COOKIE), NOT by customer_id — so for a guest
+    # checkout the line above is a no-op and the cart would survive. Clear the
+    # session-keyed cart too so the buyer's cart empties after the order.
+    _cart_session = http_request.cookies.get("numu_cart_session")
+    if _cart_session:
+        try:
+            await _checkout_cart_repo.delete(_cart_session, store_id)
+        except Exception as _cart_clear_exc:  # noqa: BLE001 — best-effort cleanup
+            logger.warning(
+                "Failed to clear guest cart session after checkout: %s",
+                _cart_clear_exc,
+            )
 
     checkout_response = CheckoutResponse(
         order_id=str(created_order.id),
