@@ -16,6 +16,11 @@ FROM node:20-slim
 # Install acorn globally for the AST scanner that runs post-build
 RUN npm install -g acorn@8
 
+# Render-gate invoker (theme-enforcement Phase 2). Runs the theme's own
+# @numueg/theme-sdk /verify harness against the built SSR bundle inside this
+# same sandboxed container when NUMU_THEME_RENDER_GATE=1.
+COPY verify_theme_render.mjs /opt/verify_theme_render.mjs
+
 # Create unprivileged user
 RUN groupadd --gid 1000 numu && \
     useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash numu

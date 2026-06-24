@@ -299,6 +299,11 @@ def _run_in_docker(theme_dir: Path, timeout: int = 300) -> subprocess.CompletedP
             "--user=1000:1000",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
+            # Phase 2 render gate (default off). When "1", the entrypoint
+            # SSR-renders every template against fixtures inside this sandbox
+            # and fails the build on any crashing/empty template.
+            "-e",
+            f"NUMU_THEME_RENDER_GATE={os.getenv('NUMU_THEME_RENDER_GATE', '0')}",
             "-v",
             f"{theme_dir}:/theme-src:ro",
             "-v",
