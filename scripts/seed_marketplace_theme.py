@@ -173,7 +173,9 @@ async def seed() -> None:
             "settings_schema": settings_schema,
             "section_schemas": section_schemas,
             "presets": presets,
-            "status": "approved",
+            # `published` (not `approved`): install/update reads the latest
+            # PUBLISHED version, so this is what surfaces as an available update.
+            "status": "published",
             "checksum": checksum,
         }
 
