@@ -71,7 +71,12 @@ def promotion_to_output(
     )
 
 
-def promotion_to_list_item(promo: Promotion) -> PromotionListItemOutput:
+def promotion_to_list_item(
+    promo: Promotion,
+    *,
+    code: str | None = None,
+    usage_count: int = 0,
+) -> PromotionListItemOutput:
     return PromotionListItemOutput(
         id=promo.id,
         name=promo.name,
@@ -82,6 +87,9 @@ def promotion_to_list_item(promo: Promotion) -> PromotionListItemOutput:
         ends_at=promo.ends_at,
         version=promo.version,
         coupon_id=promo.coupon_id,
+        code=code,
+        usage_count=usage_count,
+        discount_rule=promo.discount_rule,
         created_at=promo.created_at,
         updated_at=promo.updated_at,
     )

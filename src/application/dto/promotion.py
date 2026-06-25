@@ -213,6 +213,13 @@ class PromotionListItemOutput(BaseModel):
     ends_at: datetime | None = None
     version: int
     coupon_id: UUID | None = None
+    # Enriched for the merchant "Discounts" table so it can show the code,
+    # the discount value, and how many times it's been used — like the old
+    # coupons list. `code`/`usage_count` come from the linked coupon (null
+    # for automatic discounts); `discount_rule` is on the promotion itself.
+    code: str | None = None
+    usage_count: int = 0
+    discount_rule: DiscountRule | None = None
     created_at: datetime
     updated_at: datetime
 

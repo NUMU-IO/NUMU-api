@@ -218,6 +218,7 @@ async def create_preview_token(
 async def list_promotions(
     store: Annotated[Store, Depends(verify_store_ownership)],
     promo_repo: Annotated[PromotionRepository, Depends(get_promotion_repository)],
+    coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
     status_filter: Annotated[
         PromotionStatus | None,
         Query(alias="status", description="Filter by status"),
@@ -228,7 +229,7 @@ async def list_promotions(
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SuccessResponse[PromotionListOutput]:
-    use_case = ListPromotionsUseCase(promotion_repo=promo_repo)
+    use_case = ListPromotionsUseCase(promotion_repo=promo_repo, coupon_repo=coupon_repo)
     page = await use_case.execute(
         store_id=store.id,
         status=status_filter,
