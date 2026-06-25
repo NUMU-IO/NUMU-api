@@ -84,6 +84,36 @@ def _safe_error_body(
     return _error_body(code, message, details)
 
 
+# Public, anonymous-facing surfaces. On these we keep validation details
+# hidden (an unauthenticated prober shouldn't get free schema hints); on
+# every other surface (merchant `/stores/*`, `/admin/*`, auth, …) we return
+# the sanitized field list so the merchant hub is self-diagnosing.
+_PUBLIC_SURFACE_MARKERS = ("/storefront/", "/public/")
+
+
+def _is_public_surface(path: str) -> bool:
+    return any(marker in path for marker in _PUBLIC_SURFACE_MARKERS)
+
+
+def _sanitize_validation_errors(exc: RequestValidationError) -> list[dict]:
+    """Reduce Pydantic's ``exc.errors()`` to a safe, JSON-serializable list.
+
+    Keeps only the field location, message, and error type — deliberately
+    DROPS ``input`` (which echoes the caller's submitted value) and ``ctx``
+    (which may carry a non-serializable ``ValueError`` and internal detail).
+    """
+    out: list[dict] = []
+    for err in exc.errors():
+        loc = err.get("loc") or ()
+        field = ".".join(str(p) for p in loc) if loc else "(request)"
+        out.append({
+            "field": field,
+            "message": err.get("msg", "Invalid value"),
+            "type": err.get("type", "value_error"),
+        })
+    return out
+
+
 async def error_handler_middleware(request: Request, call_next: Callable):
     """Global error handling middleware."""
     try:
@@ -103,14 +133,25 @@ def setup_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(request: Request, exc: RequestValidationError):
-        """Override FastAPI default to prevent verbose field-level detail leak."""
-        logger.warning("Request validation failed: %s", exc.errors())
+        """Surface which fields failed on trusted (merchant/admin) surfaces.
+
+        The full ``exc.errors()`` is always logged. In the response we include
+        a SANITIZED field list (path + message + type, never the submitted
+        value) on non-public surfaces or in debug — so the merchant hub is
+        self-diagnosing — and suppress it on public storefront endpoints to
+        avoid handing anonymous probers schema hints.
+        """
+        logger.warning(
+            "Request validation failed on %s: %s", request.url.path, exc.errors()
+        )
+        show_details = settings.debug or not _is_public_surface(request.url.path)
+        details = _sanitize_validation_errors(exc) if show_details else None
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content=_safe_error_body(
+            content=_error_body(
                 "VALIDATION_ERROR",
                 "Request validation failed",
-                exc.errors(),
+                details,
             ),
         )
 
