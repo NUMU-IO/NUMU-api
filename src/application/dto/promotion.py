@@ -96,6 +96,12 @@ class CreatePromotionInput(BaseModel):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
 
+    # Usage caps — enforced by the eligibility checker via convert-event
+    # counts. `usage_limit_total` = platform-wide budget; `_per_customer`
+    # = per-customer cap. Null = unlimited.
+    usage_limit_total: int | None = Field(default=None, ge=1)
+    usage_limit_per_customer: int | None = Field(default=None, ge=1)
+
 
 class UpdatePromotionInput(BaseModel):
     """Payload for `PATCH /stores/{id}/promotions/{pid}`.
@@ -119,6 +125,8 @@ class UpdatePromotionInput(BaseModel):
     priority: int | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
+    usage_limit_total: int | None = Field(default=None, ge=1)
+    usage_limit_per_customer: int | None = Field(default=None, ge=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -182,6 +190,8 @@ class PromotionOutput(BaseModel):
     priority: int
     starts_at: datetime | None = None
     ends_at: datetime | None = None
+    usage_limit_total: int | None = None
+    usage_limit_per_customer: int | None = None
     version: int
     created_at: datetime
     updated_at: datetime

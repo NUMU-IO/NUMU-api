@@ -108,6 +108,8 @@ class CreatePromotionUseCase:
             priority=payload.priority,
             starts_at=payload.starts_at,
             ends_at=payload.ends_at,
+            usage_limit_total=payload.usage_limit_total,
+            usage_limit_per_customer=payload.usage_limit_per_customer,
             created_by=actor_user_id,
             updated_by=actor_user_id,
         )

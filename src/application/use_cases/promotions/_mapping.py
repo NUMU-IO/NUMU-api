@@ -62,6 +62,8 @@ def promotion_to_output(
         priority=promo.priority,
         starts_at=promo.starts_at,
         ends_at=promo.ends_at,
+        usage_limit_total=promo.usage_limit_total,
+        usage_limit_per_customer=promo.usage_limit_per_customer,
         version=promo.version,
         created_at=promo.created_at,
         updated_at=promo.updated_at,

@@ -70,6 +70,10 @@ class UpdatePromotionUseCase:
             current.starts_at = payload.starts_at
         if payload.ends_at is not None:
             current.ends_at = payload.ends_at
+        if payload.usage_limit_total is not None:
+            current.usage_limit_total = payload.usage_limit_total
+        if payload.usage_limit_per_customer is not None:
+            current.usage_limit_per_customer = payload.usage_limit_per_customer
         if payload.coupon_id is not None:
             # When the caller sends coupon_id explicitly, validate it.
             coupon = await self._coupon_repo.get_by_id(payload.coupon_id)
