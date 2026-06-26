@@ -1,0 +1,60 @@
+{
+  "name": "knowledge_refresh",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "knowledge_refresh", "options": {} },
+      "id": "webhook-trigger",
+      "name": "Webhook (HMAC trigger from NUMU-api)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NUMU_API_URL}}/api/v1/agent/knowledge/refresh",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Knowledge-Secret", "value": "={{$env.AGENT_KNOWLEDGE_UPSERT_SECRET}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"source_kind\":\"authored\"}",
+        "options": {}
+      },
+      "id": "refresh-authored",
+      "name": "Rebuild authored Layer A corpus",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NUMU_API_URL}}/api/v1/agent/workflows/callback",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"run_id\":\"{{$json.run_id}}\",\"tenant_id\":\"{{$json.tenant_id}}\",\"status\":\"succeeded\",\"result\":{{$json}}}",
+        "options": {}
+      },
+      "id": "callback",
+      "name": "Report back to NUMU-api callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    }
+  ],
+  "connections": {
+    "Webhook (HMAC trigger from NUMU-api)": {
+      "main": [[{ "node": "Rebuild authored Layer A corpus", "type": "main", "index": 0 }]]
+    },
+    "Rebuild authored Layer A corpus": {
+      "main": [[{ "node": "Report back to NUMU-api callback", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "_comment": "On publish + periodic sweep. Rebuilds the authored in-repo corpus into Layer A (idempotent — re-runs skip unchanged docs by content_hash)."
+}

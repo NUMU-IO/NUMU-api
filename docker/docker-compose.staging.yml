@@ -90,7 +90,7 @@ services:
   # PostgreSQL with WAL Archiving
   # ===========================================================================
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16  # pgvector for NUMU-knowledge RAG (spec 002); CREATE EXTENSION runs in the Alembic migration
     container_name: numu-postgres-staging
     restart: unless-stopped
     environment:

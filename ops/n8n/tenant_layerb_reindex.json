@@ -1,0 +1,60 @@
+{
+  "name": "tenant_layerb_reindex",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "tenant_layerb_reindex", "options": {} },
+      "id": "webhook-trigger",
+      "name": "Webhook (HMAC trigger, carries tenant_id)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NUMU_API_URL}}/api/v1/agent/knowledge/tenant-reindex",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Knowledge-Secret", "value": "={{$env.AGENT_KNOWLEDGE_UPSERT_SECRET}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"tenant_id\":\"{{$json.tenant_id}}\",\"store_id\":\"{{$json.params.store_id}}\",\"scope\":\"{{$json.params.scope}}\"}",
+        "options": {}
+      },
+      "id": "reindex",
+      "name": "Re-embed this tenant's Layer B (RLS server-side)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NUMU_API_URL}}/api/v1/agent/workflows/callback",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"run_id\":\"{{$json.run_id}}\",\"tenant_id\":\"{{$json.tenant_id}}\",\"status\":\"succeeded\",\"result\":{{$json}}}",
+        "options": {}
+      },
+      "id": "callback",
+      "name": "Report back to NUMU-api callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    }
+  ],
+  "connections": {
+    "Webhook (HMAC trigger, carries tenant_id)": {
+      "main": [[{ "node": "Re-embed this tenant's Layer B (RLS server-side)", "type": "main", "index": 0 }]]
+    },
+    "Re-embed this tenant's Layer B (RLS server-side)": {
+      "main": [[{ "node": "Report back to NUMU-api callback", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "_comment": "Triggered on a store-change event (carries tenant_id). NUMU-api enforces tenant isolation (RLS) server-side; the workflow never sees another tenant's data. A merchant's reindex never touches another tenant (SC-005)."
+}

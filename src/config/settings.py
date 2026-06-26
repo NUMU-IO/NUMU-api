@@ -139,6 +139,54 @@ class Settings(BaseSettings):
         password_part = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
+    # ── NUMU Agent (merchant copilot) ────────────────────────────────────────
+    # Pluggable LLM provider behind an OpenAI-compatible client (FR-012). The
+    # default is Groq's Llama 3.3 70B (free/low-cost); swap provider/model by
+    # config alone — no tool/business-logic change. A cheaper model may be used
+    # for trivial read chat via the optional router.
+    agent_enabled: bool = True
+    agent_llm_base_url: str = "https://api.groq.com/openai/v1"
+    agent_llm_api_key: str = ""
+    agent_llm_model: str = "llama-3.3-70b-versatile"
+    agent_llm_model_cheap: str | None = None  # optional cheap model for trivial chat
+    agent_llm_temperature: float = 0.2
+    agent_max_tool_iterations: int = 5  # cap the perceive→act loop (runaway guard)
+    agent_request_timeout_seconds: int = 30
+    # Free-tier rate-limit handling: queue/retry via Redis instead of failing hard.
+    agent_rate_limit_max_retries: int = 3
+    agent_rate_limit_backoff_seconds: float = 2.0
+    # NUMU-knowledge RAG (two layers: shared platform docs + per-tenant). Embeddings
+    # default to multilingual-e5-large (1024-dim). When agent_embed_url is unset, a
+    # deterministic local fallback embedder is used (dev/offline) — swap by config.
+    agent_embed_url: str = (
+        ""  # OpenAI-compatible /embeddings endpoint (e.g. a TEI server)
+    )
+    agent_embed_api_key: str = ""
+    agent_embed_model: str = "intfloat/multilingual-e5-large"
+    agent_embed_dim: int = 1024
+    agent_knowledge_top_k: int = 5
+    # Knowledge base (spec 002): pgvector is soft-added — retrieval falls back to the
+    # JSONB scan when the extension/column isn't present, so nothing breaks. The corpus
+    # coverage report flags areas with no published article or stale beyond this window.
+    agent_knowledge_staleness_days: int = 90
+    # Base URL of the developer docs ingested into Layer A (theme/SDK/CLI/API topics).
+    agent_docs_ingest_base_url: str = "https://docs.numueg.app"
+    # Shared secret n8n presents when upserting Layer A knowledge (server-side only).
+    agent_knowledge_upsert_secret: str = ""
+    # n8n orchestration lane (research R9): heavy/async/bulk work is offloaded to
+    # the existing self-hosted n8n via an ALLOW-LISTED webhook only. The LLM never
+    # calls n8n directly and can never invoke an arbitrary URL.
+    agent_n8n_base_url: str = "https://n8n.numueg.app"
+    agent_n8n_webhook_secret: str = ""  # signs triggers + verifies callbacks (HMAC)
+    # Allow-listed workflow names (LLM can never invoke an arbitrary URL). Spec 002 adds
+    # the knowledge ingestion/refresh + per-tenant Layer-B reindex lanes.
+    agent_n8n_allowed_workflows: list[str] = [
+        "ping",
+        "knowledge_ingest_docs",
+        "knowledge_refresh",
+        "tenant_layerb_reindex",
+    ]
+
     # Storefront cache (store + theme reads). Short TTL is the safety net;
     # explicit invalidation on mutation is the correctness mechanism.
     storefront_cache_enabled: bool = True

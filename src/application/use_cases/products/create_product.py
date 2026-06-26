@@ -343,4 +343,14 @@ class CreateProductUseCase:
             except Exception:
                 pass
 
+        # Refresh the merchant's Agent knowledge (Layer B) for the new catalog item
+        # (spec 002, FR-005). Best-effort + offloaded to the n8n reindex lane — never
+        # blocks or breaks product creation.
+        try:
+            from src.application.agent.knowledge.tenant_indexer import on_store_change
+
+            await on_store_change(store.tenant_id, store_id, scope="catalog")
+        except Exception:  # noqa: BLE001 — catalog write must succeed regardless
+            pass
+
         return ProductDTO.from_entity(created_product)
