@@ -1,0 +1,112 @@
+"""Domain interfaces for the NUMU Agent (Clean Architecture ports).
+
+Pure typing/protocols — implemented by the infrastructure layer. Keeping the
+LLM provider behind a Protocol is what makes the model layer swappable by config
+alone (Constitution V / FR-012).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+from uuid import UUID
+
+from src.core.agent.entities import (
+    ActionProposal,
+    AuditRecord,
+    Conversation,
+    Turn,
+)
+
+# ── LLM message / response value types ───────────────────────────────────────
+
+
+@dataclass
+class ChatMessage:
+    """One message in the model conversation.
+
+    ``role`` is one of: system | user | assistant | tool. ``tool_calls`` is set
+    on an assistant message that requested tools; ``tool_call_id``/``name`` are
+    set on a tool-result message.
+    """
+
+    role: str
+    content: str | None = None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_call_id: str | None = None
+    name: str | None = None
+
+
+@dataclass
+class ToolCall:
+    """A model-requested tool invocation."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class LLMResponse:
+    """Result of one model completion."""
+
+    content: str | None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    model: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+
+class LLMRateLimitError(Exception):
+    """Raised by a provider on HTTP 429 so the loop can queue/retry (FR-013)."""
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class LLMProviderError(Exception):
+    """Non-retryable provider failure (bad request, auth, 5xx after retries)."""
+
+
+class LLMProvider(Protocol):
+    """OpenAI-compatible chat-completions port with tool-calling support."""
+
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+    ) -> LLMResponse:
+        """Run one completion. Raises LLMRateLimitError on 429."""
+        ...
+
+
+# ── Persistence ports ─────────────────────────────────────────────────────────
+
+
+class ConversationRepository(Protocol):
+    async def create(self, conversation: Conversation) -> Conversation: ...
+    async def get(self, conversation_id: UUID) -> Conversation | None: ...
+    async def list_for_staff(
+        self, staff_id: UUID, *, limit: int = 50
+    ) -> list[Conversation]: ...
+
+
+class TurnRepository(Protocol):
+    async def add(self, turn: Turn) -> Turn: ...
+    async def list_for_conversation(self, conversation_id: UUID) -> list[Turn]: ...
+
+
+class ProposalRepository(Protocol):
+    async def add(self, proposal: ActionProposal) -> ActionProposal: ...
+    async def get(self, proposal_id: UUID) -> ActionProposal | None: ...
+    async def get_pending_for_conversation(
+        self, conversation_id: UUID
+    ) -> ActionProposal | None: ...
+
+
+class AuditRepository(Protocol):
+    async def add(self, record: AuditRecord) -> AuditRecord: ...

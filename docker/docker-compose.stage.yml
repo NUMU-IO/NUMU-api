@@ -49,7 +49,7 @@ services:
           memory: 1G
 
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16  # pgvector for NUMU-knowledge RAG (spec 002); CREATE EXTENSION runs in the Alembic migration
     container_name: numu-postgres-stage
     restart: unless-stopped
     environment:

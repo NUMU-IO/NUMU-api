@@ -1,5 +1,21 @@
 """Database models module."""
 
+from src.infrastructure.agent.knowledge.models import (  # noqa: E402
+    NumuKnowledgeChunkModel,
+    NumuKnowledgeDocModel,
+    TenantKnowledgeChunkModel,
+    TenantKnowledgeDocModel,
+    TenantNoteModel,
+)
+
+# NUMU Agent (merchant copilot) — imported here so the tables register on
+# Base.metadata for Alembic autogenerate consistency (migration is manual).
+from src.infrastructure.agent.persistence.models import (  # noqa: E402
+    AgentActionProposalModel,
+    AgentAuditLogModel,
+    AgentConversationModel,
+    AgentTurnModel,
+)
 from src.infrastructure.database.models.audit import AuditLogModel
 from src.infrastructure.database.models.base import (
     TenantMixin,
@@ -139,4 +155,14 @@ __all__ = [
     "ThemeVersionModel",
     "StoreThemeModel",
     "ThemeAssetModel",
+    # NUMU Agent
+    "AgentConversationModel",
+    "AgentTurnModel",
+    "AgentActionProposalModel",
+    "AgentAuditLogModel",
+    "NumuKnowledgeDocModel",
+    "NumuKnowledgeChunkModel",
+    "TenantKnowledgeDocModel",
+    "TenantKnowledgeChunkModel",
+    "TenantNoteModel",
 ]

@@ -34,6 +34,12 @@ URL Hierarchy:
 
 from fastapi import APIRouter
 
+# Store management routes (for store owners)
+from src.api.v1.agent.knowledge_routes import router as agent_knowledge_router
+from src.api.v1.agent.notes_routes import router as agent_notes_router
+from src.api.v1.agent.routes import router as agent_router
+from src.api.v1.agent.workflow_routes import router as agent_workflow_router
+
 # Admin routes (super admin only — waitlist, feedback)
 from src.api.v1.routes.admin import router as admin_router
 from src.api.v1.routes.auth import router as auth_router
@@ -183,8 +189,6 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront.cart_sdk_aliases import (
     router as storefront_cart_sdk_router,
 )
-
-# Store management routes (for store owners)
 from src.api.v1.routes.stores import router as stores_router
 from src.api.v1.routes.tenants import (
     admin_router as tenants_admin_router,
@@ -230,6 +234,16 @@ api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores")
+
+# NUMU Agent (merchant copilot) — store-scoped chat/history (SSE). The router
+# already carries the `/stores/{store_id}/agent` prefix.
+api_router.include_router(agent_router)
+# Agent merchant notes/FAQ (Layer B) — store-scoped, RBAC + RLS (spec 002).
+api_router.include_router(agent_notes_router)
+# Agent knowledge ingestion (Layer A) — secret-guarded, not store-scoped.
+api_router.include_router(agent_knowledge_router)
+# Agent n8n workflow callback — HMAC-verified, not store-scoped.
+api_router.include_router(agent_workflow_router)
 
 # Meta (Facebook/Instagram) OAuth for the business scopes — ads_management,
 # business_management, catalog_management, pages_show_list, instagram_basic.

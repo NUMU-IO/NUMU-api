@@ -1,0 +1,64 @@
+{
+  "name": "knowledge_ingest_docs",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "knowledge_ingest_docs",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (HMAC trigger from NUMU-api)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NUMU_API_URL}}/api/v1/agent/knowledge/refresh",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Knowledge-Secret", "value": "={{$env.AGENT_KNOWLEDGE_UPSERT_SECRET}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"source_kind\":\"docs\"}",
+        "options": {}
+      },
+      "id": "refresh-docs",
+      "name": "Refresh Layer A from docs.numueg.app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NUMU_API_URL}}/api/v1/agent/workflows/callback",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"run_id\":\"{{$json.run_id}}\",\"tenant_id\":\"{{$json.tenant_id}}\",\"status\":\"succeeded\",\"result\":{{$json}}}",
+        "options": {}
+      },
+      "id": "callback",
+      "name": "Report back to NUMU-api callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    }
+  ],
+  "connections": {
+    "Webhook (HMAC trigger from NUMU-api)": {
+      "main": [[{ "node": "Refresh Layer A from docs.numueg.app", "type": "main", "index": 0 }]]
+    },
+    "Refresh Layer A from docs.numueg.app": {
+      "main": [[{ "node": "Report back to NUMU-api callback", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "_comment": "Scheduled (e.g. daily) + manual. Crawls docs.numueg.app → Layer A. Import into n8n; the SQLite store is not the source of truth. The callback HMAC is verified by NUMU-api."
+}

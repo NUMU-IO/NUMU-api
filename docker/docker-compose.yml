@@ -35,7 +35,7 @@ services:
       - numu-network
 
   db:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15  # pgvector for NUMU-knowledge RAG (spec 002); CREATE EXTENSION runs in the Alembic migration
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
