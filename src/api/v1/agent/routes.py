@@ -30,6 +30,7 @@ from src.infrastructure.agent.persistence.repositories import (
     AuditRepository,
     ConversationRepository,
 )
+from src.infrastructure.database.connection import set_tenant_id
 
 _WRITE_PERMISSION = "themes.edit"
 
@@ -56,6 +57,13 @@ async def chat(
     locale = body.locale or "en"
 
     async def event_stream():
+        # A StreamingResponse body is iterated AFTER the endpoint returns, in a
+        # context where the request-scoped tenant ContextVar (set by the tenant
+        # middleware) has already been torn down. The agent repositories resolve
+        # the tenant via that ContextVar (get_tenant_id), so without re-seeding it
+        # here every persistence call fails closed with "No tenant context".
+        # Re-establish it from the authenticated ctx before streaming the turn.
+        set_tenant_id(ctx.tenant_id)
         try:
             async for event in stream_turn(
                 tenant_id=ctx.tenant_id,

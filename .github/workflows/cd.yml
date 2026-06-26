@@ -166,6 +166,52 @@ jobs:
           ${SNIPPET}SNIPPET_EOF
           REMOTE_SCRIPT
 
+      # NUMU Agent (specs 001/002) — idempotently upsert the agent LLM config
+      # into /opt/numu/.env.test. The API key is a GitHub secret; the OpenRouter
+      # base URL + model are non-secret literals. Same upsert mechanics as the
+      # WhatsApp step above: only non-empty keys are written, so a missing secret
+      # never blanks an existing manual entry, and repeated runs converge.
+      - name: Sync Agent LLM env vars to test droplet
+        env:
+          REMOTE_FILE: /opt/numu/.env.test
+          AGENT_ENABLED: "true"
+          AGENT_LLM_API_KEY: ${{ secrets.TEST_AGENT_LLM_API_KEY }}
+          AGENT_LLM_BASE_URL: https://openrouter.ai/api/v1
+          AGENT_LLM_MODEL: meta-llama/llama-3.3-70b-instruct
+        run: |
+          SNIPPET=""
+          for KEY in AGENT_ENABLED AGENT_LLM_API_KEY AGENT_LLM_BASE_URL AGENT_LLM_MODEL; do
+            VAL="${!KEY}"
+            if [ -n "$VAL" ]; then
+              SNIPPET+="${KEY}=${VAL}"$'\n'
+            else
+              echo "[agent-env] $KEY: no value set; leaving .env.test untouched for this key"
+            fi
+          done
+          if [ -z "$SNIPPET" ]; then
+            echo "[agent-env] No agent LLM values configured — skipping sync."
+            exit 0
+          fi
+          # See the WhatsApp step for why SNIPPET is embedded in the heredoc
+          # rather than piped (pipe + heredoc → heredoc wins, SNIPPET dropped).
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "FILE='${REMOTE_FILE}' bash -s" <<REMOTE_SCRIPT
+          set -e
+          if [ ! -f "\$FILE" ]; then
+            echo "[agent-env] \$FILE not found — bailing"; exit 1
+          fi
+          while IFS= read -r line; do
+            [ -z "\$line" ] && continue
+            key="\${line%%=*}"
+            grep -v "^\${key}=" "\$FILE" > "\${FILE}.tmp"
+            printf '%s\n' "\$line" >> "\${FILE}.tmp"
+            mv "\${FILE}.tmp" "\$FILE"
+            echo "[agent-env] upserted \${key} in \$FILE"
+          done <<'SNIPPET_EOF'
+          ${SNIPPET}SNIPPET_EOF
+          REMOTE_SCRIPT
+
       - name: Deploy to test DO Droplet
         env:
           NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
