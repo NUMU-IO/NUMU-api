@@ -22,10 +22,12 @@ from pydantic import BaseModel
 
 from src.api.dependencies.repositories import (
     get_order_repository,
+    get_product_repository,
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
 from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.repositories.product_repository import ProductRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
 
 router = APIRouter()
@@ -111,6 +113,7 @@ async def track_order(
     ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Public tracking view for an order. No auth required — protected
     only by the unguessable order UUID. Returns a sanitised subset of the
@@ -136,13 +139,32 @@ async def track_order(
     ship = order.shipping_address
     customer_name = f"{ship.first_name or ''} {ship.last_name or ''}".strip() or None
 
+    # Order line items don't snapshot the product image, so resolve the
+    # current primary image (absolute CDN URL) by product_id in one batch.
+    image_by_pid: dict[str, str] = {}
+    pids: list[UUID] = []
+    for li in order.line_items:
+        raw_pid = getattr(li, "product_id", None)
+        if not raw_pid:
+            continue
+        try:
+            pids.append(UUID(str(raw_pid)))
+        except (ValueError, TypeError):
+            continue
+    if pids:
+        for product in await product_repo.get_by_ids(pids):
+            if product.images:
+                image_by_pid[str(product.id)] = product.images[0]
+
     items = [
         TrackingLineItem(
             product_name=li.product_name,
             quantity=li.quantity,
             unit_price=li.unit_price,
             total=li.quantity * li.unit_price,
-            product_image_url=getattr(li, "product_image_url", None),
+            product_image_url=image_by_pid.get(
+                str(getattr(li, "product_id", "") or "")
+            ),
         )
         for li in order.line_items
     ]
