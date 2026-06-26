@@ -90,9 +90,20 @@ def _safe_error_body(
 # the sanitized field list so the merchant hub is self-diagnosing.
 _PUBLIC_SURFACE_MARKERS = ("/storefront/", "/public/")
 
+# Buyer-facing forms that are technically public but benefit from knowing
+# WHICH field failed — the storefront checkout highlights the offending
+# input instead of showing an opaque "Request validation failed". Still
+# sanitized (field + message + type only, never the submitted value), so
+# this leaks no schema beyond what the checkout form already posts.
+_PUBLIC_DETAIL_MARKERS = ("/checkout",)
+
 
 def _is_public_surface(path: str) -> bool:
     return any(marker in path for marker in _PUBLIC_SURFACE_MARKERS)
+
+
+def _public_surface_allows_details(path: str) -> bool:
+    return any(marker in path for marker in _PUBLIC_DETAIL_MARKERS)
 
 
 def _sanitize_validation_errors(exc: RequestValidationError) -> list[dict]:
@@ -139,12 +150,17 @@ def setup_exception_handlers(app: FastAPI) -> None:
         a SANITIZED field list (path + message + type, never the submitted
         value) on non-public surfaces or in debug — so the merchant hub is
         self-diagnosing — and suppress it on public storefront endpoints to
-        avoid handing anonymous probers schema hints.
+        avoid handing anonymous probers schema hints. Buyer-facing forms in
+        ``_PUBLIC_DETAIL_MARKERS`` (checkout) are an explicit exception so the
+        storefront can highlight the offending field.
         """
-        logger.warning(
-            "Request validation failed on %s: %s", request.url.path, exc.errors()
+        path = request.url.path
+        logger.warning("Request validation failed on %s: %s", path, exc.errors())
+        show_details = (
+            settings.debug
+            or not _is_public_surface(path)
+            or _public_surface_allows_details(path)
         )
-        show_details = settings.debug or not _is_public_surface(request.url.path)
         details = _sanitize_validation_errors(exc) if show_details else None
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
