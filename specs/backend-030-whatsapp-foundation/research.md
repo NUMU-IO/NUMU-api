@@ -71,10 +71,10 @@ The five spec-level `[NEEDS CLARIFICATION]` candidates were resolved interactive
     name="numu_api.whatsapp.dispatch_scheduled_send",
     bind=True,
     autoretry_for=(httpx.HTTPStatusError, httpx.NetworkError),
-    retry_backoff=True,           # exponential: 1, 2, 4, 8, 16... seconds
-    retry_backoff_max=600,        # cap each retry delay at 10 min
-    retry_jitter=True,            # ±50% jitter to avoid thundering herd
-    max_retries=5,                # 5 retries spanning ~25 minutes worst case
+    retry_backoff=True,  # exponential: 1, 2, 4, 8, 16... seconds
+    retry_backoff_max=600,  # cap each retry delay at 10 min
+    retry_jitter=True,  # ±50% jitter to avoid thundering herd
+    max_retries=5,  # 5 retries spanning ~25 minutes worst case
 )
 async def dispatch_scheduled_send(self, scheduled_send_id: str) -> None: ...
 ```

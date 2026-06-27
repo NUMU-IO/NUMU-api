@@ -125,6 +125,7 @@ As the spec 009 + spec 004 follow-up integration, `RecoverySucceededEvent` and `
 ```python
 # src/core/entities/flow_trigger_emission.py
 
+
 class FlowTriggerEmissionStatus(StrEnum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"
@@ -132,6 +133,7 @@ class FlowTriggerEmissionStatus(StrEnum):
     FAILED_TERMINAL = "failed_terminal"
     TERMINATED_UNINSTALL = "terminated_uninstall"
     SKIPPED_NOT_SUBSCRIBED = "skipped_not_subscribed"
+
 
 class FlowTriggerEmissionLog(Base):
     __tablename__ = "flow_trigger_emission_log"
@@ -146,9 +148,13 @@ class FlowTriggerEmissionLog(Base):
     attempted_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     succeeded_at: Mapped[datetime | None] = mapped_column(nullable=True)
     error_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    payload_snapshot: Mapped[dict] = mapped_column(JSONB)  # The exact payload sent (for debugging)
+    payload_snapshot: Mapped[dict] = mapped_column(
+        JSONB
+    )  # The exact payload sent (for debugging)
     __table_args__ = (
-        UniqueConstraint("store_id", "dedup_key", "trigger_handle", name="uq_flow_trigger_dedup"),
+        UniqueConstraint(
+            "store_id", "dedup_key", "trigger_handle", name="uq_flow_trigger_dedup"
+        ),
         Index("ix_flow_trigger_status_attempted", "status", "attempted_at"),
     )
 ```

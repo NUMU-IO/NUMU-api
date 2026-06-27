@@ -31,9 +31,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    campaign_channel = ENUM(
-        "email", "sms", name="campaignchannel", create_type=False
-    )
+    campaign_channel = ENUM("email", "sms", name="campaignchannel", create_type=False)
     campaign_channel.create(op.get_bind(), checkfirst=True)
 
     campaign_status = ENUM(
@@ -87,9 +85,7 @@ def upgrade() -> None:
         sa.Column("canceled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("total_recipients", sa.Integer, nullable=False, server_default="0"),
         sa.Column("sent_count", sa.Integer, nullable=False, server_default="0"),
-        sa.Column(
-            "delivered_count", sa.Integer, nullable=False, server_default="0"
-        ),
+        sa.Column("delivered_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("failed_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("note", sa.Text, nullable=True),
         sa.Column(
@@ -133,9 +129,7 @@ def upgrade() -> None:
         ["scheduled_at"],
         unique=False,
         schema="public",
-        postgresql_where=sa.text(
-            "status = 'scheduled' AND scheduled_at IS NOT NULL"
-        ),
+        postgresql_where=sa.text("status = 'scheduled' AND scheduled_at IS NOT NULL"),
     )
 
 

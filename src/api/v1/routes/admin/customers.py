@@ -121,7 +121,11 @@ async def list_customers(
     )
     not_excluded = CustomerModel.tenant_id.notin_(excluded_tenant_ids)
 
-    query = select(CustomerModel).options(selectinload(CustomerModel.store)).where(not_excluded)
+    query = (
+        select(CustomerModel)
+        .options(selectinload(CustomerModel.store))
+        .where(not_excluded)
+    )
     count_query = select(func.count(CustomerModel.id)).where(not_excluded)
 
     if store_id:

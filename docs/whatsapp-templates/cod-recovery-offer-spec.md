@@ -175,8 +175,10 @@ payment flow used by checkout, and promotions.
 `cod_recovery_service` must guarantee a non-empty `promo` (Meta §2 rule). Change:
 
 ```python
-promo = str(cod_trust.get("recovery_promo") or "").strip() \
-        or "Pay online to secure your order."
+promo = (
+    str(cod_trust.get("recovery_promo") or "").strip()
+    or "Pay online to secure your order."
+)
 ```
 
 (or localize the default by `store.default_language`).

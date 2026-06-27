@@ -218,10 +218,14 @@ async def list_orders(
     )
     not_excluded = OrderModel.tenant_id.notin_(excluded_tenant_ids)
 
-    query = select(OrderModel).options(
-        selectinload(OrderModel.customer),
-        selectinload(OrderModel.store),
-    ).where(not_excluded)
+    query = (
+        select(OrderModel)
+        .options(
+            selectinload(OrderModel.customer),
+            selectinload(OrderModel.store),
+        )
+        .where(not_excluded)
+    )
     count_query = select(func.count(OrderModel.id)).where(not_excluded)
 
     # Filters
@@ -426,9 +430,7 @@ async def delete_order(
     proofs, refunds, shipments, and returns are deleted. Invoices and
     abandoned checkouts have their order_id set to NULL.
     """
-    result = await db.execute(
-        select(OrderModel).where(OrderModel.id == order_id)
-    )
+    result = await db.execute(select(OrderModel).where(OrderModel.id == order_id))
     order = result.scalars().first()
 
     if not order:

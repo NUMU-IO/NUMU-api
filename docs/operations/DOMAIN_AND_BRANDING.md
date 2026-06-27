@@ -193,13 +193,16 @@ centralizing via a `BASE_DOMAIN` setting:
 # src/config/settings.py
 base_domain: str = "numu.io"
 
+
 @property
 def api_url(self) -> str:
     return f"https://api.{self.base_domain}"
 
+
 @property
 def frontend_url(self) -> str:
     return f"https://app.{self.base_domain}"
+
 
 def store_url(self, subdomain: str) -> str:
     return f"https://{subdomain}.{self.base_domain}"

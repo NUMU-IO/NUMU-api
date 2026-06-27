@@ -216,7 +216,9 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict:
                 # with the per-product SAVEPOINT, this means a problem
                 # on row 1 no longer cascades through rows 2-5.
                 logger.exception(
-                    "demo_seed_product_failed: %s (slug=%s)", name_en, f"demo-{slug}",
+                    "demo_seed_product_failed: %s (slug=%s)",
+                    name_en,
+                    f"demo-{slug}",
                 )
                 errors.append({
                     "name": name_en,
@@ -284,5 +286,7 @@ async def remove_demo_catalog(store_id: UUID) -> int:
         for row in rows:
             await session.delete(row)
         await session.commit()
-    logger.info("demo_catalog_removed", extra={"store_id": str(store_id), "count": len(rows)})
+    logger.info(
+        "demo_catalog_removed", extra={"store_id": str(store_id), "count": len(rows)}
+    )
     return len(rows)

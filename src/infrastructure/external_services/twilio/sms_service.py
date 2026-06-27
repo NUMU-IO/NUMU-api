@@ -93,9 +93,7 @@ class TwilioSMSService:
                 )
             if res.status_code in (200, 201):
                 payload: dict[str, Any] = res.json()
-                return SMSDeliveryResult(
-                    success=True, provider_id=payload.get("sid")
-                )
+                return SMSDeliveryResult(success=True, provider_id=payload.get("sid"))
             return SMSDeliveryResult(
                 success=False,
                 error=f"Twilio HTTP {res.status_code}: {res.text[:200]}",
