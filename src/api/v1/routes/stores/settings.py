@@ -1,6 +1,7 @@
 """Store settings routes."""
 
 import base64
+import hashlib
 import logging
 import re
 import uuid
@@ -8,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel, Field
 
 from src.api.dependencies import (
     get_current_store,
@@ -570,6 +572,107 @@ async def update_cod_trust_settings_endpoint(
     return SuccessResponse(
         data=CodTrustResponse(**cod_trust),
         message="COD trust settings updated",
+    )
+
+
+# ============ Storefront password protection ============
+#
+# A pre-launch "password page" gate, Shopify-style. Stored under
+# ``store.settings.password_protected = {enabled, password_hash}`` — the
+# same shape the Next.js storefront reads (src/lib/store-lock.ts) and the
+# /api/storefront/unlock route compares against. We hash server-side with
+# SHA-256 hex so the plaintext is never persisted, matching the
+# storefront's ``hashPassword`` (sha256 of the visitor's input).
+
+
+class StorefrontPasswordResponse(BaseModel):
+    enabled: bool
+    has_password: bool
+
+
+class UpdateStorefrontPasswordRequest(BaseModel):
+    enabled: bool
+    # Plaintext; only sent when setting/changing the password. Omit to keep
+    # the existing password while toggling ``enabled``.
+    password: str | None = Field(default=None, max_length=200)
+
+
+def _password_protected(store_settings: dict | None) -> dict:
+    raw = (store_settings or {}).get("password_protected") or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+@router.get(
+    "/storefront-password",
+    response_model=SuccessResponse[StorefrontPasswordResponse],
+    summary="Get storefront password-protection status",
+    operation_id="get_storefront_password",
+)
+async def get_storefront_password(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Return whether the storefront is password-protected (never the hash)."""
+    pp = _password_protected(store.settings)
+    return SuccessResponse(
+        data=StorefrontPasswordResponse(
+            enabled=bool(pp.get("enabled")),
+            has_password=bool(pp.get("password_hash")),
+        ),
+        message="Storefront password status retrieved",
+    )
+
+
+@router.put(
+    "/storefront-password",
+    response_model=SuccessResponse[StorefrontPasswordResponse],
+    summary="Enable/disable storefront password & set the password",
+    operation_id="update_storefront_password",
+)
+async def update_storefront_password(
+    request: UpdateStorefrontPasswordRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
+):
+    """Set the storefront's pre-launch password gate.
+
+    Hashes the password (SHA-256) server-side and stores it under
+    ``settings.password_protected``. Disabling keeps the hash so the merchant
+    can re-enable without retyping. Refuses to enable without a password.
+    """
+    settings = dict(store.settings) if store.settings else {}
+    pp = dict(_password_protected(settings))
+
+    if request.password is not None and request.password.strip():
+        pp["password_hash"] = hashlib.sha256(
+            request.password.encode("utf-8")
+        ).hexdigest()
+
+    if request.enabled and not pp.get("password_hash"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Set a password before enabling protection.",
+        )
+
+    pp["enabled"] = bool(request.enabled)
+    settings["password_protected"] = pp
+    store.settings = settings
+    await store_repo.update(store)
+
+    # Storefront reads the gate from the cached store payload — bust it so
+    # the change takes effect on the next request.
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
+
+    return SuccessResponse(
+        data=StorefrontPasswordResponse(
+            enabled=pp["enabled"],
+            has_password=bool(pp.get("password_hash")),
+        ),
+        message="Storefront password updated",
     )
 
 

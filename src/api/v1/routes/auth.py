@@ -788,6 +788,20 @@ async def get_current_user(
         except Exception:
             pass  # Missing config row → flag simply absent (tab hidden).
 
+        # Platform-wide AI Assistant widget toggle (super-admin → platform
+        # settings). Default ON so the hub shows it unless explicitly hidden.
+        try:
+            from src.api.v1.routes.admin.platform_settings import (
+                get_platform_settings,
+            )
+
+            _ps = await get_platform_settings(db)
+            platform_flags["assistant_enabled"] = bool(
+                _ps.get("assistant_enabled", True)
+            )
+        except Exception:
+            pass  # On any error the hub defaults to showing the assistant.
+
         if tenant:
             tenant_info = TenantInfoResponse(
                 id=str(tenant.id),
