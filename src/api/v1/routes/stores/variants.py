@@ -180,6 +180,35 @@ async def _load_product_for_store(
     return product
 
 
+async def _sync_product_base_price(
+    session: AsyncSession,
+    product_repo: ProductRepository,
+    product,
+) -> None:
+    """Keep the product's base price equal to its cheapest variant.
+
+    The storefront LISTING shows ``product.price`` while the PDP shows the
+    selected variant — so a product whose base price drifts from its variants
+    (e.g. base 1200 SAR, variant 12 SAR) renders two different prices. After
+    any variant change we recompute the base from the variants.
+
+    Unit bridge: a variant's ``price.amount`` is CENTS (repo stores it raw;
+    see the variant-money memory note), whereas a product's ``price`` is built
+    from MAJOR units — so we go through ``Money.from_cents``. No-op when the
+    product has no variants (keeps the merchant's manual base price).
+    """
+    repo = VariantRepository(session)
+    variants = await repo.list_for_product(product.id)
+    cents = [int(v.price.amount) for v in variants if v.price is not None]
+    if not cents:
+        return
+    new_price = Money.from_cents(min(cents), product.price.currency)
+    if new_price.cents == product.price.cents:
+        return
+    product.price = new_price
+    await product_repo.update(product)
+
+
 # ─── Routes ───────────────────────────────────────────────────────────
 
 
@@ -247,6 +276,7 @@ async def create_variant_route(
         weight=request.weight_g,
         metadata=request.metadata,
     )
+    await _sync_product_base_price(session, product_repo, product)
     await session.commit()
     return _to_response(variant)
 
@@ -268,7 +298,7 @@ async def update_variant_route(
     """Partial update — only fields explicitly present in the body
     are written. Use null to clear nullable fields (sku, barcode,
     cost_price, etc.)."""
-    await _load_product_for_store(product_id, store, product_repo)
+    product = await _load_product_for_store(product_id, store, product_repo)
     repo = VariantRepository(session)
     existing = await repo.get_by_id(variant_id)
     if existing is None or existing.product_id != product_id:
@@ -322,6 +352,7 @@ async def update_variant_route(
         existing.metadata = body["metadata"] or {}
 
     updated = await repo.update(existing)
+    await _sync_product_base_price(session, product_repo, product)
     await session.commit()
     return _to_response(updated)
 
@@ -344,7 +375,7 @@ async def delete_variant_route(
     by an active cart line; that surfaces as a 500 today. If we hit
     that in practice we'll need to either soft-delete (add deleted_at)
     or null-out the cart references first."""
-    await _load_product_for_store(product_id, store, product_repo)
+    product = await _load_product_for_store(product_id, store, product_repo)
     repo = VariantRepository(session)
     existing = await repo.get_by_id(variant_id)
     if existing is None or existing.product_id != product_id:
@@ -353,4 +384,5 @@ async def delete_variant_route(
             detail="Variant not found",
         )
     await repo.delete_by_id(variant_id)
+    await _sync_product_base_price(session, product_repo, product)
     await session.commit()
