@@ -313,12 +313,30 @@ async def add_cart_item(
                 str(v) for v in variant.option_values.values() if v
             )
 
+    # Cap the added quantity to what's still available so repeated adds can't
+    # push a line past the variant's inventory (add_item increments any
+    # existing line). Product-level (no-variant) lines keep product stock rules.
+    add_qty = request.quantity
+    if request.variant_id and variant is not None:
+        existing = cart.get_item(request.product_id, request.variant_id)
+        existing_qty = existing.quantity if existing else 0
+        allowed = max(0, variant.inventory_quantity - existing_qty)
+        if allowed <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Only {variant.inventory_quantity} in stock — you already "
+                    "have the maximum in your cart."
+                ),
+            )
+        add_qty = min(request.quantity, allowed)
+
     new_item = CartItem(
         product_id=request.product_id,
         product_name=product.name,
         variant_id=request.variant_id,
         variant_name=variant_name,
-        quantity=request.quantity,
+        quantity=add_qty,
         unit_price=variant_price_cents,
         sku=variant_sku,
         image_url=variant_image,

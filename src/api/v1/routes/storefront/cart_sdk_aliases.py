@@ -164,6 +164,7 @@ async def sdk_add_cart_item(
     line_sku = product.sku
     line_image = product.images[0] if product.images else None
     variant_name: str | None = None
+    add_qty = request.quantity
     if request.variant_id:
         from src.infrastructure.database.connection import AsyncSessionLocal
         from src.infrastructure.repositories.variant_repository import (
@@ -194,6 +195,22 @@ async def sdk_add_cart_item(
             variant_name = " / ".join(
                 str(v) for v in variant.option_values.values() if v
             )
+        # Enforce stock against the cart TOTAL, not just this add — repeated
+        # adds and the in-cart stepper would otherwise push a line past the
+        # variant's inventory. `add_item` increments any existing line, so cap
+        # the delta to what's still available.
+        existing = cart.get_item(request.product_id, request.variant_id)
+        existing_qty = existing.quantity if existing else 0
+        allowed = max(0, variant.inventory_quantity - existing_qty)
+        if allowed <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Only {variant.inventory_quantity} in stock — you already "
+                    "have the maximum in your cart."
+                ),
+            )
+        add_qty = min(request.quantity, allowed)
 
     cart.add_item(
         CartItem(
@@ -201,7 +218,7 @@ async def sdk_add_cart_item(
             product_name=product.name,
             variant_id=request.variant_id,
             variant_name=variant_name,
-            quantity=request.quantity,
+            quantity=add_qty,
             unit_price=unit_price_cents,
             sku=line_sku,
             image_url=line_image,
@@ -298,7 +315,22 @@ async def sdk_update_cart_item(
                 detail="Cart item not found",
             )
 
-        if request.quantity == 0:
+        # Cap the new quantity to the variant's available stock so the in-cart
+        # +/- stepper can't push a line past inventory (the storefront stepper
+        # is just UX; this is the authoritative guard).
+        new_qty = request.quantity
+        if new_qty > 0 and variant_id is not None:
+            from src.infrastructure.database.connection import AsyncSessionLocal
+            from src.infrastructure.repositories.variant_repository import (
+                VariantRepository,
+            )
+
+            async with AsyncSessionLocal() as _s:
+                variant = await VariantRepository(_s).get_by_id(variant_id)
+            if variant is not None:
+                new_qty = min(new_qty, variant.inventory_quantity)
+
+        if new_qty <= 0:
             cart.remove_item(product_id, variant_id)
         else:
             # The Cart entity exposes `update_item_quantity(product_id,
@@ -307,7 +339,7 @@ async def sdk_update_cart_item(
             # quantity change (the cart +/- stepper). Note the arg order:
             # (product_id, quantity, variant_id), not (product_id, variant_id,
             # quantity).
-            cart.update_item_quantity(product_id, request.quantity, variant_id)
+            cart.update_item_quantity(product_id, new_qty, variant_id)
         changed = True
 
     if request.note is not None:
