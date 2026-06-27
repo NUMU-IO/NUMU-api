@@ -114,6 +114,11 @@ _KEYS: list[str] = [
     "notifications",
     "settings",
     "store",
+    # ── Global widgets (not sidebar tabs) ───────────────────────────────
+    # The floating AI Assistant launcher. Gated by the hub via
+    # useNavConfig().isVisible("assistant") exactly like every sidebar tab,
+    # so super-admins flip it from the same Merchant Hub Nav screen.
+    "assistant",
 ]
 
 DEFAULT_TABS: list[dict[str, object]] = [

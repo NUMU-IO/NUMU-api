@@ -49,10 +49,6 @@ DEFAULTS: dict[str, Any] = {
     "maintenance_mode": False,
     "session_timeout_minutes": 60,
     "max_login_attempts": 5,
-    # Show the AI Assistant widget in the merchant hub. Default ON (current
-    # behavior); super-admin can hide it platform-wide. Surfaced to the hub
-    # via /auth/me feature_flags["assistant_enabled"].
-    "assistant_enabled": True,
 }
 
 
@@ -71,7 +67,6 @@ class PlatformSettingsResponse(BaseModel):
     maintenance_mode: bool
     session_timeout_minutes: int
     max_login_attempts: int
-    assistant_enabled: bool
 
 
 class PlatformSettingsUpdate(BaseModel):
@@ -86,7 +81,6 @@ class PlatformSettingsUpdate(BaseModel):
     maintenance_mode: bool | None = None
     session_timeout_minutes: int | None = Field(None, ge=5, le=24 * 60)
     max_login_attempts: int | None = Field(None, ge=1, le=100)
-    assistant_enabled: bool | None = None
 
 
 # ---------------------------------------------------------------------------
