@@ -138,20 +138,26 @@ async def create_product(
             product_id=str(result.id),
         )
 
-    # Phase 8.1 — materialize options + variants. The use case doesn't
-    # know about either today (kept scoped to the legacy single-SKU
-    # path); we layer variants on top via the variant repo + a
-    # patch-options write on the product row. When the request omits
-    # variants the migration's default-variant pattern kicks in: we
-    # create one row carrying the product's price + quantity, so the
-    # cart's variant-id resolution always finds a row.
+    # Phase 8.1 — materialize options + variants. UI #2 sends top-level
+    # options/variants; the main "Product Options" + "Variant Combinations"
+    # editor sends them inside `attributes` — bridge those into the canonical
+    # model so a combination becomes a real variant. When nothing is sent the
+    # migration's default-variant pattern creates one row carrying the product's
+    # price + quantity, so cart variant-id resolution always finds a row.
+    options_in = request.options
+    variants_in = request.variants
+    if not options_in and not variants_in:
+        b_opts, b_vars = _options_variants_from_legacy_attributes(result.attributes)
+        if b_opts is not None or b_vars is not None:
+            options_in = b_opts or []
+            variants_in = b_vars or []
     variant_summaries = await _materialize_product_variants(
         session=product_repo.session,
         product_id=result.id,
         store_id=store.id,
         tenant_id=store.tenant_id,
-        options=request.options,
-        variants=request.variants,
+        options=options_in,
+        variants=variants_in,
         default_price=str(result.price),
         default_currency=result.price_currency,
         default_quantity=result.quantity,
@@ -185,13 +191,94 @@ async def create_product(
             attributes=result.attributes,
             seo_title=result.seo_title,
             seo_description=result.seo_description,
-            options=[o.model_dump() for o in request.options],
+            options=[o.model_dump() for o in (options_in or [])],
             variants=variant_summaries,
             created_at=str(result.created_at),
             updated_at=str(result.updated_at),
         ),
         message="Product created successfully",
     )
+
+
+def _options_variants_from_legacy_attributes(attributes):
+    """Bridge the main product editor's legacy variant shape into canonical
+    Phase-8.1 options + variants, so a "Variant Combination" becomes a real,
+    purchasable product_variant (Shopify parity).
+
+    The main editor ("Product Options" + "Variant Combinations") persists
+    variants inside `attributes`, never the top-level options/variants:
+        attributes.variants             = axes   [{name, options:[values], ...}]
+        attributes.variant_combinations = combos
+            [{options:{axis:value}, price, stock, sku, enabled}]
+    so its combinations never became real product_variants and the storefront
+    / cart / checkout (which read product.options + product_variants) couldn't
+    resolve a buyable variant. Derive options + variants here so the existing
+    materializer creates them.
+
+    Returns (None, None) when there is nothing to bridge, so non-variant
+    updates leave the variant matrix untouched.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    from src.api.v1.schemas.tenant.product import (
+        ProductOptionInput,
+        VariantInput,
+    )
+
+    if not isinstance(attributes, dict):
+        return None, None
+    legacy_axes = attributes.get("variants")
+    combos = attributes.get("variant_combinations")
+    if not isinstance(legacy_axes, list) and not isinstance(combos, list):
+        return None, None
+
+    options: list = []
+    for i, axis in enumerate(legacy_axes or []):
+        if not isinstance(axis, dict):
+            continue
+        name = str(axis.get("name") or "").strip()
+        values = [str(v).strip() for v in (axis.get("options") or []) if str(v).strip()]
+        if name and values:
+            options.append(ProductOptionInput(name=name, position=i, values=values))
+
+    variants: list = []
+    for j, combo in enumerate(combos or []):
+        if not isinstance(combo, dict):
+            continue
+        if combo.get("enabled") is False:
+            continue
+        raw_ov = combo.get("options")
+        if not isinstance(raw_ov, dict) or not raw_ov:
+            continue
+        # Match the axis name/value casing exactly (the SDK matches with a
+        # strict `===` + key-count check), trimmed of stray whitespace.
+        option_values = {str(k).strip(): str(val).strip() for k, val in raw_ov.items()}
+        # The variant repo stores Money.amount straight into the integer
+        # "cents" column and the storefront divides by 100, so convert the
+        # merchant's MAJOR combo price (10 = 10 EGP) to that representation.
+        try:
+            price = Decimal(str(combo.get("price") or "0")) * 100
+        except (InvalidOperation, ValueError, TypeError):
+            price = Decimal("0")
+        try:
+            stock = int(float(combo.get("stock") or 0))
+        except (TypeError, ValueError):
+            stock = 0
+        sku_raw = combo.get("sku")
+        sku = str(sku_raw).strip() if sku_raw else None
+        variants.append(
+            VariantInput(
+                position=j,
+                option_values=option_values,
+                price=price,
+                inventory_quantity=max(0, stock),
+                sku=sku or None,
+            )
+        )
+
+    if not options and not variants:
+        return None, None
+    return options, variants
 
 
 async def _materialize_product_variants(
@@ -263,6 +350,26 @@ async def _materialize_product_variants(
         else:
             v = existing[0]
         return [_variant_to_summary_dict(v)]
+
+    # Reuse existing rows for id-less variants by their option_values, so the
+    # main-editor bridge (which can't carry variant ids) updates the same
+    # product_variant rows each save instead of delete+recreating them — which
+    # would churn ids and orphan order/line references.
+    if any(vin.id is None for vin in variants):
+
+        def _ov_sig(ov: dict | None) -> tuple:
+            return tuple(sorted((ov or {}).items()))
+
+        taken: set = set()
+        existing_by_sig: dict = {}
+        for ev in existing:
+            existing_by_sig.setdefault(_ov_sig(ev.option_values), ev)
+        for vin in variants:
+            if vin.id is None:
+                m = existing_by_sig.get(_ov_sig(vin.option_values))
+                if m is not None and m.id not in taken:
+                    vin.id = m.id
+                    taken.add(m.id)
 
     # 4. Delete variants the request omitted.
     keep_ids = {v.id for v in variants if v.id is not None}
@@ -592,18 +699,29 @@ async def update_product(
             product_id=str(result.id),
         )
 
-    # Phase 8.1 — only re-materialize variants/options when the
-    # merchant explicitly sent them. Partial-update on other fields
-    # leaves the variant matrix alone.
+    # Phase 8.1 — re-materialize options/variants when the merchant sent them.
+    # UI #2 ("SKU-tracked variants") sends the top-level options/variants; the
+    # main "Product Options" + "Variant Combinations" editor sends them only
+    # inside `attributes`, so bridge those into the canonical model so a
+    # combination becomes a real, purchasable variant. A partial-update on other
+    # fields (no variant data anywhere) leaves the matrix alone.
+    options_in = request.options
+    variants_in = request.variants
+    if options_in is None and variants_in is None:
+        b_opts, b_vars = _options_variants_from_legacy_attributes(result.attributes)
+        if b_opts is not None or b_vars is not None:
+            options_in = b_opts or []
+            variants_in = b_vars or []
+
     variant_summaries: list[dict] | None = None
-    if request.options is not None or request.variants is not None:
+    if options_in is not None or variants_in is not None:
         variant_summaries = await _materialize_product_variants(
             session=product_repo.session,
             product_id=result.id,
             store_id=store.id,
             tenant_id=store.tenant_id,
-            options=request.options or [],
-            variants=request.variants or [],
+            options=options_in or [],
+            variants=variants_in or [],
             default_price=str(result.price),
             default_currency=result.price_currency,
             default_quantity=result.quantity,
@@ -650,8 +768,8 @@ async def update_product(
             seo_title=result.seo_title,
             seo_description=result.seo_description,
             options=(
-                [o.model_dump() for o in request.options]
-                if request.options is not None
+                [o.model_dump() for o in options_in]
+                if options_in is not None
                 else (getattr(result, "options", None) or [])
             ),
             variants=variant_summaries or [],
