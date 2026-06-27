@@ -141,6 +141,7 @@ As the refund webhook handler, when a refund is processed for an order that prev
 ```python
 # src/core/entities/recovery_flow.py
 
+
 class RecoveryFlowState(StrEnum):
     PENDING_STEP_1 = "pending_step_1"
     PENDING_STEP_2 = "pending_step_2"
@@ -154,6 +155,7 @@ class RecoveryFlowState(StrEnum):
     BLOCKED_NO_GATEWAY = "blocked_no_gateway"
     BLOCKED_NO_TEMPLATE = "blocked_no_template"
 
+
 class RecoveryFlow(Base):
     __tablename__ = "recovery_flows"
     flow_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -162,24 +164,35 @@ class RecoveryFlow(Base):
     state: Mapped[RecoveryFlowState] = mapped_column(
         Enum(RecoveryFlowState, values_callable=lambda e: [m.value for m in e])
     )  # values_callable required per project memory enum-details.md
-    cadence: Mapped[dict] = mapped_column(JSONB)  # [{delay_seconds, template_key, fallback_action}, ...]
+    cadence: Mapped[dict] = mapped_column(
+        JSONB
+    )  # [{delay_seconds, template_key, fallback_action}, ...]
     current_step_index: Mapped[int] = mapped_column(default=0)
-    payment_link_session_id: Mapped[UUID | None] = mapped_column(ForeignKey("payment_link_sessions.id"), nullable=True)
+    payment_link_session_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("payment_link_sessions.id"), nullable=True
+    )
     recovered_amount_cents: Mapped[int | None] = mapped_column(nullable=True)
     recovered_via_rail: Mapped[str | None] = mapped_column(String(32), nullable=True)
     refunded_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     __table_args__ = (
-        UniqueConstraint("store_id", "shopify_order_id", name="uq_recovery_flow_per_order"),
+        UniqueConstraint(
+            "store_id", "shopify_order_id", name="uq_recovery_flow_per_order"
+        ),
         Index("ix_recovery_flow_state_created", "state", "created_at"),
     )
+
 
 class RecoveryStep(Base):
     __tablename__ = "recovery_steps"
     step_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    flow_id: Mapped[UUID] = mapped_column(ForeignKey("recovery_flows.flow_id", ondelete="CASCADE"))
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey("recovery_flows.flow_id", ondelete="CASCADE")
+    )
     step_index: Mapped[int]
     template_key: Mapped[str] = mapped_column(String(128))
     channel: Mapped[str] = mapped_column(String(16), default="whatsapp")
@@ -188,15 +201,27 @@ class RecoveryStep(Base):
     opened_at: Mapped[datetime | None] = mapped_column(nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(nullable=True)
     failed_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    __table_args__ = (UniqueConstraint("flow_id", "step_index", name="uq_recovery_step_per_flow_index"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "flow_id", "step_index", name="uq_recovery_step_per_flow_index"
+        ),
+    )
+
 
 class RecoveryMonthlyRollup(Base):
     __tablename__ = "recovery_monthly_rollups"
-    store_id: Mapped[int] = mapped_column(ForeignKey("stores.store_id"), primary_key=True)
-    month_key: Mapped[date] = mapped_column(primary_key=True)  # First day of store-local calendar month
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.store_id"), primary_key=True
+    )
+    month_key: Mapped[date] = mapped_column(
+        primary_key=True
+    )  # First day of store-local calendar month
     recovered_cents: Mapped[int] = mapped_column(default=0)
     recovered_count: Mapped[int] = mapped_column(default=0)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
 
 # Added 2026-05-11 in response to spec 009 red-team finding F-019 (rollup write race) +
 # spec 009 CL-006 (idempotency triple). Without this ledger, the rollup's
@@ -205,21 +230,27 @@ class RecoveryMonthlyRollup(Base):
 # twice if the rollup updater is retried.
 class RecoveryRollupLedger(Base):
     __tablename__ = "recovery_rollup_ledger"
-    store_id: Mapped[int] = mapped_column(ForeignKey("stores.store_id"), primary_key=True)
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.store_id"), primary_key=True
+    )
     shopify_order_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     event_type: Mapped[str] = mapped_column(String(32), primary_key=True)
     # event_type ∈ {'succeeded', 'succeeded_deposit', 'balance_captured', 'refunded', 'refund_reversed'}
     # The composite PK prevents the same (store_id, order_id, event_type) tuple
     # from incrementing the rollup more than once even under Celery retry.
     applied_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    applied_amount_cents: Mapped[int]  # The cents delta applied to the rollup for this event
+    applied_amount_cents: Mapped[
+        int
+    ]  # The cents delta applied to the rollup for this event
 ```
 
 ### Idempotent rollup update procedure (per spec 009 CL-006)
 
 ```python
 # In recovery_tasks.py — runs when RecoverySucceededEvent (or sibling event) fires
-def apply_to_rollup(store_id, shopify_order_id, event_type, amount_cents, store_local_month):
+def apply_to_rollup(
+    store_id, shopify_order_id, event_type, amount_cents, store_local_month
+):
     with db.transaction():
         # Step 1: try to insert into the ledger; on conflict, exit silently
         try:
@@ -234,21 +265,27 @@ def apply_to_rollup(store_id, shopify_order_id, event_type, amount_cents, store_
         except IntegrityError:
             return  # Already applied — no-op (this is the idempotency guard)
         # Step 2: ledger insert succeeded → safe to mutate the rollup
-        delta = -amount_cents if event_type in ('refunded',) else amount_cents
+        delta = -amount_cents if event_type in ("refunded",) else amount_cents
         db.execute(
-            insert(RecoveryMonthlyRollup).values(
+            insert(RecoveryMonthlyRollup)
+            .values(
                 store_id=store_id,
                 month_key=store_local_month,
                 recovered_cents=delta,
-                recovered_count=1 if event_type in ('succeeded', 'succeeded_deposit') else 0,
-            ).on_conflict_do_update(
-                index_elements=['store_id', 'month_key'],
+                recovered_count=1
+                if event_type in ("succeeded", "succeeded_deposit")
+                else 0,
+            )
+            .on_conflict_do_update(
+                index_elements=["store_id", "month_key"],
                 set_=dict(
                     recovered_cents=RecoveryMonthlyRollup.recovered_cents + delta,
-                    recovered_count=RecoveryMonthlyRollup.recovered_count + (1 if event_type in ('succeeded', 'succeeded_deposit') else 0),
+                    recovered_count=RecoveryMonthlyRollup.recovered_count
+                    + (1 if event_type in ("succeeded", "succeeded_deposit") else 0),
                 ),
             )
         )
+
 
 # The Shopify additive-mutation path is NOT in this transaction — moves to a
 # separate outbox-pattern worker per spec 009 CL-006 step 3. A Shopify 5xx
@@ -259,11 +296,27 @@ def apply_to_rollup(store_id, shopify_order_id, event_type, amount_cents, store_
 
 ```python
 DEFAULT_RECOVERY_CADENCE = [
-    {"delay_seconds": 0,      "template_key": "recovery_step_1_offer",       "fallback_action": None},
-    {"delay_seconds": 7200,   "template_key": "recovery_step_2_reminder",    "fallback_action": None},
-    {"delay_seconds": 86400,  "template_key": "recovery_step_3_deposit",     "fallback_action": "deposit_only"},
+    {
+        "delay_seconds": 0,
+        "template_key": "recovery_step_1_offer",
+        "fallback_action": None,
+    },
+    {
+        "delay_seconds": 7200,
+        "template_key": "recovery_step_2_reminder",
+        "fallback_action": None,
+    },
+    {
+        "delay_seconds": 86400,
+        "template_key": "recovery_step_3_deposit",
+        "fallback_action": "deposit_only",
+    },
     # Terminal action (does not count toward 5-step ceiling per spec 009 CL-001)
-    {"delay_seconds": 172800, "template_key": None,                          "fallback_action": "auto_cancel_or_hold"},
+    {
+        "delay_seconds": 172800,
+        "template_key": None,
+        "fallback_action": "auto_cancel_or_hold",
+    },
 ]
 ```
 

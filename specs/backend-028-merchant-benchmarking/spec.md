@@ -50,8 +50,12 @@ As a merchant, when I open the dashboard, I see a tile comparing my COD refusal 
 class MerchantCohortAssignmentModel(Base, ...):
     __tablename__ = "merchant_cohort_assignments"
     store_id: Mapped[UUID] = mapped_column(primary_key=True)
-    vertical: Mapped[str] = mapped_column(String(32))  # 'fashion', 'electronics', 'beauty', 'fnb', 'home_goods', 'other'
-    volume_bucket: Mapped[str] = mapped_column(String(16))  # 'micro', 'small', 'medium', 'large'
+    vertical: Mapped[str] = mapped_column(
+        String(32)
+    )  # 'fashion', 'electronics', 'beauty', 'fnb', 'home_goods', 'other'
+    volume_bucket: Mapped[str] = mapped_column(
+        String(16)
+    )  # 'micro', 'small', 'medium', 'large'
     cohort_key: Mapped[str] = mapped_column(String(48))  # f"{vertical}:{volume_bucket}"
     benchmarking_enabled: Mapped[bool] = mapped_column(default=True)
 
@@ -60,7 +64,9 @@ class BenchmarkSnapshotModel(Base, ...):
     __tablename__ = "benchmark_snapshots"
     cohort_key: Mapped[str] = mapped_column(primary_key=True)
     period_start: Mapped[date] = mapped_column(primary_key=True)
-    metric_name: Mapped[str] = mapped_column(primary_key=True)  # 'cod_refusal_pct', 'recovery_pct', 'aov_cents'
+    metric_name: Mapped[str] = mapped_column(
+        primary_key=True
+    )  # 'cod_refusal_pct', 'recovery_pct', 'aov_cents'
     median_value: Mapped[float] = mapped_column()
     p75_value: Mapped[float] = mapped_column()
     contributor_count: Mapped[int] = mapped_column()  # >= 5

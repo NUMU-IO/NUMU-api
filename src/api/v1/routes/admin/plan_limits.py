@@ -130,9 +130,7 @@ async def get_plan_limits(
     """Return the current plan limits (code defaults merged with DB overrides)."""
     # Load overrides from DB and apply (in case they haven't been applied yet)
     result = await db.execute(
-        select(PlatformConfigModel).where(
-            PlatformConfigModel.key == PLAN_LIMITS_KEY
-        )
+        select(PlatformConfigModel).where(PlatformConfigModel.key == PLAN_LIMITS_KEY)
     )
     row = result.scalar_one_or_none()
     if row and isinstance(row.value, dict):

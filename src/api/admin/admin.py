@@ -81,9 +81,12 @@ class DashboardAdmin(Admin):
                         ).scalar_one()
                     except Exception:
                         count = None  # one bad table shouldn't blank the dashboard
-                    metrics.append(
-                        {"label": label, "slug": slug, "icon": icon, "count": count}
-                    )
+                    metrics.append({
+                        "label": label,
+                        "slug": slug,
+                        "icon": icon,
+                        "count": count,
+                    })
         except Exception:
             logger.warning("admin_dashboard_metrics_failed", exc_info=True)
             metrics = [
