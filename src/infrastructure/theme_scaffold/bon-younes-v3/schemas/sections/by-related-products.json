@@ -1,0 +1,33 @@
+{
+  "type": "by-related-products",
+  "name": "Related products",
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "count",
+      "label": "Number of cards",
+      "min": 2,
+      "max": 8,
+      "step": 1,
+      "default": 4
+    }
+  ],
+  "presets": [
+    {
+      "name": "Related products",
+      "locales": {
+        "ar": {
+          "name": "منتجات ذات صلة"
+        }
+      },
+      "category": "product-detail",
+      "settings": {}
+    }
+  ]
+}

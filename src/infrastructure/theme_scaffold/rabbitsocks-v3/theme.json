@@ -1,0 +1,156 @@
+{
+  "id": "rabbitsocks-v3",
+  "name": "Rabbitsocks (V3)",
+  "author": "NUMU",
+  "version": "0.3.4",
+  "layout": "single-column",
+  "description": "Rabbitsocks (V3) — quiet-luxury editorial minimalism (serif italic headlines, generous whitespace), ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "rs-hero",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "rs-marquee",
+            "settings": {
+              "repeat": 3
+            }
+          },
+          {
+            "type": "rs-featured",
+            "settings": {
+              "view_all_link": "/products",
+              "product_count": 8
+            }
+          },
+          {
+            "type": "rs-image-with-text",
+            "settings": {
+              "image_alt": "Curated objects",
+              "image_position": "right"
+            }
+          },
+          {
+            "type": "rs-promo-banner",
+            "settings": {
+              "journal_link": "/blog",
+              "edit_link": "/products"
+            }
+          },
+          {
+            "type": "rs-newsletter",
+            "settings": {}
+          },
+          {
+            "type": "rs-image-with-text",
+            "settings": {
+              "image_position": "left",
+              "cta_link": "/contact"
+            }
+          },
+          {
+            "type": "rs-editorial",
+            "settings": {
+              "cta_url": "/products"
+            }
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "rs-product-detail",
+            "settings": {
+              "show_rating": true,
+              "show_stock": true,
+              "show_guarantees": true,
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "rs-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "rs-image-with-text",
+            "settings": {
+              "image_position": "right",
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "rs-editorial",
+            "settings": {
+              "cta_url": "/products"
+            }
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "rs-editorial",
+            "settings": {
+              "cta_url": "/products"
+            }
+          },
+          {
+            "type": "rs-newsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "rs-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "rs-order-confirmation-section",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,332 @@
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *  Bazar (V3) — compiled CSS entry.
+ *
+ *  This file is the SOURCE OF TRUTH for the theme's styles. It is
+ *  imported by src/main.tsx so Vite's PostCSS pipeline compiles the
+ *  Tailwind directives below into dist/theme.css. The root-level
+ *  styles.css is a thin pointer kept only to satisfy the plugin's
+ *  required-files contract — see styles.css for the full Tailwind
+ *  decision writeup.
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Bazar Theme — Bold Streetwear Aesthetic ───
+ *
+ * Tokens are scoped to BOTH :root and the app wrapper. The storefront host
+ * does NOT set data-theme="bazar" on any element (it only tags the <link>),
+ * so the original `:root[data-theme="bazar"]` selector never matched there
+ * and the whole palette evaluated to its CSS fallbacks. Mirroring the
+ * Bon Younes approach (`:root, [data-…-v3-app]`) makes the tokens apply on
+ * the live storefront, the editor iframe, and the local dev preview alike.
+ */
+:root,
+[data-bazar-v3-app] {
+  /* Core palette.
+   *
+   * Each brand colour reads the global-settings token that the SDK's
+   * `applyGlobalStyleTokens` writes onto the mount root (id-based
+   * `--theme-<id>`), falling back to the V2 hex so an un-customised store
+   * renders byte-identical to V2. This is what makes the Brand colour
+   * pickers actually re-paint the storefront — before this the tokens were
+   * hardcoded and the pickers were a silent no-op. */
+  --bz-amber: var(--theme-primary_color, #FFB300);
+  --bz-amber-dark: #E6A200;
+  --bz-amber-light: #FFCA28;
+  --bz-cream: var(--theme-background_color, #FFF5E1);
+  --bz-dark: var(--theme-text_color, #0a0a14);
+  --bz-navy: var(--theme-accent_color, #001f3f);
+  --bz-white: #FFFFFF;
+  --bz-gray: #6b7280;
+
+  /* Layout tokens driven by the Layout global-settings group. Ranges store a
+   * bare number, so multiply by 1px; defaults equal the V2 values. */
+  --bz-card-border: calc(var(--theme-card_border_width, 2) * 1px);
+
+  /* Tailwind semantic tokens */
+  --background: 43 100% 94%;
+  --foreground: 240 30% 5%;
+  --primary: 42 100% 50%;
+  --primary-foreground: 240 30% 5%;
+  --secondary: 43 100% 94%;
+  --secondary-foreground: 240 30% 5%;
+  --accent: 42 100% 50%;
+  --accent-foreground: 240 30% 5%;
+  --muted: 43 20% 88%;
+  --muted-foreground: 240 10% 40%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 30% 5%;
+  --border: 42 40% 80%;
+  --ring: 42 100% 50%;
+  --radius: calc(var(--theme-corner_radius, 16) * 1px);
+}
+
+[data-bazar-v3-app] {
+  font-family: var(--theme-font-body, var(--theme-body_font, 'Inter')), system-ui, -apple-system, sans-serif;
+  color: var(--bz-dark);
+  background: var(--bz-cream);
+  overflow-x: clip; /* hard guard against horizontal scroll */
+  min-height: 100vh;
+}
+
+/* Responsive-image reset wrapped in :where() so it carries ZERO specificity —
+ * otherwise `[data-bazar-v3-app] img` (0,1,1) beats utility classes like
+ * `.h-full` (0,1,0) and forces `height:auto`, which collapses every
+ * `object-cover` frame (the image renders at its natural height with empty
+ * space below). With :where(), any utility/inline height wins, so framed
+ * cards/galleries fill correctly. */
+:where([data-bazar-v3-app] img) {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ─── Typography ─── */
+.bz-heading {
+  font-family: var(--theme-font-heading, var(--theme-heading_font, 'Inter')), system-ui, sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+}
+
+.bz-label {
+  font-family: var(--theme-font-body, var(--theme-body_font, 'Inter')), system-ui, sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 11px;
+}
+
+/* ─── Wave Dividers ─── */
+.bz-wave-top {
+  position: relative;
+}
+.bz-wave-top::before {
+  content: '';
+  position: absolute;
+  top: -40px;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: var(--bz-navy);
+  clip-path: path('M0,40 C200,0 400,40 600,10 C800,-20 1000,30 1200,10 C1400,-10 1600,35 1800,15 L1800,40 Z');
+  z-index: 2;
+}
+
+.bz-wave-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* ─── Announcement bar slide ───
+   Each rotation remounts the message node (keyed on the slide index), so this
+   plays on every change: the message slides up + fades in. `static` mode never
+   remounts, so it stays put. */
+.bz-ann-slide {
+  animation: bz-ann-slide-in 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+@keyframes bz-ann-slide-in {
+  from { opacity: 0; transform: translateY(60%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bz-ann-slide { animation: none; }
+}
+
+/* ─── Marquee ─── */
+.bz-marquee-track {
+  display: flex;
+  animation: bz-scroll 20s linear infinite;
+  width: max-content;
+}
+@keyframes bz-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+[dir="rtl"] .bz-marquee-track {
+  animation: bz-scroll-rtl 20s linear infinite;
+}
+@keyframes bz-scroll-rtl {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(50%); }
+}
+
+/* ─── Wavy background pattern ─── */
+.bz-wavy-bg {
+  background-color: var(--bz-amber);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 30% 60%, var(--bz-amber-light) 0%, transparent 50%),
+    radial-gradient(ellipse 100% 60% at 70% 40%, var(--bz-amber-dark) 0%, transparent 50%);
+}
+
+/* ─── Global keyboard focus indicator ───
+   Every interactive element gets a visible amber outline when focused
+   via keyboard. Uses :focus-visible so mouse clicks don't trigger it. */
+[data-bazar-v3-app] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--bz-amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Buttons ─── */
+.bz-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 12px;
+  padding: 12px 32px;
+  border: 2px solid var(--bz-dark);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bz-dark);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  text-decoration: none;
+}
+.bz-btn:hover {
+  background: var(--bz-dark);
+  color: var(--bz-cream);
+}
+.bz-btn-filled {
+  background: var(--bz-dark);
+  color: var(--bz-cream);
+  border-color: var(--bz-dark);
+}
+.bz-btn-filled:hover {
+  background: var(--bz-navy);
+  border-color: var(--bz-navy);
+}
+.bz-btn-amber {
+  background: var(--bz-amber);
+  color: var(--bz-dark);
+  border-color: var(--bz-amber);
+}
+.bz-btn-amber:hover {
+  background: var(--bz-amber-dark);
+  border-color: var(--bz-amber-dark);
+}
+
+/* ─── Size selectors ─── */
+.bz-size-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--bz-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--bz-dark);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.bz-size-btn:hover,
+.bz-size-btn.active {
+  background: var(--bz-dark);
+  color: var(--bz-amber);
+}
+
+/* ─── Card hover ─── */
+.bz-card-hover {
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+}
+.bz-card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+}
+
+/* ─── Image zoom ─── */
+.bz-img-zoom {
+  transition: transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.group:hover .bz-img-zoom {
+  transform: scale(1.05);
+}
+
+/* ─── Organic blob shapes ─── */
+.bz-blob {
+  border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  animation: bz-morph 8s ease-in-out infinite;
+}
+.bz-blob-delay-2 { animation-delay: 2s; }
+.bz-blob-delay-4 { animation-delay: 4s; }
+@keyframes bz-morph {
+  0%, 100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+  50% { border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%; }
+}
+
+/* ─── Souk-print dot grid (decorative, used behind PDP gallery) ─── */
+.bz-dot-grid {
+  background-image: radial-gradient(circle, var(--bz-dark) 1px, transparent 1.5px);
+  background-size: 12px 12px;
+}
+
+/* ─── Inline editor affordances ───
+ * The customizer wraps editable text in <InlineEditable>; these styles
+ * show a dashed amber frame + pencil glyph on hover INSIDE the editor
+ * iframe only (the component gates the `--armed` class on isInsideEditor).
+ * Live shoppers never see them. */
+.bz-inline-edit {
+  position: relative;
+  display: inline;
+}
+
+.bz-inline-edit--armed {
+  cursor: text;
+  border-radius: 4px;
+  transition: outline-color 160ms ease, background-color 160ms ease;
+  outline: 1px dashed transparent;
+  outline-offset: 3px;
+}
+
+.bz-inline-edit--armed:hover {
+  outline-color: var(--bz-amber, #FFB300);
+  background-color: rgba(255, 179, 0, 0.08);
+}
+
+.bz-inline-edit--armed::after {
+  content: "";
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  background: var(--bz-amber, #FFB300);
+  border-radius: 50%;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0a14' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 9px 9px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(10, 10, 20, 0.25);
+}
+
+.bz-inline-edit--armed:hover::after,
+.bz-inline-edit--editing::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.bz-inline-edit--editing {
+  outline-color: var(--bz-dark, #0a0a14) !important;
+  outline-style: solid;
+  outline-width: 1px;
+  background-color: rgba(255, 245, 225, 0.5);
+  cursor: text;
+}
+
+.bz-inline-edit--editing[contenteditable="true"] {
+  caret-color: var(--bz-dark, #0a0a14);
+}

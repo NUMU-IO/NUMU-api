@@ -1,0 +1,42 @@
+{
+  "type": "bz-related-products",
+  "name": "Bazar Related Products",
+  "name_ar": "بازار منتجات ذات صلة",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "count",
+      "label": "Number of cards",
+      "label_ar": "عدد البطاقات",
+      "min": 2,
+      "max": 8,
+      "step": 1,
+      "default": 4
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Related Products",
+      "locales": {
+        "en": {
+          "name": "Bazar Related Products"
+        },
+        "ar": {
+          "name": "بازار منتجات ذات صلة"
+        }
+      },
+      "settings": {
+        "title": "",
+        "count": 4
+      }
+    }
+  ]
+}

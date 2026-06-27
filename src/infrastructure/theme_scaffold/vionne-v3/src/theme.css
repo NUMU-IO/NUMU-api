@@ -1,0 +1,782 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported verbatim from V2 Vionne (numu-egyptian-bazaar/src/themes/
+ * vionne/styles.css). The only change: the V2 root selector
+ * :root[data-theme="vionne"] is retargeted to the V3 mount element
+ * [data-vionne-v3-app] so the --vn-* + HSL tokens reach the sections.
+ * ─────────────────────────────────────────────────────────────── */
+/* ─── Vionne Theme — Refined grayscale storefront ─── */
+
+[data-vionne-v3-app] {
+  /* Vionne core palette — bridged to the global-settings tokens the SDK's
+     applyGlobalStyleTokens writes onto the mount root (`--theme-<id>`), with
+     the V2 hex as the fallback so an un-customised store renders byte-identical
+     to today. Editing a Colors global now actually re-paints (before W1 the
+     palette was hardcoded + only 2 pickers existed, both silent no-ops). Same
+     technique as bazar's `--bz-*` bridge, but with Vionne's grayscale + gold. */
+  --vn-white: var(--theme-color_white, #FFFFFF);
+  --vn-band: var(--theme-color_band, #F4F4F4);
+  --vn-surface-dark: var(--theme-color_surface_dark, #3A3A3A);
+  --vn-ink: var(--theme-color_ink, #050505);
+  --vn-border: var(--theme-color_border, #DADADA);
+  /* Default bumped from #8B8B8B (3.5:1 on white) to #6F6F6F (4.79:1) so
+     secondary text meets WCAG AA. Used by .vn-eyebrow + paragraph muted text. */
+  --vn-muted: var(--theme-color_muted, #6F6F6F);
+  --vn-sale: var(--theme-color_sale, #A20000);
+  /* Signature Vionne gold — new global in W1 (V2 lacked it). Additive: no
+     section consumed --vn-accent before, so the default render is unchanged. */
+  --vn-accent: var(--theme-accent_color, #D4AF37);
+
+  /* Fonts: consume the SDK font aliases (`--theme-font-heading/-body`, written
+     by applyGlobalStyleTokens) AND the resolveFontStack output
+     (`--theme-heading_font/-body_font`, written by mountTheme), falling back to
+     the V2 Neue Haas Grotesk stacks. .vn-heading / .vn-eyebrow / .vn-label and
+     the root font-family below already read --heading-font / --body-font, so
+     this is what makes the Typography font pickers re-paint. */
+  --heading-font: var(--theme-font-heading, var(--theme-heading_font, "Neue Haas Grotesk Display Pro", "Helvetica Neue", Helvetica, Arial, sans-serif));
+  --body-font: var(--theme-font-body, var(--theme-body_font, "Neue Haas Grotesk Text Pro", "Helvetica Neue", Helvetica, Arial, sans-serif));
+  /* Heading tracking ramp (W1): an additive nudge over the -0.01em default
+     (range stores a bare px number → multiply by 1px; 0 = unchanged). */
+  --vn-heading-tracking: calc(-0.01em + var(--theme-heading_tracking, 0) * 1px);
+
+  /* Override the global store-gradient (default is teal/green) so any
+     shared component using `.store-gradient` (PromoBanner, AuthPage,
+     OrderConfirmation, etc.) renders in Vionne's grayscale palette. */
+  --store-gradient: linear-gradient(135deg, #050505, #3A3A3A);
+
+  /* Tailwind semantic tokens (HSL channels) */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 2%;
+  --primary: 0 0% 2%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 2%;
+  --accent: 0 0% 23%;
+  --accent-foreground: 0 0% 100%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 55%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 2%;
+  --border: 0 0% 86%;
+  --input: 0 0% 86%;
+  --ring: 0 0% 2%;
+  /* Layout radius driven by the Layout global (range stores a bare number, so
+     multiply by 1px; default 4 == V2). Feeds Tailwind borderRadius.lg/md/sm. */
+  --radius: calc(var(--theme-radius, 4) * 1px);
+
+  /* Hero / band tokens */
+  --hero-bg: 0 0% 96%;
+
+  /* Tokens used by shared components — defining them here so they
+     don't fall through to the (now-removed) unguarded :root teal
+     defaults. Without these, components using
+     bg-[hsl(var(--announcement-bg))] etc. would resolve to invalid
+     colors when a merchant clears their promo overrides. */
+  --announcement-bg: 0 0% 2%;       /* near-black, matches --vn-ink */
+  --announcement-fg: 0 0% 100%;     /* white */
+  --badge-bg: 0 0% 2%;              /* near-black */
+  --badge-fg: 0 0% 100%;            /* white */
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 2%;
+  --destructive: 0 100% 32%;        /* derived from --vn-sale (#A20000) */
+  --destructive-foreground: 0 0% 100%;
+  /* Sidebar tokens — used by shadcn's sidebar primitive in checkout
+     and account pages. Anchor on Vionne's grayscale so the sidebar
+     doesn't suddenly bleed Modern's teal greens. */
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 0 0% 2%;
+  --sidebar-primary: 0 0% 2%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 0 0% 96%;
+  --sidebar-accent-foreground: 0 0% 2%;
+  --sidebar-border: 0 0% 86%;
+  --sidebar-ring: 0 0% 2%;
+
+  /* Base text size ramp (W1): default 16px == browser default, so unchanged
+     out-of-box. em-based children scale from here. */
+  font-size: calc(var(--theme-base_font_size, 16) * 1px);
+  font-family: var(--body-font, "Neue Haas Grotesk Text Pro"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[data-vionne-v3-app] body {
+  background: var(--vn-white);
+  color: var(--vn-ink);
+}
+
+/* ─── Typography ─── */
+
+.vn-heading {
+  font-family: var(--heading-font, "Neue Haas Grotesk Display Pro"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 500;
+  letter-spacing: var(--vn-heading-tracking, -0.01em);
+  line-height: 1.05;
+}
+
+.vn-eyebrow {
+  font-family: var(--body-font, "Neue Haas Grotesk Text Pro"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 11px;
+  color: var(--vn-muted);
+}
+
+.vn-label {
+  font-family: var(--body-font, "Neue Haas Grotesk Text Pro"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+}
+
+/* ─── Buttons ─── */
+
+.vn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  transition: transform 200ms ease, background-color 200ms ease, color 200ms ease, opacity 200ms ease;
+  cursor: pointer;
+}
+
+.vn-btn-filled {
+  background: var(--vn-ink);
+  color: var(--vn-white);
+}
+.vn-btn-filled:hover {
+  transform: translateY(-1px);
+  opacity: 0.92;
+}
+
+.vn-btn-outline-light {
+  background: transparent;
+  color: var(--vn-white);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+}
+.vn-btn-outline-light:hover {
+  background: var(--vn-white);
+  color: var(--vn-ink);
+  transform: translateY(-1px);
+}
+
+.vn-btn-outline-dark {
+  background: transparent;
+  color: var(--vn-ink);
+  border: 1px solid var(--vn-ink);
+}
+.vn-btn-outline-dark:hover {
+  background: var(--vn-ink);
+  color: var(--vn-white);
+  transform: translateY(-1px);
+}
+
+/* ─── Header / Announcement Marquee ─── */
+
+.vn-marquee {
+  background: var(--vn-surface-dark);
+  color: var(--vn-white);
+  height: 40px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.vn-marquee-track {
+  display: flex;
+  align-items: center;
+  /* flex-shrink: 0 is the critical bit. `.vn-marquee` is a flex container,
+     so the track inherits the default `flex-shrink: 1` and the browser
+     squashes `width: max-content` back down to the parent's width — the
+     track stops overflowing and the translateX animation only travels a
+     fraction of what it should, which is why the banner looked frozen or
+     jittery. Pinning shrink to 0 lets the natural content width win and the
+     scroll covers the full half-track distance every loop. */
+  flex-shrink: 0;
+  width: max-content;
+  /* `will-change: transform` hints the compositor so the animation runs on
+     the GPU and doesn't repaint the whole header strip every frame. */
+  will-change: transform;
+  animation: vn-marquee-scroll var(--vn-marquee-duration, 25s) linear infinite;
+}
+
+.vn-marquee:hover .vn-marquee-track {
+  animation-play-state: paused;
+}
+
+@keyframes vn-marquee-scroll {
+  from { transform: translateX(0); }
+  /* -50% works because the track always renders content twice (A + A);
+     translating left by exactly one A puts the duplicate where the
+     original was, so the wrap from -50% back to 0 is invisible. */
+  to { transform: translateX(-50%); }
+}
+
+[dir="rtl"] .vn-marquee-track {
+  animation-direction: reverse;
+}
+
+/* ─── Standalone Marquee Section ────────────────────────────────────────── */
+/* Used by the Vionne `marquee` home section. Same seamless A+A pattern as
+   the header announcement, but theme-able per section (size, color, speed,
+   direction). */
+
+.vn-marquee-section {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  background: var(--vn-marquee-bg, var(--vn-ink));
+  color: var(--vn-marquee-fg, var(--vn-white));
+  border-block: 1px solid var(--vn-marquee-border, transparent);
+}
+
+.vn-marquee-section .vn-marquee-track {
+  /* Scoped duration variable so multiple marquees on one page can have
+     independent speeds without leaking via inheritance. */
+  animation: vn-marquee-scroll var(--vn-marquee-section-duration, 30s) linear infinite;
+}
+
+.vn-marquee-section[data-direction="right"] .vn-marquee-track {
+  animation-direction: reverse;
+}
+
+/* RTL stores already flip via the global rule above. When the merchant
+   explicitly chose "right", invert the inversion so the visual direction
+   matches the editor preview regardless of dir. */
+[dir="rtl"] .vn-marquee-section[data-direction="right"] .vn-marquee-track {
+  animation-direction: normal;
+}
+
+.vn-marquee-section[data-pause-on-hover="true"]:hover .vn-marquee-track {
+  animation-play-state: paused;
+}
+
+.vn-marquee-section[data-size="sm"] { font-size: 11px; letter-spacing: 0.22em; }
+.vn-marquee-section[data-size="md"] { font-size: 14px; letter-spacing: 0.18em; }
+.vn-marquee-section[data-size="lg"] { font-size: 18px; letter-spacing: 0.14em; }
+.vn-marquee-section[data-size="xl"] { font-size: 24px; letter-spacing: 0.10em; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Accessibility: respect "reduced motion" by stopping the scroll. The
+     duplicated content still reads naturally, just statically. */
+  .vn-marquee-track,
+  .vn-marquee-section .vn-marquee-track {
+    animation: none;
+    transform: none;
+  }
+}
+
+.vn-header {
+  background: var(--vn-surface-dark);
+  color: var(--vn-white);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 300ms ease, background-color 300ms ease, box-shadow 300ms ease;
+  will-change: transform;
+}
+
+.vn-header.is-hidden {
+  transform: translateY(-100%);
+}
+
+.vn-header.is-condensed {
+  background: rgba(58, 58, 58, 0.95);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
+}
+
+.vn-header a,
+.vn-header button {
+  color: inherit;
+}
+
+/* ─── Mobile Drawer ─── */
+
+.vn-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.vn-drawer-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 5, 5, 0);
+  transition: background-color 280ms ease;
+  pointer-events: none;
+}
+
+.vn-drawer.is-open .vn-drawer-overlay {
+  background: rgba(5, 5, 5, 0.45);
+  pointer-events: auto;
+}
+
+.vn-drawer-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  inset-inline-start: 0;
+  width: min(86vw, 360px);
+  background: var(--vn-white);
+  color: var(--vn-ink);
+  transform: translateX(-100%);
+  transition: transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+[dir="rtl"] .vn-drawer-panel {
+  transform: translateX(100%);
+}
+
+.vn-drawer.is-open .vn-drawer-panel {
+  transform: translateX(0);
+}
+
+.vn-drawer-item {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 280ms ease, transform 280ms ease;
+}
+
+.vn-drawer.is-open .vn-drawer-item {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ─── Mobile Bottom Dock ─── */
+
+.vn-dock {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 40;
+  background: var(--vn-surface-dark);
+  color: var(--vn-white);
+  padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0;
+  transform: translateY(100%);
+  transition: transform 320ms ease;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vn-dock.is-revealed {
+  transform: translateY(0);
+}
+
+.vn-dock-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 4px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--vn-white);
+  border: none;
+  cursor: pointer;
+  position: relative;
+}
+
+.vn-dock-btn .vn-dock-badge {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: calc(50% - 18px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--vn-white);
+  color: var(--vn-ink);
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (min-width: 768px) {
+  .vn-dock {
+    display: none;
+  }
+}
+
+/* Reserve room at the bottom of the page on mobile so the fixed bottom
+   dock doesn't cover the last content. Dock is hidden ≥ 768px so the
+   padding only applies on smaller viewports. */
+[data-vionne-v3-app] [data-testid="storefront-layout"] main {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 768px) {
+  [data-vionne-v3-app] [data-testid="storefront-layout"] main {
+    padding-bottom: 0;
+  }
+}
+
+/* ─── Slideshow ─── */
+
+.vn-slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 1000ms ease;
+}
+
+.vn-slide.is-active {
+  opacity: 1;
+  z-index: 1;
+}
+
+.vn-slide-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+.vn-slide-dot {
+  /* Visible dot stays 8x8 (rendered via ::before) while the button itself
+     is a 24x24 tap target — meets WCAG 2.5.5 / Lighthouse touch-target. */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.vn-slide-dot::before {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.45);
+  transition: transform 200ms ease, background-color 200ms ease;
+}
+
+.vn-slide-dot:hover::before {
+  transform: scale(1.25);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.vn-slide-dot.is-active::before {
+  background: var(--vn-white);
+  transform: scale(1.15);
+}
+
+/* ─── Product Card hover ─── */
+
+.vn-product-card .vn-product-image {
+  transition: transform 600ms ease, opacity 280ms ease;
+}
+
+.vn-product-card:hover .vn-product-image {
+  transform: scale(1.03);
+}
+
+.vn-product-card .vn-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.vn-product-card:hover .vn-product-image-secondary {
+  opacity: 1;
+}
+
+.vn-product-card .vn-quick-view {
+  position: absolute;
+  top: 12px;
+  inset-inline-end: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--vn-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: scale(0);
+  transition: transform 220ms ease, background-color 200ms ease;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.vn-product-card:hover .vn-quick-view {
+  transform: scale(1);
+}
+
+.vn-product-card .vn-quick-view:hover {
+  background: var(--vn-ink);
+  color: var(--vn-white);
+}
+
+.vn-product-card .vn-add-cta {
+  position: absolute;
+  inset-inline: 12px;
+  bottom: 12px;
+  transform: translateY(120%);
+  transition: transform 280ms ease;
+}
+
+.vn-product-card:hover .vn-add-cta {
+  transform: translateY(0);
+}
+
+/* ─── Reveal-on-scroll helper ─── */
+
+.vn-reveal {
+  opacity: 0;
+  transform: translateY(40px);
+  transition: opacity 700ms ease, transform 700ms ease;
+}
+
+.vn-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ─── Shimmer (lazy media placeholder) ─── */
+
+.vn-shimmer {
+  background: linear-gradient(90deg, #ECECEC 0%, #F5F5F5 40%, #ECECEC 80%);
+  background-size: 200% 100%;
+  animation: vn-shimmer 1400ms ease-in-out infinite;
+}
+
+@keyframes vn-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Image-comparison: divider + handle ─── */
+/* Live slider reads `--vn-pos` (set inline as a CSS custom property
+   from the dragged position state); empty-state mock centers at 50%.
+   Logical properties keep both correct under RTL. */
+
+.vn-cmp-divider-center,
+.vn-cmp-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-inline-start: -0.5px;
+  background: #ffffff;
+  pointer-events: none;
+  z-index: 10;
+}
+.vn-cmp-divider-center { inset-inline-start: 50%; }
+.vn-cmp-divider        { inset-inline-start: var(--vn-pos, 50%); }
+
+.vn-cmp-handle-center,
+.vn-cmp-handle {
+  position: absolute;
+  top: 50%;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-inline-start: -1.375rem;
+  margin-top: -1.375rem;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: var(--vn-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 20;
+}
+.vn-cmp-handle-center {
+  inset-inline-start: 50%;
+  pointer-events: none;
+}
+.vn-cmp-handle {
+  inset-inline-start: var(--vn-pos, 50%);
+  cursor: ew-resize;
+}
+.vn-cmp-handle:focus { outline: none; }
+.vn-cmp-handle:focus-visible {
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 0 0 4px var(--vn-ink),
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Clip wrapper for the "before" image. Reads `--vn-clip` (= 100 - position%)
+   set inline as a custom property; the LTR rule clips from the right edge,
+   the RTL override clips from the left so the reveal direction matches the
+   handle motion under both writing modes. */
+.vn-cmp-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  clip-path: inset(0 var(--vn-clip, 50%) 0 0);
+}
+[dir="rtl"] .vn-cmp-clip,
+:dir(rtl) .vn-cmp-clip {
+  clip-path: inset(0 0 0 var(--vn-clip, 50%));
+}
+
+/* Colored band fallbacks shown in place of a missing before/after image.
+   Two slightly different tones so the divider visibly separates them when
+   the merchant hasn't uploaded yet — the slider stays fully draggable. */
+.vn-cmp-band-before {
+  background: var(--vn-band);
+}
+.vn-cmp-band-after {
+  background: color-mix(in srgb, var(--vn-band) 78%, var(--vn-ink) 10%);
+}
+
+/* Per-side upload button overlay. Sits on top of the colored band so the
+   merchant can open the image picker, but the band itself has
+   pointer-events: none so dragging anywhere else still reaches the slider
+   container's pointer handlers. */
+.vn-cmp-upload {
+  position: absolute;
+  top: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: var(--vn-ink);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  z-index: 15;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.vn-cmp-upload:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.12);
+}
+.vn-cmp-upload-before { inset-inline-start: 1rem; }
+.vn-cmp-upload-after  { inset-inline-end: 1rem; }
+
+/* ─── Footer ─── */
+
+.vn-footer {
+  background: var(--vn-surface-dark);
+  color: var(--vn-white);
+}
+
+.vn-footer a {
+  color: rgba(255, 255, 255, 0.78);
+  transition: color 200ms ease;
+}
+
+.vn-footer a:hover {
+  color: var(--vn-white);
+}
+
+/* ─── Misc helpers ─── */
+
+.vn-divider {
+  height: 1px;
+  width: 100%;
+  background: var(--vn-border);
+}
+
+.vn-band {
+  background: var(--vn-band);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* ─── Prose (rich text inside policy pages) ─── */
+
+.vn-prose h1,
+.vn-prose h2,
+.vn-prose h3,
+.vn-prose h4 {
+  font-family: var(--heading-font, "Neue Haas Grotesk Display Pro"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--vn-ink);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.vn-prose h1 { font-size: 1.75rem; }
+.vn-prose h2 { font-size: 1.35rem; }
+.vn-prose h3 { font-size: 1.15rem; }
+.vn-prose h4 { font-size: 1rem; }
+.vn-prose p {
+  margin-bottom: 1em;
+  color: var(--vn-ink);
+}
+.vn-prose a {
+  color: var(--vn-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: opacity 200ms ease;
+}
+.vn-prose a:hover {
+  opacity: 0.7;
+}
+.vn-prose ul,
+.vn-prose ol {
+  padding-inline-start: 1.25rem;
+  margin-bottom: 1em;
+}
+.vn-prose li {
+  margin-bottom: 0.35em;
+}
+.vn-prose ul li {
+  list-style: disc;
+}
+.vn-prose ol li {
+  list-style: decimal;
+}
+.vn-prose strong {
+  font-weight: 600;
+}
+.vn-prose blockquote {
+  border-inline-start: 2px solid var(--vn-ink);
+  padding-inline-start: 1rem;
+  color: var(--vn-muted);
+  margin: 1em 0;
+}
+.vn-prose hr {
+  border: none;
+  border-top: 1px solid var(--vn-border);
+  margin: 2em 0;
+}

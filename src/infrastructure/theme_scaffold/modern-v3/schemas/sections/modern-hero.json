@@ -1,0 +1,110 @@
+{
+  "type": "modern-hero",
+  "name": "Hero Banner",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "badge_text",
+      "type": "text",
+      "label": "Badge Text",
+      "label_ar": "نص الشارة",
+      "default": ""
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "textarea",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Primary Button Text",
+      "label_ar": "نص الزر الرئيسي",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Primary Button Link",
+      "label_ar": "رابط الزر الرئيسي",
+      "default": "/products"
+    },
+    {
+      "id": "secondary_text",
+      "type": "text",
+      "label": "Secondary Button Text",
+      "label_ar": "نص الزر الثانوي",
+      "default": ""
+    },
+    {
+      "id": "secondary_link",
+      "type": "url",
+      "label": "Secondary Button Link",
+      "label_ar": "رابط الزر الثانوي",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "hero_image_url",
+      "type": "image_picker",
+      "label": "Hero Image (Main)",
+      "label_ar": "الصورة الرئيسية",
+      "aspect_ratio": "16/9",
+      "default": ""
+    },
+    {
+      "id": "hero_image_mobile",
+      "type": "image_picker",
+      "label": "Hero Image (Mobile)",
+      "label_ar": "صورة البانر للهاتف",
+      "default": ""
+    },
+    {
+      "id": "hero_image_2",
+      "type": "image_picker",
+      "label": "Hero Image 2",
+      "label_ar": "صورة ٢",
+      "default": ""
+    },
+    {
+      "id": "hero_image_3",
+      "type": "image_picker",
+      "label": "Hero Image 3",
+      "label_ar": "صورة ٣",
+      "default": ""
+    },
+    {
+      "id": "hero_image_4",
+      "type": "image_picker",
+      "label": "Hero Image 4",
+      "label_ar": "صورة ٤",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "show_trust_strip",
+      "type": "checkbox",
+      "label": "Show Trust Strip (Mobile)",
+      "label_ar": "إظهار شريط الثقة",
+      "default": true
+    }
+  ]
+}

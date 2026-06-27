@@ -1,0 +1,28 @@
+{
+  "type": "kgcategories",
+  "name": "Category Row",
+  "name_ar": "شبكة الفئات",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Section Title",
+      "label_ar": "عنوان القسم",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Category Row",
+      "name_ar": "شبكة الفئات",
+      "settings": {
+        "title": ""
+      }
+    }
+  ]
+}

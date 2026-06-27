@@ -1,0 +1,430 @@
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *  Gilded Glamour Boutique (V3) — compiled CSS entry (SOURCE OF TRUTH).
+ *
+ *  Imported by src/main.tsx so Vite's PostCSS pipeline compiles the
+ *  Tailwind directives + the ported V2 gilded utility classes into
+ *  dist/theme.css (the file the host loads via external_theme.css_url).
+ *  The root-level styles.css is a thin pointer kept only to satisfy the
+ *  plugin's required-files contract.
+ *
+ *  DESIGN = a FAITHFUL port of the V2 Gilded Glamour Boutique theme
+ *  (numu-egyptian-bazaar/src/themes/gilded-glamour-boutique/styles.css):
+ *  warm beige canvas, white cards, near-black ink, MUTED-GOLD accent,
+ *  decorative Lobster headings (Montserrat for display headings), deep-red
+ *  sale, SHARP edges (radius 0), BLACK footer. The V2 theme is the design
+ *  spec — nothing here invents a new look.
+ *
+ *  Fonts: Lobster (decorative heading face) + Montserrat (uppercase luxury
+ *  display face used by the hero / product / order-confirmation headings).
+ *  @import MUST precede @tailwind (CSS @import-first rule).
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+@import url('https://fonts.googleapis.com/css2?family=Lobster&family=Montserrat:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Tokens ───
+ * Scoped to BOTH :root and the app wrapper. The storefront host does NOT set
+ * data-theme on any element (it only tags the <link>), so the V2 selector
+ * :root[data-theme="gilded-glamour-boutique"] never matched there. Mirroring
+ * bazar/luxury (`:root, [data-…-v3-app]`) makes the tokens apply on the live
+ * storefront, the editor iframe, and dev preview.
+ *
+ * The high-value BRAND colours read the global-settings token the SDK's
+ * applyGlobalStyleTokens writes onto the mount root (`--theme-<id>`), falling
+ * back to the EXACT V2 value so an un-customised store renders byte-identical
+ * to V2. THIS is what makes the Brand colour pickers actually re-paint the
+ * store (the HSL-triplet neutrals below stay fixed — the faithful canvas). */
+:root,
+[data-gilded-glamour-boutique-v3-app] {
+  /* HSL-triplet palette — verbatim V2 gilded values. Consumed by the ported
+     sections' Tailwind classes (`text-foreground`, `bg-card`, `border-border`,
+     `bg-muted`, `text-muted-foreground`, …). Kept FIXED for a faithful canvas. */
+  --background: 40 33% 95%;
+  --foreground: 0 0% 0%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 0%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 0%;
+
+  --primary: 47 27% 56%;
+  --primary-foreground: 0 0% 0%;
+  --secondary: 40 33% 95%;
+  --secondary-foreground: 0 0% 0%;
+  --accent: 47 27% 56%;
+  --accent-foreground: 0 0% 0%;
+
+  --muted: 40 20% 90%;
+  --muted-foreground: 0 0% 40%;
+
+  --destructive: 0 84% 32%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 47 20% 80%;
+  --input: 47 20% 80%;
+  --ring: 47 27% 56%;
+
+  /* Brand HSL extensions (verbatim V2) — gold scale, olive, sale, beige. */
+  --gold: 43 37% 48%;
+  --gold-light: 43 40% 60%;
+  --gold-dark: 43 35% 38%;
+  --beige: 40 33% 95%;
+  --olive: 90 20% 34%;
+  --soft-pink: 0 40% 80%;
+  --sale: 0 100% 32%;
+
+  /* ── Global-wired BRAND tokens (the merchant's pickers repaint these) ──
+     Each reads `--theme-<id>` with the EXACT V2 fallback, so default == V2. */
+  --gilded-gold: var(--theme-accent_color, hsl(43 37% 48%));
+  --gilded-gold-dark: color-mix(in srgb, var(--gilded-gold) 80%, #000);
+  --gilded-ink: var(--theme-primary_color, hsl(0 0% 0%));
+  --gilded-canvas: var(--theme-background_color, hsl(40 33% 95%));
+  --gilded-text: var(--theme-text_color, hsl(0 0% 0%));
+
+  /* Sharp edges by default; the Layout → "Corner radius" global can soften
+     them (a range stores a bare number → ×1px). V2 default = 0. */
+  --radius: calc(var(--theme-corner_radius, 0) * 1px);
+
+  /* Decorative heading face (generic h1–h6). Montserrat is the display face
+     used by `.gld-heading`. Fall back to Lobster when no global is set. */
+  --heading-font: 'Lobster', cursive;
+
+  /* Theme gradient — gold sweep (V2). */
+  --store-gradient: linear-gradient(135deg, hsl(43 37% 48%), hsl(43 35% 38%));
+}
+
+/* App wrapper — warm beige canvas (global-wired), readable body type. */
+[data-gilded-glamour-boutique-v3-app] {
+  font-family: var(--theme-font-body, var(--theme-body_font, "Inter")),
+    "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: var(--gilded-canvas);
+  color: hsl(var(--foreground));
+  letter-spacing: 0.01em;
+  min-height: 100vh;
+  overflow-x: clip;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Generic headings = decorative Lobster (V2). Repaints when the merchant picks
+   a Typography "Heading font". The prominent DISPLAY headings use `.gld-heading`
+   (Montserrat) — see below — exactly mirroring the V2 inline Montserrat override. */
+[data-gilded-glamour-boutique-v3-app] h1,
+[data-gilded-glamour-boutique-v3-app] h2,
+[data-gilded-glamour-boutique-v3-app] h3,
+[data-gilded-glamour-boutique-v3-app] h4,
+[data-gilded-glamour-boutique-v3-app] h5,
+[data-gilded-glamour-boutique-v3-app] h6 {
+  font-family: var(--theme-font-heading, var(--heading-font)), 'Lobster', cursive;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Zero-specificity image reset — keep utility/inline heights winning so
+   object-cover frames fill instead of collapsing. */
+:where([data-gilded-glamour-boutique-v3-app] img) {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Zero-specificity link reset (`:where`) — default link colour to inherit
+   WITHOUT out-ranking component classes (`.gld-btn`, `.text-gold`). */
+:where([data-gilded-glamour-boutique-v3-app] a) {
+  text-decoration: none;
+  color: inherit;
+}
+
+[data-gilded-glamour-boutique-v3-app] button {
+  font: inherit;
+}
+
+/* Keyboard focus — subtle gold ring (matches the accent). */
+[data-gilded-glamour-boutique-v3-app]
+  :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 1px solid var(--gilded-gold);
+  outline-offset: 2px;
+}
+
+/* ─── Heading-scale (V2) ───
+ * Multiply each Tailwind heading text utility (incl. responsive variants) by
+ * the merchant's chosen scale. Each variant stays inside its own @media block
+ * so breakpoint switching keeps working; attribute-selector specificity
+ * (1,1,0) overrides Tailwind's base rule (0,1,0) inside the same media context. */
+@media (min-width: 0px) {
+  [data-gilded-glamour-boutique-v3-app] .text-3xl { font-size: calc(1.875rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .text-4xl { font-size: calc(2.25rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .text-5xl { font-size: calc(3rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .text-6xl { font-size: calc(3.75rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .text-7xl { font-size: calc(4.5rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .text-8xl { font-size: calc(6rem * var(--gilded-heading-scale, 1)); }
+}
+@media (min-width: 640px) {
+  [data-gilded-glamour-boutique-v3-app] .sm\:text-3xl { font-size: calc(1.875rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .sm\:text-4xl { font-size: calc(2.25rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .sm\:text-5xl { font-size: calc(3rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .sm\:text-6xl { font-size: calc(3.75rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .sm\:text-7xl { font-size: calc(4.5rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .sm\:text-8xl { font-size: calc(6rem * var(--gilded-heading-scale, 1)); }
+}
+@media (min-width: 768px) {
+  [data-gilded-glamour-boutique-v3-app] .md\:text-3xl { font-size: calc(1.875rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .md\:text-4xl { font-size: calc(2.25rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .md\:text-5xl { font-size: calc(3rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .md\:text-6xl { font-size: calc(3.75rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .md\:text-7xl { font-size: calc(4.5rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .md\:text-8xl { font-size: calc(6rem * var(--gilded-heading-scale, 1)); }
+}
+@media (min-width: 1024px) {
+  [data-gilded-glamour-boutique-v3-app] .lg\:text-3xl { font-size: calc(1.875rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .lg\:text-4xl { font-size: calc(2.25rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .lg\:text-5xl { font-size: calc(3rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .lg\:text-6xl { font-size: calc(3.75rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .lg\:text-7xl { font-size: calc(4.5rem * var(--gilded-heading-scale, 1)); }
+  [data-gilded-glamour-boutique-v3-app] .lg\:text-8xl { font-size: calc(6rem * var(--gilded-heading-scale, 1)); }
+}
+
+/* ─── Brand utility classes ───
+ * text-gold / bg-gold / border-gold / text-gold-dark / bg-gold-dark / text-olive
+ * / bg-beige / text-sale / bg-sale are now REGISTERED Tailwind colours (see
+ * tailwind.config.js → varColor + the gold/gold-dark/olive/sale/beige entries),
+ * so their hover:/focus: variant forms AND /opacity modifiers compile correctly
+ * and the gold reads the global-wired --gilded-gold token. Do NOT re-add them as
+ * hand-written rules here (that would shadow the opacity-aware Tailwind output). */
+
+/* Decorative gold radial backdrops — default fallback when a merchant hasn't
+   supplied an auth/policy hero image. */
+[data-gilded-glamour-boutique-v3-app] .gilded-decor-bg {
+  background:
+    radial-gradient(ellipse at top left, hsl(var(--gold) / 0.25), transparent 60%),
+    radial-gradient(ellipse at bottom right, hsl(var(--gold-dark) / 0.20), transparent 55%);
+}
+
+/* ━━━ Gilded component helpers (gld-*) — the page/section building blocks ━━━
+ * Mirror the V2 gilded treatments. Used by the rebuilt sections instead of the
+ * old Vionne `vn-*` classes. Gold pieces read `--gilded-gold(-dark)`. */
+
+/* Display heading = uppercase Montserrat (V2 hero / product / confirmation). */
+.gld-heading {
+  font-family: var(--theme-font-heading, "Montserrat"), "Montserrat",
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.gld-eyebrow {
+  font-family: "Montserrat", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.gld-label {
+  font-family: "Montserrat", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 11px;
+}
+
+/* Primary CTA — gold fill, black text, sharp edges, hover → gold-dark (V2). */
+.gld-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--gilded-gold);
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  padding: 0.9rem 2rem;
+  border: 1px solid var(--gilded-gold);
+  border-radius: var(--radius);
+  transition: background-color 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
+  cursor: pointer;
+}
+.gld-btn:hover {
+  background: var(--gilded-gold-dark);
+  border-color: var(--gilded-gold-dark);
+}
+
+/* Secondary CTA — gold outline, fills gold on hover (V2 "View All" / promo). */
+.gld-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: transparent;
+  color: hsl(var(--foreground));
+  border: 1px solid var(--gilded-gold);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--radius);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  cursor: pointer;
+}
+.gld-btn-outline:hover {
+  background: var(--gilded-gold);
+  color: hsl(var(--foreground));
+}
+
+/* Input — hairline border, gold focus (V2). */
+.gld-input {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  letter-spacing: 0.01em;
+  color: hsl(var(--foreground));
+}
+.gld-input:focus {
+  border-color: var(--gilded-gold);
+  outline: none;
+}
+
+/* Category chip — bordered, fills black-on-gold when active (V2 PLP pills). */
+.gld-chip {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+}
+.gld-chip:hover {
+  border-color: var(--gilded-gold);
+}
+.gld-chip-active {
+  background: hsl(var(--foreground));
+  color: var(--gilded-gold);
+  border-color: hsl(var(--foreground));
+}
+
+/* Card — white, sharp, subtle hover shadow. */
+.gld-card {
+  background: hsl(var(--card));
+  border-radius: var(--radius);
+  transition: box-shadow 0.4s ease, border-color 0.3s ease;
+}
+.gld-card:hover {
+  box-shadow: 0 8px 30px hsl(0 0% 0% / 0.08);
+}
+
+.gld-divider {
+  height: 1px;
+  width: 100%;
+  background: hsl(var(--border));
+}
+.gld-band {
+  background: hsl(var(--beige));
+}
+
+/* Product-card hover (image zoom + secondary reveal) — V2 parity. */
+.gld-product-card .gld-product-image {
+  transition: transform 500ms ease, opacity 280ms ease;
+}
+.gld-product-card:hover .gld-product-image {
+  transform: scale(1.05);
+}
+.gld-product-card .gld-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+.gld-product-card:hover .gld-product-image-secondary {
+  opacity: 1;
+}
+
+/* Shimmer placeholder for lazy media. */
+.gld-shimmer {
+  background: linear-gradient(90deg, hsl(40 20% 86%) 0%, hsl(40 24% 92%) 40%, hsl(40 20% 86%) 80%);
+  background-size: 200% 100%;
+  animation: gld-shimmer 1400ms ease-in-out infinite;
+}
+@keyframes gld-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gld-shimmer { animation: none; }
+}
+
+/* Scrollbar-hide (thumbnail rail / category strip / filter chips). */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* ━━━ Inline-editor affordances ━━━
+ * The customizer wraps editable text in <InlineEditable> (class prefix
+ * `gilded-inline-edit`). These styles show a dashed gold frame + pencil glyph
+ * on hover INSIDE the editor iframe only (`--armed` gates on isInsideEditor).
+ * Live shoppers never see them. */
+.gilded-inline-edit {
+  position: relative;
+  display: inline;
+}
+.gilded-inline-edit--armed {
+  cursor: text;
+  border-radius: 3px;
+  transition: outline-color 160ms ease, background-color 160ms ease;
+  outline: 1px dashed transparent;
+  outline-offset: 3px;
+}
+.gilded-inline-edit--armed:hover {
+  outline-color: var(--gilded-gold);
+  background-color: rgba(168, 142, 77, 0.08);
+}
+.gilded-inline-edit--armed::after {
+  content: "";
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  background-color: var(--gilded-gold);
+  border-radius: 50%;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 9px 9px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.gilded-inline-edit--armed:hover::after,
+.gilded-inline-edit--editing::after {
+  opacity: 1;
+  transform: scale(1);
+}
+.gilded-inline-edit--editing {
+  outline-color: hsl(var(--foreground)) !important;
+  outline-style: solid;
+  outline-width: 1px;
+  background-color: rgba(0, 0, 0, 0.03);
+  cursor: text;
+}
+.gilded-inline-edit--editing[contenteditable="true"] {
+  caret-color: hsl(var(--foreground));
+}

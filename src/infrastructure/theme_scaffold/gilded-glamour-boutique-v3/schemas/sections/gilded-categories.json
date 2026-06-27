@@ -1,0 +1,76 @@
+{
+  "type": "gilded-categories",
+  "name": "Gilded Categories",
+  "name_ar": "شبكة الفئات",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content",
+      "content_ar": "المحتوى"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Section title",
+      "label_ar": "عنوان القسم",
+      "default": "Curated Verticals",
+      "info": "Eyebrow shown above the category grid."
+    },
+    {
+      "type": "header",
+      "content": "Layout",
+      "content_ar": "التخطيط"
+    },
+    {
+      "type": "range",
+      "id": "max_items",
+      "label": "Max categories",
+      "label_ar": "أقصى عدد فئات",
+      "default": 0,
+      "min": 0,
+      "max": 12,
+      "step": 1,
+      "info": "0 = show all categories."
+    }
+  ],
+  "blocks": [
+    {
+      "type": "category",
+      "name": "Category",
+      "name_ar": "فئة",
+      "settings": [
+        {
+          "type": "image_picker",
+          "id": "image",
+          "label": "Image",
+          "label_ar": "الصورة"
+        },
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label",
+          "label_ar": "التسمية",
+          "default": "Category"
+        },
+        {
+          "type": "url",
+          "id": "link",
+          "label": "Link",
+          "label_ar": "الرابط",
+          "default": "/products"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Gilded Categories",
+      "name_ar": "شبكة الفئات",
+      "settings": {
+        "title": "Curated Verticals",
+        "max_items": 0
+      },
+      "blocks": []
+    }
+  ]
+}

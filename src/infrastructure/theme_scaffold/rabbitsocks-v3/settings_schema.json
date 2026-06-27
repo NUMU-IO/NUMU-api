@@ -1,0 +1,76 @@
+[
+  {
+    "name": "Colors",
+    "settings": [
+      {
+        "type": "color",
+        "id": "primary_color",
+        "label": "Primary color",
+        "label_ar": "اللون الأساسي",
+        "default": "#000613"
+      },
+      {
+        "type": "color",
+        "id": "secondary_color",
+        "label": "Secondary color",
+        "label_ar": "اللون الثانوي",
+        "default": "#635e54"
+      },
+      {
+        "type": "color",
+        "id": "primary_container",
+        "label": "Dark background",
+        "label_ar": "الخلفية الداكنة",
+        "default": "#001f3f"
+      },
+      {
+        "type": "color",
+        "id": "background_color",
+        "label": "Page background",
+        "label_ar": "خلفية الصفحة",
+        "default": "#f9f9f7"
+      },
+      {
+        "type": "color",
+        "id": "surface_low",
+        "label": "Surface (cards)",
+        "label_ar": "خلفية البطاقات",
+        "default": "#f4f4f2"
+      }
+    ]
+  },
+  {
+    "name": "Typography",
+    "settings": [
+      {
+        "type": "font",
+        "id": "heading_font",
+        "label": "Heading font",
+        "label_ar": "خط العناوين",
+        "default": "Cormorant Garamond"
+      },
+      {
+        "type": "font",
+        "id": "body_font",
+        "label": "Body font",
+        "label_ar": "خط النص",
+        "default": "Manrope"
+      }
+    ]
+  },
+  {
+    "name": "Layout",
+    "settings": [
+      {
+        "type": "range",
+        "id": "radius",
+        "label": "Border radius",
+        "label_ar": "زوايا الحواف",
+        "default": 0,
+        "min": 0,
+        "max": 16,
+        "step": 2
+      }
+    ]
+  }
+]

@@ -1,0 +1,84 @@
+{
+  "type": "lux-product-grid",
+  "name": "Product Grid",
+  "name_ar": "شبكة المنتجات",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Heading" },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title override",
+      "label_ar": "تجاوز العنوان",
+      "default": "",
+      "info": "Leave blank to use the collection name (collection pages) or \"All Products\" (products page)."
+    },
+    {
+      "type": "checkbox",
+      "id": "show_category_subtitle",
+      "label": "Show collection description",
+      "label_ar": "إظهار وصف المجموعة",
+      "default": false,
+      "info": "On a collection page, shows the collection's description under the title."
+    },
+    { "type": "header", "content": "Grid" },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Columns (desktop)",
+      "label_ar": "الأعمدة (سطح المكتب)",
+      "min": 2,
+      "max": 5,
+      "step": 1,
+      "unit": "col",
+      "default": 4
+    },
+    {
+      "type": "range",
+      "id": "columns_mobile",
+      "label": "Columns (mobile)",
+      "label_ar": "الأعمدة (الجوال)",
+      "min": 1,
+      "max": 2,
+      "step": 1,
+      "unit": "col",
+      "default": 2
+    },
+    {
+      "type": "range",
+      "id": "products_per_page",
+      "label": "Products per page",
+      "label_ar": "عدد المنتجات في الصفحة",
+      "min": 8,
+      "max": 60,
+      "step": 4,
+      "unit": "prod",
+      "default": 24
+    },
+    { "type": "header", "content": "Toolbar" },
+    {
+      "type": "checkbox",
+      "id": "show_view_toggle",
+      "label": "Show grid / list toggle",
+      "label_ar": "إظهار زر الشبكة / القائمة",
+      "default": false
+    }
+  ],
+  "presets": [
+    {
+      "name": "Product Grid",
+      "locales": {
+        "en": { "name": "Product Grid" },
+        "ar": { "name": "شبكة المنتجات" }
+      },
+      "settings": {
+        "title": "",
+        "show_category_subtitle": false,
+        "columns_desktop": 4,
+        "columns_mobile": 2,
+        "products_per_page": 24,
+        "show_view_toggle": false
+      }
+    }
+  ]
+}

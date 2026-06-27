@@ -1,0 +1,131 @@
+{
+  "type": "vionne-about",
+  "name": "About Page (Vionne)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "eyebrow",
+      "type": "text",
+      "label": "Eyebrow",
+      "label_ar": "نص علوي",
+      "default": ""
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "quote",
+      "type": "textarea",
+      "label": "Quote",
+      "label_ar": "اقتباس",
+      "default": ""
+    },
+    {
+      "id": "description",
+      "type": "textarea",
+      "label": "Description",
+      "label_ar": "الوصف",
+      "default": ""
+    },
+    {
+      "id": "image",
+      "type": "image_picker",
+      "label": "Side image",
+      "label_ar": "الصورة الجانبية",
+      "aspect_ratio": "4/5",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Values"
+    },
+    {
+      "id": "value_1_title",
+      "type": "text",
+      "label": "Value 1 title",
+      "default": ""
+    },
+    {
+      "id": "value_1_text",
+      "type": "textarea",
+      "label": "Value 1 text",
+      "default": ""
+    },
+    {
+      "id": "value_2_title",
+      "type": "text",
+      "label": "Value 2 title",
+      "default": ""
+    },
+    {
+      "id": "value_2_text",
+      "type": "textarea",
+      "label": "Value 2 text",
+      "default": ""
+    },
+    {
+      "id": "value_3_title",
+      "type": "text",
+      "label": "Value 3 title",
+      "default": ""
+    },
+    {
+      "id": "value_3_text",
+      "type": "textarea",
+      "label": "Value 3 text",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Calls To Action"
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Primary CTA Text",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Primary CTA Link",
+      "default": "/products"
+    },
+    {
+      "id": "contact_cta_text",
+      "type": "text",
+      "label": "Secondary CTA Text",
+      "default": ""
+    },
+    {
+      "id": "contact_cta_link",
+      "type": "url",
+      "label": "Secondary CTA Link",
+      "default": "/contact"
+    }
+  ],
+  "presets": [
+    {
+      "name": "About (Vionne)",
+      "locales": {
+        "en": {
+          "name": "About (Vionne)"
+        },
+        "ar": {
+          "name": "عن المتجر"
+        }
+      },
+      "settings": {
+        "cta_link": "/products",
+        "contact_cta_link": "/contact"
+      }
+    }
+  ]
+}

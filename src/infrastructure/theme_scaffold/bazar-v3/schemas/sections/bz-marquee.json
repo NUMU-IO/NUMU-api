@@ -1,0 +1,41 @@
+{
+  "type": "bz-marquee",
+  "name": "Bazar Marquee",
+  "name_ar": "بازار شريط متحرك",
+  "settings": [
+    {
+      "type": "text",
+      "id": "text",
+      "label": "Marquee Text",
+      "label_ar": "نص الشريط",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "repeat_count",
+      "label": "Repeat Count",
+      "label_ar": "عدد التكرار",
+      "default": 2,
+      "min": 1,
+      "max": 10,
+      "step": 1
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Marquee",
+      "locales": {
+        "en": {
+          "name": "Bazar Marquee"
+        },
+        "ar": {
+          "name": "بازار شريط متحرك"
+        }
+      },
+      "settings": {
+        "text": "",
+        "repeat_count": 2
+      }
+    }
+  ]
+}

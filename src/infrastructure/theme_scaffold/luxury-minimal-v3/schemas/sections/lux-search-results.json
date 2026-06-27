@@ -1,0 +1,43 @@
+{
+  "type": "lux-search-results",
+  "name": "Search Results",
+  "name_ar": "نتائج البحث",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Content" },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Page title",
+      "label_ar": "عنوان الصفحة",
+      "default": "",
+      "info": "Shown when there is no query. With a query the heading becomes “Results for …”."
+    },
+    { "type": "header", "content": "Layout" },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Columns (desktop)",
+      "label_ar": "الأعمدة (سطح المكتب)",
+      "min": 2,
+      "max": 5,
+      "step": 1,
+      "unit": "",
+      "default": 4,
+      "info": "Mobile shows 2 columns. Matches the products page grid."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Search Results",
+      "locales": {
+        "en": { "name": "Search Results" },
+        "ar": { "name": "نتائج البحث" }
+      },
+      "settings": {
+        "title": "",
+        "columns_desktop": 4
+      }
+    }
+  ]
+}

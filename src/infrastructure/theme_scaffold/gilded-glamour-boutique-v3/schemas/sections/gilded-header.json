@@ -1,0 +1,168 @@
+{
+  "type": "gilded-header",
+  "name": "Gilded Header",
+  "name_ar": "ترويسة جيلدد",
+  "tag": "header",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Brand",
+      "content_ar": "العلامة التجارية"
+    },
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "label_ar": "اسم المتجر",
+      "default": "",
+      "info": "Leave empty to use the store name.",
+      "info_ar": "اتركه فارغًا لاستخدام اسم المتجر."
+    },
+    {
+      "type": "image_picker",
+      "id": "logo_url",
+      "label": "Logo",
+      "label_ar": "الشعار",
+      "info": "Shown on the start. Falls back to the brand name text. Shape & size come from the global logo settings.",
+      "info_ar": "يظهر في بداية الترويسة. يتم استخدام نص اسم المتجر إذا لم يتم تعيينه. يأتي الشكل والحجم من إعدادات الشعار العامة."
+    },
+    {
+      "type": "header",
+      "content": "Announcement bar",
+      "content_ar": "شريط الإعلان"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_announcement",
+      "label": "Show announcement bar",
+      "label_ar": "إظهار شريط الإعلان",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "announcement_text",
+      "label": "Announcement text",
+      "label_ar": "نص الإعلان",
+      "default": "Complimentary shipping on all orders",
+      "info": "Black bar above the header. Leave empty to hide it.",
+      "info_ar": "شريط أسود أعلى الترويسة. اتركه فارغًا لإخفائه."
+    },
+    {
+      "type": "header",
+      "content": "Icons",
+      "content_ar": "الأيقونات"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_search",
+      "label": "Show search icon",
+      "label_ar": "إظهار أيقونة البحث",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_cart",
+      "label": "Show cart icon",
+      "label_ar": "إظهار أيقونة السلة",
+      "default": true
+    }
+  ],
+  "blocks": [
+    {
+      "type": "nav_item",
+      "name": "Navigation link",
+      "name_ar": "رابط التنقل",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label",
+          "label_ar": "التسمية",
+          "default": "Shop"
+        },
+        {
+          "type": "url",
+          "id": "href",
+          "label": "URL",
+          "label_ar": "الرابط",
+          "default": "/products",
+          "info": "Use /collections for the dropdown of all collections.",
+          "info_ar": "استخدم /collections للقائمة المنسدلة لكل التشكيلات."
+        }
+      ]
+    }
+  ],
+  "max_blocks": 8,
+  "presets": [
+    {
+      "name": "Gilded Header",
+      "locales": {
+        "en": {
+          "name": "Gilded Header"
+        },
+        "ar": {
+          "name": "ترويسة جيلدد"
+        }
+      },
+      "settings": {
+        "brand_name": "",
+        "show_announcement": true,
+        "announcement_text": "Complimentary shipping on all orders",
+        "show_search": true,
+        "show_cart": true
+      },
+      "blocks": [
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "HOME",
+            "href": "/"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "SHOP",
+            "href": "/products"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "COLLECTIONS",
+            "href": "/collections"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "LOOKBOOK",
+            "href": "/pages/lookbook"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "ABOUT",
+            "href": "/pages/about"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "FAQ",
+            "href": "/pages/faq"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "CONTACT",
+            "href": "/pages/contact"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,441 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported verbatim from V2 Skeuomorphic (numu-egyptian-bazaar/src/
+ * themes/skeuomorphic/styles.css). The only change: the V2 root
+ * selector :root[data-theme="skeuomorphic"] is retargeted to the V3
+ * mount element [data-skeuomorphic-v3-app] so the --skeu-* + HSL
+ * tokens reach the sections.
+ * ─────────────────────────────────────────────────────────────── */
+/* Theme: Skeuomorphic — Physical, tactile 3D interface */
+
+/* ===== CSS Variables ===== */
+[data-skeuomorphic-v3-app] {
+  --background: 35 30% 93%;
+  --foreground: 25 30% 12%;
+  --card: 35 25% 96%;
+  --card-foreground: 25 30% 12%;
+  --popover: 35 25% 96%;
+  --popover-foreground: 25 30% 12%;
+  --primary: 210 65% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 35 20% 88%;
+  --secondary-foreground: 25 30% 12%;
+  --muted: 35 15% 85%;
+  --muted-foreground: 25 15% 42%;
+  --accent: 210 40% 90%;
+  --accent-foreground: 210 65% 30%;
+  --destructive: 0 75% 55%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 35 15% 78%;
+  --input: 35 10% 80%;
+  --ring: 210 65% 48%;
+  --radius: 0.75rem;
+  --store-gradient: linear-gradient(180deg, hsl(210 65% 55%), hsl(210 65% 42%));
+  --hero-bg: 35 25% 90%;
+  --badge-bg: 210 65% 48%;
+  --badge-fg: 0 0% 100%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 25 25% 25%;
+  --announcement-fg: 35 30% 95%;
+  --success: 142 60% 38%;
+  --warning: 38 92% 50%;
+
+  /* Skeuomorphic-specific tokens */
+  --skeu-shadow-sm:
+    0 1px 2px hsl(var(--foreground) / 0.15),
+    0 1px 0 hsl(0 0% 100% / 0.4) inset;
+  --skeu-shadow-md:
+    0 3px 8px hsl(var(--foreground) / 0.18),
+    0 1px 3px hsl(var(--foreground) / 0.1),
+    0 1px 0 hsl(0 0% 100% / 0.5) inset;
+  --skeu-shadow-lg:
+    0 8px 24px hsl(var(--foreground) / 0.2),
+    0 4px 8px hsl(var(--foreground) / 0.12),
+    0 2px 0 hsl(0 0% 100% / 0.4) inset;
+  --skeu-shadow-inset:
+    inset 0 2px 4px hsl(var(--foreground) / 0.2),
+    inset 0 1px 2px hsl(var(--foreground) / 0.1);
+  --skeu-shadow-pressed:
+    inset 0 2px 6px hsl(var(--foreground) / 0.25),
+    inset 0 1px 2px hsl(var(--foreground) / 0.15);
+  --skeu-highlight: hsl(0 0% 100% / 0.5);
+  --skeu-surface: linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
+  --skeu-surface-dark: linear-gradient(180deg, hsl(var(--muted)) 0%, hsl(var(--border)) 100%);
+  --skeu-btn-gradient: linear-gradient(180deg, color-mix(in srgb, hsl(var(--primary)), white 18%) 0%, hsl(var(--primary)) 100%);
+  --skeu-btn-gradient-hover: linear-gradient(180deg, color-mix(in srgb, hsl(var(--primary)), white 25%) 0%, color-mix(in srgb, hsl(var(--primary)), white 5%) 100%);
+  --skeu-texture: url("data:image/svg+xml,%3Csvg width='6' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='6' height='6' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  --skeu-depth: 1;
+
+  --sidebar-background: 35 25% 92%;
+  --sidebar-foreground: 25 30% 12%;
+  --sidebar-primary: 210 65% 48%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 210 40% 90%;
+  --sidebar-accent-foreground: 210 65% 30%;
+  --sidebar-border: 35 15% 78%;
+  --sidebar-ring: 210 65% 48%;
+}
+
+/* Texture on body */
+[data-skeuomorphic-v3-app] body,
+[data-skeuomorphic-v3-app] {
+  background-image: var(--skeu-texture);
+  background-repeat: repeat;
+}
+
+/* ===== COMPONENT STYLES ===== */
+
+/* Card - physical object feel */
+[data-skeuomorphic-v3-app] .skeu-card {
+  background: var(--skeu-surface);
+  border: 1px solid hsl(var(--border));
+  border-bottom: 2px solid color-mix(in srgb, hsl(var(--border)), hsl(var(--foreground)) 15%);
+  box-shadow: var(--skeu-shadow-md);
+  position: relative;
+}
+[data-skeuomorphic-v3-app] .skeu-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: var(--skeu-texture);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Elevated card */
+[data-skeuomorphic-v3-app] .skeu-elevated {
+  box-shadow: var(--skeu-shadow-lg);
+  border-bottom: 3px solid color-mix(in srgb, hsl(var(--border)), hsl(var(--foreground)) 20%);
+}
+
+/* Inset - embedded feel for inputs */
+[data-skeuomorphic-v3-app] .skeu-inset {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--skeu-shadow-inset);
+}
+
+/* Button - tactile, pressable */
+[data-skeuomorphic-v3-app] .skeu-btn {
+  background: var(--skeu-btn-gradient);
+  border: 1px solid color-mix(in srgb, hsl(var(--primary)), black 25%);
+  border-bottom: 3px solid color-mix(in srgb, hsl(var(--primary)), black 35%);
+  box-shadow:
+    0 1px 3px hsl(var(--primary) / 0.3),
+    0 1px 0 hsl(0 0% 100% / 0.3) inset;
+  color: white;
+  font-weight: 700;
+  text-shadow: 0 1px 2px hsl(var(--primary) / 0.4);
+  transition: all 0.1s ease;
+  position: relative;
+}
+[data-skeuomorphic-v3-app] .skeu-btn:hover {
+  background: var(--skeu-btn-gradient-hover);
+  border-bottom-width: 3px;
+}
+[data-skeuomorphic-v3-app] .skeu-btn:active {
+  border-bottom-width: 1px;
+  transform: translateY(2px);
+  box-shadow:
+    0 0 1px hsl(var(--primary) / 0.3),
+    inset 0 2px 4px hsl(var(--primary) / 0.3);
+}
+
+/* Secondary button */
+[data-skeuomorphic-v3-app] .skeu-btn-secondary {
+  background: var(--skeu-surface);
+  border: 1px solid hsl(var(--border));
+  border-bottom: 3px solid color-mix(in srgb, hsl(var(--border)), hsl(var(--foreground)) 15%);
+  box-shadow:
+    0 1px 3px hsl(var(--foreground) / 0.15),
+    0 1px 0 hsl(0 0% 100% / 0.5) inset;
+  color: hsl(var(--foreground));
+  font-weight: 700;
+  transition: all 0.1s ease;
+}
+[data-skeuomorphic-v3-app] .skeu-btn-secondary:hover {
+  background: var(--skeu-surface-dark);
+}
+[data-skeuomorphic-v3-app] .skeu-btn-secondary:active {
+  border-bottom-width: 1px;
+  transform: translateY(2px);
+  box-shadow: var(--skeu-shadow-pressed);
+}
+
+/* Badge / tag */
+[data-skeuomorphic-v3-app] .skeu-badge {
+  background: linear-gradient(180deg, color-mix(in srgb, hsl(var(--destructive)), white 15%) 0%, hsl(var(--destructive)) 100%);
+  border: 1px solid color-mix(in srgb, hsl(var(--destructive)), black 20%);
+  border-bottom: 2px solid color-mix(in srgb, hsl(var(--destructive)), black 30%);
+  box-shadow: 0 2px 4px hsl(var(--destructive) / 0.3);
+  color: white;
+  text-shadow: 0 1px 1px hsl(var(--destructive) / 0.4);
+}
+
+/* New badge */
+[data-skeuomorphic-v3-app] .skeu-badge-new {
+  background: linear-gradient(180deg, color-mix(in srgb, hsl(var(--primary)), white 15%) 0%, hsl(var(--primary)) 100%);
+  border: 1px solid color-mix(in srgb, hsl(var(--primary)), black 25%);
+  border-bottom: 2px solid color-mix(in srgb, hsl(var(--primary)), black 35%);
+  box-shadow: 0 2px 4px hsl(var(--primary) / 0.3);
+  color: white;
+  text-shadow: 0 1px 1px hsl(var(--primary) / 0.4);
+}
+
+/* Header - shelf/bar feel */
+[data-skeuomorphic-v3-app] .skeu-header {
+  background: linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
+  border-bottom: 2px solid hsl(var(--border));
+  box-shadow:
+    0 2px 8px hsl(var(--foreground) / 0.15),
+    0 1px 0 hsl(0 0% 100% / 0.6) inset;
+}
+
+/* Toggle / switch */
+[data-skeuomorphic-v3-app] .skeu-toggle {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--skeu-shadow-inset);
+}
+[data-skeuomorphic-v3-app] .skeu-toggle-active {
+  background: var(--skeu-btn-gradient);
+  border-color: color-mix(in srgb, hsl(var(--primary)), black 25%);
+  box-shadow:
+    0 1px 0 hsl(0 0% 100% / 0.3) inset;
+  color: white;
+  text-shadow: 0 1px 1px hsl(var(--primary) / 0.3);
+}
+
+/* Footer - heavy base */
+[data-skeuomorphic-v3-app] .skeu-footer {
+  background: linear-gradient(180deg, hsl(var(--foreground)) 0%, color-mix(in srgb, hsl(var(--foreground)), black 30%) 100%);
+  border-top: 3px solid color-mix(in srgb, hsl(var(--foreground)), white 15%);
+  box-shadow:
+    0 -2px 8px hsl(var(--foreground) / 0.3),
+    0 1px 0 hsl(0 0% 100% / 0.1) inset;
+  color: hsl(var(--background));
+}
+
+/* Product image frame */
+[data-skeuomorphic-v3-app] .skeu-img-frame {
+  border: 3px solid hsl(var(--border));
+  border-bottom: 4px solid color-mix(in srgb, hsl(var(--border)), hsl(var(--foreground)) 15%);
+  box-shadow:
+    var(--skeu-shadow-md),
+    inset 0 0 0 1px hsl(0 0% 100% / 0.3);
+  background: hsl(var(--card));
+  padding: 4px;
+}
+
+/* Chip/category pill */
+[data-skeuomorphic-v3-app] .skeu-chip {
+  background: var(--skeu-surface);
+  border: 1px solid hsl(var(--border));
+  border-bottom: 2px solid color-mix(in srgb, hsl(var(--border)), hsl(var(--foreground)) 15%);
+  box-shadow: 0 1px 3px hsl(var(--foreground) / 0.12);
+  transition: all 0.1s ease;
+}
+[data-skeuomorphic-v3-app] .skeu-chip:active {
+  border-bottom-width: 1px;
+  transform: translateY(1px);
+}
+[data-skeuomorphic-v3-app] .skeu-chip-active {
+  background: var(--skeu-btn-gradient);
+  border-color: color-mix(in srgb, hsl(var(--primary)), black 25%);
+  color: white;
+  text-shadow: 0 1px 1px hsl(var(--primary) / 0.3);
+}
+
+/* Announcement bar */
+[data-skeuomorphic-v3-app] .skeu-announcement {
+  background: linear-gradient(180deg, hsl(var(--announcement-bg)) 0%, color-mix(in srgb, hsl(var(--announcement-bg)), black 20%) 100%);
+  border-bottom: 2px solid color-mix(in srgb, hsl(var(--announcement-bg)), black 40%);
+  box-shadow: 0 1px 0 hsl(0 0% 100% / 0.1) inset;
+  color: hsl(var(--announcement-fg));
+  text-shadow: 0 1px 2px hsl(var(--foreground) / 0.5);
+}
+
+/* Rating star */
+[data-skeuomorphic-v3-app] .skeu-star {
+  filter: drop-shadow(0 1px 1px hsl(var(--warning) / 0.4));
+}
+
+/* Divider */
+[data-skeuomorphic-v3-app] .skeu-divider {
+  height: 2px;
+  background: linear-gradient(
+    180deg,
+    hsl(var(--border)) 0%,
+    color-mix(in srgb, hsl(var(--border)), white 10%) 50%,
+    hsl(var(--card)) 100%
+  );
+  border: none;
+}
+
+/* Section with subtle texture */
+[data-skeuomorphic-v3-app] .skeu-section {
+  background: hsl(var(--muted));
+  border-top: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+  box-shadow:
+    inset 0 1px 3px hsl(var(--foreground) / 0.08),
+    inset 0 -1px 0 hsl(0 0% 100% / 0.4);
+}
+
+
+/* Force skeuomorphic palette for shared page classes */
+[data-skeuomorphic-v3-app] .store-gradient {
+  background: linear-gradient(180deg, hsl(210 65% 55%), hsl(210 65% 42%)) !important;
+}
+
+/* ───────────────────────────────────────────────────────────────
+ * V3 PAGE-LEVEL SECTIONS (product-detail / products-page / profile /
+ * order-confirmation, ported from the proven Vionne V3 sections).
+ *
+ * Those sections are authored against Vionne's `vn-*` utility classes
+ * and `--vn-*` tokens. To keep them visually coherent with the
+ * Skeuomorphic theme rather than dropping in Vionne's grayscale, the
+ * `--vn-*` tokens below are RE-MAPPED to the Skeuomorphic palette
+ * (warm beige surfaces, near-black ink, blue accent) and the buttons
+ * are re-skinned to the skeuomorphic tactile look.
+ * ─────────────────────────────────────────────────────────────── */
+
+[data-skeuomorphic-v3-app] {
+  --vn-white: hsl(35 25% 96%);
+  --vn-band: hsl(35 20% 88%);
+  --vn-surface-dark: hsl(25 30% 12%);
+  --vn-ink: hsl(25 30% 12%);
+  --vn-border: hsl(35 15% 78%);
+  --vn-muted: hsl(25 15% 42%);
+  --vn-sale: hsl(0 75% 50%);
+}
+
+/* ─── Typography ─── */
+
+[data-skeuomorphic-v3-app] .vn-heading {
+  font-family: var(--heading-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  text-shadow: 0 1px 0 hsl(35 30% 100% / 0.5);
+}
+
+[data-skeuomorphic-v3-app] .vn-eyebrow {
+  font-family: var(--body-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+  color: var(--vn-muted);
+}
+
+[data-skeuomorphic-v3-app] .vn-label {
+  font-family: var(--body-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+}
+
+/* ─── Buttons — skinned to the skeuomorphic tactile look ─── */
+
+[data-skeuomorphic-v3-app] .vn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 700;
+  transition: all 0.1s ease;
+  cursor: pointer;
+  position: relative;
+}
+
+[data-skeuomorphic-v3-app] .vn-btn-filled {
+  background: var(--skeu-btn-gradient);
+  border: 1px solid color-mix(in srgb, hsl(var(--primary)), black 25%);
+  border-bottom: 3px solid color-mix(in srgb, hsl(var(--primary)), black 35%);
+  box-shadow:
+    0 1px 3px hsl(var(--primary) / 0.3),
+    0 1px 0 hsl(0 0% 100% / 0.3) inset;
+  color: white;
+  text-shadow: 0 1px 2px hsl(var(--primary) / 0.4);
+}
+[data-skeuomorphic-v3-app] .vn-btn-filled:hover {
+  background: var(--skeu-btn-gradient-hover);
+}
+[data-skeuomorphic-v3-app] .vn-btn-filled:active {
+  border-bottom-width: 1px;
+  transform: translateY(2px);
+}
+
+[data-skeuomorphic-v3-app] .vn-btn-outline-dark {
+  background: var(--skeu-surface);
+  border: 1px solid hsl(var(--border));
+  border-bottom: 3px solid color-mix(in srgb, hsl(var(--border)), hsl(var(--foreground)) 15%);
+  box-shadow:
+    0 1px 3px hsl(var(--foreground) / 0.15),
+    0 1px 0 hsl(0 0% 100% / 0.5) inset;
+  color: hsl(var(--foreground));
+  font-weight: 700;
+}
+[data-skeuomorphic-v3-app] .vn-btn-outline-dark:hover {
+  background: var(--skeu-surface-dark);
+}
+[data-skeuomorphic-v3-app] .vn-btn-outline-dark:active {
+  border-bottom-width: 1px;
+  transform: translateY(2px);
+  box-shadow: var(--skeu-shadow-pressed);
+}
+
+/* ─── Product card hover (related rail + PLP) ─── */
+
+[data-skeuomorphic-v3-app] .vn-product-card .vn-product-image {
+  transition: transform 500ms ease, opacity 280ms ease;
+}
+[data-skeuomorphic-v3-app] .vn-product-card:hover .vn-product-image {
+  transform: scale(1.04);
+}
+[data-skeuomorphic-v3-app] .vn-product-card .vn-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+[data-skeuomorphic-v3-app] .vn-product-card:hover .vn-product-image-secondary {
+  opacity: 1;
+}
+
+/* ─── Shimmer (lazy media placeholder) ─── */
+
+[data-skeuomorphic-v3-app] .vn-shimmer {
+  background: linear-gradient(90deg, hsl(35 15% 85%) 0%, hsl(35 25% 92%) 40%, hsl(35 15% 85%) 80%);
+  background-size: 200% 100%;
+  animation: skeu-shimmer 1400ms ease-in-out infinite;
+}
+
+@keyframes skeu-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Misc helpers ─── */
+
+[data-skeuomorphic-v3-app] .scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+[data-skeuomorphic-v3-app] .scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}

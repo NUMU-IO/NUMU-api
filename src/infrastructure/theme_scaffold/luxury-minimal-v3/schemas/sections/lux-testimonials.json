@@ -1,0 +1,85 @@
+{
+  "type": "lux-testimonials",
+  "name": "Testimonials",
+  "name_ar": "آراء العملاء",
+  "settings": [
+    { "type": "header", "content": "Heading" },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Eyebrow title",
+      "label_ar": "العنوان العلوي",
+      "default": "",
+      "info": "Small uppercase label centered above the reviews. Leave empty to use the default."
+    }
+  ],
+  "blocks": [
+    {
+      "type": "review",
+      "name": "Review",
+      "name_ar": "رأي",
+      "settings": [
+        {
+          "id": "text",
+          "type": "textarea",
+          "label": "Review text",
+          "label_ar": "نص الرأي",
+          "default": ""
+        },
+        {
+          "id": "name",
+          "type": "text",
+          "label": "Reviewer name",
+          "label_ar": "اسم العميل",
+          "default": ""
+        },
+        {
+          "id": "city",
+          "type": "text",
+          "label": "City",
+          "label_ar": "المدينة",
+          "default": "",
+          "info": "Optional. Shown below the reviewer's name."
+        },
+        {
+          "id": "rating",
+          "type": "range",
+          "label": "Star rating",
+          "label_ar": "عدد النجوم",
+          "min": 1,
+          "max": 5,
+          "step": 1,
+          "unit": "★",
+          "default": 5
+        }
+      ]
+    }
+  ],
+  "max_blocks": 12,
+  "presets": [
+    {
+      "name": "Testimonials",
+      "locales": {
+        "en": { "name": "Testimonials" },
+        "ar": { "name": "آراء العملاء" }
+      },
+      "settings": {
+        "title": ""
+      },
+      "blocks": [
+        {
+          "type": "review",
+          "settings": { "text": "", "name": "", "city": "", "rating": 5 }
+        },
+        {
+          "type": "review",
+          "settings": { "text": "", "name": "", "city": "", "rating": 5 }
+        },
+        {
+          "type": "review",
+          "settings": { "text": "", "name": "", "city": "", "rating": 5 }
+        }
+      ]
+    }
+  ]
+}

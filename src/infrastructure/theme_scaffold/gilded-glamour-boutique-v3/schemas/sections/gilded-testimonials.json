@@ -1,0 +1,106 @@
+{
+  "type": "gilded-testimonials",
+  "name": "Gilded Testimonials",
+  "name_ar": "آراء العملاء",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content",
+      "content_ar": "المحتوى"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Section title",
+      "label_ar": "عنوان القسم",
+      "default": "What Our Clients Say"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "testimonial",
+      "name": "Testimonial",
+      "name_ar": "شهادة عميل",
+      "settings": [
+        {
+          "type": "textarea",
+          "id": "quote",
+          "label": "Quote",
+          "label_ar": "نص الشهادة",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "name",
+          "label": "Reviewer name",
+          "label_ar": "اسم العميل",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "city",
+          "label": "City",
+          "label_ar": "المدينة",
+          "default": ""
+        },
+        {
+          "type": "range",
+          "id": "rating",
+          "label": "Rating (stars)",
+          "label_ar": "التقييم (نجوم)",
+          "default": 5,
+          "min": 1,
+          "max": 5,
+          "step": 1,
+          "unit": "★"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 12,
+  "presets": [
+    {
+      "name": "Gilded Testimonials",
+      "locales": {
+        "en": {
+          "name": "Gilded Testimonials"
+        },
+        "ar": {
+          "name": "آراء العملاء"
+        }
+      },
+      "settings": {
+        "title": "What Our Clients Say"
+      },
+      "blocks": [
+        {
+          "type": "testimonial",
+          "settings": {
+            "quote": "Absolutely exquisite craftsmanship. Each piece feels like a true heirloom.",
+            "name": "Yasmine Fouad",
+            "city": "Cairo",
+            "rating": 5
+          }
+        },
+        {
+          "type": "testimonial",
+          "settings": {
+            "quote": "The attention to detail is unmatched. My wardrobe has never felt so refined.",
+            "name": "Karim Saleh",
+            "city": "Alexandria",
+            "rating": 5
+          }
+        },
+        {
+          "type": "testimonial",
+          "settings": {
+            "quote": "Timeless elegance with impeccable quality. Worth every single penny.",
+            "name": "Nourhan Adel",
+            "city": "Giza",
+            "rating": 5
+          }
+        }
+      ]
+    }
+  ]
+}

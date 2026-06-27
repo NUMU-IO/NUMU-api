@@ -1,0 +1,193 @@
+{
+  "id": "gilded-glamour-boutique-v3",
+  "name": "Gilded Glamour Boutique (V3)",
+  "author": "Saw Saw Atelier",
+  "version": "0.5.0",
+  "layout": "single-column",
+  "description": "A bold, gold-accented luxury fashion theme — warm beige canvas, decorative Lobster + uppercase Montserrat display type, parallax hero, scroll-fill brand statement, and curated vertical layouts. A faithful V3 port of the V2 Gilded Glamour Boutique theme. Editable gold header + black footer on every page.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "404": {
+        "name": "404 — Not found",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-not-found", "settings": {} },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "home": {
+        "name": "Home",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          {
+            "type": "gilded-hero",
+            "settings": {
+              "headline": "THE NEW EMPIRE",
+              "subtitle": "Curated Excellence & Timeless Precision",
+              "cta_text": "Discover Collection",
+              "cta_link": "/products",
+              "enable_parallax": true
+            }
+          },
+          {
+            "type": "gilded-categories",
+            "settings": { "title": "Curated Verticals", "max_items": 3 }
+          },
+          {
+            "type": "gilded-featured-collection",
+            "settings": {
+              "title": "Crafted for the Eternal Wardrobe",
+              "subtitle": "The Artisan Way",
+              "collection_tag": "new",
+              "product_count": 5,
+              "columns": 5,
+              "view_all_text": "View All",
+              "view_all_link": "/products"
+            }
+          },
+          {
+            "type": "gilded-promo-banner",
+            "settings": {
+              "headline": "WHERE HERITAGE MEETS THE FUTURE",
+              "subtitle": "Every thread tells a story, every silhouette commands a room, and every piece is destined to become an heirloom."
+            }
+          },
+          {
+            "type": "gilded-featured-collection",
+            "settings": {
+              "title": "Empire Essentials",
+              "subtitle": "Most Loved",
+              "collection_tag": "bestseller",
+              "product_count": 5,
+              "columns": 5,
+              "view_all_text": "Shop All",
+              "view_all_link": "/products"
+            }
+          },
+          {
+            "type": "gilded-newsletter",
+            "settings": {
+              "title": "Newsletter",
+              "subtitle": "Join the empire. Be first to know.",
+              "button_text": "Join",
+              "placeholder": "Your email"
+            }
+          },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          {
+            "type": "gilded-product-detail",
+            "settings": {
+              "show_rating": true,
+              "show_stock": true,
+              "show_guarantees": true,
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          {
+            "type": "gilded-products-page",
+            "settings": { "columns_desktop": 5, "columns_mobile": 2 }
+          },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "collection": {
+        "name": "Collection",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          {
+            "type": "gilded-products-page",
+            "settings": { "columns_desktop": 5, "columns_mobile": 2 }
+          },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-cart", "settings": {} },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-order-confirmation", "settings": { "show_guarantees": true } },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "search": {
+        "name": "Search",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-search-results", "settings": { "columns_desktop": 5 } },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "page": {
+        "name": "Page",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-rich-text", "settings": {} },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "policy": {
+        "name": "Policy",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-rich-text", "settings": {} },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-rich-text", "settings": {} },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-rich-text", "settings": {} },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          { "type": "gilded-header", "settings": {} },
+          { "type": "gilded-profile", "settings": { "show_stats": true } },
+          { "type": "gilded-footer", "settings": {} }
+        ]
+      }
+    }
+  }
+}

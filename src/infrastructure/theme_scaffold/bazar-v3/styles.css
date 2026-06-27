@@ -1,0 +1,53 @@
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *  Bazar (V3) — styles.css
+ *
+ *  ⚠️  THIS IS NOT THE SOURCE OF TRUTH FOR THE THEME'S STYLES.
+ *      Edit `src/theme.css` instead. This file is a thin fallback kept
+ *      only to satisfy @numueg/theme-plugin's required-files contract.
+ *
+ *  ── The Tailwind-in-bundle decision ──────────────────────────────
+ *
+ *  Problem: the 8 Bazar sections are authored entirely in Tailwind
+ *  utility classes (`grid md:grid-cols-2`, `container mx-auto`, `py-12`,
+ *  arbitrary values like `text-[var(--bz-dark)]`…). But the theme bundle
+ *  ships no Tailwind, and @numueg/theme-plugin copies this styles.css
+ *  VERBATIM to dist/theme.css (it does not run PostCSS/Tailwind). So if
+ *  the utilities lived here as `@tailwind` directives they would never
+ *  compile, and every section would render unstyled.
+ *
+ *  Chosen fix (recommended option from the work plan): add Tailwind to
+ *  the Vite build. `src/main.tsx` imports `src/theme.css`, which holds
+ *  the `@tailwind base/components/utilities` directives plus all the
+ *  custom `.bz-*` CSS. Vite's PostCSS step (postcss.config.js +
+ *  tailwind.config.js, content-globbing ./src/**/*.{ts,tsx}) compiles
+ *  those directives and EMITS dist/theme.css itself. The plugin's
+ *  closeBundle only writes the styles.css→dist/theme.css fallback when
+ *  no Vite CSS emit already exists (see numu-theme-plugin/src/index.ts
+ *  §3a), so the compiled output wins and this file is never copied.
+ *
+ *  Verified after `npm run build`: dist/theme.css contains compiled
+ *  utilities (.container / .grid / `@media (min-width:768px)` md: rules)
+ *  in addition to the .bz-* classes — i.e. the sections are styled.
+ *
+ *  Also fixed here vs. the original: the palette was scoped to
+ *  `:root[data-theme="bazar"]`, but the storefront host never sets that
+ *  attribute, so the tokens fell back to their hardcoded defaults on the
+ *  live store. src/theme.css scopes tokens to `:root, [data-bazar-v3-app]`
+ *  instead (mirrors Bon Younes), and the broken `@import './color-scheme.css'`
+ *  (file never existed) is dropped.
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+/* Minimal token fallback. The real, compiled stylesheet is emitted by Vite
+ * from src/theme.css; this block only matters in the degenerate case where
+ * the plugin copies this file because no Vite CSS emit was produced. */
+:root,
+[data-bazar-v3-app] {
+  --bz-amber: #FFB300;
+  --bz-amber-dark: #E6A200;
+  --bz-amber-light: #FFCA28;
+  --bz-cream: #FFF5E1;
+  --bz-dark: #0a0a14;
+  --bz-navy: #001f3f;
+  --bz-white: #FFFFFF;
+  --bz-gray: #6b7280;
+}

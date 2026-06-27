@@ -1,0 +1,95 @@
+{
+  "type": "vionne-featured-collection",
+  "name": "Vionne Featured Collection",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "default": ""
+    },
+    {
+      "id": "collection_tag",
+      "type": "select",
+      "label": "Collection",
+      "default": "new",
+      "options": [
+        {
+          "value": "new",
+          "label": "New arrivals"
+        },
+        {
+          "value": "bestseller",
+          "label": "Best sellers"
+        },
+        {
+          "value": "featured",
+          "label": "Featured"
+        }
+      ]
+    },
+    {
+      "id": "view_all_text",
+      "type": "text",
+      "label": "View all text",
+      "default": ""
+    },
+    {
+      "id": "view_all_link",
+      "type": "url",
+      "label": "View all link",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "product_count",
+      "type": "range",
+      "label": "Products to show",
+      "default": 8,
+      "min": 2,
+      "max": 12,
+      "step": 1
+    },
+    {
+      "id": "columns",
+      "type": "range",
+      "label": "Columns",
+      "default": 4,
+      "min": 2,
+      "max": 5,
+      "step": 1
+    }
+  ],
+  "presets": [
+    {
+      "name": "Featured Collection",
+      "locales": {
+        "en": {
+          "name": "Featured Collection"
+        },
+        "ar": {
+          "name": "تشكيلة مميزة"
+        }
+      },
+      "settings": {
+        "collection_tag": "new",
+        "view_all_link": "/products",
+        "product_count": 8,
+        "columns": 4
+      }
+    }
+  ]
+}

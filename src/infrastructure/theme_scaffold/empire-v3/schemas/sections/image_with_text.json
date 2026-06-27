@@ -1,0 +1,19 @@
+{
+  "type": "image_with_text",
+  "name": "Image with Text",
+  "locales": { "ar": { "name": "صورة مع نص" } },
+  "settings": [
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow", "locales": { "ar": { "label": "تمهيد" } } },
+    { "type": "text", "id": "title", "label": "Title", "default": "قصة علامتنا", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "textarea", "id": "subtitle", "label": "Subtitle", "locales": { "ar": { "label": "العنوان الفرعي" } } },
+    { "type": "text", "id": "cta_text", "label": "Button text", "locales": { "ar": { "label": "نص الزر" } } },
+    { "type": "url", "id": "cta_link", "label": "Button link", "default": "/products", "locales": { "ar": { "label": "رابط الزر" } } },
+    { "type": "image_picker", "id": "image", "label": "Image", "locales": { "ar": { "label": "الصورة" } } },
+    { "type": "select", "id": "image_position", "label": "Image position", "default": "start", "options": [
+      { "value": "start", "label": "Side (start)" },
+      { "value": "end", "label": "Side (end)" },
+      { "value": "background", "label": "Background hero" }
+    ], "locales": { "ar": { "label": "موضع الصورة" } } },
+    { "type": "checkbox", "id": "overlay", "label": "Dark overlay (background mode)", "default": true, "locales": { "ar": { "label": "تعتيم الخلفية" } } }
+  ]
+}

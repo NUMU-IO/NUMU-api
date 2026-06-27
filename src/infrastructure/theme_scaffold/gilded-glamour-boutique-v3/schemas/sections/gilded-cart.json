@@ -1,0 +1,183 @@
+{
+  "type": "gilded-cart",
+  "name": "Cart",
+  "name_ar": "السلة",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Breadcrumb & title", "content_ar": "المسار والعنوان" },
+    {
+      "type": "text",
+      "id": "home_label",
+      "label": "Home breadcrumb",
+      "label_ar": "مسار الرئيسية",
+      "default": "Home"
+    },
+    {
+      "type": "text",
+      "id": "cart_label",
+      "label": "Cart breadcrumb",
+      "label_ar": "مسار السلة",
+      "default": "Cart"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Page title",
+      "label_ar": "عنوان الصفحة",
+      "default": "Your Cart",
+      "info": "Item count is appended automatically below the title."
+    },
+    {
+      "type": "text",
+      "id": "item_singular_label",
+      "label": "Item count label (singular)",
+      "label_ar": "نص عدد القطع (مفرد)",
+      "default": "Curated Piece",
+      "info": "Shown below the title when the cart has one item."
+    },
+    {
+      "type": "text",
+      "id": "item_plural_label",
+      "label": "Item count label (plural)",
+      "label_ar": "نص عدد القطع (جمع)",
+      "default": "Curated Pieces",
+      "info": "Shown below the title when the cart has multiple items."
+    },
+    { "type": "header", "content": "Empty state", "content_ar": "حالة السلة الفارغة" },
+    {
+      "type": "text",
+      "id": "empty_eyebrow",
+      "label": "Empty eyebrow",
+      "label_ar": "نص تمهيدي للسلة الفارغة",
+      "default": "Your cart is empty",
+      "info": "Shown above the heading when the cart has no items."
+    },
+    {
+      "type": "text",
+      "id": "empty_headline",
+      "label": "Empty headline",
+      "label_ar": "عنوان السلة الفارغة",
+      "default": "Nothing Here Yet"
+    },
+    {
+      "type": "text",
+      "id": "empty_cta_label",
+      "label": "Empty state button label",
+      "label_ar": "نص زر حالة السلة الفارغة",
+      "default": "Explore the Collection",
+      "info": "Shown on the empty-state call-to-action button."
+    },
+    {
+      "type": "text",
+      "id": "continue_label",
+      "label": "Continue shopping label",
+      "label_ar": "نص زر متابعة التسوق",
+      "default": "Continue Shopping",
+      "info": "Used on the 'continue shopping' link in the order summary."
+    },
+    {
+      "type": "url",
+      "id": "continue_href",
+      "label": "Continue shopping link",
+      "label_ar": "رابط متابعة التسوق",
+      "default": "/products"
+    },
+    { "type": "header", "content": "Order summary", "content_ar": "ملخص الطلب" },
+    {
+      "type": "text",
+      "id": "summary_label",
+      "label": "Summary heading",
+      "label_ar": "عنوان الملخص",
+      "default": "Order Summary"
+    },
+    {
+      "type": "text",
+      "id": "subtotal_label",
+      "label": "Subtotal label",
+      "label_ar": "نص الإجمالي الفرعي",
+      "default": "Subtotal"
+    },
+    {
+      "type": "text",
+      "id": "shipping_label",
+      "label": "Shipping label",
+      "label_ar": "نص الشحن",
+      "default": "Shipping"
+    },
+    {
+      "type": "text",
+      "id": "shipping_calc_label",
+      "label": "Shipping placeholder",
+      "label_ar": "نص الشحن المؤجل",
+      "default": "Calculated at checkout",
+      "info": "Shown when shipping is not free; the real rate is computed at checkout."
+    },
+    {
+      "type": "text",
+      "id": "free_label",
+      "label": "Free shipping label",
+      "label_ar": "نص الشحن المجاني",
+      "default": "Free",
+      "info": "Shown for shipping once the free-shipping threshold is met."
+    },
+    {
+      "type": "text",
+      "id": "total_label",
+      "label": "Total label",
+      "label_ar": "نص الإجمالي",
+      "default": "Total"
+    },
+    {
+      "type": "text",
+      "id": "checkout_label",
+      "label": "Checkout button",
+      "label_ar": "نص زر الدفع",
+      "default": "Secure Checkout"
+    },
+    {
+      "type": "text",
+      "id": "remove_label",
+      "label": "Remove item label",
+      "label_ar": "نص إزالة المنتج",
+      "default": "Remove"
+    },
+    {
+      "type": "number",
+      "id": "free_shipping_threshold",
+      "label": "Free shipping threshold",
+      "label_ar": "حد الشحن المجاني",
+      "default": 0,
+      "info": "Order subtotal (in your store currency) above which shipping shows as free. 0 = no free-shipping offer."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Cart",
+      "locales": {
+        "en": { "name": "Cart" },
+        "ar": { "name": "السلة" }
+      },
+      "settings": {
+        "home_label": "Home",
+        "cart_label": "Cart",
+        "title": "Your Cart",
+        "item_singular_label": "Curated Piece",
+        "item_plural_label": "Curated Pieces",
+        "empty_eyebrow": "Your cart is empty",
+        "empty_headline": "Nothing Here Yet",
+        "empty_cta_label": "Explore the Collection",
+        "continue_label": "Continue Shopping",
+        "continue_href": "/products",
+        "summary_label": "Order Summary",
+        "subtotal_label": "Subtotal",
+        "shipping_label": "Shipping",
+        "shipping_calc_label": "Calculated at checkout",
+        "free_label": "Free",
+        "total_label": "Total",
+        "checkout_label": "Secure Checkout",
+        "remove_label": "Remove",
+        "free_shipping_threshold": 0
+      }
+    }
+  ]
+}

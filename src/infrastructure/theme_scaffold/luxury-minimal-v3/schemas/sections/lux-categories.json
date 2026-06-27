@@ -1,0 +1,101 @@
+{
+  "type": "lux-categories",
+  "name": "Category Grid",
+  "name_ar": "شبكة الفئات",
+  "settings": [
+    { "type": "header", "content": "Content" },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Eyebrow title",
+      "label_ar": "العنوان",
+      "default": "",
+      "info": "Small centered uppercase label above the grid. Leave empty for the default."
+    },
+    { "type": "header", "content": "Layout" },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Columns (desktop)",
+      "label_ar": "الأعمدة (سطح المكتب)",
+      "min": 2,
+      "max": 6,
+      "step": 1,
+      "default": 5
+    },
+    {
+      "type": "range",
+      "id": "columns_mobile",
+      "label": "Columns (mobile)",
+      "label_ar": "الأعمدة (الجوال)",
+      "min": 1,
+      "max": 3,
+      "step": 1,
+      "default": 2
+    },
+    {
+      "type": "range",
+      "id": "max_items",
+      "label": "Maximum categories",
+      "label_ar": "الحد الأقصى للفئات",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "default": 0,
+      "info": "0 shows every category."
+    },
+    { "type": "header", "content": "Categories" },
+    {
+      "type": "paragraph",
+      "content": "Leave the blocks empty to auto-fill the grid from your store collections. Add Category blocks below to curate the grid by hand instead."
+    }
+  ],
+  "blocks": [
+    {
+      "type": "category",
+      "name": "Category",
+      "name_ar": "فئة",
+      "settings": [
+        {
+          "type": "image_picker",
+          "id": "image_url",
+          "label": "Image",
+          "label_ar": "الصورة",
+          "aspect_ratio": "1/1",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label",
+          "label_ar": "التسمية",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link",
+          "label": "Link",
+          "label_ar": "الرابط",
+          "default": "/collections"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 12,
+  "presets": [
+    {
+      "name": "Category Grid",
+      "locales": {
+        "en": { "name": "Category Grid" },
+        "ar": { "name": "شبكة الفئات" }
+      },
+      "settings": {
+        "title": "",
+        "columns_desktop": 5,
+        "columns_mobile": 2,
+        "max_items": 0
+      },
+      "blocks": []
+    }
+  ]
+}

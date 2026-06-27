@@ -1,0 +1,48 @@
+{
+  "type": "vionne-search-results",
+  "name": "Search Results",
+  "name_ar": "نتائج البحث",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "textarea",
+      "id": "no_results_text",
+      "label": "No-results copy",
+      "label_ar": "نص عدم وجود نتائج",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Columns (desktop)",
+      "label_ar": "أعمدة (سطح المكتب)",
+      "min": 1,
+      "max": 5,
+      "step": 1,
+      "default": 4
+    },
+    {
+      "type": "range",
+      "id": "columns_mobile",
+      "label": "Columns (mobile)",
+      "label_ar": "أعمدة (الجوال)",
+      "min": 1,
+      "max": 3,
+      "step": 1,
+      "default": 2
+    }
+  ],
+  "presets": [
+    {
+      "name": "Search Results",
+      "locales": {
+        "en": { "name": "Search Results" },
+        "ar": { "name": "نتائج البحث" }
+      },
+      "settings": {
+        "columns_desktop": 4,
+        "columns_mobile": 2
+      }
+    }
+  ]
+}

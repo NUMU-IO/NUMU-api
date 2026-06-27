@@ -1,0 +1,50 @@
+{
+  "type": "boutique-hero",
+  "name": "Boutique Hero",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "textarea",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "hero_image_url",
+      "type": "image_picker",
+      "label": "Hero image",
+      "label_ar": "الصورة الرئيسية",
+      "aspect_ratio": "16/9",
+      "default": ""
+    }
+  ]
+}

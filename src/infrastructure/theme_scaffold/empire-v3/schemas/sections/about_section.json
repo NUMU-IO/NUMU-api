@@ -1,0 +1,23 @@
+{
+  "type": "about_section",
+  "name": "About / Brand Story",
+  "locales": { "ar": { "name": "عن العلامة" } },
+  "settings": [
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow", "default": "قصتنا", "locales": { "ar": { "label": "تمهيد" } } },
+    { "type": "text", "id": "title", "label": "Title", "default": "صُنع بشغف، يدوم مدى الحياة", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "textarea", "id": "body", "label": "Body", "locales": { "ar": { "label": "النص" } } },
+    { "type": "image_picker", "id": "image", "label": "Image", "locales": { "ar": { "label": "الصورة" } } }
+  ],
+  "max_blocks": 4,
+  "blocks": [
+    {
+      "type": "stat",
+      "name": "Stat",
+      "locales": { "ar": { "name": "إحصائية" } },
+      "settings": [
+        { "type": "text", "id": "value", "label": "Value", "default": "+10k", "locales": { "ar": { "label": "القيمة" } } },
+        { "type": "text", "id": "label", "label": "Label", "default": "عميل سعيد", "locales": { "ar": { "label": "الوصف" } } }
+      ]
+    }
+  ]
+}

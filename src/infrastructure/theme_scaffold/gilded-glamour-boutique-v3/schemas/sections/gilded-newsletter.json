@@ -1,0 +1,52 @@
+{
+  "type": "gilded-newsletter",
+  "name": "Newsletter",
+  "name_ar": "النشرة البريدية",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content",
+      "content_ar": "المحتوى"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": "Newsletter"
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": "Join the empire. Be first to know."
+    },
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": "Join"
+    },
+    {
+      "type": "text",
+      "id": "placeholder",
+      "label": "Input placeholder",
+      "label_ar": "نص الحقل النائب",
+      "default": "Your email"
+    }
+  ],
+  "presets": [
+    {
+      "name": "Newsletter",
+      "name_ar": "النشرة البريدية",
+      "settings": {
+        "title": "Newsletter",
+        "subtitle": "Join the empire. Be first to know.",
+        "button_text": "Join",
+        "placeholder": "Your email"
+      }
+    }
+  ]
+}

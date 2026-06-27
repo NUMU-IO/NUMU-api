@@ -1,0 +1,161 @@
+{
+  "type": "lux-product-detail",
+  "name": "Product Detail",
+  "name_ar": "تفاصيل المنتج",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Breadcrumb" },
+    {
+      "type": "text",
+      "id": "breadcrumb_home",
+      "label": "Home label",
+      "label_ar": "تسمية الرئيسية",
+      "default": "",
+      "info": "Leave blank to use the localized default (Home / الرئيسية)."
+    },
+    {
+      "type": "text",
+      "id": "breadcrumb_shop",
+      "label": "Shop label",
+      "label_ar": "تسمية المتجر",
+      "default": "",
+      "info": "Leave blank to use the localized default (Shop / المتجر)."
+    },
+
+    { "type": "header", "content": "Buy box" },
+    {
+      "type": "text",
+      "id": "add_to_cart_text",
+      "label": "Add-to-cart button text",
+      "label_ar": "نص زر الإضافة للحقيبة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "sold_out_text",
+      "label": "Sold-out button text",
+      "label_ar": "نص زر نفاد الكمية",
+      "default": ""
+    },
+    {
+      "type": "checkbox",
+      "id": "show_rating",
+      "label": "Show star rating",
+      "label_ar": "إظهار التقييم بالنجوم",
+      "default": false
+    },
+    {
+      "type": "checkbox",
+      "id": "show_stock",
+      "label": "Show stock status",
+      "label_ar": "إظهار حالة المخزون",
+      "default": false
+    },
+
+    { "type": "header", "content": "Trust guarantees" },
+    {
+      "type": "checkbox",
+      "id": "show_guarantees",
+      "label": "Show guarantees row",
+      "label_ar": "إظهار صف الضمانات",
+      "default": true,
+      "info": "Shipping / returns / authenticity strip under the buy box."
+    },
+    {
+      "type": "text",
+      "id": "shipping_label",
+      "label": "Shipping label",
+      "label_ar": "عنوان الشحن",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "shipping_desc",
+      "label": "Shipping detail",
+      "label_ar": "تفاصيل الشحن",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "returns_label",
+      "label": "Returns label",
+      "label_ar": "عنوان الإرجاع",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "returns_desc",
+      "label": "Returns detail",
+      "label_ar": "تفاصيل الإرجاع",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "authentic_label",
+      "label": "Authenticity label",
+      "label_ar": "عنوان الأصالة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "authentic_desc",
+      "label": "Authenticity detail",
+      "label_ar": "تفاصيل الأصالة",
+      "default": ""
+    },
+
+    { "type": "header", "content": "Related products" },
+    {
+      "type": "checkbox",
+      "id": "show_related_products",
+      "label": "Show related products",
+      "label_ar": "إظهار المنتجات ذات الصلة",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "related_title",
+      "label": "Related products title",
+      "label_ar": "عنوان المنتجات ذات الصلة",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "related_products_count",
+      "label": "Number of related products",
+      "label_ar": "عدد المنتجات ذات الصلة",
+      "min": 2,
+      "max": 8,
+      "step": 1,
+      "unit": "items",
+      "default": 4
+    }
+  ],
+  "presets": [
+    {
+      "name": "Product Detail",
+      "locales": {
+        "en": { "name": "Product Detail" },
+        "ar": { "name": "تفاصيل المنتج" }
+      },
+      "settings": {
+        "breadcrumb_home": "",
+        "breadcrumb_shop": "",
+        "add_to_cart_text": "",
+        "sold_out_text": "",
+        "show_rating": false,
+        "show_stock": false,
+        "show_guarantees": true,
+        "shipping_label": "",
+        "shipping_desc": "",
+        "returns_label": "",
+        "returns_desc": "",
+        "authentic_label": "",
+        "authentic_desc": "",
+        "show_related_products": true,
+        "related_title": "",
+        "related_products_count": 4
+      }
+    }
+  ]
+}

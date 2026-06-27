@@ -1,0 +1,56 @@
+{
+  "type": "vionne-not-found",
+  "name": "404 — Not found",
+  "name_ar": "404 — غير موجود",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "status_label",
+      "label": "Status label",
+      "label_ar": "رمز الحالة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subhead",
+      "label": "Subhead",
+      "label_ar": "النص الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "CTA label",
+      "label_ar": "تسمية الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "CTA URL",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    }
+  ],
+  "presets": [
+    {
+      "name": "404 — Not found",
+      "locales": {
+        "en": { "name": "404 — Not found" },
+        "ar": { "name": "404 — غير موجود" }
+      },
+      "settings": {
+        "status_label": "",
+        "headline": ""
+      }
+    }
+  ]
+}

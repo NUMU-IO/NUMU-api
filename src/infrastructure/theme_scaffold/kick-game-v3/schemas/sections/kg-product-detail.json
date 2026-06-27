@@ -1,0 +1,52 @@
+{
+  "type": "kg-product-detail",
+  "name": "Kick Game Product Detail",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "show_rating",
+      "type": "checkbox",
+      "label": "Show rating",
+      "label_ar": "إظهار التقييم",
+      "default": false
+    },
+    {
+      "id": "show_stock",
+      "type": "checkbox",
+      "label": "Show stock status",
+      "label_ar": "إظهار حالة المخزون",
+      "default": false
+    },
+    {
+      "id": "show_guarantees",
+      "type": "checkbox",
+      "label": "Show trust guarantees",
+      "label_ar": "إظهار ضمانات الثقة",
+      "default": false
+    },
+    {
+      "type": "header",
+      "content": "Related products"
+    },
+    {
+      "id": "show_related_products",
+      "type": "checkbox",
+      "label": "Show related products",
+      "label_ar": "إظهار المنتجات المشابهة",
+      "default": true
+    },
+    {
+      "id": "related_products_count",
+      "type": "range",
+      "label": "Related products count",
+      "label_ar": "عدد المنتجات المشابهة",
+      "default": 4,
+      "min": 0,
+      "max": 8,
+      "step": 1
+    }
+  ]
+}

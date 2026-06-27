@@ -1,0 +1,14 @@
+{
+  "type": "footer",
+  "name": "Footer",
+  "locales": { "ar": { "name": "التذييل" } },
+  "settings": [
+    { "type": "text", "id": "brand_name", "label": "Brand name (blank = store name)", "default": "", "locales": { "ar": { "label": "اسم العلامة (فارغ = اسم المتجر)" } } },
+    { "type": "textarea", "id": "description", "label": "Description", "default": "متجر مستقل يقدّم تشكيلة مختارة بعناية.", "locales": { "ar": { "label": "الوصف" } } },
+    { "type": "text", "id": "ticker_text", "label": "Ticker text", "default": "100% مستقل", "locales": { "ar": { "label": "نص الشريط المتحرك" } } },
+    { "type": "url", "id": "instagram", "label": "Instagram URL", "locales": { "ar": { "label": "رابط إنستغرام" } } },
+    { "type": "url", "id": "facebook", "label": "Facebook URL", "locales": { "ar": { "label": "رابط فيسبوك" } } },
+    { "type": "url", "id": "twitter", "label": "X (Twitter) URL", "locales": { "ar": { "label": "رابط إكس" } } },
+    { "type": "text", "id": "copyright", "label": "Copyright line (optional)", "locales": { "ar": { "label": "حقوق النشر" } } }
+  ]
+}

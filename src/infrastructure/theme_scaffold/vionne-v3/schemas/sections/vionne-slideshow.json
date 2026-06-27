@@ -1,0 +1,221 @@
+{
+  "type": "vionne-slideshow",
+  "name": "Hero Slideshow (Vionne)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Behavior"
+    },
+    {
+      "id": "autoplay",
+      "type": "checkbox",
+      "label": "Autoplay",
+      "label_ar": "تشغيل تلقائي",
+      "default": true
+    },
+    {
+      "id": "interval",
+      "type": "range",
+      "label": "Slide interval (seconds)",
+      "label_ar": "مدة العرض (ثواني)",
+      "default": 10,
+      "min": 2,
+      "max": 20,
+      "step": 1
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "height",
+      "type": "select",
+      "label": "Height",
+      "label_ar": "الارتفاع",
+      "default": "large",
+      "options": [
+        {
+          "label": "Small",
+          "label_ar": "صغير",
+          "value": "small"
+        },
+        {
+          "label": "Medium",
+          "label_ar": "متوسط",
+          "value": "medium"
+        },
+        {
+          "label": "Large",
+          "label_ar": "كبير",
+          "value": "large"
+        },
+        {
+          "label": "Full screen",
+          "label_ar": "ملء الشاشة",
+          "value": "full"
+        }
+      ]
+    },
+    {
+      "id": "text_alignment",
+      "type": "select",
+      "label": "Text alignment",
+      "label_ar": "محاذاة النص",
+      "default": "start",
+      "options": [
+        {
+          "label": "Start",
+          "label_ar": "البداية",
+          "value": "start"
+        },
+        {
+          "label": "Center",
+          "label_ar": "الوسط",
+          "value": "center"
+        }
+      ]
+    },
+    {
+      "type": "header",
+      "content": "Slide 1"
+    },
+    {
+      "id": "slide_1_image",
+      "type": "image_picker",
+      "label": "Slide 1 image",
+      "label_ar": "صورة الشريحة 1",
+      "aspect_ratio": "16/9",
+      "default": ""
+    },
+    {
+      "id": "slide_1_headline",
+      "type": "text",
+      "label": "Slide 1 headline",
+      "label_ar": "عنوان الشريحة 1",
+      "default": ""
+    },
+    {
+      "id": "slide_1_subtitle",
+      "type": "text",
+      "label": "Slide 1 subtitle",
+      "label_ar": "وصف الشريحة 1",
+      "default": ""
+    },
+    {
+      "id": "slide_1_cta_text",
+      "type": "text",
+      "label": "Slide 1 button text",
+      "label_ar": "نص زر الشريحة 1",
+      "default": ""
+    },
+    {
+      "id": "slide_1_cta_link",
+      "type": "url",
+      "label": "Slide 1 button link",
+      "label_ar": "رابط زر الشريحة 1",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Slide 2"
+    },
+    {
+      "id": "slide_2_image",
+      "type": "image_picker",
+      "label": "Slide 2 image",
+      "label_ar": "صورة الشريحة 2",
+      "aspect_ratio": "16/9",
+      "default": ""
+    },
+    {
+      "id": "slide_2_headline",
+      "type": "text",
+      "label": "Slide 2 headline",
+      "label_ar": "عنوان الشريحة 2",
+      "default": ""
+    },
+    {
+      "id": "slide_2_subtitle",
+      "type": "text",
+      "label": "Slide 2 subtitle",
+      "label_ar": "وصف الشريحة 2",
+      "default": ""
+    },
+    {
+      "id": "slide_2_cta_text",
+      "type": "text",
+      "label": "Slide 2 button text",
+      "label_ar": "نص زر الشريحة 2",
+      "default": ""
+    },
+    {
+      "id": "slide_2_cta_link",
+      "type": "url",
+      "label": "Slide 2 button link",
+      "label_ar": "رابط زر الشريحة 2",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Slide 3"
+    },
+    {
+      "id": "slide_3_image",
+      "type": "image_picker",
+      "label": "Slide 3 image",
+      "label_ar": "صورة الشريحة 3",
+      "aspect_ratio": "16/9",
+      "default": ""
+    },
+    {
+      "id": "slide_3_headline",
+      "type": "text",
+      "label": "Slide 3 headline",
+      "label_ar": "عنوان الشريحة 3",
+      "default": ""
+    },
+    {
+      "id": "slide_3_subtitle",
+      "type": "text",
+      "label": "Slide 3 subtitle",
+      "label_ar": "وصف الشريحة 3",
+      "default": ""
+    },
+    {
+      "id": "slide_3_cta_text",
+      "type": "text",
+      "label": "Slide 3 button text",
+      "label_ar": "نص زر الشريحة 3",
+      "default": ""
+    },
+    {
+      "id": "slide_3_cta_link",
+      "type": "url",
+      "label": "Slide 3 button link",
+      "label_ar": "رابط زر الشريحة 3",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Slideshow",
+      "locales": {
+        "en": {
+          "name": "Slideshow"
+        },
+        "ar": {
+          "name": "عرض الشرائح"
+        }
+      },
+      "settings": {
+        "autoplay": true,
+        "interval": 10,
+        "height": "large",
+        "text_alignment": "start",
+        "slide_1_cta_link": "/products",
+        "slide_2_cta_link": "/products",
+        "slide_3_cta_link": "/products"
+      }
+    }
+  ]
+}

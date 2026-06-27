@@ -1,0 +1,163 @@
+{
+  "type": "gilded-order-confirmation",
+  "name": "Order Confirmation",
+  "name_ar": "تأكيد الطلب",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Heading",
+      "content_ar": "العنوان"
+    },
+    {
+      "type": "text",
+      "id": "eyebrow_text",
+      "label": "Eyebrow",
+      "label_ar": "النص التمهيدي",
+      "default": "Confirmed"
+    },
+    {
+      "type": "text",
+      "id": "title_text",
+      "label": "Title",
+      "label_ar": "العنوان الرئيسي",
+      "default": "Thank you for your order"
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle_text",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": "We have received your order and will send the details to you shortly. Your curated pieces are being prepared with care."
+    },
+    {
+      "type": "header",
+      "content": "Journey tracker",
+      "content_ar": "متتبع الرحلة"
+    },
+    {
+      "type": "text",
+      "id": "tracker_title",
+      "label": "Tracker title",
+      "label_ar": "عنوان المتتبع",
+      "default": "Journey Status",
+      "info": "Steps are configured via the Journey step blocks below."
+    },
+    {
+      "type": "header",
+      "content": "WhatsApp callout",
+      "content_ar": "بطاقة واتساب"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_whatsapp",
+      "label": "Show WhatsApp callout",
+      "label_ar": "إظهار بطاقة واتساب",
+      "default": true,
+      "info": "The WhatsApp number is read from your store's Social settings."
+    },
+    {
+      "type": "text",
+      "id": "whatsapp_title",
+      "label": "WhatsApp title",
+      "label_ar": "عنوان واتساب",
+      "default": "Need Assistance?",
+      "visible_if": "{{ show_whatsapp }}"
+    },
+    {
+      "type": "textarea",
+      "id": "whatsapp_text",
+      "label": "WhatsApp message",
+      "label_ar": "رسالة واتساب",
+      "default": "Our team is available via WhatsApp for any questions about your order",
+      "visible_if": "{{ show_whatsapp }}"
+    },
+    {
+      "type": "header",
+      "content": "Actions",
+      "content_ar": "الإجراءات"
+    },
+    {
+      "type": "text",
+      "id": "track_text",
+      "label": "Track order button",
+      "label_ar": "زر تتبع الطلب",
+      "default": "Track Order"
+    },
+    {
+      "type": "url",
+      "id": "track_link",
+      "label": "Track order link",
+      "label_ar": "رابط تتبع الطلب",
+      "default": "/track"
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Continue shopping button",
+      "label_ar": "زر متابعة التسوق",
+      "default": "Continue Shopping"
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Continue shopping link",
+      "label_ar": "رابط متابعة التسوق",
+      "default": "/products"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "step",
+      "name": "Journey step",
+      "name_ar": "خطوة الرحلة",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Step label",
+          "label_ar": "عنوان الخطوة",
+          "default": "Order Placed"
+        },
+        {
+          "type": "checkbox",
+          "id": "active",
+          "label": "Mark as reached",
+          "label_ar": "تمييز كمكتملة",
+          "default": false,
+          "info": "Reached steps show a gold filled circle with a check."
+        }
+      ]
+    }
+  ],
+  "max_blocks": 6,
+  "presets": [
+    {
+      "name": "Order Confirmation",
+      "name_ar": "تأكيد الطلب",
+      "locales": {
+        "en": { "name": "Order Confirmation" },
+        "ar": { "name": "تأكيد الطلب" }
+      },
+      "settings": {
+        "eyebrow_text": "Confirmed",
+        "title_text": "Thank you for your order",
+        "subtitle_text": "We have received your order and will send the details to you shortly. Your curated pieces are being prepared with care.",
+        "tracker_title": "Journey Status",
+        "show_whatsapp": true,
+        "whatsapp_title": "Need Assistance?",
+        "whatsapp_text": "Our team is available via WhatsApp for any questions about your order",
+        "track_text": "Track Order",
+        "track_link": "/track",
+        "cta_text": "Continue Shopping",
+        "cta_link": "/products"
+      },
+      "blocks": [
+        { "type": "step", "settings": { "label": "Order Placed", "active": true } },
+        { "type": "step", "settings": { "label": "Processing", "active": true } },
+        { "type": "step", "settings": { "label": "On the Way", "active": false } },
+        { "type": "step", "settings": { "label": "Delivered", "active": false } }
+      ]
+    }
+  ]
+}

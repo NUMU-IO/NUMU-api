@@ -1,0 +1,76 @@
+{
+  "type": "rs-editorial",
+  "name": "Editorial (Rabbitsocks)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Main card"
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Eyebrow",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "image_main",
+      "type": "image_picker",
+      "label": "Main image",
+      "label_ar": "الصورة الرئيسية",
+      "default": "",
+      "aspect_ratio": "16/9"
+    },
+    {
+      "type": "header",
+      "content": "Side card"
+    },
+    {
+      "id": "side_title",
+      "type": "text",
+      "label": "Side title",
+      "label_ar": "العنوان الجانبي",
+      "default": ""
+    },
+    {
+      "id": "body",
+      "type": "textarea",
+      "label": "Side body",
+      "label_ar": "النص الجانبي",
+      "default": ""
+    },
+    {
+      "id": "image_side",
+      "type": "image_picker",
+      "label": "Side image",
+      "label_ar": "الصورة الجانبية",
+      "default": "",
+      "aspect_ratio": "4/5"
+    },
+    {
+      "type": "header",
+      "content": "Call to action"
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "cta_url",
+      "type": "url",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    }
+  ]
+}

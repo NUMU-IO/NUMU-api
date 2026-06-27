@@ -1,0 +1,139 @@
+{
+  "id": "boutique-v3",
+  "name": "Boutique (V3)",
+  "author": "NUMU",
+  "version": "0.3.4",
+  "layout": "single-column",
+  "description": "Boutique (V3) — vibrant pink/magenta fashion-forward storefront, ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "boutique-hero",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "boutique-featured-collection",
+            "settings": {
+              "view_all_link": "/products",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "boutique-categories",
+            "settings": {
+              "columns_desktop": 4,
+              "columns_mobile": 2,
+              "max_items": 0
+            }
+          },
+          {
+            "type": "boutique-featured-collection",
+            "settings": {
+              "view_all_link": "/products",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "boutique-promo-banner",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "boutique-testimonials",
+            "settings": {
+              "review_1_rating": 5,
+              "review_2_rating": 5,
+              "review_3_rating": 5
+            }
+          },
+          {
+            "type": "boutique-newsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "boutique-product-detail",
+            "settings": {
+              "show_rating": true,
+              "show_stock": true,
+              "show_guarantees": true,
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "boutique-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "boutique-about",
+            "settings": {}
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "boutique-contact",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "boutique-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "boutique-order-confirmation-section",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

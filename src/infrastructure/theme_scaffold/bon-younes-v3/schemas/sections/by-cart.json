@@ -1,0 +1,50 @@
+{
+  "type": "by-cart",
+  "name": "Cart",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Empty state"
+    },
+    {
+      "type": "text",
+      "id": "empty_headline",
+      "label": "Empty headline",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "empty_subhead",
+      "label": "Empty subhead",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "empty_cta_label",
+      "label": "Empty CTA label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "empty_cta_href",
+      "label": "Empty CTA URL",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Populated state"
+    },
+    {
+      "type": "text",
+      "id": "populated_title",
+      "label": "Section title",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "checkout_cta_label",
+      "label": "Checkout button label",
+      "default": ""
+    }
+  ]
+}

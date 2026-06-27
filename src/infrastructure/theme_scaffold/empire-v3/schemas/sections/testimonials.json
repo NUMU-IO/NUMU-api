@@ -1,0 +1,22 @@
+{
+  "type": "testimonials",
+  "name": "Testimonials",
+  "locales": { "ar": { "name": "آراء العملاء" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "رأي عملائنا", "locales": { "ar": { "label": "العنوان" } } }
+  ],
+  "max_blocks": 9,
+  "blocks": [
+    {
+      "type": "review",
+      "name": "Review",
+      "locales": { "ar": { "name": "تقييم" } },
+      "settings": [
+        { "type": "textarea", "id": "text", "label": "Quote", "default": "منتجات رائعة وجودة ممتازة!", "locales": { "ar": { "label": "الاقتباس" } } },
+        { "type": "text", "id": "author", "label": "Author", "default": "عميل", "locales": { "ar": { "label": "الاسم" } } },
+        { "type": "text", "id": "city", "label": "City", "locales": { "ar": { "label": "المدينة" } } },
+        { "type": "range", "id": "rating", "label": "Rating", "default": 5, "min": 1, "max": 5, "step": 1, "locales": { "ar": { "label": "التقييم" } } }
+      ]
+    }
+  ]
+}

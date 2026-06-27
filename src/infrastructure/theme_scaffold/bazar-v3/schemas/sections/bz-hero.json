@@ -1,0 +1,146 @@
+{
+  "type": "bz-hero",
+  "name": "Bazar Hero",
+  "name_ar": "بازار الرئيسي",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "letter",
+      "label": "Hero Letter",
+      "label_ar": "حرف البانر",
+      "default": "",
+      "info": "Optional oversized initial shown above the headline."
+    },
+    {
+      "type": "text",
+      "id": "letter_ar",
+      "label": "Hero Letter (Arabic)",
+      "label_ar": "حرف البانر (عربي)",
+      "default": "",
+      "info": "Optional oversized initial for Arabic; falls back to the English letter."
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "subline",
+      "label": "Subline",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "tagline",
+      "label": "Tagline / Value Prop",
+      "label_ar": "وصف فرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Primary Button Text",
+      "label_ar": "نص الزر الأساسي",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Primary Button Link",
+      "label_ar": "رابط الزر الأساسي",
+      "default": "/products"
+    },
+    {
+      "type": "text",
+      "id": "secondary_cta_text",
+      "label": "Secondary Button Text",
+      "label_ar": "نص الزر الثانوي",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "secondary_cta_link",
+      "label": "Secondary Button Link",
+      "label_ar": "رابط الزر الثانوي",
+      "default": "/collections"
+    },
+    {
+      "type": "text",
+      "id": "trust_text",
+      "label": "Trust Strip",
+      "label_ar": "نص الثقة",
+      "default": ""
+    },
+    {
+      "type": "image_picker",
+      "id": "hero_image_url",
+      "label": "Hero Product Image",
+      "label_ar": "صورة البطل",
+      "info": "Leave empty for a centered single-column hero.",
+      "aspect_ratio": "16/9"
+    },
+    {
+      "type": "select",
+      "id": "color_scheme",
+      "label": "Color Scheme",
+      "label_ar": "مخطط الألوان",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "Auto",
+          "label_ar": "تلقائي"
+        },
+        {
+          "value": "light",
+          "label": "Light",
+          "label_ar": "فاتح"
+        },
+        {
+          "value": "dark",
+          "label": "Dark",
+          "label_ar": "داكن"
+        }
+      ]
+    },
+    {
+      "type": "checkbox",
+      "id": "blob_decoration",
+      "label": "Show blob shape behind the letter",
+      "label_ar": "إظهار الشكل العضوي خلف الحرف",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_wave_divider",
+      "label": "Show wave divider",
+      "label_ar": "إظهار الفاصل المموج",
+      "default": true
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Hero",
+      "locales": {
+        "en": {
+          "name": "Bazar Hero"
+        },
+        "ar": {
+          "name": "بازار الرئيسي"
+        }
+      },
+      "settings": {
+        "headline": "",
+        "subline": "",
+        "tagline": "",
+        "cta_text": "",
+        "cta_link": "/products"
+      }
+    }
+  ]
+}

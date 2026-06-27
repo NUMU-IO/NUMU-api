@@ -1,0 +1,101 @@
+{
+  "type": "bz-testimonials",
+  "name": "Bazar Testimonials",
+  "name_ar": "بازار آراء",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Section Title",
+      "label_ar": "عنوان القسم",
+      "default": ""
+    }
+  ],
+  "blocks": [
+    {
+      "type": "review",
+      "name": "Review",
+      "name_ar": "تقييم",
+      "settings": [
+        {
+          "type": "text",
+          "id": "name",
+          "label": "Reviewer Name",
+          "label_ar": "اسم المراجع",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "city",
+          "label": "Reviewer City",
+          "label_ar": "مدينة المراجع",
+          "default": ""
+        },
+        {
+          "type": "textarea",
+          "id": "text",
+          "label": "Review Text",
+          "label_ar": "نص التقييم",
+          "default": ""
+        },
+        {
+          "type": "range",
+          "id": "rating",
+          "label": "Rating",
+          "label_ar": "التقييم",
+          "default": 5,
+          "min": 1,
+          "max": 5,
+          "step": 1
+        }
+      ]
+    }
+  ],
+  "max_blocks": 12,
+  "presets": [
+    {
+      "name": "Bazar Testimonials",
+      "locales": {
+        "en": {
+          "name": "Bazar Testimonials"
+        },
+        "ar": {
+          "name": "بازار آراء"
+        }
+      },
+      "settings": {
+        "title": ""
+      },
+      "blocks": [
+        {
+          "type": "review",
+          "settings": {
+            "name": "",
+            "city": "",
+            "text": "",
+            "rating": 5
+          }
+        },
+        {
+          "type": "review",
+          "settings": {
+            "name": "",
+            "city": "",
+            "text": "",
+            "rating": 5
+          }
+        },
+        {
+          "type": "review",
+          "settings": {
+            "name": "",
+            "city": "",
+            "text": "",
+            "rating": 4
+          }
+        }
+      ]
+    }
+  ]
+}

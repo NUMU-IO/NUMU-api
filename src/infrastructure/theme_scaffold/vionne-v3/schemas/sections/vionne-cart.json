@@ -1,0 +1,129 @@
+{
+  "type": "vionne-cart",
+  "name": "Cart",
+  "name_ar": "السلة",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Empty state"
+    },
+    {
+      "type": "text",
+      "id": "empty_headline",
+      "label": "Empty headline",
+      "label_ar": "عنوان الفراغ",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "empty_subhead",
+      "label": "Empty subhead",
+      "label_ar": "نص الفراغ",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "empty_cta_label",
+      "label": "Empty / continue CTA label",
+      "label_ar": "تسمية زر المتابعة",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "empty_cta_href",
+      "label": "Continue-shopping URL",
+      "label_ar": "رابط متابعة التسوق",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Populated state"
+    },
+    {
+      "type": "text",
+      "id": "populated_title",
+      "label": "Cart title",
+      "label_ar": "عنوان السلة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "checkout_cta_label",
+      "label": "Checkout button",
+      "label_ar": "زر الدفع",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "continue_label",
+      "label": "Continue-shopping link",
+      "label_ar": "رابط متابعة التسوق",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Summary labels"
+    },
+    {
+      "type": "text",
+      "id": "subtotal_label",
+      "label": "Subtotal label",
+      "label_ar": "تسمية المجموع الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "shipping_label",
+      "label": "Shipping label",
+      "label_ar": "تسمية الشحن",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "total_label",
+      "label": "Total label",
+      "label_ar": "تسمية الإجمالي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "free_label",
+      "label": "Free-shipping label",
+      "label_ar": "تسمية الشحن المجاني",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Shipping rule"
+    },
+    {
+      "type": "text",
+      "id": "shipping_calc_label",
+      "label": "Shipping placeholder (before checkout)",
+      "label_ar": "نص الشحن (قبل الدفع)",
+      "default": "",
+      "info": "Shown for shipping at the cart; the real rate is calculated in checkout once an address is entered."
+    },
+    {
+      "type": "number",
+      "id": "free_shipping_threshold",
+      "label": "Free shipping over (0 = no promo)",
+      "label_ar": "شحن مجاني فوق (0 = بدون عرض)",
+      "default": 0,
+      "info": "Your real free-shipping threshold. Drives the FREE label + 'add X more' progress hint."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Cart",
+      "locales": {
+        "en": { "name": "Cart" },
+        "ar": { "name": "السلة" }
+      },
+      "settings": {
+        "populated_title": ""
+      }
+    }
+  ]
+}

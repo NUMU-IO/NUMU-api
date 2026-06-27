@@ -1,0 +1,75 @@
+{
+  "type": "gilded-profile",
+  "name": "Gilded Account Page",
+  "name_ar": "صفحة الحساب",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Headings",
+      "content_ar": "العناوين"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Page title",
+      "label_ar": "عنوان الصفحة",
+      "info": "Shown in the breadcrumb. Leave blank to use \"My Account\".",
+      "default": "My Account"
+    },
+    {
+      "id": "orders_title",
+      "type": "text",
+      "label": "Orders heading",
+      "label_ar": "عنوان الطلبات",
+      "default": "My Orders"
+    },
+    {
+      "id": "addresses_title",
+      "type": "text",
+      "label": "Addresses heading",
+      "label_ar": "عنوان العناوين",
+      "default": "My Addresses"
+    },
+    {
+      "id": "settings_title",
+      "type": "text",
+      "label": "Settings heading",
+      "label_ar": "عنوان الإعدادات",
+      "default": "Settings"
+    },
+    {
+      "id": "password_title",
+      "type": "text",
+      "label": "Password heading",
+      "label_ar": "عنوان كلمة المرور",
+      "default": "Change password"
+    },
+    {
+      "type": "header",
+      "content": "Layout",
+      "content_ar": "التخطيط"
+    },
+    {
+      "id": "show_stats",
+      "type": "checkbox",
+      "label": "Show account stats",
+      "label_ar": "إظهار إحصائيات الحساب",
+      "info": "Displays the order count and total spent in the account sidebar.",
+      "default": true
+    }
+  ],
+  "presets": [
+    {
+      "name": "Gilded Account Page",
+      "name_ar": "صفحة الحساب",
+      "settings": {
+        "title": "My Account",
+        "orders_title": "My Orders",
+        "addresses_title": "My Addresses",
+        "settings_title": "Settings",
+        "password_title": "Change password",
+        "show_stats": true
+      }
+    }
+  ]
+}

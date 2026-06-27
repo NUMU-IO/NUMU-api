@@ -1,0 +1,424 @@
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *  Luxury Minimal (V3) — compiled CSS entry (SOURCE OF TRUTH).
+ *
+ *  Imported by src/main.tsx so Vite's PostCSS pipeline compiles the
+ *  Tailwind directives below + the ported V2 luxury-minimal utility
+ *  classes into dist/theme.css (the file the host loads via
+ *  external_theme.css_url). The root-level styles.css is a thin pointer
+ *  kept only to satisfy the plugin's required-files contract.
+ *
+ *  DESIGN = a FAITHFUL port of the V2 luxury-minimal theme
+ *  (numu-egyptian-bazaar/src/themes/luxury-minimal/styles.css):
+ *  white canvas, near-black ink, warm gold accent, SHARP edges
+ *  (radius 0), uppercase wide-tracked typography, dark refined footer.
+ *  The V2 theme is the design spec — nothing here invents a new look.
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Tokens ───
+ * Scoped to BOTH :root and the app wrapper. The storefront host does NOT set
+ * data-theme on any element (it only tags the <link>), so the V2 selector
+ * `:root[data-theme="luxury-minimal"]` never matched there and the palette
+ * fell back to defaults. Mirroring bazar (`:root, [data-…-v3-app]`) makes the
+ * tokens apply on the live storefront, the editor iframe, and dev preview.
+ *
+ * The brand colours read the global-settings token the SDK's
+ * `applyGlobalStyleTokens` writes onto the mount root (`--theme-<id>`),
+ * falling back to the V2 value so an un-customised store renders identical to
+ * V2. THIS is what makes the Brand colour pickers actually re-paint the store
+ * (before the rebuild the tokens were hardcoded → the pickers were a no-op). */
+:root,
+[data-luxury-minimal-v3-app] {
+  /* HSL-triplet neutrals — consumed by the ported sections' Tailwind classes
+     (`text-foreground`, `bg-[hsl(var(--lux-gray))]`, `border-border`, …).
+     These are the V2 monochrome foundation; kept fixed for a faithful canvas. */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 10%;
+  --card: 0 0% 99%;
+  --card-foreground: 0 0% 10%;
+  --popover: 0 0% 99%;
+  --popover-foreground: 0 0% 10%;
+  --primary: 0 0% 10%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 10%;
+  --muted: 0 0% 95%;
+  --muted-foreground: 0 0% 46%;
+  --accent: 38 75% 40%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 90%;
+  --input: 0 0% 92%;
+  --ring: 0 0% 10%;
+  --success: 153 50% 38%;
+  --warning: 38 92% 50%;
+
+  /* V2 luxury-specific HSL tokens (image placeholders / mono helpers). */
+  --lux-gray: 0 0% 96%;
+  --lux-band: 0 0% 96%;
+  --lux-line: 0 0% 90%;
+  --lux-muted: 0 0% 46%;
+  --lux-sale: 0 72% 45%;
+
+  /* Brand tokens (HEX, global-wired) — the high-value pieces the merchant
+     customises: the ink (buttons/footer), the canvas, and the gold accent.
+     Each reads `--theme-<id>` with the V2 hex fallback. */
+  --lux-black: var(--theme-primary_color, #1a1a1a);
+  --lux-ink: var(--theme-text_color, #1a1a1a);
+  --lux-white: var(--theme-background_color, #ffffff);
+  --lux-gold: var(--theme-accent_color, #b8860b);
+
+  /* Sharp edges by default; the Layout → "Corner radius" global can soften
+     them (a range stores a bare number → ×1px). V2 default = 0. */
+  --radius: calc(var(--theme-corner_radius, 0) * 1px);
+  --store-gradient: linear-gradient(135deg, hsl(0 0% 10%), hsl(0 0% 20%));
+  --hero-bg: 0 0% 97%;
+  --badge-bg: 0 0% 10%;
+  --badge-fg: 0 0% 100%;
+  --announcement-bg: 0 0% 10%;
+  --announcement-fg: 0 0% 95%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+}
+
+[data-luxury-minimal-v3-app] {
+  /* Body type: prefer the global Typography "Body font" stack, else V2's
+     Helvetica-Neue system stack. (mountTheme sets --theme-body_font /
+     --theme-font-body from the body_font global.) */
+  font-family: var(--theme-font-body, var(--theme-body_font, "Helvetica Neue")),
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  overflow-x: clip;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  line-height: 1.6;
+}
+
+/* Zero-specificity image reset (see bazar rationale): keep utility/inline
+   heights winning so object-cover frames fill instead of collapsing. */
+:where([data-luxury-minimal-v3-app] img) {
+  max-width: 100%;
+  height: auto;
+}
+
+[data-luxury-minimal-v3-app] button {
+  font: inherit;
+}
+/* Zero-specificity link reset (`:where`) — sets the default link colour to
+   inherit WITHOUT out-ranking component classes. A plain
+   `[data-…-v3-app] a` selector (0,1,1) beats `.lux-btn` / `.lux-nav-link`
+   (0,1,0), which made the solid black CTA render black-on-black text (only
+   visible on hover, when the bg turns transparent). `:where()` carries 0
+   specificity, so `.lux-btn`'s white text + `.lux-nav-link`'s muted colour
+   win again, while bare links still inherit. */
+:where([data-luxury-minimal-v3-app] a) {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Keyboard focus — subtle gold ring (refined, matches the accent). */
+[data-luxury-minimal-v3-app]
+  :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 1px solid var(--lux-gold);
+  outline-offset: 2px;
+}
+
+/* ━━━ Typography helpers (V2 .lux-*) ━━━ */
+.lux-heading {
+  font-family: var(--theme-font-heading, var(--theme-heading_font, "Helvetica Neue")),
+    Helvetica, Arial, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lux-eyebrow {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+
+.lux-label {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 10px;
+}
+
+/* Ultra-thin separator */
+.lux-separator {
+  height: 1px;
+  background: hsl(var(--border));
+}
+
+/* ━━━ Buttons — solid black, sharp edges, uppercase, hover inverts ━━━ */
+.lux-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--lux-black);
+  color: var(--lux-white);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  padding: 1rem 2.5rem;
+  border: 1px solid var(--lux-black);
+  border-radius: var(--radius);
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+.lux-btn:hover {
+  background: transparent;
+  color: var(--lux-black);
+}
+
+.lux-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: transparent;
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  padding: 1rem 2.5rem;
+  border-radius: var(--radius);
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+.lux-btn-outline:hover {
+  border-color: hsl(var(--foreground));
+}
+
+/* Compact filled / outline used by the page sections (PDP/PLP/profile). */
+.lux-btn-filled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--lux-black);
+  color: var(--lux-white);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  padding: 0.9rem 2rem;
+  border: 1px solid var(--lux-black);
+  border-radius: var(--radius);
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+.lux-btn-filled:hover {
+  background: transparent;
+  color: var(--lux-black);
+}
+.lux-btn-outline-dark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: transparent;
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--foreground));
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  padding: 0.9rem 2rem;
+  border-radius: var(--radius);
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+.lux-btn-outline-dark:hover {
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+}
+
+/* Card — borderless, clean, subtle hover shadow */
+.lux-card {
+  background: hsl(var(--card));
+  border-radius: var(--radius);
+  transition: all 0.4s ease;
+}
+.lux-card:hover {
+  box-shadow: 0 8px 30px hsl(0 0% 0% / 0.06);
+}
+
+/* Nav link — extra-small uppercase, underline on hover */
+.lux-nav-link {
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  transition: color 0.3s ease;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 2px;
+}
+.lux-nav-link:hover {
+  color: hsl(var(--foreground));
+  border-bottom-color: hsl(var(--foreground));
+}
+
+/* Chip — bordered, fills black on active */
+.lux-chip {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: all 0.3s ease;
+}
+.lux-chip-active {
+  background: var(--lux-black);
+  color: var(--lux-white);
+  border-color: var(--lux-black);
+}
+
+/* Input — refined hairline border, black focus */
+.lux-input {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  color: hsl(var(--foreground));
+}
+.lux-input:focus {
+  border-color: hsl(var(--foreground));
+  outline: none;
+}
+
+/* Gold accent (global-wired) */
+.lux-gold {
+  color: var(--lux-gold);
+}
+
+/* Header — pure, airy white with a hairline bottom border */
+.lux-header {
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* Footer — dark refined (uses the ink token so the primary picker repaints it) */
+.lux-footer {
+  background: var(--lux-black);
+  color: hsl(0 0% 80%);
+}
+
+/* Force the dark gradient for shared page classes (parity with V2) */
+.store-gradient {
+  background: linear-gradient(135deg, hsl(0 0% 10%), hsl(0 0% 20%)) !important;
+}
+
+/* ━━━ Product-card hover (image zoom + secondary reveal) ━━━ */
+.lux-product-card .lux-product-image {
+  transition: transform 600ms ease, opacity 280ms ease;
+}
+.lux-product-card:hover .lux-product-image {
+  transform: scale(1.03);
+}
+.lux-product-card .lux-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+.lux-product-card:hover .lux-product-image-secondary {
+  opacity: 1;
+}
+
+/* Shimmer placeholder for lazy media */
+.lux-shimmer {
+  background: linear-gradient(90deg, #ececec 0%, #f5f5f5 40%, #ececec 80%);
+  background-size: 200% 100%;
+  animation: lux-shimmer 1400ms ease-in-out infinite;
+}
+@keyframes lux-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lux-shimmer { animation: none; }
+}
+
+/* Scrollbar-hide (thumbnail rail / category strip / filter chips) */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* ━━━ Inline-editor affordances ━━━
+ * The customizer wraps editable text in <InlineEditable>; these styles show a
+ * dashed gold frame + pencil glyph on hover INSIDE the editor iframe only (the
+ * component gates `--armed` on isInsideEditor). Live shoppers never see them. */
+.lux-inline-edit {
+  position: relative;
+  display: inline;
+}
+.lux-inline-edit--armed {
+  cursor: text;
+  border-radius: 3px;
+  transition: outline-color 160ms ease, background-color 160ms ease;
+  outline: 1px dashed transparent;
+  outline-offset: 3px;
+}
+.lux-inline-edit--armed:hover {
+  outline-color: var(--lux-gold, #b8860b);
+  background-color: rgba(184, 134, 11, 0.07);
+}
+.lux-inline-edit--armed::after {
+  content: "";
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  background: var(--lux-gold, #b8860b);
+  border-radius: 50%;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 9px 9px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.lux-inline-edit--armed:hover::after,
+.lux-inline-edit--editing::after {
+  opacity: 1;
+  transform: scale(1);
+}
+.lux-inline-edit--editing {
+  outline-color: var(--lux-ink, #1a1a1a) !important;
+  outline-style: solid;
+  outline-width: 1px;
+  background-color: rgba(0, 0, 0, 0.03);
+  cursor: text;
+}
+.lux-inline-edit--editing[contenteditable="true"] {
+  caret-color: var(--lux-ink, #1a1a1a);
+}

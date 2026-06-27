@@ -1,0 +1,205 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported verbatim from V2 Elegant (numu-egyptian-bazaar/src/themes/
+ * elegant/styles.css). The only change: the V2 root selector
+ * :root[data-theme="elegant"] is retargeted to the V3 mount element
+ * [data-elegant-v3-app] so the HSL tokens reach the sections.
+ * ─────────────────────────────────────────────────────────────── */
+/* Theme: Classic Elegant — Rich warm brown */
+[data-elegant-v3-app] {
+  --background: 45 30% 97%;
+  --foreground: 30 20% 12%;
+  --card: 40 40% 99%;
+  --card-foreground: 30 20% 12%;
+  --popover: 40 40% 99%;
+  --popover-foreground: 30 20% 12%;
+  --primary: 30 50% 30%;
+  --primary-foreground: 45 30% 97%;
+  --secondary: 45 25% 92%;
+  --secondary-foreground: 30 20% 12%;
+  --muted: 45 20% 92%;
+  --muted-foreground: 30 15% 45%;
+  --accent: 30 40% 90%;
+  --accent-foreground: 30 50% 20%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 45 20% 85%;
+  --input: 45 20% 85%;
+  --ring: 30 50% 30%;
+  --radius: 0.5rem;
+  --store-gradient: linear-gradient(135deg, hsl(30 50% 30%), hsl(30 40% 20%));
+  --hero-bg: 30 40% 95%;
+  --badge-bg: 30 50% 30%;
+  --badge-fg: 45 30% 97%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 30 50% 30%;
+  --announcement-fg: 45 30% 97%;
+  --success: 142 70% 40%;
+  --warning: 38 92% 50%;
+
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+}
+
+/* Force elegant palette for shared page classes */
+[data-elegant-v3-app] .store-gradient {
+  background: var(--store-gradient) !important;
+}
+
+/* ───────────────────────────────────────────────────────────────
+ * Elegant V3 — supporting utility classes for the ported page-level
+ * sections (product-detail, products-page, profile).
+ *
+ * V2 elegant rendered those pages through the SHARED Base*Page
+ * components, which used shadcn semantic utilities. The V3 page
+ * sections are self-contained (copied from the proven vionne ports)
+ * and reference a small `eg-*` design vocabulary; we define it here
+ * in elegant's warm-brown / serif-heading aesthetic so those pages
+ * render styled, not naked. Home sections use plain Tailwind utils
+ * + the HSL tokens above and need none of this.
+ * ─────────────────────────────────────────────────────────────── */
+
+[data-elegant-v3-app] {
+  /* Elegant palette aliases consumed by the eg-* classes + arbitrary
+     `text-[var(--eg-ink)]` values in the page sections. Derived from
+     the warm-brown HSL tokens above so the two stay in lockstep. */
+  --eg-white: hsl(40 40% 99%);
+  --eg-band: hsl(45 25% 92%);
+  --eg-ink: hsl(30 20% 12%);
+  --eg-border: hsl(45 20% 85%);
+  --eg-muted: hsl(30 15% 45%);
+  --eg-sale: hsl(0 72% 42%);
+
+  font-family: var(--body-font), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ─── Typography ─── */
+
+.eg-heading {
+  font-family: var(--heading-font), Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.1;
+}
+
+.eg-eyebrow {
+  font-family: var(--body-font), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 11px;
+  color: var(--eg-muted);
+}
+
+.eg-label {
+  font-family: var(--body-font), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+}
+
+/* ─── Buttons ─── */
+
+.eg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 44px;
+  padding: 0 1.5rem;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  transition: opacity 200ms ease, background-color 200ms ease, color 200ms ease;
+  cursor: pointer;
+}
+
+.eg-btn-filled {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.eg-btn-filled:hover {
+  opacity: 0.9;
+}
+
+.eg-btn-outline {
+  background: transparent;
+  color: hsl(var(--primary));
+  border: 1px solid hsl(var(--primary));
+}
+.eg-btn-outline:hover {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+/* ─── Product card hover (mirrors V2 elegant ProductCard motion) ─── */
+
+.eg-product-card .eg-product-image {
+  transition: transform 700ms ease, opacity 280ms ease;
+}
+
+.eg-product-card:hover .eg-product-image {
+  transform: scale(1.05);
+}
+
+.eg-product-card .eg-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.eg-product-card:hover .eg-product-image-secondary {
+  opacity: 1;
+}
+
+/* ─── Shimmer (lazy media placeholder) ─── */
+
+.eg-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(45 20% 90%) 0%,
+    hsl(45 25% 95%) 40%,
+    hsl(45 20% 90%) 80%
+  );
+  background-size: 200% 100%;
+  animation: eg-shimmer 1400ms ease-in-out infinite;
+}
+
+@keyframes eg-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Misc helpers ─── */
+
+.eg-divider {
+  height: 1px;
+  width: 100%;
+  background: var(--eg-border);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}

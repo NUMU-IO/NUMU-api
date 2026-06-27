@@ -1,0 +1,128 @@
+{
+  "type": "gilded-featured-collection",
+  "name": "Featured Collection",
+  "name_ar": "مجموعة مميزة",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content",
+      "content_ar": "المحتوى"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": "Crafted for the Eternal Wardrobe"
+    },
+    {
+      "type": "text",
+      "id": "subtitle",
+      "label": "Subtitle (eyebrow)",
+      "label_ar": "عنوان فرعي (تمهيدي)",
+      "default": "The Artisan Way"
+    },
+    {
+      "type": "header",
+      "content": "Products",
+      "content_ar": "المنتجات"
+    },
+    {
+      "type": "product_list",
+      "id": "product_ids",
+      "label": "Pick products (manual)",
+      "label_ar": "اختيار المنتجات (يدوي)",
+      "default": [],
+      "info": "When you pick products here, they are shown in the order selected. Leave empty to auto-fill from the collection below.",
+      "info_ar": "عند اختيار المنتجات هنا، تظهر بالترتيب المحدد. اتركها فارغة للتعبئة التلقائية من المجموعة أدناه."
+    },
+    {
+      "type": "select",
+      "id": "collection_tag",
+      "label": "Collection (auto-fill)",
+      "label_ar": "المجموعة (تعبئة تلقائية)",
+      "default": "new",
+      "options": [
+        {
+          "label": "New Arrivals",
+          "label_ar": "وصل حديثاً",
+          "value": "new"
+        },
+        {
+          "label": "Best Sellers",
+          "label_ar": "الأكثر مبيعاً",
+          "value": "bestseller"
+        },
+        {
+          "label": "Featured",
+          "label_ar": "مميز",
+          "value": "featured"
+        },
+        {
+          "label": "Sale",
+          "label_ar": "تخفيضات",
+          "value": "sale"
+        }
+      ]
+    },
+    {
+      "type": "header",
+      "content": "View all button",
+      "content_ar": "زر عرض الكل"
+    },
+    {
+      "type": "text",
+      "id": "view_all_text",
+      "label": "View all text",
+      "label_ar": "نص زر عرض الكل",
+      "default": "View All"
+    },
+    {
+      "type": "url",
+      "id": "view_all_link",
+      "label": "View all link",
+      "label_ar": "رابط عرض الكل",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Layout",
+      "content_ar": "التخطيط"
+    },
+    {
+      "type": "range",
+      "id": "product_count",
+      "label": "Products to show",
+      "label_ar": "عدد المنتجات المعروضة",
+      "default": 5,
+      "min": 2,
+      "max": 8,
+      "step": 1
+    },
+    {
+      "type": "range",
+      "id": "columns",
+      "label": "Columns (desktop)",
+      "label_ar": "الأعمدة (سطح المكتب)",
+      "default": 5,
+      "min": 2,
+      "max": 5,
+      "step": 1
+    }
+  ],
+  "presets": [
+    {
+      "name": "Featured Collection",
+      "name_ar": "مجموعة مميزة",
+      "settings": {
+        "title": "Crafted for the Eternal Wardrobe",
+        "subtitle": "The Artisan Way",
+        "collection_tag": "new",
+        "product_count": 5,
+        "columns": 5,
+        "view_all_text": "View All",
+        "view_all_link": "/products"
+      }
+    }
+  ]
+}

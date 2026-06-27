@@ -1,0 +1,369 @@
+/* ═══════════════════════════════════════════════════════════════
+   STREET VIBES THEME — Bold Urban / Mob Links Inspired
+   ═══════════════════════════════════════════════════════════════ */
+
+:root[data-theme="street"] {
+  /* ─── Color Tokens ─── */
+  --primary:   45 100% 51%;      /* vibrant yellow #FFC107 */
+  --primary-foreground: 0 0% 8%;
+  --secondary:  238 72% 24%;     /* deep navy #1A1464 */
+  --secondary-foreground: 0 0% 100%;
+  --accent:    348 100% 62%;     /* hot pink/red #FF3D6B */
+  --accent-foreground: 0 0% 100%;
+  --background: 44 100% 97%;    /* warm cream */
+  --foreground: 0 0% 8%;
+  --card:       44 100% 97%;
+  --card-foreground: 0 0% 8%;
+  --muted:      44 40% 92%;
+  --muted-foreground: 0 0% 35%;
+  --border:     0 0% 8%;
+  --input:      0 0% 8%;
+  --ring:       45 100% 51%;
+  --radius: 1rem;
+
+  /* ─── Street-specific tokens ─── */
+  --st-yellow:   hsl(45 100% 51%);
+  --st-navy:     hsl(238 72% 24%);
+  --st-pink:     hsl(348 100% 62%);
+  --st-cream:    hsl(44 100% 97%);
+  --st-dark:     hsl(0 0% 8%);
+  --st-brown:    hsl(20 75% 20%);
+  --st-topo:     hsl(42 100% 45%);           /* topo line colour */
+  --st-topo-bg:  hsl(45 100% 51%);           /* topo section bg */
+
+  font-family: var(--body-font, 'Cairo'), sans-serif;
+}
+
+/* ─── Topographic background pattern ─── */
+.st-topo-bg {
+  background-color: var(--st-topo-bg);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 50%, hsl(44 100% 98% / 0.12) 0%, transparent 70%),
+    radial-gradient(ellipse 55% 40% at 50% 50%, hsl(44 100% 98% / 0.10) 0%, transparent 60%),
+    radial-gradient(ellipse 35% 25% at 50% 50%, hsl(44 100% 98% / 0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 20% 14% at 50% 50%, hsl(44 100% 98% / 0.15) 0%, transparent 50%);
+  background-size: 100% 100%;
+}
+
+.st-topo-lines {
+  background-color: var(--st-topo-bg);
+  background-image:
+    repeating-radial-gradient(
+      ellipse 100% 80% at 50% 55%,
+      transparent 0%,
+      transparent calc(5% - 1px),
+      hsl(42 100% 42% / 0.4) calc(5% - 1px),
+      hsl(42 100% 42% / 0.4) 5%,
+      transparent 5%,
+      transparent calc(10% - 1px),
+      hsl(42 100% 42% / 0.4) calc(10% - 1px),
+      hsl(42 100% 42% / 0.4) 10%,
+      transparent 10%,
+      transparent calc(15% - 1px),
+      hsl(42 100% 42% / 0.4) calc(15% - 1px),
+      hsl(42 100% 42% / 0.4) 15%,
+      transparent 15%,
+      transparent calc(20% - 1px),
+      hsl(42 100% 42% / 0.4) calc(20% - 1px),
+      hsl(42 100% 42% / 0.4) 20%,
+      transparent 20%,
+      transparent calc(25% - 1px),
+      hsl(42 100% 42% / 0.4) calc(25% - 1px),
+      hsl(42 100% 42% / 0.4) 25%,
+      transparent 25%,
+      transparent calc(30% - 1px),
+      hsl(42 100% 42% / 0.4) calc(30% - 1px),
+      hsl(42 100% 42% / 0.4) 30%,
+      transparent 30%,
+      transparent calc(35% - 1px),
+      hsl(42 100% 42% / 0.4) calc(35% - 1px),
+      hsl(42 100% 42% / 0.4) 35%,
+      transparent 35%,
+      transparent calc(40% - 1px),
+      hsl(42 100% 42% / 0.4) calc(40% - 1px),
+      hsl(42 100% 42% / 0.4) 40%,
+      transparent 40%,
+      transparent 50%
+    );
+}
+
+/* ─── Blob wave divider ─── */
+.st-wave-top {
+  clip-path: ellipse(60% 60% at 50% 100%);
+}
+
+/* ─── Header ─── */
+.st-header {
+  background: var(--st-yellow);
+  border-bottom: 3px solid var(--st-dark);
+}
+
+.st-header-nav-link {
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--st-dark);
+  transition: opacity 0.15s;
+}
+.st-header-nav-link:hover { opacity: 0.65; }
+
+.st-logo-text {
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--st-dark);
+}
+
+/* ─── Buttons ─── */
+.st-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 2rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 2px solid var(--st-dark);
+  border-radius: 999px;
+  background: var(--st-dark);
+  color: var(--st-yellow);
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s, color 0.15s;
+}
+.st-btn:hover { background: var(--st-yellow); color: var(--st-dark); transform: scale(1.03); }
+.st-btn:active { transform: scale(0.97); }
+
+.st-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.7rem 2rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 2px solid var(--st-dark);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--st-dark);
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s, color 0.15s;
+}
+.st-btn-outline:hover { background: var(--st-dark); color: var(--st-yellow); }
+
+.st-btn-yellow {
+  background: var(--st-yellow);
+  color: var(--st-dark);
+  border: 2px solid var(--st-dark);
+  border-radius: 999px;
+  padding: 0.75rem 2rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.st-btn-yellow:hover { transform: scale(1.03); box-shadow: 0 4px 20px hsl(45 100% 51% / 0.5); }
+
+/* ─── Cards ─── */
+.st-card {
+  background: hsl(var(--card));
+  border: 2px solid var(--st-dark);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.st-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 40px hsl(0 0% 0% / 0.12);
+}
+
+/* ─── Product card ─── */
+.st-product-card {}
+
+.st-product-img-wrap {
+  border-bottom: 2px solid var(--st-dark);
+  overflow: hidden;
+}
+
+.st-size-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  border: 2px solid var(--st-dark);
+  background: hsl(var(--muted));
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.st-size-btn:hover, .st-size-btn.active {
+  background: var(--st-dark);
+  color: var(--st-yellow);
+}
+
+/* ─── Announcement bar ─── */
+.st-announcement {
+  background: var(--st-navy);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.45rem 1rem;
+  text-align: center;
+}
+
+/* ─── Footer ─── */
+.st-footer {
+  background: var(--st-dark);
+  color: #fff;
+}
+
+/* ─── Badge / tag ─── */
+.st-badge {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 2px solid var(--st-dark);
+  border-radius: 999px;
+  background: var(--st-yellow);
+  color: var(--st-dark);
+}
+.st-badge-dark {
+  background: var(--st-dark);
+  color: var(--st-yellow);
+  border-color: var(--st-dark);
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: 999px;
+}
+.st-badge-pink {
+  background: var(--st-pink);
+  color: #fff;
+  border-color: var(--st-pink);
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: 999px;
+}
+
+/* ─── Scroll-to-discover pill ─── */
+.st-scroll-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1.5rem;
+  border: 2px solid var(--st-dark);
+  border-radius: 999px;
+  background: hsl(var(--card));
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--st-dark);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.st-scroll-pill:hover { background: var(--st-dark); color: var(--st-yellow); }
+
+/* ─── Hero split ─── */
+.st-hero-headline {
+  font-size: clamp(2.5rem, 7vw, 5.5rem);
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+}
+
+/* ─── Section heading ─── */
+.st-section-title {
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+/* ─── Marquee strip ─── */
+.st-marquee-strip {
+  background: var(--st-dark);
+  color: var(--st-yellow);
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  overflow: hidden;
+  border-top: 2px solid var(--st-dark);
+  border-bottom: 2px solid var(--st-dark);
+  padding: 0.6rem 0;
+}
+.st-marquee-inner {
+  display: inline-flex;
+  gap: 3rem;
+  white-space: nowrap;
+  animation: st-marquee 18s linear infinite;
+}
+@keyframes st-marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* ─── Blob wave ─── */
+.st-blob-divider {
+  height: 80px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─── Input ─── */
+.st-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 2px solid var(--st-dark);
+  border-radius: 0.75rem;
+  background: hsl(var(--background));
+  color: var(--st-dark);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.st-input:focus { border-color: var(--st-yellow); box-shadow: 0 0 0 3px hsl(45 100% 51% / 0.2); }
+
+/* ─── Cart drawer ─── */
+.st-cart-overlay {
+  position: fixed;
+  inset: 0;
+  background: hsl(0 0% 0% / 0.5);
+  z-index: 40;
+}
+.st-cart-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 95vw);
+  background: hsl(var(--card));
+  border-left: 2.5px solid var(--st-dark);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}

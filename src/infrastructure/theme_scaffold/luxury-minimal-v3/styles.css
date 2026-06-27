@@ -1,0 +1,25 @@
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *  Luxury Minimal (V3) — thin contract pointer.
+ *
+ *  @numueg/theme-plugin's contract requires a top-level styles.css to
+ *  exist, and its closeBundle copies this file to dist/theme.css ONLY
+ *  when Vite did not already emit one. This theme uses Tailwind-in-bundle:
+ *  src/main.tsx imports src/theme.css (the SOURCE OF TRUTH), so Vite's
+ *  PostCSS step compiles the real, full stylesheet to dist/theme.css and
+ *  this copy never runs. A couple of base tokens are kept here only as a
+ *  last-resort fallback (e.g. a mis-wired build) so the canvas is still
+ *  white-on-near-black rather than unstyled.
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+[data-luxury-minimal-v3-app] {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 10%;
+  --border: 0 0% 90%;
+  --muted-foreground: 0 0% 46%;
+  --lux-black: #1a1a1a;
+  --lux-white: #ffffff;
+  --lux-gold: #b8860b;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}

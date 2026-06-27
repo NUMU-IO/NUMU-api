@@ -1,0 +1,157 @@
+{
+  "type": "vionne-footer",
+  "name": "Vionne Footer",
+  "name_ar": "تذييل فيون",
+  "tag": "footer",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "label_ar": "اسم المتجر",
+      "default": "",
+      "info": "Leave empty to use the store name."
+    },
+    {
+      "type": "textarea",
+      "id": "footer_about_text",
+      "label": "Brand blurb",
+      "label_ar": "نبذة المتجر",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Columns"
+    },
+    {
+      "type": "link_list_picker",
+      "id": "footer_menu_handle",
+      "label": "Footer menu",
+      "label_ar": "قائمة التذييل",
+      "default": "footer",
+      "info": "Pick a menu from Online Store → Navigation. Top-level items with sub-items become columns; links to hidden/unpublished pages drop automatically. Falls back to the Link column blocks below, then the default Shop/Help columns.",
+      "info_ar": "اختاري قائمة من متجر إلكتروني ← التنقل. روابط الصفحات المخفية تختفي تلقائيًا."
+    },
+    {
+      "type": "text",
+      "id": "shop_title",
+      "label": "Shop column title",
+      "label_ar": "عنوان عمود التسوّق",
+      "default": "",
+      "info": "Used for the default Shop column (All products + collections)."
+    },
+    {
+      "type": "text",
+      "id": "help_title",
+      "label": "Help column title",
+      "label_ar": "عنوان عمود المساعدة",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Newsletter"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_newsletter",
+      "label": "Show newsletter signup",
+      "label_ar": "إظهار الاشتراك بالنشرة",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "newsletter_title",
+      "label": "Newsletter title",
+      "label_ar": "عنوان النشرة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "newsletter_subtitle",
+      "label": "Newsletter subtitle",
+      "label_ar": "وصف النشرة",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Bottom bar"
+    },
+    {
+      "type": "text",
+      "id": "payment_methods",
+      "label": "Payment methods",
+      "label_ar": "طرق الدفع",
+      "default": "",
+      "info": "Comma-separated, shown in the bottom bar."
+    },
+    {
+      "type": "text",
+      "id": "copyright_template",
+      "label": "Copyright line",
+      "label_ar": "سطر حقوق النشر",
+      "default": "",
+      "info": "Tokens: {year} {store} {rights}. Leave empty for © {year} {store}. All rights reserved."
+    }
+  ],
+  "blocks": [
+    {
+      "type": "column",
+      "name": "Link column",
+      "name_ar": "عمود روابط",
+      "settings": [
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Column title",
+          "label_ar": "عنوان العمود"
+        }
+      ],
+      "blocks": [
+        {
+          "type": "link",
+          "name": "Link",
+          "name_ar": "رابط",
+          "settings": [
+            {
+              "type": "text",
+              "id": "label",
+              "label": "Label",
+              "label_ar": "التسمية"
+            },
+            {
+              "type": "url",
+              "id": "href",
+              "label": "URL",
+              "label_ar": "الرابط"
+            }
+          ]
+        }
+      ],
+      "max_blocks": 8
+    }
+  ],
+  "max_blocks": 4,
+  "presets": [
+    {
+      "name": "Vionne Footer",
+      "locales": {
+        "en": {
+          "name": "Vionne Footer"
+        },
+        "ar": {
+          "name": "تذييل فيون"
+        }
+      },
+      "settings": {
+        "brand_name": "",
+        "footer_about_text": "",
+        "show_newsletter": true,
+        "newsletter_title": "",
+        "newsletter_subtitle": "",
+        "payment_methods": "Visa, Mastercard, Cash on Delivery, Fawry"
+      },
+      "blocks": []
+    }
+  ]
+}

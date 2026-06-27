@@ -1,0 +1,27 @@
+{
+  "type": "by-search-results",
+  "name": "Search results",
+  "settings": [
+    {
+      "type": "text",
+      "id": "placeholder_when_no_query",
+      "label": "Empty-query headline",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "no_results_text",
+      "label": "No-results copy",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Columns (desktop)",
+      "min": 1,
+      "max": 5,
+      "step": 1,
+      "default": 3
+    }
+  ]
+}

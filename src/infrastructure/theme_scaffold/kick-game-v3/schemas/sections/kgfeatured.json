@@ -1,0 +1,64 @@
+{
+  "type": "kgfeatured",
+  "name": "Featured Collection",
+  "name_ar": "مجموعة مميزة",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "view_all_text",
+      "type": "text",
+      "label": "View All Text",
+      "label_ar": "نص عرض الكل",
+      "default": ""
+    },
+    {
+      "id": "view_all_link",
+      "type": "url",
+      "label": "View All Link",
+      "label_ar": "رابط عرض الكل",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "product_count",
+      "type": "range",
+      "label": "Products to Show",
+      "label_ar": "عدد المنتجات",
+      "default": 8,
+      "min": 2,
+      "max": 12,
+      "step": 1
+    }
+  ],
+  "presets": [
+    {
+      "name": "Best Sellers",
+      "name_ar": "الأكثر مبيعاً",
+      "settings": {
+        "title": "",
+        "view_all_link": "/products?tag=bestseller"
+      }
+    },
+    {
+      "name": "New Arrivals",
+      "name_ar": "وصل حديثاً",
+      "settings": {
+        "title": "",
+        "view_all_link": "/products?tag=new"
+      }
+    }
+  ]
+}

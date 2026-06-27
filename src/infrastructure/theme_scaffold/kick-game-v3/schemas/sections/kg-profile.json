@@ -1,0 +1,49 @@
+{
+  "type": "kg-profile",
+  "name": "Kick Game Account Page",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Page title",
+      "label_ar": "عنوان الصفحة",
+      "default": ""
+    },
+    {
+      "id": "orders_title",
+      "type": "text",
+      "label": "Orders heading",
+      "label_ar": "عنوان الطلبات",
+      "default": ""
+    },
+    {
+      "id": "addresses_title",
+      "type": "text",
+      "label": "Addresses heading",
+      "label_ar": "عنوان العناوين",
+      "default": ""
+    },
+    {
+      "id": "settings_title",
+      "type": "text",
+      "label": "Settings heading",
+      "label_ar": "عنوان الإعدادات",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "show_stats",
+      "type": "checkbox",
+      "label": "Show account stats",
+      "label_ar": "إظهار إحصائيات الحساب",
+      "default": true
+    }
+  ]
+}

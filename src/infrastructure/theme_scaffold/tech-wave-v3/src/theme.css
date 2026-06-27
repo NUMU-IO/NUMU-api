@@ -1,0 +1,464 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported verbatim from V2 Tech Wave (numu-egyptian-bazaar/src/themes/
+ * tech-wave/styles.css). The only change: the V2 root selector
+ * :root[data-theme="tech-wave"] is retargeted to the V3 mount element
+ * [data-tech-wave-v3-app] so the --tw-* + HSL tokens reach the sections.
+ * ─────────────────────────────────────────────────────────────── */
+/* Theme: Tech Wave — Futuristic dark with neon accents and glassmorphism */
+
+/* ===== CSS Variables ===== */
+[data-tech-wave-v3-app] {
+  --background: 220 40% 7%;
+  --foreground: 210 20% 90%;
+  --card: 220 35% 12%;
+  --card-foreground: 210 20% 90%;
+  --popover: 220 35% 14%;
+  --popover-foreground: 210 20% 90%;
+  --primary: 195 100% 50%;
+  --primary-foreground: 220 40% 7%;
+  --secondary: 225 35% 18%;
+  --secondary-foreground: 210 20% 85%;
+  --muted: 220 30% 16%;
+  --muted-foreground: 210 15% 55%;
+  --accent: 260 100% 69%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 30% 20%;
+  --input: 220 30% 18%;
+  --ring: 195 100% 50%;
+  --radius: 0.75rem;
+  --store-gradient: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+  --hero-bg: 220 40% 9%;
+  --badge-bg: 195 100% 50%;
+  --badge-fg: 220 40% 7%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 220 40% 12%;
+  --announcement-fg: 195 100% 70%;
+  --success: 142 70% 45%;
+  --warning: 38 92% 55%;
+
+  /* Tech Wave-specific tokens */
+  --tw-neon-color: var(--primary);
+  --tw-neon-glow-sm: 0 0 6px hsl(var(--primary) / 0.4), 0 0 12px hsl(var(--primary) / 0.2);
+  --tw-neon-glow-md: 0 0 10px hsl(var(--primary) / 0.5), 0 0 20px hsl(var(--primary) / 0.25), 0 0 40px hsl(var(--primary) / 0.1);
+  --tw-neon-glow-lg: 0 0 15px hsl(var(--primary) / 0.6), 0 0 30px hsl(var(--primary) / 0.3), 0 0 60px hsl(var(--primary) / 0.15);
+  --tw-glass-bg: hsl(var(--card) / 0.7);
+  --tw-glass-border: hsl(var(--foreground) / 0.1);
+  --tw-wave-color: hsl(var(--primary) / 0.05);
+
+  /* Reset skeu variables */
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+
+  --sidebar-background: 220 35% 10%;
+  --sidebar-foreground: 210 20% 90%;
+  --sidebar-primary: 195 100% 50%;
+  --sidebar-primary-foreground: 220 40% 7%;
+  --sidebar-accent: 260 100% 69%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 220 30% 20%;
+  --sidebar-ring: 195 100% 50%;
+
+  font-family: var(--body-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Body dark background — uses CSS variable so merchant overrides work */
+[data-tech-wave-v3-app] body,
+[data-tech-wave-v3-app] {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* ===== ANIMATIONS ===== */
+
+@keyframes tw-wave {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-8px) scaleY(1.02); }
+}
+
+@keyframes tw-pulse-glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes tw-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* ===== COMPONENT STYLES ===== */
+
+/* Glass card — frosted glass effect */
+[data-tech-wave-v3-app] .tw-glass {
+  background: var(--tw-glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--tw-glass-border);
+}
+
+/* Card — dark surface with neon border on hover */
+[data-tech-wave-v3-app] .tw-card {
+  background: hsl(var(--card) / 0.8);
+  border: 1px solid hsl(var(--border));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+}
+[data-tech-wave-v3-app] .tw-card:hover {
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Neon button — primary CTA */
+[data-tech-wave-v3-app] .tw-neon-btn {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.85) 100%);
+  border: none;
+  color: hsl(var(--primary-foreground));
+  font-weight: 700;
+  box-shadow: var(--tw-neon-glow-md);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+[data-tech-wave-v3-app] .tw-neon-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 30%, hsl(0 0% 100% / 0.2) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: tw-shimmer 3s infinite;
+}
+[data-tech-wave-v3-app] .tw-neon-btn:hover {
+  box-shadow: var(--tw-neon-glow-lg);
+  transform: translateY(-1px);
+}
+[data-tech-wave-v3-app] .tw-neon-btn:active {
+  transform: translateY(0);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Secondary button — glass outline */
+[data-tech-wave-v3-app] .tw-btn-secondary {
+  background: hsl(var(--card) / 0.6);
+  border: 1px solid hsl(var(--primary) / 0.3);
+  color: hsl(var(--primary) / 0.85);
+  font-weight: 600;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 0.3s ease;
+}
+[data-tech-wave-v3-app] .tw-btn-secondary:hover {
+  border-color: hsl(var(--primary) / 0.6);
+  background: hsl(var(--card) / 0.8);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Neon text glow */
+[data-tech-wave-v3-app] .tw-neon-text {
+  color: hsl(var(--primary) / 0.85);
+  text-shadow: 0 0 8px hsl(var(--primary) / 0.6), 0 0 20px hsl(var(--primary) / 0.3);
+}
+
+/* Wave section background */
+[data-tech-wave-v3-app] .tw-wave-section {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background) / 0.9) 100%);
+}
+[data-tech-wave-v3-app] .tw-wave-section::before {
+  content: "";
+  position: absolute;
+  bottom: -50%;
+  left: -10%;
+  right: -10%;
+  height: 100%;
+  background: radial-gradient(ellipse at center, hsl(var(--primary) / 0.06) 0%, transparent 70%);
+  animation: tw-wave 6s ease-in-out infinite;
+  pointer-events: none;
+}
+[data-tech-wave-v3-app] .tw-wave-section::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -10%;
+  right: -10%;
+  height: 100%;
+  background: radial-gradient(ellipse at center, hsl(var(--accent) / 0.04) 0%, transparent 70%);
+  animation: tw-wave 8s ease-in-out infinite reverse;
+  pointer-events: none;
+}
+
+/* Header — dark glass bar */
+[data-tech-wave-v3-app] .tw-header {
+  background: hsl(var(--background) / 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid hsl(var(--primary) / 0.15);
+  box-shadow: 0 1px 20px hsl(var(--primary) / 0.05);
+}
+
+/* Footer — deep dark gradient */
+[data-tech-wave-v3-app] .tw-footer {
+  background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background) / 0.9) 100%);
+  border-top: 1px solid hsl(var(--primary) / 0.15);
+}
+
+/* Badge — neon glow */
+[data-tech-wave-v3-app] .tw-badge {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-weight: 700;
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Badge — accent variant */
+[data-tech-wave-v3-app] .tw-badge-accent {
+  background: hsl(var(--accent));
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 0 6px hsl(var(--accent) / 0.4), 0 0 12px hsl(var(--accent) / 0.2);
+}
+
+/* Announcement bar */
+[data-tech-wave-v3-app] .tw-announcement {
+  background: linear-gradient(90deg, hsl(var(--background) / 0.9) 0%, hsl(var(--card)) 50%, hsl(var(--background) / 0.9) 100%);
+  border-bottom: 1px solid hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary) / 0.85);
+}
+
+/* Image frame */
+[data-tech-wave-v3-app] .tw-img-frame {
+  border: 1px solid hsl(var(--border));
+  overflow: hidden;
+  position: relative;
+  transition: all 0.3s ease;
+}
+[data-tech-wave-v3-app] .tw-img-frame:hover {
+  border-color: hsl(var(--primary) / 0.4);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Chip / pill */
+[data-tech-wave-v3-app] .tw-chip {
+  background: hsl(var(--card) / 0.6);
+  border: 1px solid hsl(var(--border));
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+}
+[data-tech-wave-v3-app] .tw-chip:hover {
+  border-color: hsl(var(--primary) / 0.4);
+}
+[data-tech-wave-v3-app] .tw-chip-active {
+  background: hsl(var(--primary) / 0.15);
+  border-color: hsl(var(--primary) / 0.5);
+  color: hsl(var(--primary) / 0.85);
+}
+
+/* Inset / input */
+[data-tech-wave-v3-app] .tw-inset {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  transition: border-color 0.2s ease;
+}
+[data-tech-wave-v3-app] .tw-inset:focus {
+  border-color: hsl(var(--primary) / 0.6);
+  box-shadow: var(--tw-neon-glow-sm);
+  outline: none;
+}
+
+/* Divider */
+[data-tech-wave-v3-app] .tw-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / 0.3) 50%, transparent 100%);
+  border: none;
+}
+
+/* Section */
+[data-tech-wave-v3-app] .tw-section {
+  background: hsl(var(--background));
+  border-top: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* Star rating */
+[data-tech-wave-v3-app] .tw-star {
+  filter: drop-shadow(0 0 3px hsl(38 92% 55% / 0.5));
+}
+
+
+/* Force tech-wave palette for shared page classes */
+[data-tech-wave-v3-app] .store-gradient {
+  background: linear-gradient(135deg, hsl(195 100% 50%), hsl(280 80% 55%)) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * Page-level section styles (Product Detail / Products Page / Profile /
+ * About / Contact / Order Confirmation).
+ *
+ * These sections were ported from the proven Vionne V3 page sections,
+ * which author their markup with `vn-*` utility classes + `--vn-*` design
+ * tokens. Rather than rewrite every className, we keep the `vn-*` names and
+ * RE-MAP the `--vn-*` tokens onto Tech Wave's dark/neon palette here, so the
+ * pages render in Tech Wave's look (dark surfaces, cyan ink, neon glow)
+ * instead of Vionne's grayscale. Block ported from vionne/src/theme.css.
+ * ═══════════════════════════════════════════════════════════════ */
+
+[data-tech-wave-v3-app] {
+  /* Tech Wave palette re-mapped onto the vn-* token names */
+  --vn-white: hsl(220 40% 7%);             /* page bg = dark */
+  --vn-band: hsl(220 35% 12%);             /* card/band surface */
+  --vn-surface-dark: hsl(220 35% 10%);
+  --vn-ink: hsl(210 20% 90%);              /* primary text = light */
+  --vn-border: hsl(220 30% 20%);
+  --vn-muted: hsl(210 15% 60%);            /* secondary text */
+  --vn-sale: hsl(0 84% 60%);               /* destructive / sale */
+}
+
+/* ─── Typography ─── */
+
+[data-tech-wave-v3-app] .vn-heading {
+  font-family: var(--heading-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--vn-ink);
+}
+
+[data-tech-wave-v3-app] .vn-eyebrow {
+  font-family: var(--body-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 11px;
+  color: var(--vn-muted);
+}
+
+[data-tech-wave-v3-app] .vn-label {
+  font-family: var(--body-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+}
+
+/* ─── Buttons (mapped to Tech Wave neon) ─── */
+
+[data-tech-wave-v3-app] .vn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: 0.75rem;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: transform 200ms ease, background-color 200ms ease, color 200ms ease, opacity 200ms ease, box-shadow 200ms ease;
+  cursor: pointer;
+}
+
+[data-tech-wave-v3-app] .vn-btn-filled {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.85) 100%);
+  color: hsl(var(--primary-foreground));
+  box-shadow: var(--tw-neon-glow-md);
+}
+[data-tech-wave-v3-app] .vn-btn-filled:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--tw-neon-glow-lg);
+}
+
+[data-tech-wave-v3-app] .vn-btn-outline-light {
+  background: transparent;
+  color: var(--vn-ink);
+  border: 1px solid hsl(var(--primary) / 0.5);
+}
+[data-tech-wave-v3-app] .vn-btn-outline-light:hover {
+  background: hsl(var(--primary) / 0.1);
+  transform: translateY(-1px);
+}
+
+[data-tech-wave-v3-app] .vn-btn-outline-dark {
+  background: hsl(var(--card) / 0.6);
+  color: hsl(var(--primary) / 0.9);
+  border: 1px solid hsl(var(--primary) / 0.3);
+}
+[data-tech-wave-v3-app] .vn-btn-outline-dark:hover {
+  border-color: hsl(var(--primary) / 0.6);
+  box-shadow: var(--tw-neon-glow-sm);
+  transform: translateY(-1px);
+}
+
+/* ─── Product Card hover ─── */
+
+[data-tech-wave-v3-app] .vn-product-card .vn-product-image {
+  transition: transform 600ms ease, opacity 280ms ease;
+}
+
+[data-tech-wave-v3-app] .vn-product-card:hover .vn-product-image {
+  transform: scale(1.04);
+}
+
+[data-tech-wave-v3-app] .vn-product-card .vn-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+[data-tech-wave-v3-app] .vn-product-card:hover .vn-product-image-secondary {
+  opacity: 1;
+}
+
+/* ─── Shimmer (lazy media placeholder) ─── */
+
+[data-tech-wave-v3-app] .vn-shimmer {
+  background: linear-gradient(90deg, hsl(220 30% 14%) 0%, hsl(220 30% 18%) 40%, hsl(220 30% 14%) 80%);
+  background-size: 200% 100%;
+  animation: vn-shimmer 1400ms ease-in-out infinite;
+}
+
+@keyframes vn-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Misc helpers ─── */
+
+[data-tech-wave-v3-app] .vn-divider {
+  height: 1px;
+  width: 100%;
+  background: var(--vn-border);
+}
+
+[data-tech-wave-v3-app] .vn-band {
+  background: var(--vn-band);
+}
+
+[data-tech-wave-v3-app] .scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+[data-tech-wave-v3-app] .scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}

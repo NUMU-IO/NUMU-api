@@ -1,0 +1,222 @@
+[
+  {
+    "name": "Brand",
+    "name_ar": "العلامة التجارية",
+    "settings": [
+      {
+        "type": "text",
+        "id": "brand_name",
+        "label": "Brand name",
+        "label_ar": "اسم العلامة",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "id": "brand_name_ar",
+        "label": "Brand name (Arabic)",
+        "label_ar": "اسم العلامة (عربي)",
+        "default": ""
+      },
+      {
+        "type": "image_picker",
+        "id": "logo_url",
+        "label": "Logo",
+        "label_ar": "الشعار",
+        "default": ""
+      },
+      {
+        "type": "select",
+        "id": "logo_shape",
+        "label": "Logo shape",
+        "label_ar": "شكل الشعار",
+        "default": "none",
+        "info": "Crops the logo into a shape. 'Original' keeps it untouched. Circle/Square/Triangle look best with a square logo.",
+        "options": [
+          { "value": "none", "label": "Original", "label_ar": "الأصلي" },
+          { "value": "square", "label": "Square", "label_ar": "مربع" },
+          { "value": "rounded", "label": "Rounded square", "label_ar": "مربع بزوايا دائرية" },
+          { "value": "circle", "label": "Circle", "label_ar": "دائرة" },
+          { "value": "triangle", "label": "Triangle", "label_ar": "مثلث" }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "logo_size",
+        "label": "Logo size",
+        "label_ar": "حجم الشعار",
+        "default": "small",
+        "info": "Applies when a logo shape is chosen.",
+        "options": [
+          { "value": "small", "label": "Small", "label_ar": "صغير" },
+          { "value": "medium", "label": "Medium", "label_ar": "متوسط" },
+          { "value": "large", "label": "Large", "label_ar": "كبير" }
+        ]
+      },
+      {
+        "type": "image_picker",
+        "id": "favicon",
+        "label": "Favicon (browser tab icon)",
+        "label_ar": "أيقونة المتصفح",
+        "default": ""
+      },
+      {
+        "type": "color",
+        "id": "primary_color",
+        "label": "Amber (primary)",
+        "label_ar": "اللون الأساسي",
+        "default": "#FFB300"
+      },
+      {
+        "type": "color",
+        "id": "accent_color",
+        "label": "Navy accent",
+        "label_ar": "لون التمييز",
+        "default": "#001F3F"
+      },
+      {
+        "type": "color",
+        "id": "background_color",
+        "label": "Cream background",
+        "label_ar": "لون الخلفية",
+        "default": "#FFF5E1"
+      },
+      {
+        "type": "color",
+        "id": "text_color",
+        "label": "Ink (text)",
+        "label_ar": "لون النص",
+        "default": "#0A0A14"
+      }
+    ]
+  },
+  {
+    "name": "Typography",
+    "name_ar": "الخطوط",
+    "settings": [
+      {
+        "type": "select",
+        "id": "heading_font",
+        "label": "Heading font",
+        "label_ar": "خط العناوين",
+        "default": "inter",
+        "options": [
+          {
+            "value": "inter",
+            "label": "Inter (sans-serif)",
+            "label_ar": "إنتر"
+          },
+          {
+            "value": "poppins",
+            "label": "Poppins (geometric)",
+            "label_ar": "بوبينز"
+          },
+          {
+            "value": "montserrat",
+            "label": "Montserrat (display)",
+            "label_ar": "مونتسيرات"
+          }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "body_font",
+        "label": "Body font",
+        "label_ar": "خط النص",
+        "default": "inter",
+        "options": [
+          {
+            "value": "inter",
+            "label": "Inter (sans-serif)",
+            "label_ar": "إنتر"
+          },
+          {
+            "value": "montserrat",
+            "label": "Montserrat",
+            "label_ar": "مونتسيرات"
+          },
+          {
+            "value": "cairo",
+            "label": "Cairo (Arabic-first)",
+            "label_ar": "القاهرة"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Layout",
+    "name_ar": "التخطيط",
+    "settings": [
+      {
+        "type": "range",
+        "id": "corner_radius",
+        "label": "Corner radius",
+        "label_ar": "استدارة الزوايا",
+        "default": 16,
+        "min": 0,
+        "max": 32,
+        "step": 2,
+        "unit": "px"
+      },
+      {
+        "type": "range",
+        "id": "card_border_width",
+        "label": "Card border width",
+        "label_ar": "سُمك حدود البطاقة",
+        "default": 2,
+        "min": 0,
+        "max": 6,
+        "step": 1,
+        "unit": "px"
+      }
+    ]
+  },
+  {
+    "name": "Social links",
+    "name_ar": "روابط التواصل",
+    "settings": [
+      {
+        "type": "url",
+        "id": "social_instagram",
+        "label": "Instagram URL",
+        "label_ar": "رابط إنستجرام",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_facebook",
+        "label": "Facebook URL",
+        "label_ar": "رابط فيسبوك",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_tiktok",
+        "label": "TikTok URL",
+        "label_ar": "رابط تيك توك",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_x",
+        "label": "X (Twitter) URL",
+        "label_ar": "رابط إكس (تويتر)",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_whatsapp",
+        "label": "WhatsApp number or link",
+        "label_ar": "رقم أو رابط واتساب",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_youtube",
+        "label": "YouTube URL",
+        "label_ar": "رابط يوتيوب",
+        "default": ""
+      }
+    ]
+  }
+]

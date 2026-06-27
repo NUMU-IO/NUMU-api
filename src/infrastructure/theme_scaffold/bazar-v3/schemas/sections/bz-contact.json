@@ -1,0 +1,210 @@
+{
+  "type": "bz-contact",
+  "name": "Bazar Contact",
+  "name_ar": "بازار تواصل",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "id": "hdr_hero",
+      "content": "Hero"
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "label_ar": "تسمية علوية",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "intro",
+      "label": "Intro text",
+      "label_ar": "نص تمهيدي",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_channels",
+      "content": "Channels"
+    },
+    {
+      "type": "text",
+      "id": "channels_label",
+      "label": "Channels label",
+      "label_ar": "تسمية القنوات",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "channels_headline",
+      "label": "Channels headline",
+      "label_ar": "عنوان القنوات",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_form",
+      "content": "Form"
+    },
+    {
+      "type": "text",
+      "id": "form_label",
+      "label": "Form label",
+      "label_ar": "تسمية النموذج",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "form_headline",
+      "label": "Form headline",
+      "label_ar": "عنوان النموذج",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "name_label",
+      "label": "Name field label",
+      "label_ar": "تسمية الاسم",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "email_label",
+      "label": "Email field label",
+      "label_ar": "تسمية البريد",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "phone_label",
+      "label": "Phone field label",
+      "label_ar": "تسمية الهاتف",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "message_label",
+      "label": "Message field label",
+      "label_ar": "تسمية الرسالة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "submit_text",
+      "label": "Submit button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_success",
+      "content": "Success state"
+    },
+    {
+      "type": "text",
+      "id": "success_title",
+      "label": "Success heading",
+      "label_ar": "عنوان النجاح",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "success_message",
+      "label": "Success message",
+      "label_ar": "رسالة النجاح",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_hours",
+      "content": "Business hours"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_hours",
+      "label": "Show business hours",
+      "label_ar": "إظهار ساعات العمل",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "hours_label",
+      "label": "Hours label",
+      "label_ar": "تسمية الساعات",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "hours_headline",
+      "label": "Hours headline",
+      "label_ar": "عنوان الساعات",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "hours_description",
+      "label": "Hours description",
+      "label_ar": "وصف الساعات",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "hours_weekdays_label",
+      "label": "Weekdays label",
+      "label_ar": "تسمية أيام الأسبوع",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "hours_weekdays_value",
+      "label": "Weekdays hours",
+      "label_ar": "ساعات أيام الأسبوع",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "hours_friday_label",
+      "label": "Friday label",
+      "label_ar": "تسمية الجمعة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "hours_friday_value",
+      "label": "Friday hours",
+      "label_ar": "ساعات الجمعة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "hours_note",
+      "label": "Hours note",
+      "label_ar": "ملاحظة الساعات",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Contact",
+      "locales": {
+        "en": {
+          "name": "Bazar Contact"
+        },
+        "ar": {
+          "name": "بازار تواصل"
+        }
+      },
+      "settings": {
+        "headline": ""
+      }
+    }
+  ]
+}

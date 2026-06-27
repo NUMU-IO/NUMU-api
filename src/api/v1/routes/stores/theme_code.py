@@ -165,16 +165,34 @@ async def delete_file(
 )
 async def scaffold_theme(
     request: ScaffoldThemeRequest,
+    session: Annotated[AsyncSession, Depends(get_db)],
     store: Store = Depends(get_current_store),
     svc: ThemeCodeService = Depends(_get_code_svc),
 ) -> SuccessResponse[ScaffoldThemeResponse]:
     if store.tenant_id is None:
         raise HTTPException(status_code=400, detail="Store has no tenant_id")
+
+    # Seed from the store's active theme source when the client didn't pick a
+    # source explicitly — so "Edit code" opens on the merchant's real theme
+    # code. Unknown/un-bundled slugs fall back to v3_starter in the service.
+    source = request.source
+    if not source:
+        try:
+            from src.infrastructure.repositories.store_theme_repository import (
+                StoreThemeRepository,
+            )
+
+            active = await StoreThemeRepository(session).get_active_for_store(store.id)
+            source = getattr(active, "theme_slug", None) if active else None
+        except Exception:
+            source = None
+
     count = await svc.scaffold(
         store_id=store.id,
         tenant_id=store.tenant_id,
         theme_name=request.name,
         theme_id=request.theme_id,
+        source=source,
         overwrite=request.overwrite,
     )
     return SuccessResponse(

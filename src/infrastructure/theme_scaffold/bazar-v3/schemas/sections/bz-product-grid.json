@@ -1,0 +1,99 @@
+{
+  "type": "bz-product-grid",
+  "name": "Bazar Product Grid",
+  "name_ar": "بازار شبكة المنتجات",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Columns (desktop)",
+      "label_ar": "أعمدة (ديسكتوب)",
+      "min": 1,
+      "max": 6,
+      "step": 1,
+      "default": 4
+    },
+    {
+      "type": "range",
+      "id": "columns_mobile",
+      "label": "Columns (mobile)",
+      "label_ar": "أعمدة (موبايل)",
+      "min": 1,
+      "max": 3,
+      "step": 1,
+      "default": 2
+    },
+    {
+      "type": "number",
+      "id": "max_items",
+      "label": "Max products (0 = all)",
+      "label_ar": "أقصى عدد للمنتجات (0 = الكل)",
+      "default": 0
+    },
+    {
+      "type": "header",
+      "content": "Filtering"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_filters",
+      "label": "Show search / category / sort bar",
+      "label_ar": "إظهار شريط البحث والتصفية والترتيب",
+      "default": true
+    },
+    {
+      "type": "range",
+      "id": "page_size",
+      "label": "Products per page (Load more)",
+      "label_ar": "عدد المنتجات لكل صفحة",
+      "min": 4,
+      "max": 48,
+      "step": 4,
+      "default": 12
+    },
+    {
+      "type": "textarea",
+      "id": "empty_state_text",
+      "label": "Empty state copy",
+      "label_ar": "نص حالة الفراغ",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Product Grid",
+      "locales": {
+        "en": {
+          "name": "Bazar Product Grid"
+        },
+        "ar": {
+          "name": "بازار شبكة المنتجات"
+        }
+      },
+      "settings": {
+        "title": "",
+        "columns_desktop": 4,
+        "columns_mobile": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "type": "ed-hero",
+  "name": "Editorial Hero",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "type": "image_picker",
+      "id": "hero_image_url",
+      "label": "Hero image",
+      "label_ar": "صورة البطل",
+      "aspect_ratio": "16/9",
+      "default": ""
+    }
+  ],
+  "presets": []
+}

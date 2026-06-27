@@ -1,0 +1,51 @@
+{
+  "type": "bz-newsletter",
+  "name": "Bazar Newsletter",
+  "name_ar": "بازار نشرة",
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button Text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "placeholder",
+      "label": "Input Placeholder",
+      "label_ar": "نص الإدخال",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Newsletter",
+      "locales": {
+        "en": {
+          "name": "Bazar Newsletter"
+        },
+        "ar": {
+          "name": "بازار نشرة"
+        }
+      },
+      "settings": {
+        "title": ""
+      }
+    }
+  ]
+}

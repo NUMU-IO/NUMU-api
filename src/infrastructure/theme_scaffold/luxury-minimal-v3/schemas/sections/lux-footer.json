@@ -1,0 +1,144 @@
+{
+  "type": "lux-footer",
+  "name": "Footer",
+  "name_ar": "التذييل",
+  "tag": "footer",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "label_ar": "اسم المتجر",
+      "default": "",
+      "info": "Leave empty to use the store name."
+    },
+    {
+      "type": "image_picker",
+      "id": "logo_url",
+      "label": "Logo",
+      "label_ar": "الشعار",
+      "info": "Falls back to the brand name text."
+    },
+    {
+      "type": "textarea",
+      "id": "footer_text",
+      "label": "Brand blurb",
+      "label_ar": "نبذة المتجر",
+      "default": ""
+    }
+  ],
+  "blocks": [
+    {
+      "type": "column",
+      "name": "Link column",
+      "name_ar": "عمود روابط",
+      "settings": [
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Column title",
+          "label_ar": "عنوان العمود"
+        },
+        {
+          "type": "text",
+          "id": "link1_label",
+          "label": "Link 1 label",
+          "label_ar": "تسمية الرابط 1"
+        },
+        {
+          "type": "url",
+          "id": "link1_href",
+          "label": "Link 1 URL",
+          "label_ar": "رابط 1"
+        },
+        {
+          "type": "text",
+          "id": "link2_label",
+          "label": "Link 2 label",
+          "label_ar": "تسمية الرابط 2"
+        },
+        {
+          "type": "url",
+          "id": "link2_href",
+          "label": "Link 2 URL",
+          "label_ar": "رابط 2"
+        },
+        {
+          "type": "text",
+          "id": "link3_label",
+          "label": "Link 3 label",
+          "label_ar": "تسمية الرابط 3"
+        },
+        {
+          "type": "url",
+          "id": "link3_href",
+          "label": "Link 3 URL",
+          "label_ar": "رابط 3"
+        },
+        {
+          "type": "text",
+          "id": "link4_label",
+          "label": "Link 4 label",
+          "label_ar": "تسمية الرابط 4"
+        },
+        {
+          "type": "url",
+          "id": "link4_href",
+          "label": "Link 4 URL",
+          "label_ar": "رابط 4"
+        },
+        {
+          "type": "text",
+          "id": "link5_label",
+          "label": "Link 5 label",
+          "label_ar": "تسمية الرابط 5"
+        },
+        {
+          "type": "url",
+          "id": "link5_href",
+          "label": "Link 5 URL",
+          "label_ar": "رابط 5"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 4,
+  "presets": [
+    {
+      "name": "Footer",
+      "locales": {
+        "en": { "name": "Footer" },
+        "ar": { "name": "التذييل" }
+      },
+      "settings": {
+        "brand_name": "",
+        "footer_text": ""
+      },
+      "blocks": [
+        {
+          "type": "column",
+          "settings": {
+            "title": "Shop",
+            "link1_label": "All Products",
+            "link1_href": "/products"
+          }
+        },
+        {
+          "type": "column",
+          "settings": {
+            "title": "Help",
+            "link1_label": "Shipping",
+            "link1_href": "/pages/shipping",
+            "link2_label": "Returns",
+            "link2_href": "/pages/returns",
+            "link3_label": "Contact us",
+            "link3_href": "/pages/contact",
+            "link4_label": "Track Order",
+            "link4_href": "/track"
+          }
+        }
+      ]
+    }
+  ]
+}

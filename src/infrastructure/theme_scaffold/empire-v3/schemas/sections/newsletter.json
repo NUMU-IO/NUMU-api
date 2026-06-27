@@ -1,0 +1,11 @@
+{
+  "type": "newsletter",
+  "name": "Newsletter",
+  "locales": { "ar": { "name": "النشرة البريدية" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "اشترك في نشرتنا", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "textarea", "id": "subtitle", "label": "Subtitle", "default": "اعرف أول واحد عن العروض والمنتجات الجديدة", "locales": { "ar": { "label": "العنوان الفرعي" } } },
+    { "type": "text", "id": "button_text", "label": "Button text", "default": "اشترك", "locales": { "ar": { "label": "نص الزر" } } },
+    { "type": "text", "id": "placeholder", "label": "Input placeholder", "default": "البريد الإلكتروني", "locales": { "ar": { "label": "نص الحقل" } } }
+  ]
+}

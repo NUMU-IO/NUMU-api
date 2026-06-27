@@ -1,0 +1,98 @@
+{
+  "type": "gilded-hero",
+  "name": "Hero",
+  "name_ar": "البانر الرئيسي",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content",
+      "content_ar": "المحتوى"
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": "THE NEW EMPIRE",
+      "info": "Large display heading, shown in Montserrat uppercase.",
+      "info_ar": "العنوان الكبير المعروض بخط مونتسيرات بأحرف كبيرة."
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": "Curated Excellence & Timeless Precision"
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": "Discover Collection"
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Media",
+      "content_ar": "الوسائط"
+    },
+    {
+      "type": "image_picker",
+      "id": "hero_image_url",
+      "label": "Hero image (desktop)",
+      "label_ar": "صورة البانر (للحاسوب)",
+      "aspect_ratio": "16/9",
+      "info": "Shown full-screen on desktop, fit to preserve aspect over a gold gradient.",
+      "info_ar": "تُعرض بملء الشاشة على الحاسوب مع الحفاظ على نسبة الأبعاد فوق تدرّج ذهبي.",
+      "default": ""
+    },
+    {
+      "type": "image_picker",
+      "id": "hero_image_mobile",
+      "label": "Hero image (mobile)",
+      "label_ar": "صورة البانر (للهاتف)",
+      "aspect_ratio": "4/5",
+      "info": "Optional portrait image for phones. When set, it crops to a 4:5 frame.",
+      "info_ar": "صورة عمودية اختيارية للهواتف. عند تعيينها تُقصّ بنسبة 4:5.",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout",
+      "content_ar": "التخطيط"
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_parallax",
+      "label": "Enable parallax",
+      "label_ar": "تفعيل التأثير الحركي",
+      "info": "Background gently moves and fades as the visitor scrolls.",
+      "info_ar": "تتحرك الخلفية وتتلاشى بلطف أثناء تمرير الزائر للصفحة.",
+      "default": true
+    }
+  ],
+  "presets": [
+    {
+      "name": "Hero",
+      "locales": {
+        "en": { "name": "Hero" },
+        "ar": { "name": "البانر الرئيسي" }
+      },
+      "settings": {
+        "headline": "THE NEW EMPIRE",
+        "subtitle": "Curated Excellence & Timeless Precision",
+        "cta_text": "Discover Collection",
+        "cta_link": "/products",
+        "enable_parallax": true
+      }
+    }
+  ]
+}

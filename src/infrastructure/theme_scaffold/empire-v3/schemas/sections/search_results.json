@@ -1,0 +1,11 @@
+{
+  "type": "search_results",
+  "name": "Search Results",
+  "locales": { "ar": { "name": "نتائج البحث" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "البحث", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "text", "id": "search_placeholder", "label": "Search placeholder", "default": "ابحث عن المنتجات…", "locales": { "ar": { "label": "نص حقل البحث" } } },
+    { "type": "textarea", "id": "no_results_text", "label": "No-results text", "default": "لا توجد نتائج. جرّب كلمة أخرى أو تصفّح كل التشكيلة.", "locales": { "ar": { "label": "نص لا نتائج" } } },
+    { "type": "range", "id": "columns_desktop", "label": "Desktop columns", "default": 4, "min": 2, "max": 5, "step": 1, "locales": { "ar": { "label": "أعمدة سطح المكتب" } } }
+  ]
+}

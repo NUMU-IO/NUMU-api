@@ -1,0 +1,99 @@
+{
+  "type": "nbfeatured-collection",
+  "name": "Featured Collection",
+  "name_ar": "مجموعة مميزة",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "label_ar": "عنوان فرعي",
+      "default": ""
+    },
+    {
+      "id": "product_ids",
+      "type": "product",
+      "label": "Pick products (manual)",
+      "label_ar": "اختيار المنتجات",
+      "default": []
+    },
+    {
+      "id": "collection_tag",
+      "type": "select",
+      "label": "Collection (auto-fill)",
+      "label_ar": "المجموعة (تعبئة تلقائية)",
+      "default": "new",
+      "options": [
+        {
+          "value": "new",
+          "label": "New Arrivals",
+          "label_ar": "وصل حديثاً"
+        },
+        {
+          "value": "bestseller",
+          "label": "Best Sellers",
+          "label_ar": "الأكثر مبيعاً"
+        },
+        {
+          "value": "featured",
+          "label": "Featured",
+          "label_ar": "مميز"
+        },
+        {
+          "value": "sale",
+          "label": "Sale",
+          "label_ar": "تخفيضات"
+        }
+      ]
+    },
+    {
+      "id": "view_all_text",
+      "type": "text",
+      "label": "View All Text",
+      "label_ar": "نص عرض الكل",
+      "default": ""
+    },
+    {
+      "id": "view_all_link",
+      "type": "url",
+      "label": "View All Link",
+      "label_ar": "رابط عرض الكل",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "product_count",
+      "type": "range",
+      "label": "Products to Show",
+      "label_ar": "عدد المنتجات",
+      "default": 4,
+      "min": 2,
+      "max": 8,
+      "step": 1
+    },
+    {
+      "id": "columns",
+      "type": "range",
+      "label": "Columns (Desktop)",
+      "label_ar": "أعمدة (ديسكتوب)",
+      "default": 4,
+      "min": 2,
+      "max": 5,
+      "step": 1
+    }
+  ]
+}

@@ -1,0 +1,482 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported verbatim from V2 Neo Brutalism (numu-egyptian-bazaar/src/
+ * themes/neo-brutalism/styles.css). The only change: the V2 root
+ * selector :root[data-theme="neo-brutalism"] is retargeted to the V3
+ * mount element [data-neo-brutalism-v3-app] so the --nb-* + HSL tokens
+ * reach the sections.
+ * ─────────────────────────────────────────────────────────────── */
+/* Theme: Neo Brutalism — Bold, raw, thick borders, hard shadows, neon accents */
+
+[data-neo-brutalism-v3-app] {
+  --background: 55 92% 95%;
+  --foreground: 0 0% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 10%;
+  --primary: 82 78% 55%;
+  --primary-foreground: 0 0% 10%;
+  --secondary: 45 96% 56%;
+  --secondary-foreground: 0 0% 10%;
+  --muted: 55 40% 90%;
+  --muted-foreground: 0 0% 40%;
+  --accent: 330 86% 70%;
+  --accent-foreground: 0 0% 10%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 10%;
+  --input: 0 0% 10%;
+  --ring: 82 78% 55%;
+  --radius: 0.5rem;
+  --store-gradient: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.85));
+  --hero-bg: 55 92% 95%;
+  --badge-bg: 82 78% 55%;
+  --badge-fg: 0 0% 10%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 0 0% 10%;
+  --announcement-fg: 82 78% 55%;
+  --success: 142 70% 40%;
+  --warning: 45 96% 56%;
+
+  /* Neo Brutalism specific tokens */
+  --nb-border: 3px solid hsl(var(--foreground));
+  --nb-shadow: 4px 4px 0 hsl(var(--foreground));
+  --nb-shadow-sm: 2px 2px 0 hsl(var(--foreground));
+  --nb-shadow-lg: 6px 6px 0 hsl(var(--foreground));
+  --nb-shadow-hover: 6px 6px 0 hsl(var(--foreground));
+  --nb-shadow-active: 1px 1px 0 hsl(var(--foreground));
+  --nb-accent-shadow: 4px 4px 0 hsl(var(--primary) / 0.8);
+
+  /* Reset skeu variables */
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+
+  --sidebar-background: 55 92% 95%;
+  --sidebar-foreground: 0 0% 10%;
+  --sidebar-primary: 82 78% 55%;
+  --sidebar-primary-foreground: 0 0% 10%;
+  --sidebar-accent: 82 78% 85%;
+  --sidebar-accent-foreground: 0 0% 10%;
+  --sidebar-border: 0 0% 10%;
+  --sidebar-ring: 82 78% 55%;
+}
+
+/* ===== BASE ===== */
+[data-neo-brutalism-v3-app] body {
+  background-color: hsl(var(--background));
+}
+
+/* ===== CARD — thick border + hard shadow ===== */
+[data-neo-brutalism-v3-app] .nb-card {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+[data-neo-brutalism-v3-app] .nb-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+
+/* ===== BUTTON — primary ===== */
+[data-neo-brutalism-v3-app] .nb-btn {
+  background: hsl(var(--primary));
+  color: hsl(var(--foreground));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  position: relative;
+}
+[data-neo-brutalism-v3-app] .nb-btn:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+[data-neo-brutalism-v3-app] .nb-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--nb-shadow-active);
+}
+
+/* ===== BUTTON — secondary ===== */
+[data-neo-brutalism-v3-app] .nb-btn-secondary {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  font-weight: 800;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+[data-neo-brutalism-v3-app] .nb-btn-secondary:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+  background: hsl(var(--background));
+}
+[data-neo-brutalism-v3-app] .nb-btn-secondary:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--nb-shadow-active);
+}
+
+/* ===== BUTTON — accent (pink/yellow) ===== */
+[data-neo-brutalism-v3-app] .nb-btn-accent {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  font-weight: 800;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+[data-neo-brutalism-v3-app] .nb-btn-accent:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+[data-neo-brutalism-v3-app] .nb-btn-accent:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--nb-shadow-active);
+}
+
+/* ===== INPUT — inset, thick border ===== */
+[data-neo-brutalism-v3-app] .nb-input {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+  box-shadow: 3px 3px 0 hsl(var(--foreground)) inset;
+  font-weight: 600;
+}
+[data-neo-brutalism-v3-app] .nb-input:focus {
+  box-shadow: 3px 3px 0 hsl(var(--primary)) inset;
+  outline: none;
+}
+
+/* ===== BADGE ===== */
+[data-neo-brutalism-v3-app] .nb-badge {
+  background: hsl(var(--primary));
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--foreground));
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+[data-neo-brutalism-v3-app] .nb-badge-pink {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--foreground));
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 900;
+}
+
+[data-neo-brutalism-v3-app] .nb-badge-yellow {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--foreground));
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 900;
+}
+
+/* ===== CHIP / PILL ===== */
+[data-neo-brutalism-v3-app] .nb-chip {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 700;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+[data-neo-brutalism-v3-app] .nb-chip:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--nb-shadow);
+}
+[data-neo-brutalism-v3-app] .nb-chip:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+[data-neo-brutalism-v3-app] .nb-chip-active {
+  background: hsl(var(--primary));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 800;
+}
+
+/* ===== HEADER ===== */
+[data-neo-brutalism-v3-app] .nb-header {
+  background: hsl(var(--primary));
+  border-bottom: var(--nb-border);
+}
+
+/* ===== FOOTER ===== */
+[data-neo-brutalism-v3-app] .nb-footer {
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  border-top: 4px solid hsl(var(--primary));
+}
+
+/* ===== ANNOUNCEMENT ===== */
+[data-neo-brutalism-v3-app] .nb-announcement {
+  background: hsl(var(--foreground));
+  color: hsl(var(--primary));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-bottom: 2px solid hsl(var(--primary));
+}
+
+/* ===== IMAGE FRAME ===== */
+[data-neo-brutalism-v3-app] .nb-img-frame {
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  overflow: hidden;
+}
+
+/* ===== DIAGONAL BANNER ===== */
+[data-neo-brutalism-v3-app] .nb-diagonal-banner {
+  background: hsl(var(--primary));
+  color: hsl(var(--foreground));
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transform: rotate(-3deg);
+  border-top: 2px solid hsl(var(--foreground));
+  border-bottom: 2px solid hsl(var(--foreground));
+  white-space: nowrap;
+}
+
+/* ===== MARQUEE TEXT ===== */
+[data-neo-brutalism-v3-app] .nb-marquee {
+  background: hsl(var(--primary));
+  border-top: var(--nb-border);
+  border-bottom: var(--nb-border);
+  overflow: hidden;
+}
+
+@keyframes nb-scroll {
+  from { transform: translateX(100%); }
+  to { transform: translateX(-100%); }
+}
+
+[data-neo-brutalism-v3-app] .nb-marquee-text {
+  animation: nb-scroll 20s linear infinite;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* ===== DIVIDER ===== */
+[data-neo-brutalism-v3-app] .nb-divider {
+  height: 3px;
+  background: hsl(var(--foreground));
+  border: none;
+}
+
+/* ===== SECTION alternate bg ===== */
+[data-neo-brutalism-v3-app] .nb-section-alt {
+  background: hsl(var(--card));
+  border-top: var(--nb-border);
+  border-bottom: var(--nb-border);
+}
+
+/* ===== TOGGLE ===== */
+[data-neo-brutalism-v3-app] .nb-toggle {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+}
+[data-neo-brutalism-v3-app] .nb-toggle-active {
+  background: hsl(var(--primary));
+  border: var(--nb-border);
+  font-weight: 800;
+}
+
+/* ===== STAR ===== */
+[data-neo-brutalism-v3-app] .nb-star {
+  filter: drop-shadow(1px 1px 0 hsl(var(--foreground)));
+}
+
+/* Force neo-brutalism palette for shared page classes */
+[data-neo-brutalism-v3-app] .store-gradient {
+  background: linear-gradient(135deg, hsl(82 78% 55%), hsl(82 78% 45%)) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * Page-section style block — adapted from vionne's vn-* utilities so
+ * the ported product-detail / products-page / profile / about /
+ * contact / order-confirmation sections render with the right
+ * structure. The --vn-* design tokens are RE-MAPPED to neo-brutalism's
+ * palette (yellow-green primary, black ink, hard shadows). Class names
+ * stay identical to vionne's so the section markup ports verbatim, but
+ * the look reads neo-brutalist: square corners, thick black borders,
+ * hard offset shadows, uppercase heavy type.
+ * ═══════════════════════════════════════════════════════════════ */
+
+[data-neo-brutalism-v3-app] {
+  /* Neo-brutalism palette mapped onto vionne's token names */
+  --vn-white: #ffffff;
+  --vn-band: hsl(55 40% 90%);        /* muted cream */
+  --vn-surface-dark: hsl(0 0% 10%);  /* near-black ink */
+  --vn-ink: hsl(0 0% 10%);           /* foreground */
+  --vn-border: hsl(0 0% 10%);        /* thick black border */
+  --vn-muted: hsl(0 0% 40%);         /* muted-foreground */
+  --vn-sale: hsl(0 84% 60%);         /* destructive red */
+}
+
+/* ─── Typography ─── */
+
+[data-neo-brutalism-v3-app] .vn-heading {
+  font-family: var(--heading-font, inherit), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 1.0;
+}
+
+[data-neo-brutalism-v3-app] .vn-eyebrow {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  color: var(--vn-muted);
+}
+
+[data-neo-brutalism-v3-app] .vn-label {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+}
+
+/* ─── Buttons (neo-brutalist offset-shadow) ─── */
+
+[data-neo-brutalism-v3-app] .vn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: 0.5rem;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background-color 200ms ease, color 200ms ease;
+  cursor: pointer;
+}
+[data-neo-brutalism-v3-app] .vn-btn:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+[data-neo-brutalism-v3-app] .vn-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--nb-shadow-active);
+}
+
+[data-neo-brutalism-v3-app] .vn-btn-filled {
+  background: hsl(var(--primary));
+  color: hsl(var(--foreground));
+}
+
+[data-neo-brutalism-v3-app] .vn-btn-outline-light {
+  background: transparent;
+  color: var(--vn-white);
+  border: 3px solid var(--vn-white);
+  box-shadow: 4px 4px 0 var(--vn-white);
+}
+[data-neo-brutalism-v3-app] .vn-btn-outline-light:hover {
+  background: var(--vn-white);
+  color: var(--vn-ink);
+}
+
+[data-neo-brutalism-v3-app] .vn-btn-outline-dark {
+  background: hsl(var(--card));
+  color: var(--vn-ink);
+  border: var(--nb-border);
+}
+[data-neo-brutalism-v3-app] .vn-btn-outline-dark:hover {
+  background: hsl(var(--background));
+}
+
+/* ─── Product Card hover (brutalist lift) ─── */
+
+[data-neo-brutalism-v3-app] .vn-product-card {
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  background: hsl(var(--card));
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+[data-neo-brutalism-v3-app] .vn-product-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+
+[data-neo-brutalism-v3-app] .vn-product-card .vn-product-image {
+  transition: transform 600ms ease, opacity 280ms ease;
+}
+[data-neo-brutalism-v3-app] .vn-product-card:hover .vn-product-image {
+  transform: scale(1.03);
+}
+
+[data-neo-brutalism-v3-app] .vn-product-card .vn-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+[data-neo-brutalism-v3-app] .vn-product-card:hover .vn-product-image-secondary {
+  opacity: 1;
+}
+
+/* ─── Shimmer (lazy media placeholder) ─── */
+
+[data-neo-brutalism-v3-app] .vn-shimmer {
+  background: linear-gradient(90deg, hsl(55 40% 88%) 0%, hsl(55 40% 93%) 40%, hsl(55 40% 88%) 80%);
+  background-size: 200% 100%;
+  animation: vn-shimmer 1400ms ease-in-out infinite;
+}
+
+@keyframes vn-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Misc helpers ─── */
+
+[data-neo-brutalism-v3-app] .vn-divider {
+  height: 3px;
+  width: 100%;
+  background: var(--vn-ink);
+}
+
+[data-neo-brutalism-v3-app] .vn-band {
+  background: var(--vn-band);
+}
+
+[data-neo-brutalism-v3-app] .scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+[data-neo-brutalism-v3-app] .scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-neo-brutalism-v3-app] .nb-marquee-text {
+    animation: none;
+  }
+}

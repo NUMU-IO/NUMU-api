@@ -1,0 +1,262 @@
+/* Theme: Kick Game — Warm minimalist luxury streetwear, dense editorial grid */
+
+:root[data-theme="kick-game"] {
+  --background: 43 38% 98%;
+  --foreground: 0 0% 7%;
+  --card: 43 38% 98%;
+  --card-foreground: 0 0% 7%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 7%;
+  --primary: 0 0% 7%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 43 20% 95%;
+  --secondary-foreground: 0 0% 7%;
+  --muted: 43 15% 92%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 43 40% 73%;
+  --accent-foreground: 0 0% 7%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 43 15% 88%;
+  --input: 43 15% 88%;
+  --ring: 0 0% 7%;
+  --radius: 0.25rem;
+  --store-gradient: linear-gradient(135deg, hsl(0 0% 7%), hsl(0 0% 20%));
+  --hero-bg: 43 38% 98%;
+  --badge-bg: 0 0% 7%;
+  --badge-fg: 0 0% 100%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 0 0% 7%;
+  --announcement-fg: 43 38% 98%;
+  --success: 153 50% 38%;
+  --warning: 38 92% 50%;
+
+  /* Kick Game specific tokens */
+  --kg-cream: 43 38% 98%;
+  --kg-black: 0 0% 7%;
+  --kg-white: 0 0% 100%;
+  --kg-gold: 43 40% 73%;
+  --kg-gray: 0 0% 45%;
+  --kg-light-gray: 43 15% 92%;
+  --kg-border: 43 15% 88%;
+  --kg-hover: 0 0% 23%;
+
+  /* Reset skeu variables */
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+
+  --sidebar-background: 43 38% 98%;
+  --sidebar-foreground: 0 0% 7%;
+  --sidebar-primary: 0 0% 7%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 43 40% 73%;
+  --sidebar-accent-foreground: 0 0% 7%;
+  --sidebar-border: 43 15% 88%;
+  --sidebar-ring: 0 0% 7%;
+}
+
+/* ===== BASE ===== */
+:root[data-theme="kick-game"] body {
+  background-color: hsl(var(--background));
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "kern" 1;
+}
+
+/* Force Kick Game palette for shared page classes */
+:root[data-theme="kick-game"] .store-gradient {
+  background: linear-gradient(135deg, hsl(0 0% 7%), hsl(0 0% 20%)) !important;
+}
+
+/* ===== HEADING — tight tracking, bold ===== */
+:root[data-theme="kick-game"] .kg-heading {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+:root[data-theme="kick-game"] .kg-display {
+  font-weight: 700;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+/* ===== LABEL — small uppercase ===== */
+:root[data-theme="kick-game"] .kg-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ===== BUTTON — primary (black, 40px, 4px radius) ===== */
+:root[data-theme="kick-game"] .kg-btn {
+  background: hsl(var(--kg-black));
+  color: hsl(var(--kg-white));
+  font-weight: 700;
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 20px;
+  padding: 10px 24px;
+  height: 40px;
+  border-radius: 4px;
+  border: 1px solid hsl(var(--kg-black));
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+:root[data-theme="kick-game"] .kg-btn:hover {
+  background: hsl(var(--kg-hover));
+}
+
+/* ===== BUTTON — outline ===== */
+:root[data-theme="kick-game"] .kg-btn-outline {
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-weight: 700;
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 10px 24px;
+  height: 40px;
+  border-radius: 4px;
+  border: 1px solid hsl(var(--border));
+  transition: all 0.2s ease;
+}
+:root[data-theme="kick-game"] .kg-btn-outline:hover {
+  border-color: hsl(var(--foreground));
+}
+
+/* ===== CARD — no border, no shadow, no radius ===== */
+:root[data-theme="kick-game"] .kg-card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ===== PRODUCT CARD — zero ornamentation ===== */
+:root[data-theme="kick-game"] .kg-product-card {
+  position: relative;
+}
+:root[data-theme="kick-game"] .kg-product-card img {
+  transition: transform 0.4s ease;
+}
+:root[data-theme="kick-game"] .kg-product-card:hover img {
+  transform: scale(1.03);
+}
+
+/* ===== BADGE — sale, selling fast, etc ===== */
+:root[data-theme="kick-game"] .kg-badge {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 0.4rem;
+}
+:root[data-theme="kick-game"] .kg-badge-sale {
+  background: hsl(0 72% 51%);
+  color: white;
+}
+:root[data-theme="kick-game"] .kg-badge-selling {
+  background: hsl(var(--kg-black));
+  color: hsl(var(--kg-white));
+}
+:root[data-theme="kick-game"] .kg-badge-hype {
+  background: hsl(30 100% 50%);
+  color: white;
+}
+
+/* ===== INPUT — minimal, 4px radius, thin border ===== */
+:root[data-theme="kick-game"] .kg-input {
+  background: hsl(var(--kg-cream));
+  border: 1px solid hsl(var(--border) / 0.3);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  height: 44px;
+  padding: 0 16px;
+}
+:root[data-theme="kick-game"] .kg-input:focus {
+  border-color: hsl(var(--foreground));
+  outline: none;
+}
+
+/* ===== CHIP — filter tag ===== */
+:root[data-theme="kick-game"] .kg-chip {
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 6px 14px;
+  transition: all 0.2s ease;
+}
+:root[data-theme="kick-game"] .kg-chip-active {
+  background: hsl(var(--kg-black));
+  color: hsl(var(--kg-white));
+  border-color: hsl(var(--kg-black));
+}
+
+/* ===== HEADER ===== */
+:root[data-theme="kick-game"] .kg-header {
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* ===== FOOTER — dark ===== */
+:root[data-theme="kick-game"] .kg-footer {
+  background: hsl(var(--kg-black));
+  color: hsl(var(--kg-cream));
+}
+
+/* ===== SEPARATOR ===== */
+:root[data-theme="kick-game"] .kg-separator {
+  height: 1px;
+  background: hsl(var(--border));
+}
+
+/* ===== ANNOUNCEMENT ===== */
+:root[data-theme="kick-game"] .kg-announcement {
+  background: hsl(var(--kg-black));
+  color: hsl(var(--kg-cream));
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ===== MARQUEE — announcement ticker ===== */
+@keyframes kg-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+:root[data-theme="kick-game"] .kg-ticker {
+  animation: kg-ticker 35s linear infinite;
+}
+
+/* ===== GOLD ACCENT ===== */
+:root[data-theme="kick-game"] .kg-gold {
+  color: hsl(var(--kg-gold));
+}
+
+/* ===== DENSE GRID — 8px gaps like Kick Game ===== */
+:root[data-theme="kick-game"] .kg-grid {
+  gap: 8px;
+}
+@media (max-width: 768px) {
+  :root[data-theme="kick-game"] .kg-grid {
+    gap: 4px;
+  }
+}

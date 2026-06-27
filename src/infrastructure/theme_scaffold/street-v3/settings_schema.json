@@ -1,0 +1,19 @@
+[
+  {
+    "name": "Brand",
+    "settings": [
+      {
+        "type": "color",
+        "id": "primary_color",
+        "label": "Primary color",
+        "default": "#111111"
+      },
+      {
+        "type": "color",
+        "id": "accent_color",
+        "label": "Accent color",
+        "default": "#d4af37"
+      }
+    ]
+  }
+]

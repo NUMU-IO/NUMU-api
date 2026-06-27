@@ -1,0 +1,38 @@
+{
+  "type": "tech-wave-newsletter",
+  "name": "Tech Wave Newsletter",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "textarea",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "button_text",
+      "type": "text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "placeholder",
+      "type": "text",
+      "label": "Email placeholder",
+      "label_ar": "نص حقل البريد",
+      "default": ""
+    }
+  ]
+}

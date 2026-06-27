@@ -1,0 +1,27 @@
+{
+  "id": "street-v3",
+  "name": "Street (V3)",
+  "author": "NUMU",
+  "version": "0.1.0",
+  "layout": "single-column",
+  "description": "Street (V3) — migrated from V2.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "st-street-product-detail-section",
+            "settings": {}
+          },
+          {
+            "type": "st-street-products-page-section",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

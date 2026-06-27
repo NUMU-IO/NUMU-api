@@ -1,0 +1,110 @@
+{
+  "type": "tech-wave-hero",
+  "name": "Tech Wave Hero",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "badge_text",
+      "type": "text",
+      "label": "Badge text",
+      "label_ar": "نص الشارة",
+      "default": ""
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "textarea",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Calls To Action"
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Primary button text",
+      "label_ar": "نص الزر الأساسي",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Primary button link",
+      "label_ar": "رابط الزر الأساسي",
+      "default": "/products"
+    },
+    {
+      "id": "secondary_text",
+      "type": "text",
+      "label": "Secondary button text",
+      "label_ar": "نص الزر الثانوي",
+      "default": ""
+    },
+    {
+      "id": "secondary_link",
+      "type": "url",
+      "label": "Secondary button link",
+      "label_ar": "رابط الزر الثانوي",
+      "default": "/products?category=clothing"
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "hero_image_url",
+      "type": "image_picker",
+      "label": "Hero image 1",
+      "label_ar": "صورة البطل 1",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "hero_image_2",
+      "type": "image_picker",
+      "label": "Hero image 2",
+      "label_ar": "صورة البطل 2",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "hero_image_3",
+      "type": "image_picker",
+      "label": "Hero image 3",
+      "label_ar": "صورة البطل 3",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "hero_image_4",
+      "type": "image_picker",
+      "label": "Hero image 4",
+      "label_ar": "صورة البطل 4",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "show_trust_strip",
+      "type": "checkbox",
+      "label": "Show mobile trust strip",
+      "label_ar": "إظهار شريط الثقة للموبايل",
+      "default": true
+    }
+  ]
+}

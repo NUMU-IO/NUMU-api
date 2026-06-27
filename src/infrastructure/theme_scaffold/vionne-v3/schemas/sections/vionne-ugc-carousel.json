@@ -1,0 +1,322 @@
+{
+  "type": "vionne-ugc-carousel",
+  "name": "UGC / Reels Carousel (Vionne)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "eyebrow",
+      "type": "text",
+      "label": "Eyebrow",
+      "label_ar": "نص علوي",
+      "default": ""
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Intro CTA Text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Intro CTA Link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "id": "intro_image",
+      "type": "image_picker",
+      "label": "Intro card image",
+      "label_ar": "صورة بطاقة المقدمة",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "badge_text",
+      "type": "text",
+      "label": "Product link badge text",
+      "label_ar": "نص شارة المنتج",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 1"
+    },
+    {
+      "id": "item_1_media",
+      "type": "image_picker",
+      "label": "Item 1 poster image",
+      "label_ar": "الصورة الافتراضية - عنصر 1",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "item_1_video",
+      "type": "video_picker",
+      "label": "Item 1 video URL (MP4)",
+      "label_ar": "فيديو عنصر 1",
+      "default": ""
+    },
+    {
+      "id": "item_1_caption",
+      "type": "text",
+      "label": "Item 1 caption",
+      "label_ar": "تعليق عنصر 1",
+      "default": ""
+    },
+    {
+      "id": "item_1_product_image",
+      "type": "image_picker",
+      "label": "Item 1 product thumbnail",
+      "label_ar": "صورة المنتج",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "item_1_product_link",
+      "type": "url",
+      "label": "Item 1 product link",
+      "label_ar": "رابط المنتج",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 2"
+    },
+    {
+      "id": "item_2_media",
+      "type": "image_picker",
+      "label": "Item 2 poster image",
+      "label_ar": "الصورة الافتراضية - عنصر 2",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "item_2_video",
+      "type": "video_picker",
+      "label": "Item 2 video URL (MP4)",
+      "label_ar": "فيديو عنصر 2",
+      "default": ""
+    },
+    {
+      "id": "item_2_caption",
+      "type": "text",
+      "label": "Item 2 caption",
+      "label_ar": "تعليق عنصر 2",
+      "default": ""
+    },
+    {
+      "id": "item_2_product_image",
+      "type": "image_picker",
+      "label": "Item 2 product thumbnail",
+      "label_ar": "صورة المنتج",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "item_2_product_link",
+      "type": "url",
+      "label": "Item 2 product link",
+      "label_ar": "رابط المنتج",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 3"
+    },
+    {
+      "id": "item_3_media",
+      "type": "image_picker",
+      "label": "Item 3 poster image",
+      "label_ar": "الصورة الافتراضية - عنصر 3",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "item_3_video",
+      "type": "video_picker",
+      "label": "Item 3 video URL (MP4)",
+      "label_ar": "فيديو عنصر 3",
+      "default": ""
+    },
+    {
+      "id": "item_3_caption",
+      "type": "text",
+      "label": "Item 3 caption",
+      "label_ar": "تعليق عنصر 3",
+      "default": ""
+    },
+    {
+      "id": "item_3_product_image",
+      "type": "image_picker",
+      "label": "Item 3 product thumbnail",
+      "label_ar": "صورة المنتج",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "item_3_product_link",
+      "type": "url",
+      "label": "Item 3 product link",
+      "label_ar": "رابط المنتج",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 4"
+    },
+    {
+      "id": "item_4_media",
+      "type": "image_picker",
+      "label": "Item 4 poster image",
+      "label_ar": "الصورة الافتراضية - عنصر 4",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "item_4_video",
+      "type": "video_picker",
+      "label": "Item 4 video URL (MP4)",
+      "label_ar": "فيديو عنصر 4",
+      "default": ""
+    },
+    {
+      "id": "item_4_caption",
+      "type": "text",
+      "label": "Item 4 caption",
+      "label_ar": "تعليق عنصر 4",
+      "default": ""
+    },
+    {
+      "id": "item_4_product_image",
+      "type": "image_picker",
+      "label": "Item 4 product thumbnail",
+      "label_ar": "صورة المنتج",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "item_4_product_link",
+      "type": "url",
+      "label": "Item 4 product link",
+      "label_ar": "رابط المنتج",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 5"
+    },
+    {
+      "id": "item_5_media",
+      "type": "image_picker",
+      "label": "Item 5 poster image",
+      "label_ar": "الصورة الافتراضية - عنصر 5",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "item_5_video",
+      "type": "video_picker",
+      "label": "Item 5 video URL (MP4)",
+      "label_ar": "فيديو عنصر 5",
+      "default": ""
+    },
+    {
+      "id": "item_5_caption",
+      "type": "text",
+      "label": "Item 5 caption",
+      "label_ar": "تعليق عنصر 5",
+      "default": ""
+    },
+    {
+      "id": "item_5_product_image",
+      "type": "image_picker",
+      "label": "Item 5 product thumbnail",
+      "label_ar": "صورة المنتج",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "item_5_product_link",
+      "type": "url",
+      "label": "Item 5 product link",
+      "label_ar": "رابط المنتج",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 6"
+    },
+    {
+      "id": "item_6_media",
+      "type": "image_picker",
+      "label": "Item 6 poster image",
+      "label_ar": "الصورة الافتراضية - عنصر 6",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "item_6_video",
+      "type": "video_picker",
+      "label": "Item 6 video URL (MP4)",
+      "label_ar": "فيديو عنصر 6",
+      "default": ""
+    },
+    {
+      "id": "item_6_caption",
+      "type": "text",
+      "label": "Item 6 caption",
+      "label_ar": "تعليق عنصر 6",
+      "default": ""
+    },
+    {
+      "id": "item_6_product_image",
+      "type": "image_picker",
+      "label": "Item 6 product thumbnail",
+      "label_ar": "صورة المنتج",
+      "aspect_ratio": "1/1",
+      "default": ""
+    },
+    {
+      "id": "item_6_product_link",
+      "type": "url",
+      "label": "Item 6 product link",
+      "label_ar": "رابط المنتج",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "UGC Reels",
+      "locales": {
+        "en": {
+          "name": "UGC Reels"
+        },
+        "ar": {
+          "name": "ريلز المستخدمين"
+        }
+      },
+      "settings": {
+        "cta_link": "/products"
+      }
+    }
+  ]
+}

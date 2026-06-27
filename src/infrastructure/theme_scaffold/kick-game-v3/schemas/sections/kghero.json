@@ -1,0 +1,64 @@
+{
+  "type": "kghero",
+  "name": "Hero Banner",
+  "name_ar": "البانر الرئيسي",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Button Text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Button Link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "hero_image_url",
+      "type": "image_picker",
+      "label": "Hero Image",
+      "label_ar": "الصورة الرئيسية",
+      "aspect_ratio": "16/9",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Hero Banner",
+      "name_ar": "بانر رئيسي",
+      "settings": {
+        "headline": "",
+        "subtitle": "",
+        "cta_text": "",
+        "cta_link": "/products"
+      }
+    }
+  ]
+}

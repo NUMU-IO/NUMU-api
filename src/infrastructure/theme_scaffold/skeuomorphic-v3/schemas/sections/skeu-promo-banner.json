@@ -1,0 +1,57 @@
+{
+  "type": "skeu-promo-banner",
+  "name": "Promotional Banner",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "badge_text",
+      "type": "text",
+      "label": "Badge Text",
+      "label_ar": "نص الشارة",
+      "default": ""
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "label_ar": "عنوان فرعي",
+      "default": ""
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Button Text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Button Link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "image_url",
+      "type": "image_picker",
+      "label": "Image",
+      "label_ar": "الصورة",
+      "aspect_ratio": "1/1",
+      "default": ""
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "type": "rs-order-confirmation-section",
+  "name": "Order Confirmation (Rabbitsocks)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "textarea",
+      "label": "Subtitle",
+      "label_ar": "وصف",
+      "default": ""
+    },
+    {
+      "id": "continue_shopping_text",
+      "type": "text",
+      "label": "Continue shopping button text",
+      "label_ar": "نص زر متابعة التسوق",
+      "default": ""
+    },
+    {
+      "id": "continue_shopping_link",
+      "type": "url",
+      "label": "Continue shopping link",
+      "label_ar": "رابط متابعة التسوق",
+      "default": "/"
+    },
+    {
+      "type": "header",
+      "content": "Display options"
+    },
+    {
+      "id": "show_emoji",
+      "type": "checkbox",
+      "label": "Show emoji in title",
+      "label_ar": "إظهار الرمز التعبيري",
+      "default": false
+    },
+    {
+      "id": "show_progress",
+      "type": "checkbox",
+      "label": "Show progress tracker",
+      "label_ar": "إظهار شريط التقدم",
+      "default": true
+    },
+    {
+      "id": "show_whatsapp",
+      "type": "checkbox",
+      "label": "Show WhatsApp message card",
+      "label_ar": "إظهار بطاقة واتساب",
+      "default": true
+    },
+    {
+      "id": "show_track_order",
+      "type": "checkbox",
+      "label": "Show track order button",
+      "label_ar": "إظهار زر تتبع الطلب",
+      "default": true
+    }
+  ]
+}

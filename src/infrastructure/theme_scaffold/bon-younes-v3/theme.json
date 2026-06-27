@@ -1,0 +1,216 @@
+{
+  "id": "bon-younes-v3",
+  "name": "Bon Younes (V3)",
+  "author": "NUMU",
+  "version": "0.2.3",
+  "layout": "single-column",
+  "description": "Mobile-first cafe & coffee storefront for Bon Younes — cream and espresso palette, looping drink strip hero, and a scroll-driven brand story.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "404": {
+        "name": "404 — Not found",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-not-found",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-hero",
+            "settings": {}
+          },
+          {
+            "type": "by-scroll-story",
+            "settings": {}
+          },
+          {
+            "type": "by-menu",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-product-grid",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-product-detail",
+            "settings": {}
+          },
+          {
+            "type": "by-related-products",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "collection": {
+        "name": "Collection",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-product-grid",
+            "settings": {
+              "title": "Collection"
+            }
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-cart",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-order-confirmation",
+            "settings": {
+              "show_emoji": false,
+              "show_progress": false,
+              "show_whatsapp": false,
+              "show_track_order": false
+            }
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "page": {
+        "name": "Page",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-rich-text",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "search": {
+        "name": "Search",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-search-results",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Account",
+        "sections": [
+          {
+            "type": "by-header",
+            "settings": {}
+          },
+          {
+            "type": "by-profile-section",
+            "settings": {}
+          },
+          {
+            "type": "by-footer",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

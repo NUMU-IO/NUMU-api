@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported verbatim from V2 Boutique (numu-egyptian-bazaar/src/themes/
+ * boutique/styles.css). The only change: the V2 root selector
+ * :root[data-theme="boutique"] is retargeted to the V3 mount element
+ * [data-boutique-v3-app] so the HSL tokens reach the sections.
+ * ─────────────────────────────────────────────────────────────── */
+/* Theme: Vibrant Boutique — Pink/magenta fashion-forward */
+[data-boutique-v3-app] {
+  --background: 330 30% 98%;
+  --foreground: 330 30% 8%;
+  --card: 0 0% 100%;
+  --card-foreground: 330 30% 8%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 330 30% 8%;
+  --primary: 340 75% 55%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 330 30% 94%;
+  --secondary-foreground: 330 30% 8%;
+  --muted: 330 20% 94%;
+  --muted-foreground: 330 15% 40%;
+  --accent: 340 60% 92%;
+  --accent-foreground: 340 75% 35%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 330 20% 88%;
+  --input: 330 20% 88%;
+  --ring: 340 75% 55%;
+  --radius: 1rem;
+  --store-gradient: linear-gradient(135deg, hsl(340 75% 55%), hsl(320 60% 45%));
+  --hero-bg: 340 60% 96%;
+  --badge-bg: 340 75% 55%;
+  --badge-fg: 0 0% 100%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 340 75% 55%;
+  --announcement-fg: 0 0% 100%;
+  --success: 142 70% 40%;
+  --warning: 38 92% 50%;
+
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+
+  /* Sidebar tokens — used by shadcn's sidebar primitive in checkout and
+     account pages. Anchor on Boutique's pink palette so shared components
+     don't fall through to Modern's teal defaults. */
+  --sidebar-background: 330 30% 98%;
+  --sidebar-foreground: 330 30% 8%;
+  --sidebar-primary: 340 75% 55%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 340 60% 92%;
+  --sidebar-accent-foreground: 340 75% 35%;
+  --sidebar-border: 330 20% 88%;
+  --sidebar-ring: 340 75% 55%;
+}
+
+/* Force boutique palette for shared page classes */
+[data-boutique-v3-app] .store-gradient {
+  background: var(--store-gradient) !important;
+}

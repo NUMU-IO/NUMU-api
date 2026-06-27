@@ -1,0 +1,140 @@
+{
+  "id": "neo-brutalism-v3",
+  "name": "Neo Brutalism (V3)",
+  "author": "NUMU",
+  "version": "0.3.4",
+  "layout": "single-column",
+  "description": "Neo Brutalism (V3) — bold, raw, unapologetic design with thick borders, hard shadows, and neon accents. Ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "nbhero",
+            "settings": {
+              "cta_link": "/products",
+              "secondary_link": "/products?category=clothing",
+              "hero_image_url": "",
+              "show_trust_strip": true
+            }
+          },
+          {
+            "type": "nbmarquee",
+            "settings": {
+              "repeat_count": 2
+            }
+          },
+          {
+            "type": "nbcategories",
+            "settings": {
+              "columns_desktop": 5,
+              "columns_mobile": 3
+            }
+          },
+          {
+            "type": "nbfeatured-collection",
+            "settings": {
+              "view_all_link": "/products?tag=new"
+            }
+          },
+          {
+            "type": "nbpromo-banner",
+            "settings": {
+              "cta_link": "/products?category=accessories"
+            }
+          },
+          {
+            "type": "nbfeatured-collection",
+            "settings": {
+              "view_all_link": "/products?tag=bestseller"
+            }
+          },
+          {
+            "type": "nbtestimonials",
+            "settings": {
+              "review_1_rating": 5,
+              "review_2_rating": 5,
+              "review_3_rating": 4
+            }
+          },
+          {
+            "type": "nbnewsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "nb-product-detail",
+            "settings": {
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "nb-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "nb-about",
+            "settings": {}
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "nb-contact",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "nb-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "nb-order-confirmation-section",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

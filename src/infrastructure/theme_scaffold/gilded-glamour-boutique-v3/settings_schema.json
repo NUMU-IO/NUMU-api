@@ -1,0 +1,198 @@
+[
+  {
+    "name": "Brand",
+    "name_ar": "العلامة التجارية",
+    "settings": [
+      {
+        "type": "text",
+        "id": "brand_name",
+        "label": "Brand name",
+        "label_ar": "اسم العلامة",
+        "default": "",
+        "info": "Shown in the header/footer when no logo is set. Leave empty to use the store name."
+      },
+      {
+        "type": "text",
+        "id": "brand_name_ar",
+        "label": "Brand name (Arabic)",
+        "label_ar": "اسم العلامة (عربي)",
+        "default": ""
+      },
+      {
+        "type": "image_picker",
+        "id": "logo_url",
+        "label": "Logo",
+        "label_ar": "الشعار",
+        "info": "Shown in the header. Falls back to the brand name text. Animated GIFs are supported.",
+        "default": ""
+      },
+      {
+        "type": "select",
+        "id": "logo_shape",
+        "label": "Logo shape",
+        "label_ar": "شكل الشعار",
+        "default": "none",
+        "info": "Crops the logo into a shape. 'Original' keeps it untouched. Circle/Square/Triangle look best with a square logo.",
+        "options": [
+          { "value": "none", "label": "Original", "label_ar": "الأصلي" },
+          { "value": "square", "label": "Square", "label_ar": "مربع" },
+          { "value": "rounded", "label": "Rounded square", "label_ar": "مربع بزوايا دائرية" },
+          { "value": "circle", "label": "Circle", "label_ar": "دائرة" },
+          { "value": "triangle", "label": "Triangle", "label_ar": "مثلث" }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "logo_size",
+        "label": "Logo size",
+        "label_ar": "حجم الشعار",
+        "default": "small",
+        "info": "Applies when a logo shape is chosen.",
+        "options": [
+          { "value": "small", "label": "Small", "label_ar": "صغير" },
+          { "value": "medium", "label": "Medium", "label_ar": "متوسط" },
+          { "value": "large", "label": "Large", "label_ar": "كبير" }
+        ]
+      },
+      {
+        "type": "image_picker",
+        "id": "favicon",
+        "label": "Favicon (browser tab icon)",
+        "label_ar": "أيقونة المتصفح",
+        "default": ""
+      },
+      {
+        "type": "color",
+        "id": "accent_color",
+        "label": "Gold accent",
+        "label_ar": "لون التمييز (الذهبي)",
+        "default": "#A88E4D",
+        "info": "Buttons, prices, links, social chips. The signature muted gold."
+      },
+      {
+        "type": "color",
+        "id": "primary_color",
+        "label": "Ink (primary)",
+        "label_ar": "اللون الأساسي (الحبر)",
+        "default": "#000000",
+        "info": "Headlines, footer, active states. Black by default."
+      },
+      {
+        "type": "color",
+        "id": "background_color",
+        "label": "Canvas background",
+        "label_ar": "لون الخلفية",
+        "default": "#F6F4EE",
+        "info": "The warm beige page background."
+      },
+      {
+        "type": "color",
+        "id": "text_color",
+        "label": "Body text",
+        "label_ar": "لون النص",
+        "default": "#000000"
+      }
+    ]
+  },
+  {
+    "name": "Typography",
+    "name_ar": "الخطوط",
+    "settings": [
+      {
+        "type": "select",
+        "id": "heading_font",
+        "label": "Heading font",
+        "label_ar": "خط العناوين",
+        "default": "lobster",
+        "info": "Decorative Lobster by default; display headings (hero/product) use Montserrat.",
+        "options": [
+          { "value": "lobster", "label": "Lobster (theme default)", "label_ar": "لوبستر (افتراضي)" },
+          { "value": "montserrat", "label": "Montserrat (display)", "label_ar": "مونتسيرات" },
+          { "value": "playfair", "label": "Playfair Display (serif)", "label_ar": "بلايفير ديسبلاي" },
+          { "value": "cormorant", "label": "Cormorant Garamond (serif)", "label_ar": "كورمورانت" },
+          { "value": "cairo", "label": "Cairo (Arabic-first)", "label_ar": "القاهرة" }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "body_font",
+        "label": "Body font",
+        "label_ar": "خط النص",
+        "default": "inter",
+        "options": [
+          { "value": "inter", "label": "Inter (clean sans)", "label_ar": "إنتر" },
+          { "value": "montserrat", "label": "Montserrat", "label_ar": "مونتسيرات" },
+          { "value": "dm-sans", "label": "DM Sans", "label_ar": "دي إم سانس" },
+          { "value": "cairo", "label": "Cairo (Arabic-first)", "label_ar": "القاهرة" },
+          { "value": "tajawal", "label": "Tajawal (Arabic-first)", "label_ar": "تجوال" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Layout",
+    "name_ar": "التخطيط",
+    "settings": [
+      {
+        "type": "range",
+        "id": "corner_radius",
+        "label": "Corner radius",
+        "label_ar": "استدارة الزوايا",
+        "default": 0,
+        "min": 0,
+        "max": 24,
+        "step": 1,
+        "unit": "px",
+        "info": "Gilded uses sharp luxury edges (0) by default."
+      }
+    ]
+  },
+  {
+    "name": "Social links",
+    "name_ar": "روابط التواصل",
+    "settings": [
+      {
+        "type": "url",
+        "id": "social_instagram",
+        "label": "Instagram URL",
+        "label_ar": "رابط إنستجرام",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_facebook",
+        "label": "Facebook URL",
+        "label_ar": "رابط فيسبوك",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_tiktok",
+        "label": "TikTok URL",
+        "label_ar": "رابط تيك توك",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_x",
+        "label": "X (Twitter) URL",
+        "label_ar": "رابط إكس (تويتر)",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_whatsapp",
+        "label": "WhatsApp number or link",
+        "label_ar": "رقم أو رابط واتساب",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_youtube",
+        "label": "YouTube URL",
+        "label_ar": "رابط يوتيوب",
+        "default": ""
+      }
+    ]
+  }
+]

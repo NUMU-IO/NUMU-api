@@ -1,0 +1,120 @@
+{
+  "type": "lux-order-confirmation",
+  "name": "Order Confirmation",
+  "name_ar": "تأكيد الطلب",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Content" },
+    {
+      "type": "text",
+      "id": "prefix_text",
+      "label": "Eyebrow / thank-you label",
+      "label_ar": "نص الشكر",
+      "default": "",
+      "info": "Small uppercase label above the title. Leave empty to use the default."
+    },
+    {
+      "type": "text",
+      "id": "title_text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    { "type": "header", "content": "Continue button" },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    { "type": "header", "content": "Options" },
+    {
+      "type": "checkbox",
+      "id": "show_track_order",
+      "label": "Show track-order button",
+      "label_ar": "إظهار زر تتبع الطلب",
+      "default": false,
+      "info": "Adds a Track Order link beside Continue Shopping."
+    },
+    {
+      "type": "checkbox",
+      "id": "show_progress",
+      "label": "Show progress tracker",
+      "label_ar": "إظهار شريط التقدم",
+      "default": false,
+      "info": "Adds an Ordered → Delivered step timeline inside the order card."
+    },
+    {
+      "type": "checkbox",
+      "id": "show_guarantees",
+      "label": "Show guarantees",
+      "label_ar": "إظهار الضمانات",
+      "default": false,
+      "info": "Adds a reassurance card (secure payment, easy returns, etc.)."
+    }
+  ],
+  "blocks": [
+    {
+      "type": "step",
+      "name": "Progress step",
+      "name_ar": "خطوة التقدم",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Step label",
+          "label_ar": "اسم الخطوة",
+          "default": ""
+        }
+      ]
+    },
+    {
+      "type": "guarantee",
+      "name": "Guarantee",
+      "name_ar": "ضمان",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Guarantee text",
+          "label_ar": "نص الضمان",
+          "default": ""
+        }
+      ]
+    }
+  ],
+  "max_blocks": 8,
+  "presets": [
+    {
+      "name": "Order Confirmation",
+      "locales": {
+        "en": { "name": "Order Confirmation" },
+        "ar": { "name": "تأكيد الطلب" }
+      },
+      "settings": {
+        "prefix_text": "",
+        "title_text": "",
+        "cta_text": "",
+        "cta_link": "/products",
+        "show_track_order": false,
+        "show_progress": false,
+        "show_guarantees": false
+      },
+      "blocks": [
+        { "type": "step", "settings": { "label": "" } },
+        { "type": "step", "settings": { "label": "" } },
+        { "type": "step", "settings": { "label": "" } },
+        { "type": "step", "settings": { "label": "" } },
+        { "type": "guarantee", "settings": { "label": "" } }
+      ]
+    }
+  ]
+}

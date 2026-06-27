@@ -1,0 +1,76 @@
+{
+  "type": "gilded-rich-text",
+  "name": "Rich Text / Page",
+  "name_ar": "نص / صفحة",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Header band",
+      "content_ar": "شريط الترويسة"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_header",
+      "label": "Show header band",
+      "label_ar": "إظهار شريط الترويسة",
+      "default": true,
+      "info": "The black hero band with the eyebrow + title above the body. Turn off to use this section as a plain inline prose block.",
+      "info_ar": "الشريط الأسود الذي يحمل العنوان الفرعي والعنوان فوق النص. أوقفه لاستخدام هذا القسم ككتلة نص عادية."
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "label_ar": "العنوان الفرعي",
+      "default": "The House",
+      "info": "Small uppercase gold label above the title.",
+      "info_ar": "نص صغير ذهبي بأحرف كبيرة فوق العنوان."
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": "About",
+      "info": "Used only when this section is placed outside a CMS page. On a Page route the page's own title is shown.",
+      "info_ar": "يُستخدم فقط عند وضع هذا القسم خارج صفحة المحتوى. على مسار الصفحة يظهر عنوان الصفحة نفسها."
+    },
+    {
+      "type": "image_picker",
+      "id": "background_image",
+      "label": "Header background image",
+      "label_ar": "صورة خلفية الترويسة",
+      "info": "Optional faint art behind the header band (overlaid at low opacity). Leave empty for the gold decorative backdrop.",
+      "info_ar": "صورة اختيارية باهتة خلف شريط الترويسة (تظهر بشفافية منخفضة). اتركها فارغة لاستخدام الخلفية الذهبية الزخرفية."
+    },
+    {
+      "type": "header",
+      "content": "Body",
+      "content_ar": "النص"
+    },
+    {
+      "type": "richtext",
+      "id": "content",
+      "label": "Content",
+      "label_ar": "المحتوى",
+      "default": "",
+      "info": "Rich text is sanitized before it renders on the storefront. On a Page route the page body is shown instead.",
+      "info_ar": "يتم تنقية النص المنسّق قبل عرضه على المتجر. على مسار الصفحة يظهر محتوى الصفحة بدلاً منه."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Rich Text / Page",
+      "locales": {
+        "en": { "name": "Rich Text / Page" },
+        "ar": { "name": "نص / صفحة" }
+      },
+      "settings": {
+        "show_header": true,
+        "eyebrow": "The House",
+        "title": "About",
+        "content": "<p>Tell your story here. Share the craftsmanship, the heritage, and the people behind your house.</p>"
+      }
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "type": "by-footer",
+  "name": "Footer",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Brand"
+    },
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "default": "",
+      "info": "Leave empty to use the store name."
+    },
+    {
+      "type": "textarea",
+      "id": "tagline",
+      "label": "Brand tagline",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "address",
+      "label": "Address",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "phone",
+      "label": "Phone",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Navigation"
+    },
+    {
+      "type": "link_list_picker",
+      "id": "footer_menu_handle",
+      "label": "Footer menu",
+      "default": "",
+      "info": "Pick a menu from Online Store → Navigation. Top-level items with sub-items become columns. Leave empty to use the Link column blocks below."
+    },
+    {
+      "type": "header",
+      "content": "Newsletter"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_newsletter",
+      "label": "Show newsletter",
+      "default": true,
+      "info": "The newsletter only renders when enabled and a title is set."
+    },
+    {
+      "type": "text",
+      "id": "newsletter_title",
+      "label": "Newsletter title",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "newsletter_copy",
+      "label": "Newsletter copy",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "newsletter_button_label",
+      "label": "Newsletter button",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "newsletter_button_success",
+      "label": "Newsletter button (subscribed)",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Bottom bar"
+    },
+    {
+      "type": "text",
+      "id": "copyright_text",
+      "label": "Copyright text",
+      "default": "",
+      "info": "Shown after the year and brand name."
+    },
+    {
+      "type": "text",
+      "id": "credit_text",
+      "label": "Credit line text",
+      "default": "",
+      "info": "Leave empty to hide the credit line."
+    },
+    {
+      "type": "text",
+      "id": "credit_link_label",
+      "label": "Credit line link",
+      "default": ""
+    }
+  ],
+  "blocks": [
+    {
+      "type": "column",
+      "name": "Link column",
+      "settings": [
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Column title"
+        }
+      ],
+      "blocks": [
+        {
+          "type": "link",
+          "name": "Link",
+          "settings": [
+            {
+              "type": "text",
+              "id": "label",
+              "label": "Label",
+              "default": "New link"
+            },
+            {
+              "type": "url",
+              "id": "href",
+              "label": "URL",
+              "default": "/"
+            }
+          ]
+        }
+      ],
+      "max_blocks": 12
+    }
+  ],
+  "max_blocks": 4
+}

@@ -1,0 +1,71 @@
+{
+  "type": "lux-hero",
+  "name": "Hero Banner",
+  "name_ar": "البانر الرئيسي",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Content" },
+    {
+      "type": "text",
+      "id": "badge_text",
+      "label": "Eyebrow / badge",
+      "label_ar": "نص الشارة",
+      "default": "",
+      "info": "Small uppercase label above the headline (e.g. New Collection)."
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    { "type": "header", "content": "Media" },
+    {
+      "type": "image_picker",
+      "id": "hero_image_url",
+      "label": "Hero image",
+      "label_ar": "الصورة الرئيسية",
+      "aspect_ratio": "4/5",
+      "info": "Shown on the left on desktop. Hidden on mobile.",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Hero Banner",
+      "locales": {
+        "en": { "name": "Hero Banner" },
+        "ar": { "name": "البانر الرئيسي" }
+      },
+      "settings": {
+        "badge_text": "",
+        "headline": "",
+        "subtitle": "",
+        "cta_text": "",
+        "cta_link": "/products"
+      }
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "type": "lux-cart",
+  "name": "Cart",
+  "name_ar": "السلة",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Empty state" },
+    {
+      "type": "text",
+      "id": "empty_headline",
+      "label": "Empty headline",
+      "label_ar": "عنوان السلة الفارغة",
+      "default": "",
+      "info": "Shown when the cart has no items."
+    },
+    {
+      "type": "textarea",
+      "id": "empty_subhead",
+      "label": "Empty subhead",
+      "label_ar": "النص الفرعي للسلة الفارغة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "empty_cta_label",
+      "label": "Continue shopping label",
+      "label_ar": "نص زر متابعة التسوق",
+      "default": "",
+      "info": "Used on the empty-state button and the 'continue shopping' link in the summary."
+    },
+    {
+      "type": "url",
+      "id": "empty_cta_href",
+      "label": "Continue shopping link",
+      "label_ar": "رابط متابعة التسوق",
+      "default": "/products"
+    },
+    { "type": "header", "content": "Cart page" },
+    {
+      "type": "text",
+      "id": "populated_title",
+      "label": "Page title",
+      "label_ar": "عنوان الصفحة",
+      "default": "",
+      "info": "Item count is appended automatically, e.g. Cart (3)."
+    },
+    {
+      "type": "text",
+      "id": "checkout_cta_label",
+      "label": "Checkout button",
+      "label_ar": "نص زر الدفع",
+      "default": ""
+    },
+    { "type": "header", "content": "Summary labels" },
+    {
+      "type": "text",
+      "id": "subtotal_label",
+      "label": "Subtotal label",
+      "label_ar": "نص الإجمالي الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "shipping_label",
+      "label": "Shipping label",
+      "label_ar": "نص الشحن",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "total_label",
+      "label": "Total label",
+      "label_ar": "نص الإجمالي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "free_label",
+      "label": "Free shipping label",
+      "label_ar": "نص الشحن المجاني",
+      "default": "",
+      "info": "Shown for shipping once the free-shipping threshold is met."
+    },
+    {
+      "type": "text",
+      "id": "shipping_calc_label",
+      "label": "Shipping placeholder",
+      "label_ar": "نص الشحن المؤجل",
+      "default": "",
+      "info": "Shown when shipping is not free; the real rate is computed at checkout."
+    },
+    {
+      "type": "number",
+      "id": "free_shipping_threshold",
+      "label": "Free shipping threshold",
+      "label_ar": "حد الشحن المجاني",
+      "default": 0,
+      "info": "Order subtotal (in your store currency) above which shipping shows as free. 0 = no free-shipping offer."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Cart",
+      "locales": {
+        "en": { "name": "Cart" },
+        "ar": { "name": "السلة" }
+      },
+      "settings": {
+        "empty_headline": "",
+        "empty_subhead": "",
+        "empty_cta_label": "",
+        "empty_cta_href": "/products",
+        "populated_title": "",
+        "checkout_cta_label": "",
+        "subtotal_label": "",
+        "shipping_label": "",
+        "total_label": "",
+        "free_label": "",
+        "shipping_calc_label": "",
+        "free_shipping_threshold": 0
+      }
+    }
+  ]
+}

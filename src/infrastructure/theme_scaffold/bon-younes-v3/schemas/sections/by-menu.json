@@ -1,0 +1,109 @@
+{
+  "type": "by-menu",
+  "name": "Menu / featured",
+  "settings": [
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow (small label)",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "view_all_label",
+      "label": "View-all label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "view_all_link",
+      "label": "View-all URL",
+      "default": "/products"
+    },
+    {
+      "type": "text",
+      "id": "card_cta_label",
+      "label": "Product card button",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "empty_category_text",
+      "label": "Empty category message",
+      "default": ""
+    }
+  ],
+  "blocks": [
+    {
+      "type": "tab",
+      "name": "Category tab",
+      "settings": [
+        {
+          "type": "text",
+          "id": "id",
+          "label": "Tab id (slug)"
+        },
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label"
+        },
+        {
+          "type": "text",
+          "id": "match",
+          "label": "Match tag/category (optional)"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 8,
+  "presets": [
+    {
+      "name": "Menu with category tabs",
+      "locales": {
+        "ar": {
+          "name": "قائمة مع تبويبات"
+        }
+      },
+      "category": "products",
+      "settings": {},
+      "blocks": [
+        {
+          "type": "tab",
+          "settings": {
+            "id": "all",
+            "label": ""
+          }
+        },
+        {
+          "type": "tab",
+          "settings": {
+            "id": "coffee",
+            "label": "",
+            "match": ""
+          }
+        },
+        {
+          "type": "tab",
+          "settings": {
+            "id": "treats",
+            "label": "",
+            "match": ""
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,311 @@
+[
+  {
+    "name": "Brand",
+    "name_ar": "العلامة التجارية",
+    "settings": [
+      {
+        "type": "image_picker",
+        "id": "logo",
+        "label": "Logo",
+        "label_ar": "الشعار",
+        "info": "Shown in the header and footer. Leave empty to use the store name as a wordmark.",
+        "info_ar": "يظهر في الهيدر والفوتر. اتركه فارغًا لاستخدام اسم المتجر كنص.",
+        "default": ""
+      },
+      {
+        "type": "range",
+        "id": "logo_width",
+        "label": "Logo width",
+        "label_ar": "عرض الشعار",
+        "default": 120,
+        "min": 60,
+        "max": 260,
+        "step": 4,
+        "unit": "px"
+      },
+      {
+        "type": "select",
+        "id": "logo_shape",
+        "label": "Logo shape",
+        "label_ar": "شكل الشعار",
+        "default": "none",
+        "info": "Crops the logo into a shape. 'Original' keeps it untouched. Circle/Square/Triangle look best with a square logo.",
+        "options": [
+          { "value": "none", "label": "Original", "label_ar": "الأصلي" },
+          { "value": "square", "label": "Square", "label_ar": "مربع" },
+          { "value": "rounded", "label": "Rounded square", "label_ar": "مربع بزوايا دائرية" },
+          { "value": "circle", "label": "Circle", "label_ar": "دائرة" },
+          { "value": "triangle", "label": "Triangle", "label_ar": "مثلث" }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "logo_size",
+        "label": "Logo size",
+        "label_ar": "حجم الشعار",
+        "default": "small",
+        "info": "Applies when a logo shape is chosen.",
+        "options": [
+          { "value": "small", "label": "Small", "label_ar": "صغير" },
+          { "value": "medium", "label": "Medium", "label_ar": "متوسط" },
+          { "value": "large", "label": "Large", "label_ar": "كبير" }
+        ]
+      },
+      {
+        "type": "image_picker",
+        "id": "favicon",
+        "label": "Favicon (browser tab icon)",
+        "label_ar": "أيقونة المتصفح",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "name": "Colors",
+    "name_ar": "الألوان",
+    "settings": [
+      {
+        "type": "color",
+        "id": "color_white",
+        "label": "Page background",
+        "label_ar": "خلفية الصفحة",
+        "default": "#FFFFFF"
+      },
+      {
+        "type": "color",
+        "id": "color_band",
+        "label": "Section band",
+        "label_ar": "خلفية القسم الفاتح",
+        "default": "#F4F4F4"
+      },
+      {
+        "type": "color",
+        "id": "color_surface_dark",
+        "label": "Header / footer surface",
+        "label_ar": "خلفية الهيدر والفوتر",
+        "default": "#3A3A3A"
+      },
+      {
+        "type": "color",
+        "id": "color_ink",
+        "label": "Primary text & buttons",
+        "label_ar": "النص والأزرار الأساسية",
+        "default": "#050505"
+      },
+      {
+        "type": "color",
+        "id": "color_border",
+        "label": "Border",
+        "label_ar": "الحدود",
+        "default": "#DADADA"
+      },
+      {
+        "type": "color",
+        "id": "color_muted",
+        "label": "Muted text",
+        "label_ar": "النص الثانوي",
+        "default": "#6F6F6F"
+      },
+      {
+        "type": "color",
+        "id": "color_sale",
+        "label": "Sale accent",
+        "label_ar": "لون التخفيض",
+        "default": "#A20000"
+      },
+      {
+        "type": "color",
+        "id": "accent_color",
+        "label": "Gold accent",
+        "label_ar": "لون التمييز الذهبي",
+        "info": "The signature Vionne gold, used for highlights and hover states.",
+        "info_ar": "ذهبي فيون المميز، يُستخدم للإبرازات وحالات التمرير.",
+        "default": "#D4AF37"
+      }
+    ]
+  },
+  {
+    "name": "Typography",
+    "name_ar": "الخطوط",
+    "settings": [
+      {
+        "type": "select",
+        "id": "heading_font",
+        "label": "Heading font",
+        "label_ar": "خط العناوين",
+        "default": "Neue Haas Grotesk Display Pro, Helvetica Neue, Helvetica, Arial, sans-serif",
+        "options": [
+          {
+            "value": "Neue Haas Grotesk Display Pro, Helvetica Neue, Helvetica, Arial, sans-serif",
+            "label": "Neue Haas Grotesk (Vionne default)",
+            "label_ar": "نويه هاس جروتسك (افتراضي)"
+          },
+          {
+            "value": "cormorant",
+            "label": "Cormorant Garamond (serif)",
+            "label_ar": "كورمورانت جاراموند"
+          },
+          {
+            "value": "playfair",
+            "label": "Playfair Display (serif)",
+            "label_ar": "بلايفير ديسبلاي"
+          },
+          {
+            "value": "lora",
+            "label": "Lora (serif)",
+            "label_ar": "لورا"
+          },
+          {
+            "value": "inter",
+            "label": "Inter (sans-serif)",
+            "label_ar": "إنتر"
+          },
+          {
+            "value": "montserrat",
+            "label": "Montserrat (sans-serif)",
+            "label_ar": "مونتسيرات"
+          }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "body_font",
+        "label": "Body font",
+        "label_ar": "خط النص",
+        "default": "Neue Haas Grotesk Text Pro, Helvetica Neue, Helvetica, Arial, sans-serif",
+        "options": [
+          {
+            "value": "Neue Haas Grotesk Text Pro, Helvetica Neue, Helvetica, Arial, sans-serif",
+            "label": "Neue Haas Grotesk (Vionne default)",
+            "label_ar": "نويه هاس جروتسك (افتراضي)"
+          },
+          {
+            "value": "inter",
+            "label": "Inter (sans-serif)",
+            "label_ar": "إنتر"
+          },
+          {
+            "value": "montserrat",
+            "label": "Montserrat (sans-serif)",
+            "label_ar": "مونتسيرات"
+          },
+          {
+            "value": "lora",
+            "label": "Lora (serif)",
+            "label_ar": "لورا"
+          },
+          {
+            "value": "cairo",
+            "label": "Cairo (Arabic-first)",
+            "label_ar": "القاهرة"
+          }
+        ]
+      },
+      {
+        "type": "range",
+        "id": "base_font_size",
+        "label": "Base text size",
+        "label_ar": "حجم النص الأساسي",
+        "default": 16,
+        "min": 14,
+        "max": 20,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "type": "range",
+        "id": "heading_tracking",
+        "label": "Heading letter-spacing",
+        "label_ar": "تباعد حروف العناوين",
+        "info": "Fine-tunes heading tracking relative to the Vionne default (0 = unchanged).",
+        "info_ar": "ضبط تباعد حروف العناوين بالنسبة للافتراضي (0 = دون تغيير).",
+        "default": 0,
+        "min": -4,
+        "max": 6,
+        "step": 1,
+        "unit": "px"
+      }
+    ]
+  },
+  {
+    "name": "Layout",
+    "name_ar": "التخطيط",
+    "settings": [
+      {
+        "type": "range",
+        "id": "radius",
+        "label": "Corner radius",
+        "label_ar": "استدارة الزوايا",
+        "info": "Applies to cards, inputs and tiles. Vionne keeps a quiet 4px by default.",
+        "info_ar": "يُطبّق على البطاقات والحقول والمربعات. يحافظ فيون على 4 بكسل هادئة افتراضيًا.",
+        "default": 4,
+        "min": 0,
+        "max": 20,
+        "step": 2,
+        "unit": "px"
+      },
+      {
+        "type": "checkbox",
+        "id": "enableAnimations",
+        "label": "Enable motion & reveal animations",
+        "label_ar": "تفعيل الحركة وتأثيرات الظهور",
+        "default": true
+      },
+      {
+        "type": "checkbox",
+        "id": "enableHideOnScroll",
+        "label": "Hide header on scroll down",
+        "label_ar": "إخفاء الهيدر عند التمرير للأسفل",
+        "default": true
+      }
+    ]
+  },
+  {
+    "name": "Social links",
+    "name_ar": "روابط التواصل",
+    "settings": [
+      {
+        "type": "url",
+        "id": "social_instagram",
+        "label": "Instagram URL",
+        "label_ar": "رابط إنستجرام",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_tiktok",
+        "label": "TikTok URL",
+        "label_ar": "رابط تيك توك",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_facebook",
+        "label": "Facebook URL",
+        "label_ar": "رابط فيسبوك",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_x",
+        "label": "X (Twitter) URL",
+        "label_ar": "رابط إكس (تويتر)",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_youtube",
+        "label": "YouTube URL",
+        "label_ar": "رابط يوتيوب",
+        "default": ""
+      },
+      {
+        "type": "url",
+        "id": "social_whatsapp",
+        "label": "WhatsApp number or link",
+        "label_ar": "رقم أو رابط واتساب",
+        "default": ""
+      }
+    ]
+  }
+]

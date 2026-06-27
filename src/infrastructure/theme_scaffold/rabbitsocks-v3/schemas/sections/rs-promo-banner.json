@@ -1,0 +1,75 @@
+{
+  "type": "rs-promo-banner",
+  "name": "Promo Banner (Rabbitsocks)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Journal card"
+    },
+    {
+      "id": "journal_label",
+      "type": "text",
+      "label": "Journal label",
+      "label_ar": "عنوان المدونة الفرعي",
+      "default": ""
+    },
+    {
+      "id": "journal_title",
+      "type": "text",
+      "label": "Journal title",
+      "label_ar": "عنوان المدونة",
+      "default": ""
+    },
+    {
+      "id": "journal_link",
+      "type": "url",
+      "label": "Journal link",
+      "label_ar": "رابط المدونة",
+      "default": "/blog"
+    },
+    {
+      "type": "header",
+      "content": "Editorial"
+    },
+    {
+      "id": "edit_label",
+      "type": "text",
+      "label": "Editorial title",
+      "label_ar": "عنوان المقال",
+      "default": ""
+    },
+    {
+      "id": "edit_text",
+      "type": "textarea",
+      "label": "Editorial text",
+      "label_ar": "نص المقال",
+      "default": ""
+    },
+    {
+      "id": "edit_link",
+      "type": "url",
+      "label": "Editorial link",
+      "label_ar": "رابط المقال",
+      "default": "/products"
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "product_image",
+      "type": "image_picker",
+      "label": "Editorial image (optional)",
+      "label_ar": "صورة المقال (اختياري)",
+      "default": "",
+      "aspect_ratio": "4/3"
+    }
+  ]
+}

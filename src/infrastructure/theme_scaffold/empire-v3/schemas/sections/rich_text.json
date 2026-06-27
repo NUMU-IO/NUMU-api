@@ -1,0 +1,17 @@
+{
+  "type": "rich_text",
+  "name": "Rich Text",
+  "locales": { "ar": { "name": "نص منسّق" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "textarea", "id": "content", "label": "Content (HTML allowed)", "default": "<p>أضف محتوى صفحتك هنا.</p>", "locales": { "ar": { "label": "المحتوى" } } },
+    { "type": "select", "id": "align", "label": "Alignment", "default": "start", "options": [
+      { "value": "start", "label": "Start" },
+      { "value": "center", "label": "Center" }
+    ], "locales": { "ar": { "label": "المحاذاة" } } },
+    { "type": "select", "id": "width", "label": "Width", "default": "narrow", "options": [
+      { "value": "narrow", "label": "Narrow" },
+      { "value": "wide", "label": "Wide" }
+    ], "locales": { "ar": { "label": "العرض" } } }
+  ]
+}

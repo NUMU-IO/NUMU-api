@@ -1,0 +1,42 @@
+{
+  "type": "tw-announcement-bar",
+  "name": "Tech Wave Announcement Bar",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "label": "Announcement text",
+      "label_ar": "نص الإعلان",
+      "default": ""
+    },
+    {
+      "id": "link_url",
+      "type": "url",
+      "label": "Link URL",
+      "label_ar": "رابط",
+      "default": ""
+    },
+    {
+      "id": "link_text",
+      "type": "text",
+      "label": "Link text",
+      "label_ar": "نص الرابط",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Behaviour"
+    },
+    {
+      "id": "dismissible",
+      "type": "checkbox",
+      "label": "Allow dismiss",
+      "label_ar": "السماح بالإغلاق",
+      "default": true
+    }
+  ]
+}

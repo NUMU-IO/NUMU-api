@@ -1,0 +1,63 @@
+{
+  "type": "lux-not-found",
+  "name": "404 — Page Not Found",
+  "name_ar": "٤٠٤ — الصفحة غير موجودة",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Content" },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "label_ar": "العنوان الكبير",
+      "default": "",
+      "info": "The oversized status display (e.g. 404)."
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "label_ar": "النص العلوي",
+      "default": "",
+      "info": "Small uppercase label below the heading (e.g. Page not found)."
+    },
+    {
+      "type": "textarea",
+      "id": "subtext",
+      "label": "Subtext",
+      "label_ar": "النص الفرعي",
+      "default": ""
+    },
+    { "type": "header", "content": "Call to action" },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/"
+    }
+  ],
+  "presets": [
+    {
+      "name": "404 — Page Not Found",
+      "locales": {
+        "en": { "name": "404 — Page Not Found" },
+        "ar": { "name": "٤٠٤ — الصفحة غير موجودة" }
+      },
+      "settings": {
+        "heading": "",
+        "eyebrow": "",
+        "subtext": "",
+        "cta_text": "",
+        "cta_link": "/"
+      }
+    }
+  ]
+}

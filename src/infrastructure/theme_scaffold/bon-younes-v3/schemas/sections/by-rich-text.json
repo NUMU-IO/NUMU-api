@@ -1,0 +1,30 @@
+{
+  "type": "by-rich-text",
+  "name": "Rich text",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": ""
+    },
+    {
+      "type": "richtext",
+      "id": "body",
+      "label": "Body",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Rich text",
+      "locales": {
+        "ar": {
+          "name": "نص منسّق"
+        }
+      },
+      "category": "content",
+      "settings": {}
+    }
+  ]
+}

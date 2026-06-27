@@ -1,0 +1,147 @@
+{
+  "type": "lux-header",
+  "name": "Header",
+  "name_ar": "الترويسة",
+  "tag": "header",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "label_ar": "اسم المتجر",
+      "default": "",
+      "info": "Leave empty to use the store name."
+    },
+    {
+      "type": "image_picker",
+      "id": "logo_url",
+      "label": "Logo",
+      "label_ar": "الشعار",
+      "info": "Falls back to the brand name text. Animated GIFs are supported (e.g. a spinning logo). Shape & size are in Theme settings → Brand."
+    },
+    {
+      "type": "select",
+      "id": "header_layout",
+      "label": "Header layout",
+      "label_ar": "تخطيط الترويسة",
+      "default": "logo-center",
+      "options": [
+        { "value": "logo-center", "label": "Logo centered" },
+        { "value": "logo-left", "label": "Logo left" },
+        { "value": "stacked", "label": "Stacked (logo + nav)" },
+        { "value": "logo-right", "label": "Logo right" }
+      ]
+    },
+    {
+      "type": "header",
+      "content": "Announcement bar"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_announcement",
+      "label": "Show announcement bar",
+      "label_ar": "إظهار شريط الإعلان",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "announcement_text",
+      "label": "Announcement text",
+      "label_ar": "نص الإعلان",
+      "default": ""
+    },
+    {
+      "type": "color",
+      "id": "announcement_color",
+      "label": "Announcement background",
+      "label_ar": "خلفية الإعلان",
+      "default": ""
+    },
+    {
+      "type": "color",
+      "id": "announcement_text_color",
+      "label": "Announcement text colour",
+      "label_ar": "لون نص الإعلان",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Icons"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_search",
+      "label": "Show search icon",
+      "label_ar": "إظهار أيقونة البحث",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_cart",
+      "label": "Show cart icon",
+      "label_ar": "إظهار أيقونة السلة",
+      "default": true
+    }
+  ],
+  "blocks": [
+    {
+      "type": "nav_item",
+      "name": "Navigation link",
+      "name_ar": "رابط التنقل",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label",
+          "label_ar": "التسمية"
+        },
+        {
+          "type": "url",
+          "id": "href",
+          "label": "URL",
+          "label_ar": "الرابط"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 8,
+  "presets": [
+    {
+      "name": "Header",
+      "locales": {
+        "en": { "name": "Header" },
+        "ar": { "name": "الترويسة" }
+      },
+      "settings": {
+        "header_layout": "logo-center",
+        "show_announcement": true,
+        "show_search": true,
+        "show_cart": true
+      },
+      "blocks": [
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "Home",
+            "href": "/"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "Shop",
+            "href": "/products"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "Collections",
+            "href": "/collections"
+          }
+        }
+      ]
+    }
+  ]
+}

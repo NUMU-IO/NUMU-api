@@ -1,0 +1,254 @@
+{
+  "type": "vionne-marquee",
+  "name": "Scrolling Banner",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "item_1",
+      "type": "text",
+      "label": "Item 1",
+      "label_ar": "عنصر 1",
+      "default": ""
+    },
+    {
+      "id": "item_2",
+      "type": "text",
+      "label": "Item 2",
+      "label_ar": "عنصر 2",
+      "default": ""
+    },
+    {
+      "id": "item_3",
+      "type": "text",
+      "label": "Item 3",
+      "label_ar": "عنصر 3",
+      "default": ""
+    },
+    {
+      "id": "item_4",
+      "type": "text",
+      "label": "Item 4",
+      "label_ar": "عنصر 4",
+      "default": ""
+    },
+    {
+      "id": "item_5",
+      "type": "text",
+      "label": "Item 5",
+      "label_ar": "عنصر 5",
+      "default": ""
+    },
+    {
+      "id": "item_6",
+      "type": "text",
+      "label": "Item 6",
+      "label_ar": "عنصر 6",
+      "default": ""
+    },
+    {
+      "id": "separator",
+      "type": "select",
+      "label": "Separator",
+      "label_ar": "الفاصل",
+      "default": "dot",
+      "options": [
+        {
+          "value": "dot",
+          "label": "• Dot"
+        },
+        {
+          "value": "slash",
+          "label": "/ Slash"
+        },
+        {
+          "value": "pipe",
+          "label": "| Pipe"
+        },
+        {
+          "value": "star",
+          "label": "★ Star"
+        },
+        {
+          "value": "diamond",
+          "label": "◆ Diamond"
+        },
+        {
+          "value": "arrow",
+          "label": "→ Arrow"
+        },
+        {
+          "value": "dash",
+          "label": "— Dash"
+        },
+        {
+          "value": "none",
+          "label": "(none)"
+        }
+      ]
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "id": "size",
+      "type": "select",
+      "label": "Text size",
+      "label_ar": "حجم النص",
+      "default": "sm",
+      "options": [
+        {
+          "value": "sm",
+          "label": "Small"
+        },
+        {
+          "value": "md",
+          "label": "Medium"
+        },
+        {
+          "value": "lg",
+          "label": "Large"
+        },
+        {
+          "value": "xl",
+          "label": "Extra Large"
+        }
+      ]
+    },
+    {
+      "id": "color_scheme",
+      "type": "select",
+      "label": "Color scheme",
+      "label_ar": "نظام الألوان",
+      "default": "ink",
+      "options": [
+        {
+          "value": "ink",
+          "label": "Dark on light"
+        },
+        {
+          "value": "light",
+          "label": "Light on dark"
+        },
+        {
+          "value": "band",
+          "label": "Soft band"
+        },
+        {
+          "value": "accent",
+          "label": "Accent (sale)"
+        },
+        {
+          "value": "custom",
+          "label": "Custom"
+        }
+      ]
+    },
+    {
+      "id": "custom_bg",
+      "type": "color",
+      "label": "Custom background",
+      "label_ar": "خلفية مخصصة",
+      "default": "#111111"
+    },
+    {
+      "id": "custom_fg",
+      "type": "color",
+      "label": "Custom text color",
+      "label_ar": "لون النص",
+      "default": "#ffffff"
+    },
+    {
+      "id": "show_borders",
+      "type": "checkbox",
+      "label": "Show top & bottom borders",
+      "label_ar": "إظهار الحدود",
+      "default": false
+    },
+    {
+      "id": "padding_y",
+      "type": "range",
+      "label": "Vertical padding",
+      "label_ar": "المسافة العمودية",
+      "default": 14,
+      "min": 4,
+      "max": 40,
+      "step": 2
+    },
+    {
+      "type": "header",
+      "content": "Motion"
+    },
+    {
+      "id": "direction",
+      "type": "select",
+      "label": "Scroll direction",
+      "label_ar": "اتجاه الحركة",
+      "default": "left",
+      "options": [
+        {
+          "value": "left",
+          "label": "Left ←"
+        },
+        {
+          "value": "right",
+          "label": "Right →"
+        }
+      ]
+    },
+    {
+      "id": "speed_seconds",
+      "type": "range",
+      "label": "Loop duration (s)",
+      "label_ar": "مدة الدورة (ث)",
+      "default": 30,
+      "min": 10,
+      "max": 120,
+      "step": 5
+    },
+    {
+      "id": "pause_on_hover",
+      "type": "checkbox",
+      "label": "Pause on hover",
+      "label_ar": "إيقاف عند التمرير",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Link"
+    },
+    {
+      "id": "link_url",
+      "type": "url",
+      "label": "Optional link",
+      "label_ar": "رابط اختياري",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Marquee",
+      "locales": {
+        "en": {
+          "name": "Marquee"
+        },
+        "ar": {
+          "name": "شريط متحرك"
+        }
+      },
+      "settings": {
+        "separator": "dot",
+        "size": "sm",
+        "color_scheme": "ink",
+        "direction": "left",
+        "speed_seconds": 30,
+        "pause_on_hover": true,
+        "padding_y": 14,
+        "show_borders": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "type": "bz-rich-text",
+  "name": "Bazar Rich Text",
+  "name_ar": "بازار نص",
+  "settings": [
+    {
+      "type": "richtext",
+      "id": "content",
+      "label": "Content",
+      "label_ar": "المحتوى",
+      "default": "",
+      "info": "Rich text is sanitized before it renders on the storefront."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Rich Text",
+      "locales": {
+        "en": {
+          "name": "Bazar Rich Text"
+        },
+        "ar": {
+          "name": "بازار نص"
+        }
+      },
+      "settings": {
+        "content": ""
+      }
+    }
+  ]
+}

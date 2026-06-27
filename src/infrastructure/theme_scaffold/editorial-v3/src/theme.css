@@ -1,0 +1,329 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported verbatim from V2 Editorial (numu-egyptian-bazaar/src/themes/
+ * editorial/styles.css). The only change: the V2 root selector
+ * :root[data-theme="editorial"] is retargeted to the V3 mount element
+ * [data-editorial-v3-app] so the --ed-* + HSL tokens reach the sections.
+ * ─────────────────────────────────────────────────────────────── */
+/* Theme: Editorial — Bold fashion editorial with dramatic green palette */
+
+[data-editorial-v3-app] {
+  --background: 90 10% 94%;
+  --foreground: 0 0% 11%;
+  --card: 90 8% 97%;
+  --card-foreground: 0 0% 11%;
+  --popover: 90 8% 97%;
+  --popover-foreground: 0 0% 11%;
+  --primary: 153 45% 30%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 153 30% 50%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 90 8% 88%;
+  --muted-foreground: 0 0% 40%;
+  --accent: 153 30% 72%;
+  --accent-foreground: 153 45% 18%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 90 6% 82%;
+  --input: 90 5% 85%;
+  --ring: 153 45% 30%;
+  --radius: 0.25rem;
+  --store-gradient: linear-gradient(135deg, hsl(153 45% 30%), hsl(153 30% 42%));
+  --hero-bg: 153 45% 30%;
+  --badge-bg: 153 45% 30%;
+  --badge-fg: 0 0% 100%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 0 0% 8%;
+  --announcement-fg: 0 0% 95%;
+  --success: 153 50% 38%;
+  --warning: 38 92% 50%;
+
+  /* Editorial-specific tokens */
+  --ed-green: 153 45% 30%;
+  --ed-green-light: 153 30% 72%;
+  --ed-cream: 90 10% 94%;
+  --ed-dark: 0 0% 8%;
+
+  /* Reset skeu variables */
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+
+  --sidebar-background: 90 8% 92%;
+  --sidebar-foreground: 0 0% 11%;
+  --sidebar-primary: 153 45% 30%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 153 30% 72%;
+  --sidebar-accent-foreground: 153 45% 18%;
+  --sidebar-border: 90 6% 82%;
+  --sidebar-ring: 153 45% 30%;
+
+  /* ── Vionne-derived `vn-*` token vocabulary, remapped to Editorial's
+   *    palette. The copied page-level sections (product-detail,
+   *    products-page, profile, order-confirmation) reference these tokens;
+   *    we keep the same token NAMES vionne uses but bind them to Editorial's
+   *    cream/green/near-black colour values so the pages read as Editorial. */
+  --vn-white: #FFFFFF;
+  --vn-band: hsl(90 8% 88%);        /* editorial --muted (light cream band) */
+  --vn-surface-dark: hsl(0 0% 8%);  /* editorial --ed-dark */
+  --vn-ink: hsl(0 0% 11%);          /* editorial --foreground (near-black) */
+  --vn-border: hsl(90 6% 82%);      /* editorial --border */
+  --vn-muted: hsl(0 0% 40%);        /* editorial --muted-foreground */
+  --vn-sale: hsl(0 72% 51%);        /* editorial --destructive */
+}
+
+[data-editorial-v3-app] body {
+  background: hsl(var(--ed-cream));
+  color: hsl(var(--foreground));
+}
+
+/* Editorial giant heading style */
+[data-editorial-v3-app] .ed-hero-title {
+  font-size: clamp(3rem, 10vw, 8rem);
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+}
+
+/* Editorial category block */
+[data-editorial-v3-app] .ed-block {
+  position: relative;
+  overflow: hidden;
+  background: hsl(var(--ed-green));
+}
+
+[data-editorial-v3-app] .ed-block-light {
+  background: hsl(var(--ed-green-light));
+}
+
+/* Minimal card with no shadows */
+[data-editorial-v3-app] .ed-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  transition: transform 0.3s ease;
+}
+[data-editorial-v3-app] .ed-card:hover {
+  transform: translateY(-4px);
+}
+
+/* Editorial button — solid, sharp */
+[data-editorial-v3-app] .ed-btn {
+  background: hsl(var(--ed-dark));
+  color: white;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  padding: 0.875rem 2rem;
+  transition: all 0.2s ease;
+}
+[data-editorial-v3-app] .ed-btn:hover {
+  background: hsl(var(--ed-green));
+}
+
+[data-editorial-v3-app] .ed-btn-outline {
+  background: transparent;
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--foreground));
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  padding: 0.875rem 2rem;
+  transition: all 0.2s ease;
+}
+[data-editorial-v3-app] .ed-btn-outline:hover {
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+}
+
+/* Editorial header — minimal */
+[data-editorial-v3-app] .ed-header {
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* Editorial footer — dark */
+[data-editorial-v3-app] .ed-footer {
+  background: hsl(var(--ed-dark));
+  color: hsl(90 10% 85%);
+}
+
+/* Chip / tag */
+[data-editorial-v3-app] .ed-chip {
+  border: 1px solid hsl(var(--border));
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  transition: all 0.2s ease;
+}
+[data-editorial-v3-app] .ed-chip-active {
+  background: hsl(var(--ed-dark));
+  color: white;
+  border-color: hsl(var(--ed-dark));
+}
+
+/* Inset input */
+[data-editorial-v3-app] .ed-inset {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+}
+[data-editorial-v3-app] .ed-inset:focus {
+  border-color: hsl(var(--ed-green));
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(153 45% 30% / 0.15);
+}
+
+/* Section divider */
+[data-editorial-v3-app] .ed-divider {
+  height: 1px;
+  background: hsl(var(--border));
+}
+
+/* Force editorial palette for shared page classes */
+[data-editorial-v3-app] .store-gradient {
+  background: linear-gradient(135deg, hsl(153 45% 30%), hsl(153 30% 42%)) !important;
+}
+
+/* ───────────────────────────────────────────────────────────────
+ * `vn-*` utility vocabulary — copied from V2 Vionne's theme.css and
+ * re-bound to Editorial's tokens above. These back the copied page-level
+ * sections (product-detail / products-page / profile / order-confirmation)
+ * which were ported from Vionne's proven SDK-wired versions. The class
+ * SHAPES are vionne's; the colours resolve through Editorial's --vn-*
+ * tokens so the pages render in Editorial's palette.
+ * ─────────────────────────────────────────────────────────────── */
+
+/* ─── Typography ─── */
+
+.vn-heading {
+  font-family: var(--heading-font), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+
+.vn-eyebrow {
+  font-family: var(--body-font), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 11px;
+  color: var(--vn-muted);
+}
+
+.vn-label {
+  font-family: var(--body-font), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 11px;
+}
+
+/* ─── Buttons ─── */
+
+.vn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  transition: transform 200ms ease, background-color 200ms ease, color 200ms ease, opacity 200ms ease;
+  cursor: pointer;
+}
+
+.vn-btn-filled {
+  background: var(--vn-ink);
+  color: var(--vn-white);
+}
+.vn-btn-filled:hover {
+  background: hsl(var(--ed-green));
+  opacity: 1;
+}
+
+.vn-btn-outline-light {
+  background: transparent;
+  color: var(--vn-white);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+.vn-btn-outline-light:hover {
+  background: var(--vn-white);
+  color: var(--vn-ink);
+}
+
+.vn-btn-outline-dark {
+  background: transparent;
+  color: var(--vn-ink);
+  border: 2px solid var(--vn-ink);
+}
+.vn-btn-outline-dark:hover {
+  background: var(--vn-ink);
+  color: var(--vn-white);
+}
+
+/* ─── Product Card hover ─── */
+
+.vn-product-card .vn-product-image {
+  transition: transform 600ms ease, opacity 280ms ease;
+}
+
+.vn-product-card:hover .vn-product-image {
+  transform: scale(1.05);
+}
+
+.vn-product-card .vn-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.vn-product-card:hover .vn-product-image-secondary {
+  opacity: 1;
+}
+
+/* ─── Shimmer (lazy media placeholder) ─── */
+
+.vn-shimmer {
+  background: linear-gradient(90deg, #E2E5DC 0%, #ECEEE7 40%, #E2E5DC 80%);
+  background-size: 200% 100%;
+  animation: vn-shimmer 1400ms ease-in-out infinite;
+}
+
+@keyframes vn-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vn-shimmer { animation: none; }
+}
+
+/* ─── Misc helpers ─── */
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}

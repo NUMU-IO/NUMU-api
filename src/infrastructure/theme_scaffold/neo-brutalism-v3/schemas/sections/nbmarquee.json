@@ -1,0 +1,28 @@
+{
+  "type": "nbmarquee",
+  "name": "Marquee Banner",
+  "name_ar": "شريط متحرك",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "label": "Marquee Text",
+      "label_ar": "نص الشريط",
+      "default": ""
+    },
+    {
+      "id": "repeat_count",
+      "type": "number",
+      "label": "Repeat Count",
+      "label_ar": "عدد التكرار",
+      "default": 2,
+      "min": 1,
+      "max": 5
+    }
+  ]
+}

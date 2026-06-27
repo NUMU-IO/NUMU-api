@@ -1,0 +1,239 @@
+/* vionne V3 — minimalist storefront. Mobile-first. */
+
+:root, [data-theme="vionne-v3"] {
+  --vionne-bg: #fafaf7;
+  --vionne-ink: #0a0a0a;
+  --vionne-ink-muted: #666;
+  --vionne-accent: #b8a572;
+  --vionne-surface: #efeae1;
+  --vionne-line: rgba(0,0,0,0.1);
+  --vionne-shell-max: 1280px;
+  --vionne-shell-px: clamp(1rem, 4vw, 2.5rem);
+  --vionne-font-display: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+  --vionne-font-sans: "Inter", system-ui, sans-serif;
+}
+
+[data-vionne-v3-app] * { box-sizing: border-box; }
+[data-vionne-v3-app] {
+  font-family: var(--vionne-font-sans);
+  color: var(--vionne-ink);
+  background: var(--vionne-bg);
+  overflow-x: clip;
+  min-height: 100vh;
+  line-height: 1.6;
+}
+[data-vionne-v3-app] img { max-width: 100%; height: auto; display: block; }
+[data-vionne-v3-app] button { font: inherit; }
+[data-vionne-v3-app] a:not([class]) { color: inherit; }
+[data-vionne-v3-app] a { text-decoration: none; }
+
+.vionne-shell {
+  width: 100%; max-width: var(--vionne-shell-max);
+  margin-inline: auto; padding-inline: var(--vionne-shell-px);
+}
+.vionne-section { padding-block: clamp(2.5rem, 7vw, 5rem); }
+.vionne-text-center { text-align: center; }
+
+.vionne-heading {
+  font-family: var(--vionne-font-display);
+  font-weight: 500; line-height: 1.15; margin: 0;
+  color: var(--vionne-ink); font-size: clamp(1.5rem, 4vw, 2.4rem);
+}
+.vionne-body {
+  font-size: 0.95rem; color: var(--vionne-ink-muted);
+  line-height: 1.7; margin: 0; max-width: 50ch;
+}
+.vionne-empty {
+  padding: 3rem var(--vionne-shell-px);
+  text-align: center; color: var(--vionne-ink-muted); font-size: 0.9rem;
+}
+
+.vionne-btn, .vionne-btn-ghost, .vionne-btn-light {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.85rem 1.5rem;
+  font-family: var(--vionne-font-sans); font-weight: 500;
+  font-size: 0.78rem; letter-spacing: 0.15em; text-transform: uppercase;
+  cursor: pointer; transition: background 240ms ease, color 240ms ease;
+  min-height: 44px; border-radius: 4px;
+}
+.vionne-btn {
+  background: var(--vionne-ink); color: var(--vionne-bg);
+  border: 1px solid var(--vionne-ink);
+}
+.vionne-btn:hover { background: var(--vionne-accent); border-color: var(--vionne-accent);  }
+.vionne-btn-ghost {
+  background: transparent; color: var(--vionne-ink);
+  border: 1px solid var(--vionne-ink);
+}
+.vionne-btn-ghost:hover { background: var(--vionne-ink); color: var(--vionne-bg); }
+.vionne-btn-light {
+  background: var(--vionne-bg); color: var(--vionne-ink);
+  border: 1px solid var(--vionne-bg);
+}
+
+.vionne-link {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-size: 0.75rem; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--vionne-ink); border-bottom: 1px solid var(--vionne-ink);
+  padding-bottom: 0.15rem;
+}
+.vionne-link:hover { opacity: 0.65; }
+
+.vionne-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;
+}
+
+/* Hero */
+.vionne-hero { padding-block: 0; background: var(--vionne-surface); }
+.vionne-hero-grid {
+  display: grid; grid-template-columns: 1fr; align-items: center;
+  min-height: 65vh;
+}
+@media (min-width: 768px) { .vionne-hero-grid { grid-template-columns: 1fr 1fr; } }
+.vionne-hero-image { width: 100%; aspect-ratio: 4/5; overflow: hidden; }
+.vionne-hero-image img { width: 100%; height: 100%; object-fit: cover; }
+.vionne-hero-image-placeholder { width: 100%; height: 100%; background: linear-gradient(135deg, #e5e5e5, #f5f5f5); }
+.vionne-hero-content {
+  padding: clamp(2rem, 6vw, 4rem);
+  display: flex; flex-direction: column; gap: 1.25rem; align-items: flex-start;
+}
+.vionne-hero-headline { font-size: clamp(2rem, 5vw, 3.4rem); max-width: 16ch; }
+
+/* Product grid (used by featured + products page) */
+.vionne-product-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(1rem, 2vw, 1.5rem);
+}
+@media (min-width: 768px) {
+  .vionne-product-grid { grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); }
+}
+.vionne-product-card { display: flex; flex-direction: column; gap: 0.65rem; }
+.vionne-product-card-image {
+  width: 100%; aspect-ratio: 3/4; overflow: hidden; background: var(--vionne-surface);
+}
+.vionne-product-card-image img { width: 100%; height: 100%; object-fit: cover; transition: transform 600ms ease; }
+.vionne-product-card:hover .vionne-product-card-image img { transform: scale(1.04); }
+.vionne-product-card-name { font-size: 0.85rem; color: var(--vionne-ink); margin: 0; }
+.vionne-product-card-price { font-size: 0.85rem; color: var(--vionne-ink-muted); margin: 0; }
+
+/* Categories */
+.vionne-category-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1.5rem;
+}
+@media (min-width: 768px) {
+  .vionne-category-grid { grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr)); }
+}
+.vionne-category-card { text-align: center; }
+.vionne-category-card-image {
+  width: 100%; aspect-ratio: 1/1; overflow: hidden;
+  background: var(--vionne-surface); margin-bottom: 0.5rem;
+}
+.vionne-category-card-image img { width: 100%; height: 100%; object-fit: cover; transition: transform 600ms ease; }
+.vionne-category-card:hover .vionne-category-card-image img { transform: scale(1.03); }
+.vionne-category-card-name {
+  font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--vionne-ink-muted); margin: 0;
+}
+
+/* Promo */
+.vionne-promo {
+  background: var(--vionne-ink); color: var(--vionne-bg);
+}
+.vionne-promo .vionne-heading, .vionne-promo .vionne-body { color: var(--vionne-bg); }
+.vionne-promo .vionne-btn-ghost { color: var(--vionne-bg); border-color: var(--vionne-bg); }
+.vionne-promo .vionne-btn-ghost:hover { background: var(--vionne-bg); color: var(--vionne-ink); }
+.vionne-promo-grid {
+  display: grid; grid-template-columns: 1fr; gap: 2rem; align-items: center;
+}
+@media (min-width: 768px) { .vionne-promo-grid { grid-template-columns: 1fr 1fr; } }
+.vionne-promo-image { aspect-ratio: 4/3; overflow: hidden; }
+.vionne-promo-image img { width: 100%; height: 100%; object-fit: cover; }
+.vionne-promo-content { display: flex; flex-direction: column; gap: 1rem; align-items: flex-start; }
+
+/* Testimonials */
+.vionne-testimonial-grid {
+  display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-top: 2rem;
+}
+@media (min-width: 768px) { .vionne-testimonial-grid { grid-template-columns: repeat(3, 1fr); } }
+.vionne-testimonial { margin: 0; padding: 1.5rem; border: 1px solid var(--vionne-line); text-align: center; }
+.vionne-testimonial blockquote {
+  font-family: var(--vionne-font-display); font-style: italic;
+  font-size: 1.05rem; line-height: 1.55; margin: 0;
+}
+.vionne-testimonial figcaption {
+  margin-top: 0.75rem; font-size: 0.7rem;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--vionne-ink-muted);
+}
+
+/* Newsletter */
+.vionne-newsletter { background: var(--vionne-surface); }
+.vionne-newsletter-inner {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1rem; text-align: center; max-width: 540px; margin-inline: auto;
+}
+.vionne-newsletter-form {
+  display: flex; gap: 0.5rem; width: 100%;
+  margin-top: 0.75rem; flex-wrap: wrap; justify-content: center;
+}
+.vionne-newsletter-form input {
+  flex: 1 1 220px; min-height: 44px; padding: 0.6rem 1rem;
+  border: 1px solid var(--vionne-line); background: var(--vionne-bg);
+  font-family: var(--vionne-font-sans); font-size: 0.85rem; border-radius: 4px;
+}
+
+/* PDP */
+.vionne-pdp-grid {
+  display: grid; grid-template-columns: 1fr; gap: 2rem;
+}
+@media (min-width: 900px) {
+  .vionne-pdp-grid { grid-template-columns: 1.1fr 1fr; align-items: start; }
+}
+.vionne-pdp-gallery img { width: 100%; aspect-ratio: 4/5; object-fit: cover; }
+.vionne-pdp-buy { display: flex; flex-direction: column; gap: 1rem; }
+.vionne-pdp-price {
+  font-family: var(--vionne-font-display); font-size: 1.4rem;
+  color: var(--vionne-ink); margin: 0;
+}
+.vionne-pdp-qty {
+  display: inline-flex; align-items: center; border: 1px solid var(--vionne-line);
+  width: max-content;
+}
+.vionne-pdp-qty button { width: 38px; height: 38px; background: transparent; border: none; cursor: pointer; color: var(--vionne-ink); }
+.vionne-pdp-qty span { min-width: 34px; text-align: center; font-size: 0.9rem; }
+
+/* Confirmation */
+.vionne-confirmation { background: var(--vionne-surface); text-align: center; }
+.vionne-confirmation-inner { display: flex; flex-direction: column; align-items: center; gap: 1rem; max-width: 460px; margin-inline: auto; }
+
+/* Slideshow / marquee / ugc / img-comparison (only used by vionne) */
+.vionne-slideshow { position: relative; width: 100%; aspect-ratio: 16/9; overflow: hidden; }
+.vionne-slideshow img { width: 100%; height: 100%; object-fit: cover; }
+.vionne-slideshow-content {
+  position: absolute; inset-inline-start: 0; bottom: 2rem; padding: 0 var(--vionne-shell-px);
+  color: var(--vionne-bg);
+}
+.vionne-slideshow-content h1 { font-family: var(--vionne-font-display); font-size: clamp(1.6rem, 5vw, 3rem); margin: 0; max-width: 16ch; }
+.vionne-slideshow-content p { margin: 0.5rem 0 1rem; max-width: 36ch; }
+
+.vionne-marquee {
+  overflow: hidden; background: var(--vionne-ink); color: var(--vionne-bg);
+  padding: 0.75rem 0;
+}
+.vionne-marquee-track {
+  display: flex; gap: 2rem; white-space: nowrap; animation: vionne-marquee 30s linear infinite;
+}
+.vionne-marquee-track span { font-size: 0.85rem; letter-spacing: 0.2em; text-transform: uppercase; }
+@keyframes vionne-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+.vionne-img-cmp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.vionne-img-cmp-pair img { width: 100%; aspect-ratio: 4/5; object-fit: cover; }
+.vionne-caption { text-align: center; color: var(--vionne-ink-muted); font-size: 0.85rem; margin-top: 1rem; }
+
+.vionne-ugc-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-top: 1.5rem;
+}
+@media (min-width: 768px) { .vionne-ugc-grid { grid-template-columns: repeat(4, 1fr); } }
+.vionne-ugc-tile { aspect-ratio: 1/1; overflow: hidden; }
+.vionne-ugc-tile img { width: 100%; height: 100%; object-fit: cover; transition: transform 500ms ease; }
+.vionne-ugc-tile:hover img { transform: scale(1.05); }

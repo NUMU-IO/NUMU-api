@@ -1,0 +1,51 @@
+{
+  "type": "boutique-categories",
+  "name": "Boutique Categories",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Section title",
+      "label_ar": "عنوان القسم",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "columns_desktop",
+      "type": "range",
+      "label": "Columns (desktop)",
+      "label_ar": "أعمدة (ديسكتوب)",
+      "default": 4,
+      "min": 3,
+      "max": 6,
+      "step": 1
+    },
+    {
+      "id": "columns_mobile",
+      "type": "range",
+      "label": "Columns (mobile)",
+      "label_ar": "أعمدة (موبايل)",
+      "default": 2,
+      "min": 2,
+      "max": 4,
+      "step": 1
+    },
+    {
+      "id": "max_items",
+      "type": "range",
+      "label": "Max categories (0 = all)",
+      "label_ar": "أقصى عدد فئات",
+      "default": 0,
+      "min": 0,
+      "max": 12,
+      "step": 1
+    }
+  ]
+}

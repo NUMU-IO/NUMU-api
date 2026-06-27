@@ -1,0 +1,121 @@
+{
+  "id": "elegant-v3",
+  "name": "Elegant (V3)",
+  "author": "NUMU",
+  "version": "0.3.4",
+  "layout": "single-column",
+  "description": "Elegant (V3) — rich warm-brown classic storefront, ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "elegant-hero",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "elegant-categories",
+            "settings": {
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          },
+          {
+            "type": "elegant-featured-collection",
+            "settings": {
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "elegant-promo-banner",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "elegant-collection-strip",
+            "settings": {
+              "layout": "image-row",
+              "item_1_link": "/products",
+              "item_2_link": "/products",
+              "item_3_link": "/products",
+              "item_4_link": "/products"
+            }
+          },
+          {
+            "type": "elegant-testimonials",
+            "settings": {
+              "review_1_rating": 5,
+              "review_2_rating": 5,
+              "review_3_rating": 4
+            }
+          },
+          {
+            "type": "elegant-newsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "elegant-product-detail",
+            "settings": {
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "elegant-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": []
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": []
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "elegant-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": []
+      }
+    }
+  }
+}

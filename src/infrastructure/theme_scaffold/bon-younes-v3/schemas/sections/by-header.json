@@ -1,0 +1,62 @@
+{
+  "type": "by-header",
+  "name": "Header",
+  "settings": [
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "brand_tagline",
+      "label": "Tagline / sub-line",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "brand_monogram",
+      "label": "Logo-less monogram",
+      "default": ""
+    },
+    {
+      "type": "checkbox",
+      "id": "show_search",
+      "label": "Show search icon",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_cart",
+      "label": "Show cart icon",
+      "default": true
+    },
+    {
+      "type": "link_list_picker",
+      "id": "nav_menu_handle",
+      "label": "Navigation menu",
+      "default": "main-menu",
+      "info": "Pick a menu from Online Store → Navigation. Items with sub-items render as dropdowns."
+    }
+  ],
+  "blocks": [
+    {
+      "type": "nav_item",
+      "name": "Navigation link",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label"
+        },
+        {
+          "type": "url",
+          "id": "href",
+          "label": "URL"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 8
+}

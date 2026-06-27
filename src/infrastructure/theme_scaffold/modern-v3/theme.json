@@ -1,0 +1,118 @@
+{
+  "id": "modern-v3",
+  "name": "Modern (V3)",
+  "author": "NUMU",
+  "version": "0.3.4",
+  "layout": "single-column",
+  "description": "Modern (V3) — clean teal aesthetic, ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "modern-hero",
+            "settings": {
+              "cta_link": "/products",
+              "secondary_link": "/products?category=clothing",
+              "hero_image_url": "",
+              "show_trust_strip": true
+            }
+          },
+          {
+            "type": "modern-categories",
+            "settings": {
+              "columns_desktop": 5,
+              "columns_mobile": 3
+            }
+          },
+          {
+            "type": "modern-featured-collection",
+            "settings": {
+              "view_all_link": "/products?tag=new",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "modern-promo-banner",
+            "settings": {
+              "cta_link": "/products?category=accessories"
+            }
+          },
+          {
+            "type": "modern-featured-collection",
+            "settings": {
+              "view_all_link": "/products?tag=bestseller",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "modern-testimonials",
+            "settings": {
+              "review_1_rating": 5,
+              "review_2_rating": 5,
+              "review_3_rating": 4
+            }
+          },
+          {
+            "type": "modern-newsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "modern-product-detail",
+            "settings": {
+              "show_rating": true,
+              "show_stock": true,
+              "show_guarantees": true,
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "modern-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "modern-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": []
+      }
+    }
+  }
+}

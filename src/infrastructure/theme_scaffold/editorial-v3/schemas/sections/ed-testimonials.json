@@ -1,0 +1,123 @@
+{
+  "type": "ed-testimonials",
+  "name": "Editorial Testimonials",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Review 1"
+    },
+    {
+      "type": "text",
+      "id": "review_1_name",
+      "label": "Name",
+      "label_ar": "الاسم",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "review_1_city",
+      "label": "City",
+      "label_ar": "المدينة",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "review_1_text",
+      "label": "Review",
+      "label_ar": "التقييم",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "review_1_rating",
+      "label": "Rating",
+      "label_ar": "النجوم",
+      "default": 5,
+      "min": 1,
+      "max": 5,
+      "step": 1
+    },
+    {
+      "type": "header",
+      "content": "Review 2"
+    },
+    {
+      "type": "text",
+      "id": "review_2_name",
+      "label": "Name",
+      "label_ar": "الاسم",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "review_2_city",
+      "label": "City",
+      "label_ar": "المدينة",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "review_2_text",
+      "label": "Review",
+      "label_ar": "التقييم",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "review_2_rating",
+      "label": "Rating",
+      "label_ar": "النجوم",
+      "default": 5,
+      "min": 1,
+      "max": 5,
+      "step": 1
+    },
+    {
+      "type": "header",
+      "content": "Review 3"
+    },
+    {
+      "type": "text",
+      "id": "review_3_name",
+      "label": "Name",
+      "label_ar": "الاسم",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "review_3_city",
+      "label": "City",
+      "label_ar": "المدينة",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "review_3_text",
+      "label": "Review",
+      "label_ar": "التقييم",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "review_3_rating",
+      "label": "Rating",
+      "label_ar": "النجوم",
+      "default": 5,
+      "min": 1,
+      "max": 5,
+      "step": 1
+    }
+  ],
+  "presets": []
+}

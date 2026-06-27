@@ -1,0 +1,56 @@
+{
+  "type": "by-profile-section",
+  "name": "Account page",
+  "name_ar": "صفحة الحساب",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Page title",
+      "label_ar": "عنوان الصفحة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "orders_title",
+      "label": "Orders heading",
+      "label_ar": "عنوان الطلبات",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "addresses_title",
+      "label": "Addresses heading",
+      "label_ar": "عنوان العناوين",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "settings_title",
+      "label": "Settings heading",
+      "label_ar": "عنوان الإعدادات",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_stats",
+      "label": "Show account stats",
+      "label_ar": "إظهار إحصائيات الحساب",
+      "default": true
+    }
+  ],
+  "presets": [
+    {
+      "name": "Account page",
+      "settings": {}
+    }
+  ]
+}

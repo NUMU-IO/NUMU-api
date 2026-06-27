@@ -1,0 +1,14 @@
+{
+  "type": "featured_collection",
+  "name": "Featured Collection",
+  "locales": { "ar": { "name": "مجموعة مميزة" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "المتجر", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "text", "id": "tab_trending_label", "label": "Tab 1 label (trending)", "default": "الأكثر رواجاً", "locales": { "ar": { "label": "تبويب 1 (رائج)" } } },
+    { "type": "text", "id": "tab_bestseller_label", "label": "Tab 2 label (bestsellers)", "default": "الأكثر مبيعاً", "locales": { "ar": { "label": "تبويب 2 (الأكثر مبيعاً)" } } },
+    { "type": "text", "id": "tab_new_label", "label": "Tab 3 label (new)", "default": "وصل حديثاً", "locales": { "ar": { "label": "تبويب 3 (وصل حديثاً)" } } },
+    { "type": "text", "id": "view_all_label", "label": "View-all label", "default": "عرض الكل", "locales": { "ar": { "label": "نص عرض الكل" } } },
+    { "type": "url", "id": "view_all_link", "label": "View-all link", "default": "/products", "locales": { "ar": { "label": "رابط عرض الكل" } } },
+    { "type": "range", "id": "max_items", "label": "Max products", "default": 8, "min": 4, "max": 12, "step": 1, "locales": { "ar": { "label": "أقصى عدد منتجات" } } }
+  ]
+}

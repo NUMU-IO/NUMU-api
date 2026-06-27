@@ -1,0 +1,80 @@
+{
+  "type": "ed-featured-collection",
+  "name": "Editorial Featured Collection",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "select",
+      "id": "collection_tag",
+      "label": "Collection",
+      "label_ar": "المجموعة",
+      "default": "new",
+      "options": [
+        {
+          "value": "new",
+          "label": "New arrivals",
+          "label_ar": "وصل حديثاً"
+        },
+        {
+          "value": "bestseller",
+          "label": "Best sellers",
+          "label_ar": "الأكثر مبيعاً"
+        },
+        {
+          "value": "featured",
+          "label": "Featured",
+          "label_ar": "مميز"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "id": "view_all_text",
+      "label": "View all text",
+      "label_ar": "نص عرض الكل",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "view_all_link",
+      "label": "View all link",
+      "label_ar": "رابط عرض الكل",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "type": "range",
+      "id": "product_count",
+      "label": "Products to show",
+      "label_ar": "عدد المنتجات",
+      "default": 4,
+      "min": 2,
+      "max": 12,
+      "step": 1
+    },
+    {
+      "type": "range",
+      "id": "columns",
+      "label": "Columns",
+      "label_ar": "الأعمدة",
+      "default": 4,
+      "min": 2,
+      "max": 5,
+      "step": 1
+    }
+  ],
+  "presets": []
+}

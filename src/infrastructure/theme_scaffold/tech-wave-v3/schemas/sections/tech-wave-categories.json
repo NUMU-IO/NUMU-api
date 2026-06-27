@@ -1,0 +1,51 @@
+{
+  "type": "tech-wave-categories",
+  "name": "Tech Wave Categories",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "columns_desktop",
+      "type": "range",
+      "label": "Desktop columns",
+      "label_ar": "أعمدة الديسكتوب",
+      "default": 5,
+      "min": 2,
+      "max": 6,
+      "step": 1
+    },
+    {
+      "id": "columns_mobile",
+      "type": "range",
+      "label": "Mobile columns",
+      "label_ar": "أعمدة الموبايل",
+      "default": 3,
+      "min": 1,
+      "max": 4,
+      "step": 1
+    },
+    {
+      "id": "max_items",
+      "type": "range",
+      "label": "Max categories (0 = all)",
+      "label_ar": "أقصى عدد فئات (0 = الكل)",
+      "default": 0,
+      "min": 0,
+      "max": 12,
+      "step": 1
+    }
+  ]
+}

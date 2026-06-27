@@ -1,0 +1,306 @@
+{
+  "id": "luxury-minimal-v3",
+  "name": "Luxury Minimal (V3)",
+  "author": "NUMU",
+  "version": "0.6.4",
+  "layout": "single-column",
+  "description": "Minimalist luxury fashion theme — ultra-clean uppercase typography, refined neutrals, a warm gold accent, sharp edges, and subtle motion. A faithful V3 port of the V2 luxury-minimal theme. Great for clothing, accessories, and beauty brands that want timeless polish. Editable monochrome header + footer on every page.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "404": {
+        "name": "404 — Not found",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-not-found",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-hero",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "lux-categories",
+            "settings": {
+              "columns_desktop": 5,
+              "columns_mobile": 2,
+              "max_items": 0
+            }
+          },
+          {
+            "type": "lux-featured-collection",
+            "settings": {
+              "collection_tag": "new",
+              "view_all_link": "/products",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "lux-promo-banner",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "lux-featured-collection",
+            "settings": {
+              "collection_tag": "bestseller",
+              "view_all_link": "/products",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "lux-testimonials",
+            "settings": {}
+          },
+          {
+            "type": "lux-newsletter",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-product-grid",
+            "settings": {
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "collection": {
+        "name": "Collection",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-product-grid",
+            "settings": {
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-product-detail",
+            "settings": {
+              "show_guarantees": true,
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-cart",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "search": {
+        "name": "Search",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-search-results",
+            "settings": {
+              "columns_desktop": 4
+            }
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "page": {
+        "name": "Page",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-rich-text",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "policy": {
+        "name": "Policy",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-rich-text",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-rich-text",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-rich-text",
+            "settings": {}
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-profile",
+            "settings": {
+              "show_stats": true
+            }
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "lux-header",
+            "settings": {}
+          },
+          {
+            "type": "lux-order-confirmation",
+            "settings": {
+              "show_guarantees": true
+            }
+          },
+          {
+            "type": "lux-footer",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "type": "rs-categories",
+  "name": "Categories (Rabbitsocks)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "label": "Label",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    }
+  ]
+}

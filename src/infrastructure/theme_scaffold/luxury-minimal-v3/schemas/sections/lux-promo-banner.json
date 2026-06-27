@@ -1,0 +1,73 @@
+{
+  "type": "lux-promo-banner",
+  "name": "Promo Banner",
+  "name_ar": "بانر العرض",
+  "limit": 2,
+  "settings": [
+    { "type": "header", "content": "Content" },
+    {
+      "type": "text",
+      "id": "badge_text",
+      "label": "Eyebrow / badge",
+      "label_ar": "نص الشارة",
+      "default": "",
+      "info": "Small uppercase label above the headline (e.g. Limited Offer)."
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    { "type": "header", "content": "Call to action" },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products?category=accessories"
+    },
+    { "type": "header", "content": "Media" },
+    {
+      "type": "image_picker",
+      "id": "image_url",
+      "label": "Banner image",
+      "label_ar": "صورة البانر",
+      "aspect_ratio": "4/3",
+      "info": "Shown on the left (40% width). Falls back to a shopping-bag glyph when empty.",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Promo Banner",
+      "locales": {
+        "en": { "name": "Promo Banner" },
+        "ar": { "name": "بانر العرض" }
+      },
+      "settings": {
+        "badge_text": "",
+        "headline": "",
+        "subtitle": "",
+        "cta_text": "",
+        "cta_link": "/products?category=accessories",
+        "image_url": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "type": "gilded-products-page",
+  "name": "Gilded Products Page",
+  "name_ar": "صفحة المنتجات",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Heading",
+      "content_ar": "العنوان"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title override",
+      "label_ar": "تجاوز العنوان",
+      "info": "Leave blank to use the collection name (or “All Products”).",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout",
+      "content_ar": "التخطيط"
+    },
+    {
+      "id": "columns_desktop",
+      "type": "range",
+      "label": "Desktop columns",
+      "label_ar": "أعمدة سطح المكتب",
+      "default": 5,
+      "min": 2,
+      "max": 5,
+      "step": 1
+    },
+    {
+      "id": "columns_mobile",
+      "type": "range",
+      "label": "Mobile columns",
+      "label_ar": "أعمدة الموبايل",
+      "default": 2,
+      "min": 1,
+      "max": 3,
+      "step": 1
+    }
+  ],
+  "presets": [
+    {
+      "name": "Gilded Products Page",
+      "name_ar": "صفحة المنتجات",
+      "settings": {
+        "title": "",
+        "columns_desktop": 5,
+        "columns_mobile": 2
+      }
+    }
+  ]
+}

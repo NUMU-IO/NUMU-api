@@ -1,0 +1,144 @@
+{
+  "id": "tech-wave-v3",
+  "name": "Tech wave (V3)",
+  "author": "NUMU",
+  "version": "0.3.4",
+  "layout": "single-column",
+  "description": "Tech Wave (V3) — futuristic dark storefront with neon accents and glassmorphism, ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "tw-announcement-bar",
+            "settings": {
+              "link_text": "تسوق الآن",
+              "dismissible": true
+            }
+          },
+          {
+            "type": "tech-wave-hero",
+            "settings": {
+              "cta_link": "/products",
+              "secondary_link": "/products?tag=sale",
+              "show_trust_strip": true
+            }
+          },
+          {
+            "type": "tech-wave-categories",
+            "settings": {
+              "columns_desktop": 5,
+              "columns_mobile": 3,
+              "max_items": 0
+            }
+          },
+          {
+            "type": "tech-wave-featured-collection",
+            "settings": {
+              "view_all_link": "/products",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "tech-wave-promo-banner",
+            "settings": {
+              "cta_link": "/products?tag=sale"
+            }
+          },
+          {
+            "type": "tech-wave-featured-collection",
+            "settings": {
+              "view_all_link": "/products",
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "tech-wave-testimonials",
+            "settings": {}
+          },
+          {
+            "type": "tech-wave-newsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "tech-wave-product-detail",
+            "settings": {
+              "show_rating": true,
+              "show_stock": true,
+              "show_guarantees": true,
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "tech-wave-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "columns_desktop": 3,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "tech-wave-about",
+            "settings": {}
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "tech-wave-contact",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "tech-wave-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "tech-wave-order-confirmation-section",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

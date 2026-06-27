@@ -1,0 +1,38 @@
+{
+  "type": "elegant-newsletter",
+  "name": "Elegant Newsletter",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "label_ar": "عنوان فرعي",
+      "default": ""
+    },
+    {
+      "id": "button_text",
+      "type": "text",
+      "label": "Button Text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "placeholder",
+      "type": "text",
+      "label": "Placeholder",
+      "label_ar": "نص العنصر النائب",
+      "default": ""
+    }
+  ]
+}

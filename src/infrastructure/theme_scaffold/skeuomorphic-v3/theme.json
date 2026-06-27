@@ -1,0 +1,141 @@
+{
+  "id": "skeuomorphic-v3",
+  "name": "Skeuomorphic (V3)",
+  "author": "NUMU",
+  "version": "0.3.4",
+  "layout": "single-column",
+  "description": "Skeuomorphic (V3) — physical, tactile 3D interface, ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "skeu-announcement-bar",
+            "settings": {
+              "link_text": "تسوق الآن",
+              "dismissible": true
+            }
+          },
+          {
+            "type": "skeu-hero",
+            "settings": {
+              "cta_link": "/products",
+              "show_trust_strip": true
+            }
+          },
+          {
+            "type": "skeu-categories",
+            "settings": {
+              "columns_desktop": 5,
+              "columns_mobile": 3
+            }
+          },
+          {
+            "type": "skeu-featured-collection",
+            "settings": {
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "skeu-promo-banner",
+            "settings": {
+              "cta_link": "/products?category=accessories"
+            }
+          },
+          {
+            "type": "skeu-featured-collection",
+            "settings": {
+              "product_count": 4,
+              "columns": 4
+            }
+          },
+          {
+            "type": "skeu-testimonials",
+            "settings": {
+              "review_1_rating": 5,
+              "review_2_rating": 5,
+              "review_3_rating": 4
+            }
+          },
+          {
+            "type": "skeu-newsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "skeu-product-detail",
+            "settings": {
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "skeu-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "skeu-about",
+            "settings": {}
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "skeu-contact",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "skeu-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "skeu-order-confirmation-section",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

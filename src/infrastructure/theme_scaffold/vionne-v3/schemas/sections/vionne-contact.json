@@ -1,0 +1,155 @@
+{
+  "type": "vionne-contact",
+  "name": "Contact Page (Vionne)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "eyebrow",
+      "type": "text",
+      "label": "Eyebrow",
+      "label_ar": "نص علوي",
+      "default": ""
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "textarea",
+      "label": "Subtitle",
+      "label_ar": "وصف",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Form"
+    },
+    {
+      "id": "name_label",
+      "type": "text",
+      "label": "Name field label",
+      "label_ar": "تسمية الاسم",
+      "default": ""
+    },
+    {
+      "id": "phone_label",
+      "type": "text",
+      "label": "Phone field label",
+      "label_ar": "تسمية الهاتف",
+      "default": ""
+    },
+    {
+      "id": "message_label",
+      "type": "text",
+      "label": "Message field label",
+      "label_ar": "تسمية الرسالة",
+      "default": ""
+    },
+    {
+      "id": "submit_text",
+      "type": "text",
+      "label": "Submit button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Success state"
+    },
+    {
+      "id": "success_title",
+      "type": "text",
+      "label": "Success heading",
+      "label_ar": "عنوان النجاح",
+      "default": ""
+    },
+    {
+      "id": "success_message",
+      "type": "textarea",
+      "label": "Success message",
+      "label_ar": "رسالة النجاح",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Working hours"
+    },
+    {
+      "id": "show_working_hours",
+      "type": "checkbox",
+      "label": "Show Working Hours",
+      "label_ar": "إظهار ساعات العمل",
+      "default": true
+    },
+    {
+      "id": "hours_weekdays_label",
+      "type": "text",
+      "label": "Weekdays label",
+      "label_ar": "تسمية أيام الأسبوع",
+      "default": ""
+    },
+    {
+      "id": "hours_weekdays_value",
+      "type": "text",
+      "label": "Weekdays hours",
+      "label_ar": "ساعات أيام الأسبوع",
+      "default": ""
+    },
+    {
+      "id": "hours_friday_label",
+      "type": "text",
+      "label": "Friday label",
+      "label_ar": "تسمية الجمعة",
+      "default": ""
+    },
+    {
+      "id": "hours_friday_value",
+      "type": "text",
+      "label": "Friday hours",
+      "label_ar": "ساعات الجمعة",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Map"
+    },
+    {
+      "id": "show_map",
+      "type": "checkbox",
+      "label": "Show map",
+      "label_ar": "إظهار الخريطة",
+      "default": false
+    },
+    {
+      "id": "map_embed_url",
+      "type": "url",
+      "label": "Map embed URL",
+      "label_ar": "رابط الخريطة",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Contact (Vionne)",
+      "locales": {
+        "en": {
+          "name": "Contact (Vionne)"
+        },
+        "ar": {
+          "name": "تواصل"
+        }
+      },
+      "settings": {
+        "show_working_hours": true,
+        "show_map": false
+      }
+    }
+  ]
+}

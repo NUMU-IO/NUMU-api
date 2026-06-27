@@ -1,0 +1,94 @@
+{
+  "type": "by-product-detail",
+  "name": "Product detail (AOV)",
+  "settings": [
+    {
+      "type": "text",
+      "id": "recommended_title",
+      "label": "Recommendations title",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "addons_title",
+      "label": "Add-ons title",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Buy-box labels"
+    },
+    {
+      "type": "text",
+      "id": "badge_1_text",
+      "label": "Trust badge 1",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "badge_2_text",
+      "label": "Trust badge 2",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "quantity_label",
+      "label": "Quantity label",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "add_to_cart_label",
+      "label": "Add-to-cart button",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "save_label",
+      "label": "Save / wishlist button",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "addons_total_label",
+      "label": "Add-ons total label",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "reco_cta_label",
+      "label": "Recommendation card button",
+      "default": ""
+    }
+  ],
+  "blocks": [
+    {
+      "type": "addon",
+      "name": "Add-on / pairing",
+      "settings": [
+        {
+          "type": "text",
+          "id": "id",
+          "label": "Add-on id"
+        },
+        {
+          "type": "text",
+          "id": "name",
+          "label": "Name"
+        },
+        {
+          "type": "number",
+          "id": "price",
+          "label": "Price (major units)"
+        },
+        {
+          "type": "image_picker",
+          "id": "image",
+          "label": "Image",
+          "aspect_ratio": "1/1"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 6
+}

@@ -1,0 +1,73 @@
+{
+  "type": "vionne-promo-banner",
+  "name": "Promotional Banner",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "badge_text",
+      "label": "Badge text",
+      "label_ar": "نص الشارة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "عنوان فرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "type": "image_picker",
+      "id": "image_url",
+      "label": "Image",
+      "label_ar": "الصورة",
+      "aspect_ratio": "1/1",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Promo Banner",
+      "locales": {
+        "en": {
+          "name": "Promo Banner"
+        },
+        "ar": {
+          "name": "بانر ترويجي"
+        }
+      },
+      "settings": {
+        "cta_link": "/products"
+      }
+    }
+  ]
+}

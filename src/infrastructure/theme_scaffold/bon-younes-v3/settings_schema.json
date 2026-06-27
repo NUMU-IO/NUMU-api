@@ -1,0 +1,115 @@
+[
+  {
+    "name": "Brand",
+    "settings": [
+      {
+        "type": "color",
+        "id": "primary_color",
+        "label": "Espresso (primary)",
+        "default": "#3A2418"
+      },
+      {
+        "type": "color",
+        "id": "accent_color",
+        "label": "Caramel accent",
+        "default": "#B07A4A"
+      },
+      {
+        "type": "color",
+        "id": "background_color",
+        "label": "Cream background",
+        "default": "#F7F1E8"
+      },
+      {
+        "type": "text",
+        "id": "brand_name",
+        "label": "Brand name",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "id": "brand_name_ar",
+        "label": "Brand name (Arabic)",
+        "default": ""
+      },
+      {
+        "type": "image_picker",
+        "id": "logo_url",
+        "label": "Logo",
+        "default": "",
+        "aspect_ratio": "1/1"
+      },
+      {
+        "type": "select",
+        "id": "logo_shape",
+        "label": "Logo shape",
+        "label_ar": "شكل الشعار",
+        "default": "none",
+        "info": "Crops the logo into a shape. 'Original' keeps it untouched. Circle/Square/Triangle look best with a square logo.",
+        "options": [
+          { "value": "none", "label": "Original", "label_ar": "الأصلي" },
+          { "value": "square", "label": "Square", "label_ar": "مربع" },
+          { "value": "rounded", "label": "Rounded square", "label_ar": "مربع بزوايا دائرية" },
+          { "value": "circle", "label": "Circle", "label_ar": "دائرة" },
+          { "value": "triangle", "label": "Triangle", "label_ar": "مثلث" }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "logo_size",
+        "label": "Logo size",
+        "label_ar": "حجم الشعار",
+        "default": "small",
+        "info": "Applies when a logo shape is chosen.",
+        "options": [
+          { "value": "small", "label": "Small", "label_ar": "صغير" },
+          { "value": "medium", "label": "Medium", "label_ar": "متوسط" },
+          { "value": "large", "label": "Large", "label_ar": "كبير" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Typography",
+    "settings": [
+      {
+        "type": "font_picker",
+        "id": "heading_font",
+        "label": "Heading font",
+        "default": "cormorant"
+      },
+      {
+        "type": "font_picker",
+        "id": "body_font",
+        "label": "Body font",
+        "default": "dm-sans"
+      }
+    ]
+  },
+  {
+    "name": "Layout",
+    "settings": [
+      {
+        "type": "select",
+        "id": "page_width",
+        "label": "Page width",
+        "default": "1240px",
+        "info": "Max width of the content area.",
+        "options": [
+          {
+            "value": "1120px",
+            "label": "Narrow (1120px)"
+          },
+          {
+            "value": "1240px",
+            "label": "Standard (1240px)"
+          },
+          {
+            "value": "1440px",
+            "label": "Wide (1440px)"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,94 @@
+{
+  "type": "rs-image-with-text",
+  "name": "Image With Text (Rabbitsocks)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "label": "Label",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "headline",
+      "type": "text",
+      "label": "Headline",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "headline_accent",
+      "type": "text",
+      "label": "Headline accent",
+      "label_ar": "تكملة العنوان",
+      "default": ""
+    },
+    {
+      "id": "text",
+      "type": "textarea",
+      "label": "Body text",
+      "label_ar": "النص",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Call to action"
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "image_url",
+      "type": "image_picker",
+      "label": "Image",
+      "label_ar": "الصورة",
+      "default": "",
+      "aspect_ratio": "4/5"
+    },
+    {
+      "id": "image_alt",
+      "type": "text",
+      "label": "Image alt text",
+      "label_ar": "النص البديل للصورة",
+      "default": ""
+    },
+    {
+      "id": "image_position",
+      "type": "select",
+      "label": "Image position",
+      "label_ar": "موضع الصورة",
+      "default": "right",
+      "options": [
+        {
+          "value": "left",
+          "label": "Left",
+          "label_ar": "يسار"
+        },
+        {
+          "value": "right",
+          "label": "Right",
+          "label_ar": "يمين"
+        }
+      ]
+    }
+  ]
+}

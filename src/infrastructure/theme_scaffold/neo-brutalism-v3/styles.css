@@ -1,0 +1,298 @@
+/* Theme: Neo Brutalism — Bold, raw, thick borders, hard shadows, neon accents */
+
+:root[data-theme="neo-brutalism"] {
+  --background: 55 92% 95%;
+  --foreground: 0 0% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 10%;
+  --primary: 82 78% 55%;
+  --primary-foreground: 0 0% 10%;
+  --secondary: 45 96% 56%;
+  --secondary-foreground: 0 0% 10%;
+  --muted: 55 40% 90%;
+  --muted-foreground: 0 0% 40%;
+  --accent: 330 86% 70%;
+  --accent-foreground: 0 0% 10%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 10%;
+  --input: 0 0% 10%;
+  --ring: 82 78% 55%;
+  --radius: 0.5rem;
+  --store-gradient: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.85));
+  --hero-bg: 55 92% 95%;
+  --badge-bg: 82 78% 55%;
+  --badge-fg: 0 0% 10%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 0 0% 10%;
+  --announcement-fg: 82 78% 55%;
+  --success: 142 70% 40%;
+  --warning: 45 96% 56%;
+
+  /* Neo Brutalism specific tokens */
+  --nb-border: 3px solid hsl(var(--foreground));
+  --nb-shadow: 4px 4px 0 hsl(var(--foreground));
+  --nb-shadow-sm: 2px 2px 0 hsl(var(--foreground));
+  --nb-shadow-lg: 6px 6px 0 hsl(var(--foreground));
+  --nb-shadow-hover: 6px 6px 0 hsl(var(--foreground));
+  --nb-shadow-active: 1px 1px 0 hsl(var(--foreground));
+  --nb-accent-shadow: 4px 4px 0 hsl(var(--primary) / 0.8);
+
+  /* Reset skeu variables */
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+
+  --sidebar-background: 55 92% 95%;
+  --sidebar-foreground: 0 0% 10%;
+  --sidebar-primary: 82 78% 55%;
+  --sidebar-primary-foreground: 0 0% 10%;
+  --sidebar-accent: 82 78% 85%;
+  --sidebar-accent-foreground: 0 0% 10%;
+  --sidebar-border: 0 0% 10%;
+  --sidebar-ring: 82 78% 55%;
+}
+
+/* ===== BASE ===== */
+:root[data-theme="neo-brutalism"] body {
+  background-color: hsl(var(--background));
+}
+
+/* ===== CARD — thick border + hard shadow ===== */
+:root[data-theme="neo-brutalism"] .nb-card {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+:root[data-theme="neo-brutalism"] .nb-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+
+/* ===== BUTTON — primary ===== */
+:root[data-theme="neo-brutalism"] .nb-btn {
+  background: hsl(var(--primary));
+  color: hsl(var(--foreground));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  position: relative;
+}
+:root[data-theme="neo-brutalism"] .nb-btn:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+:root[data-theme="neo-brutalism"] .nb-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--nb-shadow-active);
+}
+
+/* ===== BUTTON — secondary ===== */
+:root[data-theme="neo-brutalism"] .nb-btn-secondary {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  font-weight: 800;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+:root[data-theme="neo-brutalism"] .nb-btn-secondary:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+  background: hsl(var(--background));
+}
+:root[data-theme="neo-brutalism"] .nb-btn-secondary:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--nb-shadow-active);
+}
+
+/* ===== BUTTON — accent (pink/yellow) ===== */
+:root[data-theme="neo-brutalism"] .nb-btn-accent {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  font-weight: 800;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+:root[data-theme="neo-brutalism"] .nb-btn-accent:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--nb-shadow-hover);
+}
+:root[data-theme="neo-brutalism"] .nb-btn-accent:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--nb-shadow-active);
+}
+
+/* ===== INPUT — inset, thick border ===== */
+:root[data-theme="neo-brutalism"] .nb-input {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+  box-shadow: 3px 3px 0 hsl(var(--foreground)) inset;
+  font-weight: 600;
+}
+:root[data-theme="neo-brutalism"] .nb-input:focus {
+  box-shadow: 3px 3px 0 hsl(var(--primary)) inset;
+  outline: none;
+}
+
+/* ===== BADGE ===== */
+:root[data-theme="neo-brutalism"] .nb-badge {
+  background: hsl(var(--primary));
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--foreground));
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+:root[data-theme="neo-brutalism"] .nb-badge-pink {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--foreground));
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 900;
+}
+
+:root[data-theme="neo-brutalism"] .nb-badge-yellow {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--foreground));
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 900;
+}
+
+/* ===== CHIP / PILL ===== */
+:root[data-theme="neo-brutalism"] .nb-chip {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 700;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+:root[data-theme="neo-brutalism"] .nb-chip:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--nb-shadow);
+}
+:root[data-theme="neo-brutalism"] .nb-chip:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+:root[data-theme="neo-brutalism"] .nb-chip-active {
+  background: hsl(var(--primary));
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow-sm);
+  font-weight: 800;
+}
+
+/* ===== HEADER ===== */
+:root[data-theme="neo-brutalism"] .nb-header {
+  background: hsl(var(--primary));
+  border-bottom: var(--nb-border);
+}
+
+/* ===== FOOTER ===== */
+:root[data-theme="neo-brutalism"] .nb-footer {
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  border-top: 4px solid hsl(var(--primary));
+}
+
+/* ===== ANNOUNCEMENT ===== */
+:root[data-theme="neo-brutalism"] .nb-announcement {
+  background: hsl(var(--foreground));
+  color: hsl(var(--primary));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-bottom: 2px solid hsl(var(--primary));
+}
+
+/* ===== IMAGE FRAME ===== */
+:root[data-theme="neo-brutalism"] .nb-img-frame {
+  border: var(--nb-border);
+  box-shadow: var(--nb-shadow);
+  overflow: hidden;
+}
+
+/* ===== DIAGONAL BANNER ===== */
+:root[data-theme="neo-brutalism"] .nb-diagonal-banner {
+  background: hsl(var(--primary));
+  color: hsl(var(--foreground));
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transform: rotate(-3deg);
+  border-top: 2px solid hsl(var(--foreground));
+  border-bottom: 2px solid hsl(var(--foreground));
+  white-space: nowrap;
+}
+
+/* ===== MARQUEE TEXT ===== */
+:root[data-theme="neo-brutalism"] .nb-marquee {
+  background: hsl(var(--primary));
+  border-top: var(--nb-border);
+  border-bottom: var(--nb-border);
+  overflow: hidden;
+}
+
+@keyframes nb-scroll {
+  from { transform: translateX(100%); }
+  to { transform: translateX(-100%); }
+}
+
+:root[data-theme="neo-brutalism"] .nb-marquee-text {
+  animation: nb-scroll 20s linear infinite;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* ===== DIVIDER ===== */
+:root[data-theme="neo-brutalism"] .nb-divider {
+  height: 3px;
+  background: hsl(var(--foreground));
+  border: none;
+}
+
+/* ===== SECTION alternate bg ===== */
+:root[data-theme="neo-brutalism"] .nb-section-alt {
+  background: hsl(var(--card));
+  border-top: var(--nb-border);
+  border-bottom: var(--nb-border);
+}
+
+/* ===== TOGGLE ===== */
+:root[data-theme="neo-brutalism"] .nb-toggle {
+  background: hsl(var(--card));
+  border: var(--nb-border);
+}
+:root[data-theme="neo-brutalism"] .nb-toggle-active {
+  background: hsl(var(--primary));
+  border: var(--nb-border);
+  font-weight: 800;
+}
+
+/* ===== STAR ===== */
+:root[data-theme="neo-brutalism"] .nb-star {
+  filter: drop-shadow(1px 1px 0 hsl(var(--foreground)));
+}
+
+/* Force neo-brutalism palette for shared page classes */
+:root[data-theme="neo-brutalism"] .store-gradient {
+  background: linear-gradient(135deg, hsl(82 78% 55%), hsl(82 78% 45%)) !important;
+}

@@ -1,0 +1,71 @@
+{
+  "type": "lux-profile",
+  "name": "Account",
+  "name_ar": "الحساب",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Headings" },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Page title",
+      "label_ar": "عنوان الصفحة",
+      "default": "",
+      "info": "Shown in the breadcrumb. Defaults to My Account / حسابي."
+    },
+    {
+      "type": "text",
+      "id": "orders_title",
+      "label": "Orders heading",
+      "label_ar": "عنوان الطلبات",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "addresses_title",
+      "label": "Addresses heading",
+      "label_ar": "عنوان العناوين",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "settings_title",
+      "label": "Settings heading",
+      "label_ar": "عنوان الإعدادات",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "password_title",
+      "label": "Change-password heading",
+      "label_ar": "عنوان تغيير كلمة المرور",
+      "default": ""
+    },
+    { "type": "header", "content": "Layout" },
+    {
+      "type": "checkbox",
+      "id": "show_stats",
+      "label": "Show account stats",
+      "label_ar": "إظهار إحصائيات الحساب",
+      "default": true,
+      "info": "Order count and total spent in the sidebar."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Account",
+      "locales": {
+        "en": { "name": "Account" },
+        "ar": { "name": "الحساب" }
+      },
+      "settings": {
+        "title": "",
+        "orders_title": "",
+        "addresses_title": "",
+        "settings_title": "",
+        "password_title": "",
+        "show_stats": true
+      }
+    }
+  ]
+}

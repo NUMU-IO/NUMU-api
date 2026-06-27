@@ -1,0 +1,64 @@
+{
+  "type": "lux-newsletter",
+  "name": "Newsletter",
+  "name_ar": "النشرة البريدية",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Content" },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Eyebrow / label",
+      "label_ar": "نص الشارة",
+      "default": "",
+      "info": "Small uppercase label above the heading (e.g. Subscribe to Our Newsletter)."
+    },
+    {
+      "type": "text",
+      "id": "subtitle",
+      "label": "Heading",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    { "type": "header", "content": "Form" },
+    {
+      "type": "text",
+      "id": "placeholder",
+      "label": "Email placeholder",
+      "label_ar": "نص حقل البريد",
+      "default": "",
+      "info": "Placeholder shown inside the email input."
+    },
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "success_text",
+      "label": "Confirmation text",
+      "label_ar": "نص التأكيد",
+      "default": "",
+      "info": "Replaces the button label after a successful subscribe."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Newsletter",
+      "locales": {
+        "en": { "name": "Newsletter" },
+        "ar": { "name": "النشرة البريدية" }
+      },
+      "settings": {
+        "title": "",
+        "subtitle": "",
+        "placeholder": "",
+        "button_text": "",
+        "success_text": ""
+      }
+    }
+  ]
+}

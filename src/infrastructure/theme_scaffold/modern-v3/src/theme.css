@@ -1,0 +1,182 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────
+ * Ported from V2 Modern (numu-egyptian-bazaar/src/themes/modern/
+ * styles.css). The V2 root selector :root[data-theme="modern"] is
+ * retargeted to the V3 mount element [data-modern-v3-app] so the
+ * HSL + helper tokens reach the sections. Below the V2 block we add
+ * the --vn-* tokens + vn-* component classes that the page-level
+ * sections (product-detail / products-page / profile, ported from
+ * the proven Vionne V3 versions) depend on — re-mapped to Modern's
+ * clean teal palette so those pages render in Modern's identity.
+ * ─────────────────────────────────────────────────────────────── */
+
+/* Theme: Modern Minimal — Clean teal aesthetic */
+[data-modern-v3-app] {
+  --background: 40 20% 98%;
+  --foreground: 220 20% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 20% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 20% 10%;
+  --primary: 168 55% 38%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 40 30% 94%;
+  --secondary-foreground: 220 20% 10%;
+  --muted: 40 20% 94%;
+  --muted-foreground: 220 10% 46%;
+  --accent: 168 40% 92%;
+  --accent-foreground: 168 55% 25%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 40 15% 88%;
+  --input: 40 15% 88%;
+  --ring: 168 55% 38%;
+  --radius: 0.75rem;
+  --store-gradient: linear-gradient(135deg, hsl(168 55% 38%), hsl(168 55% 28%));
+  --hero-bg: 168 40% 96%;
+  --badge-bg: 168 55% 38%;
+  --badge-fg: 0 0% 100%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 168 55% 38%;
+  --announcement-fg: 0 0% 100%;
+  --success: 142 70% 40%;
+  --warning: 38 92% 50%;
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: 240 5.9% 10%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 240 4.8% 95.9%;
+  --sidebar-accent-foreground: 240 5.9% 10%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
+
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+}
+
+/* Force modern palette for shared page classes */
+[data-modern-v3-app] .store-gradient {
+  background: linear-gradient(135deg, hsl(168 55% 38%), hsl(168 55% 28%)) !important;
+}
+
+/* ─── Page-section tokens (--vn-*) re-mapped to Modern's palette ───
+ * The ported product-detail / products-page / profile sections read
+ * these tokens. We anchor them on Modern's teal/clean values (not
+ * Vionne's grayscale) so the catalogue + account pages look like
+ * Modern, not Vionne. */
+[data-modern-v3-app] {
+  --vn-white: #ffffff;
+  --vn-band: hsl(168 40% 96%);      /* --hero-bg, the soft teal band */
+  --vn-ink: hsl(220 20% 10%);       /* --foreground */
+  --vn-border: hsl(40 15% 88%);     /* --border */
+  --vn-muted: hsl(220 10% 46%);     /* --muted-foreground */
+  --vn-sale: hsl(0 84% 60%);        /* --destructive */
+}
+
+/* ─── Page-section component classes (vn-*) ───
+ * Mirror the subset of Vionne's vn-* classes the ported page sections
+ * use, styled for Modern (rounded, teal). */
+
+.vn-heading {
+  font-family: var(--heading-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--vn-ink);
+}
+
+.vn-eyebrow {
+  font-family: var(--body-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+  color: var(--vn-muted);
+}
+
+.vn-label {
+  font-family: var(--body-font, "Cairo"), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+}
+
+.vn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 44px;
+  padding: 0 1.5rem;
+  border-radius: 1rem;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 200ms ease, background-color 200ms ease, color 200ms ease, opacity 200ms ease, box-shadow 200ms ease;
+  cursor: pointer;
+}
+
+.vn-btn-filled {
+  background: linear-gradient(135deg, hsl(168 55% 38%), hsl(168 55% 28%));
+  color: var(--vn-white);
+  box-shadow: 0 4px 14px hsl(168 55% 38% / 0.25);
+}
+.vn-btn-filled:hover {
+  transform: translateY(-1px);
+  opacity: 0.92;
+}
+
+/* ─── Product card hover (used by PDP related rail + PLP cards) ─── */
+
+.vn-product-card .vn-product-image {
+  transition: transform 600ms ease, opacity 280ms ease;
+}
+.vn-product-card:hover .vn-product-image {
+  transform: scale(1.03);
+}
+
+.vn-product-card .vn-product-image-secondary {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+.vn-product-card:hover .vn-product-image-secondary {
+  opacity: 1;
+}
+
+/* ─── Shimmer (lazy media placeholder) ─── */
+
+.vn-shimmer {
+  background: linear-gradient(90deg, #ececec 0%, #f5f5f5 40%, #ececec 80%);
+  background-size: 200% 100%;
+  animation: vn-shimmer 1400ms ease-in-out infinite;
+}
+
+@keyframes vn-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vn-shimmer { animation: none; }
+}
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}

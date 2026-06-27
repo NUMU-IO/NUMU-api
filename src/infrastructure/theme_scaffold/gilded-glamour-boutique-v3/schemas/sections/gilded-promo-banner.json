@@ -1,0 +1,61 @@
+{
+  "type": "gilded-promo-banner",
+  "name": "Gilded Promo Banner",
+  "name_ar": "بانر ترويجي",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content",
+      "content_ar": "المحتوى"
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان",
+      "info": "Large scroll-fill statement. Wipes from muted to gold as it scrolls into view.",
+      "info_ar": "عبارة كبيرة تتلوّن من الرمادي إلى الذهبي أثناء التمرير.",
+      "default": "WHERE HERITAGE MEETS THE FUTURE"
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "عنوان فرعي",
+      "default": "Every thread tells a story, every silhouette commands a room, and every piece is destined to become an heirloom."
+    },
+    {
+      "type": "header",
+      "content": "Button",
+      "content_ar": "الزر"
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "info": "Leave empty to hide the button.",
+      "info_ar": "اتركه فارغًا لإخفاء الزر.",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    }
+  ],
+  "presets": [
+    {
+      "name": "Gilded Promo Banner",
+      "name_ar": "بانر ترويجي",
+      "settings": {
+        "headline": "WHERE HERITAGE MEETS THE FUTURE",
+        "subtitle": "Every thread tells a story, every silhouette commands a room, and every piece is destined to become an heirloom.",
+        "cta_text": "",
+        "cta_link": "/products"
+      }
+    }
+  ]
+}

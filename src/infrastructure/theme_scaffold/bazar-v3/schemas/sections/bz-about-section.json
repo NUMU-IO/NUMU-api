@@ -1,0 +1,254 @@
+{
+  "type": "bz-about-section",
+  "name": "Bazar About",
+  "name_ar": "بازار من نحن",
+  "settings": [
+    {
+      "type": "header",
+      "id": "hdr_hero",
+      "label": "Hero"
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "label_ar": "تسمية علوية",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "quote",
+      "label": "Quote",
+      "label_ar": "اقتباس",
+      "default": ""
+    },
+    {
+      "type": "image_picker",
+      "id": "image_url",
+      "label": "Background Image",
+      "label_ar": "صورة الخلفية",
+      "info": "Shown faded behind the hero. Optional.",
+      "aspect_ratio": "16/9"
+    },
+    {
+      "type": "header",
+      "id": "hdr_who",
+      "label": "Who we are"
+    },
+    {
+      "type": "text",
+      "id": "who_label",
+      "label": "Section Label",
+      "label_ar": "تسمية القسم",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "who_headline",
+      "label": "Section Headline",
+      "label_ar": "عنوان القسم",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "description",
+      "label": "Description",
+      "label_ar": "الوصف",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_marquee",
+      "label": "Marquee strip"
+    },
+    {
+      "type": "text",
+      "id": "marquee_text",
+      "label": "Marquee Text",
+      "label_ar": "نص الشريط",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_values",
+      "label": "Values"
+    },
+    {
+      "type": "text",
+      "id": "values_label",
+      "label": "Values Label",
+      "label_ar": "تسمية القيم",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "values_headline",
+      "label": "Values Headline",
+      "label_ar": "عنوان القيم",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_cta",
+      "label": "Call to action"
+    },
+    {
+      "type": "text",
+      "id": "cta_label",
+      "label": "CTA Label",
+      "label_ar": "تسمية الدعوة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_headline",
+      "label": "CTA Headline",
+      "label_ar": "عنوان الدعوة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "CTA Button Text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "CTA Button Link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    },
+    {
+      "type": "text",
+      "id": "contact_cta_text",
+      "label": "Contact CTA Text",
+      "label_ar": "نص زر التواصل",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "contact_cta_link",
+      "label": "Contact CTA Link",
+      "label_ar": "رابط التواصل",
+      "default": "/contact"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "value",
+      "name": "Value card",
+      "name_ar": "بطاقة قيمة",
+      "settings": [
+        {
+          "type": "select",
+          "id": "icon",
+          "label": "Icon",
+          "label_ar": "أيقونة",
+          "default": "gem",
+          "options": [
+            {
+              "value": "gem",
+              "label": "Gem",
+              "label_ar": "جوهرة"
+            },
+            {
+              "value": "shield",
+              "label": "Shield",
+              "label_ar": "درع"
+            },
+            {
+              "value": "users",
+              "label": "Community",
+              "label_ar": "مجتمع"
+            },
+            {
+              "value": "palette",
+              "label": "Craft",
+              "label_ar": "حرفة"
+            },
+            {
+              "value": "star",
+              "label": "Star",
+              "label_ar": "نجمة"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Title",
+          "label_ar": "العنوان",
+          "default": ""
+        },
+        {
+          "type": "textarea",
+          "id": "description",
+          "label": "Description",
+          "label_ar": "الوصف",
+          "default": ""
+        }
+      ]
+    }
+  ],
+  "max_blocks": 8,
+  "presets": [
+    {
+      "name": "Bazar About",
+      "locales": {
+        "en": {
+          "name": "Bazar About"
+        },
+        "ar": {
+          "name": "بازار من نحن"
+        }
+      },
+      "settings": {
+        "headline": "",
+        "who_headline": ""
+      },
+      "blocks": [
+        {
+          "type": "value",
+          "settings": {
+            "icon": "gem",
+            "title": "",
+            "description": ""
+          }
+        },
+        {
+          "type": "value",
+          "settings": {
+            "icon": "shield",
+            "title": "",
+            "description": ""
+          }
+        },
+        {
+          "type": "value",
+          "settings": {
+            "icon": "users",
+            "title": "",
+            "description": ""
+          }
+        },
+        {
+          "type": "value",
+          "settings": {
+            "icon": "palette",
+            "title": "",
+            "description": ""
+          }
+        }
+      ]
+    }
+  ]
+}

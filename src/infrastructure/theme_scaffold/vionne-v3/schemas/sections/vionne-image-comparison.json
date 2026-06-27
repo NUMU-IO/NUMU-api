@@ -1,0 +1,153 @@
+{
+  "type": "vionne-image-comparison",
+  "name": "Before / After (Vionne)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "eyebrow",
+      "type": "text",
+      "label": "Eyebrow",
+      "label_ar": "نص علوي",
+      "default": ""
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Media"
+    },
+    {
+      "id": "before_image",
+      "type": "image_picker",
+      "label": "\"Before\" image",
+      "label_ar": "صورة قبل",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "before_label",
+      "type": "text",
+      "label": "\"Before\" label",
+      "label_ar": "نص قبل",
+      "default": ""
+    },
+    {
+      "id": "after_image",
+      "type": "image_picker",
+      "label": "\"After\" image",
+      "label_ar": "صورة بعد",
+      "aspect_ratio": "3/4",
+      "default": ""
+    },
+    {
+      "id": "after_label",
+      "type": "text",
+      "label": "\"After\" label",
+      "label_ar": "نص بعد",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Behavior"
+    },
+    {
+      "id": "initial_position",
+      "type": "range",
+      "label": "Handle start position (%)",
+      "label_ar": "الموضع الابتدائي (%)",
+      "default": 50,
+      "min": 5,
+      "max": 95,
+      "step": 5
+    },
+    {
+      "id": "animate_to_center",
+      "type": "checkbox",
+      "label": "Animate handle to center on reveal",
+      "label_ar": "تحريك المقبض للمنتصف عند الظهور",
+      "default": true
+    },
+    {
+      "id": "show_labels",
+      "type": "checkbox",
+      "label": "Show before/after labels",
+      "label_ar": "إظهار شارات قبل/بعد",
+      "default": false
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "full_width",
+      "type": "checkbox",
+      "label": "Full-bleed (edge-to-edge)",
+      "label_ar": "ملء العرض",
+      "default": true
+    },
+    {
+      "id": "aspect",
+      "type": "select",
+      "label": "Aspect ratio",
+      "label_ar": "نسبة العرض إلى الارتفاع",
+      "default": "3-4",
+      "options": [
+        {
+          "label": "3 : 4 (portrait)",
+          "value": "3-4"
+        },
+        {
+          "label": "2 : 3",
+          "value": "2-3"
+        },
+        {
+          "label": "1 : 1",
+          "value": "1-1"
+        },
+        {
+          "label": "4 : 3",
+          "value": "4-3"
+        },
+        {
+          "label": "16 : 9",
+          "value": "16-9"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Before / After",
+      "locales": {
+        "en": {
+          "name": "Before / After"
+        },
+        "ar": {
+          "name": "قبل / بعد"
+        }
+      },
+      "settings": {
+        "initial_position": 50,
+        "animate_to_center": true,
+        "show_labels": true,
+        "full_width": true,
+        "aspect": "3-4"
+      }
+    }
+  ]
+}

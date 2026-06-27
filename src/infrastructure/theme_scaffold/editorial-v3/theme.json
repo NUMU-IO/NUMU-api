@@ -1,0 +1,137 @@
+{
+  "id": "editorial-v3",
+  "name": "Editorial (V3)",
+  "author": "NUMU",
+  "version": "0.3.6",
+  "layout": "single-column",
+  "description": "Editorial (V3) — bold fashion editorial with oversized typography and a dramatic green palette, ported faithfully from the V2 in-tree theme.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "ed-hero",
+            "settings": {
+              "cta_link": "/products",
+              "hero_image_url": ""
+            }
+          },
+          {
+            "type": "ed-categories",
+            "settings": {
+              "max_items": 0
+            }
+          },
+          {
+            "type": "ed-featured-collection",
+            "settings": {
+              "collection_tag": "new",
+              "view_all_link": "/products",
+              "product_count": 8,
+              "columns": 4
+            }
+          },
+          {
+            "type": "ed-promo-banner",
+            "settings": {
+              "cta_link": "/products",
+              "image_url": ""
+            }
+          },
+          {
+            "type": "ed-featured-collection",
+            "settings": {
+              "collection_tag": "bestseller",
+              "view_all_link": "/products",
+              "product_count": 8,
+              "columns": 4
+            }
+          },
+          {
+            "type": "ed-testimonials",
+            "settings": {}
+          },
+          {
+            "type": "ed-newsletter",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "ed-product-detail-section",
+            "settings": {
+              "show_rating": false,
+              "show_stock": true,
+              "show_guarantees": true,
+              "show_related_products": true,
+              "related_products_count": 4
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "ed-products-page-section",
+            "settings": {
+              "show_view_toggle": false,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "collection": {
+        "name": "Collection",
+        "sections": [
+          {
+            "type": "ed-products-page-section",
+            "settings": {
+              "show_view_toggle": false,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "ed-profile",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": []
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": []
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "ed-order-confirmation-section",
+            "settings": {
+              "show_emoji": false,
+              "show_progress": false,
+              "show_whatsapp": false,
+              "show_track_order": false
+            }
+          }
+        ]
+      }
+    }
+  }
+}

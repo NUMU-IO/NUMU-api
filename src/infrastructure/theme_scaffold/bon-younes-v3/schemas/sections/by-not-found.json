@@ -1,0 +1,36 @@
+{
+  "type": "by-not-found",
+  "name": "404 — Not found",
+  "settings": [
+    {
+      "type": "text",
+      "id": "status_label",
+      "label": "Status label",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subhead",
+      "label": "Subhead",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_label",
+      "label": "CTA label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_href",
+      "label": "CTA URL",
+      "default": "/products"
+    }
+  ]
+}

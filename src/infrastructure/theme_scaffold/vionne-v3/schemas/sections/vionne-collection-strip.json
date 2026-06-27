@@ -1,0 +1,148 @@
+{
+  "type": "vionne-collection-strip",
+  "name": "Collection Strip",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "type": "select",
+      "id": "layout",
+      "label": "Layout",
+      "label_ar": "التخطيط",
+      "default": "image-row",
+      "options": [
+        {
+          "value": "image-row",
+          "label": "Image row",
+          "label_ar": "صف صور"
+        },
+        {
+          "value": "text-strip",
+          "label": "Text strip",
+          "label_ar": "شريط نصي"
+        }
+      ]
+    },
+    {
+      "type": "header",
+      "content": "Item 1"
+    },
+    {
+      "type": "image_picker",
+      "id": "item_1_image",
+      "label": "Item 1 image",
+      "aspect_ratio": "4/5",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "item_1_label",
+      "label": "Item 1 label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "item_1_link",
+      "label": "Item 1 link",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 2"
+    },
+    {
+      "type": "image_picker",
+      "id": "item_2_image",
+      "label": "Item 2 image",
+      "aspect_ratio": "4/5",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "item_2_label",
+      "label": "Item 2 label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "item_2_link",
+      "label": "Item 2 link",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 3"
+    },
+    {
+      "type": "image_picker",
+      "id": "item_3_image",
+      "label": "Item 3 image",
+      "aspect_ratio": "4/5",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "item_3_label",
+      "label": "Item 3 label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "item_3_link",
+      "label": "Item 3 link",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Item 4"
+    },
+    {
+      "type": "image_picker",
+      "id": "item_4_image",
+      "label": "Item 4 image",
+      "aspect_ratio": "4/5",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "item_4_label",
+      "label": "Item 4 label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "item_4_link",
+      "label": "Item 4 link",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Collection Strip",
+      "locales": {
+        "en": {
+          "name": "Collection Strip"
+        },
+        "ar": {
+          "name": "شريط التشكيلات"
+        }
+      },
+      "settings": {
+        "layout": "image-row"
+      }
+    }
+  ]
+}

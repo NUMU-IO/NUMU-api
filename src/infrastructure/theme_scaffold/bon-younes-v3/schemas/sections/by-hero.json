@@ -1,0 +1,98 @@
+{
+  "type": "by-hero",
+  "name": "Hero",
+  "settings": [
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow (small label)",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "headline",
+      "label": "Headline",
+      "default": "",
+      "info": "Use the word 'with' to split the headline into two visual lines."
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "CTA label",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "CTA URL",
+      "default": "/products"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "drink",
+      "name": "Drink card",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label"
+        },
+        {
+          "type": "image_picker",
+          "id": "image",
+          "label": "Image",
+          "aspect_ratio": "3/4"
+        },
+        {
+          "type": "url",
+          "id": "href",
+          "label": "Link",
+          "default": "/products"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 12,
+  "presets": [
+    {
+      "name": "Hero with drink strip",
+      "locales": {
+        "ar": {
+          "name": "بانر مع شريط المشروبات"
+        }
+      },
+      "category": "hero",
+      "settings": {},
+      "blocks": [
+        {
+          "type": "drink",
+          "settings": {
+            "label": "",
+            "href": "/products"
+          }
+        },
+        {
+          "type": "drink",
+          "settings": {
+            "label": "",
+            "href": "/products"
+          }
+        },
+        {
+          "type": "drink",
+          "settings": {
+            "label": "",
+            "href": "/products"
+          }
+        }
+      ]
+    }
+  ]
+}

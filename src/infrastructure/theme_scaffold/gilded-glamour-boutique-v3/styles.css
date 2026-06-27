@@ -1,0 +1,10 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Gilded Glamour Boutique (V3) — contract pointer ONLY.
+ *
+ * The real, compiled stylesheet is dist/theme.css, produced by Vite's PostCSS
+ * pipeline from src/theme.css (@tailwind directives + the ported V2 gilded
+ * styles + the global-token bridge). This file exists only to satisfy the
+ * @numueg/theme-plugin required-files contract (a theme must ship a styles.css).
+ * The host loads dist/theme.css via external_theme.css_url; this file is never
+ * shipped. Do NOT add design tokens here — edit src/theme.css instead.
+ * ───────────────────────────────────────────────────────────────────────── */

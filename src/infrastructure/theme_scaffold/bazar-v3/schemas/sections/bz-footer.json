@@ -1,0 +1,162 @@
+{
+  "type": "bz-footer",
+  "name": "Bazar Footer",
+  "name_ar": "بازار تذييل",
+  "tag": "footer",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "label_ar": "اسم المتجر",
+      "default": "",
+      "info": "Leave empty to use the store name."
+    },
+    {
+      "type": "textarea",
+      "id": "footer_text",
+      "label": "Brand blurb",
+      "label_ar": "نبذة المتجر",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Newsletter"
+    },
+    {
+      "type": "text",
+      "id": "newsletter_title",
+      "label": "Newsletter title",
+      "label_ar": "عنوان النشرة",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "newsletter_copy",
+      "label": "Newsletter copy",
+      "label_ar": "نص النشرة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "newsletter_button_label",
+      "label": "Newsletter button",
+      "label_ar": "زر النشرة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "newsletter_button_success",
+      "label": "Newsletter button (subscribed)",
+      "label_ar": "زر النشرة (مشترك)",
+      "default": ""
+    }
+  ],
+  "blocks": [
+    {
+      "type": "column",
+      "name": "Link column",
+      "name_ar": "عمود روابط",
+      "settings": [
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Column title",
+          "label_ar": "عنوان العمود"
+        },
+        {
+          "type": "text",
+          "id": "link1_label",
+          "label": "Link 1 label",
+          "label_ar": "تسمية الرابط 1"
+        },
+        {
+          "type": "url",
+          "id": "link1_href",
+          "label": "Link 1 URL",
+          "label_ar": "رابط 1"
+        },
+        {
+          "type": "text",
+          "id": "link2_label",
+          "label": "Link 2 label",
+          "label_ar": "تسمية الرابط 2"
+        },
+        {
+          "type": "url",
+          "id": "link2_href",
+          "label": "Link 2 URL",
+          "label_ar": "رابط 2"
+        },
+        {
+          "type": "text",
+          "id": "link3_label",
+          "label": "Link 3 label",
+          "label_ar": "تسمية الرابط 3"
+        },
+        {
+          "type": "url",
+          "id": "link3_href",
+          "label": "Link 3 URL",
+          "label_ar": "رابط 3"
+        },
+        {
+          "type": "text",
+          "id": "link4_label",
+          "label": "Link 4 label",
+          "label_ar": "تسمية الرابط 4"
+        },
+        {
+          "type": "url",
+          "id": "link4_href",
+          "label": "Link 4 URL",
+          "label_ar": "رابط 4"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 4,
+  "presets": [
+    {
+      "name": "Bazar Footer",
+      "locales": {
+        "en": {
+          "name": "Bazar Footer"
+        },
+        "ar": {
+          "name": "بازار تذييل"
+        }
+      },
+      "settings": {
+        "newsletter_title": ""
+      },
+      "blocks": [
+        {
+          "type": "column",
+          "settings": {
+            "title": "",
+            "link1_label": "",
+            "link1_href": "/products",
+            "link2_label": "",
+            "link2_href": "/products?sort=newest",
+            "link3_label": "",
+            "link3_href": "/search"
+          }
+        },
+        {
+          "type": "column",
+          "settings": {
+            "title": "",
+            "link1_label": "",
+            "link1_href": "/shipping",
+            "link2_label": "",
+            "link2_href": "/returns",
+            "link3_label": "",
+            "link3_href": "/contact"
+          }
+        }
+      ]
+    }
+  ]
+}

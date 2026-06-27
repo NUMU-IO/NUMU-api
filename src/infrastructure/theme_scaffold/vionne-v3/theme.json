@@ -1,0 +1,342 @@
+{
+  "id": "vionne-v3",
+  "name": "Vionne (V3)",
+  "author": "NUMU",
+  "version": "0.4.11",
+  "layout": "single-column",
+  "description": "Vionne (V3) — refined grayscale storefront for modest fashion, ported faithfully from the V2 in-tree theme. Now with an editable Vionne header + footer included across every page.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "404": {
+        "name": "404 — Not found",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-not-found",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-slideshow",
+            "settings": {
+              "autoplay": true,
+              "interval": 10,
+              "height": "large",
+              "text_alignment": "start",
+              "slide_1_cta_link": "/products",
+              "slide_2_cta_link": "/products",
+              "slide_3_cta_link": "/about"
+            }
+          },
+          {
+            "type": "vionne-marquee",
+            "settings": {
+              "separator": "dot",
+              "size": "sm",
+              "color_scheme": "ink",
+              "direction": "left",
+              "speed_seconds": 30,
+              "pause_on_hover": true,
+              "padding_y": 14,
+              "show_borders": false
+            }
+          },
+          {
+            "type": "vionne-ugc-carousel",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "vionne-featured-collection",
+            "settings": {
+              "collection_tag": "new",
+              "view_all_link": "/products",
+              "product_count": 8,
+              "columns": 4
+            }
+          },
+          {
+            "type": "vionne-promo-banner",
+            "settings": {
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "vionne-featured-collection",
+            "settings": {
+              "collection_tag": "bestseller",
+              "view_all_link": "/products",
+              "product_count": 8,
+              "columns": 4
+            }
+          },
+          {
+            "type": "vionne-collection-strip",
+            "settings": {
+              "layout": "image-row",
+              "item_1_link": "/products",
+              "item_2_link": "/products",
+              "item_3_link": "/products",
+              "item_4_link": "/products"
+            }
+          },
+          {
+            "type": "vionne-featured-collection",
+            "settings": {
+              "collection_tag": "featured",
+              "view_all_link": "/products",
+              "product_count": 8,
+              "columns": 4
+            }
+          },
+          {
+            "type": "vionne-image-comparison",
+            "settings": {
+              "before_image": "https://picsum.photos/seed/vionne-before/900/1200",
+              "after_image": "https://picsum.photos/seed/vionne-after/900/1200",
+              "initial_position": 50,
+              "animate_to_center": true,
+              "aspect": "3-4",
+              "full_width": true,
+              "show_labels": false
+            }
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-product-detail",
+            "settings": {
+              "show_related_products": true,
+              "related_title": "You may also like"
+            }
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "show_category_subtitle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-about",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-contact",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-profile",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "account": {
+        "name": "Account",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-profile",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-cart",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "order-confirmation": {
+        "name": "Order confirmation",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-order-confirmation-section",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "collection": {
+        "name": "Collection",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-products-page",
+            "settings": {
+              "show_view_toggle": true,
+              "show_category_subtitle": true,
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "search": {
+        "name": "Search",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-search-results",
+            "settings": {
+              "columns_desktop": 4,
+              "columns_mobile": 2
+            }
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "page": {
+        "name": "Page",
+        "sections": [
+          {
+            "type": "vionne-header",
+            "settings": {}
+          },
+          {
+            "type": "vionne-footer",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

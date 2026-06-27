@@ -1,0 +1,278 @@
+{
+  "id": "bazar-v3",
+  "name": "Bazar (V3)",
+  "author": "NUMU",
+  "version": "0.4.8",
+  "layout": "single-column",
+  "description": "Bazar (V3) — bold Egyptian streetwear storefront. Amber + navy palette, souk-print product cards, wavy dividers, and a full multipage set (home, listing, product, cart, search, 404).",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "templates": {
+      "404": {
+        "name": "404 — Not found",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-not-found",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-hero",
+            "settings": {}
+          },
+          {
+            "type": "bz-marquee",
+            "settings": {}
+          },
+          {
+            "type": "bz-featured-collection",
+            "settings": {}
+          },
+          {
+            "type": "bz-image-with-text",
+            "settings": {}
+          },
+          {
+            "type": "bz-promo-banner",
+            "settings": {}
+          },
+          {
+            "type": "bz-testimonials",
+            "settings": {}
+          },
+          {
+            "type": "bz-newsletter",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "products": {
+        "name": "Products",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-product-grid",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-product-detail",
+            "settings": {}
+          },
+          {
+            "type": "bz-related-products",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "collection": {
+        "name": "Collection",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-product-grid",
+            "settings": {
+              "title": "COLLECTION"
+            }
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-cart",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "checkout": {
+        "name": "Checkout",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "search": {
+        "name": "Search",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-search-results",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "page": {
+        "name": "Page",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-rich-text",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "policy": {
+        "name": "Policy",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-rich-text",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "about": {
+        "name": "About",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-about-section",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "contact": {
+        "name": "Contact",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-contact",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "profile": {
+        "name": "Profile",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-profile",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      },
+      "order-confirmation": {
+        "name": "Order Confirmation",
+        "sections": [
+          {
+            "type": "bz-header",
+            "settings": {}
+          },
+          {
+            "type": "bz-order-confirmation",
+            "settings": {}
+          },
+          {
+            "type": "bz-footer",
+            "settings": {}
+          }
+        ]
+      }
+    }
+  }
+}

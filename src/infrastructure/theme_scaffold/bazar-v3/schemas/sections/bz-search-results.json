@@ -1,0 +1,56 @@
+{
+  "type": "bz-search-results",
+  "name": "Bazar Search Results",
+  "name_ar": "بازار نتائج البحث",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "placeholder_when_no_query",
+      "label": "Empty-query headline",
+      "label_ar": "عنوان البحث الفارغ",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "search_placeholder",
+      "label": "Search box placeholder",
+      "label_ar": "نص حقل البحث",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "no_results_text",
+      "label": "No-results copy",
+      "label_ar": "نص عدم وجود نتائج",
+      "default": ""
+    },
+    {
+      "type": "range",
+      "id": "columns_desktop",
+      "label": "Columns (desktop)",
+      "label_ar": "أعمدة (ديسكتوب)",
+      "min": 1,
+      "max": 5,
+      "step": 1,
+      "default": 4
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Search Results",
+      "locales": {
+        "en": {
+          "name": "Bazar Search Results"
+        },
+        "ar": {
+          "name": "بازار نتائج البحث"
+        }
+      },
+      "settings": {
+        "placeholder_when_no_query": "",
+        "columns_desktop": 4
+      }
+    }
+  ]
+}

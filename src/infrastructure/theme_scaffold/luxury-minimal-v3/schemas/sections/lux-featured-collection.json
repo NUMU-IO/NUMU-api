@@ -1,0 +1,121 @@
+{
+  "type": "lux-featured-collection",
+  "name": "Featured Collection",
+  "name_ar": "تشكيلة مميزة",
+  "settings": [
+    { "type": "header", "content": "Heading" },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title (eyebrow)",
+      "label_ar": "العنوان (الشارة)",
+      "default": "",
+      "info": "Small uppercase wide-tracked label on the left of the header row."
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": "",
+      "info": "Optional muted caption shown in the middle of the header row (desktop only)."
+    },
+    { "type": "header", "content": "View all link" },
+    {
+      "id": "view_all_text",
+      "type": "text",
+      "label": "View all text",
+      "label_ar": "نص عرض الكل",
+      "default": ""
+    },
+    {
+      "id": "view_all_link",
+      "type": "url",
+      "label": "View all link",
+      "label_ar": "رابط عرض الكل",
+      "default": "/products"
+    },
+    { "type": "header", "content": "Products" },
+    {
+      "id": "product_ids",
+      "type": "product",
+      "label": "Pick products (manual)",
+      "label_ar": "اختيار المنتجات يدوياً",
+      "default": [],
+      "info": "When set, these products override the automatic catalog list. Leave empty to show the store catalog."
+    },
+    {
+      "id": "collection_tag",
+      "type": "select",
+      "label": "Collection (auto-fill)",
+      "label_ar": "المجموعة (تعبئة تلقائية)",
+      "default": "new",
+      "info": "Informational only — products are sourced from the store catalog (tag buckets aren't available on the listing route).",
+      "options": [
+        { "value": "new", "label": "New Arrivals", "label_ar": "وصل حديثاً" },
+        { "value": "bestseller", "label": "Best Sellers", "label_ar": "الأكثر مبيعاً" }
+      ]
+    },
+    { "type": "header", "content": "Layout" },
+    {
+      "id": "product_count",
+      "type": "range",
+      "label": "Products to Show",
+      "label_ar": "عدد المنتجات",
+      "default": 4,
+      "min": 2,
+      "max": 12,
+      "step": 1,
+      "unit": ""
+    },
+    {
+      "id": "columns",
+      "type": "range",
+      "label": "Columns (Desktop)",
+      "label_ar": "الأعمدة (سطح المكتب)",
+      "default": 4,
+      "min": 2,
+      "max": 6,
+      "step": 1,
+      "unit": ""
+    }
+  ],
+  "blocks": [
+    {
+      "type": "product",
+      "name": "Product",
+      "name_ar": "منتج",
+      "settings": [
+        {
+          "id": "product",
+          "type": "product",
+          "label": "Product",
+          "label_ar": "المنتج",
+          "default": "",
+          "info": "Feature a specific product. Product blocks (in editor order) override both the manual list and the automatic catalog."
+        }
+      ]
+    }
+  ],
+  "max_blocks": 12,
+  "presets": [
+    {
+      "name": "Featured Collection",
+      "locales": {
+        "en": { "name": "Featured Collection" },
+        "ar": { "name": "تشكيلة مميزة" }
+      },
+      "settings": {
+        "title": "",
+        "subtitle": "",
+        "view_all_text": "",
+        "view_all_link": "/products",
+        "product_ids": [],
+        "collection_tag": "new",
+        "product_count": 4,
+        "columns": 4
+      },
+      "blocks": []
+    }
+  ]
+}

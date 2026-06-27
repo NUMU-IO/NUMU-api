@@ -1,0 +1,49 @@
+{
+  "type": "rs-hero",
+  "name": "Hero (Rabbitsocks)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "badge_text",
+      "type": "text",
+      "label": "Collection label",
+      "label_ar": "عنوان التشكيلة",
+      "default": ""
+    },
+    {
+      "id": "headline",
+      "type": "textarea",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "id": "subtitle",
+      "type": "textarea",
+      "label": "Subtitle",
+      "label_ar": "الوصف",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Call to action"
+    },
+    {
+      "id": "cta_text",
+      "type": "text",
+      "label": "Button text",
+      "label_ar": "نص الزر",
+      "default": ""
+    },
+    {
+      "id": "cta_link",
+      "type": "url",
+      "label": "Button link",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    }
+  ]
+}

@@ -210,6 +210,15 @@ class ScaffoldThemeRequest(BaseModel):
 
     name: str = Field(default="My Theme", max_length=120)
     theme_id: str | None = Field(default=None, max_length=120)
+    source: str | None = Field(
+        default=None,
+        max_length=120,
+        description=(
+            "Bundled theme source to seed from (e.g. 'empire-v3'). When "
+            "omitted, the store's active theme source is used, falling back "
+            "to the generic starter."
+        ),
+    )
     overwrite: bool = Field(
         default=False, description="Wipe an existing workspace first"
     )

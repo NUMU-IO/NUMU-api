@@ -1,0 +1,193 @@
+{
+  "type": "vionne-header",
+  "name": "Vionne Header",
+  "name_ar": "ترويسة فيون",
+  "tag": "header",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "label_ar": "اسم المتجر",
+      "default": "",
+      "info": "Leave empty to use the store name."
+    },
+    {
+      "type": "image_picker",
+      "id": "logo_url",
+      "label": "Logo",
+      "label_ar": "الشعار",
+      "info": "Shown centered. Falls back to the brand name wordmark."
+    },
+    {
+      "type": "header",
+      "content": "Announcement bar"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_announcement",
+      "label": "Show announcement bar",
+      "label_ar": "إظهار شريط الإعلان",
+      "default": false
+    },
+    {
+      "type": "text",
+      "id": "announcement_text",
+      "label": "Announcement text",
+      "label_ar": "نص الإعلان",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Icons"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_search",
+      "label": "Show search icon",
+      "label_ar": "إظهار أيقونة البحث",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_account",
+      "label": "Show account icon",
+      "label_ar": "إظهار أيقونة الحساب",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_cart",
+      "label": "Show cart icon",
+      "label_ar": "إظهار أيقونة السلة",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Navigation"
+    },
+    {
+      "type": "link_list_picker",
+      "id": "header_menu_handle",
+      "label": "Header menu",
+      "label_ar": "قائمة الهيدر",
+      "default": "main-menu",
+      "info": "Pick a menu from Online Store → Navigation. Links to hidden/unpublished pages drop automatically. Falls back to the links below when the menu is empty.",
+      "info_ar": "اختاري قائمة من متجر إلكتروني ← التنقل. روابط الصفحات المخفية تختفي تلقائيًا."
+    },
+    {
+      "type": "text",
+      "id": "collections_label",
+      "label": "Collections menu label",
+      "label_ar": "تسمية قائمة التشكيلات",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "nav_shop_label",
+      "label": "Shop link label",
+      "label_ar": "تسمية رابط المتجر",
+      "default": "",
+      "info": "Used only when no navigation links are added below."
+    },
+    {
+      "type": "text",
+      "id": "nav_about_label",
+      "label": "About link label",
+      "label_ar": "تسمية رابط عن المتجر",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "nav_contact_label",
+      "label": "Contact link label",
+      "label_ar": "تسمية رابط التواصل",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Behaviour"
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_hide_on_scroll",
+      "label": "Hide header on scroll down",
+      "label_ar": "إخفاء الترويسة عند التمرير لأسفل",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_mobile_dock",
+      "label": "Show mobile bottom dock",
+      "label_ar": "إظهار شريط التنقل السفلي للجوال",
+      "default": true
+    }
+  ],
+  "blocks": [
+    {
+      "type": "nav_item",
+      "name": "Navigation link",
+      "name_ar": "رابط التنقل",
+      "settings": [
+        {
+          "type": "text",
+          "id": "label",
+          "label": "Label",
+          "label_ar": "التسمية"
+        },
+        {
+          "type": "url",
+          "id": "href",
+          "label": "URL",
+          "label_ar": "الرابط"
+        }
+      ]
+    }
+  ],
+  "max_blocks": 8,
+  "presets": [
+    {
+      "name": "Vionne Header",
+      "locales": {
+        "en": {
+          "name": "Vionne Header"
+        },
+        "ar": {
+          "name": "ترويسة فيون"
+        }
+      },
+      "settings": {
+        "show_announcement": false,
+        "show_search": true,
+        "show_account": true,
+        "show_cart": true,
+        "enable_hide_on_scroll": true,
+        "show_mobile_dock": true
+      },
+      "blocks": [
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "SHOP",
+            "href": "/products"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "ABOUT",
+            "href": "/pages/about"
+          }
+        },
+        {
+          "type": "nav_item",
+          "settings": {
+            "label": "CONTACT",
+            "href": "/pages/contact"
+          }
+        }
+      ]
+    }
+  ]
+}

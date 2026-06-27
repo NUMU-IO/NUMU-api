@@ -1,0 +1,144 @@
+{
+  "type": "bz-order-confirmation",
+  "name": "Bazar Order Confirmation",
+  "name_ar": "بازار تأكيد الطلب",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "id": "hdr_content",
+      "content": "Content"
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "label_ar": "تسمية علوية",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subtitle",
+      "label": "Subtitle",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "continue_shopping_text",
+      "label": "Continue-shopping button text",
+      "label_ar": "نص زر متابعة التسوق",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "continue_shopping_link",
+      "label": "Continue-shopping link",
+      "label_ar": "رابط متابعة التسوق",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "id": "hdr_labels",
+      "content": "Card labels"
+    },
+    {
+      "type": "text",
+      "id": "order_number_label",
+      "label": "Order number label",
+      "label_ar": "تسمية رقم الطلب",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "total_label",
+      "label": "Total label",
+      "label_ar": "تسمية الإجمالي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "delivery_label",
+      "label": "Delivery label",
+      "label_ar": "تسمية التوصيل",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "delivery_value",
+      "label": "Delivery value",
+      "label_ar": "قيمة التوصيل",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "status_label",
+      "label": "Status label",
+      "label_ar": "تسمية الحالة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "status_value",
+      "label": "Status value",
+      "label_ar": "قيمة الحالة",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "id": "hdr_display",
+      "content": "Display options"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_progress",
+      "label": "Show progress tracker",
+      "label_ar": "إظهار شريط التقدم",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_whatsapp",
+      "label": "Show WhatsApp message card",
+      "label_ar": "إظهار بطاقة واتساب",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_track_order",
+      "label": "Show track-order button",
+      "label_ar": "إظهار زر تتبع الطلب",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "track_order_text",
+      "label": "Track-order button text",
+      "label_ar": "نص زر التتبع",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar Order Confirmation",
+      "locales": {
+        "en": {
+          "name": "Bazar Order Confirmation"
+        },
+        "ar": {
+          "name": "بازار تأكيد الطلب"
+        }
+      },
+      "settings": {
+        "title": ""
+      }
+    }
+  ]
+}

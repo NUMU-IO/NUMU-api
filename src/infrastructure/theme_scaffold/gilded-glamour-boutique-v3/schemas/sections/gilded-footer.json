@@ -1,0 +1,231 @@
+{
+  "type": "gilded-footer",
+  "name": "Gilded Footer",
+  "name_ar": "تذييل جيلدد",
+  "tag": "footer",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Brand",
+      "content_ar": "العلامة التجارية"
+    },
+    {
+      "type": "text",
+      "id": "brand_name",
+      "label": "Brand name",
+      "label_ar": "اسم المتجر",
+      "default": "",
+      "info": "Leave empty to use the store name."
+    },
+    {
+      "type": "image_picker",
+      "id": "logo_url",
+      "label": "Logo",
+      "label_ar": "الشعار",
+      "default": "",
+      "info": "Falls back to the store logo / brand name text."
+    },
+    {
+      "type": "textarea",
+      "id": "footer_text",
+      "label": "Brand blurb",
+      "label_ar": "نبذة المتجر",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Newsletter",
+      "content_ar": "النشرة البريدية"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_newsletter",
+      "label": "Show newsletter signup",
+      "label_ar": "إظهار الاشتراك بالنشرة",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "newsletter_title",
+      "label": "Newsletter title",
+      "label_ar": "عنوان النشرة",
+      "default": "",
+      "visible_if": "{{ section.settings.show_newsletter }}"
+    },
+    {
+      "type": "text",
+      "id": "newsletter_subtitle",
+      "label": "Newsletter subtitle",
+      "label_ar": "وصف النشرة",
+      "default": "",
+      "visible_if": "{{ section.settings.show_newsletter }}"
+    },
+    {
+      "type": "header",
+      "content": "Social links",
+      "content_ar": "روابط التواصل"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "column",
+      "name": "Link column",
+      "name_ar": "عمود روابط",
+      "settings": [
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Column title",
+          "label_ar": "عنوان العمود",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "link1_label",
+          "label": "Link 1 label",
+          "label_ar": "تسمية الرابط 1",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link1_href",
+          "label": "Link 1 URL",
+          "label_ar": "رابط 1",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "link2_label",
+          "label": "Link 2 label",
+          "label_ar": "تسمية الرابط 2",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link2_href",
+          "label": "Link 2 URL",
+          "label_ar": "رابط 2",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "link3_label",
+          "label": "Link 3 label",
+          "label_ar": "تسمية الرابط 3",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link3_href",
+          "label": "Link 3 URL",
+          "label_ar": "رابط 3",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "link4_label",
+          "label": "Link 4 label",
+          "label_ar": "تسمية الرابط 4",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link4_href",
+          "label": "Link 4 URL",
+          "label_ar": "رابط 4",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "link5_label",
+          "label": "Link 5 label",
+          "label_ar": "تسمية الرابط 5",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link5_href",
+          "label": "Link 5 URL",
+          "label_ar": "رابط 5",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "link6_label",
+          "label": "Link 6 label",
+          "label_ar": "تسمية الرابط 6",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link6_href",
+          "label": "Link 6 URL",
+          "label_ar": "رابط 6",
+          "default": ""
+        },
+        {
+          "type": "text",
+          "id": "link7_label",
+          "label": "Link 7 label",
+          "label_ar": "تسمية الرابط 7",
+          "default": ""
+        },
+        {
+          "type": "url",
+          "id": "link7_href",
+          "label": "Link 7 URL",
+          "label_ar": "رابط 7",
+          "default": ""
+        }
+      ]
+    }
+  ],
+  "max_blocks": 4,
+  "presets": [
+    {
+      "name": "Gilded Footer",
+      "locales": {
+        "en": { "name": "Gilded Footer" },
+        "ar": { "name": "تذييل جيلدد" }
+      },
+      "settings": {
+        "brand_name": "",
+        "footer_text": "",
+        "show_newsletter": true,
+        "newsletter_title": "",
+        "newsletter_subtitle": ""
+      },
+      "blocks": [
+        {
+          "type": "column",
+          "settings": {
+            "title": "Shop",
+            "link1_label": "All Products",
+            "link1_href": "/products"
+          }
+        },
+        {
+          "type": "column",
+          "settings": {
+            "title": "Info",
+            "link1_label": "About",
+            "link1_href": "/pages/about",
+            "link2_label": "Shipping",
+            "link2_href": "/pages/shipping",
+            "link3_label": "Returns",
+            "link3_href": "/pages/returns",
+            "link4_label": "Privacy",
+            "link4_href": "/pages/privacy",
+            "link5_label": "Terms",
+            "link5_href": "/pages/terms",
+            "link6_label": "Contact",
+            "link6_href": "/pages/contact",
+            "link7_label": "Track Order",
+            "link7_href": "/track"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "type": "nb-announcement-bar",
+  "name": "Announcement Bar",
+  "name_ar": "شريط الإعلانات",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "label": "Announcement Text",
+      "label_ar": "نص الإعلان",
+      "default": ""
+    },
+    {
+      "id": "link_url",
+      "type": "url",
+      "label": "Link URL",
+      "label_ar": "رابط",
+      "default": ""
+    },
+    {
+      "id": "link_text",
+      "type": "text",
+      "label": "Link Text",
+      "label_ar": "نص الرابط",
+      "default": ""
+    },
+    {
+      "type": "header",
+      "content": "Behavior"
+    },
+    {
+      "id": "dismissible",
+      "type": "checkbox",
+      "label": "Can be dismissed",
+      "label_ar": "قابل للإغلاق",
+      "default": true
+    }
+  ]
+}

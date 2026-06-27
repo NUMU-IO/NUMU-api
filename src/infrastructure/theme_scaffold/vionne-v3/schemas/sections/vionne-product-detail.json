@@ -1,0 +1,167 @@
+{
+  "type": "vionne-product-detail",
+  "name": "Vionne Product Detail",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "show_rating",
+      "type": "checkbox",
+      "label": "Show rating",
+      "label_ar": "إظهار التقييم",
+      "default": true
+    },
+    {
+      "id": "show_stock",
+      "type": "checkbox",
+      "label": "Show stock status",
+      "label_ar": "إظهار حالة المخزون",
+      "default": true
+    },
+    {
+      "id": "show_guarantees",
+      "type": "checkbox",
+      "label": "Show trust guarantees",
+      "label_ar": "إظهار ضمانات الثقة",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Related products"
+    },
+    {
+      "id": "show_related_products",
+      "type": "checkbox",
+      "label": "Show related products",
+      "label_ar": "إظهار المنتجات المشابهة",
+      "default": true
+    },
+    {
+      "id": "related_products_count",
+      "type": "range",
+      "label": "Related products count",
+      "label_ar": "عدد المنتجات المشابهة",
+      "default": 4,
+      "min": 0,
+      "max": 8,
+      "step": 1
+    },
+    {
+      "id": "related_title",
+      "type": "text",
+      "label": "Related section title",
+      "label_ar": "عنوان قسم المنتجات المشابهة",
+      "default": "You may also like"
+    },
+    {
+      "type": "header",
+      "content": "Gallery"
+    },
+    {
+      "id": "gallery_aspect",
+      "type": "select",
+      "label": "Main image ratio",
+      "label_ar": "نسبة الصورة",
+      "default": "3-4",
+      "options": [
+        {
+          "value": "3-4",
+          "label": "3:4 (portrait)"
+        },
+        {
+          "value": "4-5",
+          "label": "4:5"
+        },
+        {
+          "value": "1-1",
+          "label": "1:1 (square)"
+        },
+        {
+          "value": "4-3",
+          "label": "4:3"
+        }
+      ]
+    },
+    {
+      "type": "header",
+      "content": "Description"
+    },
+    {
+      "id": "show_description",
+      "type": "checkbox",
+      "label": "Show description",
+      "label_ar": "إظهار الوصف",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Trust guarantees"
+    },
+    {
+      "id": "guarantee_1_label",
+      "type": "text",
+      "label": "Guarantee 1 title",
+      "label_ar": "ضمان 1 عنوان",
+      "default": ""
+    },
+    {
+      "id": "guarantee_1_desc",
+      "type": "text",
+      "label": "Guarantee 1 detail",
+      "label_ar": "ضمان 1 تفصيل",
+      "default": ""
+    },
+    {
+      "id": "guarantee_2_label",
+      "type": "text",
+      "label": "Guarantee 2 title",
+      "label_ar": "ضمان 2 عنوان",
+      "default": ""
+    },
+    {
+      "id": "guarantee_2_desc",
+      "type": "text",
+      "label": "Guarantee 2 detail",
+      "label_ar": "ضمان 2 تفصيل",
+      "default": ""
+    },
+    {
+      "id": "guarantee_3_label",
+      "type": "text",
+      "label": "Guarantee 3 title",
+      "label_ar": "ضمان 3 عنوان",
+      "default": ""
+    },
+    {
+      "id": "guarantee_3_desc",
+      "type": "text",
+      "label": "Guarantee 3 detail",
+      "label_ar": "ضمان 3 تفصيل",
+      "default": ""
+    }
+  ],
+  "presets": [
+    {
+      "name": "Product Detail",
+      "locales": {
+        "en": {
+          "name": "Product Detail"
+        },
+        "ar": {
+          "name": "تفاصيل المنتج"
+        }
+      },
+      "settings": {
+        "show_rating": true,
+        "show_stock": true,
+        "show_guarantees": true,
+        "show_related_products": true,
+        "related_products_count": 4,
+        "show_description": true,
+        "gallery_aspect": "3-4"
+      }
+    }
+  ]
+}

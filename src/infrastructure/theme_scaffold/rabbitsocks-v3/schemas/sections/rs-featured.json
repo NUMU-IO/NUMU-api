@@ -1,0 +1,52 @@
+{
+  "type": "rs-featured",
+  "name": "Featured Collection (Rabbitsocks)",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content"
+    },
+    {
+      "id": "label",
+      "type": "text",
+      "label": "Label",
+      "label_ar": "العنوان الفرعي",
+      "default": ""
+    },
+    {
+      "id": "title",
+      "type": "text",
+      "label": "Title",
+      "label_ar": "العنوان",
+      "default": ""
+    },
+    {
+      "id": "view_all_text",
+      "type": "text",
+      "label": "View all text",
+      "label_ar": "نص عرض الكل",
+      "default": ""
+    },
+    {
+      "id": "view_all_link",
+      "type": "url",
+      "label": "View all link",
+      "label_ar": "رابط عرض الكل",
+      "default": "/products"
+    },
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "id": "product_count",
+      "type": "range",
+      "label": "Products to show",
+      "label_ar": "عدد المنتجات",
+      "default": 8,
+      "min": 2,
+      "max": 12,
+      "step": 1
+    }
+  ]
+}

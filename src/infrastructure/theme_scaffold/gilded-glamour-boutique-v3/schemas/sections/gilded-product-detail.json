@@ -1,0 +1,179 @@
+{
+  "type": "gilded-product-detail",
+  "name": "Gilded Product Detail",
+  "name_ar": "تفاصيل المنتج",
+  "limit": 1,
+  "settings": [
+    { "type": "header", "content": "Breadcrumb", "content_ar": "مسار التنقل" },
+    {
+      "type": "text",
+      "id": "breadcrumb_home",
+      "label": "Home label",
+      "label_ar": "تسمية الرئيسية",
+      "default": "",
+      "info": "Leave blank to use the localized default (Home / الرئيسية)."
+    },
+    {
+      "type": "text",
+      "id": "breadcrumb_shop",
+      "label": "Shop label",
+      "label_ar": "تسمية المتجر",
+      "default": "",
+      "info": "Leave blank to use the localized default (Shop / المتجر)."
+    },
+
+    { "type": "header", "content": "Buy box", "content_ar": "صندوق الشراء" },
+    {
+      "type": "text",
+      "id": "quantity_label",
+      "label": "Quantity label",
+      "label_ar": "تسمية الكمية",
+      "default": "",
+      "info": "Leave blank to use the localized default (Quantity / الكمية)."
+    },
+    {
+      "type": "text",
+      "id": "add_to_cart_text",
+      "label": "Add-to-cart button text",
+      "label_ar": "نص زر الإضافة إلى السلة",
+      "default": "",
+      "info": "Leave blank to use the localized default (Add to Cart / أضف إلى السلة)."
+    },
+    {
+      "type": "text",
+      "id": "sold_out_text",
+      "label": "Sold-out button text",
+      "label_ar": "نص زر نفاد الكمية",
+      "default": "",
+      "info": "Leave blank to use the localized default (Out of Stock / نفذت الكمية)."
+    },
+    {
+      "type": "checkbox",
+      "id": "show_rating",
+      "label": "Show rating",
+      "label_ar": "إظهار التقييم",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_stock",
+      "label": "Show stock status",
+      "label_ar": "إظهار حالة المخزون",
+      "default": true
+    },
+
+    { "type": "header", "content": "Trust guarantees", "content_ar": "ضمانات الثقة" },
+    {
+      "type": "checkbox",
+      "id": "show_guarantees",
+      "label": "Show trust guarantees",
+      "label_ar": "إظهار ضمانات الثقة",
+      "default": true,
+      "info": "Authenticity / returns / shipping strip under the buy box."
+    },
+    {
+      "type": "text",
+      "id": "secure_label",
+      "label": "Authenticity label",
+      "label_ar": "عنوان الأصالة",
+      "default": "",
+      "info": "Leave blank to use the localized default (Authentic / أصلي)."
+    },
+    {
+      "type": "text",
+      "id": "secure_desc",
+      "label": "Authenticity detail",
+      "label_ar": "تفاصيل الأصالة",
+      "default": "",
+      "info": "Leave blank to use the localized default (100% Genuine / أصلي ١٠٠٪)."
+    },
+    {
+      "type": "text",
+      "id": "returns_label",
+      "label": "Returns label",
+      "label_ar": "عنوان الإرجاع",
+      "default": "",
+      "info": "Leave blank to use the localized default (Easy Returns / إرجاع سهل)."
+    },
+    {
+      "type": "text",
+      "id": "returns_desc",
+      "label": "Returns detail",
+      "label_ar": "تفاصيل الإرجاع",
+      "default": "",
+      "info": "Leave blank to use the localized default (14 days / خلال ١٤ يوم)."
+    },
+    {
+      "type": "text",
+      "id": "shipping_label",
+      "label": "Shipping label",
+      "label_ar": "عنوان الشحن",
+      "default": "",
+      "info": "Leave blank to use the localized default (Fast Shipping / شحن سريع)."
+    },
+    {
+      "type": "text",
+      "id": "shipping_desc",
+      "label": "Shipping detail",
+      "label_ar": "تفاصيل الشحن",
+      "default": "",
+      "info": "Leave blank to use the localized default (3-5 days / ٣-٥ أيام)."
+    },
+
+    { "type": "header", "content": "Related products", "content_ar": "المنتجات المشابهة" },
+    {
+      "type": "checkbox",
+      "id": "show_related_products",
+      "label": "Show related products",
+      "label_ar": "إظهار المنتجات المشابهة",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "related_title",
+      "label": "Related products title",
+      "label_ar": "عنوان المنتجات المشابهة",
+      "default": "",
+      "info": "Leave blank to use the localized default (Similar Products / منتجات مشابهة)."
+    },
+    {
+      "type": "range",
+      "id": "related_products_count",
+      "label": "Related products count",
+      "label_ar": "عدد المنتجات المشابهة",
+      "default": 4,
+      "min": 0,
+      "max": 8,
+      "step": 1,
+      "unit": "items"
+    }
+  ],
+  "presets": [
+    {
+      "name": "Product Detail",
+      "locales": {
+        "en": { "name": "Product Detail" },
+        "ar": { "name": "تفاصيل المنتج" }
+      },
+      "settings": {
+        "breadcrumb_home": "",
+        "breadcrumb_shop": "",
+        "quantity_label": "",
+        "add_to_cart_text": "",
+        "sold_out_text": "",
+        "show_rating": true,
+        "show_stock": true,
+        "show_guarantees": true,
+        "secure_label": "",
+        "secure_desc": "",
+        "returns_label": "",
+        "returns_desc": "",
+        "shipping_label": "",
+        "shipping_desc": "",
+        "show_related_products": true,
+        "related_title": "",
+        "related_products_count": 4
+      }
+    }
+  ]
+}

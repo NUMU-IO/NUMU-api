@@ -1,0 +1,60 @@
+{
+  "type": "bz-not-found",
+  "name": "Bazar 404",
+  "name_ar": "بازار 404",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "text",
+      "id": "status_label",
+      "label": "Status label",
+      "label_ar": "رمز الحالة",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": ""
+    },
+    {
+      "type": "textarea",
+      "id": "subhead",
+      "label": "Subhead",
+      "label_ar": "النص الفرعي",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "id": "cta_label",
+      "label": "CTA label",
+      "label_ar": "تسمية الزر",
+      "default": ""
+    },
+    {
+      "type": "url",
+      "id": "cta_href",
+      "label": "CTA URL",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    }
+  ],
+  "presets": [
+    {
+      "name": "Bazar 404",
+      "locales": {
+        "en": {
+          "name": "Bazar 404"
+        },
+        "ar": {
+          "name": "بازار 404"
+        }
+      },
+      "settings": {
+        "status_label": "",
+        "headline": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "type": "gilded-not-found",
+  "name": "404 — Not found",
+  "name_ar": "404 — غير موجود",
+  "limit": 1,
+  "settings": [
+    {
+      "type": "header",
+      "content": "Content",
+      "content_ar": "المحتوى"
+    },
+    {
+      "type": "text",
+      "id": "status_label",
+      "label": "Status label",
+      "label_ar": "رمز الحالة",
+      "info": "The oversized faded number behind the headline.",
+      "info_ar": "الرقم الكبير الباهت خلف العنوان.",
+      "default": "404"
+    },
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "label_ar": "العنوان الرئيسي",
+      "default": "Page not found"
+    },
+    {
+      "type": "textarea",
+      "id": "subhead",
+      "label": "Subhead",
+      "label_ar": "النص الفرعي",
+      "default": "The page you're looking for doesn't exist. Let's get you back to the collection."
+    },
+    {
+      "type": "header",
+      "content": "Call to action",
+      "content_ar": "زر الإجراء"
+    },
+    {
+      "type": "text",
+      "id": "cta_text",
+      "label": "CTA label",
+      "label_ar": "تسمية الزر",
+      "default": "Back to shop"
+    },
+    {
+      "type": "url",
+      "id": "cta_link",
+      "label": "CTA URL",
+      "label_ar": "رابط الزر",
+      "default": "/products"
+    }
+  ],
+  "presets": [
+    {
+      "name": "404 — Not found",
+      "name_ar": "404 — غير موجود",
+      "locales": {
+        "en": { "name": "404 — Not found" },
+        "ar": { "name": "404 — غير موجود" }
+      },
+      "settings": {
+        "status_label": "404",
+        "headline": "Page not found",
+        "subhead": "The page you're looking for doesn't exist. Let's get you back to the collection.",
+        "cta_text": "Back to shop",
+        "cta_link": "/products"
+      }
+    }
+  ]
+}

@@ -1,0 +1,294 @@
+/* Theme: Tech Wave — Futuristic dark with neon accents and glassmorphism */
+
+/* ===== CSS Variables ===== */
+:root[data-theme="tech-wave"] {
+  --background: 220 40% 7%;
+  --foreground: 210 20% 90%;
+  --card: 220 35% 12%;
+  --card-foreground: 210 20% 90%;
+  --popover: 220 35% 14%;
+  --popover-foreground: 210 20% 90%;
+  --primary: 195 100% 50%;
+  --primary-foreground: 220 40% 7%;
+  --secondary: 225 35% 18%;
+  --secondary-foreground: 210 20% 85%;
+  --muted: 220 30% 16%;
+  --muted-foreground: 210 15% 55%;
+  --accent: 260 100% 69%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 30% 20%;
+  --input: 220 30% 18%;
+  --ring: 195 100% 50%;
+  --radius: 0.75rem;
+  --store-gradient: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+  --hero-bg: 220 40% 9%;
+  --badge-bg: 195 100% 50%;
+  --badge-fg: 220 40% 7%;
+  --whatsapp: 142 70% 40%;
+  --whatsapp-foreground: 0 0% 100%;
+  --announcement-bg: 220 40% 12%;
+  --announcement-fg: 195 100% 70%;
+  --success: 142 70% 45%;
+  --warning: 38 92% 55%;
+
+  /* Tech Wave-specific tokens */
+  --tw-neon-color: var(--primary);
+  --tw-neon-glow-sm: 0 0 6px hsl(var(--primary) / 0.4), 0 0 12px hsl(var(--primary) / 0.2);
+  --tw-neon-glow-md: 0 0 10px hsl(var(--primary) / 0.5), 0 0 20px hsl(var(--primary) / 0.25), 0 0 40px hsl(var(--primary) / 0.1);
+  --tw-neon-glow-lg: 0 0 15px hsl(var(--primary) / 0.6), 0 0 30px hsl(var(--primary) / 0.3), 0 0 60px hsl(var(--primary) / 0.15);
+  --tw-glass-bg: hsl(var(--card) / 0.7);
+  --tw-glass-border: hsl(var(--foreground) / 0.1);
+  --tw-wave-color: hsl(var(--primary) / 0.05);
+
+  /* Reset skeu variables */
+  --skeu-shadow-sm: none;
+  --skeu-shadow-md: none;
+  --skeu-shadow-lg: none;
+  --skeu-shadow-inset: none;
+  --skeu-highlight: transparent;
+  --skeu-surface: transparent;
+  --skeu-texture: none;
+  --skeu-depth: 0;
+
+  --sidebar-background: 220 35% 10%;
+  --sidebar-foreground: 210 20% 90%;
+  --sidebar-primary: 195 100% 50%;
+  --sidebar-primary-foreground: 220 40% 7%;
+  --sidebar-accent: 260 100% 69%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 220 30% 20%;
+  --sidebar-ring: 195 100% 50%;
+}
+
+/* Body dark background — uses CSS variable so merchant overrides work */
+:root[data-theme="tech-wave"] body,
+:root[data-theme="tech-wave"] {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* ===== ANIMATIONS ===== */
+
+@keyframes tw-wave {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-8px) scaleY(1.02); }
+}
+
+@keyframes tw-pulse-glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes tw-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* ===== COMPONENT STYLES ===== */
+
+/* Glass card — frosted glass effect */
+:root[data-theme="tech-wave"] .tw-glass {
+  background: var(--tw-glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--tw-glass-border);
+}
+
+/* Card — dark surface with neon border on hover */
+:root[data-theme="tech-wave"] .tw-card {
+  background: hsl(var(--card) / 0.8);
+  border: 1px solid hsl(var(--border));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+}
+:root[data-theme="tech-wave"] .tw-card:hover {
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Neon button — primary CTA */
+:root[data-theme="tech-wave"] .tw-neon-btn {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.85) 100%);
+  border: none;
+  color: hsl(var(--primary-foreground));
+  font-weight: 700;
+  box-shadow: var(--tw-neon-glow-md);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+:root[data-theme="tech-wave"] .tw-neon-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 30%, hsl(0 0% 100% / 0.2) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: tw-shimmer 3s infinite;
+}
+:root[data-theme="tech-wave"] .tw-neon-btn:hover {
+  box-shadow: var(--tw-neon-glow-lg);
+  transform: translateY(-1px);
+}
+:root[data-theme="tech-wave"] .tw-neon-btn:active {
+  transform: translateY(0);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Secondary button — glass outline */
+:root[data-theme="tech-wave"] .tw-btn-secondary {
+  background: hsl(var(--card) / 0.6);
+  border: 1px solid hsl(var(--primary) / 0.3);
+  color: hsl(var(--primary) / 0.85);
+  font-weight: 600;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 0.3s ease;
+}
+:root[data-theme="tech-wave"] .tw-btn-secondary:hover {
+  border-color: hsl(var(--primary) / 0.6);
+  background: hsl(var(--card) / 0.8);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Neon text glow */
+:root[data-theme="tech-wave"] .tw-neon-text {
+  color: hsl(var(--primary) / 0.85);
+  text-shadow: 0 0 8px hsl(var(--primary) / 0.6), 0 0 20px hsl(var(--primary) / 0.3);
+}
+
+/* Wave section background */
+:root[data-theme="tech-wave"] .tw-wave-section {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background) / 0.9) 100%);
+}
+:root[data-theme="tech-wave"] .tw-wave-section::before {
+  content: "";
+  position: absolute;
+  bottom: -50%;
+  left: -10%;
+  right: -10%;
+  height: 100%;
+  background: radial-gradient(ellipse at center, hsl(var(--primary) / 0.06) 0%, transparent 70%);
+  animation: tw-wave 6s ease-in-out infinite;
+  pointer-events: none;
+}
+:root[data-theme="tech-wave"] .tw-wave-section::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -10%;
+  right: -10%;
+  height: 100%;
+  background: radial-gradient(ellipse at center, hsl(var(--accent) / 0.04) 0%, transparent 70%);
+  animation: tw-wave 8s ease-in-out infinite reverse;
+  pointer-events: none;
+}
+
+/* Header — dark glass bar */
+:root[data-theme="tech-wave"] .tw-header {
+  background: hsl(var(--background) / 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid hsl(var(--primary) / 0.15);
+  box-shadow: 0 1px 20px hsl(var(--primary) / 0.05);
+}
+
+/* Footer — deep dark gradient */
+:root[data-theme="tech-wave"] .tw-footer {
+  background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background) / 0.9) 100%);
+  border-top: 1px solid hsl(var(--primary) / 0.15);
+}
+
+/* Badge — neon glow */
+:root[data-theme="tech-wave"] .tw-badge {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-weight: 700;
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Badge — accent variant */
+:root[data-theme="tech-wave"] .tw-badge-accent {
+  background: hsl(var(--accent));
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 0 6px hsl(var(--accent) / 0.4), 0 0 12px hsl(var(--accent) / 0.2);
+}
+
+/* Announcement bar */
+:root[data-theme="tech-wave"] .tw-announcement {
+  background: linear-gradient(90deg, hsl(var(--background) / 0.9) 0%, hsl(var(--card)) 50%, hsl(var(--background) / 0.9) 100%);
+  border-bottom: 1px solid hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary) / 0.85);
+}
+
+/* Image frame */
+:root[data-theme="tech-wave"] .tw-img-frame {
+  border: 1px solid hsl(var(--border));
+  overflow: hidden;
+  position: relative;
+  transition: all 0.3s ease;
+}
+:root[data-theme="tech-wave"] .tw-img-frame:hover {
+  border-color: hsl(var(--primary) / 0.4);
+  box-shadow: var(--tw-neon-glow-sm);
+}
+
+/* Chip / pill */
+:root[data-theme="tech-wave"] .tw-chip {
+  background: hsl(var(--card) / 0.6);
+  border: 1px solid hsl(var(--border));
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+}
+:root[data-theme="tech-wave"] .tw-chip:hover {
+  border-color: hsl(var(--primary) / 0.4);
+}
+:root[data-theme="tech-wave"] .tw-chip-active {
+  background: hsl(var(--primary) / 0.15);
+  border-color: hsl(var(--primary) / 0.5);
+  color: hsl(var(--primary) / 0.85);
+}
+
+/* Inset / input */
+:root[data-theme="tech-wave"] .tw-inset {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  transition: border-color 0.2s ease;
+}
+:root[data-theme="tech-wave"] .tw-inset:focus {
+  border-color: hsl(var(--primary) / 0.6);
+  box-shadow: var(--tw-neon-glow-sm);
+  outline: none;
+}
+
+/* Divider */
+:root[data-theme="tech-wave"] .tw-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / 0.3) 50%, transparent 100%);
+  border: none;
+}
+
+/* Section */
+:root[data-theme="tech-wave"] .tw-section {
+  background: hsl(var(--background));
+  border-top: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* Star rating */
+:root[data-theme="tech-wave"] .tw-star {
+  filter: drop-shadow(0 0 3px hsl(38 92% 55% / 0.5));
+}
+
+
+/* Force tech-wave palette for shared page classes */
+:root[data-theme="tech-wave"] .store-gradient {
+  background: linear-gradient(135deg, hsl(195 100% 50%), hsl(280 80% 55%)) !important;
+}

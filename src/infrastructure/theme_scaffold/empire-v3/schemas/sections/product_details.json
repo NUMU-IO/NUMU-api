@@ -1,0 +1,12 @@
+{
+  "type": "product_details",
+  "name": "Product Details",
+  "locales": { "ar": { "name": "تفاصيل المنتج" } },
+  "settings": [
+    { "type": "text", "id": "add_to_cart_label", "label": "Add-to-cart label", "default": "أضف إلى السلة", "locales": { "ar": { "label": "نص زر الإضافة" } } },
+    { "type": "checkbox", "id": "show_compare_price", "label": "Show compare-at price", "default": true, "locales": { "ar": { "label": "إظهار السعر قبل الخصم" } } },
+    { "type": "checkbox", "id": "show_related", "label": "Show related products", "default": true, "locales": { "ar": { "label": "إظهار منتجات مشابهة" } } },
+    { "type": "checkbox", "id": "show_whatsapp", "label": "Show 'Ask via WhatsApp'", "default": true, "locales": { "ar": { "label": "إظهار زر واتساب" } } },
+    { "type": "checkbox", "id": "show_fbt", "label": "Show 'Frequently bought' in buy box", "default": true, "locales": { "ar": { "label": "إظهار 'يُشترى معاً' في صندوق الشراء" } } }
+  ]
+}
