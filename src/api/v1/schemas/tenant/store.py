@@ -40,8 +40,13 @@ class CreateStoreRequest(BaseModel):
         description="URL-friendly slug; auto-generated from name if omitted",
     )
     description: str | None = Field(None, description="Short store description")
-    default_currency: str = Field(
-        default="EGP", max_length=3, description="ISO 4217 default currency"
+    default_currency: str | None = Field(
+        default=None,
+        max_length=3,
+        description=(
+            "ISO 4217 default currency. When omitted, the store's market "
+            "(country) default is used — e.g. SAR for SA, EGP for EG."
+        ),
     )
     country: str = Field(
         default="EG",

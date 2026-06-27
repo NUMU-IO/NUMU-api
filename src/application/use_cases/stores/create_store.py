@@ -157,12 +157,16 @@ class CreateStoreUseCase:
         market = get_market(dto.country)
 
         # Parse currency. When the request omits an explicit currency
-        # (still the schema default "EGP"), prefer the market's default
-        # so a Saudi store onboards in SAR without the client having to
-        # restate it. An explicit, valid currency always wins.
-        try:
-            currency = Currency(dto.default_currency)
-        except ValueError:
+        # (default_currency is None), use the market's default so a Saudi
+        # store onboards in SAR without the client having to restate it. An
+        # explicit, valid currency always wins; an invalid one also falls
+        # back to the market default.
+        if dto.default_currency:
+            try:
+                currency = Currency(dto.default_currency)
+            except ValueError:
+                currency = market.default_currency
+        else:
             currency = market.default_currency
 
         # Default theme settings for NUMU-shop

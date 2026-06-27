@@ -76,7 +76,8 @@ class CreateStoreDTO(BaseDTO):
     )
     slug: str | None = None
     description: str | None = None
-    default_currency: str = "EGP"
+    # None → resolve from the store's market (country) default in the use case.
+    default_currency: str | None = None
     country: str = "EG"
     default_language: str = "ar"
     contact_email: str | None = None
