@@ -87,7 +87,9 @@ class GetCurrentUserUseCase:
 
 **repositories.py** example:
 ```python
-def get_user_repository(session: Annotated[AsyncSession, Depends(get_db)]) -> UserRepository:
+def get_user_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> UserRepository:
     return UserRepository(session)
 ```
 

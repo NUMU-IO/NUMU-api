@@ -78,7 +78,9 @@ def _categorize(name: str) -> str:
         return "Catalog"
     if any(k in n for k in ("order", "customer", "coupon", "shipment")):
         return "Commerce"
-    if any(k in n for k in ("tenant", "user", "role", "membership", "permission", "staff")):
+    if any(
+        k in n for k in ("tenant", "user", "role", "membership", "permission", "staff")
+    ):
         return "Identity"
     return "Other"
 
@@ -88,16 +90,16 @@ _READONLY_CATEGORIES = {"Payments", "Trust & Risk", "Events & Logs"}
 # Individually read-only models that fall outside those categories
 # (PII, message content, high-volume analytics rows).
 _READONLY_EXTRA = {
-    "TenantMembershipModel",     # access-control wiring — view only
-    "RoleModel",                 # RBAC roles — editing raw CRUD risks escalation
-    "CustomerAddressModel",      # PII (addresses)
-    "ChannelMessageModel",       # customer message content
-    "MessageLogModel",           # message delivery logs
-    "AutomationLogModel",        # automation execution logs
-    "PromotionEventModel",       # analytics
+    "TenantMembershipModel",  # access-control wiring — view only
+    "RoleModel",  # RBAC roles — editing raw CRUD risks escalation
+    "CustomerAddressModel",  # PII (addresses)
+    "ChannelMessageModel",  # customer message content
+    "MessageLogModel",  # message delivery logs
+    "AutomationLogModel",  # automation execution logs
+    "PromotionEventModel",  # analytics
     "PromotionEventDailyModel",  # analytics rollups
-    "PromotionDismissalModel",   # analytics
-    "PromotionDisplayModel",     # analytics
+    "PromotionDismissalModel",  # analytics
+    "PromotionDisplayModel",  # analytics
 }
 # Models that look like logs but are actually editable config.
 _EDITABLE_OVERRIDE = {"WebhookSubscriptionModel"}

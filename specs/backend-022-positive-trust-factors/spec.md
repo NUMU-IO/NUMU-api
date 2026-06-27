@@ -100,15 +100,15 @@ As the consumer of every `RiskAssessmentFinalisedEvent`, when the merchant has `
 - **FR-001:** The risk-scoring path (existing `risk_scoring_tasks.py`) is extended to compute the `customer_trust` factor as a 6th deterministic factor with weight 25%. The signed formula:
   ```python
   positive = (
-      successful_deliveries * 4 +
-      prepaid_orders * 6 +
-      whatsapp_response_rate_pct * 0.1 +
-      network_positive_events * 3
+      successful_deliveries * 4
+      + prepaid_orders * 6
+      + whatsapp_response_rate_pct * 0.1
+      + network_positive_events * 3
   )
   negative_adjustment = (
-      network_negative_events * 8 +     # RTOs across the network — heavily weighted
-      local_recent_refusals * 6 +        # Local refusals in last 30d
-      local_lifetime_refusals * 2        # Older local refusals — decayed weight
+      network_negative_events * 8  # RTOs across the network — heavily weighted
+      + local_recent_refusals * 6  # Local refusals in last 30d
+      + local_lifetime_refusals * 2  # Older local refusals — decayed weight
   )
   customer_trust = max(0, min(100, positive - negative_adjustment))
   ```
@@ -143,9 +143,11 @@ As the consumer of every `RiskAssessmentFinalisedEvent`, when the merchant has `
 ```python
 # src/core/entities/network_reputation.py — EXTENSION
 
+
 class NetworkEventPolarity(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
+
 
 # Add to existing NetworkEvent / NetworkReputation entity:
 polarity: Mapped[NetworkEventPolarity] = mapped_column(
@@ -160,10 +162,14 @@ polarity: Mapped[NetworkEventPolarity] = mapped_column(
 
 # Add fields:
 auto_approve_on_trust_enabled: Mapped[bool] = mapped_column(default=False)
-auto_approve_trust_threshold: Mapped[int] = mapped_column(default=80)  # CHECK: 70 <= x <= 95
+auto_approve_trust_threshold: Mapped[int] = mapped_column(
+    default=80
+)  # CHECK: 70 <= x <= 95
 auto_disabled_at: Mapped[datetime | None] = mapped_column(nullable=True)
 auto_disabled_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
-first_recovery_celebration_dismissed: Mapped[bool] = mapped_column(default=False)  # Per spec 009 CL-012
+first_recovery_celebration_dismissed: Mapped[bool] = mapped_column(
+    default=False
+)  # Per spec 009 CL-012
 ```
 
 ### Default formula constants
@@ -179,16 +185,16 @@ TRUST_PENALTY_LOCAL_RECENT_REFUSAL = 6
 TRUST_PENALTY_LOCAL_LIFETIME_REFUSAL = 2
 
 TRUST_TIER_BOUNDARIES = {
-    'none':   (0, 0),       # Customers with no history
-    'new':    (1, 29),      # Some history but below Bronze
-    'bronze': (30, 59),
-    'silver': (60, 79),
-    'gold':   (80, 100),
+    "none": (0, 0),  # Customers with no history
+    "new": (1, 29),  # Some history but below Bronze
+    "bronze": (30, 59),
+    "silver": (60, 79),
+    "gold": (80, 100),
 }
 
-AUTO_APPROVE_KILL_SWITCH_MIN_SAMPLE = 20      # Spec 010 CL-002
+AUTO_APPROVE_KILL_SWITCH_MIN_SAMPLE = 20  # Spec 010 CL-002
 AUTO_APPROVE_KILL_SWITCH_MAX_RTO_RATE = 0.05
-AUTO_APPROVE_RISK_CAP = 90                    # Spec 010 FR-002
+AUTO_APPROVE_RISK_CAP = 90  # Spec 010 FR-002
 ```
 
 ## Success Criteria *(mandatory)*

@@ -139,7 +139,7 @@ def seed_demo(client: httpx.Client, store_id: str) -> None:
     # like a healthy 200.
     try:
         body = r.json()
-        seed_errors = (body.get("errors") or body.get("data", {}).get("errors") or [])
+        seed_errors = body.get("errors") or body.get("data", {}).get("errors") or []
     except Exception:
         seed_errors = []
     if seed_errors:
@@ -199,12 +199,17 @@ def main() -> int:
         )
         # Emit a minimal summary so the workflow's downstream JSON parse
         # step doesn't crash on an empty file.
-        print(json.dumps({
-            "target": args.base_url,
-            "stores": [],
-            "all_ok": False,
-            "auth_error": "missing credentials",
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "target": args.base_url,
+                    "stores": [],
+                    "all_ok": False,
+                    "auth_error": "missing credentials",
+                },
+                indent=2,
+            )
+        )
         return 2
 
     subdomains = [s.strip() for s in args.stores.split(",") if s.strip()]
@@ -217,12 +222,17 @@ def main() -> int:
             logger.error("auth failure: %s", exc)
             # Same rationale as above — keep the JSON contract intact
             # even on the failure path so callers can `jq` safely.
-            print(json.dumps({
-                "target": args.base_url,
-                "stores": [],
-                "all_ok": False,
-                "auth_error": str(exc),
-            }, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "target": args.base_url,
+                        "stores": [],
+                        "all_ok": False,
+                        "auth_error": str(exc),
+                    },
+                    indent=2,
+                )
+            )
             return 2
 
         for sd in subdomains:

@@ -88,10 +88,16 @@ import re
 
 FIELD_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
+
 class FieldSelector:
     """Secure sparse fieldset handler with whitelist validation."""
 
-    def __init__(self, allowed_fields: Set[str], default_fields: Set[str], sensitive_fields: Set[str] = None):
+    def __init__(
+        self,
+        allowed_fields: Set[str],
+        default_fields: Set[str],
+        sensitive_fields: Set[str] = None,
+    ):
         self.allowed_fields = allowed_fields
         self.default_fields = default_fields
         self.sensitive_fields = sensitive_fields or set()
@@ -109,15 +115,28 @@ class FieldSelector:
         # Validate against whitelist
         invalid = requested - self.allowed_fields
         if invalid:
-            raise HTTPException(status_code=400, detail=f"Unknown fields: {sorted(invalid)}")
+            raise HTTPException(
+                status_code=400, detail=f"Unknown fields: {sorted(invalid)}"
+            )
 
         return requested
 ```
 
 ### Product Fields Configuration
 ```python
-PRODUCT_ALLOWED_FIELDS = {"id", "name", "slug", "price", "compare_at_price", "description",
-                          "images", "category_id", "stock_quantity", "is_active", "created_at"}
+PRODUCT_ALLOWED_FIELDS = {
+    "id",
+    "name",
+    "slug",
+    "price",
+    "compare_at_price",
+    "description",
+    "images",
+    "category_id",
+    "stock_quantity",
+    "is_active",
+    "created_at",
+}
 PRODUCT_DEFAULT_FIELDS = {"id", "name", "slug", "price", "images"}  # Mobile-optimized
 PRODUCT_SENSITIVE_FIELDS = {"cost_price", "supplier_id", "internal_notes"}
 ```
@@ -153,10 +172,10 @@ from fastapi_pagination import add_pagination
 from fastapi_pagination.cursor import CursorPage, CursorParams
 from fastapi_pagination.ext.sqlalchemy import paginate
 
+
 # Cursor pagination dependency
 async def get_products_cursor(
-    db: AsyncSession,
-    params: CursorParams = Depends()
+    db: AsyncSession, params: CursorParams = Depends()
 ) -> CursorPage[ProductOut]:
     # CRITICAL: Always order by unique column(s) - include primary key
     query = select(Product).order_by(Product.created_at.desc(), Product.id.desc())
@@ -167,6 +186,7 @@ async def get_products_cursor(
 ```python
 # src/api/v1/schemas/common.py
 from fastapi_pagination.cursor import CursorPage
+
 
 class CursorPaginatedResponse(BaseModel, Generic[T]):
     items: list[T]
@@ -215,6 +235,7 @@ pip install redis>=7.1.0
 ```python
 # Key patterns
 "numu:v1:products:store:{store_id}:cat:{category_id}:p:{page}:l:{limit}"
+
 "numu:v1:products:store:{store_id}:detail:{product_id}"
 "numu:v1:categories:store:{store_id}:tree"
 "numu:v1:categories:store:{store_id}:branch:{parent_id}"
@@ -229,12 +250,13 @@ from typing import Optional, Any
 import json
 import hashlib
 
+
 class ProductCacheService:
     """Redis caching for product-related data."""
 
-    TTL_PRODUCT_LIST = 300      # 5 minutes
-    TTL_PRODUCT_DETAIL = 1800   # 30 minutes
-    TTL_CATEGORY_TREE = 3600    # 1 hour
+    TTL_PRODUCT_LIST = 300  # 5 minutes
+    TTL_PRODUCT_DETAIL = 1800  # 30 minutes
+    TTL_CATEGORY_TREE = 3600  # 1 hour
 
     def __init__(self, redis: aioredis.Redis):
         self.redis = redis
@@ -246,7 +268,7 @@ class ProductCacheService:
         category_id: Optional[int],
         page: int,
         limit: int,
-        filters_hash: str
+        filters_hash: str,
     ) -> Optional[dict]:
         key = self._products_key(store_id, category_id, page, limit, filters_hash)
         cached = await self.redis.get(key)
@@ -259,15 +281,21 @@ class ProductCacheService:
         page: int,
         limit: int,
         filters_hash: str,
-        data: dict
+        data: dict,
     ) -> None:
         key = self._products_key(store_id, category_id, page, limit, filters_hash)
-        await self.redis.setex(key, self.TTL_PRODUCT_LIST, json.dumps(data, default=str))
+        await self.redis.setex(
+            key, self.TTL_PRODUCT_LIST, json.dumps(data, default=str)
+        )
 
-    async def invalidate_product(self, store_id: int, product_id: int, category_id: int) -> None:
+    async def invalidate_product(
+        self, store_id: int, product_id: int, category_id: int
+    ) -> None:
         """Invalidate all caches related to a product."""
         # Delete specific product cache
-        await self.redis.delete(f"{self.prefix}:products:store:{store_id}:detail:{product_id}")
+        await self.redis.delete(
+            f"{self.prefix}:products:store:{store_id}:detail:{product_id}"
+        )
 
         # Delete all product list caches for this store/category
         pattern = f"{self.prefix}:products:store:{store_id}:cat:{category_id}:*"
@@ -291,7 +319,14 @@ class ProductCacheService:
         if keys:
             await self.redis.delete(*keys)
 
-    def _products_key(self, store_id: int, category_id: Optional[int], page: int, limit: int, filters_hash: str) -> str:
+    def _products_key(
+        self,
+        store_id: int,
+        category_id: Optional[int],
+        page: int,
+        limit: int,
+        filters_hash: str,
+    ) -> str:
         cat = category_id or "all"
         return f"{self.prefix}:products:store:{store_id}:cat:{cat}:f:{filters_hash}:p:{page}:l:{limit}"
 
@@ -418,6 +453,7 @@ pip install httpx  # For async HTTP client with timeout support
 # tests/performance/conftest.py
 from dataclasses import dataclass
 
+
 @dataclass
 class NetworkProfile:
     name: str
@@ -426,6 +462,7 @@ class NetworkProfile:
     latency_ms: int
     jitter_ms: int
     packet_loss_percent: float
+
 
 NETWORK_PROFILES = {
     "3g_slow": NetworkProfile("Slow 3G", 500, 250, 400, 100, 2.0),
@@ -441,6 +478,7 @@ import pytest
 import time
 import asyncio
 import httpx
+
 
 class TestAPIUnder3GConditions:
     """API performance tests simulating 3G network conditions."""
@@ -462,18 +500,16 @@ class TestAPIUnder3GConditions:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     "http://localhost:8000/api/v1/storefront/store/1/products",
-                    params={"limit": 15}  # 3G-optimized page size
+                    params={"limit": 15},  # 3G-optimized page size
                 )
                 return response
 
         result = benchmark.pedantic(
-            lambda: asyncio.run(make_request()),
-            rounds=10,
-            warmup_rounds=2
+            lambda: asyncio.run(make_request()), rounds=10, warmup_rounds=2
         )
 
         # Assert acceptable for 3G
-        assert benchmark.stats['mean'] < 3.0
+        assert benchmark.stats["mean"] < 3.0
 
     def test_response_size_under_3g_limit(self):
         """Verify response sizes are acceptable for 3G."""
@@ -481,11 +517,13 @@ class TestAPIUnder3GConditions:
 
         response = requests.get(
             "http://localhost:8000/api/v1/storefront/store/1/products",
-            params={"limit": 15, "fields": "id,name,price,images"}
+            params={"limit": 15, "fields": "id,name,price,images"},
         )
 
         # 3G target: <50KB for acceptable load time
-        assert len(response.content) < 50000, f"Response too large for 3G: {len(response.content)} bytes"
+        assert len(response.content) < 50000, (
+            f"Response too large for 3G: {len(response.content)} bytes"
+        )
 ```
 
 ---
@@ -510,6 +548,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 logger = structlog.get_logger(__name__)
+
 
 class ResponseTimeMiddleware(BaseHTTPMiddleware):
     """
@@ -587,8 +626,8 @@ Comprehensive performance tests for cache hit/miss, pagination, sparse fieldsets
 import pytest
 import time
 
-class TestCachePerformance:
 
+class TestCachePerformance:
     async def test_cache_hit_faster_than_miss(self, client, redis):
         """Verify cache hits are significantly faster than misses."""
         # First request (cache miss)
@@ -622,7 +661,6 @@ class TestCachePerformance:
 ```python
 # tests/performance/test_pagination_performance.py
 class TestPaginationPerformance:
-
     @pytest.mark.benchmark
     def test_cursor_pagination_constant_time(self, benchmark, client):
         """Verify cursor pagination has O(1) performance regardless of offset."""
@@ -642,7 +680,11 @@ class TestPaginationPerformance:
         result_page100 = benchmark.pedantic(lambda: paginate_to_page(cursor), rounds=10)
 
         # Performance should be within 20% regardless of position
-        assert abs(result_page1.stats['mean'] - result_page100.stats['mean']) / result_page1.stats['mean'] < 0.2
+        assert (
+            abs(result_page1.stats["mean"] - result_page100.stats["mean"])
+            / result_page1.stats["mean"]
+            < 0.2
+        )
 ```
 
 ---

@@ -108,9 +108,8 @@ async def get_dashboard_stats(
     not_excluded_order = OrderModel.tenant_id.notin_(excluded_tenant_ids)
     not_excluded_customer = CustomerModel.tenant_id.notin_(excluded_tenant_ids)
     not_excluded_tenant = (
-        (TenantModel.lifecycle_state != TenantLifecycleState.DEMO.value)
-        & (TenantModel.is_internal.is_(False))
-    )
+        TenantModel.lifecycle_state != TenantLifecycleState.DEMO.value
+    ) & (TenantModel.is_internal.is_(False))
 
     # --- Total revenue (paid orders) ---
     rev_result = await db.execute(
@@ -251,11 +250,17 @@ async def get_dashboard_stats(
     starter_features = PLAN_LIMITS["starter"]
     pro_features = PLAN_LIMITS["pro"]
 
-    starter_monthly_mrr = starter_monthly_count * starter_features.monthly_price_piasters
-    starter_annual_mrr = starter_annual_count * (starter_features.annual_price_piasters // 12)
+    starter_monthly_mrr = (
+        starter_monthly_count * starter_features.monthly_price_piasters
+    )
+    starter_annual_mrr = starter_annual_count * (
+        starter_features.annual_price_piasters // 12
+    )
     pro_monthly_mrr = pro_monthly_count * pro_features.monthly_price_piasters
     pro_annual_mrr = pro_annual_count * (pro_features.annual_price_piasters // 12)
-    total_mrr = starter_monthly_mrr + starter_annual_mrr + pro_monthly_mrr + pro_annual_mrr
+    total_mrr = (
+        starter_monthly_mrr + starter_annual_mrr + pro_monthly_mrr + pro_annual_mrr
+    )
 
     mrr = MRRBreakdown(
         total=total_mrr,
@@ -264,8 +269,10 @@ async def get_dashboard_stats(
         pro_monthly=pro_monthly_mrr,
         pro_annual=pro_annual_mrr,
         subscriber_count=(
-            starter_monthly_count + starter_annual_count
-            + pro_monthly_count + pro_annual_count
+            starter_monthly_count
+            + starter_annual_count
+            + pro_monthly_count
+            + pro_annual_count
         ),
     )
 

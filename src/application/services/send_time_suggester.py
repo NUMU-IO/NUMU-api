@@ -139,7 +139,7 @@ async def suggest(
 
     # Rank
     if use_open_rate:
-        candidates.sort(key=lambda c: (c.avg_open_rate or 0), reverse=True)
+        candidates.sort(key=lambda c: c.avg_open_rate or 0, reverse=True)
     else:
         candidates.sort(key=lambda c: c.avg_sent, reverse=True)
 

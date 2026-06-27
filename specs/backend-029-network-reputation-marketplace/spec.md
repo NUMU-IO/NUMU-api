@@ -78,7 +78,9 @@ class BuyerReputationOptOutModel(Base, ...):
     __tablename__ = "buyer_reputation_opt_out"
     phone_hash: Mapped[str] = mapped_column(primary_key=True)
     opted_out_at: Mapped[datetime] = mapped_column()
-    opted_out_via: Mapped[str] = mapped_column(String(32))  # 'checkout_prompt', 'dsar_request', etc.
+    opted_out_via: Mapped[str] = mapped_column(
+        String(32)
+    )  # 'checkout_prompt', 'dsar_request', etc.
 ```
 
 ## Success Criteria *(mandatory)*

@@ -77,14 +77,26 @@ class OtpCode(Base, UUIDMixin, TenantMixin, TimestampMixin):
         Index("ix_otp_codes_store_phone", "store_id", "phone_hash"),
         {"schema": "public"},
     )
-    store_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    store_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
     phone_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    language: Mapped[str] = mapped_column(String(2), nullable=False, server_default="'ar'")
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    attempts_left: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    failed_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    language: Mapped[str] = mapped_column(
+        String(2), nullable=False, server_default="'ar'"
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    attempts_left: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="3"
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    failed_send_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 ```
 
 ## Success Criteria *(mandatory)*

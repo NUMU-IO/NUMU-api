@@ -132,15 +132,15 @@ async def seed() -> None:
             )
         ).first()
 
-        version_values = dict(
-            bundle_url=bundle_url,
-            css_url=css_url,
-            manifest=manifest,
-            checksum=checksum,
-            is_latest=True,
-            published_at=now,
-            updated_at=now,
-        )
+        version_values = {
+            "bundle_url": bundle_url,
+            "css_url": css_url,
+            "manifest": manifest,
+            "checksum": checksum,
+            "is_latest": True,
+            "published_at": now,
+            "updated_at": now,
+        }
 
         if vrow:
             await session.execute(

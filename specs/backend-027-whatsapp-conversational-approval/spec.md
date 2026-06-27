@@ -87,15 +87,25 @@ As a merchant, at the end of each store-local day, I receive a single WhatsApp m
 ```python
 class MerchantWhatsAppGroupModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     __tablename__ = "merchant_whatsapp_groups"
-    __table_args__ = (UniqueConstraint("store_id", name="uq_wa_group_per_store"),
-                       {"schema": "public"})
+    __table_args__ = (
+        UniqueConstraint("store_id", name="uq_wa_group_per_store"),
+        {"schema": "public"},
+    )
     store_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     group_jid: Mapped[str] = mapped_column(String(64), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-    group_admin_phone_hashes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="'[]'")
-    last_posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_send_failure_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+    group_admin_phone_hashes: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default="'[]'"
+    )
+    last_posted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_send_failure_reason: Mapped[str | None] = mapped_column(
+        String(512), nullable=True
+    )
 ```
 
 ## Success Criteria *(mandatory)*
