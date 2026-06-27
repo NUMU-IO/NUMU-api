@@ -1096,7 +1096,7 @@ async def get_product_by_slug(
             attributes=product.attributes,
             seo_title=product.seo_title,
             seo_description=product.seo_description,
-            options=getattr(product, "options", None) or [],
+            options=_resolve_options_for_product(product),
             variants=variant_summaries,
             meta_catalog_id=product.meta_catalog_id,
             created_at=str(product.created_at),
@@ -1104,6 +1104,52 @@ async def get_product_by_slug(
         ),
         message="Product retrieved successfully",
     )
+
+
+def _resolve_options_for_product(product) -> list[dict]:
+    """Option axes for the PDP selector — with a legacy-field fallback.
+
+    Phase 8.1 stores axes in `product.options` ([{name, position, values}]),
+    written by the hub's "SKU-tracked variants" editor. But the hub's MAIN
+    product editor still writes axes to the legacy `attributes.variants` JSON
+    ([{name, options:[...values], nameAr, optionsAr, hexValues?, imageValues?}])
+    — the very field V2 themes read. A merchant who adds options there leaves
+    `product.options` empty, so the V3 PDP rendered no size/colour selector and
+    let the item be added without a choice.
+
+    When `product.options` is empty, derive the axes from `attributes.variants`
+    so those products render a selector on V3 too (matching V2). Real
+    `product.options` always wins when present.
+    """
+    options = list(getattr(product, "options", None) or [])
+    if options:
+        return options
+
+    attrs = getattr(product, "attributes", None) or {}
+    legacy = attrs.get("variants") if isinstance(attrs, dict) else None
+    if not isinstance(legacy, list):
+        return []
+
+    derived: list[dict] = []
+    for i, axis in enumerate(legacy):
+        if not isinstance(axis, dict):
+            continue
+        name = axis.get("name")
+        # Legacy stores the axis VALUES under the `options` key.
+        values = axis.get("options") or axis.get("values") or []
+        if not name or not isinstance(values, list) or not values:
+            continue
+        entry: dict = {"name": name, "position": i, "values": values}
+        if axis.get("nameAr"):
+            entry["name_ar"] = axis["nameAr"]
+        if axis.get("optionsAr"):
+            entry["values_ar"] = axis["optionsAr"]
+        if axis.get("hexValues"):
+            entry["hex_values"] = axis["hexValues"]
+        if axis.get("imageValues"):
+            entry["image_values"] = axis["imageValues"]
+        derived.append(entry)
+    return derived
 
 
 async def _resolve_variants_for_product(
