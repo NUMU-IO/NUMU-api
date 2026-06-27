@@ -236,7 +236,7 @@ async def update_platform_config(
         logger.info(
             "platform_default_theme_updated",
             extra={
-                "admin_email": admin.get("email", "unknown"),
+                "admin_id": str(admin),
                 "new_value": (
                     str(payload.default_marketplace_theme_id)
                     if payload.default_marketplace_theme_id
@@ -250,7 +250,7 @@ async def update_platform_config(
         logger.info(
             "platform_app_embeds_tab_toggled",
             extra={
-                "admin_email": admin.get("email", "unknown"),
+                "admin_id": str(admin),
                 "new_value": bool(payload.app_embeds_tab_enabled),
             },
         )
@@ -329,7 +329,7 @@ async def update_meta_credentials(
 
     logger.info(
         "Meta credentials updated by admin %s",
-        _admin.get("email", "unknown"),
+        str(_admin),
     )
 
     # Redact secrets in response
