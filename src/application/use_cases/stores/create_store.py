@@ -1,5 +1,6 @@
 """Create store use case."""
 
+import logging
 import re
 import uuid
 from uuid import UUID
@@ -16,6 +17,8 @@ from src.core.interfaces.repositories.onboarding_repository import (
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency
 from src.infrastructure.tenancy.service import TenantService
+
+logger = logging.getLogger(__name__)
 
 # Reserved subdomains that cannot be used
 RESERVED_SUBDOMAINS = {
@@ -247,6 +250,50 @@ class CreateStoreUseCase:
 
             await init_onboarding_for_store(
                 self.onboarding_repository, created_store.id
+            )
+
+        # Apply the admin-configured platform default theme so a brand-new
+        # store opens on whatever was set in numu-admin → platform config
+        # (install + activate its marketplace bundle). Best-effort and last:
+        # any failure (no default set, or the default theme has no built
+        # bundle yet) leaves the hardcoded default_theme_settings in place
+        # and must never block onboarding. For bundle-less themes install
+        # raises before any DB mutation, so this is a clean no-op.
+        try:
+            from src.application.services.marketplace_service import (
+                MarketplaceService,
+            )
+            from src.application.services.platform_default_theme_service import (
+                PlatformDefaultThemeService,
+            )
+            from src.infrastructure.repositories.marketplace_repository import (
+                MarketplaceRepository,
+            )
+
+            session = self.store_repository.session
+            mp_repo = MarketplaceRepository(session)
+            default_theme_id = await PlatformDefaultThemeService(
+                session, mp_repo
+            ).get_default_theme_id()
+            if default_theme_id is not None:
+                mp_svc = MarketplaceService(marketplace_repo=mp_repo)
+                await mp_svc.install_theme(
+                    created_store.id, default_theme_id, user_id=owner_id
+                )
+                await mp_svc.activate_theme(
+                    created_store.id, default_theme_id, user_id=owner_id
+                )
+                logger.info(
+                    "store_default_theme_applied",
+                    extra={
+                        "store_id": str(created_store.id),
+                        "theme_id": str(default_theme_id),
+                    },
+                )
+        except Exception as exc:
+            logger.warning(
+                "default_theme_apply_skipped",
+                extra={"store_id": str(created_store.id), "error": str(exc)},
             )
 
         return StoreDTO.from_entity(created_store)
