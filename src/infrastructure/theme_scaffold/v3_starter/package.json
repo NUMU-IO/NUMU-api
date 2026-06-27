@@ -1,0 +1,27 @@
+{
+  "name": "__PKG_NAME__",
+  "version": "__VERSION__",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "numu-theme dev",
+    "build": "numu-theme build",
+    "check": "numu-theme check",
+    "lint": "numu-theme lint",
+    "verify": "numu-theme verify"
+  },
+  "dependencies": {
+    "@numueg/theme-sdk": "^0.5.0"
+  },
+  "devDependencies": {
+    "@numueg/theme-cli": "^0.5.0",
+    "@numueg/theme-plugin": "^0.5.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "vite": "^6.0.0",
+    "typescript": "^5.8.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

@@ -103,8 +103,14 @@ class IStoreThemeRepository(BaseRepository[StoreTheme]):
         theme_id: UUID,
         theme_version_id: UUID,
         customization_v3: dict | None = None,
+        installation_id: UUID | None = None,
     ) -> StoreTheme:
-        """Find-or-create the StoreTheme(store_id, theme_id) row and mark it active.
+        """Find-or-create a StoreTheme row for this store and mark it active.
+
+        When ``installation_id`` is supplied, that exact row is targeted
+        (V2 activate-this-installation path, needed once duplicates of the
+        same theme can coexist). Otherwise the row is resolved by
+        ``(store_id, theme_id)``.
 
         Assumes ``deactivate_all_for_store`` has already been called by
         the caller (the activation service). Does NOT itself deactivate

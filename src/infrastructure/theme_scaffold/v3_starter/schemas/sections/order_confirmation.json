@@ -1,0 +1,9 @@
+{
+  "type": "order_confirmation",
+  "name": "Order Confirmation",
+  "locales": { "ar": { "name": "تأكيد الطلب" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "شكراً لطلبك!", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "textarea", "id": "subtitle", "label": "Subtitle", "default": "تم استلام طلبك بنجاح. هنبعتلك تأكيد على بريدك.", "locales": { "ar": { "label": "العنوان الفرعي" } } }
+  ]
+}

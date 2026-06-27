@@ -80,6 +80,7 @@ class ThemeActivationService:
         reason: str,
         marketplace_theme_id: UUID | None = None,
         seed_customization_v3: dict[str, Any] | None = None,
+        installation_id: UUID | None = None,
     ) -> StoreTheme:
         """Swap the store's active theme to ``theme_id`` with full sync.
 
@@ -114,6 +115,11 @@ class ThemeActivationService:
                 ``customization_v3`` on the new active row. When None,
                 preserves whatever's already on the row (V2 path
                 semantics — merchant's prior customization survives).
+            installation_id: When provided, the exact ``store_themes.id``
+                row to activate. Required for the V2 path now that a store
+                can hold multiple installations of one theme (Duplicate);
+                ``(store_id, theme_id)`` alone would be ambiguous. Omit for
+                marketplace / dev-mode (one runtime row per theme).
 
         Returns:
             The activated ``StoreTheme`` entity (with eager-loaded
@@ -167,6 +173,7 @@ class ThemeActivationService:
             theme_id=theme_id,
             theme_version_id=theme_version_id,
             customization_v3=seed_customization_v3,
+            installation_id=installation_id,
         )
 
         # 4) Mirror to marketplace_theme_installations.

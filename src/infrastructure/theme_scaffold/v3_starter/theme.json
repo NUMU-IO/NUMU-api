@@ -1,0 +1,224 @@
+{
+  "id": "__THEME_ID__",
+  "name": "__THEME_NAME__",
+  "author": "__AUTHOR__",
+  "version": "__VERSION__",
+  "layout": "single-column",
+  "description": "__THEME_NAME__ — a premium NUMU V3 starter: bilingual (AR/EN), inline-editable, multi-currency, with a size-aware product page.",
+  "error_template": "templates/error.html",
+  "loading_template": "templates/loading.html",
+  "presets": {
+    "section_groups": {
+      "header": {
+        "name": "Header",
+        "sections": [
+          {
+            "type": "header",
+            "settings": {
+              "announcement_text": "شحن مجاني للطلبات فوق ٥٠٠ ج.م",
+              "menu_handle": "main-menu",
+              "show_search": true,
+              "show_account": true,
+              "show_cart": true
+            }
+          }
+        ]
+      },
+      "footer": {
+        "name": "Footer",
+        "sections": [
+          {
+            "type": "footer",
+            "settings": {
+              "description": "متجر مستقل يقدّم تشكيلة مختارة بعناية. تصميم نظيف، جودة تدوم.",
+              "ticker_text": "100% مستقل"
+            }
+          }
+        ]
+      }
+    },
+    "templates": {
+      "home": {
+        "name": "Home",
+        "sections": [
+          {
+            "type": "hero",
+            "settings": {
+              "headline": "اكتشف التشكيلة الجديدة",
+              "subtitle": "تسوق الآن",
+              "cta_text": "تسوق",
+              "cta_link": "/products",
+              "image_1": "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1600",
+              "image_2": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=1600",
+              "image_3": "https://images.unsplash.com/photo-1556906781-9a412961c28c?w=1600",
+              "autoplay": true
+            }
+          },
+          {
+            "type": "marquee",
+            "settings": { "text": "100% مستقل", "repeat": 10 }
+          },
+          {
+            "type": "featured_collection",
+            "settings": {
+              "title": "المتجر",
+              "view_all_link": "/products",
+              "max_items": 8
+            }
+          },
+          {
+            "type": "categories",
+            "settings": { "title": "تسوق حسب الفئة", "columns_desktop": 5 }
+          },
+          {
+            "type": "promo_banner",
+            "settings": {
+              "badge_text": "عرض محدود",
+              "headline": "خصم ٢٥٪ على كل الإكسسوارات",
+              "subtitle": "العرض ساري لنهاية الشهر. متفوتش الفرصة!",
+              "cta_text": "تسوق الآن",
+              "cta_link": "/products"
+            }
+          },
+          {
+            "type": "testimonials",
+            "settings": { "title": "رأي عملائنا" },
+            "blocks": [
+              { "type": "review", "settings": { "text": "جودة المنتجات فوق الممتازة والتوصيل سريع جداً.", "author": "ليلى م.", "city": "القاهرة", "rating": 5 } },
+              { "type": "review", "settings": { "text": "تصميم أنيق وخامات تدوم. تجربة شراء مريحة.", "author": "عمر أ.", "city": "الرياض", "rating": 5 } },
+              { "type": "review", "settings": { "text": "أفضل متجر تعاملت معه. أنصح به بشدة.", "author": "نادية ح.", "city": "دبي", "rating": 4 } }
+            ]
+          },
+          {
+            "type": "newsletter",
+            "settings": {
+              "title": "اشترك في نشرتنا",
+              "subtitle": "اعرف أول واحد عن العروض والمنتجات الجديدة",
+              "button_text": "اشترك",
+              "placeholder": "البريد الإلكتروني"
+            }
+          }
+        ]
+      },
+      "product": {
+        "name": "Product",
+        "sections": [
+          {
+            "type": "product_details",
+            "settings": {
+              "add_to_cart_label": "أضف إلى السلة",
+              "show_compare_price": true,
+              "show_related": false,
+              "show_whatsapp": true,
+              "show_fbt": true
+            }
+          }
+        ]
+      },
+      "products": {
+        "name": "All Products",
+        "sections": [
+          {
+            "type": "product_grid",
+            "settings": {
+              "title": "كل المنتجات",
+              "columns_desktop": 4,
+              "show_search": true,
+              "show_sort": true,
+              "show_categories": true
+            }
+          }
+        ]
+      },
+      "collection": {
+        "name": "Collection",
+        "sections": [
+          {
+            "type": "product_grid",
+            "settings": {
+              "title": "المجموعة",
+              "columns_desktop": 4,
+              "show_search": false,
+              "show_sort": true,
+              "show_categories": false
+            }
+          }
+        ]
+      },
+      "cart": {
+        "name": "Cart",
+        "sections": [
+          {
+            "type": "cart_summary",
+            "settings": {
+              "title": "سلة التسوق",
+              "checkout_label": "إتمام الطلب",
+              "empty_title": "السلة فاضية",
+              "empty_cta_label": "متابعة التسوق",
+              "empty_cta_link": "/products"
+            }
+          }
+        ]
+      },
+      "order-confirmation": {
+        "name": "Order Confirmation",
+        "sections": [
+          {
+            "type": "order_confirmation",
+            "settings": {
+              "title": "شكراً لطلبك!",
+              "subtitle": "تم استلام طلبك بنجاح. هنبعتلك تأكيد على بريدك."
+            }
+          }
+        ]
+      },
+      "search": {
+        "name": "Search",
+        "sections": [
+          {
+            "type": "search_results",
+            "settings": {
+              "title": "البحث",
+              "search_placeholder": "ابحث عن المنتجات…",
+              "columns_desktop": 4
+            }
+          }
+        ]
+      },
+      "page": {
+        "name": "Page",
+        "sections": [
+          {
+            "type": "rich_text",
+            "settings": {
+              "content": "<p>أضف محتوى صفحتك من إعدادات القسم.</p>",
+              "align": "start",
+              "width": "narrow"
+            }
+          }
+        ]
+      },
+      "404": {
+        "name": "404 — Not Found",
+        "sections": [
+          {
+            "type": "not_found",
+            "settings": {
+              "code": "404",
+              "title": "الصفحة غير موجودة",
+              "message": "يبدو أن الصفحة التي تبحث عنها غير متاحة أو تم نقلها.",
+              "cta_text": "العودة للتسوق",
+              "cta_link": "/products"
+            }
+          }
+        ]
+      },
+      "profile": {
+        "name": "Account",
+        "sections": [
+          { "type": "account", "settings": { "heading": "حسابي" } }
+        ]
+      }
+    }
+  }
+}

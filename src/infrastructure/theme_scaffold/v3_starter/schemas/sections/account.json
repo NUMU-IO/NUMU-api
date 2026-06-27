@@ -1,0 +1,8 @@
+{
+  "type": "account",
+  "name": "Account",
+  "locales": { "ar": { "name": "الحساب" } },
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "حسابي", "locales": { "ar": { "label": "العنوان" } } }
+  ]
+}

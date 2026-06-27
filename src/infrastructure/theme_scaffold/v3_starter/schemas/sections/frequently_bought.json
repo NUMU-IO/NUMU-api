@@ -1,0 +1,10 @@
+{
+  "type": "frequently_bought",
+  "name": "Frequently Bought Together",
+  "locales": { "ar": { "name": "يُشترى عادةً معاً" } },
+  "settings": [
+    { "type": "checkbox", "id": "enabled", "label": "Show this section", "default": true, "locales": { "ar": { "label": "إظهار القسم" } } },
+    { "type": "text", "id": "title", "label": "Title", "default": "يُشترى عادةً معاً", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "range", "id": "max_items", "label": "Max items", "default": 3, "min": 2, "max": 4, "step": 1, "locales": { "ar": { "label": "أقصى عدد عناصر" } } }
+  ]
+}

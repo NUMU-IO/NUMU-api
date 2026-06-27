@@ -37,9 +37,12 @@ from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.theme_v2 import (
     ActivateThemeResponse,
     CustomizeDraftRequest,
+    DuplicateThemeRequest,
     InstallThemeRequest,
+    RenameThemeRequest,
     StoreInstalledThemesResponse,
     StoreThemeInstallationResponse,
+    ThemeExportResponse,
 )
 from src.application.services.theme_service import ThemeService
 from src.core.entities.store import Store
@@ -84,6 +87,8 @@ def _serialize(inst: StoreTheme) -> StoreThemeInstallationResponse:
         store_id=str(inst.store_id),
         theme_id=str(inst.theme_id),
         theme_version_id=str(inst.theme_version_id),
+        name=inst.name,
+        display_name=inst.display_name,
         theme_slug=inst.theme_slug,
         theme_name=inst.theme_name,
         theme_type=inst.theme_type.value if inst.theme_type else None,
@@ -186,6 +191,81 @@ async def get_installation(
         store_id=store.id, installation_id=UUID(installation_id)
     )
     return SuccessResponse(data=_serialize(inst))
+
+
+@router.patch(
+    "/{installation_id}",
+    response_model=SuccessResponse[StoreThemeInstallationResponse],
+    dependencies=[Depends(verify_store_ownership)],
+    summary="Rename a theme installation",
+    tags=["Store Themes V2"],
+)
+async def rename_installation(
+    installation_id: str,
+    request: RenameThemeRequest,
+    store: Store = Depends(get_current_store),
+    svc: ThemeService = Depends(_get_svc),
+) -> SuccessResponse[StoreThemeInstallationResponse]:
+    """Set the merchant-facing label for an installation.
+
+    Metadata-only — the live storefront is unaffected.
+    """
+    updated = await svc.rename_installation(
+        store_id=store.id,
+        installation_id=UUID(installation_id),
+        name=request.name,
+    )
+    return SuccessResponse(data=_serialize(updated), message="Theme renamed")
+
+
+@router.post(
+    "/{installation_id}/duplicate",
+    response_model=SuccessResponse[StoreThemeInstallationResponse],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_store_ownership)],
+    summary="Duplicate a theme installation into a new draft copy",
+    tags=["Store Themes V2"],
+)
+async def duplicate_installation(
+    installation_id: str,
+    request: DuplicateThemeRequest | None = None,
+    store: Store = Depends(get_current_store),
+    svc: ThemeService = Depends(_get_svc),
+) -> SuccessResponse[StoreThemeInstallationResponse]:
+    """Clone an installation (incl. its full customization) as a new,
+    inactive copy the merchant can edit independently."""
+    clone = await svc.duplicate_installation(
+        store_id=store.id,
+        installation_id=UUID(installation_id),
+        name=request.name if request else None,
+    )
+    return SuccessResponse(
+        data=_serialize(clone),
+        message="Theme duplicated",
+    )
+
+
+@router.get(
+    "/{installation_id}/export",
+    response_model=SuccessResponse[ThemeExportResponse],
+    dependencies=[Depends(verify_store_ownership)],
+    summary="Export an installation as a portable JSON document",
+    tags=["Store Themes V2"],
+)
+async def export_installation(
+    installation_id: str,
+    store: Store = Depends(get_current_store),
+    svc: ThemeService = Depends(_get_svc),
+) -> SuccessResponse[ThemeExportResponse]:
+    """Return a self-describing JSON snapshot of the theme + customization.
+
+    The hub turns this into a downloadable ``.json`` file.
+    """
+    export = await svc.export_installation(
+        store_id=store.id,
+        installation_id=UUID(installation_id),
+    )
+    return SuccessResponse(data=ThemeExportResponse(**export))
 
 
 @router.post(

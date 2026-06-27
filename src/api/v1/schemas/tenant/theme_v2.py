@@ -138,6 +138,88 @@ class CustomizeDraftRequest(BaseModel):
     )
 
 
+class RenameThemeRequest(BaseModel):
+    """Request to rename a theme installation (set its merchant label)."""
+
+    model_config = ConfigDict(json_schema_extra={"example": {"name": "Holiday draft"}})
+
+    name: str = Field(min_length=1, max_length=120, description="New label")
+
+
+class DuplicateThemeRequest(BaseModel):
+    """Request to duplicate a theme installation into a new draft copy."""
+
+    model_config = ConfigDict(json_schema_extra={"example": {"name": "Copy of Bazar"}})
+
+    name: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Label for the copy. Defaults to 'Copy of <source name>'.",
+    )
+
+
+class ThemeExportResponse(BaseModel):
+    """Portable JSON export of an installation's theme + customization."""
+
+    format: str
+    version: int
+    exported_at: str
+    theme: dict[str, Any]
+    customization: dict[str, Any]
+    customization_v3: dict[str, Any]
+
+
+# ── Code editor (theme file workspace) ─────────────────────────────────────────
+
+
+class ThemeFileMeta(BaseModel):
+    """A file in the workspace without its content (for the file tree)."""
+
+    path: str
+    size: int
+    updated_at: str | None = None
+
+
+class ThemeFileListResponse(BaseModel):
+    """The store's whole theme workspace as a flat file list."""
+
+    files: list[ThemeFileMeta]
+    has_workspace: bool
+
+
+class ThemeFileContentResponse(BaseModel):
+    """A single file with its full content."""
+
+    path: str
+    content: str
+    updated_at: str | None = None
+
+
+class WriteThemeFileRequest(BaseModel):
+    """Create or overwrite one file."""
+
+    content: str = Field(description="Full file content")
+
+
+class ScaffoldThemeRequest(BaseModel):
+    """Seed a buildable starter theme into the workspace."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"name": "My Theme", "overwrite": False}}
+    )
+
+    name: str = Field(default="My Theme", max_length=120)
+    theme_id: str | None = Field(default=None, max_length=120)
+    overwrite: bool = Field(
+        default=False, description="Wipe an existing workspace first"
+    )
+
+
+class ScaffoldThemeResponse(BaseModel):
+    file_count: int
+    message: str
+
+
 # ── Store installation responses ───────────────────────────────────────────────
 
 
@@ -172,6 +254,11 @@ class StoreThemeInstallationResponse(BaseModel):
     store_id: str
     theme_id: str
     theme_version_id: str
+    # Merchant-set label for this installation (Rename / Duplicate); None
+    # when the merchant never renamed it.
+    name: str | None = None
+    # Resolved label the UI should show: ``name`` if set, else theme_name.
+    display_name: str | None = None
     theme_slug: str | None = None
     theme_name: str | None = None
     theme_type: str | None = None

@@ -1,0 +1,12 @@
+{
+  "type": "not_found",
+  "name": "404 — Not Found",
+  "locales": { "ar": { "name": "404 — غير موجود" } },
+  "settings": [
+    { "type": "text", "id": "code", "label": "Code", "default": "404", "locales": { "ar": { "label": "الرمز" } } },
+    { "type": "text", "id": "title", "label": "Title", "default": "الصفحة غير موجودة", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "textarea", "id": "message", "label": "Message", "default": "يبدو أن الصفحة التي تبحث عنها غير متاحة أو تم نقلها.", "locales": { "ar": { "label": "الرسالة" } } },
+    { "type": "text", "id": "cta_text", "label": "Button text", "default": "العودة للتسوق", "locales": { "ar": { "label": "نص الزر" } } },
+    { "type": "url", "id": "cta_link", "label": "Button link", "default": "/products", "locales": { "ar": { "label": "رابط الزر" } } }
+  ]
+}

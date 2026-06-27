@@ -1,0 +1,13 @@
+{
+  "type": "promo_banner",
+  "name": "Promo Banner",
+  "locales": { "ar": { "name": "بانر ترويجي" } },
+  "settings": [
+    { "type": "text", "id": "badge_text", "label": "Badge text", "default": "عرض محدود", "locales": { "ar": { "label": "نص الشارة" } } },
+    { "type": "text", "id": "headline", "label": "Headline", "default": "خصم ٢٥٪ على كل الإكسسوارات", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "textarea", "id": "subtitle", "label": "Subtitle", "default": "العرض ساري لنهاية الشهر.", "locales": { "ar": { "label": "العنوان الفرعي" } } },
+    { "type": "text", "id": "cta_text", "label": "Button text", "default": "تسوق الآن", "locales": { "ar": { "label": "نص الزر" } } },
+    { "type": "url", "id": "cta_link", "label": "Button link", "default": "/products", "locales": { "ar": { "label": "رابط الزر" } } },
+    { "type": "image_picker", "id": "image_url", "label": "Image", "locales": { "ar": { "label": "الصورة" } } }
+  ]
+}

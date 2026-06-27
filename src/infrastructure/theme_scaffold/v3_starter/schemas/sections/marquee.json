@@ -1,0 +1,9 @@
+{
+  "type": "marquee",
+  "name": "Marquee Ticker",
+  "locales": { "ar": { "name": "شريط متحرك" } },
+  "settings": [
+    { "type": "text", "id": "text", "label": "Ticker text", "default": "100% مستقل", "locales": { "ar": { "label": "النص" } } },
+    { "type": "range", "id": "repeat", "label": "Repetitions", "default": 10, "min": 4, "max": 20, "step": 1, "locales": { "ar": { "label": "عدد التكرار" } } }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "type": "size_chart",
+  "name": "Size Guide",
+  "locales": { "ar": { "name": "دليل المقاسات" } },
+  "settings": [
+    { "type": "text", "id": "trigger_label", "label": "Trigger label", "default": "دليل المقاسات", "locales": { "ar": { "label": "نص الزر" } } },
+    { "type": "text", "id": "title", "label": "Modal title", "default": "دليل المقاسات", "locales": { "ar": { "label": "عنوان النافذة" } } }
+  ]
+}

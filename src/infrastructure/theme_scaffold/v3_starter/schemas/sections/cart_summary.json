@@ -1,0 +1,12 @@
+{
+  "type": "cart_summary",
+  "name": "Cart",
+  "locales": { "ar": { "name": "سلة التسوق" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "سلة التسوق", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "text", "id": "checkout_label", "label": "Checkout button label", "default": "إتمام الطلب", "locales": { "ar": { "label": "نص زر الدفع" } } },
+    { "type": "text", "id": "empty_title", "label": "Empty-cart title", "default": "السلة فاضية", "locales": { "ar": { "label": "عنوان السلة الفارغة" } } },
+    { "type": "text", "id": "empty_cta_label", "label": "Empty-cart button label", "default": "متابعة التسوق", "locales": { "ar": { "label": "نص زر المتابعة" } } },
+    { "type": "url", "id": "empty_cta_link", "label": "Empty-cart button link", "default": "/products", "locales": { "ar": { "label": "رابط المتابعة" } } }
+  ]
+}

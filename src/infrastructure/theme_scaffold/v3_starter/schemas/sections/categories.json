@@ -1,0 +1,9 @@
+{
+  "type": "categories",
+  "name": "Category Grid",
+  "locales": { "ar": { "name": "شبكة الفئات" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "تسوق حسب الفئة", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "range", "id": "columns_desktop", "label": "Desktop columns", "default": 5, "min": 2, "max": 6, "step": 1, "locales": { "ar": { "label": "أعمدة سطح المكتب" } } }
+  ]
+}

@@ -1,0 +1,35 @@
+[
+  {
+    "type": "color",
+    "id": "accent_color",
+    "label": "Accent Color",
+    "default": "#0099ff",
+    "locales": { "ar": { "label": "لون التمييز" } }
+  },
+  {
+    "type": "color",
+    "id": "foreground_color",
+    "label": "Text Color",
+    "default": "#000000",
+    "locales": { "ar": { "label": "لون النص" } }
+  },
+  {
+    "type": "color",
+    "id": "background_color",
+    "label": "Background Color",
+    "default": "#efeeed",
+    "locales": { "ar": { "label": "لون الخلفية" } }
+  },
+  {
+    "type": "select",
+    "id": "font_family",
+    "label": "Font Family",
+    "default": "Cairo",
+    "options": [
+      { "value": "Cairo", "label": "Cairo" },
+      { "value": "Inter", "label": "Inter" },
+      { "value": "Tajawal", "label": "Tajawal" }
+    ],
+    "locales": { "ar": { "label": "الخط" } }
+  }
+]

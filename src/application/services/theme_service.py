@@ -215,6 +215,11 @@ class ThemeService:
             # row — the merchant flipped an already-installed theme;
             # they should land on whatever they had configured.
             seed_customization_v3=None,
+            # Target this exact installation. Required now that a store can
+            # hold multiple installations of the same theme (Duplicate) —
+            # without it the activation would resolve by (store, theme) and
+            # could flip the wrong copy.
+            installation_id=installation_id,
         )
 
         # Backward-compat: denormalize to stores.theme_settings JSONB
@@ -341,6 +346,103 @@ class ThemeService:
                 detail="Installation not found",
             )
         return installation
+
+    async def rename_installation(
+        self,
+        store_id: UUID,
+        installation_id: UUID,
+        name: str,
+    ) -> StoreTheme:
+        """Set the merchant-facing label for an installation.
+
+        Pure metadata — does not touch the live storefront, so no cache
+        invalidation or denormalization is needed.
+        """
+        installation = await self.get_installation(store_id, installation_id)
+        cleaned = name.strip()
+        if not cleaned:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Theme name cannot be empty",
+            )
+        installation.name = cleaned[:120]
+        updated = await self.store_theme_repo.update(installation)
+        logger.info(
+            "theme_installation_renamed",
+            extra={
+                "store_id": str(store_id),
+                "installation_id": str(installation_id),
+            },
+        )
+        return updated
+
+    async def duplicate_installation(
+        self,
+        store_id: UUID,
+        installation_id: UUID,
+        name: str | None = None,
+    ) -> StoreTheme:
+        """Clone an installation into a new, inactive copy.
+
+        Copies the full customization payload (live + draft, V2 + V3) so the
+        merchant gets an independent editable copy — Shopify's "Duplicate"
+        creates an unpublished draft theme. The clone is never active; the
+        merchant activates it explicitly when ready. Activation targets the
+        clone's own row id (see ``upsert_active(installation_id=…)``), so two
+        installations of the same theme stay independently activatable.
+        """
+        source = await self.get_installation(store_id, installation_id)
+
+        default_name = f"Copy of {source.display_name}"
+        clone = StoreTheme(
+            id=uuid4(),
+            store_id=store_id,
+            tenant_id=source.tenant_id,
+            theme_id=source.theme_id,
+            theme_version_id=source.theme_version_id,
+            is_active=False,
+            name=(name.strip()[:120] if name and name.strip() else default_name[:120]),
+            customization=dict(source.customization or {}),
+            draft_customization=dict(source.draft_customization or {}),
+            customization_v3=dict(source.customization_v3 or {}),
+            draft_customization_v3=dict(source.draft_customization_v3 or {}),
+            installed_at=datetime.now(UTC),
+        )
+        result = await self.store_theme_repo.create(clone)
+        logger.info(
+            "theme_installation_duplicated",
+            extra={
+                "store_id": str(store_id),
+                "source_installation_id": str(installation_id),
+                "clone_installation_id": str(result.id),
+            },
+        )
+        return result
+
+    async def export_installation(
+        self, store_id: UUID, installation_id: UUID
+    ) -> dict[str, Any]:
+        """Serialize an installation to a portable JSON document.
+
+        The export is a self-describing snapshot of everything that makes
+        the theme look the way it does — theme identity + the full
+        customization payloads. It deliberately omits store/tenant ids so
+        the file is safe to hand to another store as an import seed later.
+        """
+        inst = await self.get_installation(store_id, installation_id)
+        return {
+            "format": "numu.theme-export",
+            "version": 1,
+            "exported_at": datetime.now(UTC).isoformat(),
+            "theme": {
+                "slug": inst.theme_slug,
+                "name": inst.display_name,
+                "type": inst.theme_type.value if inst.theme_type else None,
+                "version": inst.theme_version,
+            },
+            "customization": inst.customization or {},
+            "customization_v3": inst.customization_v3 or {},
+        }
 
     # ── Storefront resolution ──────────────────────────────────────────────────
 

@@ -66,6 +66,56 @@ def _validate_theme_json(theme_dir: Path) -> dict:
     return manifest
 
 
+def _materialize_store_files(store_id: str, dest: Path) -> None:
+    """Write a store's code-editor workspace (store_theme_files) onto disk.
+
+    This is the file-store equivalent of ``git clone`` — it lays the merchant's
+    edited theme source into ``dest`` so the rest of the pipeline (validate →
+    install → build → upload) runs unchanged. Raises if the workspace is empty
+    so the build fails fast with a clear message instead of "missing theme.json".
+    """
+    import asyncio
+    from uuid import UUID
+
+    from src.infrastructure.database.connection import AsyncSessionLocal, engine
+    from src.infrastructure.repositories.store_theme_file_repository import (
+        StoreThemeFileRepository,
+    )
+
+    dest_root = dest.resolve()
+
+    async def _run() -> int:
+        # Dispose the engine pool on the way out so a later new_event_loop()
+        # block in the same sync task (e.g. _register) doesn't reuse a
+        # connection bound to this now-closed loop (asyncpg cross-loop crash).
+        try:
+            async with AsyncSessionLocal() as session:
+                repo = StoreThemeFileRepository(session)
+                files = await repo.list_for_store(UUID(store_id))
+                for f in files:
+                    # Defense-in-depth against path traversal in stored paths.
+                    target = (dest_root / f.path.lstrip("/")).resolve()
+                    if dest_root not in target.parents and target != dest_root:
+                        raise ValueError(f"Unsafe theme file path: {f.path}")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(f.content, encoding="utf-8")
+                return len(files)
+        finally:
+            await engine.dispose()
+
+    loop = asyncio.new_event_loop()
+    try:
+        count = loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+    if count == 0:
+        raise ValueError(
+            "No theme files to build. Scaffold or save files in the code "
+            "editor before publishing."
+        )
+
+
 def _validate_required_files(theme_dir: Path) -> None:
     """Validate that all required theme files exist."""
     required = [
@@ -110,11 +160,20 @@ def build_external_theme(
     github_url: str,
     branch: str,
     build_id: str,
+    source: str = "github",
 ) -> dict:
-    """Build an external theme from a GitHub repository.
+    """Build an external theme and publish it to the store.
+
+    ``source`` selects where the theme source comes from:
+    - ``"github"`` (default): shallow-clone ``github_url`` (the BYOT flow).
+    - ``"files"``: materialize the store's in-app code-editor workspace
+      (``store_theme_files``) onto disk. ``github_url`` is ignored.
+
+    Everything after source acquisition is identical for both — that's the
+    whole point: the code editor reuses the exact same pipeline.
 
     Steps:
-    1. Shallow clone the repo
+    1. Acquire source (clone OR materialize file store)
     2. Validate theme contract (theme.json, settings_schema.json, etc.)
     3. npm install (with --ignore-scripts for security)
     4. npm run build (expects @numu/theme-plugin in vite.config — validates
@@ -126,29 +185,33 @@ def build_external_theme(
     work_dir = None
 
     try:
-        # ── Step 1: Clone ────────────────────────────────────────────────
+        # ── Step 1: Acquire source ───────────────────────────────────────
         _update_build_status(build_id, status="cloning")
-        logger.info("Cloning theme repo: %s (branch: %s)", github_url, branch)
-
         work_dir = Path(tempfile.mkdtemp(prefix="numu-theme-"))
-        clone_result = subprocess.run(
-            [
-                "git",
-                "clone",
-                "--depth=1",
-                f"--branch={branch}",
-                github_url,
-                str(work_dir / "theme"),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-        if clone_result.returncode != 0:
-            raise ValueError(f"Git clone failed: {clone_result.stderr.strip()}")
-
         theme_dir = work_dir / "theme"
+
+        if source == "files":
+            logger.info("Materializing theme files from store %s", store_id)
+            theme_dir.mkdir(parents=True, exist_ok=True)
+            _materialize_store_files(store_id, theme_dir)
+        else:
+            logger.info("Cloning theme repo: %s (branch: %s)", github_url, branch)
+            clone_result = subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    f"--branch={branch}",
+                    github_url,
+                    str(theme_dir),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            if clone_result.returncode != 0:
+                raise ValueError(f"Git clone failed: {clone_result.stderr.strip()}")
 
         # ── Step 2: Validate ─────────────────────────────────────────────
         _update_build_status(build_id, status="validating")
@@ -365,13 +428,13 @@ def build_external_theme(
         # ── Step 8: Update store theme_settings ──────────────────────────
         logger.info("Updating store theme_settings with CDN URLs")
 
-        from src.infrastructure.database.session import get_session
+        from src.infrastructure.database.connection import AsyncSessionLocal
         from src.infrastructure.repositories.store_repository import (
             SQLAlchemyStoreRepository,
         )
 
         async def _update_store():
-            async with get_session() as session:
+            async with AsyncSessionLocal() as session:
                 repo = SQLAlchemyStoreRepository(session)
                 store = await repo.get_by_id(store_id)
                 if not store:
@@ -403,7 +466,7 @@ def build_external_theme(
                     "version": manifest.get("version", "1.0.0"),
                     "author": manifest.get("author", "Unknown"),
                     "tags": manifest.get("tags", []),
-                    "source_repo": github_url,
+                    "source_repo": github_url or "code-editor",
                     "built_at": datetime.now(UTC).isoformat(),
                     "settings_schema": settings_schema,
                     # Section schemas extracted from the bundle's sections.json,

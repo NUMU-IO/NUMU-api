@@ -1,0 +1,12 @@
+{
+  "type": "product_grid",
+  "name": "Products Grid",
+  "locales": { "ar": { "name": "شبكة المنتجات" } },
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "كل المنتجات", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "range", "id": "columns_desktop", "label": "Desktop columns", "default": 4, "min": 2, "max": 5, "step": 1, "locales": { "ar": { "label": "أعمدة سطح المكتب" } } },
+    { "type": "checkbox", "id": "show_search", "label": "Show search box", "default": true, "locales": { "ar": { "label": "إظهار البحث" } } },
+    { "type": "checkbox", "id": "show_sort", "label": "Show sort dropdown", "default": true, "locales": { "ar": { "label": "إظهار الترتيب" } } },
+    { "type": "checkbox", "id": "show_categories", "label": "Show category chips", "default": true, "locales": { "ar": { "label": "إظهار الفئات" } } }
+  ]
+}

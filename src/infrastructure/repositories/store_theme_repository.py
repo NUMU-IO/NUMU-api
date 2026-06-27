@@ -80,6 +80,7 @@ class StoreThemeRepository(IStoreThemeRepository):
             theme_id=UUID(str(model.theme_id)),
             theme_version_id=UUID(str(model.theme_version_id)),
             is_active=model.is_active,
+            name=model.name,
             customization=copy.deepcopy(model.customization or {}),
             draft_customization=copy.deepcopy(model.draft_customization or {}),
             customization_v3=copy.deepcopy(model.customization_v3 or {}),
@@ -109,6 +110,7 @@ class StoreThemeRepository(IStoreThemeRepository):
             theme_id=str(entity.theme_id),
             theme_version_id=str(entity.theme_version_id),
             is_active=entity.is_active,
+            name=entity.name,
             customization=entity.customization,
             draft_customization=entity.draft_customization,
             customization_v3=entity.customization_v3,
@@ -158,6 +160,7 @@ class StoreThemeRepository(IStoreThemeRepository):
         if not model:
             raise ValueError(f"StoreTheme {entity.id} not found")
         model.is_active = entity.is_active
+        model.name = entity.name
         model.customization = entity.customization
         model.draft_customization = entity.draft_customization
         model.customization_v3 = entity.customization_v3
@@ -234,12 +237,20 @@ class StoreThemeRepository(IStoreThemeRepository):
         )
 
     async def installation_exists(self, store_id: UUID, theme_id: UUID) -> bool:
-        """Check whether a theme is already installed on this store."""
+        """Check whether a theme is already installed on this store.
+
+        Uses ``limit(1)`` rather than ``scalar_one_or_none()`` because a
+        store can now hold multiple installations of the same theme
+        (Duplicate creates a second ``(store_id, theme_id)`` row), so the
+        "at most one" assumption no longer holds.
+        """
         result = await self.session.execute(
-            select(StoreThemeModel.id).where(
+            select(StoreThemeModel.id)
+            .where(
                 StoreThemeModel.store_id == str(store_id),
                 StoreThemeModel.theme_id == str(theme_id),
             )
+            .limit(1)
         )
         return result.scalar_one_or_none() is not None
 
@@ -251,24 +262,52 @@ class StoreThemeRepository(IStoreThemeRepository):
         theme_id: UUID,
         theme_version_id: UUID,
         customization_v3: dict | None = None,
+        installation_id: UUID | None = None,
     ) -> StoreTheme:
-        """Find-or-create the StoreTheme(store_id, theme_id) row and mark it active.
+        """Find-or-create a StoreTheme row for this store and mark it active.
+
+        When ``installation_id`` is given (the V2 "activate this specific
+        installation" path), that exact row is targeted — this is what makes
+        duplicated installations of the *same* theme activatable, since
+        ``(store_id, theme_id)`` alone no longer identifies a single row.
+
+        Otherwise the row is resolved by ``(store_id, theme_id)`` (marketplace
+        / dev-mode paths, where there's one runtime row per theme). That
+        lookup is ordered + ``limit(1)`` so a store that *does* hold
+        duplicates of the theme deterministically reactivates the most
+        recently-touched one instead of raising ``MultipleResultsFound``.
 
         Caller is responsible for snapshotting + deactivating other rows
         beforehand. ThemeActivationService.activate orchestrates that.
         """
         from uuid import uuid4
 
-        # Find existing row by (store_id, theme_id) — at most one per pair
-        # in practice, but we explicitly check before mutating to keep the
-        # write surface small.
-        existing = await self.session.execute(
-            select(StoreThemeModel).where(
-                StoreThemeModel.store_id == str(store_id),
-                StoreThemeModel.theme_id == str(theme_id),
+        model = None
+        if installation_id is not None:
+            targeted = await self.session.execute(
+                select(StoreThemeModel).where(
+                    StoreThemeModel.id == str(installation_id),
+                    StoreThemeModel.store_id == str(store_id),
+                )
             )
-        )
-        model = existing.scalar_one_or_none()
+            model = targeted.scalar_one_or_none()
+        else:
+            # Find existing row by (store_id, theme_id). A store may now hold
+            # multiple rows for one theme (Duplicate), so order deterministically
+            # and take one rather than asserting a single result.
+            existing = await self.session.execute(
+                select(StoreThemeModel)
+                .where(
+                    StoreThemeModel.store_id == str(store_id),
+                    StoreThemeModel.theme_id == str(theme_id),
+                )
+                .order_by(
+                    StoreThemeModel.is_active.desc(),
+                    StoreThemeModel.created_at.desc(),
+                )
+                .limit(1)
+            )
+            model = existing.scalar_one_or_none()
 
         now = datetime.now()
 

@@ -101,6 +101,8 @@ class StoreTheme(BaseEntity):
     theme_id: UUID
     theme_version_id: UUID
     is_active: bool = False
+    # Optional merchant-set label (Rename / Duplicate). None → use theme_name.
+    name: str | None = None
     customization: dict[str, Any] = Field(default_factory=dict)
     draft_customization: dict[str, Any] = Field(default_factory=dict)
     # V3 Theme Engine columns
@@ -129,6 +131,11 @@ class StoreTheme(BaseEntity):
         """Whether there are unsaved draft changes."""
         return bool(self.draft_customization)
 
+    @property
+    def display_name(self) -> str:
+        """Merchant-set label if present, else the catalog theme name."""
+        return self.name or self.theme_name or self.theme_slug or "Untitled theme"
+
     def activate(self) -> None:
         """Mark this installation as the active theme for the store."""
         from datetime import UTC
@@ -152,3 +159,17 @@ class StoreTheme(BaseEntity):
         self.customization = dict(self.draft_customization)
         self.draft_customization = {}
         self.touch()
+
+
+class StoreThemeFile(BaseEntity):
+    """One editable source file of a store's in-app theme workspace.
+
+    The full set of a store's files is a complete, buildable theme project
+    that the code editor edits and "Publish" feeds through the external-theme
+    build pipeline. Path-addressable by ``(store_id, path)``.
+    """
+
+    store_id: UUID
+    tenant_id: UUID
+    path: str = Field(max_length=300)
+    content: str = ""

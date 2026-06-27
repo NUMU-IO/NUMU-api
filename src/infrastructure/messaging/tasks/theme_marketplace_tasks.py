@@ -561,12 +561,12 @@ def theme_marketplace_watchdog() -> dict[str, Any]:
     async def _sweep() -> dict[str, Any]:
         from sqlalchemy import select
 
-        from src.infrastructure.database.connection import get_session
+        from src.infrastructure.database.connection import AsyncSessionLocal
         from src.infrastructure.database.models.tenant.marketplace_theme import (
             MarketplaceThemeVersionModel,
         )
 
-        async with get_session() as session:
+        async with AsyncSessionLocal() as session:
             # Pick everything that's been BUILDING since before the cutoff.
             # `updated_at` advances on every status transition so this
             # excludes versions that are progressing.

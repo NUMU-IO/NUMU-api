@@ -1,0 +1,14 @@
+{
+  "type": "header",
+  "name": "Header",
+  "locales": { "ar": { "name": "الترويسة" } },
+  "settings": [
+    { "type": "text", "id": "brand_name", "label": "Brand name (blank = store name)", "default": "", "locales": { "ar": { "label": "اسم العلامة (فارغ = اسم المتجر)" } } },
+    { "type": "image_picker", "id": "logo", "label": "Logo image (optional)", "locales": { "ar": { "label": "صورة الشعار" } } },
+    { "type": "text", "id": "announcement_text", "label": "Announcement bar text", "default": "شحن مجاني للطلبات فوق ٥٠٠ ج.م", "locales": { "ar": { "label": "نص شريط الإعلان" } } },
+    { "type": "text", "id": "menu_handle", "label": "Menu handle", "default": "main-menu", "locales": { "ar": { "label": "معرّف القائمة" } } },
+    { "type": "checkbox", "id": "show_search", "label": "Show search icon", "default": true, "locales": { "ar": { "label": "إظهار البحث" } } },
+    { "type": "checkbox", "id": "show_account", "label": "Show account icon", "default": true, "locales": { "ar": { "label": "إظهار الحساب" } } },
+    { "type": "checkbox", "id": "show_cart", "label": "Show cart icon", "default": true, "locales": { "ar": { "label": "إظهار السلة" } } }
+  ]
+}

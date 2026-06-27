@@ -524,7 +524,405 @@ def get_build_status(build_id: str) -> dict | None:
     return _build_statuses.get(build_id)
 
 
-# ── Main Celery task ──────────────────────────────────────────────────────────
+async def _dispose_engine() -> None:
+    """Reset the global async engine's connection pool.
+
+    The build task drives several short-lived ``new_event_loop()`` blocks in
+    one sync Celery task. A connection pooled in one loop is invalid in the
+    next (asyncpg binds connections to a loop), so we dispose the pool after
+    each DB block; the engine lazily recreates it — with its RLS/search_path
+    pool listeners intact — on the next loop's first checkout.
+    """
+    from src.infrastructure.database.connection import engine
+
+    await engine.dispose()
+
+
+def _redis_status(build_id: str, **kwargs) -> None:
+    """Status callback that writes to the Redis build store.
+
+    Used by the code-editor publish path so its existing poller
+    (``GET /themes/external/builds/{build_id}``, Redis-backed) sees progress
+    even though the worker runs in a different process than the API. The
+    marketplace ZIP path keeps the in-memory ``_update_status`` (it polls in
+    the same process). A fresh event loop per call is fine — there are only a
+    handful of status transitions per build.
+    """
+    import asyncio
+
+    from src.infrastructure.cache.theme_build_store import get_theme_build_store
+
+    store = get_theme_build_store()
+    # The store caches a redis client bound to the loop it was first used on;
+    # this task runs many short-lived loops, so force a fresh client per call
+    # and close it after — otherwise later updates hit "Event loop is closed".
+    store._client = None
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(store.update(build_id, kwargs))
+    except Exception as e:  # noqa: BLE001 — status is best-effort, never fail the build
+        logger.warning("Redis build-status update failed for %s: %s", build_id, e)
+    finally:
+        client = store._client
+        if client is not None:
+            try:
+                loop.run_until_complete(client.aclose())
+            except Exception:  # noqa: BLE001
+                pass
+        store._client = None
+        loop.close()
+
+
+# ── Shared build core ─────────────────────────────────────────────────────────
+
+
+def _build_register_activate(
+    *,
+    theme_dir: Path,
+    build_id: str,
+    status,
+    uploader_id: str | None = None,
+    activate_for_store_id: str | None = None,
+    tenant_id: str | None = None,
+) -> dict:
+    """Validate → build → scan → gate → upload → register (+ optionally activate).
+
+    The single shared pipeline behind both entrypoints. ``status`` is a
+    callable ``(build_id, **fields)`` so each caller picks its status backend
+    (in-memory for the marketplace ZIP upload, Redis for the code editor).
+    When ``activate_for_store_id`` is given, the freshly-registered
+    ``ThemeVersion`` is activated for that store and the storefront is
+    revalidated — that's what makes a code-editor Publish actually go live.
+    """
+    import asyncio
+
+    # ── Validate contract ───────────────────────────────────────────────────
+    status(build_id, status="validating")
+    manifest = _validate_theme_contract(theme_dir)
+    theme_id_slug = manifest["id"]
+    version = manifest["version"]
+    status(build_id, theme_slug=theme_id_slug, version=version)
+
+    # ── Build ───────────────────────────────────────────────────────────────
+    status(build_id, status="building")
+    dist = theme_dir / "dist"
+    dist.mkdir(exist_ok=True)
+
+    result = _run_in_docker(theme_dir) if USE_DOCKER else _run_local_build(theme_dir)
+    if result.returncode != 0:
+        raise ThemeBuildError(f"Build failed: {result.stderr.strip()[:500]}")
+
+    bundle_path = None
+    for name in ["theme.js", "theme.mjs", "theme.esm.js"]:
+        candidate = dist / name
+        if candidate.exists():
+            bundle_path = candidate
+            break
+    if not bundle_path:
+        raise ThemeBuildError("Build produced no bundle (dist/theme.js)")
+
+    # ── Size check ──────────────────────────────────────────────────────────
+    size = bundle_path.stat().st_size
+    if size > MAX_BUNDLE_SIZE:
+        raise ThemeBuildError(
+            f"Bundle too large: {size / 1024 / 1024:.1f}MB "
+            f"(max {MAX_BUNDLE_SIZE // 1024 // 1024}MB)"
+        )
+
+    # ── Security scan ─────────────────────────────────────────────────────────
+    status(build_id, status="scanning")
+    violations = _ast_security_scan(bundle_path)
+    if violations:
+        raise ThemeBuildError(f"Security scan failed: {'; '.join(violations[:5])}")
+
+    # ── Theme-contract gate ─────────────────────────────────────────────────
+    from src.core.theme_contract import validate_dist_bundle
+
+    contract_errors = validate_dist_bundle(dist)
+    if contract_errors:
+        raise ThemeBuildError(
+            "Theme contract validation failed: " + "; ".join(contract_errors)
+        )
+
+    # ── Render gate (host path) ──────────────────────────────────────────────
+    _maybe_render_gate_host(theme_dir)
+
+    # ── Compute checksum ──────────────────────────────────────────────────────
+    bundle_bytes = bundle_path.read_bytes()
+    checksum = hashlib.sha256(bundle_bytes).hexdigest()
+    version_hash = checksum[:8]
+
+    # ── Upload bundle (R2 in prod, local filesystem in dev) ───────────────────
+    status(build_id, status="uploading")
+
+    # Mirror the get_storage_service() factory but inline (keeps the worker off
+    # the FastAPI dependency layer): real R2 when configured, otherwise the
+    # LocalStorageService that main.py serves under /uploads — so a dev build
+    # produces a genuinely fetchable bundle URL, not a stub.
+    from src.config.settings import settings as _settings
+    from src.core.interfaces.services.storage_service import StorageBucket
+
+    if _settings.object_storage_configured:
+        from src.infrastructure.external_services.cloudflare_r2.storage_service import (
+            CloudflareR2StorageService,
+        )
+
+        storage = CloudflareR2StorageService()
+    else:
+        from src.infrastructure.external_services.local_storage import (
+            LocalStorageService,
+        )
+
+        storage = LocalStorageService()
+
+    loop = asyncio.new_event_loop()
+    bundle_key = f"themes/{theme_id_slug}/{version}-{version_hash}/theme.js"
+    bundle_uploaded = loop.run_until_complete(
+        storage.upload_file(
+            file_content=bundle_bytes,
+            filename="theme.js",
+            content_type="application/javascript",
+            bucket=StorageBucket.THEMES,
+            key=bundle_key,
+        )
+    )
+    bundle_url = bundle_uploaded.url
+
+    css_url = None
+    css_path = dist / "theme.css"
+    if css_path.exists():
+        css_key = f"themes/{theme_id_slug}/{version}-{version_hash}/theme.css"
+        css_uploaded = loop.run_until_complete(
+            storage.upload_file(
+                file_content=css_path.read_bytes(),
+                filename="theme.css",
+                content_type="text/css",
+                bucket=StorageBucket.THEMES,
+                key=css_key,
+            )
+        )
+        css_url = css_uploaded.url
+    loop.close()
+
+    # ── Parse schemas ─────────────────────────────────────────────────────────
+    settings_schema = {}
+    schema_file = theme_dir / "settings_schema.json"
+    if schema_file.exists():
+        try:
+            settings_schema = json.loads(schema_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("Bad settings_schema.json: %s", e)
+
+    section_schemas = None
+    sections_file = theme_dir / "sections.json"
+    if sections_file.exists():
+        try:
+            section_schemas = json.loads(sections_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("Bad sections.json: %s", e)
+
+    # ── Register themes + theme_versions rows ─────────────────────────────────
+    status(build_id, status="registering")
+
+    async def _register():
+        from src.core.entities.theme import (
+            Theme,
+            ThemeStatus,
+            ThemeType,
+            ThemeVersion,
+        )
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.repositories.theme_repository import ThemeRepository
+        from src.infrastructure.repositories.theme_version_repository import (
+            ThemeVersionRepository,
+        )
+
+        async with AsyncSessionLocal() as session:
+            theme_repo = ThemeRepository(session)
+            version_repo = ThemeVersionRepository(session)
+
+            existing = await theme_repo.get_by_slug(theme_id_slug)
+            if existing:
+                theme = existing
+            else:
+                theme = Theme(
+                    id=uuid4(),
+                    name=manifest.get("name", theme_id_slug),
+                    slug=theme_id_slug,
+                    description=manifest.get("description"),
+                    author=manifest.get("author", "Community"),
+                    type=ThemeType.EXTERNAL,
+                    status=ThemeStatus.PUBLISHED,
+                    is_public=False,  # Private until reviewed
+                    settings_schema=settings_schema,
+                    section_schemas=section_schemas,
+                    supported_features=manifest.get("supports"),
+                    created_by=uuid4() if uploader_id is None else uuid4(),
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+                theme = await theme_repo.create(theme)
+
+            # Code-editor publishes (activate_for_store_id set) republish the
+            # SAME theme.json version constantly, so we register a
+            # content-unique version "<version>+<checksum8>" (valid semver
+            # build metadata, mirrors dev-mode's "+dev.<ts>"). Each distinct
+            # build is its own immutable row with the correct bundle, and
+            # identical-content republishes reuse the existing row. The
+            # marketplace ZIP path keeps the developer's exact version.
+            reg_version = (
+                f"{version}+{version_hash}" if activate_for_store_id else version
+            )
+            existing_ver = (
+                await version_repo.get_by_theme_and_version(theme.id, reg_version)
+                if activate_for_store_id
+                else None
+            )
+            if existing_ver is not None:
+                existing_ver.is_latest = True
+                existing_ver.published_at = datetime.now(UTC)
+                theme_version = await version_repo.update(existing_ver)
+            else:
+                theme_version = await version_repo.create(
+                    ThemeVersion(
+                        id=uuid4(),
+                        theme_id=theme.id,
+                        version=reg_version,
+                        bundle_url=bundle_url,
+                        css_url=css_url,
+                        manifest=manifest,
+                        changelog=manifest.get("changelog"),
+                        is_latest=True,
+                        size_bytes=size,
+                        checksum=checksum,
+                        published_at=datetime.now(UTC),
+                        created_at=datetime.now(UTC),
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+            await session.commit()
+
+            return {
+                "theme_id": str(theme.id),
+                "version_id": str(theme_version.id),
+            }
+
+    loop = asyncio.new_event_loop()
+    try:
+        ids = loop.run_until_complete(_register())
+    finally:
+        loop.run_until_complete(_dispose_engine())
+        loop.close()
+
+    # ── Activate for the store (code-editor publish only) ─────────────────────
+    if activate_for_store_id and tenant_id:
+        status(build_id, status="activating")
+        _activate_built_theme_for_store(
+            store_id=activate_for_store_id,
+            tenant_id=tenant_id,
+            theme_id=ids["theme_id"],
+            version_id=ids["version_id"],
+        )
+
+    status(
+        build_id,
+        status="complete",
+        theme_id=ids["theme_id"],
+        version_id=ids["version_id"],
+        bundle_url=bundle_url,
+        css_url=css_url,
+        checksum=checksum,
+        size_bytes=size,
+        completed_at=datetime.now(UTC).isoformat(),
+    )
+    logger.info(
+        "Theme %s v%s built successfully: %s", theme_id_slug, version, bundle_url
+    )
+    return {
+        "build_id": build_id,
+        "status": "complete",
+        "theme_id": ids["theme_id"],
+        "version_id": ids["version_id"],
+        "bundle_url": bundle_url,
+        "css_url": css_url,
+        "checksum": checksum,
+        "size_bytes": size,
+    }
+
+
+def _activate_built_theme_for_store(
+    *, store_id: str, tenant_id: str, theme_id: str, version_id: str
+) -> None:
+    """Make a freshly-built ThemeVersion the store's active theme + go live.
+
+    Reuses ``ThemeActivationService`` (snapshot → deactivate others → upsert
+    active StoreTheme → mirror marketplace rows) then denormalizes to
+    ``stores.theme_settings`` and triggers Next.js revalidation via
+    ``ThemeService`` — the same path ``ThemeService.activate_theme`` uses, so
+    the storefront's next resolve serves the new bundle.
+    """
+    import asyncio
+    from uuid import UUID
+
+    async def _run():
+        from src.application.services.theme_activation_service import (
+            ThemeActivationService,
+        )
+        from src.application.services.theme_service import ThemeService
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.repositories.marketplace_repository import (
+            MarketplaceRepository,
+        )
+        from src.infrastructure.repositories.store_repository import (
+            StoreRepository,
+        )
+        from src.infrastructure.repositories.store_theme_repository import (
+            StoreThemeRepository,
+        )
+        from src.infrastructure.repositories.store_theme_snapshot_repository import (
+            StoreThemeSnapshotRepository,
+        )
+        from src.infrastructure.repositories.theme_repository import ThemeRepository
+        from src.infrastructure.repositories.theme_version_repository import (
+            ThemeVersionRepository,
+        )
+
+        async with AsyncSessionLocal() as session:
+            store_theme_repo = StoreThemeRepository(session)
+            activation = ThemeActivationService(
+                store_theme_repo=store_theme_repo,
+                snapshot_repo=StoreThemeSnapshotRepository(session),
+                marketplace_repo=MarketplaceRepository(session),
+            )
+            updated = await activation.activate(
+                store_id=UUID(store_id),
+                tenant_id=UUID(tenant_id),
+                theme_id=UUID(theme_id),
+                theme_version_id=UUID(version_id),
+                reason="code-editor-publish",
+            )
+
+            store_repo = StoreRepository(session)
+            svc = ThemeService(
+                theme_repo=ThemeRepository(session),
+                version_repo=ThemeVersionRepository(session),
+                store_theme_repo=store_theme_repo,
+            )
+            # Backward-compat mirror + commit + Next.js revalidate.
+            await svc._denormalize_to_store(UUID(store_id), updated, store_repo)
+            await svc._revalidate_storefront(
+                UUID(store_id), store_repo, kind="theme_activate"
+            )
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.run_until_complete(_dispose_engine())
+        loop.close()
+
+
+# ── Main Celery tasks ─────────────────────────────────────────────────────────
 
 
 @celery_app.task(
@@ -540,15 +938,10 @@ def build_theme_from_zip(
     zip_path: str,
     uploader_id: str | None = None,
 ) -> dict:
-    """Build a theme from an uploaded ZIP and register it in themes/theme_versions.
+    """Build a marketplace theme from an uploaded ZIP and register it.
 
-    Steps:
-    1. Extract ZIP safely (zip bomb / path traversal protection)
-    2. Validate theme contract (required files + theme.json)
-    3. Build (Docker-isolated if NUMU_THEME_USE_DOCKER=true)
-    4. Size check + AST security scan
-    5. Upload bundle + CSS to R2
-    6. Upsert themes + theme_versions rows
+    Source = ZIP; status = in-memory (polled in-process). Delegates the
+    validate→build→…→register pipeline to the shared core.
     """
     work_dir: Path | None = None
     try:
@@ -560,206 +953,12 @@ def build_theme_from_zip(
         theme_dir.mkdir(parents=True)
         _safe_extract_zip(Path(zip_path), theme_dir)
 
-        # ── Validate contract ───────────────────────────────────────────────
-        _update_status(build_id, status="validating")
-        manifest = _validate_theme_contract(theme_dir)
-        theme_id_slug = manifest["id"]
-        version = manifest["version"]
-        _update_status(build_id, theme_slug=theme_id_slug, version=version)
-
-        # ── Build ───────────────────────────────────────────────────────────
-        _update_status(build_id, status="building")
-        dist = theme_dir / "dist"
-        dist.mkdir(exist_ok=True)
-
-        if USE_DOCKER:
-            result = _run_in_docker(theme_dir)
-        else:
-            result = _run_local_build(theme_dir)
-
-        if result.returncode != 0:
-            raise ThemeBuildError(f"Build failed: {result.stderr.strip()[:500]}")
-
-        bundle_path = None
-        for name in ["theme.js", "theme.mjs", "theme.esm.js"]:
-            candidate = dist / name
-            if candidate.exists():
-                bundle_path = candidate
-                break
-        if not bundle_path:
-            raise ThemeBuildError("Build produced no bundle (dist/theme.js)")
-
-        # ── Size check ──────────────────────────────────────────────────────
-        size = bundle_path.stat().st_size
-        if size > MAX_BUNDLE_SIZE:
-            raise ThemeBuildError(
-                f"Bundle too large: {size / 1024 / 1024:.1f}MB "
-                f"(max {MAX_BUNDLE_SIZE // 1024 // 1024}MB)"
-            )
-
-        # ── Security scan ───────────────────────────────────────────────────
-        _update_status(build_id, status="scanning")
-        violations = _ast_security_scan(bundle_path)
-        if violations:
-            raise ThemeBuildError(f"Security scan failed: {'; '.join(violations[:5])}")
-
-        # ── Theme-contract gate ─────────────────────────────────────────────
-        # Validate the emitted dist manifest/import-map against the platform
-        # contract before publishing the bundle.
-        from src.core.theme_contract import validate_dist_bundle
-
-        contract_errors = validate_dist_bundle(dist)
-        if contract_errors:
-            raise ThemeBuildError(
-                "Theme contract validation failed: " + "; ".join(contract_errors)
-            )
-
-        # ── Render gate (host path) ─────────────────────────────────────────
-        # Docker builds render inside the sandbox; host builds render here.
-        _maybe_render_gate_host(theme_dir)
-
-        # ── Compute checksum ────────────────────────────────────────────────
-        bundle_bytes = bundle_path.read_bytes()
-        checksum = hashlib.sha256(bundle_bytes).hexdigest()
-        version_hash = checksum[:8]
-
-        # ── Upload to R2 ────────────────────────────────────────────────────
-        _update_status(build_id, status="uploading")
-
-        from src.infrastructure.external_services.cloudflare_r2.storage_service import (
-            CloudflareR2StorageService,
+        return _build_register_activate(
+            theme_dir=theme_dir,
+            build_id=build_id,
+            status=_update_status,
+            uploader_id=uploader_id,
         )
-
-        storage = CloudflareR2StorageService()
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-
-        bundle_key = f"themes/{theme_id_slug}/{version}-{version_hash}/theme.js"
-        bundle_uploaded = loop.run_until_complete(
-            storage.upload_file(
-                file_content=bundle_bytes,
-                filename=bundle_key,
-                content_type="application/javascript",
-                bucket="themes",
-            )
-        )
-        bundle_url = bundle_uploaded.url
-
-        css_url = None
-        css_path = dist / "theme.css"
-        if css_path.exists():
-            css_key = f"themes/{theme_id_slug}/{version}-{version_hash}/theme.css"
-            css_uploaded = loop.run_until_complete(
-                storage.upload_file(
-                    file_content=css_path.read_bytes(),
-                    filename=css_key,
-                    content_type="text/css",
-                    bucket="themes",
-                )
-            )
-            css_url = css_uploaded.url
-
-        loop.close()
-
-        # ── Upsert themes + theme_versions rows ─────────────────────────────
-        _update_status(build_id, status="registering")
-
-        settings_schema = {}
-        schema_file = theme_dir / "settings_schema.json"
-        if schema_file.exists():
-            try:
-                settings_schema = json.loads(schema_file.read_text(encoding="utf-8"))
-            except Exception as e:
-                logger.warning("Bad settings_schema.json: %s", e)
-
-        section_schemas = None
-        sections_file = theme_dir / "sections.json"
-        if sections_file.exists():
-            try:
-                section_schemas = json.loads(sections_file.read_text(encoding="utf-8"))
-            except Exception as e:
-                logger.warning("Bad sections.json: %s", e)
-
-        async def _register():
-            from src.core.entities.theme import (
-                Theme,
-                ThemeStatus,
-                ThemeType,
-                ThemeVersion,
-            )
-            from src.infrastructure.database.session import get_session
-            from src.infrastructure.repositories.theme_repository import ThemeRepository
-            from src.infrastructure.repositories.theme_version_repository import (
-                ThemeVersionRepository,
-            )
-
-            async with get_session() as session:
-                theme_repo = ThemeRepository(session)
-                version_repo = ThemeVersionRepository(session)
-
-                existing = await theme_repo.get_by_slug(theme_id_slug)
-                if existing:
-                    theme = existing
-                else:
-                    theme = Theme(
-                        id=uuid4(),
-                        name=manifest.get("name", theme_id_slug),
-                        slug=theme_id_slug,
-                        description=manifest.get("description"),
-                        author=manifest.get("author", "Community"),
-                        type=ThemeType.EXTERNAL,
-                        status=ThemeStatus.PUBLISHED,
-                        is_public=False,  # Private until reviewed
-                        settings_schema=settings_schema,
-                        section_schemas=section_schemas,
-                        supported_features=manifest.get("supports"),
-                        created_by=uuid4() if uploader_id is None else uuid4(),
-                        created_at=datetime.now(UTC),
-                        updated_at=datetime.now(UTC),
-                    )
-                    theme = await theme_repo.create(theme)
-
-                theme_version = ThemeVersion(
-                    id=uuid4(),
-                    theme_id=theme.id,
-                    version=version,
-                    bundle_url=bundle_url,
-                    css_url=css_url,
-                    manifest=manifest,
-                    changelog=manifest.get("changelog"),
-                    is_latest=True,
-                    size_bytes=size,
-                    checksum=checksum,
-                    published_at=datetime.now(UTC),
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-                theme_version = await version_repo.create(theme_version)
-
-                return {
-                    "theme_id": str(theme.id),
-                    "version_id": str(theme_version.id),
-                }
-
-        loop = asyncio.new_event_loop()
-        ids = loop.run_until_complete(_register())
-        loop.close()
-
-        _update_status(
-            build_id,
-            status="complete",
-            theme_id=ids["theme_id"],
-            version_id=ids["version_id"],
-            bundle_url=bundle_url,
-            css_url=css_url,
-            checksum=checksum,
-            size_bytes=size,
-        )
-        logger.info(
-            "Theme %s v%s built successfully: %s", theme_id_slug, version, bundle_url
-        )
-        return _build_statuses[build_id]
 
     except ThemeBuildError as e:
         logger.error("Build %s failed: %s", build_id, e)
@@ -772,8 +971,60 @@ def build_theme_from_zip(
     finally:
         if work_dir and work_dir.exists():
             shutil.rmtree(work_dir, ignore_errors=True)
-        # Delete the uploaded ZIP
         try:
             os.unlink(zip_path)
         except OSError:
             pass
+
+
+@celery_app.task(
+    name="build_theme_from_files",
+    bind=True,
+    max_retries=0,
+    soft_time_limit=300,
+    time_limit=360,
+)
+def build_theme_from_files(
+    self,
+    store_id: str,
+    build_id: str,
+    tenant_id: str,
+) -> dict:
+    """Build a store's in-app code-editor workspace and publish it live.
+
+    Source = the store's ``store_theme_files`` (materialized to disk); status =
+    Redis (so the editor's cross-process poller sees progress). On success the
+    new ``ThemeVersion`` is activated for the store and the storefront is
+    revalidated — the full Save→Publish→live loop.
+    """
+    from src.infrastructure.messaging.tasks.theme_build_tasks import (
+        _materialize_store_files,
+    )
+
+    work_dir: Path | None = None
+    try:
+        _redis_status(build_id, status="cloning")  # "preparing source"
+        work_dir = Path(tempfile.mkdtemp(prefix="numu-theme-files-"))
+        theme_dir = work_dir / "theme"
+        theme_dir.mkdir(parents=True)
+        _materialize_store_files(store_id, theme_dir)
+
+        return _build_register_activate(
+            theme_dir=theme_dir,
+            build_id=build_id,
+            status=_redis_status,
+            activate_for_store_id=store_id,
+            tenant_id=tenant_id,
+        )
+
+    except ThemeBuildError as e:
+        logger.error("Code-editor build %s failed: %s", build_id, e)
+        _redis_status(build_id, status="failed", error=str(e))
+        return {"build_id": build_id, "status": "failed", "error": str(e)}
+    except Exception as e:
+        logger.exception("Code-editor build %s crashed", build_id)
+        _redis_status(build_id, status="failed", error=f"Internal error: {e}")
+        raise
+    finally:
+        if work_dir and work_dir.exists():
+            shutil.rmtree(work_dir, ignore_errors=True)

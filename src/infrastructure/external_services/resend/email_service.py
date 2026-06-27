@@ -248,7 +248,13 @@ class ResendEmailService(IEmailService):
             wrap,
         )
 
-        verify_url = f"{settings.cors_origins[0]}/verify-email?token={token}"
+        # Point the verification link at the merchant hub (not the landing) —
+        # that's where the authenticated session lives and the canonical
+        # verify + onboarding flow runs. cors_origins[0] is typically the
+        # landing, whose verify page only forwards here anyway. Mirrors the
+        # FRONTEND_URL default used by notification_service.
+        frontend_url = getattr(settings, "FRONTEND_URL", "https://merchant.numueg.app")
+        verify_url = f"{frontend_url}/verify-email?token={token}"
         code_display = code or "------"
 
         body = f"""

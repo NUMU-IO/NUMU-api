@@ -1,0 +1,15 @@
+{
+  "type": "hero",
+  "name": "Hero Slideshow",
+  "locales": { "ar": { "name": "بانر رئيسي" } },
+  "settings": [
+    { "type": "text", "id": "headline", "label": "Headline", "default": "اكتشف التشكيلة الجديدة", "locales": { "ar": { "label": "العنوان" } } },
+    { "type": "text", "id": "subtitle", "label": "Subtitle", "default": "تسوق الآن", "locales": { "ar": { "label": "العنوان الفرعي" } } },
+    { "type": "text", "id": "cta_text", "label": "Button text", "default": "تسوق", "locales": { "ar": { "label": "نص الزر" } } },
+    { "type": "url", "id": "cta_link", "label": "Button link", "default": "/products", "locales": { "ar": { "label": "رابط الزر" } } },
+    { "type": "image_picker", "id": "image_1", "label": "Slide 1 image", "locales": { "ar": { "label": "صورة الشريحة 1" } } },
+    { "type": "image_picker", "id": "image_2", "label": "Slide 2 image", "locales": { "ar": { "label": "صورة الشريحة 2" } } },
+    { "type": "image_picker", "id": "image_3", "label": "Slide 3 image", "locales": { "ar": { "label": "صورة الشريحة 3" } } },
+    { "type": "checkbox", "id": "autoplay", "label": "Auto-advance slides", "default": true, "locales": { "ar": { "label": "تشغيل تلقائي" } } }
+  ]
+}

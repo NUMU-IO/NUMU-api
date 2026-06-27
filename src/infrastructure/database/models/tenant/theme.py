@@ -163,6 +163,10 @@ class StoreThemeModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false", index=True
     )
+    # Optional merchant-set label for this installation (Rename / Duplicate).
+    # NULL → fall back to the catalog theme name. Lets the same theme be
+    # installed multiple times (Live + drafts) with distinct names, Shopify-style.
+    name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     customization: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
@@ -194,6 +198,40 @@ class StoreThemeModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
             f"<StoreThemeModel(store_id={self.store_id}, "
             f"theme_id={self.theme_id}, is_active={self.is_active})>"
         )
+
+
+class StoreThemeFileModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """A single editable source file of a store's in-app theme workspace.
+
+    Backs the Online Store code editor. The full set of rows for a store is a
+    complete, buildable theme project (theme.json, settings_schema.json,
+    styles.css, src/*.tsx, package.json, vite config, …). On "Publish" the
+    rows are materialized to a temp dir and fed through the SAME external-theme
+    build pipeline (clone → install → build → upload → register) that GitHub /
+    dev-server BYOT themes use — the file store simply replaces the git clone
+    as the source.
+
+    Path-addressable: ``(store_id, path)`` is unique. ``path`` is a forward-
+    slash relative path (e.g. ``src/sections/Hero.tsx``).
+    """
+
+    __tablename__ = "store_theme_files"
+    __table_args__ = (
+        UniqueConstraint("store_id", "path", name="uq_store_theme_files_store_path"),
+        Index("ix_store_theme_files_store_id", "store_id"),
+        {"schema": "public"},
+    )
+
+    store_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    path: Mapped[str] = mapped_column(String(300), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+
+    def __repr__(self) -> str:
+        return f"<StoreThemeFileModel(store_id={self.store_id}, path={self.path})>"
 
 
 class StoreThemeSnapshotModel(Base, UUIDMixin, TenantMixin):
