@@ -280,6 +280,7 @@ async def add_cart_item(
     variant_price_cents = product.price.cents
     variant_sku = product.sku
     variant_image: str | None = product.images[0] if product.images else None
+    variant_name: str | None = None
     if request.variant_id:
         from src.infrastructure.database.connection import AsyncSessionLocal
         from src.infrastructure.repositories.variant_repository import (
@@ -298,15 +299,25 @@ async def add_cart_item(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This variant is out of stock.",
             )
+        # Variant Money is built as `Money(amount=price_amount)` where the DB
+        # column already holds CENTS (a known wart — see variant_repository
+        # `_to_entity`). So `.amount` IS the cents value here; `.cents` would
+        # 100× it. (Product Money stores major in `.amount`, hence `.cents`
+        # above for the no-variant base price.)
         variant_price_cents = int(variant.price.amount)
         variant_sku = variant.sku or product.sku
         if variant.image_url:
             variant_image = variant.image_url
+        if variant.option_values:
+            variant_name = " / ".join(
+                str(v) for v in variant.option_values.values() if v
+            )
 
     new_item = CartItem(
         product_id=request.product_id,
         product_name=product.name,
         variant_id=request.variant_id,
+        variant_name=variant_name,
         quantity=request.quantity,
         unit_price=variant_price_cents,
         sku=variant_sku,

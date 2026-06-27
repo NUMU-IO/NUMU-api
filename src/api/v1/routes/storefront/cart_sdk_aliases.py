@@ -155,15 +155,56 @@ async def sdk_add_cart_item(
         )
 
     cart = await _get_cart_for(owner)
+
+    # Phase 8.1 — when a variant is chosen, snapshot the VARIANT's price /
+    # sku / image and carry a human `variant_name` (e.g. "L" or "L / Red").
+    # Without this the line bills the product price, shows the product sku,
+    # and renders with no size in the cart drawer + checkout summary.
+    unit_price_cents = product.price.cents
+    line_sku = product.sku
+    line_image = product.images[0] if product.images else None
+    variant_name: str | None = None
+    if request.variant_id:
+        from src.infrastructure.database.connection import AsyncSessionLocal
+        from src.infrastructure.repositories.variant_repository import (
+            VariantRepository,
+        )
+
+        async with AsyncSessionLocal() as _s:
+            variant = await VariantRepository(_s).get_by_id(request.variant_id)
+        if variant is None or variant.product_id != product.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Variant not found for this product.",
+            )
+        if not variant.is_in_stock:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This variant is out of stock.",
+            )
+        # Variant Money is built as `Money(amount=price_amount)` where the DB
+        # column already holds CENTS (a known wart — see variant_repository
+        # `_to_entity`). So `.amount` IS the cents value; `.cents` would 100×
+        # it. Product Money, by contrast, stores major in `.amount` → `.cents`.
+        unit_price_cents = int(variant.price.amount)
+        line_sku = variant.sku or product.sku
+        if variant.image_url:
+            line_image = variant.image_url
+        if variant.option_values:
+            variant_name = " / ".join(
+                str(v) for v in variant.option_values.values() if v
+            )
+
     cart.add_item(
         CartItem(
             product_id=request.product_id,
             product_name=product.name,
             variant_id=request.variant_id,
+            variant_name=variant_name,
             quantity=request.quantity,
-            unit_price=product.price.cents,
-            sku=product.sku,
-            image_url=product.images[0] if product.images else None,
+            unit_price=unit_price_cents,
+            sku=line_sku,
+            image_url=line_image,
         )
     )
     await _cart_repo.save(cart)
