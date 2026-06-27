@@ -96,8 +96,15 @@ _DEMO_PRODUCTS: list[tuple[str, str, str, str, int, str]] = [
 ]
 
 
-async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict:
+async def seed_demo_catalog(
+    store_id: UUID,
+    tenant_id: UUID,
+    currency: Currency | str = Currency.EGP,
+) -> dict:
     """Insert the demo catalog into the store.
+
+    ``currency`` is the store's default currency so demo prices match the
+    store's market (SAR for a Saudi store) instead of a hardcoded EGP.
 
     Returns counts + any per-product errors so the caller can show them
     in the response body. The historical version returned only counts
@@ -110,6 +117,8 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict:
         CategoryRepository,
     )
     from src.infrastructure.repositories.product_repository import ProductRepository
+
+    ccy = currency if isinstance(currency, Currency) else Currency(str(currency))
 
     products_created = 0
     collections_created = 0
@@ -192,7 +201,7 @@ async def seed_demo_catalog(store_id: UUID, tenant_id: UUID) -> dict:
                 short_description=desc_en[:120],
                 product_type=ProductType.PHYSICAL,
                 status=ProductStatus.ACTIVE,
-                price=Money(amount=Decimal(price_cents) / 100, currency=Currency.EGP),
+                price=Money(amount=Decimal(price_cents) / 100, currency=ccy),
                 quantity=10,
                 images=[f"{_STOCK_IMAGE_BASE}/{slug}/public"],
                 tags=["demo"],

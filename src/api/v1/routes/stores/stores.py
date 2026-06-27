@@ -39,6 +39,7 @@ from src.application.use_cases.stores.create_store import (
     validate_subdomain,
 )
 from src.core.entities.store import Store
+from src.core.value_objects.money import Currency
 from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.external_services.cloudflare import cloudflare_dns_service
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
@@ -473,6 +474,7 @@ async def seed_demo_catalog_route(
     counts = await seed_demo_catalog(
         store_id=store.id,
         tenant_id=store.tenant_id or store.id,
+        currency=store.default_currency or Currency.EGP,
     )
     return {"seeded": True, **counts}
 
