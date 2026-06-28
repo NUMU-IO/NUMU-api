@@ -481,6 +481,13 @@ jobs:
               exit 1
             }
 
+            echo "==> Reloading edge nginx so it re-resolves the recreated api container IP..."
+            # docker compose up recreates the api container with a NEW docker-network
+            # IP; the long-lived edge-nginx caches the old IP in its static upstream
+            # and 502s every request until reloaded. Reload re-resolves it.
+            docker exec numu-edge-nginx nginx -s reload 2>/dev/null \
+              || echo "[edge nginx reload] skipped — numu-edge-nginx not found (non-fatal)"
+
             echo "==> Pruning dangling images..."
             docker image prune -f || echo "[image prune] skipped — non-fatal"
 
