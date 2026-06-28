@@ -14,8 +14,10 @@ from src.config.logging_config import (
 
 logger = get_logger(__name__)
 
-# Paths that generate too much noise and don't need request logs
-_SKIP_PATHS = frozenset(["/api/v1/health", "/health", "/api/v1/health/ready"])
+# Paths that generate too much noise and don't need request logs. The readiness
+# probe is mounted at /api/v1/ready (sibling of /health), not /api/v1/health/ready
+# — the old entry never matched, so probes were logged on every poll.
+_SKIP_PATHS = frozenset(["/api/v1/health", "/health", "/api/v1/ready"])
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):

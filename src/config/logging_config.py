@@ -154,8 +154,17 @@ def configure_logging() -> None:
         level=log_level,
     )
 
-    # Set third-party loggers to WARNING to reduce noise
-    for logger_name in ["uvicorn", "uvicorn.access", "sqlalchemy.engine"]:
+    # Set third-party loggers to WARNING to reduce noise. httpx/httpcore in
+    # particular emit full per-call TCP + header DEBUG traces (Meta/WhatsApp
+    # SDK calls), which flood the JSON log pipeline whenever LOG_LEVEL=DEBUG —
+    # pin them regardless of the root level.
+    for logger_name in [
+        "uvicorn",
+        "uvicorn.access",
+        "sqlalchemy.engine",
+        "httpx",
+        "httpcore",
+    ]:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
