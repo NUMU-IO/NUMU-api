@@ -18,6 +18,7 @@ to step 12 of the offers-v2 plan (storefront checkout discounts).
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -55,6 +56,7 @@ from src.application.use_cases.promotions.resolve_active_promotions import (
     ResolveActivePromotionsUseCase,
 )
 from src.core.entities.cart import Cart
+from src.core.entities.coupon import CouponType
 from src.core.entities.customer import Customer
 from src.core.enums.promotion_enums import PromotionEventType
 from src.core.exceptions import EntityNotFoundError
@@ -529,4 +531,46 @@ async def calculate_cart_discounts(
         applied_coupon_codes=body.applied_codes,
         visitor=visitor,
     )
+
+    # ── Legacy-coupon preview parity ──────────────────────────────────────
+    # The calculator above only computes promotion-backed DISCOUNT_CODE codes.
+    # A plain coupon (validated + pinned via POST /cart/discount, applied at
+    # order-create by ApplyCouponUseCase) would otherwise show a 0 discount in
+    # the order summary even though the order WILL be discounted — the exact
+    # mismatch merchants hit on guest checkouts. Recompute it READ-ONLY here
+    # (no usage increment / row lock — this endpoint is a pure preview, fired on
+    # every cart change) so the summary reconciles with what checkout charges.
+    # Only when the calculator didn't already attribute a code discount
+    # (promotion-backed codes win and are handled above) and a code is applied.
+    if out.code_discount_cents == 0 and not out.free_shipping and body.applied_codes:
+        subtotal_major = Decimal(
+            sum(li.unit_price_cents * li.quantity for li in body.items)
+        ) / Decimal("100")
+        legacy_line_items = [
+            {
+                "product_id": li.product_id,
+                "unit_price": Decimal(li.unit_price_cents) / Decimal("100"),
+                "quantity": li.quantity,
+            }
+            for li in body.items
+        ]
+        for raw in body.applied_codes:
+            coupon = await coupon_repo.get_by_code(store_id, raw.strip().upper())
+            if coupon is None or not coupon.is_usable:
+                continue
+            if not coupon.meets_minimum_order(subtotal_major):
+                continue
+            discount_major = coupon.calculate_discount(
+                subtotal_major, line_items=legacy_line_items
+            )
+            cents = int((discount_major * Decimal("100")).to_integral_value())
+            updates: dict[str, Any] = {}
+            if cents > 0:
+                updates["code_discount_cents"] = cents
+            if coupon.coupon_type == CouponType.FREE_SHIPPING:
+                updates["free_shipping"] = True
+            if updates:
+                out = out.model_copy(update=updates)
+            break
+
     return SuccessResponse(data=out)
