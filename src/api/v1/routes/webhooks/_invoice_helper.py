@@ -197,22 +197,13 @@ async def generate_invoice_for_paid_order(
                 )
 
                 pdf_gen = InvoicePDFGenerator()
-                pdf_bytes = await pdf_gen.generate(
-                    invoice_data={
-                        "invoice_number": created_inv.invoice_number,
-                        "seller": seller.__dict__
-                        if hasattr(seller, "__dict__")
-                        else seller,
-                        "buyer": buyer.__dict__
-                        if hasattr(buyer, "__dict__")
-                        else buyer,
-                        "line_items": order.line_items or [],
-                        "total_amount": order.total,
-                        "currency": order.currency or "EGP",
-                        "eta_uuid": eta_uuid,
-                        "store_name": store.name,
-                        "store_logo_url": store.logo_url,
-                    }
+                # generate() is sync and consumes the Invoice entity (which
+                # already carries seller/buyer/line-items/totals/QR) — not a
+                # dict. Passing invoice_data=... crashed the webhook with a
+                # TypeError and left the order without its invoice email.
+                pdf_bytes = pdf_gen.generate(
+                    created_inv,
+                    payment={"status": "paid"},
                 )
 
                 if customer_email and pdf_bytes:
