@@ -12,6 +12,7 @@ import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
+from urllib.parse import quote, urlparse
 from uuid import UUID
 
 from fastapi import (
@@ -108,6 +109,32 @@ from src.infrastructure.repositories.shopify_repository import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _safe_storefront_origin(request: "Request") -> str | None:
+    """The shopper's storefront origin (scheme://host) for a safe
+    post-payment redirect — e.g. ``https://zid-test.v3.test.numueg.app``.
+
+    Reads the ``Origin`` header (falling back to ``Referer``'s origin) and
+    allow-lists ``*.numueg.app`` to prevent an open redirect. Returns None
+    when absent/untrusted so the caller can fall back to a derived host.
+    """
+    candidate = (request.headers.get("origin") or "").strip()
+    if not candidate:
+        ref = (request.headers.get("referer") or "").strip()
+        if ref:
+            p = urlparse(ref)
+            if p.scheme and p.netloc:
+                candidate = f"{p.scheme}://{p.netloc}"
+    if not candidate:
+        return None
+    parsed = urlparse(candidate)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme in ("http", "https") and (
+        host == "numueg.app" or host.endswith(".numueg.app")
+    ):
+        return f"https://{parsed.netloc}"
+    return None
 
 
 def _risk_level_from_score(score: int | None) -> str:
@@ -2077,6 +2104,13 @@ async def checkout(
             _api_host = _fwd_host or http_request.url.hostname or "numueg.app"
             _api_base = f"https://{_api_host}"
             _oid = str(created_order.id)
+            # The shopper's actual storefront origin (e.g. the v3 host
+            # https://zid-test.v3.test.numueg.app). Pass it through so the
+            # redirect handler returns them to the EXACT storefront they
+            # checked out on, instead of guessing a host. Validated +
+            # allow-listed to *.numueg.app in the handler.
+            _origin = _safe_storefront_origin(http_request)
+            _return_q = f"&return_to={quote(_origin, safe='')}" if _origin else ""
             intent = await moyasar_service.create_payment_intent(
                 amount=_gateway_amount,
                 currency=currency,
@@ -2084,8 +2118,8 @@ async def checkout(
                 metadata={
                     "order_id": _oid,
                     "callback_url": f"{_api_base}/api/v1/webhooks/moyasar/callback",
-                    "success_url": f"{_api_base}/api/v1/webhooks/moyasar/redirect?order_id={_oid}",
-                    "back_url": f"{_api_base}/api/v1/webhooks/moyasar/redirect?order_id={_oid}",
+                    "success_url": f"{_api_base}/api/v1/webhooks/moyasar/redirect?order_id={_oid}{_return_q}",
+                    "back_url": f"{_api_base}/api/v1/webhooks/moyasar/redirect?order_id={_oid}{_return_q}",
                 },
             )
             payment_url = intent.client_secret

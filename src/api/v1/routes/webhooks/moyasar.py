@@ -43,6 +43,23 @@ from src.infrastructure.tenancy.rls import narrow_to_tenant
 logger = get_logger(__name__)
 router = APIRouter()
 
+
+def _safe_return_origin(value: str | None) -> str | None:
+    """Validate a ``return_to`` origin (scheme://host) to ``*.numueg.app``
+    so the post-payment redirect can't be pointed at an arbitrary host."""
+    if not value:
+        return None
+    from urllib.parse import urlparse
+
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme in ("http", "https") and (
+        host == "numueg.app" or host.endswith(".numueg.app")
+    ):
+        return f"https://{parsed.netloc}"
+    return None
+
+
 _cache_service: RedisCacheService | None = (
     RedisCacheService() if settings.redis_host else None
 )
@@ -275,6 +292,7 @@ async def moyasar_callback(
 async def moyasar_redirect(
     order_id: str | None = Query(None),
     status: str | None = Query(None),  # noqa: A002 - matches Moyasar query param
+    return_to: str | None = Query(None),
     db: AsyncSession = Depends(get_admin_db_session),
 ):
     """Browser redirect target after the customer completes payment.
@@ -299,11 +317,14 @@ async def moyasar_redirect(
     if order:
         store = await store_repo.get_by_id(order.store_id)
         if store:
-            # The store subdomain already encodes the env suffix on non-prod
-            # (e.g. "zid-test"), so the flat "<subdomain>.numueg.app" is the
-            # correct storefront host on every env — "<sub>.test.numueg.app"
-            # does not resolve.
-            base_url = f"https://{store.subdomain}.numueg.app"
+            # Prefer the exact storefront the shopper checked out on (passed
+            # as return_to, e.g. the v3 host zid-test.v3.test.numueg.app) —
+            # validated to *.numueg.app to avoid an open redirect. Fall back to
+            # the flat "<subdomain>.numueg.app" (the subdomain already encodes
+            # the env suffix on non-prod).
+            base_url = _safe_return_origin(return_to) or (
+                f"https://{store.subdomain}.numueg.app"
+            )
             paid = (status or "").lower() == "paid"
             if paid:
                 redirect_url = (
