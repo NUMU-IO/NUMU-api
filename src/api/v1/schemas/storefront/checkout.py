@@ -66,6 +66,12 @@ class CheckoutRequest(BaseModel):
     )
     customer_notes: SanitizedStr | None = Field(None, max_length=1000)
     coupon_code: str | None = Field(None, max_length=50)
+    # The storefront origin the shopper checked out from (e.g.
+    # "https://zid-test.v3.test.numueg.app"). Set by the storefront so
+    # post-payment gateways (Moyasar) redirect the shopper back to the EXACT
+    # storefront — needed because SSR-proxied checkouts carry no Origin header.
+    # Validated + allow-listed server-side before use.
+    storefront_origin: str | None = Field(None, max_length=255)
     # Phase 7.5 — pay with a previously-saved card. When present, the
     # gateway service skips the new-card capture form and charges the
     # stored token directly. Must belong to the authenticated customer

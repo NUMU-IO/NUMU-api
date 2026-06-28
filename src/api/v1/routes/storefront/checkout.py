@@ -111,29 +111,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _safe_storefront_origin(request: "Request") -> str | None:
-    """The shopper's storefront origin (scheme://host) for a safe
-    post-payment redirect — e.g. ``https://zid-test.v3.test.numueg.app``.
-
-    Reads the ``Origin`` header (falling back to ``Referer``'s origin) and
-    allow-lists ``*.numueg.app`` to prevent an open redirect. Returns None
-    when absent/untrusted so the caller can fall back to a derived host.
-    """
-    candidate = (request.headers.get("origin") or "").strip()
-    if not candidate:
-        ref = (request.headers.get("referer") or "").strip()
-        if ref:
-            p = urlparse(ref)
-            if p.scheme and p.netloc:
-                candidate = f"{p.scheme}://{p.netloc}"
+def _validate_numueg_origin(candidate: str | None) -> str | None:
+    """Return ``scheme://host`` if ``candidate`` is a trusted ``*.numueg.app``
+    origin (forced to https), else None — guards against an open redirect."""
     if not candidate:
         return None
-    parsed = urlparse(candidate)
+    parsed = urlparse(candidate.strip())
     host = (parsed.hostname or "").lower()
     if parsed.scheme in ("http", "https") and (
         host == "numueg.app" or host.endswith(".numueg.app")
     ):
         return f"https://{parsed.netloc}"
+    return None
+
+
+def _safe_storefront_origin(
+    request: "Request", explicit: str | None = None
+) -> str | None:
+    """The shopper's storefront origin for a safe post-payment redirect — e.g.
+    ``https://zid-test.v3.test.numueg.app``.
+
+    Resolution order: an ``explicit`` value the storefront put in the request
+    body (needed for SSR-proxied checkouts that carry no browser Origin) →
+    the ``Origin`` header → the ``Referer`` origin. All allow-listed to
+    ``*.numueg.app``; returns None when none are trusted.
+    """
+    val = _validate_numueg_origin(explicit)
+    if val:
+        return val
+    val = _validate_numueg_origin(request.headers.get("origin"))
+    if val:
+        return val
+    ref = (request.headers.get("referer") or "").strip()
+    if ref:
+        p = urlparse(ref)
+        if p.scheme and p.netloc:
+            return _validate_numueg_origin(f"{p.scheme}://{p.netloc}")
     return None
 
 
@@ -2109,7 +2122,7 @@ async def checkout(
             # redirect handler returns them to the EXACT storefront they
             # checked out on, instead of guessing a host. Validated +
             # allow-listed to *.numueg.app in the handler.
-            _origin = _safe_storefront_origin(http_request)
+            _origin = _safe_storefront_origin(http_request, request.storefront_origin)
             _return_q = f"&return_to={quote(_origin, safe='')}" if _origin else ""
             intent = await moyasar_service.create_payment_intent(
                 amount=_gateway_amount,
