@@ -311,6 +311,27 @@ def compute_full_risk_score(
             for f in full_result.factors
         ]
 
+        # Non-PII snapshot of exactly what score_order() consumed, so the recorded
+        # risk_score is replayable for the Trust Network cutover proof. Determinants
+        # only (address length, phone state) — never raw PII (Principle II).
+        from src.application.services.decision_input_capture import (
+            build_decision_inputs,
+        )
+
+        decision_inputs_snapshot = build_decision_inputs(
+            total_cents=total_cents,
+            payment_method=payment_method,
+            customer_total_orders=customer_total_orders,
+            customer_cancellation_rate=enriched_cancel_rate,
+            avg_order_cents=avg_order_cents,
+            network_score=net_score,
+            network_label=net_label,
+            created_at=parsed_created_at,
+            product_tags=product_tags,
+            address=address,
+            phone=phone,
+        )
+
         # ── 4. Persist final score + customer_trust (backend-022) ─────────
         # Compute the deterministic trust factor from local + network signals.
         from src.application.services.customer_trust_formula import (
@@ -389,6 +410,7 @@ def compute_full_risk_score(
                     trust_tier=trust_result.trust_tier,
                     negative_adjustment_count=trust_result.negative_adjustment_count,
                     customer_phone_hash=persisted_phone_hash,
+                    decision_inputs=decision_inputs_snapshot,
                 )
             )
 
