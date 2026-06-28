@@ -88,6 +88,11 @@ class PublishResponse(BaseModel):
     # "Live" vs "Saved, storefront refresh delayed" state instead of a
     # misleading success.
     revalidation: dict[str, Any] | None = None
+    # New post-publish etag. Publishing bumps store_theme.updated_at (the etag
+    # source) and clears the draft; the client must adopt this so a later
+    # edit + autosave/publish isn't rejected as stale. Sent in the body (not
+    # just the ETag header) because a gzip-aware proxy/CDN can drop the header.
+    etag: str | None = None
 
 
 class VersionListItem(BaseModel):

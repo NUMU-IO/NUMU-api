@@ -198,6 +198,7 @@ async def publish(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     store: Annotated[Store, Depends(get_current_store)],
     cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
+    response: Response,
 ):
     """Publish V3 draft with Dual-Write to all columns.
 
@@ -248,6 +249,14 @@ async def publish(
         )
         revalidation = summary.as_dict()
 
+    # Publish bumps store_theme.updated_at (the ETag source) and clears the
+    # draft. Echo the NEW etag so the client refreshes its draft etag — without
+    # this, a subsequent edit + autosave/publish sends the stale pre-publish
+    # etag and gets a 409 stale_etag until the page is reloaded.
+    new_state = await svc.get_draft_with_etag(store_id)
+    if new_state["etag"]:
+        response.headers["ETag"] = new_state["etag"]
+
     return SuccessResponse(
         data=PublishResponse(
             published=result["published"],
@@ -255,6 +264,7 @@ async def publish(
             content_hash=result.get("content_hash"),
             verified=bool(result.get("verified")),
             revalidation=revalidation,
+            etag=new_state["etag"],
         ),
         message="Published successfully",
     )
