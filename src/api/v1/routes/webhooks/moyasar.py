@@ -273,7 +273,6 @@ async def moyasar_callback(
 
 @router.get("/redirect", operation_id="moyasar_redirect")
 async def moyasar_redirect(
-    request: Request,
     order_id: str | None = Query(None),
     status: str | None = Query(None),  # noqa: A002 - matches Moyasar query param
     db: AsyncSession = Depends(get_admin_db_session),
@@ -297,17 +296,14 @@ async def moyasar_redirect(
         except (ValueError, AttributeError):
             order = await order_repo.get_by_payment_id_for_update(str(order_id))
 
-    # Env-aware storefront host: derive the env from the host this redirect
-    # arrived on so a test payment lands on the test storefront, not prod.
-    # api_host "numueg.app" -> "<sub>.numueg.app"; "test.numueg.app" ->
-    # "<sub>.test.numueg.app" — both are just "<sub>.<api_host>".
-    _fwd_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
-    api_host = _fwd_host or request.url.hostname or "numueg.app"
-
     if order:
         store = await store_repo.get_by_id(order.store_id)
         if store:
-            base_url = f"https://{store.subdomain}.{api_host}"
+            # The store subdomain already encodes the env suffix on non-prod
+            # (e.g. "zid-test"), so the flat "<subdomain>.numueg.app" is the
+            # correct storefront host on every env — "<sub>.test.numueg.app"
+            # does not resolve.
+            base_url = f"https://{store.subdomain}.numueg.app"
             paid = (status or "").lower() == "paid"
             if paid:
                 redirect_url = (
@@ -321,4 +317,4 @@ async def moyasar_redirect(
                 redirect_url = f"{base_url}/checkout?payment_failed=true"
             return RedirectResponse(url=redirect_url)
 
-    return RedirectResponse(url=f"https://{api_host}")
+    return RedirectResponse(url="https://numueg.app")
