@@ -308,7 +308,22 @@ class WhatsAppMessagingService(IMessagingService):
         # Build message payload — pass the template's component layout so
         # the builder can emit body + URL-button components keyed by the
         # named placeholders the template declares.
-        phone = self._format_phone_number(content.recipient.phone)
+        # Invalid/unreachable customer phone is a data-quality issue (a buyer
+        # typed a malformed number), not a system fault. Canonicalization is
+        # outside the network try/except below, so without this guard the
+        # ValueError escapes the event handler and pages as a high-priority
+        # error. Return a graceful FAILED result instead — the handler logs a
+        # skip and the order is unaffected.
+        try:
+            phone = self._format_phone_number(content.recipient.phone)
+        except ValueError as exc:
+            logger.warning("whatsapp_invalid_recipient_phone: %s", exc)
+            return MessageResult(
+                success=False,
+                channel=MessageChannel.WHATSAPP,
+                status=MessageStatus.FAILED,
+                error_message=str(exc),
+            )
         template_message = self._build_template_message(
             template.name,
             template.language,
