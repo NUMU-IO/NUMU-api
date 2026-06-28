@@ -114,6 +114,9 @@ _KEYS: list[str] = [
     "notifications",
     "settings",
     "store",
+    # Floating AI Assistant widget (not a sidebar tab, but gated through the
+    # same registry so admins can hide it). The hub reads isVisible("assistant").
+    "assistant",
 ]
 
 DEFAULT_TABS: list[dict[str, object]] = [
