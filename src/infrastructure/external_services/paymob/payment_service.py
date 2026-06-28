@@ -170,7 +170,20 @@ class PaymobPaymentService(IPaymentService):
 
             if response.status_code not in (200, 201):
                 logger.error(f"Paymob intention creation failed: {response.text}")
-                raise PaymentError("Failed to create payment with Paymob")
+                # Surface Paymob's own reason (e.g. "incorrect combination of
+                # Integration ID + Currency") so callers — including the
+                # setup-time credential validator — can show the merchant the
+                # actual problem instead of a generic failure.
+                detail = None
+                try:
+                    detail = response.json().get("detail")
+                except Exception:
+                    pass
+                raise PaymentError(
+                    f"Paymob rejected the request: {detail}"
+                    if detail
+                    else "Failed to create payment with Paymob"
+                )
 
             data = response.json()
 

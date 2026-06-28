@@ -738,6 +738,45 @@ async def save_paymob_credentials(
 
     logger.info(f"Paymob credentials saved for store {store.id}")
 
+    # Live validation probe — create a tiny Paymob intention with the store's
+    # currency + the just-entered integration IDs so the merchant sees the
+    # actual reason (e.g. "incorrect combination of Integration ID + Currency")
+    # AT SETUP TIME instead of only when a shopper fails at checkout. Non-fatal:
+    # the credentials are already saved; we only surface a warning.
+    validation_warning: str | None = None
+    try:
+        from src.infrastructure.external_services.paymob import (
+            PaymobPaymentService,
+        )
+
+        probe = PaymobPaymentService(
+            secret_key=request.secret_key,
+            public_key=request.public_key,
+            hmac_secret=request.hmac_secret,
+            card_integration_id=request.card_integration_id,
+            wallet_integration_id=request.wallet_integration_id,
+        )
+        store_ccy = (
+            store.default_currency.value
+            if hasattr(store.default_currency, "value")
+            else str(store.default_currency or "EGP")
+        )
+        await probe.create_payment_intent(
+            amount=100,
+            currency=store_ccy,
+            metadata={
+                "order_id": f"setup-check-{store.id}",
+                "billing_data": {},
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — surface any probe failure
+        validation_warning = str(exc)
+        logger.info(
+            "Paymob credential validation probe failed for store %s: %s",
+            store.id,
+            validation_warning,
+        )
+
     return SuccessResponse(
         data=PaymobCredentialsResponse(
             is_configured=True,
@@ -747,6 +786,7 @@ async def save_paymob_credentials(
             card_integration_id=request.card_integration_id,
             wallet_integration_id=request.wallet_integration_id,
             last_configured=payment_settings["paymob"]["last_configured"],
+            validation_warning=validation_warning,
         ),
         message="Paymob credentials saved successfully",
     )

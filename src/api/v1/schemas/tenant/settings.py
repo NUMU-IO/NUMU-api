@@ -174,6 +174,10 @@ class PaymobCredentialsResponse(BaseModel):
     card_integration_id: str | None = None
     wallet_integration_id: str | None = None
     last_configured: str | None = None
+    # Non-fatal warning from a live validation probe against Paymob at save
+    # time — e.g. "Paymob rejected the request: incorrect combination of
+    # Integration ID + Currency". null when the credentials validated OK.
+    validation_warning: str | None = None
 
 
 class SaveInstapayCredentialsRequest(BaseModel):
