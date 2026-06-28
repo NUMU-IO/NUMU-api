@@ -26,6 +26,9 @@ from src.infrastructure.database.models.public.omnichannel import (
     WebhookEventModel,
 )
 from src.infrastructure.database.models.public.onboarding import StoreOnboardingModel
+from src.infrastructure.database.models.public.personal_access_token import (
+    PersonalAccessTokenModel,
+)
 from src.infrastructure.database.models.public.reconciliation import (
     PaymentReconciliationRunModel,
     ReconciliationMismatchModel,
@@ -45,6 +48,7 @@ __all__ = [
     "CustomizerUndoEntryModel",
     "FeedbackModel",
     "PaymentReconciliationRunModel",
+    "PersonalAccessTokenModel",
     "ReconciliationMismatchModel",
     "StoreOnboardingModel",
     "TenantModel",
