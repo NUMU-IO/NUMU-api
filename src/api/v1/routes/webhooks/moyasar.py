@@ -293,6 +293,8 @@ async def moyasar_redirect(
     order_id: str | None = Query(None),
     status: str | None = Query(None),  # noqa: A002 - matches Moyasar query param
     return_to: str | None = Query(None),
+    payment_id: str | None = Query(None, alias="id"),
+    invoice_id: str | None = Query(None),
     db: AsyncSession = Depends(get_admin_db_session),
 ):
     """Browser redirect target after the customer completes payment.
@@ -316,6 +318,57 @@ async def moyasar_redirect(
 
     if order:
         store = await store_repo.get_by_id(order.store_id)
+
+        # Backup confirmation. The webhook is primary, but if it hasn't landed
+        # (e.g. not configured in the Moyasar dashboard) the order would stay
+        # "pending" even though the shopper paid. Verify the payment DIRECTLY
+        # with Moyasar (never trust the browser's status param) and mark it
+        # paid. Idempotent: skipped once the order is already paid.
+        if store and (status or "").lower() == "paid" and not order.is_paid:
+            try:
+                from src.infrastructure.external_services.moyasar.payment_service import (  # noqa: E501
+                    MoyasarPaymentService,
+                    get_merchant_moyasar_credentials,
+                )
+
+                creds = await get_merchant_moyasar_credentials(store.settings or {})
+                svc = MoyasarPaymentService(secret_key=creds.get("secret_key"))
+                ref = invoice_id or payment_id
+                result = await svc.confirm_payment(ref) if ref else None
+                if result and result.success:
+                    await narrow_to_tenant(db, order.tenant_id)
+                    order.mark_as_paid(
+                        payment_id=str(
+                            payment_id or invoice_id or order.payment_id or ""
+                        ),
+                        payment_method="moyasar",
+                    )
+                    await order_repo.update(order)
+                    db.add(
+                        PaymentTransactionModel(
+                            tenant_id=order.tenant_id,
+                            store_id=order.store_id,
+                            order_id=order.id,
+                            channel="online",
+                            gateway="moyasar",
+                            display_name="Card",
+                            amount_cents=int(order.total or 0),
+                            currency=order.currency or "EGP",
+                            status="success",
+                            gateway_transaction_id=str(payment_id or invoice_id or ""),
+                            processing_completed_at=datetime.now(UTC),
+                        )
+                    )
+                    await db.commit()
+                    log.info("redirect_backup_marked_paid")
+                else:
+                    log.info(
+                        "redirect_backup_not_confirmed",
+                        reason=getattr(result, "error_message", "no_ref"),
+                    )
+            except Exception as exc:  # noqa: BLE001 — backup is best-effort
+                log.warning("redirect_backup_failed", error=str(exc))
+
         if store:
             # Prefer the exact storefront the shopper checked out on (passed
             # as return_to, e.g. the v3 host zid-test.v3.test.numueg.app) —
