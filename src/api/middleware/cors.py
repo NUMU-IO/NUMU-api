@@ -39,6 +39,10 @@ DEFAULT_EXPOSED_HEADERS = [
     "X-RateLimit-Remaining",
     "Retry-After",
     "X-CSRF-Token",
+    # Optimistic-concurrency token for the V3 theme editor autosave. Without
+    # this a cross-origin browser cannot read the ETag, so the editor can
+    # never advance its concurrency token and every save after the first 409s.
+    "ETag",
 ]
 
 

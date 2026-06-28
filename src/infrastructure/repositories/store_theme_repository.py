@@ -169,9 +169,17 @@ class StoreThemeRepository(IStoreThemeRepository):
         model.activated_at = entity.activated_at
         model.theme_version_id = str(entity.theme_version_id)
         await self.session.flush()
-        # Reload with eager relationships
+        # Reload with eager relationships. `populate_existing` forces the
+        # identity-map instance to be refreshed from this SELECT — without it,
+        # server-generated columns bumped by the UPDATE (notably
+        # `updated_at` via `onupdate=func.now()`) keep their pre-update value
+        # on the in-session object. That stale value would then be echoed as
+        # the optimistic-concurrency etag, so the client's next save sends an
+        # etag the DB has already moved past and gets a spurious 409.
         result2 = await self.session.execute(
-            self._base_query().where(StoreThemeModel.id == str(entity.id))
+            self._base_query()
+            .where(StoreThemeModel.id == str(entity.id))
+            .execution_options(populate_existing=True)
         )
         refreshed = result2.scalar_one()
         return self._to_entity(refreshed)

@@ -12,7 +12,7 @@ negative pass.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -20,6 +20,7 @@ from src.application.services.theme_v3_service import (
     StaleEtagError,
     ThemeV3Service,
     _etag_from,
+    _normalize_etag,
 )
 
 VALID_V3 = {
@@ -51,7 +52,13 @@ class _FakeStoreThemeRepo:
         return self._st
 
     async def update(self, st):
+        # Mirror the production column: `updated_at` has a server-side
+        # `onupdate=func.now()`, so EVERY persisted update advances it. Without
+        # simulating this bump the round-trip test below is vacuous (the etag
+        # would never change), which is exactly how the stale-etag publish bug
+        # shipped undetected.
         self.updated.append(st)
+        st.updated_at = st.updated_at + timedelta(microseconds=1)
         return st
 
 
@@ -132,3 +139,74 @@ class TestAutosaveEtagConflict:
         svc = ThemeV3Service(_FakeStoreThemeRepo(None), _FakeVersionRepo())
         with pytest.raises(ValueError, match="No active theme"):
             await svc.autosave_draft(uuid.uuid4(), VALID_V3, expected_etag="x")
+
+
+class TestNormalizeEtag:
+    def test_none_passthrough(self):
+        assert _normalize_etag(None) is None
+
+    def test_bare_value_unchanged(self):
+        assert _normalize_etag("2026-06-28T19:25:48.924299+00:00") == (
+            "2026-06-28T19:25:48.924299+00:00"
+        )
+
+    def test_strips_weak_validator_and_quotes(self):
+        # A gzip-aware proxy can wrap our strong etag as a weak one.
+        assert _normalize_etag('W/"2026-06-28T19:25:48.924299+00:00"') == (
+            "2026-06-28T19:25:48.924299+00:00"
+        )
+
+    def test_strips_quotes_only(self):
+        assert _normalize_etag('"abc"') == "abc"
+
+
+class TestAutosaveEtagRoundTrip:
+    """Regression for the stale-etag publish bug: the etag the server hands
+    back after a save MUST be the one the *next* save can use without a 409.
+    Every save bumps ``updated_at`` (server onupdate), so the client has to
+    pick up the advanced token — see _FakeStoreThemeRepo.update."""
+
+    @pytest.mark.asyncio
+    async def test_consecutive_saves_use_advancing_etag(self):
+        dt = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+        st = _FakeStoreTheme(dt, draft_v3=None)
+        svc = ThemeV3Service(_FakeStoreThemeRepo(st), _FakeVersionRepo())
+        store_id = uuid.uuid4()
+
+        # Load → first save with the loaded etag succeeds.
+        load_etag = (await svc.get_draft_with_etag(store_id))["etag"]
+        await svc.autosave_draft(store_id, VALID_V3, expected_etag=load_etag)
+
+        # The server advanced updated_at; the echoed etag must reflect it.
+        echoed_etag = (await svc.get_draft_with_etag(store_id))["etag"]
+        assert echoed_etag != load_etag
+
+        # Re-using the STALE load etag now 409s (proves the token really moved).
+        with pytest.raises(StaleEtagError):
+            await svc.autosave_draft(
+                store_id,
+                {**VALID_V3, "global_settings": {"radius": 8}},
+                expected_etag=load_etag,
+            )
+
+        # ...but the freshly echoed etag lets the next save through — this is
+        # the path that was broken when the client never received the new etag.
+        await svc.autosave_draft(
+            store_id,
+            {**VALID_V3, "global_settings": {"radius": 8}},
+            expected_etag=echoed_etag,
+        )
+
+    @pytest.mark.asyncio
+    async def test_weak_validator_etag_still_matches(self):
+        # If a proxy weakened the etag in transit, the client echoes the weak
+        # form; the conflict check must normalize and still accept it.
+        dt = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+        st = _FakeStoreTheme(dt, draft_v3=None)
+        svc = ThemeV3Service(_FakeStoreThemeRepo(st), _FakeVersionRepo())
+        store_id = uuid.uuid4()
+
+        load_etag = (await svc.get_draft_with_etag(store_id))["etag"]
+        weak = f'W/"{load_etag}"'
+        # Must NOT raise despite the W/ wrapping.
+        await svc.autosave_draft(store_id, VALID_V3, expected_etag=weak)
