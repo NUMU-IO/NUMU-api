@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.api.dependencies import (
+    get_category_repository,
     get_customer_repository,
     get_order_repository,
     get_product_repository,
@@ -34,6 +35,7 @@ from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.entities.store import Store
 from src.infrastructure.repositories import (
     AnalyticsRollupRepository,
+    CategoryRepository,
     CustomerRepository,
     OrderRepository,
     StoreRepository,
@@ -1217,6 +1219,7 @@ class ProductPerformanceItem(BaseModel):
     id: str
     name: str
     sku: str | None
+    image_url: str | None = None
     revenue: int  # cents
     quantity_sold: int
     current_stock: int
@@ -1258,6 +1261,7 @@ async def get_product_performance(
     store: Annotated[Store, Depends(verify_store_ownership)],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
     window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
     sort_by: str = Query("revenue", description="Sort by: revenue, quantity, name"),
 ):
@@ -1292,6 +1296,14 @@ async def get_product_performance(
     products = await product_repo.get_by_store(store.id, skip=0, limit=5000)
     product_map = {str(p.id): p for p in products}
 
+    # Resolve category names up front (the Product entity carries only
+    # category_id, no joined category) so the breakdown shows real names
+    # instead of a "Category <uuid>" fallback.
+    categories_list = await category_repo.get_by_store(
+        store.id, skip=0, limit=1000, include_inactive=True
+    )
+    category_name_map = {str(c.id): c.name for c in categories_list}
+
     # Optional client-side sort over the SQL-aggregated top set.
     sort_key = {
         "revenue": lambda r: r["revenue_cents"],
@@ -1322,6 +1334,7 @@ async def get_product_performance(
                 id=pid,
                 name=r["product_name"] or (p.name if p else "Unknown"),
                 sku=p.sku if p else None,
+                image_url=(p.images[0] if p and p.images else None),
                 revenue=r["revenue_cents"],
                 quantity_sold=r["units_sold"],
                 current_stock=stock,
@@ -1340,10 +1353,10 @@ async def get_product_performance(
         p = product_map.get(pid)
         cat_id = str(p.category_id) if p and p.category_id else None
         cat_name = "Uncategorized"
-        if p and p.category_id and hasattr(p, "category") and p.category:
-            cat_name = p.category.name
-        elif cat_id:
-            cat_name = f"Category {cat_id[:8]}"
+        if cat_id:
+            # Real name from the catalog; fall back to a short id only if the
+            # category was deleted but still referenced by an order line.
+            cat_name = category_name_map.get(cat_id, f"Category {cat_id[:8]}")
 
         if cat_id not in category_data:
             category_data[cat_id] = {
