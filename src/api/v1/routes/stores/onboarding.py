@@ -315,10 +315,16 @@ async def configure_from_wizard(
     settings_applied: list[str] = []
     settings = store.settings or {}
 
-    # ── 1. Currency from country ──
-    country_data = COUNTRY_DEFAULTS.get(request.country, COUNTRY_DEFAULTS["EG"])
+    # ── 1. Currency + country from the picked market ──
+    # Keep store.country in sync with the currency so they can't drift apart
+    # (a SAR currency on an EG store later breaks currency-scoped gateways
+    # like Paymob). Unknown codes fall back to EG, same as the currency.
+    resolved_country = request.country if request.country in COUNTRY_DEFAULTS else "EG"
+    country_data = COUNTRY_DEFAULTS[resolved_country]
     store.default_currency = country_data["currency"]
+    store.country = resolved_country
     settings_applied.append(f"currency:{country_data['currency']}")
+    settings_applied.append(f"country:{resolved_country}")
 
     # ── 2. Language ──
     store.default_language = request.store_language

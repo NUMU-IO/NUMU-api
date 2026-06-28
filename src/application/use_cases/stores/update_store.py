@@ -68,6 +68,25 @@ class UpdateStoreUseCase:
             # (selecting a closed day clears its open/close fields).
             store.business_hours = dto.business_hours
 
+        # Market / currency. Changing the country re-resolves the market and
+        # applies its default currency; an explicit currency always wins. Kept
+        # together so country + currency can't drift out of sync (the bug that
+        # left a SAR currency on an EG store and broke Paymob).
+        if dto.country is not None:
+            from src.application.services.market_registry import get_market
+
+            market = get_market(dto.country)
+            store.country = market.country
+            if dto.default_currency is None:
+                store.default_currency = market.default_currency
+        if dto.default_currency is not None:
+            from src.core.value_objects.money import Currency
+
+            try:
+                store.default_currency = Currency(dto.default_currency)
+            except ValueError:
+                pass  # ignore an unknown currency code; keep the current one
+
         # Save store
         updated_store = await self.store_repository.update(store)
 

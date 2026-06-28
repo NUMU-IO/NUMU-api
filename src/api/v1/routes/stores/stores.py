@@ -399,6 +399,8 @@ async def update_store(
         settings=request.settings,
         theme_settings=request.theme_settings,
         business_hours=request.business_hours,
+        country=request.country,
+        default_currency=request.default_currency,
     )
 
     result = await use_case.execute(

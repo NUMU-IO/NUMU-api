@@ -101,3 +101,7 @@ class UpdateStoreDTO(BaseDTO):
     settings: dict | None = None
     theme_settings: dict | None = None
     business_hours: dict | None = None
+    # Market/currency — changing the country re-resolves the market; an
+    # explicit currency wins, else the market default is applied.
+    country: str | None = None
+    default_currency: str | None = None

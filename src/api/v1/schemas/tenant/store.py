@@ -129,6 +129,14 @@ class UpdateStoreRequest(BaseModel):
             '"close":"22:00","closed":false}, ...}}'
         ),
     )
+    country: str | None = Field(
+        None,
+        pattern="^[A-Za-z]{2}$",
+        description="Market country code (e.g. EG, SA). Re-resolves the market.",
+    )
+    default_currency: str | None = Field(
+        None, max_length=3, description="ISO 4217 currency (e.g. EGP, SAR)"
+    )
 
     @field_validator("settings", mode="after")
     @classmethod
