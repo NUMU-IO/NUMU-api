@@ -286,15 +286,37 @@ async def update_store_status(
 
     await store_repo.update(store)
 
-    # Evict the storefront cache so a status change (especially suspend /
-    # deactivate) takes effect immediately. Otherwise the public resolution
-    # endpoint keeps serving the stale ACTIVE payload until the TTL expires,
-    # and a suspended store stays reachable.
+    # Evict the API's Redis cache so the resolution endpoint stops serving the
+    # stale ACTIVE payload immediately.
     await cache.invalidate_store(
         store_id=store.id,
         subdomain=store.subdomain,
         custom_domain=store.custom_domain,
     )
+
+    # Bust the Next.js storefront's ISR cache too — otherwise the rendered
+    # store page keeps serving from the storefront's own cache (tag
+    # ``store-<subdomain>``) until its ~60s ISR window elapses, so a suspended
+    # store stays visibly open. Best-effort; never fail the admin action.
+    if store.subdomain:
+        try:
+            from src.infrastructure.external_services.nextjs_revalidation import (
+                revalidate_store,
+                store_cache_tags,
+            )
+
+            await revalidate_store(
+                store.subdomain,
+                paths=["/"],
+                tags=store_cache_tags(store.subdomain, store.custom_domain),
+                scope="layout",
+            )
+        except Exception:  # noqa: BLE001 — storefront revalidation is best-effort
+            logger.warning(
+                "storefront revalidation on status change failed (store=%s)",
+                store.id,
+                exc_info=True,
+            )
 
     # Sync tenant.is_active
     if store.tenant_id:
