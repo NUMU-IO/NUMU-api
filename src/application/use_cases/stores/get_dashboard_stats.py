@@ -69,6 +69,7 @@ class TopProductDTO:
     sku: str | None
     quantity_sold: int
     revenue: int
+    image_url: str | None = None
 
 
 class GetDashboardStatsUseCase:
@@ -350,6 +351,17 @@ class GetDashboardStatsUseCase:
             reverse=True,
         )[:limit]
 
+        # Batch-fetch the products (only the top N) to attach the primary
+        # image. Line items don't carry images, so resolve from the product.
+        product_images: dict[UUID, str | None] = {}
+        product_ids = [p["id"] for p in sorted_products if p["id"] is not None]
+        if product_ids:
+            products = await self.product_repository.get_by_ids(product_ids)
+            product_images = {
+                product.id: (product.images[0] if product.images else None)
+                for product in products
+            }
+
         return [
             TopProductDTO(
                 id=str(p["id"]),
@@ -357,6 +369,7 @@ class GetDashboardStatsUseCase:
                 sku=p["sku"],
                 quantity_sold=p["quantity"],
                 revenue=p["revenue"],
+                image_url=product_images.get(p["id"]),
             )
             for p in sorted_products
         ]

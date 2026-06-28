@@ -11,6 +11,11 @@ class IProductRepository(BaseRepository[Product]):
     """Product repository interface."""
 
     @abstractmethod
+    async def get_by_ids(self, entity_ids: list[UUID]) -> list[Product]:
+        """Bulk-fetch products by ID (arbitrary order, missing IDs skipped)."""
+        ...
+
+    @abstractmethod
     async def get_by_store(
         self,
         store_id: UUID,

@@ -87,6 +87,7 @@ class DashboardTopProductResponse(BaseModel):
     sku: str | None
     quantity_sold: int
     revenue: int
+    image_url: str | None = None
 
 
 class OrderStreakResponse(BaseModel):
@@ -235,6 +236,7 @@ async def get_dashboard_top_products(
                 sku=product.sku,
                 quantity_sold=product.quantity_sold,
                 revenue=product.revenue,
+                image_url=product.image_url,
             )
             for product in result
         ],
