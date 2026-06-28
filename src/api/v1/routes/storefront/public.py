@@ -683,7 +683,10 @@ async def get_store_by_subdomain(
         )
 
     store = await store_repo.get_by_subdomain(normalized)
-    if not store or store.status == StoreStatus.PENDING_APPROVAL:
+    # Only ACTIVE stores are publicly reachable. A suspended, inactive, or
+    # not-yet-approved store must read as missing so the storefront shows its
+    # closed/not-found state instead of serving a live shop.
+    if not store or store.status != StoreStatus.ACTIVE:
         await cache.set_store_missing(subdomain=normalized)
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
@@ -727,7 +730,8 @@ async def get_store_by_domain(
         )
 
     store = await store_repo.get_by_custom_domain(normalized)
-    if not store or store.status == StoreStatus.PENDING_APPROVAL:
+    # Only ACTIVE stores are publicly reachable (see store-by-subdomain).
+    if not store or store.status != StoreStatus.ACTIVE:
         await cache.set_store_missing(custom_domain=normalized)
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
 

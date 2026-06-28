@@ -19,11 +19,15 @@ from src.api.dependencies.repositories import (
     get_store_repository,
     get_user_repository,
 )
-from src.api.dependencies.services import get_token_service
+from src.api.dependencies.services import (
+    get_storefront_cache_service,
+    get_token_service,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
 from src.config import settings
 from src.core.entities.store import StoreStatus
+from src.infrastructure.cache.storefront_cache import StorefrontCache
 from src.infrastructure.database.models.public.tenant import (
     TenantLifecycleState,
     TenantModel,
@@ -241,6 +245,7 @@ async def update_store_status(
     request: UpdateStoreStatusRequest,
     _admin_id: Annotated[UUID, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Update a store's status (approve, suspend, activate, deactivate)."""
     store_repo = StoreRepository(db)
@@ -280,6 +285,16 @@ async def update_store_status(
         store.touch()
 
     await store_repo.update(store)
+
+    # Evict the storefront cache so a status change (especially suspend /
+    # deactivate) takes effect immediately. Otherwise the public resolution
+    # endpoint keeps serving the stale ACTIVE payload until the TTL expires,
+    # and a suspended store stays reachable.
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=store.custom_domain,
+    )
 
     # Sync tenant.is_active
     if store.tenant_id:
