@@ -28,6 +28,7 @@ from src.api.v1.routes.stores import ai as ai_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
 from src.api.v1.routes.stores import apps as apps_module
+from src.api.v1.routes.stores import audit as audit_module
 from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
@@ -127,6 +128,7 @@ router.include_router(
 )
 router.include_router(order_import_module.router, tags=["Store Order Import"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
+router.include_router(audit_module.router, tags=["Store MCP Audit"])
 router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(gift_cards_module.router, tags=["Store Gift Cards"])
