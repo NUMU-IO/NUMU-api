@@ -2067,11 +2067,26 @@ async def checkout(
             customer_email_str = (
                 str(current_customer.email) if current_customer.email else None
             )
+            # Env-aware callback/redirect host so Moyasar returns the shopper
+            # to the SAME environment the checkout ran on (test.numueg.app on
+            # test, numueg.app on prod) — otherwise the hosted-page redirect
+            # 404s on an env that doesn't have the route deployed.
+            _fwd_host = (
+                http_request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+            )
+            _api_host = _fwd_host or http_request.url.hostname or "numueg.app"
+            _api_base = f"https://{_api_host}"
+            _oid = str(created_order.id)
             intent = await moyasar_service.create_payment_intent(
                 amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
-                metadata={"order_id": str(created_order.id)},
+                metadata={
+                    "order_id": _oid,
+                    "callback_url": f"{_api_base}/api/v1/webhooks/moyasar/callback",
+                    "success_url": f"{_api_base}/api/v1/webhooks/moyasar/redirect?order_id={_oid}",
+                    "back_url": f"{_api_base}/api/v1/webhooks/moyasar/redirect?order_id={_oid}",
+                },
             )
             payment_url = intent.client_secret
         except Exception as e:
