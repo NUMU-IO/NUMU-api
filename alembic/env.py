@@ -97,10 +97,18 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode using async engine."""
+    # Match the app engine's TLS negotiation so migrations against a managed
+    # Postgres (Supabase) connect over SSL too. No-op for the local container.
+    connect_args = {}
+    _ssl_ctx = settings.asyncpg_ssl()
+    if _ssl_ctx is not None:
+        connect_args["ssl"] = _ssl_ctx
+
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:

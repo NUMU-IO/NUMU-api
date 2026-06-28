@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     # queries before they pin a connection for the whole request timeout.
     db_statement_timeout_ms: int = 30000
 
+    # SSL/TLS for managed Postgres providers (e.g. Supabase Supavisor pooler).
+    # Empty/unset → plaintext, which is what the local Docker container wants.
+    # asyncpg (and the SQLAlchemy asyncpg dialect) takes an `ssl` connect-arg,
+    # NOT libpq's `sslmode` query param, so a managed DB needs this rather than
+    # a `?sslmode=` URL suffix. Supabase: set "require" (encrypt, no cert check)
+    # or "verify-full" with `postgres_ssl_root_cert` pointing at its CA bundle.
+    postgres_sslmode: str = ""
+    postgres_ssl_root_cert: str = ""
+
     # Celery workers run with their own smaller pool (per process). Heavy
     # background jobs still get bandwidth without stealing from the API. Set
     # process_role=celery on the worker container (NUMU_PROCESS_ROLE env)
@@ -98,6 +107,33 @@ class Settings(BaseSettings):
             self.r2_account_id and self.r2_access_key_id and self.r2_secret_access_key
         )
         return has_s3 or has_r2
+
+    def asyncpg_ssl(self):  # type: ignore[no-untyped-def]
+        """Build an ssl.SSLContext for asyncpg, or None when SSL is disabled.
+
+        Shared by the app engine (connection.py) and Alembic (alembic/env.py)
+        so migrations and the live app negotiate TLS identically.
+        """
+        mode = (self.postgres_sslmode or "").strip().lower()
+        if not mode or mode == "disable":
+            return None
+
+        import ssl as _ssl
+
+        if mode in ("require", "prefer", "allow"):
+            # Encrypt the connection but skip cert/hostname verification — the
+            # simplest mode that satisfies Supabase's "SSL required" without
+            # shipping its CA bundle.
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+            return ctx
+
+        # verify-ca / verify-full — validate against the provider CA.
+        ctx = _ssl.create_default_context(cafile=self.postgres_ssl_root_cert or None)
+        if mode == "verify-ca":
+            ctx.check_hostname = False
+        return ctx
 
     @property
     def database_url(self) -> str:

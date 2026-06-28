@@ -185,6 +185,12 @@ else:
         pool_recycle=settings.db_pool_recycle,
     )
 
+# Managed Postgres (Supabase) requires TLS; asyncpg takes an `ssl` connect-arg
+# rather than a `?sslmode=` URL suffix. No-op for the local plaintext container.
+_ssl_ctx = settings.asyncpg_ssl()
+if _ssl_ctx is not None:
+    _engine_kwargs["connect_args"]["ssl"] = _ssl_ctx
+
 engine = create_async_engine(settings.database_url, **_engine_kwargs)
 
 
