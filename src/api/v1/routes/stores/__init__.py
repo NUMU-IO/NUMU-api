@@ -24,6 +24,7 @@ from fastapi import APIRouter
 from src.api.v1.routes.stores import (
     abandoned_checkouts as abandoned_checkouts_module,
 )
+from src.api.v1.routes.stores import access_tokens as access_tokens_module
 from src.api.v1.routes.stores import ai as ai_module
 from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
@@ -128,6 +129,7 @@ router.include_router(
 router.include_router(order_import_module.router, tags=["Store Order Import"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(customers_module.router, tags=["Store Customers"])
+router.include_router(access_tokens_module.router, tags=["Store Access Tokens"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(gift_cards_module.router, tags=["Store Gift Cards"])
 router.include_router(inventory_module.router, tags=["Store Inventory"])

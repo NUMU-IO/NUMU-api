@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 
+from src.application.services.personal_access_token_service import looks_like_pat
 from src.application.services.token_revocation_service import TokenRevocationService
 from src.core.entities.user import UserRole
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
@@ -35,33 +36,8 @@ def _bearer_token(request: Request) -> str | None:
 
 
 async def get_current_user_id(request: Request) -> UUID:
-    """Get current user ID from access_token httpOnly cookie or Bearer header."""
-    token = _bearer_token(request) or request.cookies.get("access_token")
-
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-        )
-
-    try:
-        payload = token_service.verify_token(token)
-    except TokenExpiredError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-        )
-    except InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-        )
-
-    if await _revocation_service.is_revoked(payload.user_id, payload.iat):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has been revoked. Please log in again.",
-        )
+    """Get current user ID from access_token cookie, JWT Bearer, or PAT."""
+    payload = await _resolve_principal(request)
 
     # Populate the user RLS contextvar early in the dependency chain so
     # the eventual `get_db_session()` can stamp `app.current_user` on
@@ -76,29 +52,8 @@ async def get_current_user_id(request: Request) -> UUID:
 
 
 async def get_current_user_role(request: Request) -> tuple[UUID, str]:
-    """Get current user ID and role from access_token httpOnly cookie or Bearer header."""
-    token = _bearer_token(request) or request.cookies.get("access_token")
-
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-        )
-
-    try:
-        payload = token_service.verify_token(token)
-    except (TokenExpiredError, InvalidTokenError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
-        )
-
-    if await _revocation_service.is_revoked(payload.user_id, payload.iat):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has been revoked. Please log in again.",
-        )
-
+    """Get current user ID and role from cookie, JWT Bearer, or PAT."""
+    payload = await _resolve_principal(request)
     return payload.user_id, payload.role
 
 
@@ -298,7 +253,19 @@ from src.infrastructure.repositories.store_repository import StoreRepository
 
 
 async def get_current_token_payload(request: Request) -> TokenPayload:
-    """Get full token payload from access_token httpOnly cookie or Bearer header."""
+    """Get full token payload from cookie, JWT Bearer, or Personal Access Token."""
+    return await _resolve_principal(request)
+
+
+async def _resolve_principal(request: Request) -> TokenPayload:
+    """Resolve the acting user from a cookie/JWT Bearer or a Personal Access Token.
+
+    A single entry point used by ``get_current_user_id`` /
+    ``get_current_user_role`` / ``get_current_token_payload`` so JWT and PAT
+    callers travel the exact same downstream path (membership → RBAC → plan
+    limits). JWT behaviour is unchanged; tokens prefixed with the PAT marker
+    are validated against the ``personal_access_tokens`` table instead.
+    """
     token = _bearer_token(request) or request.cookies.get("access_token")
 
     if not token:
@@ -306,6 +273,9 @@ async def get_current_token_payload(request: Request) -> TokenPayload:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
+
+    if looks_like_pat(token):
+        return await _resolve_pat_principal(token, request)
 
     try:
         payload = token_service.verify_token(token)
@@ -327,6 +297,54 @@ async def get_current_token_payload(request: Request) -> TokenPayload:
         )
 
     return payload
+
+
+async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
+    """Validate a Personal Access Token and synthesize a ``TokenPayload``.
+
+    Opens its own short-lived session (the request-scoped one isn't available
+    this early in the dependency chain). The PAT, user, and store tables all
+    live in the ``public`` schema, so the default search_path resolves them
+    without tenant-schema switching.
+    """
+    from src.application.services.personal_access_token_service import (
+        PersonalAccessTokenService,
+    )
+    from src.infrastructure.database.connection import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        service = PersonalAccessTokenService(session)
+        resolved = await service.authenticate(token)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired access token",
+            )
+        record, user = resolved
+
+        # Defense in depth: a PAT may only act on the tenant it was minted for.
+        # The subdomain middleware has already resolved the target tenant, so a
+        # token replayed against another store's subdomain is rejected here.
+        tenant = getattr(request.state, "tenant", None)
+        if tenant is not None and str(record.tenant_id) != str(tenant.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access token is not valid for this store",
+            )
+
+        await service.mark_used(record)
+        await session.commit()
+
+        role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
+        return TokenPayload(
+            user_id=user.id,
+            email=user.email,
+            role=role_value,
+            exp=0,
+            token_type="access",
+            iat=0,
+            tenant_id=record.tenant_id,
+        )
 
 
 async def get_current_customer_payload(request: Request) -> CustomerTokenPayload:
