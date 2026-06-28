@@ -32,6 +32,23 @@ from src.infrastructure.tenancy.rls import narrow_to_tenant
 logger = get_logger(__name__)
 router = APIRouter()
 
+
+def _safe_return_origin(value: str | None) -> str | None:
+    """Validate a ``return_to`` origin (scheme://host) to ``*.numueg.app``
+    so the post-payment redirect can't be pointed at an arbitrary host."""
+    if not value:
+        return None
+    from urllib.parse import urlparse
+
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme in ("http", "https") and (
+        host == "numueg.app" or host.endswith(".numueg.app")
+    ):
+        return f"https://{parsed.netloc}"
+    return None
+
+
 _cache_service: RedisCacheService | None = (
     RedisCacheService() if settings.redis_host else None
 )
@@ -352,6 +369,7 @@ async def paymob_callback_redirect(
     merchant_order_id: str | None = Query(None),
     order: str | None = Query(None),
     id: str | None = Query(None),
+    return_to: str | None = Query(None),
     db: AsyncSession = Depends(get_admin_db_session),
 ):
     """Handle Paymob redirect after payment.
@@ -397,9 +415,12 @@ async def paymob_callback_redirect(
                 )
                 await order_repo.update(internal_order)
 
-            # Build storefront URL using store's subdomain
-            subdomain = store.subdomain
-            base_url = f"https://{subdomain}.numueg.app"
+            # Land the shopper on the exact storefront they paid from (passed
+            # as return_to, e.g. the v3 host), validated to *.numueg.app; else
+            # fall back to the flat "<subdomain>.numueg.app".
+            base_url = _safe_return_origin(return_to) or (
+                f"https://{store.subdomain}.numueg.app"
+            )
 
             if success:
                 # Include the total (in cents) so the confirmation page can

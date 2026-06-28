@@ -1733,12 +1733,26 @@ async def checkout(
             )
             ship_addr = request.shipping_address
 
+            # Env-aware callback URLs so Paymob returns the shopper + notifies
+            # THIS environment (test.numueg.app on test). return_to carries the
+            # exact storefront (e.g. the v3 host) so the redirect handler lands
+            # the shopper back where they paid.
+            _fwd_host = (
+                http_request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+            )
+            _api_host = _fwd_host or http_request.url.hostname or "numueg.app"
+            _api_base = f"https://{_api_host}"
+            _origin = _safe_storefront_origin(http_request, request.storefront_origin)
+            _return_q = f"?return_to={quote(_origin, safe='')}" if _origin else ""
+
             intent = await paymob_service.create_payment_intent(
                 amount=_gateway_amount,
                 currency=currency,
                 customer_email=customer_email_str,
                 metadata={
                     "order_id": str(created_order.id),
+                    "notification_url": f"{_api_base}/api/v1/webhooks/paymob/callback",
+                    "redirection_url": f"{_api_base}/api/v1/webhooks/paymob/callback{_return_q}",
                     "billing_data": {
                         "first_name": ship_addr.first_name or "Customer",
                         "last_name": ship_addr.last_name or "Customer",

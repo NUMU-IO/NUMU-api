@@ -159,6 +159,14 @@ class PaymobPaymentService(IPaymentService):
                 "order_id": our_order_id,
             },
         }
+        # Where Paymob sends the shopper (redirection_url) and the server→server
+        # webhook (notification_url) after payment. Without these Paymob shows
+        # its own generic "Thank you" page and never notifies us, so the order
+        # stays pending — the caller passes env-aware URLs.
+        if metadata.get("redirection_url"):
+            payload["redirection_url"] = metadata["redirection_url"]
+        if metadata.get("notification_url"):
+            payload["notification_url"] = metadata["notification_url"]
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
