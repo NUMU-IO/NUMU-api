@@ -175,12 +175,16 @@ async def autosave_draft(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # Echo the new etag so the client uses it for the next autosave.
+    # Echo the new etag so the client uses it for the next autosave. We send
+    # it both as the `ETag` header AND in the response body: a gzip-aware
+    # proxy/CDN can rewrite or drop the header in transit, so the body copy is
+    # the authoritative channel the client reads from (header is a fallback).
     new_state = await svc.get_draft_with_etag(store_id)
     if new_state["etag"]:
         response.headers["ETag"] = new_state["etag"]
     return SuccessResponse(
-        data=AutosaveDraftResponse(draft=data), message="Draft saved"
+        data=AutosaveDraftResponse(draft=data, etag=new_state["etag"]),
+        message="Draft saved",
     )
 
 

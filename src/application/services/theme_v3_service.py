@@ -70,6 +70,26 @@ def _etag_from(value: datetime | str | None) -> str | None:
     return str(value)
 
 
+def _normalize_etag(value: str | None) -> str | None:
+    """Strip weak-validator wrapping (``W/"..."``) and surrounding quotes.
+
+    A gzip-aware proxy / CDN (Nginx, Vercel) can rewrite a strong ``ETag``
+    into a weak one — ``2026-…+00:00`` becomes ``W/"2026-…+00:00"`` — before
+    it reaches the browser. The client then echoes that wrapped form back as
+    ``If-Match`` / ``expected_etag``, which would never string-equal the bare
+    ISO timestamp we store. Normalizing both sides before comparing makes the
+    optimistic-concurrency check survive that transformation.
+    """
+    if value is None:
+        return None
+    v = value.strip()
+    if v.startswith("W/"):
+        v = v[2:].strip()
+    if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+        v = v[1:-1]
+    return v
+
+
 class ThemeV3Service:
     """Service for V3 theme editor operations."""
 
@@ -184,7 +204,9 @@ class ThemeV3Service:
         # validation so a conflict with stale data short-circuits even
         # if the payload is malformed.
         current_etag = _etag_from(getattr(store_theme, "updated_at", None))
-        if expected_etag is not None and current_etag != expected_etag:
+        if expected_etag is not None and _normalize_etag(
+            current_etag
+        ) != _normalize_etag(expected_etag):
             current = await self.get_draft_with_etag(store_id)
             raise StaleEtagError(
                 current_etag=current["etag"],
