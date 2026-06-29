@@ -221,3 +221,55 @@ class CheckSubdomainResponse(BaseModel):
     subdomain: str = Field(description="Subdomain that was checked")
     available: bool = Field(description="Whether the subdomain is available")
     message: str | None = Field(None, description="Additional information")
+
+
+# ── Custom domain (Cloudflare for SaaS) ──────────────────────────────────────
+
+
+class ConnectCustomDomainRequest(BaseModel):
+    """Connect a merchant-owned custom domain to the store."""
+
+    domain: str = Field(
+        ...,
+        min_length=4,
+        max_length=255,
+        description="Fully-qualified domain, e.g. 'shop.mybrand.com'",
+    )
+
+
+class CustomDomainDnsRecord(BaseModel):
+    """A DNS record the merchant must add at their registrar."""
+
+    type: str = Field(description="Record type, e.g. 'CNAME' or 'TXT'")
+    name: str = Field(description="Record name/host")
+    value: str = Field(description="Record value/target")
+
+
+class CustomDomainStatusResponse(BaseModel):
+    """Current state of the store's custom domain.
+
+    `status` is the high-level lifecycle the hub renders:
+      - pending_dns: registered, waiting for the merchant's CNAME + cert
+      - verifying:   CNAME seen, Cloudflare is issuing/validating the cert
+      - active:      cert issued, domain live
+      - failed:      validation error (see `errors`)
+      - none:        no custom domain connected
+    """
+
+    connected: bool = Field(description="Whether a custom domain is set")
+    domain: str | None = Field(None, description="The connected domain")
+    status: str = Field("none", description="Lifecycle status (see schema doc)")
+    ssl_status: str | None = Field(None, description="Raw Cloudflare cert status")
+    is_active: bool = Field(False, description="Cert issued and domain serving")
+    # The single CNAME the merchant adds; shown as the primary instruction.
+    cname: CustomDomainDnsRecord | None = Field(
+        None, description="CNAME record to add at the registrar"
+    )
+    # Optional extra ownership-verification records CF may require.
+    verification: list[CustomDomainDnsRecord] = Field(
+        default_factory=list, description="Extra DCV records, if any"
+    )
+    errors: list[str] = Field(
+        default_factory=list, description="Human-readable validation errors"
+    )
+    checked_at: str | None = Field(None, description="When status was last polled")

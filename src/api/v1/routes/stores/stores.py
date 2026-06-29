@@ -1,10 +1,11 @@
 """Store CRUD routes."""
 
-from datetime import UTC
+import re
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
@@ -26,6 +27,9 @@ from src.api.v1.schemas import (
 from src.api.v1.schemas.tenant.store import (
     CheckSubdomainRequest,
     CheckSubdomainResponse,
+    ConnectCustomDomainRequest,
+    CustomDomainDnsRecord,
+    CustomDomainStatusResponse,
 )
 from src.application.dto.store import CreateStoreDTO, UpdateStoreDTO
 from src.application.use_cases.stores import (
@@ -41,7 +45,11 @@ from src.application.use_cases.stores.create_store import (
 from src.core.entities.store import Store
 from src.core.value_objects.money import Currency
 from src.infrastructure.cache import StorefrontCache
-from src.infrastructure.external_services.cloudflare import cloudflare_dns_service
+from src.infrastructure.external_services.cloudflare import (
+    CloudflareCustomHostnameError,
+    cloudflare_custom_hostname_service,
+    cloudflare_dns_service,
+)
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
 from src.infrastructure.tenancy.service import TenantService
 
@@ -447,6 +455,244 @@ async def delete_store(
     await cache.invalidate_theme(store.id)
 
     return None
+
+
+# ── Custom domain (Cloudflare for SaaS) ──────────────────────────────────────
+
+_DOMAIN_RE = re.compile(
+    r"^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
+)
+
+
+def _normalize_custom_domain(raw: str) -> str:
+    """Validate + canonicalize a merchant-entered domain. Raises 400 on bad
+    input. Strips an accidentally-pasted scheme/path/port so 'https://shop.x/'
+    still works."""
+    d = raw.strip().lower().rstrip(".")
+    d = d.split("//")[-1].split("/")[0].split(":")[0]
+    if not _DOMAIN_RE.match(d):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enter a valid domain like shop.yourbrand.com",
+        )
+    if d == "numueg.app" or d.endswith(".numueg.app"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That's a NUMU subdomain — use the Subdomain field instead.",
+        )
+    return d
+
+
+def _derive_domain_status(cf_state: dict) -> tuple[str, bool, list[str]]:
+    """Map Cloudflare's nested status into our lifecycle + error list."""
+    ssl = (cf_state.get("ssl_status") or "").lower()
+    hostname_status = (cf_state.get("status") or "").lower()
+    errors: list[str] = []
+    for e in cf_state.get("ssl_validation_errors") or []:
+        msg = e.get("message") if isinstance(e, dict) else str(e)
+        if msg:
+            errors.append(msg)
+    for e in cf_state.get("verification_errors") or []:
+        errors.append(e if isinstance(e, str) else str(e))
+
+    if ssl == "active":
+        return "active", True, []
+    if errors:
+        return "failed", False, errors
+    if hostname_status == "active":
+        return "verifying", False, []
+    return "pending_dns", False, []
+
+
+def _build_custom_domain_response(
+    store: Store, cf_state: dict | None
+) -> CustomDomainStatusResponse:
+    cd = (store.settings or {}).get("custom_domain") or {}
+    domain = store.custom_domain or cd.get("hostname")
+    target = cloudflare_custom_hostname_service.fallback_target
+
+    if not domain:
+        return CustomDomainStatusResponse(connected=False, status="none")
+
+    if cf_state is not None:
+        lifecycle, is_active, errors = _derive_domain_status(cf_state)
+        ssl_status = cf_state.get("ssl_status")
+    else:
+        lifecycle = cd.get("status", "pending_dns")
+        is_active = lifecycle == "active"
+        ssl_status = cd.get("ssl_status")
+        errors = []
+
+    verification: list[CustomDomainDnsRecord] = []
+    ov = (cf_state or {}).get("ownership_verification") or {}
+    if ov.get("name") and ov.get("value"):
+        verification.append(
+            CustomDomainDnsRecord(
+                type=(ov.get("type") or "TXT").upper(),
+                name=ov["name"],
+                value=ov["value"],
+            )
+        )
+
+    return CustomDomainStatusResponse(
+        connected=True,
+        domain=domain,
+        status=lifecycle,
+        ssl_status=ssl_status,
+        is_active=is_active,
+        cname=CustomDomainDnsRecord(type="CNAME", name=domain, value=target),
+        verification=verification,
+        errors=errors,
+        checked_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def _persist_domain_state(
+    store: Store, domain: str | None, cf_state: dict | None
+) -> None:
+    """Write the custom-domain block into store.settings (reassigning a new
+    dict so SQLAlchemy detects the JSONB change)."""
+    settings_copy = dict(store.settings or {})
+    if domain is None:
+        settings_copy.pop("custom_domain", None)
+    else:
+        lifecycle = "pending_dns"
+        if cf_state is not None:
+            lifecycle, _, _ = _derive_domain_status(cf_state)
+        settings_copy["custom_domain"] = {
+            "hostname": domain,
+            "cf_id": (cf_state or {}).get("cf_id"),
+            "status": lifecycle,
+            "ssl_status": (cf_state or {}).get("ssl_status"),
+            "cname_target": cloudflare_custom_hostname_service.fallback_target,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    store.settings = settings_copy
+
+
+@router.get(
+    "/{store_id}/custom-domain",
+    response_model=SuccessResponse[CustomDomainStatusResponse],
+    summary="Get custom domain status",
+    operation_id="get_custom_domain",
+)
+async def get_custom_domain(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Return the store's custom-domain state, polling Cloudflare for the
+    live cert status when one is connected."""
+    cd = (store.settings or {}).get("custom_domain") or {}
+    cf_state: dict | None = None
+    cf_id = cd.get("cf_id")
+    if cf_id and cloudflare_custom_hostname_service.is_enabled:
+        try:
+            cf_state = await cloudflare_custom_hostname_service.get(cf_id)
+            # Persist the refreshed lifecycle so the hub has a value even if a
+            # later poll can't reach CF.
+            prev = cd.get("status")
+            _persist_domain_state(store, store.custom_domain, cf_state)
+            new = (store.settings or {}).get("custom_domain", {}).get("status")
+            if new != prev:
+                await store_repo.update(store)
+        except CloudflareCustomHostnameError:
+            cf_state = None  # fall back to last-known persisted status
+
+    return SuccessResponse(
+        data=_build_custom_domain_response(store, cf_state),
+        message="Custom domain status retrieved",
+    )
+
+
+@router.post(
+    "/{store_id}/custom-domain",
+    response_model=SuccessResponse[CustomDomainStatusResponse],
+    summary="Connect a custom domain",
+    operation_id="connect_custom_domain",
+)
+async def connect_custom_domain(
+    request: ConnectCustomDomainRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
+):
+    """Register a merchant-owned domain as a Cloudflare custom hostname and
+    return the CNAME the merchant must add to go live."""
+    if not cloudflare_custom_hostname_service.is_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Custom domains aren't enabled yet. Contact support.",
+        )
+
+    domain = _normalize_custom_domain(request.domain)
+
+    # Dedupe: a domain can only ever route to one store.
+    existing = await store_repo.get_by_custom_domain(domain)
+    if existing and existing.id != store.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That domain is already connected to another store.",
+        )
+
+    try:
+        cf_state = await cloudflare_custom_hostname_service.create(domain)
+    except CloudflareCustomHostnameError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message
+        ) from e
+
+    store.custom_domain = domain
+    _persist_domain_state(store, domain, cf_state)
+    await store_repo.update(store)
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=domain,
+    )
+
+    return SuccessResponse(
+        data=_build_custom_domain_response(store, cf_state),
+        message="Custom domain connected. Add the CNAME to finish.",
+    )
+
+
+@router.delete(
+    "/{store_id}/custom-domain",
+    response_model=SuccessResponse[CustomDomainStatusResponse],
+    summary="Disconnect the custom domain",
+    operation_id="disconnect_custom_domain",
+)
+async def disconnect_custom_domain(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
+):
+    """Remove the custom domain from the store and delete its Cloudflare
+    custom hostname (best-effort — local state is always cleared)."""
+    prev_domain = store.custom_domain
+    cd = (store.settings or {}).get("custom_domain") or {}
+    cf_id = cd.get("cf_id")
+    if cf_id and cloudflare_custom_hostname_service.is_enabled:
+        try:
+            await cloudflare_custom_hostname_service.delete(cf_id)
+        except CloudflareCustomHostnameError:
+            # Don't block disconnect on a CF hiccup; the hostname can be
+            # reaped later. Local state is the source of truth for routing.
+            pass
+
+    store.custom_domain = None
+    _persist_domain_state(store, None, None)
+    await store_repo.update(store)
+    await cache.invalidate_store(
+        store_id=store.id,
+        subdomain=store.subdomain,
+        custom_domain=prev_domain,
+    )
+
+    return SuccessResponse(
+        data=CustomDomainStatusResponse(connected=False, status="none"),
+        message="Custom domain disconnected",
+    )
 
 
 # ─── Phase 5.11 — demo seed catalog ───────────────────────────────
