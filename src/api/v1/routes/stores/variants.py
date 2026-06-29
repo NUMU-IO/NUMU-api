@@ -44,8 +44,8 @@ router = APIRouter(prefix="/{store_id}/products/{product_id}/variants")
 # ─── Schemas ──────────────────────────────────────────────────────────
 # Wire shape matches what the merchant-hub VariantsEditor sends/reads
 # (src/services/variantsApi.ts on the frontend). Decimals are received
-# as EGP majors (e.g. `250.00`), persisted via the existing repo
-# convention (`int(price.amount)` — same as the storefront write path).
+# as EGP majors (e.g. `250.00`) → `Money(amount=...)`; the repo persists
+# `.cents` to the price_amount column (same convention as products).
 
 
 class VariantResponse(BaseModel):
@@ -192,14 +192,14 @@ async def _sync_product_base_price(
     (e.g. base 1200 SAR, variant 12 SAR) renders two different prices. After
     any variant change we recompute the base from the variants.
 
-    Unit bridge: a variant's ``price.amount`` is CENTS (repo stores it raw;
-    see the variant-money memory note), whereas a product's ``price`` is built
-    from MAJOR units — so we go through ``Money.from_cents``. No-op when the
-    product has no variants (keeps the merchant's manual base price).
+    Variant and product Money now share one convention (``.amount`` MAJOR,
+    ``.cents`` smallest unit), so we read ``.cents`` and rebuild the product
+    base price via ``Money.from_cents``. No-op when the product has no
+    variants (keeps the merchant's manual base price).
     """
     repo = VariantRepository(session)
     variants = await repo.list_for_product(product.id)
-    cents = [int(v.price.amount) for v in variants if v.price is not None]
+    cents = [v.price.cents for v in variants if v.price is not None]
     if not cents:
         return
     new_price = Money.from_cents(min(cents), product.price.currency)
