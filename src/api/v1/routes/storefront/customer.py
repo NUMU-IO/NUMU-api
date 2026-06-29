@@ -875,7 +875,7 @@ async def reorder_customer_order(
                     )
                 )
                 continue
-            unit_price_cents = int(variant.price.amount)
+            unit_price_cents = variant.price.cents
             variant_sku = variant.sku or product.sku
             if variant.image_url:
                 variant_image = variant.image_url

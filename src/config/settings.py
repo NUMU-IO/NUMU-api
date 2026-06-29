@@ -276,6 +276,11 @@ class Settings(BaseSettings):
     # 8h covers a full working day; refresh tokens still rotate at 7d.
     access_token_expire_minutes: int = 480
     refresh_token_expire_days: int = 7
+    # Admin "log in as merchant" sessions. The handed-off token is a Bearer in
+    # the hub's sessionStorage (tab-isolated) and is NOT refreshable, so it must
+    # last a full work session on its own rather than the short access TTL —
+    # otherwise impersonation breaks ~every access-token expiry.
+    impersonation_token_expire_minutes: int = 480
 
     # Legacy HS256 secret (kept for backwards-compatible token verification during migration)
     jwt_secret_key: str = Field(default="")

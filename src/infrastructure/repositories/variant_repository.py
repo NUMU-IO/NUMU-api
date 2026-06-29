@@ -13,11 +13,16 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.variant import Variant
-from src.core.value_objects.money import Money
+from src.core.value_objects.money import Currency, Money
 from src.infrastructure.database.models.tenant.variant import VariantModel
 
 
 def _to_entity(row: VariantModel) -> Variant:
+    # price_amount columns hold CENTS (smallest unit) — same convention as
+    # `products` (see product_repository). `Money.amount` is MAJOR units, so we
+    # build via `from_cents` on read and store `.cents` on write. This keeps
+    # variant and product money handling identical end-to-end.
+    currency = Currency(row.price_currency) if row.price_currency else Currency.USD
     return Variant(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -25,14 +30,14 @@ def _to_entity(row: VariantModel) -> Variant:
         product_id=row.product_id,
         position=row.position,
         option_values=row.option_values or {},
-        price=Money(amount=row.price_amount, currency=row.price_currency),
+        price=Money.from_cents(row.price_amount, currency),
         compare_at_price=(
-            Money(amount=row.compare_at_price, currency=row.price_currency)
+            Money.from_cents(row.compare_at_price, currency)
             if row.compare_at_price is not None
             else None
         ),
         cost_price=(
-            Money(amount=row.cost_price, currency=row.price_currency)
+            Money.from_cents(row.cost_price, currency)
             if row.cost_price is not None
             else None
         ),
@@ -50,9 +55,8 @@ def _to_entity(row: VariantModel) -> Variant:
 def _money_amount(m: Money | None) -> int | None:
     if m is None:
         return None
-    # Money stores cents as `amount` (int) per the existing codebase
-    # convention; if a string-decimal sneaks in we coerce.
-    return int(m.amount)
+    # price_amount / compare_at_price / cost_price columns hold CENTS.
+    return m.cents
 
 
 class VariantRepository:
@@ -156,7 +160,7 @@ class VariantRepository:
             product_id=product_id,
             position=position,
             option_values=option_values or {},
-            price_amount=int(price.amount),
+            price_amount=price.cents,
             price_currency=price.currency,
             compare_at_price=_money_amount(compare_at_price),
             cost_price=_money_amount(cost_price),
@@ -182,7 +186,7 @@ class VariantRepository:
             raise ValueError(f"Variant {variant.id} not found")
         row.position = variant.position
         row.option_values = variant.option_values or {}
-        row.price_amount = int(variant.price.amount)
+        row.price_amount = variant.price.cents
         row.price_currency = variant.price.currency
         row.compare_at_price = _money_amount(variant.compare_at_price)
         row.cost_price = _money_amount(variant.cost_price)

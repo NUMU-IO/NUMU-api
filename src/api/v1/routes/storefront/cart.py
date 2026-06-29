@@ -299,12 +299,9 @@ async def add_cart_item(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This variant is out of stock.",
             )
-        # Variant Money is built as `Money(amount=price_amount)` where the DB
-        # column already holds CENTS (a known wart — see variant_repository
-        # `_to_entity`). So `.amount` IS the cents value here; `.cents` would
-        # 100× it. (Product Money stores major in `.amount`, hence `.cents`
-        # above for the no-variant base price.)
-        variant_price_cents = int(variant.price.amount)
+        # Variant Money now matches product Money: `.amount` is MAJOR units,
+        # `.cents` the smallest unit. Use `.cents` for the cents unit price.
+        variant_price_cents = variant.price.cents
         variant_sku = variant.sku or product.sku
         if variant.image_url:
             variant_image = variant.image_url

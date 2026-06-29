@@ -183,11 +183,9 @@ async def sdk_add_cart_item(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This variant is out of stock.",
             )
-        # Variant Money is built as `Money(amount=price_amount)` where the DB
-        # column already holds CENTS (a known wart — see variant_repository
-        # `_to_entity`). So `.amount` IS the cents value; `.cents` would 100×
-        # it. Product Money, by contrast, stores major in `.amount` → `.cents`.
-        unit_price_cents = int(variant.price.amount)
+        # Variant Money now matches product Money: `.amount` is MAJOR units,
+        # `.cents` the smallest unit. Use `.cents` for the cart's cents price.
+        unit_price_cents = variant.price.cents
         line_sku = variant.sku or product.sku
         if variant.image_url:
             line_image = variant.image_url
