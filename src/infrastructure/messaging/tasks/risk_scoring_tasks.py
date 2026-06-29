@@ -508,6 +508,22 @@ def compute_full_risk_score(
                     "trust_fsm_shadow_error surface=shopify error=%s", _shadow_exc
                 )
 
+            # ── External shadow: NUMU's embedded scorer vs the standalone Trust
+            # Network /v1/decisions (live equivalence gate before any cutover). OFF
+            # by default; best-effort; rebuilt from decision_inputs so no PII leaves.
+            try:
+                from src.application.services.trust_network_shadow import (
+                    compare_with_trust_network,
+                )
+
+                await compare_with_trust_network(
+                    decision_inputs=decision_inputs_snapshot,
+                    numu_risk_score=full_result.risk_score,
+                    order_ref=str(assessment_id),
+                )
+            except Exception as _tn_exc:  # noqa: BLE001 — shadow never affects scoring
+                logger.warning("trust_network_shadow_call_error error=%s", _tn_exc)
+
             auto_cancelled = bool(
                 settings
                 and settings.cod_risk_scoring_enabled

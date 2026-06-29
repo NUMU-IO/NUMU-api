@@ -1,0 +1,120 @@
+"""Trust Network shadow client — request building, gating, and comparison."""
+
+from __future__ import annotations
+
+import asyncio
+
+import httpx
+
+from src.application.services.trust_network_shadow import (
+    build_shadow_request,
+    compare_with_trust_network,
+    shadow_config,
+)
+
+DI = {
+    "schema_version": 1,
+    "total_cents": 80000,
+    "payment_method": "cod",
+    "avg_order_cents": 80000,
+    "customer_total_orders": 3,
+    "customer_cancellation_rate": 0.1,
+    "network_score": 20,
+    "network_label": "trusted",
+    "created_at": "2026-06-29T00:00:00+00:00",
+    "product_tags": ["electronics"],
+    "address_length": 40,
+    "phone_state": "valid",
+}
+
+
+def test_build_shadow_request_uses_determinants_no_pii():
+    req = build_shadow_request(DI)
+    assert req["network_score"] == 20
+    assert req["network_label"] == "trusted"
+    assert req["address"] == "x" * 40  # synth, not a real address
+    assert req["phone"] == "+201012345678"  # synth valid number
+    assert req["customer_total_orders"] == 3
+    # determinants themselves never travel
+    assert "address_length" not in req
+    assert "phone_state" not in req
+
+
+def test_build_shadow_request_drops_none_and_handles_empty():
+    assert build_shadow_request({"total_cents": 1000}) == {"total_cents": 1000}
+    assert build_shadow_request(None) == {}
+
+
+def test_build_shadow_request_phone_states():
+    assert "phone" not in build_shadow_request({
+        "total_cents": 1,
+        "phone_state": "absent",
+    })
+    assert (
+        build_shadow_request({"total_cents": 1, "phone_state": "invalid"})["phone"]
+        == "0"
+    )
+
+
+def test_shadow_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("TRUST_NETWORK_SHADOW_ENABLED", raising=False)
+    assert shadow_config()["enabled"] is False
+    assert (
+        asyncio.run(compare_with_trust_network(decision_inputs=DI, numu_risk_score=50))
+        is None
+    )
+
+
+def _enable(monkeypatch, handler):
+    monkeypatch.setenv("TRUST_NETWORK_SHADOW_ENABLED", "true")
+    monkeypatch.setenv("TRUST_NETWORK_URL", "http://trust-network:8000")
+    monkeypatch.setenv("TRUST_NETWORK_API_KEY", "sk_test")
+    return httpx.MockTransport(handler)
+
+
+def test_shadow_match(monkeypatch):
+    captured: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        captured["idem"] = request.headers.get("Idempotency-Key")
+        return httpx.Response(200, json={"risk_score": 50})
+
+    transport = _enable(monkeypatch, handler)
+    out = asyncio.run(
+        compare_with_trust_network(
+            decision_inputs=DI, numu_risk_score=50, order_ref="abc", transport=transport
+        )
+    )
+    assert out is not None
+    assert out["match"] is True
+    assert out["drift"] == 0
+    assert out["service_risk_score"] == 50
+    assert captured["auth"] == "Bearer sk_test"
+    assert captured["idem"] == "shadow-abc"
+
+
+def test_shadow_drift(monkeypatch):
+    transport = _enable(
+        monkeypatch, lambda r: httpx.Response(200, json={"risk_score": 47})
+    )
+    out = asyncio.run(
+        compare_with_trust_network(
+            decision_inputs=DI, numu_risk_score=50, transport=transport
+        )
+    )
+    assert out is not None
+    assert out["match"] is False
+    assert out["drift"] == 3
+
+
+def test_shadow_non_200_returns_none(monkeypatch):
+    transport = _enable(
+        monkeypatch, lambda r: httpx.Response(500, json={"detail": "boom"})
+    )
+    out = asyncio.run(
+        compare_with_trust_network(
+            decision_inputs=DI, numu_risk_score=50, transport=transport
+        )
+    )
+    assert out is None
