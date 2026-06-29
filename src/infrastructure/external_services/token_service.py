@@ -94,9 +94,20 @@ class TokenService(ITokenService):
         tenant_id: UUID | None = None,
         membership_id: UUID | None = None,
         perm_version: int = 0,
+        expires_minutes: int | None = None,
     ) -> str:
-        """Create an access token for a user."""
-        expires_delta = timedelta(minutes=self.access_token_expire_minutes)
+        """Create an access token for a user.
+
+        ``expires_minutes`` overrides the default access TTL for this token
+        only (used by admin impersonation, whose handed-off Bearer can't be
+        refreshed and so needs a longer, self-contained lifetime).
+        """
+        minutes = (
+            expires_minutes
+            if expires_minutes is not None
+            else self.access_token_expire_minutes
+        )
+        expires_delta = timedelta(minutes=minutes)
         return self._create_token(
             user,
             "access",

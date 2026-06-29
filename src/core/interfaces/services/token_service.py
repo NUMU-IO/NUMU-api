@@ -62,12 +62,20 @@ class ITokenService(ABC):
     """JWT token service interface."""
 
     @abstractmethod
-    def create_access_token(self, user: User, tenant_id: UUID | None = None) -> str:
+    def create_access_token(
+        self,
+        user: User,
+        tenant_id: UUID | None = None,
+        expires_minutes: int | None = None,
+    ) -> str:
         """Create an access token for a user.
 
         ``tenant_id`` is optional. When supplied, it is embedded in the
         token payload so consumers can read the tenant scope without
         re-resolving via subdomain middleware (used by the demo flow).
+
+        ``expires_minutes`` overrides the default access TTL for this token
+        only (admin impersonation uses a longer, self-contained lifetime).
         """
         pass
 

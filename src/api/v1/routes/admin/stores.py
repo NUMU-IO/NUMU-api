@@ -527,7 +527,14 @@ async def impersonate_store(
     )
     admin_email = (admin_user_row.scalar_one_or_none() or "admin") or "admin"
 
-    access = token_service.create_access_token(owner, tenant_id=store.tenant_id)
+    # Longer TTL than a normal access token: this Bearer is handed off into the
+    # hub's sessionStorage and can't be refreshed there, so it must outlast a
+    # work session on its own (otherwise impersonation 401s ~every 30 min).
+    access = token_service.create_access_token(
+        owner,
+        tenant_id=store.tenant_id,
+        expires_minutes=settings.impersonation_token_expire_minutes,
+    )
     refresh = token_service.create_refresh_token(owner, tenant_id=store.tenant_id)
 
     hub_base = settings.merchant_hub_url.rstrip("/")
