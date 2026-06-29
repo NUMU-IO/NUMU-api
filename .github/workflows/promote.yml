@@ -1,16 +1,9 @@
 name: Promote
 
+# Promote dev → prod in one click. Staging is intentionally bypassed.
+# Pushing `prod` triggers the deploy-apex job in cd.yml (EC2 prod deploy).
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "Promote to which environment?"
-        required: true
-        type: choice
-        options:
-          - stage        # merges dev → stage  (triggers stage deploy)
-          - prod         # merges stage → prod (triggers prod deploy)
-          - stage + prod # merges dev → stage, then stage → prod (both deploys)
 
 concurrency:
   group: promote
@@ -18,10 +11,7 @@ concurrency:
 
 jobs:
   promote:
-    name: >-
-      ${{ github.event.inputs.environment == 'stage' && 'dev → stage'
-       || github.event.inputs.environment == 'prod'  && 'stage → prod'
-       || 'dev → stage → prod' }}
+    name: dev → prod
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -38,22 +28,13 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin --prune
 
-      - name: Promote dev → stage
-        if: >-
-          github.event.inputs.environment == 'stage' ||
-          github.event.inputs.environment == 'stage + prod'
+      - name: Promote dev → prod
         run: |
-          echo "==> Promoting stage ← dev"
-          git checkout stage
-          git merge --ff-only origin/dev
-          git push origin stage
-
-      - name: Promote stage → prod
-        if: >-
-          github.event.inputs.environment == 'prod' ||
-          github.event.inputs.environment == 'stage + prod'
-        run: |
-          echo "==> Promoting prod ← stage"
+          echo "==> Promoting prod ← dev"
           git checkout prod
-          git merge --ff-only origin/stage
+          # Fast-forward when prod is an ancestor of dev (the common case);
+          # fall back to a real merge if prod has diverged (e.g. a hotfix
+          # landed straight on prod) so the promote never wedges on ff-only.
+          git merge --ff-only origin/dev \
+            || git merge --no-edit -m "Promote dev → prod" origin/dev
           git push origin prod
