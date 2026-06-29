@@ -311,6 +311,27 @@ def compute_full_risk_score(
             for f in full_result.factors
         ]
 
+        # Non-PII snapshot of exactly what score_order() consumed, so the recorded
+        # risk_score is replayable for the Trust Network cutover proof. Determinants
+        # only (address length, phone state) — never raw PII (Principle II).
+        from src.application.services.decision_input_capture import (
+            build_decision_inputs,
+        )
+
+        decision_inputs_snapshot = build_decision_inputs(
+            total_cents=total_cents,
+            payment_method=payment_method,
+            customer_total_orders=customer_total_orders,
+            customer_cancellation_rate=enriched_cancel_rate,
+            avg_order_cents=avg_order_cents,
+            network_score=net_score,
+            network_label=net_label,
+            created_at=parsed_created_at,
+            product_tags=product_tags,
+            address=address,
+            phone=phone,
+        )
+
         # ── 4. Persist final score + customer_trust (backend-022) ─────────
         # Compute the deterministic trust factor from local + network signals.
         from src.application.services.customer_trust_formula import (
@@ -389,6 +410,7 @@ def compute_full_risk_score(
                     trust_tier=trust_result.trust_tier,
                     negative_adjustment_count=trust_result.negative_adjustment_count,
                     customer_phone_hash=persisted_phone_hash,
+                    decision_inputs=decision_inputs_snapshot,
                 )
             )
 
@@ -485,6 +507,22 @@ def compute_full_risk_score(
                 logger.warning(
                     "trust_fsm_shadow_error surface=shopify error=%s", _shadow_exc
                 )
+
+            # ── External shadow: NUMU's embedded scorer vs the standalone Trust
+            # Network /v1/decisions (live equivalence gate before any cutover). OFF
+            # by default; best-effort; rebuilt from decision_inputs so no PII leaves.
+            try:
+                from src.application.services.trust_network_shadow import (
+                    compare_with_trust_network,
+                )
+
+                await compare_with_trust_network(
+                    decision_inputs=decision_inputs_snapshot,
+                    numu_risk_score=full_result.risk_score,
+                    order_ref=str(assessment_id),
+                )
+            except Exception as _tn_exc:  # noqa: BLE001 — shadow never affects scoring
+                logger.warning("trust_network_shadow_call_error error=%s", _tn_exc)
 
             auto_cancelled = bool(
                 settings

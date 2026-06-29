@@ -124,3 +124,12 @@ class RiskAssessmentModel(Base, UUIDMixin, TimestampMixin):
         nullable=True,
         index=True,
     )
+    # Non-PII snapshot of the inputs the FINAL score consumed (score determinants
+    # only — address as length, phone as absent/valid/invalid — never raw PII, per
+    # Principle II). Lets the Trust Network shadow/equivalence replay reproduce the
+    # recorded risk_score faithfully. NULL on preliminary rows. See
+    # src/application/services/decision_input_capture.py.
+    decision_inputs: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
