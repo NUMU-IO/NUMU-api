@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     cloudflare_zone_id: str = ""
     droplet_ip: str = ""
     cloudflare_auto_dns_enabled: bool = False
+    # Cloudflare for SaaS — the Fallback Origin hostname merchants CNAME their
+    # custom domain to. Set once in the CF dashboard; the storefront serves it.
+    custom_domain_fallback_target: str = "origin.numueg.app"
 
     # API
     api_v1_prefix: str = "/api/v1"
