@@ -4,6 +4,7 @@ Tests BYOT preset generation, built-in theme defaults, and section group creatio
 """
 
 from src.application.services.theme_v3_presets import (
+    _known_section_types,
     generate_initial_v3_customization,
     reconcile_v3_customization,
 )
@@ -310,6 +311,38 @@ class TestReconcileTemplates:
         cust = {"schema_version": 3, "templates": {"home": {"sections": {}}}}
         assert reconcile_v3_customization(cust, self.SCHEMAS, None) is cust
         assert reconcile_v3_customization(cust, self.SCHEMAS, {}) is cust
+
+    # Regression: bundles store schemas as an ENVELOPE
+    # {"sections": {<type>: ...}, "blocks": {...}}. Reading the envelope's own
+    # keys ("sections"/"blocks") as the known types made every real section look
+    # unrenderable, so reconcile swapped the merchant's templates for presets —
+    # the editor "erased" published edits on re-open.
+    ENVELOPE_SCHEMAS = {"blocks": {}, "sections": {"by-hero": {}, "by-grid": {}}}
+
+    def test_known_section_types_unwraps_envelope(self):
+        assert _known_section_types(self.ENVELOPE_SCHEMAS) == {"by-hero", "by-grid"}
+        # flat map still works
+        assert _known_section_types(self.SCHEMAS) == {"by-hero", "by-grid"}
+        # shopify-style list still works
+        assert _known_section_types([{"type": "by-hero"}, {"type": "by-grid"}]) == {
+            "by-hero",
+            "by-grid",
+        }
+
+    def test_envelope_schemas_keep_real_merchant_template(self):
+        # With envelope schemas, a template made of real theme sections must be
+        # KEPT (no clobber) — the bug swapped it for the preset.
+        cust = {
+            "schema_version": 3,
+            "templates": {
+                "home": {
+                    "sections": {"a": {"type": "by-hero"}, "b": {"type": "by-grid"}},
+                    "order": ["a", "b"],
+                }
+            },
+        }
+        out = reconcile_v3_customization(cust, self.ENVELOPE_SCHEMAS, self.PRESETS)
+        assert out is cust  # untouched no-op
 
     def test_no_schema_info_keeps_existing_nonempty(self):
         # Empty `known` set → "can't judge type-compat" → keep existing.

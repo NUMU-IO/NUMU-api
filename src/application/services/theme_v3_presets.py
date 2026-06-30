@@ -74,6 +74,16 @@ def _known_section_types(section_schemas: Any) -> set[str]:
     "can't judge, keep existing".
     """
     if isinstance(section_schemas, dict):
+        # Bundles expose schemas as an ENVELOPE: {"sections": {<type>: schema},
+        # "blocks": {...}}. Read section types from `.sections` — NOT the
+        # envelope's own keys ("sections"/"blocks"), which would otherwise be
+        # the only two "known" types, make every real section look
+        # unrenderable, and cause reconcile to swap the merchant's templates for
+        # presets — "erasing" published edits when the editor re-opens. Fall
+        # back to the top-level keys for a flat {<type>: schema} map.
+        inner = section_schemas.get("sections")
+        if isinstance(inner, dict):
+            return {str(k) for k in inner.keys()}
         return {str(k) for k in section_schemas.keys()}
     if isinstance(section_schemas, list):
         return {
