@@ -259,7 +259,7 @@ jobs:
 
             echo "==> Running database migrations..."
             docker compose -p numu-test --env-file /opt/numu/.env.test \
-              -f docker/docker-compose.test.yml exec -T api alembic upgrade head
+              -f docker/docker-compose.test.yml exec -T api alembic upgrade heads
 
             echo "==> Verifying health..."
             sleep 15
@@ -409,7 +409,7 @@ jobs:
 
             echo "==> Running database migrations..."
             docker compose -p numu-stage --env-file /opt/numu/.env.stage \
-              -f docker/docker-compose.stage.yml exec -T api alembic upgrade head
+              -f docker/docker-compose.stage.yml exec -T api alembic upgrade heads
 
             echo "==> Verifying health..."
             sleep 15
@@ -471,7 +471,10 @@ jobs:
             docker compose up -d api celery-worker celery-beat
 
             echo "==> Running database migrations (Supabase)..."
-            docker compose exec -T api alembic upgrade head
+            # `heads` (plural), NOT `head`: apply ALL heads so a transient branch
+            # point (two migrations off one parent before a merge migration
+            # lands) can't hard-fail the deploy with "Multiple head revisions".
+            docker compose exec -T api alembic upgrade heads
 
             echo "==> Verifying health..."
             sleep 12

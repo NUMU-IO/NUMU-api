@@ -330,7 +330,7 @@ jobs:
             if [ -n "\${PREV_IMAGE}" ]; then
               if [ "${SKIP_MIGRATIONS}" != "true" ]; then
                 echo "==> Step 4 (existing stack): Pre-swap migration in one-shot container..."
-                \$COMPOSE run --rm --no-deps -T api alembic upgrade head
+                \$COMPOSE run --rm --no-deps -T api alembic upgrade heads
               else
                 echo "==> Step 4 (existing stack): Skipping migrations (skip_migrations=true)"
               fi
@@ -349,7 +349,7 @@ jobs:
                   fi
                   sleep 2
                 done
-                \$COMPOSE exec -T api alembic upgrade head
+                \$COMPOSE exec -T api alembic upgrade heads
               else
                 echo "==> Step 5 (first deploy): Skipping migrations (skip_migrations=true)"
               fi
