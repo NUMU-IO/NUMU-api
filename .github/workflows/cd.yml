@@ -176,8 +176,8 @@ jobs:
           REMOTE_FILE: /opt/numu/.env.test
           AGENT_ENABLED: "true"
           AGENT_LLM_API_KEY: ${{ secrets.TEST_AGENT_LLM_API_KEY }}
-          AGENT_LLM_BASE_URL: https://openrouter.ai/api/v1
-          AGENT_LLM_MODEL: meta-llama/llama-3.3-70b-instruct
+          AGENT_LLM_BASE_URL: https://ai-gateway.vercel.sh/v1
+          AGENT_LLM_MODEL: alibaba/qwen-3-235b
         run: |
           SNIPPET=""
           for KEY in AGENT_ENABLED AGENT_LLM_API_KEY AGENT_LLM_BASE_URL AGENT_LLM_MODEL; do
