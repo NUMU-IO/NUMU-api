@@ -198,8 +198,11 @@ class Settings(BaseSettings):
     # default to multilingual-e5-large (1024-dim). When agent_embed_url is unset, a
     # deterministic local fallback embedder is used (dev/offline) — swap by config.
     agent_embed_url: str = (
-        ""  # OpenAI-compatible /embeddings endpoint (e.g. a TEI server)
+        ""  # embeddings endpoint base; empty → deterministic hash fallback
     )
+    # Wire format of agent_embed_url: "openai" (OpenAI-compatible /embeddings, e.g.
+    # DeepInfra/TEI) or "hf" (Hugging Face feature-extraction pipeline router).
+    agent_embed_provider: str = "openai"
     agent_embed_api_key: str = ""
     agent_embed_model: str = "intfloat/multilingual-e5-large"
     agent_embed_dim: int = 1024
