@@ -261,6 +261,15 @@ jobs:
             docker compose -p numu-test --env-file /opt/numu/.env.test \
               -f docker/docker-compose.test.yml exec -T api alembic upgrade heads
 
+            echo "==> Ingesting NUMU Agent knowledge corpus (Layer A, idempotent)..."
+            # Keeps the assistant's knowledge base populated so RAG is never empty.
+            # Idempotent (keyed on source + content hash) and non-fatal — a corpus
+            # hiccup must never fail an otherwise-healthy API deploy.
+            docker compose -p numu-test --env-file /opt/numu/.env.test \
+              -f docker/docker-compose.test.yml exec -T api \
+              python -m src.infrastructure.agent.knowledge.ingest \
+              || echo "[knowledge-ingest] failed — non-fatal, continuing deploy."
+
             echo "==> Verifying health..."
             sleep 15
             docker exec numu-nginx-staging curl -sf -H "Host: test.numueg.app" -m 8 \
