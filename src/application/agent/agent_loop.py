@@ -89,11 +89,20 @@ class AgentLoop:
         history: list[ChatMessage],
         ctx: ToolContext,
         result: AgentRunResult,
+        system_context: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        """Drive the loop, yielding events. Final text lands in ``result``."""
+        """Drive the loop, yielding events. Final text lands in ``result``.
+
+        ``system_context`` is an optional extra system message (e.g. the OKF
+        platform map) that orients the model before it reasons about the store.
+        """
         messages: list[ChatMessage] = [
             ChatMessage(role="system", content=SYSTEM_PROMPT),
             ChatMessage(role="system", content=f"locale={ctx.locale}"),
+        ]
+        if system_context:
+            messages.append(ChatMessage(role="system", content=system_context))
+        messages += [
             *history,
             ChatMessage(role="user", content=user_message),
         ]

@@ -5,6 +5,10 @@ area: themes
 locale: en
 section: Online Store
 status: published
+type: howto
+related: numu-corpus/storefront/custom-domain
+maps_to_tool: get_theme_config
+maps_to_endpoint: /stores/{id}/theme
 ---
 
 The NUMU theme editor (V3) lets you customize your storefront with sections and settings,

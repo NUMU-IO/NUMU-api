@@ -5,6 +5,9 @@ area: payments
 locale: en
 section: Payments
 status: published
+type: howto
+related: numu-corpus/payments/cod, numu-corpus/invoicing/e-invoicing
+maps_to_endpoint: /stores/{id}/payments
 ---
 
 Paymob lets your NUMU store accept Visa, Mastercard, and Meeza card payments online.
