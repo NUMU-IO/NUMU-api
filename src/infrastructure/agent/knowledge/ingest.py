@@ -7,33 +7,39 @@ each chunk, and upserts them into Layer A. The upsert is idempotent — keyed on
 only re-embeds what actually changed (FR-010). Shared docs carry no tenant, so
 this needs no tenant/RLS context.
 
-    python -m src.infrastructure.agent.knowledge.ingest
+    python -m src.infrastructure.agent.knowledge.ingest [--reembed]
 
-Note: retrieval quality still depends on a real embedding model. With
-`AGENT_EMBED_URL` unset the deterministic hash fallback is used, which stores
-valid vectors but only keyword-ish similarity — configure a real embeddings
-endpoint (Step 2) and re-run to lift retrieval quality.
+Retrieval quality depends on the embedding model. With `AGENT_EMBED_URL` unset a
+deterministic hash fallback is used (valid vectors, keyword-ish similarity);
+setting a real endpoint (Step 2) changes the embedder signature, so the next
+run re-embeds automatically. `--reembed` forces a re-embed regardless.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 
 from sqlalchemy import text
 
 from src.application.agent.knowledge.corpus_loader import load_authored_corpus
 from src.config.logging_config import get_logger
-from src.infrastructure.agent.knowledge.embedder import get_embedder
+from src.infrastructure.agent.knowledge.embedder import embedder_signature, get_embedder
 from src.infrastructure.agent.knowledge.repository import KnowledgeRepository
 from src.infrastructure.database.connection import AsyncSessionLocal
 
 logger = get_logger(__name__)
 
 
-async def ingest_authored_corpus() -> dict:
-    """Embed + idempotently upsert every authored Layer-A doc. Returns a summary."""
+async def ingest_authored_corpus(*, force: bool = False) -> dict:
+    """Embed + idempotently upsert every authored Layer-A doc. Returns a summary.
+
+    The active embedder's signature is folded into each doc's content hash, so
+    changing the embedding model re-embeds on the next run. `force` re-embeds all.
+    """
     docs = load_authored_corpus()
     embedder = get_embedder()
+    signature = embedder_signature()
     upserted = skipped = chunk_count = 0
 
     async with AsyncSessionLocal() as session:
@@ -53,6 +59,8 @@ async def ingest_authored_corpus() -> dict:
                 area=doc.area,
                 source_kind=doc.source_kind.value,
                 status=doc.status.value,
+                content_salt=signature,
+                force=force,
             )
             if changed:
                 upserted += 1
@@ -63,6 +71,7 @@ async def ingest_authored_corpus() -> dict:
 
     result = {
         "docs": len(docs),
+        "embedder": signature,
         "upserted": upserted,
         "skipped_unchanged": skipped,
         "chunks": chunk_count,
@@ -72,7 +81,14 @@ async def ingest_authored_corpus() -> dict:
 
 
 def main() -> None:
-    result = asyncio.run(ingest_authored_corpus())
+    parser = argparse.ArgumentParser(description="Ingest the authored Layer-A corpus.")
+    parser.add_argument(
+        "--reembed",
+        action="store_true",
+        help="Re-embed every doc even if unchanged (e.g. after a manual fix).",
+    )
+    args = parser.parse_args()
+    result = asyncio.run(ingest_authored_corpus(force=args.reembed))
     print(f"[knowledge-ingest] {result}")
 
 

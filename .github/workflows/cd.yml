@@ -212,6 +212,45 @@ jobs:
           ${SNIPPET}SNIPPET_EOF
           REMOTE_SCRIPT
 
+      # Embeddings for the assistant's RAG (Step 2). ONLY synced when the API key
+      # secret is present — writing AGENT_EMBED_URL without a key would make the
+      # HTTP embedder return 401 and break retrieval that currently works on the
+      # hash fallback. When the key lands, the embedder signature changes, so the
+      # ingest step below re-embeds the corpus automatically on this same deploy.
+      - name: Sync Agent embeddings env vars to test droplet
+        env:
+          REMOTE_FILE: /opt/numu/.env.test
+          AGENT_EMBED_API_KEY: ${{ secrets.TEST_AGENT_EMBED_API_KEY }}
+          AGENT_EMBED_URL: https://api.deepinfra.com/v1/openai
+          AGENT_EMBED_MODEL: intfloat/multilingual-e5-large
+        run: |
+          if [ -z "$AGENT_EMBED_API_KEY" ]; then
+            echo "[agent-embed] TEST_AGENT_EMBED_API_KEY not set — keeping the hash fallback (skipping)."
+            exit 0
+          fi
+          SNIPPET=""
+          for KEY in AGENT_EMBED_API_KEY AGENT_EMBED_URL AGENT_EMBED_MODEL; do
+            SNIPPET+="${KEY}=${!KEY}"$'\n'
+          done
+          # See the WhatsApp step for why SNIPPET is embedded in the heredoc.
+          ssh -i ~/.ssh/deploy_key \
+            ${{ secrets.STAGING_SSH_USER }}@${{ secrets.STAGING_HOST }} \
+            "FILE='${REMOTE_FILE}' bash -s" <<REMOTE_SCRIPT
+          set -e
+          if [ ! -f "\$FILE" ]; then
+            echo "[agent-embed] \$FILE not found — bailing"; exit 1
+          fi
+          while IFS= read -r line; do
+            [ -z "\$line" ] && continue
+            key="\${line%%=*}"
+            grep -v "^\${key}=" "\$FILE" > "\${FILE}.tmp"
+            printf '%s\n' "\$line" >> "\${FILE}.tmp"
+            mv "\${FILE}.tmp" "\$FILE"
+            echo "[agent-embed] upserted \${key} in \$FILE"
+          done <<'SNIPPET_EOF'
+          ${SNIPPET}SNIPPET_EOF
+          REMOTE_SCRIPT
+
       - name: Deploy to test DO Droplet
         env:
           NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
