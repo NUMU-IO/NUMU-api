@@ -36,9 +36,16 @@ def _dot(a: list[float], b: list[float]) -> float:
     return sum(a[i] * b[i] for i in range(n))
 
 
-def compute_content_hash(chunks: list[str]) -> str:
-    """Stable hash of a doc's normalized chunk text (idempotency short-circuit)."""
+def compute_content_hash(chunks: list[str], extra: str = "") -> str:
+    """Stable hash of a doc's normalized chunk text (idempotency short-circuit).
+
+    `extra` folds an out-of-band signature (e.g. the active embedder's identity)
+    into the hash so that changing the embedding model re-embeds on the next
+    ingest instead of being skipped as "unchanged".
+    """
     norm = "\n\n".join((c or "").strip() for c in chunks)
+    if extra:
+        norm = f"{extra}\n\n{norm}"
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
 
@@ -82,11 +89,15 @@ class KnowledgeRepository:
         area: str | None = None,
         source_kind: str = "authored",
         status: str = "published",
+        content_salt: str = "",
+        force: bool = False,
     ) -> tuple[UUID | None, bool]:
         """Idempotent upsert keyed on `source`. Returns (doc_id, changed).
 
-        Skips re-embed/replace when the content hash is unchanged (FR-010)."""
-        content_hash = compute_content_hash(chunks)
+        Skips re-embed/replace when the content hash is unchanged (FR-010).
+        `content_salt` folds the active embedder's signature into the hash so a
+        model change re-embeds; `force=True` bypasses the skip entirely."""
+        content_hash = compute_content_hash(chunks, extra=content_salt)
 
         existing = await self.session.execute(
             select(NumuKnowledgeDocModel).where(NumuKnowledgeDocModel.source == source)
@@ -95,7 +106,8 @@ class KnowledgeRepository:
         if existing_docs:
             # Unchanged → no-op (but keep status/metadata current).
             if (
-                len(existing_docs) == 1
+                not force
+                and len(existing_docs) == 1
                 and existing_docs[0].content_hash == content_hash
             ):
                 doc = existing_docs[0]

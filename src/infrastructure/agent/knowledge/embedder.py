@@ -100,3 +100,13 @@ def get_embedder() -> Embedder:
         )
     logger.info("agent_embedder_fallback", reason="AGENT_EMBED_URL unset")
     return FallbackEmbedder(dim=s.agent_embed_dim)
+
+
+def embedder_signature() -> str:
+    """Short identity of the active embedder — folded into the doc content hash so
+    that switching models (or moving off the hash fallback) re-embeds on the next
+    ingest instead of being skipped as unchanged."""
+    s = app_settings
+    if s.agent_embed_url:
+        return f"http:{s.agent_embed_model}:{s.agent_embed_dim}"
+    return f"fallback:{s.agent_embed_dim}"
