@@ -11,6 +11,7 @@ from __future__ import annotations
 from src.application.agent.tools import ToolRegistry, ToolSpec
 from src.core.agent.entities import RiskTier
 from src.infrastructure.agent.tools import (
+    create_discount,
     growth,
     knowledge,
     orchestration,
@@ -33,6 +34,7 @@ _TOOL_SPECS = [
     theme_write.UPDATE_SETTING_SPEC,
     knowledge.SPEC,
     growth.SPEC,
+    create_discount.SPEC,
     orchestration.SPEC,
     *reserved.SPECS,
 ]
