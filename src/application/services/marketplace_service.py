@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from src.application.services.theme_v3_presets import (
+    _known_section_types,
     generate_initial_v3_customization,
 )
 from src.core.entities.marketplace_theme import (
@@ -853,7 +854,12 @@ class MarketplaceService:
         # no section_schemas we can't judge → preserve (avoid a false reseed
         # that could drop real merchant edits; the activation service also
         # snapshots before any overwrite).
-        _known_types = set(_coerce_section_schemas(version.section_schemas).keys())
+        # Use the shared, envelope-aware extractor: section_schemas may ship as
+        # an envelope {"sections": {<type>: ...}, "blocks": {...}}, in which case
+        # the raw `.keys()` are {"sections","blocks"} (not real types) — that
+        # made `_customization_is_renderable` see zero matches and FALSELY reseed
+        # (drop the merchant's customization) on every re-activate.
+        _known_types = _known_section_types(version.section_schemas)
 
         def _customization_is_renderable(cust: dict) -> bool:
             if not _known_types:
