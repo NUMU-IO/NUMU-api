@@ -4,8 +4,8 @@ Records every status transition in the audit_logs table so merchants
 have a complete, queryable timeline of order events.
 """
 
-from src.config.logging_config import get_logger
 from src.core.events.order_events import OrderStatusChangedEvent
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

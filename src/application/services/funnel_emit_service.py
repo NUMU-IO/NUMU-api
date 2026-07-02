@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.core.entities.order import Order

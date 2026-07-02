@@ -25,12 +25,12 @@ from src.application.services.flow_trigger_dedup_keys import (
     dedup_key_recovery_succeeded,
     dedup_key_risk_score_calculated,
 )
-from src.config.logging_config import get_logger
 from src.core.events.recovery_events import (
     RecoveryAbandonedEvent,
     RecoverySucceededEvent,
 )
 from src.core.events.risk_events import RiskAssessmentFinalisedEvent
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

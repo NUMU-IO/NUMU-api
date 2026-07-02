@@ -45,11 +45,11 @@ from src.application.services.email_template_registry import (
     get_event_spec,
 )
 from src.application.services.email_template_sanitizer import strip_markdown_fences
-from src.config.logging_config import get_logger
 from src.core.entities.email_template import EmailTemplate
 from src.core.interfaces.repositories.email_template_repository import (
     IEmailTemplateRepository,
 )
+from src.core.logging import get_logger
 from src.infrastructure.external_services.resend.email_templates._base import (
     header as _email_header,
 )

@@ -4,10 +4,10 @@ from src.application.dto.auth import RefreshTokenDTO, TokenDTO
 from src.application.services.refresh_token_blacklist_service import (
     RefreshTokenBlacklistService,
 )
-from src.config.logging_config import get_logger
 from src.core.exceptions import EntityNotFoundError, InvalidTokenError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.token_service import ITokenService
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

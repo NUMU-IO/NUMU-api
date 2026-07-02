@@ -33,9 +33,9 @@ from src.application.services.campaign_auto_match import (
 from src.application.services.campaign_resolver import resolve_campaign_id
 from src.application.services.device_classifier import classify as classify_device
 from src.config import settings
-from src.config.logging_config import get_logger
 from src.core.entities.attribution import AttributionSnapshot
 from src.core.entities.store import Store
+from src.core.logging import get_logger
 from src.infrastructure.cache.idempotency_keys import (
     IdempotencyKeys,
     get_idempotency_keys,

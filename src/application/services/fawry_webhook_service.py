@@ -17,13 +17,13 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.interfaces.services.messaging_service import (
     MessageContent,
     MessageRecipient,
     MessageType,
 )
+from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.database.models.audit import AuditLogModel
 from src.infrastructure.database.models.tenant.order import OrderModel

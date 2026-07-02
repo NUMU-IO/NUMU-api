@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from sqlalchemy import select, text
 
-from src.config.logging_config import get_logger
 from src.core.events.risk_events import TrustKillSwitchFiredEvent
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 
 logger = get_logger(__name__)

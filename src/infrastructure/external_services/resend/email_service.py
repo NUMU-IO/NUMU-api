@@ -10,10 +10,10 @@ import resend
 
 from src.application.dto.email_template import RenderedEmailDTO
 from src.config import settings
-from src.config.logging_config import get_logger
 from src.core.entities.email_log import EmailLog
 from src.core.exceptions import ExternalServiceError
 from src.core.interfaces.services.email_service import EmailMessage, IEmailService
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.application.services.email_template_renderer import EmailTemplateRenderer

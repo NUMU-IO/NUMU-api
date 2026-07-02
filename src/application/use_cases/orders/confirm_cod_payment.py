@@ -1,9 +1,9 @@
 """Confirm COD (Cash on Delivery) payment collected via Bosta webhook."""
 
-from src.config.logging_config import get_logger
 from src.core.entities.order import Order
 from src.core.exceptions import EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.order_repository import IOrderRepository
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

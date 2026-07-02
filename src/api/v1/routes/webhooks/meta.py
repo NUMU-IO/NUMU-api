@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, Query, status
 from fastapi.responses import PlainTextResponse
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.external_services.meta.signature import (
     verify_meta_webhook,
     verify_x_hub_signature,

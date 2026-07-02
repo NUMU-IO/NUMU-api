@@ -24,7 +24,6 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from src.config.logging_config import get_logger
 from src.core.entities.recovery_flow import (
     DEFAULT_RECOVERY_CADENCE,
     RecoveryFlow,
@@ -41,6 +40,7 @@ from src.core.events.recovery_events import (
     make_dedupe_key,
 )
 from src.core.events.risk_events import RiskAssessmentFinalisedEvent
+from src.core.logging import get_logger
 from src.infrastructure.repositories.recovery_flow_repository import (
     RecoveryFlowRepository,
 )

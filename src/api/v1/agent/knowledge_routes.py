@@ -19,7 +19,7 @@ from src.api.dependencies.database import get_db
 from src.application.agent.knowledge.corpus_loader import load_authored_corpus
 from src.application.agent.knowledge.coverage import build_coverage_report
 from src.config import settings as app_settings
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.agent.knowledge.docs_ingest import fetch_docs_corpus
 from src.infrastructure.agent.knowledge.embedder import get_embedder
 from src.infrastructure.agent.knowledge.repository import KnowledgeRepository

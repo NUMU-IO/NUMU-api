@@ -19,7 +19,6 @@ from src.application.agent.tools import (
     ToolResult,
     validate_arguments,
 )
-from src.config.logging_config import get_logger
 from src.core.agent.entities import RiskTier, ToolCallRecord
 from src.core.agent.interfaces import (
     ChatMessage,
@@ -27,6 +26,7 @@ from src.core.agent.interfaces import (
     LLMProviderError,
     LLMRateLimitError,
 )
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

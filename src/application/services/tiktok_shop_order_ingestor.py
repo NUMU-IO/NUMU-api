@@ -17,7 +17,6 @@ import re
 from typing import Any
 from uuid import uuid4
 
-from src.config.logging_config import get_logger
 from src.core.entities.customer import Customer
 from src.core.entities.order import (
     Order,
@@ -27,6 +26,7 @@ from src.core.entities.order import (
     PaymentStatus,
 )
 from src.core.events.order_events import OrderCreatedEvent
+from src.core.logging import get_logger
 from src.core.value_objects.email import Email
 
 logger = get_logger(__name__)

@@ -14,7 +14,6 @@ from uuid import UUID, uuid4
 from src.application.dto.coupon import CreateCouponDTO
 from src.application.services.theme_v3_service import StaleEtagError
 from src.application.use_cases.coupons.create_coupon import CreateCouponUseCase
-from src.config.logging_config import get_logger
 from src.core.agent.entities import (
     AuditRecord,
     AuditResult,
@@ -26,6 +25,7 @@ from src.core.exceptions import (
     EntityNotFoundError,
     ValidationError,
 )
+from src.core.logging import get_logger
 from src.infrastructure.agent.persistence.repositories import (
     AuditRepository,
     ProposalRepository,

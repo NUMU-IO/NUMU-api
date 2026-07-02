@@ -10,7 +10,7 @@ don't accumulate stale keys forever.
 from uuid import UUID
 
 from src.config import settings
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 
 logger = get_logger(__name__)

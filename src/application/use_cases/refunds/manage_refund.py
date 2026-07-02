@@ -4,7 +4,6 @@ from uuid import UUID
 
 from src.application.dto.base import PaginatedDTO
 from src.application.dto.refund import RefundDTO, RefundListItemDTO
-from src.config.logging_config import get_logger
 from src.core.entities.order import PaymentStatus
 from src.core.entities.refund import RefundStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
@@ -12,6 +11,7 @@ from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.refund_repository import IRefundRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.interfaces.services.payment_service import IPaymentService
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

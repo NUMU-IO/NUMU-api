@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
 if TYPE_CHECKING:

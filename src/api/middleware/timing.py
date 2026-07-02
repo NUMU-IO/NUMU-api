@@ -6,7 +6,7 @@ from collections.abc import Callable
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.observability.prometheus_metrics import (
     http_request_duration_seconds,
     http_requests_in_progress,

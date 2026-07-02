@@ -2,12 +2,12 @@
 
 from uuid import UUID
 
-from src.config.logging_config import get_logger
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.interfaces.repositories.webhook_repository import (
     IWebhookSubscriptionRepository,
 )
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

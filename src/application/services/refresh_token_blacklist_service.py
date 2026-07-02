@@ -10,7 +10,7 @@ Graceful degradation: if Redis is unavailable, tokens are accepted
 
 import time
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 
 logger = get_logger(__name__)

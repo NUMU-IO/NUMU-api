@@ -20,9 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services.funnel_emit_service import emit_order_delivered
 from src.config import settings
-from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.bosta import BostaShippingService
 from src.infrastructure.repositories.funnel_event_repository import (

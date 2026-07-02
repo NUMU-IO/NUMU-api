@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from src.application.agent.tools import ToolContext, ToolResult
-from src.config.logging_config import get_logger
 from src.core.agent.entities import RiskTier
+from src.core.logging import get_logger
 from src.infrastructure.agent.tools._theme_common import (
     build_v3_service,
     known_section_types,

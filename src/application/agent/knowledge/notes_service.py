@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.agent.knowledge.embedder import get_embedder
 from src.infrastructure.agent.knowledge.models import TenantNoteModel
 from src.infrastructure.agent.knowledge.repository import KnowledgeRepository

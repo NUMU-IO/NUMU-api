@@ -5,13 +5,13 @@ from datetime import UTC, datetime, timedelta
 
 from src.application.dto.auth import AuthResponseDTO, RegisterDTO, TokenDTO
 from src.application.dto.user import UserDTO
-from src.config.logging_config import get_logger
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.exceptions import EntityAlreadyExistsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.email_service import IEmailService
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
+from src.core.logging import get_logger
 from src.core.validators.password import validate_password
 from src.core.value_objects.email import Email
 from src.infrastructure.tenancy.service import TRIAL_LIFETIME_DAYS

@@ -6,7 +6,7 @@ import uuid
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.config.logging_config import (
+from src.core.logging import (
     bind_request_context,
     clear_request_context,
     get_logger,

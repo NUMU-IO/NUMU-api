@@ -3,7 +3,6 @@
 from uuid import UUID
 
 from src.application.dto.order import CreateOrderDTO, OrderDTO
-from src.config.logging_config import get_logger
 from src.core.entities.order import (
     Order,
     OrderLineItem,
@@ -20,6 +19,7 @@ from src.core.interfaces.repositories.onboarding_repository import (
 )
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -16,8 +16,8 @@ a no-op, so no opt-out gating is needed in this handler.
 
 from __future__ import annotations
 
-from src.config.logging_config import get_logger
 from src.core.events.recovery_events import RecoverySucceededEvent
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

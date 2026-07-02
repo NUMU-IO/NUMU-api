@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
-from src.config.logging_config import get_logger
 from src.core.agent.entities import AuditRecord, AuditResult
+from src.core.logging import get_logger
 from src.infrastructure.agent.n8n import get_n8n_client
 from src.infrastructure.agent.persistence.repositories import AuditRepository
 from src.infrastructure.database.connection import set_tenant_id
