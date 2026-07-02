@@ -8,20 +8,31 @@ rejected-at-apply) write produces exactly one immutable audit record (FR-010).
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from uuid import UUID, uuid4
 
+from src.application.dto.coupon import CreateCouponDTO
 from src.application.services.theme_v3_service import StaleEtagError
+from src.application.use_cases.coupons.create_coupon import CreateCouponUseCase
 from src.config.logging_config import get_logger
 from src.core.agent.entities import (
     AuditRecord,
     AuditResult,
     ProposalStatus,
 )
+from src.core.exceptions import (
+    AuthorizationError,
+    EntityAlreadyExistsError,
+    EntityNotFoundError,
+    ValidationError,
+)
 from src.infrastructure.agent.persistence.repositories import (
     AuditRepository,
     ProposalRepository,
 )
 from src.infrastructure.agent.tools._theme_common import build_v3_service
+from src.infrastructure.repositories.coupon_repository import CouponRepository
+from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.tenancy.rls import set_tenant_context
 
@@ -101,6 +112,127 @@ def _change_summary(tool_name: str, params: dict) -> str:
     return f"Agent: update {params.get('setting_path')}"
 
 
+# ── Non-theme actions (Pillar 2) ─────────────────────────────────────────────
+# Action tools have no theme draft/publish semantics; each maps its confirmed
+# proposal to a use-case that performs the real change. An applier returns the
+# audit `after_state`, a human summary, and the data surfaced back to the caller.
+
+
+def _to_decimal(value) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ProposalError("bad_params", f"Invalid numeric value: {value!r}") from exc
+
+
+async def _apply_create_discount(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    use_case = CreateCouponUseCase(
+        coupon_repository=CouponRepository(session),
+        store_repository=StoreRepository(session),
+    )
+    dto = CreateCouponDTO(
+        code=params["code"],
+        coupon_type=params["discount_type"],
+        value=_to_decimal(params["value"]),
+        min_order_amount=(
+            _to_decimal(params["min_order_amount"])
+            if params.get("min_order_amount") is not None
+            else None
+        ),
+        usage_limit=params.get("usage_limit"),
+    )
+    coupon = await use_case.execute(dto, store_id, staff_id)
+    return {
+        "summary": f"Created coupon {coupon.code}",
+        "after_state": {
+            "coupon_id": str(coupon.id),
+            "code": coupon.code,
+            "type": coupon.coupon_type,
+            "value": str(coupon.value),
+        },
+        "result": {"coupon_id": str(coupon.id), "code": coupon.code},
+    }
+
+
+# tool_name → applier. Tools listed here follow the generic (non-theme) path.
+ACTION_APPLIERS = {
+    "create_discount": _apply_create_discount,
+}
+
+
+async def _apply_action_proposal(
+    session,
+    *,
+    proposal,
+    store_id: UUID,
+    staff_id: UUID,
+    tenant_id: UUID,
+    model_used: str | None,
+    proposal_repo: ProposalRepository,
+    audit_repo: AuditRepository,
+) -> dict:
+    """Apply a non-theme action proposal via its registered use-case applier."""
+    applier = ACTION_APPLIERS[proposal.tool_name]
+    conversation_id = proposal.conversation_id
+    try:
+        outcome = await applier(
+            session, store_id=store_id, staff_id=staff_id, params=proposal.params
+        )
+    except (
+        ValidationError,
+        AuthorizationError,
+        EntityNotFoundError,
+        EntityAlreadyExistsError,
+    ) as exc:
+        # Domain rejection at apply time is still one immutable audit record.
+        await audit_repo.add(
+            AuditRecord(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                staff_id=staff_id,
+                conversation_id=conversation_id,
+                tool_name=proposal.tool_name,
+                params=proposal.params,
+                before_state={},
+                after_state={},
+                result=AuditResult.REJECTED,
+                model_used=model_used,
+            )
+        )
+        await proposal_repo.mark(proposal.id, ProposalStatus.DECLINED)
+        raise ProposalError("apply_failed", str(exc)) from None
+
+    audit = await audit_repo.add(
+        AuditRecord(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            staff_id=staff_id,
+            conversation_id=conversation_id,
+            tool_name=proposal.tool_name,
+            params=proposal.params,
+            before_state={},
+            after_state=outcome["after_state"],
+            result=AuditResult.APPLIED,
+            model_used=model_used,
+        )
+    )
+    await proposal_repo.mark(proposal.id, ProposalStatus.APPLIED)
+    logger.info(
+        "agent_action_applied",
+        proposal_id=str(proposal.id),
+        tool=proposal.tool_name,
+        audit_id=str(audit.id),
+    )
+    return {
+        "applied": True,
+        "proposal_id": str(proposal.id),
+        "audit_id": str(audit.id),
+        **outcome.get("result", {}),
+    }
+
+
 async def apply_proposal(
     session,
     *,
@@ -119,6 +251,20 @@ async def apply_proposal(
         raise ProposalError("not_found", "Proposal not found.")
     if proposal.status != ProposalStatus.PENDING:
         raise ProposalError("already_resolved", f"Proposal is {proposal.status.value}.")
+
+    # Non-theme actions (Pillar 2) take the generic use-case apply path.
+    if proposal.tool_name in ACTION_APPLIERS:
+        return await _apply_action_proposal(
+            session,
+            proposal=proposal,
+            store_id=store_id,
+            staff_id=staff_id,
+            tenant_id=tenant_id,
+            model_used=model_used,
+            proposal_repo=proposal_repo,
+            audit_repo=audit_repo,
+        )
+
     if proposal.tool_name not in _SUPPORTED_WRITE_TOOLS:
         raise ProposalError("unsupported", f"Cannot apply tool '{proposal.tool_name}'.")
 
