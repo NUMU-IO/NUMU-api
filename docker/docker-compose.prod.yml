@@ -22,6 +22,18 @@ services:
       # `docker compose build nginx` on the server to apply updates.
     container_name: numu-nginx-prod
     restart: unless-stopped
+    # Only stderr (error_log) ships — access_log stays in the nginx_logs volume
+    # so we don't duplicate the app's per-request line in CloudWatch. Requires
+    # error_log -> /dev/stderr in nginx.conf (set there).
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/nginx
+        awslogs-create-group: "true"
+        awslogs-stream: nginx
+        mode: non-blocking
+        max-buffer-size: 4m
     ports:
       - "80:80"
       - "443:443"
@@ -56,6 +68,15 @@ services:
       - LOG_FORMAT=json
     expose:
       - "8000"
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/api
+        awslogs-create-group: "true"
+        awslogs-stream: api
+        mode: non-blocking
+        max-buffer-size: 4m
     volumes:
       - api_logs:/app/logs
     depends_on:
@@ -89,6 +110,16 @@ services:
     image: pgvector/pgvector:pg16  # pgvector for NUMU-knowledge RAG (spec 002); CREATE EXTENSION runs in the Alembic migration
     container_name: numu-postgres-prod
     restart: unless-stopped
+    # Kept for the pgvector/RAG store even though the app DB is on Supabase.
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/postgres
+        awslogs-create-group: "true"
+        awslogs-stream: postgres
+        mode: non-blocking
+        max-buffer-size: 4m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-numu}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -152,6 +183,15 @@ services:
     image: redis:7-alpine
     container_name: numu-redis-master-prod
     restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/redis
+        awslogs-create-group: "true"
+        awslogs-stream: redis-master
+        mode: non-blocking
+        max-buffer-size: 4m
     command: >
       redis-server
       --appendonly yes
@@ -286,6 +326,15 @@ services:
       - ENVIRONMENT=production
       - LOG_FORMAT=json
       - PROCESS_ROLE=celery
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/celery-worker
+        awslogs-create-group: "true"
+        awslogs-stream: celery-worker
+        mode: non-blocking
+        max-buffer-size: 4m
     depends_on:
       - redis-master
       - postgres
@@ -304,13 +353,22 @@ services:
     image: ${NUMU_API_IMAGE:?NUMU_API_IMAGE must be set}
     container_name: numu-celery-beat-prod
     restart: unless-stopped
-    command: celery -A src.infrastructure.messaging.celery_app beat --loglevel=info
+    command: celery -A src.infrastructure.messaging.celery_app beat --loglevel=warning
     env_file:
       - ../.env.prod
     environment:
       - ENVIRONMENT=production
       - LOG_FORMAT=json
       - PROCESS_ROLE=celery
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/celery-beat
+        awslogs-create-group: "true"
+        awslogs-stream: celery-beat
+        mode: non-blocking
+        max-buffer-size: 4m
     depends_on:
       - redis-master
       - postgres

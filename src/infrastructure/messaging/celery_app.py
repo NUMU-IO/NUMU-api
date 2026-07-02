@@ -1,7 +1,10 @@
 """Celery application configuration."""
 
+import logging
+
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import after_setup_logger, after_setup_task_logger
 from kombu import Queue
 
 from src.config import settings
@@ -12,6 +15,32 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
 )
+
+# Celery's framework loggers emit an INFO line for every task's lifecycle
+# ("Task <name> received" / "Task <name> succeeded in 0.5s"). With sub-minute
+# periodic tasks (see beat_schedule below) this is a constant stream shipped to
+# CloudWatch for no signal — task-level app logs and errors are what matter.
+# Pin the framework loggers to WARNING AFTER Celery configures logging, so we
+# keep `--loglevel=info` for the task code's own logger.info() calls.
+_NOISY_CELERY_LOGGERS = (
+    "celery.app.trace",  # "Task succeeded/failed" per task
+    "celery.worker.strategy",  # "Task received" per task
+    "celery.pool",
+    "celery.beat",
+)
+
+
+@after_setup_logger.connect
+def _quiet_celery_loggers(**_kwargs) -> None:
+    for name in _NOISY_CELERY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+@after_setup_task_logger.connect
+def _quiet_celery_task_loggers(**_kwargs) -> None:
+    for name in _NOISY_CELERY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
 
 # Celery configuration
 celery_app.conf.update(
