@@ -60,34 +60,20 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             tenant_slug=tenant_slug,
         )
 
-        # One structured line per request (on completion) to keep CloudWatch
-        # ingestion lean. The prior separate "request_started" line doubled log
-        # volume for no signal; client_ip is folded into the completion event
-        # and user-agent is dropped (bulky, rarely needed at INFO). Errors still
-        # get their own "request_failed" line with the traceback below.
+        # No automatic per-request log line. Only explicit logger.* calls in
+        # business code emit logs, which keeps CloudWatch ingestion minimal.
+        # The request context (request_id/tenant) bound above still decorates
+        # those explicit logs so they stay correlatable, and unhandled
+        # exceptions are still recorded via "request_failed" below.
         start_time = time.time()
 
         try:
             response = await call_next(request)
 
-            # Calculate processing time
+            # Surface processing time via a response header for client/debug
+            # visibility, without emitting a log line.
             process_time_ms = round((time.time() - start_time) * 1000, 2)
 
-            # Extract auth context set by route handlers / auth dependencies
-            user_id = getattr(request.state, "user_id", None)
-            store_id = getattr(request.state, "store_id", None)
-
-            # Log response with user/store context when available
-            log.info(
-                "request_completed",
-                status_code=response.status_code,
-                duration_ms=process_time_ms,
-                client_ip=self._get_client_ip(request),
-                user_id=str(user_id) if user_id else None,
-                store_id=str(store_id) if store_id else None,
-            )
-
-            # Add response headers
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Process-Time"] = str(process_time_ms)
 

@@ -44,11 +44,26 @@ def add_request_context(
 def add_app_context(
     logger: logging.Logger, method_name: str, event_dict: EventDict
 ) -> EventDict:
-    """Add application context to all log events."""
+    """Add application context to all log events.
+
+    `version` is intentionally omitted (constant per process, redundant on
+    every line); the CloudWatch log group already encodes the service.
+    """
     event_dict["service"] = "numu-api"
     event_dict["environment"] = settings.environment
-    event_dict["version"] = settings.app_version
     return event_dict
+
+
+def drop_none_values(
+    logger: logging.Logger, method_name: str, event_dict: EventDict
+) -> EventDict:
+    """Strip keys whose value is None to keep log lines lean.
+
+    Bound context (e.g. user_id/store_id/tenant_slug) is frequently None; those
+    keys add bytes to every CloudWatch event for no signal. Runs last, just
+    before the renderer.
+    """
+    return {k: v for k, v in event_dict.items() if v is not None}
 
 
 # Sensitive field names whose values must NEVER appear in logs (TASK-SEC-006).
@@ -121,6 +136,8 @@ def configure_logging() -> None:
         # Must come AFTER context processors and BEFORE any renderer so that
         # secrets injected via .bind() or context vars also get redacted.
         redact_sensitive_fields,
+        # Runs last: strip None-valued keys after all context is merged.
+        drop_none_values,
     ]
 
     if settings.log_format == "json":
