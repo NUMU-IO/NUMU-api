@@ -236,6 +236,16 @@ async def kashier_callback(
         except Exception:
             log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
 
+        # TikTok Events API CompletePayment (best-effort; event_id == order.id)
+        try:
+            from src.application.services.tiktok_capi_purchase_dispatcher import (
+                enqueue_tiktok_capi_purchase,
+            )
+
+            await enqueue_tiktok_capi_purchase(db, order)
+        except Exception:
+            log.warning("tiktok_capi_purchase_enqueue_failed", exc_info=True)
+
         # Fire OrderStatusChangedEvent so shipment auto-creation triggers
         try:
             from src.core.events.order_events import OrderStatusChangedEvent
@@ -379,6 +389,17 @@ async def kashier_redirect(
                 except Exception:
                     log.warning(
                         "meta_capi_purchase_enqueue_failed_redirect", exc_info=True
+                    )
+
+                try:
+                    from src.application.services.tiktok_capi_purchase_dispatcher import (  # noqa: E501
+                        enqueue_tiktok_capi_purchase,
+                    )
+
+                    await enqueue_tiktok_capi_purchase(db, internal_order)
+                except Exception:
+                    log.warning(
+                        "tiktok_capi_purchase_enqueue_failed_redirect", exc_info=True
                     )
 
             if success:

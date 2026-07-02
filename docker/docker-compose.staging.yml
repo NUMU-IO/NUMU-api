@@ -60,7 +60,7 @@ services:
     # ~2x'd throughput (~170 req/s) and halved p50 latency (load-tested 2026-06-28).
     # Per-worker DB pool is shrunk via DB_POOL_SIZE/DB_MAX_OVERFLOW=5 in .env.staging
     # so 2x(5+5)=20 conns stays under Supabase's Free/Nano ~40 usable budget.
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log
     env_file:
       - ../.env.staging
     environment:

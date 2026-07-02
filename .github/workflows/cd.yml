@@ -221,7 +221,8 @@ jobs:
         env:
           REMOTE_FILE: /opt/numu/.env.test
           AGENT_EMBED_API_KEY: ${{ secrets.TEST_AGENT_EMBED_API_KEY }}
-          AGENT_EMBED_URL: https://api.deepinfra.com/v1/openai
+          AGENT_EMBED_PROVIDER: hf
+          AGENT_EMBED_URL: https://router.huggingface.co/hf-inference/models
           AGENT_EMBED_MODEL: intfloat/multilingual-e5-large
         run: |
           if [ -z "$AGENT_EMBED_API_KEY" ]; then
@@ -229,7 +230,7 @@ jobs:
             exit 0
           fi
           SNIPPET=""
-          for KEY in AGENT_EMBED_API_KEY AGENT_EMBED_URL AGENT_EMBED_MODEL; do
+          for KEY in AGENT_EMBED_API_KEY AGENT_EMBED_PROVIDER AGENT_EMBED_URL AGENT_EMBED_MODEL; do
             SNIPPET+="${KEY}=${!KEY}"$'\n'
           done
           # See the WhatsApp step for why SNIPPET is embedded in the heredoc.

@@ -44,9 +44,19 @@ def load_areas(corpus: Path | None = None) -> list[KnowledgeArea]:
             label_en=a.get("label_en", a["key"]),
             label_ar=a.get("label_ar", a["key"]),
             description=a.get("description", ""),
+            related_areas=tuple(a.get("related_areas", [])),
+            tools=tuple(a.get("tools", [])),
         )
         for a in data.get("areas", [])
     ]
+
+
+def _split_list(value: str | None) -> tuple[str, ...]:
+    """Parse a flat front-matter list, e.g. `[a, b]` or `a, b` → ('a', 'b')."""
+    if not value:
+        return ()
+    cleaned = value.strip().lstrip("[").rstrip("]")
+    return tuple(item.strip() for item in cleaned.split(",") if item.strip())
 
 
 def _parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
@@ -113,6 +123,11 @@ def _doc_from_file(path: Path, *, default_kind: SourceKind) -> KnowledgeDoc:
         feature=fm.get("feature"),
         detected_by=fm.get("detected_by"),
         howto=fm.get("howto"),
+        doc_type=fm.get("type") or fm.get("doc_type"),
+        prerequisites=_split_list(fm.get("prerequisites")),
+        related=_split_list(fm.get("related")),
+        maps_to_tool=fm.get("maps_to_tool") or None,
+        maps_to_endpoint=fm.get("maps_to_endpoint") or None,
     )
 
 

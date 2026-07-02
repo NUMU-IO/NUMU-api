@@ -63,6 +63,8 @@ from src.api.v1.routes.marketplace import (
     marketplace_store_install_router,
 )
 from src.api.v1.routes.oauth.meta import router as meta_oauth_router
+from src.api.v1.routes.oauth.tiktok import router as tiktok_oauth_router
+from src.api.v1.routes.oauth.tiktok_shop import router as tiktok_shop_oauth_router
 
 # Omnichannel routes
 from src.api.v1.routes.omnichannel import (
@@ -135,6 +137,7 @@ from src.api.v1.routes.storefront import (
     meta_feed_router,
     storefront_lookup_router,
     theme_resolution_router,
+    tiktok_feed_router,
 )
 from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
@@ -254,6 +257,22 @@ api_router.include_router(
     meta_oauth_router, prefix="/oauth/meta", tags=["OAuth - Meta"]
 )
 
+# TikTok for Business OAuth — pixel + Events API authorization.
+# /oauth/tiktok/start (auth'd) redirects to TikTok consent; /callback
+# completes the token exchange + lists pixels. Requires NUMU_TIKTOK_APP_ID +
+# NUMU_TIKTOK_APP_SECRET and PUBLIC_API_URL; returns 503 until configured.
+api_router.include_router(
+    tiktok_oauth_router, prefix="/oauth/tiktok", tags=["OAuth - TikTok"]
+)
+
+# TikTok Shop (sales channel) OAuth — pixel-independent; authorizes shop +
+# order access. 503 until NUMU_TIKTOK_SHOP_APP_KEY/SECRET are configured.
+api_router.include_router(
+    tiktok_shop_oauth_router,
+    prefix="/oauth/tiktok-shop",
+    tags=["OAuth - TikTok Shop"],
+)
+
 # Omnichannel - inbox (channels, threads, messages under store scope)
 api_router.include_router(
     channels_router,
@@ -291,6 +310,13 @@ api_router.include_router(
     storefront_lookup_router,
     prefix="/storefront",
     tags=["Storefront - Public"],
+)
+
+# TikTok P6 — TikTok Catalog product feed (public, scoped by subdomain)
+api_router.include_router(
+    tiktok_feed_router,
+    prefix="/storefront",
+    tags=["Storefront - TikTok Catalog"],
 )
 
 # Wave 3 Phase 16 — Meta Commerce Catalog feed (public, scoped by subdomain)

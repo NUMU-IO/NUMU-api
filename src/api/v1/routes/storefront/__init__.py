@@ -54,6 +54,7 @@ from src.api.v1.routes.storefront.shipping_quote import router as shipping_quote
 from src.api.v1.routes.storefront.theme_resolution import (
     router as theme_resolution_router,
 )
+from src.api.v1.routes.storefront.tiktok_feed import router as tiktok_feed_router
 from src.api.v1.routes.storefront.tracking import router as tracking_router
 from src.api.v1.routes.storefront.upsell import router as upsell_router
 from src.api.v1.routes.storefront.whatsapp_optin import (
@@ -67,6 +68,7 @@ __all__ = [
     "gift_cards_router",
     "pickup_locations_router",
     "meta_feed_router",
+    "tiktok_feed_router",
     "public_router",
     "returns_router",
     "reviews_router",

@@ -164,6 +164,11 @@ def configure_logging() -> None:
         "sqlalchemy.engine",
         "httpx",
         "httpcore",
+        # AWS/R2 SDK + its transport — emit an INFO/DEBUG line per S3 call
+        # (every object upload/download), pure CloudWatch cost with no signal.
+        "boto3",
+        "botocore",
+        "urllib3",
     ]:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 

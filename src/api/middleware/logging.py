@@ -60,13 +60,12 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             tenant_slug=tenant_slug,
         )
 
-        # Log request start
+        # One structured line per request (on completion) to keep CloudWatch
+        # ingestion lean. The prior separate "request_started" line doubled log
+        # volume for no signal; client_ip is folded into the completion event
+        # and user-agent is dropped (bulky, rarely needed at INFO). Errors still
+        # get their own "request_failed" line with the traceback below.
         start_time = time.time()
-        log.info(
-            "request_started",
-            client_ip=self._get_client_ip(request),
-            user_agent=request.headers.get("user-agent", ""),
-        )
 
         try:
             response = await call_next(request)
@@ -83,6 +82,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 "request_completed",
                 status_code=response.status_code,
                 duration_ms=process_time_ms,
+                client_ip=self._get_client_ip(request),
                 user_id=str(user_id) if user_id else None,
                 store_id=str(store_id) if store_id else None,
             )

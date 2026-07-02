@@ -8,6 +8,7 @@ model is a config change, not a code change.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 from typing import Protocol
@@ -89,9 +90,60 @@ class HttpEmbedder:
         return await self._embed([f"passage: {t}" for t in texts])
 
 
+class HFFeatureExtractionEmbedder:
+    """Hugging Face Inference feature-extraction client (free-tier friendly).
+
+    HF's router does not expose an OpenAI-compatible /embeddings route for
+    sentence models; it serves raw vectors via
+    ``{base}/{model}/pipeline/feature-extraction`` returning a bare array (or a
+    list of arrays for batched inputs). Vectors are mean-pooled but not
+    normalized, so we L2-normalize to match the rest of the pipeline. Cold starts
+    return HTTP 503 ("model is loading") — we retry with a short backoff.
+    """
+
+    def __init__(self, *, base_url: str, api_key: str, model: str, dim: int) -> None:
+        self._endpoint = f"{base_url.rstrip('/')}/{model}/pipeline/feature-extraction"
+        self._api_key = api_key
+        self._model = model
+        self._dim = dim
+
+    async def _embed(self, inputs: list[str]) -> list[list[float]]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        payload = {"inputs": inputs, "options": {"wait_for_model": True}}
+        async with httpx.AsyncClient(timeout=60) as client:
+            for attempt in range(4):
+                resp = await client.post(self._endpoint, json=payload, headers=headers)
+                if resp.status_code == 503:  # model loading — brief cold start
+                    logger.info("agent_embedder_hf_loading", attempt=attempt)
+                    await asyncio.sleep(5)
+                    continue
+                resp.raise_for_status()
+                break
+        data = resp.json()
+        # Single input → one vector; batched → list of vectors. Normalize both.
+        if data and isinstance(data[0], int | float):
+            data = [data]
+        return [_l2_normalize(vec) for vec in data]
+
+    async def embed_query(self, text: str) -> list[float]:
+        return (await self._embed([f"query: {text}"]))[0]
+
+    async def embed_passages(self, texts: list[str]) -> list[list[float]]:
+        return await self._embed([f"passage: {t}" for t in texts])
+
+
 def get_embedder() -> Embedder:
     s = app_settings
     if s.agent_embed_url:
+        if s.agent_embed_provider == "hf":
+            return HFFeatureExtractionEmbedder(
+                base_url=s.agent_embed_url,
+                api_key=s.agent_embed_api_key,
+                model=s.agent_embed_model,
+                dim=s.agent_embed_dim,
+            )
         return HttpEmbedder(
             url=s.agent_embed_url,
             api_key=s.agent_embed_api_key,
@@ -104,9 +156,9 @@ def get_embedder() -> Embedder:
 
 def embedder_signature() -> str:
     """Short identity of the active embedder — folded into the doc content hash so
-    that switching models (or moving off the hash fallback) re-embeds on the next
-    ingest instead of being skipped as unchanged."""
+    that switching models/providers (or moving off the hash fallback) re-embeds on
+    the next ingest instead of being skipped as unchanged."""
     s = app_settings
     if s.agent_embed_url:
-        return f"http:{s.agent_embed_model}:{s.agent_embed_dim}"
+        return f"{s.agent_embed_provider}:{s.agent_embed_model}:{s.agent_embed_dim}"
     return f"fallback:{s.agent_embed_dim}"

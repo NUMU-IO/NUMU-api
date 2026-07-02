@@ -198,8 +198,11 @@ class Settings(BaseSettings):
     # default to multilingual-e5-large (1024-dim). When agent_embed_url is unset, a
     # deterministic local fallback embedder is used (dev/offline) — swap by config.
     agent_embed_url: str = (
-        ""  # OpenAI-compatible /embeddings endpoint (e.g. a TEI server)
+        ""  # embeddings endpoint base; empty → deterministic hash fallback
     )
+    # Wire format of agent_embed_url: "openai" (OpenAI-compatible /embeddings, e.g.
+    # DeepInfra/TEI) or "hf" (Hugging Face feature-extraction pipeline router).
+    agent_embed_provider: str = "openai"
     agent_embed_api_key: str = ""
     agent_embed_model: str = "intfloat/multilingual-e5-large"
     agent_embed_dim: int = 1024
@@ -445,6 +448,18 @@ class Settings(BaseSettings):
     meta_graph_api_version: str = "v19.0"
     meta_webhook_verify_token: str | None = None
     meta_login_config_id: str | None = None
+
+    # TikTok for Business — Marketing/Events API OAuth. Activation switch
+    # for /oauth/tiktok/*: unset → the route returns 503 and merchants use
+    # the paste-Pixel-ID + Events-API-token flow instead.
+    tiktok_app_id: str | None = None
+    tiktok_app_secret: str | None = None
+
+    # TikTok Shop (sales channel) — Open Platform App. Activation switch for
+    # /oauth/tiktok-shop/* + the webhook receiver. Unset → OAuth returns 503
+    # and webhooks are rejected as unsigned.
+    tiktok_shop_app_key: str | None = None
+    tiktok_shop_app_secret: str | None = None
 
     # Omnichannel Inbox
     inbox_realtime_enabled: bool = True

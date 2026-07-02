@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
 from src.application.agent.agent_loop import AgentEvent, AgentLoop, AgentRunResult
+from src.application.agent.knowledge.system_map import build_system_map
 from src.application.agent.scope import decline_message, off_domain_reason
 from src.application.agent.tool_registry import build_default_registry
 from src.application.agent.tools import ToolContext
@@ -129,6 +130,7 @@ async def stream_turn(
             history=_history_to_messages(history),
             ctx=ctx,
             result=result,
+            system_context=build_system_map(locale),
         ):
             yield event
     except Exception as exc:  # noqa: BLE001 — surface, never fabricate

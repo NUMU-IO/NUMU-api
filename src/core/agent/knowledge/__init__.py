@@ -32,6 +32,10 @@ class KnowledgeArea:
     label_en: str
     label_ar: str
     description: str = ""
+    # OKF graph: sibling areas a question here often spans, and the agent tools
+    # that act on this area (bridges knowledge → action).
+    related_areas: tuple[str, ...] = ()
+    tools: tuple[str, ...] = ()
 
 
 @dataclass
@@ -51,6 +55,13 @@ class KnowledgeDoc:
     feature: str | None = None
     detected_by: str | None = None
     howto: str | None = None
+    # OKF doc-level structure (optional): the kind of doc, other sources it
+    # depends on / relates to, and the tool/endpoint that actually performs it.
+    doc_type: str | None = None
+    prerequisites: tuple[str, ...] = ()
+    related: tuple[str, ...] = ()
+    maps_to_tool: str | None = None
+    maps_to_endpoint: str | None = None
 
 
 @dataclass
