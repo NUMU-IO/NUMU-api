@@ -120,6 +120,9 @@ from src.infrastructure.database.models.tenant.theme import (
 from src.infrastructure.database.models.tenant.theme_update_notification import (
     ThemeUpdateNotificationModel,
 )
+from src.infrastructure.database.models.tenant.tiktok_event_log import (
+    TikTokEventLogModel,
+)
 from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
 from src.infrastructure.database.models.tenant.variant import VariantModel
 from src.infrastructure.database.models.tenant.webhook import (
@@ -162,6 +165,7 @@ __all__ = [
     "MenuModel",
     "MessageLogModel",
     "MetaEventLogModel",
+    "TikTokEventLogModel",
     "NetworkContributionLogModel",
     "NetworkReputationModel",
     "InstapayIntentModel",

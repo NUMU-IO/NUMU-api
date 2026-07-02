@@ -238,13 +238,198 @@ class MetaTrackingResponse(BaseModel):
     consent_settings: ConsentSettings | None = None
 
 
+# ============================================================================
+# TikTok tracking (Pixel + Events API) — sibling of the Meta schemas above.
+# Deltas: server toggle is ``api_enabled`` (TikTok calls it "Events API"),
+# pixel IDs are alphanumeric (not 15-16 digits), the click id is ``ttclid``
+# and the response carries a ``request_id`` (not ``fbtrace_id``).
+# ============================================================================
+
+
+class TikTokPixelEntry(BaseModel):
+    """One pixel in a store's multi-pixel TikTok configuration."""
+
+    pixel_id: str = Field(..., min_length=1, max_length=64)
+    pixel_enabled: bool = True
+    api_enabled: bool = True
+    label: str | None = Field(default=None, max_length=64)
+    role: PixelRole | None = None
+
+    @field_validator("pixel_id")
+    @classmethod
+    def _validate_pixel_id(cls, v: str) -> str:
+        import re
+
+        # TikTok Pixel / Events "Pixel Code" is alphanumeric (~20 chars),
+        # e.g. "C4A2B1D3E4F5G6H7I8J9". Deliberately NOT digits-only.
+        if not re.match(r"^[A-Za-z0-9]{6,40}$", v):
+            raise ValueError(
+                "pixel_id must be 6-40 alphanumeric chars (TikTok Pixel Code)"
+            )
+        return v
+
+
+class SaveTikTokTrackingRequest(BaseModel):
+    """Body for ``PUT /stores/{id}/settings/tracking/tiktok``."""
+
+    pixel_id: str = Field(..., min_length=1, max_length=64)
+    pixel_enabled: bool
+    api_enabled: bool
+    # Optional: only sent when (re)setting the Events API token. When
+    # ``api_enabled`` is true and no token is on file AND none is provided
+    # here, the route rejects with 422.
+    api_access_token: str | None = Field(default=None, min_length=10, max_length=512)
+    test_event_code: str | None = Field(default=None, max_length=64)
+    consent_required: bool = False
+    debug_mode: bool = False
+    # COD-aware CompletePayment timing — None preserves legacy behaviour
+    # (payment webhooks remain the sole CompletePayment source).
+    purchase_trigger: PurchaseTrigger | None = None
+    # Optional multi-pixel list. When set, every Events API fire fans out
+    # to each api_enabled entry; the storefront pixel mount iterates.
+    pixels: list[TikTokPixelEntry] | None = Field(default=None, max_length=10)
+    # TikTok advertiser id — reserved for the Marketing API phase
+    # (campaigns / catalog). Optional; stored verbatim.
+    advertiser_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("pixel_id")
+    @classmethod
+    def _validate_pixel_id(cls, v: str) -> str:
+        import re
+
+        if not re.match(r"^[A-Za-z0-9]{6,40}$", v):
+            raise ValueError(
+                "pixel_id must be 6-40 alphanumeric chars (TikTok Pixel Code)"
+            )
+        return v
+
+    @field_validator("test_event_code")
+    @classmethod
+    def _validate_test_event_code(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        import re
+
+        # TikTok test-event codes are alphanumeric (from Events Manager →
+        # Test Events). More permissive than Meta's ^TEST\d+$.
+        if not re.match(r"^[A-Za-z0-9_-]{1,64}$", v):
+            raise ValueError(
+                "test_event_code must be alphanumeric (dash/underscore ok)"
+            )
+        return v
+
+
+class TikTokTrackingResponse(BaseModel):
+    """Shape returned by GET, PUT, DELETE on the tiktok-tracking endpoints.
+
+    NEVER includes the raw Events API access token — only the masked form.
+    """
+
+    pixel_id: str | None = None
+    pixel_enabled: bool = False
+    api_enabled: bool = False
+    mode: TrackingMode = "off"
+    api_access_token_masked: str | None = None
+    test_event_code: str | None = None
+    consent_required: bool = False
+    debug_mode: bool = False
+    debug_mode_expires_at: datetime | None = None
+    last_validated_at: datetime | None = None
+    status: TrackingStatus = "disabled"
+    purchase_trigger: PurchaseTrigger | None = None
+    pixels: list[TikTokPixelEntry] | None = None
+    advertiser_id: str | None = None
+
+
+class SendTikTokTestEventRequest(BaseModel):
+    """Body for the TikTok test-event endpoint."""
+
+    test_event_code: str = Field(..., min_length=1, max_length=64)
+
+    @field_validator("test_event_code")
+    @classmethod
+    def _validate_code(cls, v: str) -> str:
+        import re
+
+        if not re.match(r"^[A-Za-z0-9_-]{1,64}$", v):
+            raise ValueError(
+                "test_event_code must be alphanumeric (dash/underscore ok)"
+            )
+        return v
+
+
+class SendTikTokTestEventResponse(BaseModel):
+    """Synthetic-CompletePayment fan-out result (the actual POST is async)."""
+
+    enqueued: bool
+    test_event_code: str
+    queued_event_id: str
+
+
+class TikTokEventLogEntry(BaseModel):
+    """One row from the merchant dashboard's "Recent events" table.
+
+    The ``request_payload.user`` sub-object is dropped by the route layer;
+    only boolean presence indicators survive.
+    """
+
+    id: str
+    event_id: str
+    event_name: str
+    event_time: datetime
+    pixel_id: str
+    response_status: int | None = None
+    response_code: int | None = None
+    request_id: str | None = None
+    attempt_count: int = 1
+    last_error: str | None = None
+    sent_at: datetime | None = None
+    created_at: datetime
+    channel: Literal["browser", "server", "both"] = "server"
+    request_payload_redacted: dict
+
+
+class TikTokTrackingStatusResponse(BaseModel):
+    """Live status badge for the dashboard header."""
+
+    status: TrackingStatus
+    mode: TrackingMode
+    last_validated_at: datetime | None = None
+    recent_failure_rate: float = 0.0
+    recent_event_count: int = 0
+
+
+class TikTokReportResponse(BaseModel):
+    """Aggregated TikTok Marketing report for the hub reporting card.
+
+    ``connected`` is False when the store has no ``advertiser_id`` on file (or
+    no OAuth-scoped token) — the UI then renders a "Connect with TikTok to see
+    ad performance" empty state instead of a zero-filled table.
+    """
+
+    connected: bool
+    advertiser_id: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    spend: float = 0.0
+    impressions: int = 0
+    clicks: int = 0
+    conversions: float = 0.0
+    cost_per_conversion: float = 0.0
+    ctr: float = 0.0
+    # Present when the report call failed (token lacks reporting scope, TikTok
+    # outage, …) — the UI shows this instead of misleading zeros.
+    error: str | None = None
+
+
 class TrackingSettingsResponse(BaseModel):
     """Shape returned by GET /stores/{id}/settings/tracking — wrapper for
-    the per-channel tracking configs. Today only ``meta``; Google Ads /
-    TikTok will land here in v2.
+    the per-channel tracking configs. ``meta`` and ``tiktok`` today; Google
+    Ads will land here later.
     """
 
     meta: MetaTrackingResponse
+    tiktok: TikTokTrackingResponse | None = None
 
 
 class SendMetaTestEventRequest(BaseModel):

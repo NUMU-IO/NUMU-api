@@ -449,6 +449,18 @@ class Settings(BaseSettings):
     meta_webhook_verify_token: str | None = None
     meta_login_config_id: str | None = None
 
+    # TikTok for Business — Marketing/Events API OAuth. Activation switch
+    # for /oauth/tiktok/*: unset → the route returns 503 and merchants use
+    # the paste-Pixel-ID + Events-API-token flow instead.
+    tiktok_app_id: str | None = None
+    tiktok_app_secret: str | None = None
+
+    # TikTok Shop (sales channel) — Open Platform App. Activation switch for
+    # /oauth/tiktok-shop/* + the webhook receiver. Unset → OAuth returns 503
+    # and webhooks are rejected as unsigned.
+    tiktok_shop_app_key: str | None = None
+    tiktok_shop_app_secret: str | None = None
+
     # Omnichannel Inbox
     inbox_realtime_enabled: bool = True
 

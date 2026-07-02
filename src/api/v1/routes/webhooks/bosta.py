@@ -371,6 +371,17 @@ async def bosta_callback(
                     except Exception:
                         log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
 
+                    try:
+                        from src.application.services.tiktok_capi_purchase_dispatcher import (  # noqa: E501
+                            enqueue_tiktok_capi_purchase,
+                        )
+
+                        await enqueue_tiktok_capi_purchase(session, order)
+                    except Exception:
+                        log.warning(
+                            "tiktok_capi_purchase_enqueue_failed", exc_info=True
+                        )
+
                 if delivered_now:
                     # Idempotent via order.metadata flag — replays and the
                     # manual UpdateOrderStatusUseCase path that may fire

@@ -106,6 +106,9 @@ from src.infrastructure.events.handlers.staff_event_handlers import (
     handle_temporary_access_granted,
     handle_temporary_access_revoked,
 )
+from src.infrastructure.events.handlers.tiktok_capi_status_event_handler import (
+    handle_order_status_changed_for_tiktok_capi,
+)
 from src.infrastructure.events.handlers.trust_kill_switch_notification_handler import (
     handle_trust_kill_switch_fired,
 )
@@ -164,6 +167,10 @@ def create_event_bus() -> EventBus:
     # Wave 2 Phase 12 — fire Meta CAPI Purchase/Lead based on per-store
     # purchase_trigger / lead_trigger config (COD-aware timing).
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_changed_for_meta_capi)
+
+    # TikTok P5 — fire Events API CompletePayment based on per-store
+    # purchase_trigger config (COD-aware timing; parity with Meta above).
+    bus.subscribe(OrderStatusChangedEvent, handle_order_status_changed_for_tiktok_capi)
 
     # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)

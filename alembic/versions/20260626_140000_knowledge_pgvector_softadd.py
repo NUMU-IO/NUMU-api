@@ -45,9 +45,21 @@ EMBED_DIM = 1024
 
 
 def _try_create_extension(conn) -> bool:
-    """Attempt CREATE EXTENSION vector; never hard-fail. Returns availability."""
+    """Attempt CREATE EXTENSION vector; never hard-fail. Returns availability.
+
+    The attempt runs inside a SAVEPOINT (``begin_nested``). This is load-
+    bearing, not defensive style: Alembic wraps the whole migration in one
+    transaction, and on Postgres a failed statement *aborts* that
+    transaction — catching the Python exception does NOT un-abort it, so
+    without the savepoint every later statement in this migration dies with
+    ``InFailedSQLTransactionError`` ("current transaction is aborted") on
+    hosts where pgvector isn't installed (e.g. local Windows Postgres).
+    ``ROLLBACK TO SAVEPOINT`` restores a healthy outer transaction so the
+    soft-add can genuinely degrade to the JSONB path.
+    """
     try:
-        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector;")
+        with conn.begin_nested():  # SAVEPOINT — see docstring
+            conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector;")
     except Exception as exc:  # noqa: BLE001 — soft-add: degrade to the JSONB path
         logger.warning(
             "pgvector extension unavailable (%s); knowledge retrieval will use the "

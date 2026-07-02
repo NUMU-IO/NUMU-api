@@ -64,6 +64,9 @@ NONCE_TTL_SECONDS = 86_400  # 24 hours
 from src.application.services.meta_capi_purchase_dispatcher import (
     enqueue_meta_capi_purchase as _enqueue_meta_purchase,
 )
+from src.application.services.tiktok_capi_purchase_dispatcher import (
+    enqueue_tiktok_capi_purchase as _enqueue_tiktok_purchase,
+)
 
 
 async def _resolve_order(order_repo, merchant_order_id, paymob_order_id):
@@ -255,6 +258,14 @@ async def paymob_callback(
             await _enqueue_meta_purchase(db, order)
         except Exception:
             log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
+
+        # TikTok Events API CompletePayment fan-out — same event_id
+        # (order.id) so browser Pixel + server dedupe. Independent try
+        # so a TikTok failure can't affect the Meta fire (or the webhook).
+        try:
+            await _enqueue_tiktok_purchase(db, order)
+        except Exception:
+            log.warning("tiktok_capi_purchase_enqueue_failed", exc_info=True)
 
         # Fire OrderStatusChangedEvent so shipment auto-creation triggers
         try:
