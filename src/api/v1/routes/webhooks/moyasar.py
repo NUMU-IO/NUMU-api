@@ -242,6 +242,16 @@ async def moyasar_callback(
         except Exception:
             log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
 
+        # TikTok Events API CompletePayment (best-effort; event_id == order.id)
+        try:
+            from src.application.services.tiktok_capi_purchase_dispatcher import (
+                enqueue_tiktok_capi_purchase,
+            )
+
+            await enqueue_tiktok_capi_purchase(db, order)
+        except Exception:
+            log.warning("tiktok_capi_purchase_enqueue_failed", exc_info=True)
+
         # Order status event → shipment auto-creation, notifications
         try:
             from src.core.events.order_events import OrderStatusChangedEvent

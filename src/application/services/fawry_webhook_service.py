@@ -347,6 +347,21 @@ class FawryWebhookService:
                 exc_info=True,
             )
 
+        # TikTok Events API CompletePayment fan-out — same event_id
+        # (order.id) so browser Pixel + server dedupe. Best-effort.
+        try:
+            from src.application.services.tiktok_capi_purchase_dispatcher import (
+                enqueue_tiktok_capi_purchase,
+            )
+
+            await enqueue_tiktok_capi_purchase(self.db, order)
+        except Exception:
+            logger.warning(
+                "tiktok_capi_purchase_enqueue_failed",
+                order_id=str(order.id),
+                exc_info=True,
+            )
+
         return order
 
     async def handle_expired(

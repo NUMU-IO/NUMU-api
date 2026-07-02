@@ -264,6 +264,17 @@ async def mylerz_callback(
                     except Exception:
                         log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
 
+                    try:
+                        from src.application.services.tiktok_capi_purchase_dispatcher import (  # noqa: E501
+                            enqueue_tiktok_capi_purchase,
+                        )
+
+                        await enqueue_tiktok_capi_purchase(session, order)
+                    except Exception:
+                        log.warning(
+                            "tiktok_capi_purchase_enqueue_failed", exc_info=True
+                        )
+
                 if delivered_now:
                     await emit_order_delivered(
                         order, FunnelEventRepository(session), order_repo

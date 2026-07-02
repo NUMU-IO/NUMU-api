@@ -96,6 +96,10 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.trust_reconciliation_tasks",
         # Meta Conversions — per-event fan-out + orphan-purchase sweep
         "src.infrastructure.messaging.tasks.meta_capi",
+        # TikTok Events API — per-event fan-out + orphan-purchase sweep
+        "src.infrastructure.messaging.tasks.tiktok_capi",
+        # TikTok Shop sales channel — inbound order ingestion
+        "src.infrastructure.messaging.tasks.tiktok_shop_tasks",
         # offers-v2 — promotion lifecycle + analytics maintenance.
         "src.infrastructure.messaging.tasks.promotion_tasks",
         # Step 09 — async funnel-event ingest.
@@ -359,6 +363,14 @@ celery_app.conf.beat_schedule = {
     "meta-capi-sweep-orphaned-purchases": {
         "task": "tasks.meta_capi_sweep_orphaned_purchases",
         "schedule": crontab(minute=10),  # hourly at :10
+    },
+    # ─── TikTok Events API: catch orphaned CompletePayment events ──────
+    # Hourly sweep finds paid orders without a CompletePayment row in the
+    # TikTok event log and re-enqueues them. Offset from the Meta sweep
+    # (:25 vs :10) so the two don't contend for the same DB window.
+    "tiktok-capi-sweep-orphaned-purchases": {
+        "task": "tasks.tiktok_capi_sweep_orphaned_purchases",
+        "schedule": crontab(minute=25),  # hourly at :25
     },
     # ─── offers-v2: promotion lifecycle ─────────────────────────────────
     # Sweeping the promotion table every 5 min keeps the storefront and

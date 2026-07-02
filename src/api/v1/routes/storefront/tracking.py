@@ -241,6 +241,14 @@ class TrackPageViewRequest(BaseModel):
     page_url: str | None = Field(None, max_length=2000)
     fbp: str | None = Field(None, max_length=128)
     fbc: str | None = Field(None, max_length=256)
+    # ── TikTok Events API fan-out fields ────────────────────────────────
+    # ``ttclid`` is TikTok's click id (captured from the URL / ttclid
+    # cookie); ``ttp`` is the TikTok-SDK browser cookie. Both are passed
+    # verbatim (not hashed) to the Events API for match quality. The same
+    # single /track POST carries both the Meta (fbp/fbc) and TikTok signals
+    # so there is one round-trip per storefront event, fanned server-side.
+    ttclid: str | None = Field(None, max_length=256)
+    ttp: str | None = Field(None, max_length=128)
     # PII for CAPI matching — Meta hashes nothing on its end; we hash
     # in the Celery task before transmission via meta/hashing.py.
     user_data: dict | None = None
@@ -451,6 +459,24 @@ async def track_page_view(
     except Exception:
         # Never let a CAPI enqueue error break the main tracking call.
         logger.exception("meta_capi_enqueue_failed", extra={"store_id": str(store.id)})
+
+    # ── TikTok Events API fan-out ───────────────────────────────────────
+    # Same gate/shape as Meta above, keyed on the store's tracking.tiktok
+    # config. Independent try so a TikTok error can't break Meta or the
+    # /track response.
+    try:
+        await _maybe_enqueue_tiktok_capi(
+            store=store,
+            step=step,
+            body=body,
+            ip=raw_ip,
+            user_agent=ua,
+            session=funnel_repo.session,
+        )
+    except Exception:
+        logger.exception(
+            "tiktok_capi_enqueue_failed", extra={"store_id": str(store.id)}
+        )
 
     # Phase 4.3 — fan out to merchant-configured analytics providers
     # (GA4 / TikTok). Meta CAPI is handled by the Celery enqueue above.
@@ -840,5 +866,86 @@ async def _maybe_enqueue_meta_capi(
             action_source="website",
             # Wave 3 Phase 18 — opt_out flows through to Meta so denied-
             # marketing events count as modeled conversions only.
+            opt_out=bool(body.opt_out) if body.opt_out is not None else False,
+        )
+
+
+async def _maybe_enqueue_tiktok_capi(
+    *,
+    store: Store,
+    step: str,
+    body: TrackPageViewRequest,
+    ip: str | None,
+    user_agent: str,
+    session,
+) -> None:
+    """Enqueue ``tiktok_capi_send_event`` when this store has the TikTok
+    Events API configured. Sibling of ``_maybe_enqueue_meta_capi``.
+
+    Mapping (funnel step → TikTok event) lives in the task module's
+    ``FUNNEL_STEP_TO_TIKTOK_EVENT`` (e.g. order_completed → CompletePayment,
+    product_view → ViewContent). Fans out one task per api-enabled pixel,
+    reusing the same browser-issued ``event_id`` across pixels.
+
+    Uses the SAME server-side customer enrichment as the Meta path so
+    logged-in shoppers get email/phone/name/city/zip attached for match
+    quality without the storefront plumbing each field.
+    """
+    from src.application.services.tiktok_pixel_resolver import resolve_tiktok_pixels
+    from src.infrastructure.messaging.tasks.tiktok_capi import (
+        FUNNEL_STEP_TO_TIKTOK_EVENT,
+        tiktok_capi_send_event,
+    )
+
+    tiktok_event_name = FUNNEL_STEP_TO_TIKTOK_EVENT.get(step)
+    if not tiktok_event_name:
+        return
+
+    tiktok_cfg = ((store.settings or {}).get("tracking") or {}).get("tiktok") or {}
+    pixels = resolve_tiktok_pixels(tiktok_cfg, mode="api")
+    if not pixels:
+        return
+
+    event_id = body.event_id or str(uuid4())
+    event_time = body.event_time or datetime.now(UTC)
+    page_url = body.page_url
+
+    # Compose user_data from request signals + explicit body.user_data.
+    user_data = dict(body.user_data or {})
+    if "ttclid" not in user_data and body.ttclid:
+        user_data["ttclid"] = body.ttclid
+    if "ttp" not in user_data and body.ttp:
+        user_data["ttp"] = body.ttp
+    if "ip" not in user_data and ip:
+        user_data["ip"] = ip
+    if "user_agent" not in user_data and user_agent:
+        user_data["user_agent"] = user_agent
+
+    if body.customer_id:
+        try:
+            await _enrich_user_data_with_customer(
+                user_data, body.customer_id, store.id, session
+            )
+        except Exception:
+            logger.exception(
+                "tiktok_capi_enrich_user_data_failed",
+                extra={"store_id": str(store.id)},
+            )
+
+    custom_data = dict(body.step_data or {})
+    event_time_int = int(event_time.timestamp())
+
+    for pixel in pixels:
+        tiktok_capi_send_event.delay(
+            store_id=str(store.id),
+            pixel_id=pixel.pixel_id,
+            event_name=tiktok_event_name,
+            event_id=event_id,
+            event_time=event_time_int,
+            event_source_url=page_url,
+            user_data=user_data,
+            custom_data=custom_data,
+            test_event_code=None,
+            action_source="web",
             opt_out=bool(body.opt_out) if body.opt_out is not None else False,
         )

@@ -49,6 +49,9 @@ class ServiceType(StrEnum):
     EMAIL = "email"
     # Ad-attribution / analytics integrations (Meta CAPI, Google Ads, TikTok)
     TRACKING = "tracking"
+    # Inbound sales channels (TikTok Shop, etc.) — holds the channel's
+    # encrypted API/OAuth token. New values require an ALTER TYPE migration.
+    SALES_CHANNEL = "sales_channel"
 
 
 class ServiceName(StrEnum):
@@ -84,6 +87,16 @@ class ServiceName(StrEnum):
     # Tracking / ad attribution
     # Holds the encrypted Meta Conversions API access token.
     META_CAPI = "meta_capi"
+    # Holds the encrypted TikTok Events API access token. Adding this
+    # member requires an ``ALTER TYPE service_name_enum ADD VALUE
+    # 'tiktok_capi'`` migration (the column uses values_callable, so the
+    # PG enum type must learn the new value before rows can be written).
+    TIKTOK_CAPI = "tiktok_capi"
+
+    # Sales channels
+    # Holds the encrypted TikTok Shop OAuth token bundle
+    # (access_token + refresh_token). Requires an ALTER TYPE migration.
+    TIKTOK_SHOP = "tiktok_shop"
 
 
 class RequestStatus(StrEnum):

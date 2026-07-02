@@ -13,6 +13,7 @@ from src.api.v1.routes.webhooks.moyasar import router as moyasar_router
 from src.api.v1.routes.webhooks.mylerz import router as mylerz_router
 from src.api.v1.routes.webhooks.paymob import router as paymob_router
 from src.api.v1.routes.webhooks.resend import router as resend_router
+from src.api.v1.routes.webhooks.tiktok_shop import router as tiktok_shop_router
 from src.api.v1.routes.webhooks.whatsapp import router as whatsapp_router
 
 # Main webhooks router
@@ -32,5 +33,8 @@ router.include_router(
 )
 router.include_router(moyasar_router, prefix="/moyasar", tags=["Webhooks - Moyasar"])
 router.include_router(resend_router, prefix="/resend", tags=["Webhooks - Resend"])
+router.include_router(
+    tiktok_shop_router, prefix="/tiktok-shop", tags=["Webhooks - TikTok Shop"]
+)
 
 __all__ = ["router"]

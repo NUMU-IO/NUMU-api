@@ -3220,17 +3220,31 @@ from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: E402
 from sqlalchemy.orm.attributes import flag_modified as _flag_modified  # noqa: E402
 
 from src.api.dependencies.database import get_db as _get_db  # noqa: E402
+from src.api.v1.schemas.tenant.channels import (  # noqa: E402
+    ConnectTikTokShopRequest,
+    TikTokShopStatusResponse,
+)
 from src.api.v1.schemas.tenant.tracking import (  # noqa: E402
     MetaEventLogEntry,
     MetaTrackingResponse,
     MetaTrackingStatusResponse,
     SaveMetaTrackingRequest,
+    SaveTikTokTrackingRequest,
     SendMetaTestEventRequest,
     SendMetaTestEventResponse,
+    SendTikTokTestEventRequest,
+    SendTikTokTestEventResponse,
+    TikTokEventLogEntry,
+    TikTokReportResponse,
+    TikTokTrackingResponse,
+    TikTokTrackingStatusResponse,
     TrackingSettingsResponse,
 )
 from src.application.services.meta_tracking_resolver import (  # noqa: E402
     resolve_mode,
+)
+from src.application.services.tiktok_tracking_resolver import (  # noqa: E402
+    resolve_tiktok_mode,
 )
 
 _DEBUG_MODE_TTL_MINUTES = 60
@@ -3380,10 +3394,11 @@ async def get_tracking_settings(
     store: Annotated[Store, Depends(get_current_store)],
     db: Annotated[_AsyncSession, Depends(_get_db)],
 ):
-    """Return the per-channel tracking config — only Meta today."""
+    """Return the per-channel tracking config — Meta + TikTok."""
     meta = await _build_meta_response(db, store)
+    tiktok = await _build_tiktok_response(db, store)
     return SuccessResponse(
-        data=TrackingSettingsResponse(meta=meta),
+        data=TrackingSettingsResponse(meta=meta, tiktok=tiktok),
         message="Tracking settings retrieved",
     )
 
@@ -3897,4 +3912,839 @@ async def get_meta_tracking_status(
             recent_event_count=len(recent),
         ),
         message="Meta tracking status retrieved",
+    )
+
+
+# ============================================================================
+# TikTok Tracking (Pixel + Events API) — sibling of the Meta block above.
+# ============================================================================
+#
+# These endpoints back the merchant-hub "Marketing & Tracking → TikTok" panel.
+# Convention: PUT preserves the existing Events API token when the body omits
+# ``api_access_token``; **422** when ``api_enabled = true`` and no token is on
+# file AND none is provided.
+#
+# The token is stored as a ``ServiceCredential`` row (TIKTOK_CAPI, encrypted);
+# ``store.settings.tracking.tiktok`` carries the public bits (pixel_id, flags,
+# debug-mode expiry).
+# ============================================================================
+
+
+def _tiktok_cfg(store: Store) -> dict:
+    """Read the ``store.settings.tracking.tiktok`` sub-object (or empty)."""
+    return ((store.settings or {}).get("tracking") or {}).get("tiktok") or {}
+
+
+async def _has_active_tiktok_credential(
+    db: _AsyncSession, tenant_id: uuid.UUID
+) -> bool:
+    """Check whether a TIKTOK_CAPI ServiceCredential row exists + is active."""
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+
+    q = (
+        _select(ServiceCredential)
+        .where(ServiceCredential.tenant_id == tenant_id)
+        .where(ServiceCredential.service_type == ServiceType.TRACKING)
+        .where(ServiceCredential.service_name == ServiceName.TIKTOK_CAPI)
+        .where(ServiceCredential.is_active.is_(True))
+    )
+    return (await db.execute(q)).scalar_one_or_none() is not None
+
+
+async def _get_tiktok_credential(db: _AsyncSession, tenant_id: uuid.UUID):
+    """Return the TIKTOK_CAPI ``ServiceCredential`` row (active or not), or None."""
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+
+    q = (
+        _select(ServiceCredential)
+        .where(ServiceCredential.tenant_id == tenant_id)
+        .where(ServiceCredential.service_type == ServiceType.TRACKING)
+        .where(ServiceCredential.service_name == ServiceName.TIKTOK_CAPI)
+    )
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+async def _build_tiktok_response(
+    db: _AsyncSession,
+    store: Store,
+) -> TikTokTrackingResponse:
+    """Compose the public TikTok settings shape from store + credential row."""
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    cfg = _tiktok_cfg(store)
+    cred = await _get_tiktok_credential(db, store.tenant_id)
+    has_token = cred is not None and cred.is_active
+    mode = resolve_tiktok_mode(cfg, has_token)
+
+    masked = None
+    if cred and cred.is_active:
+        try:
+            sm = get_secrets_manager()
+            decrypted = await sm.decrypt(
+                cred.credentials_encrypted, cred.encryption_key_id
+            )
+            raw = decrypted.get("access_token") or ""
+            masked = sm.mask_credential(raw) if raw else None
+        except Exception:
+            logger.warning(
+                "tiktok_capi_token_decrypt_failed_for_mask store_id=%s",
+                store.id,
+            )
+
+    status_label: str = "disabled"
+    if mode != "off":
+        from src.infrastructure.repositories.tiktok_event_log_repository import (
+            TikTokEventLogRepository,
+        )
+
+        log_repo = TikTokEventLogRepository(db)
+        recent = await log_repo.recent_for_store(store.id, limit=20)
+        if not recent:
+            status_label = "configured_no_events"
+        else:
+            last_5_failed = sum(
+                1
+                for r in recent[:5]
+                if r.response_status is None
+                or r.response_status >= 400
+                or r.response_code not in (0, None)
+            ) == min(5, len(recent[:5]))
+            if last_5_failed and len(recent) >= 5:
+                status_label = "failing"
+            else:
+                status_label = "connected"
+
+    debug_expires_at = cfg.get("debug_mode_expires_at")
+    debug_expires_dt = None
+    if debug_expires_at:
+        try:
+            debug_expires_dt = datetime.fromisoformat(
+                debug_expires_at.replace("Z", "+00:00")
+            )
+        except (ValueError, AttributeError):
+            debug_expires_dt = None
+    debug_active = bool(debug_expires_dt and debug_expires_dt > datetime.now(UTC))
+
+    last_validated_dt = None
+    if cred and cred.last_validated_at:
+        last_validated_dt = cred.last_validated_at
+
+    return TikTokTrackingResponse(
+        pixel_id=cfg.get("pixel_id"),
+        pixel_enabled=bool(cfg.get("pixel_enabled", False)),
+        api_enabled=bool(cfg.get("api_enabled", False)),
+        mode=mode,
+        api_access_token_masked=masked,
+        test_event_code=cfg.get("test_event_code"),
+        consent_required=bool(cfg.get("consent_required", False)),
+        purchase_trigger=cfg.get("purchase_trigger"),
+        pixels=cfg.get("pixels"),
+        debug_mode=debug_active,
+        debug_mode_expires_at=debug_expires_dt,
+        last_validated_at=last_validated_dt,
+        status=status_label,
+        advertiser_id=cfg.get("advertiser_id"),
+    )
+
+
+@router.put(
+    "/tracking/tiktok",
+    response_model=SuccessResponse[TikTokTrackingResponse],
+    summary="Save TikTok Pixel + Events API settings",
+    operation_id="save_tiktok_tracking",
+)
+async def save_tiktok_tracking(
+    request: SaveTikTokTrackingRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Upsert the per-store TikTok tracking config and (optional) API token.
+
+    422 if ``api_enabled = true`` and no token is on file AND none is
+    supplied in the body.
+    """
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    settings_dict: dict = store.settings or {}
+    tracking = settings_dict.get("tracking") or {}
+    tiktok_cfg = tracking.get("tiktok") or {}
+
+    # ── Validation: api_enabled requires a token ───────────────────────
+    existing_cred = await _get_tiktok_credential(db, store.tenant_id)
+    has_existing_active_token = existing_cred is not None and existing_cred.is_active
+    if request.api_enabled and not (
+        request.api_access_token or has_existing_active_token
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "api_access_token is required when api_enabled=true "
+                "and no token is on file"
+            ),
+        )
+
+    # ── Persist / update credential when a new token was supplied ─────
+    if request.api_access_token:
+        sm = get_secrets_manager()
+        key_id = await sm.get_current_key_id()
+        encrypted = await sm.encrypt(
+            {"access_token": request.api_access_token},
+            key_id,
+        )
+
+        if existing_cred:
+            existing_cred.credentials_encrypted = encrypted
+            existing_cred.encryption_key_id = key_id
+            existing_cred.is_active = True
+            existing_cred.is_validated = False
+            existing_cred.extra_metadata = {"pixel_id": request.pixel_id}
+        else:
+            new_cred = ServiceCredential(
+                tenant_id=store.tenant_id,
+                service_type=ServiceType.TRACKING,
+                service_name=ServiceName.TIKTOK_CAPI,
+                credentials_encrypted=encrypted,
+                encryption_key_id=key_id,
+                is_active=True,
+                is_validated=False,
+                extra_metadata={"pixel_id": request.pixel_id},
+            )
+            db.add(new_cred)
+        await db.flush()
+
+    # ── Update store.settings.tracking.tiktok in place ────────────────
+    debug_expires_iso: str | None = None
+    if request.debug_mode:
+        debug_expires_iso = (
+            datetime.now(UTC) + timedelta(minutes=_DEBUG_MODE_TTL_MINUTES)
+        ).isoformat()
+
+    new_pixels = [p.model_dump() for p in request.pixels] if request.pixels else None
+
+    new_tiktok_cfg = {
+        **tiktok_cfg,
+        "pixel_id": request.pixel_id,
+        "pixel_enabled": bool(request.pixel_enabled),
+        "api_enabled": bool(request.api_enabled),
+        "test_event_code": request.test_event_code,
+        "consent_required": bool(request.consent_required),
+        "debug_mode_expires_at": debug_expires_iso,
+        "purchase_trigger": request.purchase_trigger,
+        "pixels": new_pixels,
+        # Only overwrite advertiser_id when supplied — don't wipe an
+        # existing value on a partial panel save.
+        "advertiser_id": (
+            request.advertiser_id
+            if request.advertiser_id is not None
+            else tiktok_cfg.get("advertiser_id")
+        ),
+    }
+    tracking["tiktok"] = new_tiktok_cfg
+    settings_dict["tracking"] = tracking
+    store.settings = settings_dict
+    try:
+        _flag_modified(store, "settings")
+    except Exception:
+        pass
+    await store_repo.update(store)
+
+    logger.info(
+        "tiktok_tracking_saved store_id=%s pixel_enabled=%s api_enabled=%s "
+        "token_updated=%s debug_mode=%s",
+        store.id,
+        request.pixel_enabled,
+        request.api_enabled,
+        bool(request.api_access_token),
+        request.debug_mode,
+    )
+
+    response = await _build_tiktok_response(db, store)
+    return SuccessResponse(data=response, message="TikTok tracking saved")
+
+
+@router.delete(
+    "/tracking/tiktok",
+    response_model=SuccessResponse[TikTokTrackingResponse],
+    summary="Disconnect TikTok tracking",
+    operation_id="delete_tiktok_tracking",
+)
+async def delete_tiktok_tracking(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Disconnect: turn off flags locally + soft-delete credential + audit.
+
+    Unlike Meta there is no server-side OAuth revoke yet (TikTok OAuth is a
+    later phase — the token here is a merchant-pasted Events API token).
+    The ``tiktok_event_log`` rows are retained as audit data.
+    """
+    from src.application.services.audit_service import AuditService, EventType
+
+    cred = await _get_tiktok_credential(db, store.tenant_id)
+    had_active_token = cred is not None and cred.is_active
+
+    # Turn off flags on store.settings.tracking.tiktok.
+    settings_dict: dict = store.settings or {}
+    tracking = settings_dict.get("tracking") or {}
+    tiktok_cfg = tracking.get("tiktok") or {}
+    tiktok_cfg["pixel_enabled"] = False
+    tiktok_cfg["api_enabled"] = False
+    tiktok_cfg["debug_mode_expires_at"] = None
+    tracking["tiktok"] = tiktok_cfg
+    settings_dict["tracking"] = tracking
+    store.settings = settings_dict
+    try:
+        _flag_modified(store, "settings")
+    except Exception:
+        pass
+    await store_repo.update(store)
+
+    # Soft-delete the credential row (preserves audit history).
+    if cred is not None:
+        cred.is_active = False
+        await db.flush()
+
+    try:
+        await AuditService(db).log(
+            event_type=EventType.ADMIN_CONFIG_CHANGE,
+            action="tiktok_disconnect",
+            resource_type="store_tiktok_integration",
+            resource_id=str(store.id),
+            store_id=store.id,
+            tenant_id=store.tenant_id,
+            new_value={
+                "pixel_enabled": False,
+                "api_enabled": False,
+                "had_active_token": had_active_token,
+            },
+        )
+        await db.commit()
+    except Exception:
+        logger.warning(
+            "tiktok_disconnect_audit_log_failed",
+            extra={"store_id": str(store.id)},
+            exc_info=True,
+        )
+
+    logger.info("tiktok_tracking_disconnected store_id=%s", store.id)
+
+    response = await _build_tiktok_response(db, store)
+    return SuccessResponse(data=response, message="TikTok tracking disconnected")
+
+
+@router.post(
+    "/tracking/tiktok/test-event",
+    response_model=SuccessResponse[SendTikTokTestEventResponse],
+    summary="Send a synthetic CompletePayment test event to TikTok",
+    operation_id="send_tiktok_test_event",
+)
+async def send_tiktok_test_event(
+    request: SendTikTokTestEventRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Fire a synthetic CompletePayment via the Celery fan-out task.
+
+    Rejects with 422 when the resolved mode is ``off`` or ``pixel_only``
+    (no Events API to test).
+    """
+    from src.infrastructure.messaging.tasks.tiktok_capi import (
+        tiktok_capi_send_event,
+    )
+
+    cfg = _tiktok_cfg(store)
+    has_token = await _has_active_tiktok_credential(db, store.tenant_id)
+    mode = resolve_tiktok_mode(cfg, has_token)
+    if mode in ("off", "pixel_only"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Test events require the Events API to be enabled. "
+                f"Current mode: {mode}"
+            ),
+        )
+
+    pixel_id = cfg.get("pixel_id")
+    if not pixel_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="pixel_id is required to send a test event",
+        )
+
+    event_id = f"test-{uuid.uuid4()}"
+    currency = (
+        store.default_currency.value
+        if hasattr(store.default_currency, "value")
+        else str(store.default_currency)
+    )
+
+    # Full plausible identifier set — the Celery worker SHA-256-hashes the
+    # PII downstream (tiktok/hashing.py); we pass raw NUMU-internal keys.
+    synthetic_user_data = {
+        "email": f"numu-test-{store.id}@test.numueg.app",
+        "phone": "+201000000000",
+        "first_name": "Numu",
+        "last_name": "Test",
+        "city": "Cairo",
+        "country_code": "EG",
+        "zip": "11511",
+        "customer_id": f"numu-test:{store.id}",
+        "ttclid": "NUMU_TEST_TTCLID",
+        "ip": "127.0.0.1",
+        "user_agent": "NUMU-Test-Event/1.0",
+    }
+
+    tiktok_capi_send_event.delay(
+        store_id=str(store.id),
+        pixel_id=pixel_id,
+        event_name="CompletePayment",
+        event_id=event_id,
+        event_time=int(datetime.now(UTC).timestamp()),
+        event_source_url=None,
+        user_data=synthetic_user_data,
+        custom_data={
+            "value": 0.01,
+            "currency": currency,
+            "order_id": event_id,
+        },
+        test_event_code=request.test_event_code,
+        action_source="web",
+    )
+
+    logger.info(
+        "tiktok_capi_test_event_enqueued store_id=%s event_id=%s test_event_code=%s",
+        store.id,
+        event_id,
+        request.test_event_code,
+    )
+
+    return SuccessResponse(
+        data=SendTikTokTestEventResponse(
+            enqueued=True,
+            test_event_code=request.test_event_code,
+            queued_event_id=event_id,
+        ),
+        message="Test event enqueued",
+    )
+
+
+@router.get(
+    "/tracking/tiktok/events",
+    response_model=SuccessResponse[list[TikTokEventLogEntry]],
+    summary="Get recent TikTok Events API events",
+    operation_id="get_tiktok_events",
+)
+async def get_tiktok_events(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+    limit: int = 20,
+):
+    """Return last N ``tiktok_event_log`` rows, redacted.
+
+    The ``request_payload.user`` sub-object is dropped; only boolean
+    presence indicators survive.
+    """
+    from src.infrastructure.repositories.tiktok_event_log_repository import (
+        TikTokEventLogRepository,
+    )
+
+    limit = min(max(limit, 1), 100)
+    repo = TikTokEventLogRepository(db)
+    rows = await repo.recent_for_store(store.id, limit=limit)
+
+    out: list[TikTokEventLogEntry] = []
+    for r in rows:
+        redacted = dict(r.request_payload or {})
+        user = redacted.pop("user", None) or {}
+        redacted["user_indicators"] = {
+            "had_email": bool(user.get("email")),
+            "had_phone": bool(user.get("phone")),
+            "had_first_name": bool(user.get("first_name")),
+            "had_last_name": bool(user.get("last_name")),
+            "had_city": bool(user.get("city")),
+            "had_country": bool(user.get("country")),
+            "had_zip": bool(user.get("zip_code")),
+            "had_external_id": bool(user.get("external_id")),
+            "had_ttclid": bool(user.get("ttclid")),
+            "had_ttp": bool(user.get("ttp")),
+        }
+        out.append(
+            TikTokEventLogEntry(
+                id=str(r.id),
+                event_id=r.event_id,
+                event_name=r.event_name,
+                event_time=r.event_time,
+                pixel_id=r.pixel_id,
+                response_status=r.response_status,
+                response_code=r.response_code,
+                request_id=r.request_id,
+                attempt_count=r.attempt_count,
+                last_error=r.last_error,
+                sent_at=r.sent_at,
+                created_at=r.created_at,
+                channel="server",
+                request_payload_redacted=redacted,
+            )
+        )
+
+    return SuccessResponse(data=out, message="Recent TikTok events retrieved")
+
+
+@router.get(
+    "/tracking/tiktok/status",
+    response_model=SuccessResponse[TikTokTrackingStatusResponse],
+    summary="Get TikTok tracking status",
+    operation_id="get_tiktok_tracking_status",
+)
+async def get_tiktok_tracking_status(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Live status badge data for the TikTok panel."""
+    from src.infrastructure.repositories.tiktok_event_log_repository import (
+        TikTokEventLogRepository,
+    )
+
+    cfg = _tiktok_cfg(store)
+    cred = await _get_tiktok_credential(db, store.tenant_id)
+    has_token = cred is not None and cred.is_active
+    mode = resolve_tiktok_mode(cfg, has_token)
+
+    repo = TikTokEventLogRepository(db)
+    recent = await repo.recent_for_store(store.id, limit=20)
+
+    def _is_failed(r) -> bool:
+        return (
+            r.response_status is None
+            or r.response_status >= 400
+            or r.response_code not in (0, None)
+        )
+
+    failed = sum(1 for r in recent if _is_failed(r))
+    failure_rate = (failed / len(recent)) if recent else 0.0
+
+    if mode == "off":
+        status_label = "disabled"
+    elif not recent:
+        status_label = "configured_no_events"
+    elif len(recent) >= 5 and sum(1 for r in recent[:5] if _is_failed(r)) == 5:
+        status_label = "failing"
+    else:
+        status_label = "connected"
+
+    return SuccessResponse(
+        data=TikTokTrackingStatusResponse(
+            status=status_label,
+            mode=mode,
+            last_validated_at=cred.last_validated_at if cred else None,
+            recent_failure_rate=round(failure_rate, 4),
+            recent_event_count=len(recent),
+        ),
+        message="TikTok tracking status retrieved",
+    )
+
+
+@router.get(
+    "/tracking/tiktok/report",
+    response_model=SuccessResponse[TikTokReportResponse],
+    summary="Get TikTok Marketing ad-performance report",
+    operation_id="get_tiktok_report",
+)
+async def get_tiktok_report(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+    days: int = 30,
+):
+    """Aggregated advertiser-level spend/impressions/conversions for the panel.
+
+    Returns ``connected=false`` when the store has no ``advertiser_id`` on file
+    (or no token) — the merchant only gets this after the OAuth flow, since a
+    hand-pasted Events API token lacks reporting scope. Reporting failures
+    (e.g. missing scope) come back as ``connected=true`` with an ``error``
+    string rather than misleading zeros.
+    """
+    from datetime import timedelta
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+    from src.infrastructure.external_services.tiktok.marketing_client import (
+        TikTokMarketingClient,
+        TikTokMarketingError,
+    )
+
+    cfg = _tiktok_cfg(store)
+    advertiser_id = cfg.get("advertiser_id")
+    cred = await _get_tiktok_credential(db, store.tenant_id)
+
+    if not advertiser_id or cred is None or not cred.is_active:
+        return SuccessResponse(
+            data=TikTokReportResponse(connected=False, advertiser_id=advertiser_id),
+            message="TikTok reporting not connected",
+        )
+
+    days = min(max(days, 1), 90)
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=days)
+    start_s, end_s = start.isoformat(), end.isoformat()
+
+    try:
+        sm = get_secrets_manager()
+        decrypted = await sm.decrypt(cred.credentials_encrypted, cred.encryption_key_id)
+        access_token = decrypted.get("access_token")
+    except Exception:
+        logger.warning("tiktok_report_token_decrypt_failed store_id=%s", store.id)
+        return SuccessResponse(
+            data=TikTokReportResponse(
+                connected=True,
+                advertiser_id=advertiser_id,
+                start_date=start_s,
+                end_date=end_s,
+                error="token_decrypt_failed",
+            ),
+            message="TikTok reporting error",
+        )
+
+    try:
+        report = await TikTokMarketingClient().get_advertiser_report(
+            access_token=access_token,
+            advertiser_id=str(advertiser_id),
+            start_date=start_s,
+            end_date=end_s,
+        )
+    except TikTokMarketingError as exc:
+        logger.info(
+            "tiktok_report_failed store_id=%s error=%s", store.id, str(exc)[:200]
+        )
+        return SuccessResponse(
+            data=TikTokReportResponse(
+                connected=True,
+                advertiser_id=str(advertiser_id),
+                start_date=start_s,
+                end_date=end_s,
+                error=str(exc)[:200],
+            ),
+            message="TikTok reporting error",
+        )
+
+    return SuccessResponse(
+        data=TikTokReportResponse(
+            connected=True,
+            advertiser_id=str(advertiser_id),
+            start_date=start_s,
+            end_date=end_s,
+            spend=report.spend,
+            impressions=report.impressions,
+            clicks=report.clicks,
+            conversions=report.conversions,
+            cost_per_conversion=report.cost_per_conversion,
+            ctr=report.ctr,
+        ),
+        message="TikTok report retrieved",
+    )
+
+
+# ============================================================================
+# TikTok Shop sales channel (P7) — connection persistence
+# ============================================================================
+
+
+def _tiktok_shop_cfg(store: Store) -> dict:
+    """Read ``store.settings.channels.tiktok_shop`` (or empty)."""
+    return ((store.settings or {}).get("channels") or {}).get("tiktok_shop") or {}
+
+
+@router.put(
+    "/channels/tiktok-shop",
+    response_model=SuccessResponse[TikTokShopStatusResponse],
+    summary="Connect TikTok Shop (persist token + shop)",
+    operation_id="connect_tiktok_shop",
+)
+async def connect_tiktok_shop(
+    request: ConnectTikTokShopRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Persist the OAuth token bundle (encrypted) + shop metadata.
+
+    Called by the hub after the OAuth callback returns the token + chosen shop.
+    """
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    sm = get_secrets_manager()
+    key_id = await sm.get_current_key_id()
+    encrypted = await sm.encrypt(
+        {
+            "access_token": request.access_token,
+            "refresh_token": request.refresh_token or "",
+        },
+        key_id,
+    )
+
+    existing = (
+        await db.execute(
+            _select(ServiceCredential)
+            .where(ServiceCredential.tenant_id == store.tenant_id)
+            .where(ServiceCredential.service_type == ServiceType.SALES_CHANNEL)
+            .where(ServiceCredential.service_name == ServiceName.TIKTOK_SHOP)
+        )
+    ).scalar_one_or_none()
+    if existing:
+        existing.credentials_encrypted = encrypted
+        existing.encryption_key_id = key_id
+        existing.is_active = True
+        existing.is_validated = True
+        existing.extra_metadata = {"shop_id": request.shop_id}
+    else:
+        db.add(
+            ServiceCredential(
+                tenant_id=store.tenant_id,
+                service_type=ServiceType.SALES_CHANNEL,
+                service_name=ServiceName.TIKTOK_SHOP,
+                credentials_encrypted=encrypted,
+                encryption_key_id=key_id,
+                is_active=True,
+                is_validated=True,
+                extra_metadata={"shop_id": request.shop_id},
+            )
+        )
+    await db.flush()
+
+    settings_dict: dict = store.settings or {}
+    channels = settings_dict.get("channels") or {}
+    channels["tiktok_shop"] = {
+        "shop_id": request.shop_id,
+        "shop_cipher": request.shop_cipher,
+        "shop_name": request.shop_name,
+        "region": request.region,
+        "seller_name": request.seller_name,
+        "connected_at": datetime.now(UTC).isoformat(),
+    }
+    settings_dict["channels"] = channels
+    store.settings = settings_dict
+    try:
+        _flag_modified(store, "settings")
+    except Exception:
+        pass
+    await store_repo.update(store)
+
+    logger.info(
+        "tiktok_shop_connected store_id=%s shop_id=%s", store.id, request.shop_id
+    )
+    cfg = _tiktok_shop_cfg(store)
+    return SuccessResponse(
+        data=TikTokShopStatusResponse(
+            connected=True,
+            shop_id=cfg.get("shop_id"),
+            shop_name=cfg.get("shop_name"),
+            region=cfg.get("region"),
+            seller_name=cfg.get("seller_name"),
+        ),
+        message="TikTok Shop connected",
+    )
+
+
+@router.get(
+    "/channels/tiktok-shop",
+    response_model=SuccessResponse[TikTokShopStatusResponse],
+    summary="TikTok Shop connection status",
+    operation_id="get_tiktok_shop_status",
+)
+async def get_tiktok_shop_status(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    cfg = _tiktok_shop_cfg(store)
+    connected_at = None
+    raw = cfg.get("connected_at")
+    if raw:
+        try:
+            connected_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            connected_at = None
+    return SuccessResponse(
+        data=TikTokShopStatusResponse(
+            connected=bool(cfg.get("shop_id")),
+            shop_id=cfg.get("shop_id"),
+            shop_name=cfg.get("shop_name"),
+            region=cfg.get("region"),
+            seller_name=cfg.get("seller_name"),
+            connected_at=connected_at,
+        ),
+        message="TikTok Shop status retrieved",
+    )
+
+
+@router.delete(
+    "/channels/tiktok-shop",
+    response_model=SuccessResponse[TikTokShopStatusResponse],
+    summary="Disconnect TikTok Shop",
+    operation_id="disconnect_tiktok_shop",
+)
+async def disconnect_tiktok_shop(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Soft-delete the credential + clear the channel settings."""
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+
+    cred = (
+        await db.execute(
+            _select(ServiceCredential)
+            .where(ServiceCredential.tenant_id == store.tenant_id)
+            .where(ServiceCredential.service_type == ServiceType.SALES_CHANNEL)
+            .where(ServiceCredential.service_name == ServiceName.TIKTOK_SHOP)
+        )
+    ).scalar_one_or_none()
+    if cred is not None:
+        cred.is_active = False
+        await db.flush()
+
+    settings_dict: dict = store.settings or {}
+    channels = settings_dict.get("channels") or {}
+    if "tiktok_shop" in channels:
+        channels.pop("tiktok_shop", None)
+        settings_dict["channels"] = channels
+        store.settings = settings_dict
+        try:
+            _flag_modified(store, "settings")
+        except Exception:
+            pass
+        await store_repo.update(store)
+
+    logger.info("tiktok_shop_disconnected store_id=%s", store.id)
+    return SuccessResponse(
+        data=TikTokShopStatusResponse(connected=False),
+        message="TikTok Shop disconnected",
     )
