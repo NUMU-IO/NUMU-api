@@ -3,6 +3,15 @@ version: '3.8'
 # =============================================================================
 # NUMU API - Production Environment
 # =============================================================================
+# ⚠️ DEPLOY REALITY (read before editing): since the 2026-06 EC2 migration the
+# prod box (/opt/numu-api) runs a PATH-ADJUSTED copy of this file that is
+# managed ON THE BOX. `cd.yml` deploy-apex ships the IMAGE only — it does NOT
+# scp this file and only recreates api/celery-worker/celery-beat. So changes to
+# `logging:`, `nginx` (built on-box), postgres, or redis here DO NOT reach prod
+# on promote. Mirror any such change into the on-box compose + `docker compose
+# up -d --force-recreate <svc>` manually. This file remains the source of truth
+# and drives the GHCR image build; the box copy must be kept in sync by hand.
+#
 # Features:
 # - Nginx reverse proxy with SSL termination
 # - PostgreSQL with WAL archiving for point-in-time recovery
