@@ -1,14 +1,14 @@
 {
   "areas": [
-    { "key": "payments",   "label_en": "Payments",        "label_ar": "المدفوعات", "description": "Paymob, Fawry, COD, InstaPay, Kashier, Moyasar, Tap, Stripe — setup and configuration." },
-    { "key": "shipping",   "label_en": "Shipping",        "label_ar": "الشحن",      "description": "Bosta, MyLerz, Shippo — connecting couriers, rates, governorates, labels." },
-    { "key": "marketing",  "label_en": "Marketing",       "label_ar": "التسويق",    "description": "BOGO, coupons, abandoned-cart recovery, WhatsApp broadcasts, Meta pixel." },
-    { "key": "themes",     "label_en": "Themes",          "label_ar": "القوالب",    "description": "The V3 theme editor — sections, settings, live preview, publish, versions." },
-    { "key": "invoicing",  "label_en": "Invoicing",       "label_ar": "الفواتير",   "description": "Invoices and e-invoicing (ETA Egypt, ZATCA Saudi, Fawaterak)." },
-    { "key": "analytics",  "label_en": "Analytics",       "label_ar": "التحليلات",  "description": "Dashboards, reports, and store metrics." },
-    { "key": "staff",      "label_en": "Staff & Roles",   "label_ar": "الموظفون",   "description": "Staff members, roles, and permissions (RBAC)." },
-    { "key": "storefront", "label_en": "Storefront",      "label_ar": "المتجر",     "description": "The customer storefront, domains, pages, and navigation." },
-    { "key": "orders",     "label_en": "Orders",          "label_ar": "الطلبات",    "description": "Order management, fulfillment, and cash-on-delivery handling." },
-    { "key": "growth",     "label_en": "Growth",          "label_ar": "النمو",      "description": "Growth playbooks mapping a store signal to a NUMU feature that grows sales." }
+    { "key": "payments",   "label_en": "Payments",      "label_ar": "المدفوعات", "description": "Paymob, Fawry, COD, InstaPay, Kashier, Moyasar, Tap, Stripe — setup and configuration.", "related_areas": ["orders", "invoicing", "storefront"], "tools": ["search_knowledge"] },
+    { "key": "shipping",   "label_en": "Shipping",      "label_ar": "الشحن",      "description": "Bosta, MyLerz, Shippo — connecting couriers, rates, governorates, labels.", "related_areas": ["orders", "payments"], "tools": ["search_knowledge"] },
+    { "key": "marketing",  "label_en": "Marketing",     "label_ar": "التسويق",    "description": "BOGO, coupons, abandoned-cart recovery, WhatsApp broadcasts, Meta pixel.", "related_areas": ["growth", "storefront", "orders"], "tools": ["recommend_growth", "search_knowledge"] },
+    { "key": "themes",     "label_en": "Themes",        "label_ar": "القوالب",    "description": "The V3 theme editor — sections, settings, live preview, publish, versions.", "related_areas": ["storefront"], "tools": ["get_theme_config", "add_theme_section", "update_theme_setting", "search_knowledge"] },
+    { "key": "invoicing",  "label_en": "Invoicing",     "label_ar": "الفواتير",   "description": "Invoices and e-invoicing (ETA Egypt, ZATCA Saudi, Fawaterak).", "related_areas": ["payments", "orders"], "tools": ["search_knowledge"] },
+    { "key": "analytics",  "label_en": "Analytics",     "label_ar": "التحليلات",  "description": "Dashboards, reports, and store metrics.", "related_areas": ["orders", "growth"], "tools": ["get_orders", "search_knowledge"] },
+    { "key": "staff",      "label_en": "Staff & Roles", "label_ar": "الموظفون",   "description": "Staff members, roles, and permissions (RBAC).", "related_areas": [], "tools": ["search_knowledge"] },
+    { "key": "storefront", "label_en": "Storefront",    "label_ar": "المتجر",     "description": "The customer storefront, domains, pages, and navigation.", "related_areas": ["themes", "marketing"], "tools": ["get_store_summary", "get_products", "get_theme_config", "search_knowledge"] },
+    { "key": "orders",     "label_en": "Orders",        "label_ar": "الطلبات",    "description": "Order management, fulfillment, and cash-on-delivery handling.", "related_areas": ["payments", "shipping", "analytics"], "tools": ["get_orders", "get_products", "search_knowledge"] },
+    { "key": "growth",     "label_en": "Growth",        "label_ar": "النمو",      "description": "Growth playbooks mapping a store signal to a NUMU feature that grows sales.", "related_areas": ["marketing", "analytics", "orders"], "tools": ["recommend_growth", "search_knowledge"] }
   ]
 }
