@@ -684,6 +684,9 @@ class Settings(BaseSettings):
     # Structured Logging
     log_level: str = "INFO"
     log_format: str = "json"  # "json" for production, "console" for development
+    # Destination for log.alert(...) events. Empty = log-only (no webhook).
+    # Provider-agnostic: point at a Slack/n8n/HTTP incoming-webhook URL.
+    log_alert_webhook_url: str = ""
 
     # =========================================================================
     # Slack Alerting

@@ -30,8 +30,8 @@ from sqlalchemy import select
 from src.application.services.tiktok_capi_purchase_dispatcher import (
     enqueue_tiktok_capi_event_for_order,
 )
-from src.config.logging_config import get_logger
 from src.core.events.order_events import OrderStatusChangedEvent
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.store import StoreModel

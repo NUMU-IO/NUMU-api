@@ -1794,7 +1794,7 @@ async def refresh_customer_token(
     from src.application.services.refresh_token_blacklist_service import (
         RefreshTokenBlacklistService,
     )
-    from src.config.logging_config import get_logger as _get_logger
+    from src.core.logging import get_logger as _get_logger
     from src.infrastructure.cache.redis_cache import RedisCacheService
 
     blacklist = RefreshTokenBlacklistService(RedisCacheService())

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.config import settings
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()

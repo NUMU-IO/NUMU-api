@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.config import settings
-from src.config.logging_config import (
+from src.core.logging import (
     bind_request_context,
     clear_request_context,
     get_logger,

@@ -5,7 +5,6 @@ from uuid import UUID
 
 from src.application.dto.order import OrderDTO, UpdateOrderStatusDTO
 from src.application.services.funnel_emit_service import emit_order_delivered
-from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus
 from src.core.events.base import EventBus
 from src.core.events.order_events import OrderStatusChangedEvent
@@ -13,6 +12,7 @@ from src.core.exceptions import AuthorizationError, EntityNotFoundError, Validat
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.infrastructure.repositories.funnel_event_repository import (

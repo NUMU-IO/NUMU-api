@@ -30,7 +30,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.database.models.tenant.payment_transaction import (

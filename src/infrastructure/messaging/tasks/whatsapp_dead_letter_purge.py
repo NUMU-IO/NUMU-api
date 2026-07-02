@@ -14,7 +14,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = get_logger(__name__)

@@ -8,13 +8,13 @@ order timeline.
 
 from sqlalchemy import select
 
-from src.config.logging_config import get_logger
 from src.core.entities.order_activity import OrderActivityKind
 from src.core.events.order_events import (
     OrderCreatedEvent,
     OrderPaidEvent,
     OrderStatusChangedEvent,
 )
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.tenant.order_activity import (
     OrderActivityModel,

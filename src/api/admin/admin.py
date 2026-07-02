@@ -21,7 +21,7 @@ from src.api.admin.views import (
     UserAdmin,
 )
 from src.config import settings
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal, engine
 
 logger = get_logger(__name__)

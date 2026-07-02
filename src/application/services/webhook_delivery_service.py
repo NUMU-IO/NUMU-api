@@ -13,7 +13,6 @@ from uuid import UUID
 
 import httpx
 
-from src.config.logging_config import get_logger
 from src.core.entities.webhook import (
     WebhookDeliveryLog,
     WebhookDeliveryStatus,
@@ -23,6 +22,7 @@ from src.core.interfaces.repositories.webhook_repository import (
     IWebhookDeliveryLogRepository,
     IWebhookSubscriptionRepository,
 )
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

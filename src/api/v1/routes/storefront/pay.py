@@ -42,8 +42,8 @@ from src.api.dependencies.repositories import (
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
-from src.config.logging_config import get_logger
 from src.core.entities.order import OrderStatus, PaymentStatus
+from src.core.logging import get_logger
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
 

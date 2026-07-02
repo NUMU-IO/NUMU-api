@@ -19,9 +19,9 @@ from src.application.agent.scope import decline_message, off_domain_reason
 from src.application.agent.tool_registry import build_default_registry
 from src.application.agent.tools import ToolContext
 from src.config import settings as app_settings
-from src.config.logging_config import get_logger
 from src.core.agent.entities import ActionProposal, Conversation, Turn, TurnRole
 from src.core.agent.interfaces import ChatMessage
+from src.core.logging import get_logger
 from src.infrastructure.agent.llm import get_llm_provider
 from src.infrastructure.agent.persistence.repositories import (
     ConversationRepository,

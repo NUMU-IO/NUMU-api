@@ -12,10 +12,10 @@ from google.oauth2 import id_token as google_id_token
 from src.application.dto.auth import AuthResponseDTO, TokenDTO
 from src.application.dto.user import UserDTO
 from src.config import settings
-from src.config.logging_config import get_logger
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.token_service import ITokenService
+from src.core.logging import get_logger
 from src.core.value_objects.email import Email
 
 logger = get_logger(__name__)

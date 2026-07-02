@@ -29,7 +29,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.logging_config import get_logger
 from src.core.entities.instapay import (
     InstapayIntent,
     PaymentProof,
@@ -42,6 +41,7 @@ from src.core.interfaces.services.storage_service import (
     IStorageService,
     StorageBucket,
 )
+from src.core.logging import get_logger
 from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
 )

@@ -28,7 +28,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 
 logger = get_logger(__name__)

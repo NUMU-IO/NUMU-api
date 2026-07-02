@@ -3,12 +3,12 @@
 from uuid import UUID
 
 from src.application.dto.refund import CreateRefundDTO, RefundDTO
-from src.config.logging_config import get_logger
 from src.core.entities.refund import Refund, RefundReason, RefundType
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.refund_repository import IRefundRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

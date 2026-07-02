@@ -10,7 +10,7 @@ Provides high-level API for sending alerts with:
 import sentry_sdk
 
 from src.config import settings
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.slack.alerts import (
     AlertService,
     AlertSeverity,

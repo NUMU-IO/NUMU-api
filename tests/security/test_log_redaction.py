@@ -8,7 +8,7 @@ Covers ``access_token``, ``app_secret``, ``phone_number_id``, ``waba_id``
 
 import logging
 
-from src.config.logging_config import (
+from src.core.logging import (
     REDACTION_MARKER,
     SENSITIVE_LOG_KEYS,
     redact_sensitive_fields,

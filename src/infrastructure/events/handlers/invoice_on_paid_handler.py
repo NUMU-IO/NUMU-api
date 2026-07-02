@@ -20,7 +20,6 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from src.config.logging_config import get_logger
 from src.core.entities.invoice import (
     BuyerInfo,
     Invoice,
@@ -28,6 +27,7 @@ from src.core.entities.invoice import (
     SellerInfo,
 )
 from src.core.events.order_events import OrderPaidEvent
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.tenant.invoice import InvoiceModel
 from src.infrastructure.external_services.eta.qr_generator import generate_eta_qr_code

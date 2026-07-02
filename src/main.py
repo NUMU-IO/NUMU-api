@@ -30,7 +30,7 @@ from src.api.short_link_redirect import router as short_link_redirect_router
 from src.api.v1.routes import api_router
 from src.api.v1.routes.order_redirect import router as order_redirect_router
 from src.config import settings
-from src.config.logging_config import configure_logging, get_logger
+from src.core.logging import configure_logging, get_logger
 from src.infrastructure.database import AsyncSessionLocal, engine
 
 # Configure structured logging

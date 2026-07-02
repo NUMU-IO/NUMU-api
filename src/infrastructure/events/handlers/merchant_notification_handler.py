@@ -18,8 +18,8 @@ from uuid import UUID
 from sqlalchemy import select
 
 from src.config import settings
-from src.config.logging_config import get_logger
 from src.core.events.order_events import OrderCreatedEvent
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.tenant.order import OrderModel

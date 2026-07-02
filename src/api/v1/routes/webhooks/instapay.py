@@ -20,7 +20,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)

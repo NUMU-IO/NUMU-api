@@ -3,11 +3,11 @@
 from src.application.dto.auth import AuthResponseDTO, LoginDTO, TokenDTO
 from src.application.dto.user import UserDTO
 from src.application.services.lockout_service import AccountLockoutService
-from src.config.logging_config import get_logger
 from src.core.exceptions import AccountLockedError, InvalidCredentialsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

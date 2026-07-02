@@ -29,7 +29,6 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.logging_config import get_logger
 from src.core.entities.recovery_flow import (
     DEFAULT_RECOVERY_CADENCE,
 )
@@ -38,6 +37,7 @@ from src.core.events.recovery_events import (
     RecoverySucceededEvent,
 )
 from src.core.events.risk_events import RiskAssessmentFinalisedEvent
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

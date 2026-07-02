@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.external_services.meta.hashing import (
     _h,
     _normalize_mena_phone,

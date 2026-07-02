@@ -11,8 +11,8 @@ hashed phone (no raw PII); we pass it directly into ``write_network_event``.
 
 from __future__ import annotations
 
-from src.config.logging_config import get_logger
 from src.core.events.otp_events import OtpVerifiedEvent
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

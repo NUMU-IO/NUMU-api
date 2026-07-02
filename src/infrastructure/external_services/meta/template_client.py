@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.external_services.meta.graph_client import MetaGraphClient
 
 logger = get_logger(__name__)

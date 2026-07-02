@@ -19,13 +19,13 @@ from uuid import UUID
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.logging_config import get_logger
 from src.core.entities.reconciliation import (
     MismatchType,
     PaymentReconciliationRun,
     ReconciliationMismatch,
     ReconciliationStatus,
 )
+from src.core.logging import get_logger
 from src.infrastructure.database.models.public.reconciliation import (
     PaymentReconciliationRunModel,
     ReconciliationMismatchModel,

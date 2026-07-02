@@ -5,12 +5,12 @@ promotion is created / updated / deleted, the store's cache slot is
 flushed so subsequent storefront reads recompute.
 """
 
-from src.config.logging_config import get_logger
 from src.core.events.promotion_events import (
     PromotionCreatedEvent,
     PromotionDeletedEvent,
     PromotionUpdatedEvent,
 )
+from src.core.logging import get_logger
 from src.infrastructure.cache.promotion_cache import PromotionCache
 
 logger = get_logger(__name__)

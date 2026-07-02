@@ -61,6 +61,8 @@ celery_app.conf.update(
     # Task autodiscovery - adjust paths as needed
     imports=[
         "src.infrastructure.messaging.tasks",
+        # log.alert(...) webhook delivery (src.core.logging).
+        "src.infrastructure.messaging.tasks.log_alert_task",
         "src.infrastructure.messaging.tasks.fraud_tasks",
         "src.infrastructure.messaging.tasks.risk_scoring_tasks",
         "src.infrastructure.messaging.tasks.whatsapp_nudge_task",

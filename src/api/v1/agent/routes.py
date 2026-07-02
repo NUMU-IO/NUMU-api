@@ -25,7 +25,7 @@ from src.application.agent.proposals import (
     undo_last,
 )
 from src.application.agent.run_turn import stream_turn
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.agent.persistence.repositories import (
     AuditRepository,
     ConversationRepository,

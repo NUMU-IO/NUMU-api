@@ -18,7 +18,6 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.logging_config import get_logger
 from src.core.entities.instapay import (
     InstapayIntent,
     PaymentProof,
@@ -30,6 +29,7 @@ from src.core.events.payment_events import (
     PaymentProofApprovedEvent,
     PaymentProofRejectedEvent,
 )
+from src.core.logging import get_logger
 from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
 )

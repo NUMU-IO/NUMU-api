@@ -15,12 +15,12 @@ domain or subdomain.
 
 from __future__ import annotations
 
-from src.config.logging_config import get_logger
 from src.core.events.payment_events import (
     PaymentProofApprovedEvent,
     PaymentProofRejectedEvent,
 )
 from src.core.interfaces.services.messaging_service import MessageRecipient
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.external_services.resend.email_service import (
     ResendEmailService,

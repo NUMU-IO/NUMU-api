@@ -5,7 +5,6 @@ Each handler picks the relevant fields from the domain event and calls
 WebhookDeliveryService.dispatch(), which fans out to all active subscriptions.
 """
 
-from src.config.logging_config import get_logger
 from src.core.events.order_events import (
     OrderCreatedEvent,
     OrderPaidEvent,
@@ -16,6 +15,7 @@ from src.core.events.product_events import (
     ProductDeletedEvent,
     ProductUpdatedEvent,
 )
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

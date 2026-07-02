@@ -21,13 +21,13 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from src.config.logging_config import get_logger
 from src.core.enums.whatsapp import TemplateCategory
 from src.core.events.order_events import (
     OrderCreatedEvent,
     OrderPaidEvent,
     OrderStatusChangedEvent,
 )
+from src.core.logging import get_logger
 from src.core.services.whatsapp_send_guard import GuardContext, check
 
 if TYPE_CHECKING:

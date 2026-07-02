@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 from sqlalchemy import select
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = get_logger(__name__)

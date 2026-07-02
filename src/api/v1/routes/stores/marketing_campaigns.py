@@ -40,13 +40,13 @@ from src.application.services.link_builder import LinkBuilder
 from src.application.services.short_code_generator import (
     generate as generate_short_code,
 )
-from src.config.logging_config import get_logger
 from src.core.entities.coupon import Coupon, CouponType
 from src.core.entities.marketing_campaign import (
     CampaignChannel,
     CampaignStatus,
     MarketingCampaign,
 )
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.repositories import ProductRepository, StoreRepository
 from src.infrastructure.repositories.analytics_repository import (

@@ -24,7 +24,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 
 _logger = get_logger("metrics")
 

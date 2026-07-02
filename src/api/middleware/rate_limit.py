@@ -16,7 +16,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from src.config import settings
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 
 logger = get_logger(__name__)

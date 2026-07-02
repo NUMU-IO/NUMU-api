@@ -12,8 +12,8 @@ from typing import Any
 
 from src.application.agent.tools import ToolContext, ToolResult
 from src.config import settings as app_settings
-from src.config.logging_config import get_logger
 from src.core.agent.entities import RiskTier
+from src.core.logging import get_logger
 from src.infrastructure.agent.knowledge.embedder import get_embedder
 from src.infrastructure.agent.knowledge.repository import KnowledgeRepository
 

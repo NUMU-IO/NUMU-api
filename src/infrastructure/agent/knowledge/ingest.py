@@ -23,7 +23,7 @@ import asyncio
 from sqlalchemy import text
 
 from src.application.agent.knowledge.corpus_loader import load_authored_corpus
-from src.config.logging_config import get_logger
+from src.core.logging import get_logger
 from src.infrastructure.agent.knowledge.embedder import embedder_signature, get_embedder
 from src.infrastructure.agent.knowledge.repository import KnowledgeRepository
 from src.infrastructure.database.connection import AsyncSessionLocal
