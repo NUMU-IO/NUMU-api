@@ -189,9 +189,18 @@ class TestListProductsUseCase:
         ]
         self.mock_product_repo.get_by_category.return_value = products
 
-        result = await self.use_case.by_category(category_id=category_id)
+        result = await self.use_case.by_category(
+            store_id=self.store_id, category_id=category_id, is_active=True
+        )
 
         assert len(result.items) == 1
+        # Regression guard (Phase 0 tenant-leak fix): by_category MUST forward
+        # store_id and is_active so it can never return another store's catalog
+        # or unpublished drafts.
+        self.mock_product_repo.get_by_category.assert_awaited_once()
+        _, kwargs = self.mock_product_repo.get_by_category.call_args
+        assert kwargs["store_id"] == self.store_id
+        assert kwargs["is_active"] is True
 
 
 class TestUpdateProductUseCase:

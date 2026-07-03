@@ -814,10 +814,14 @@ async def browse_products(
             page_size=limit,
         )
     elif category_id:
+        # store_id + is_active are required: an unscoped category lookup would
+        # return another tenant's products, including unpublished drafts.
         result = await use_case.by_category(
+            store_id=store_id,
             category_id=category_id,
             page=page,
             page_size=limit,
+            is_active=True,
         )
     else:
         # Only show active products in storefront
@@ -1316,9 +1320,11 @@ async def get_related_products(
     # already filters to active products via the storefront use case.
     use_case = ListProductsUseCase(product_repository=product_repo)
     fetched = await use_case.by_category(
+        store_id=store_id,
         category_id=source.category_id,
         page=1,
         page_size=limit + 1,
+        is_active=True,
     )
     siblings = [p for p in fetched.items if p.id != product_id][:limit]
 
