@@ -8,7 +8,6 @@ This module provides:
 - Connection pool monitoring via SQLAlchemy events
 """
 
-import logging
 import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -21,8 +20,9 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import Pool
 
 from src.config import settings
+from src.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Context variable to store current tenant schema
 _tenant_schema: ContextVar[str] = ContextVar("tenant_schema", default="public")
@@ -210,11 +210,9 @@ def _pool_checkout(dbapi_conn, connection_record, connection_proxy) -> None:  # 
     overflow = pool.overflow()
     logger.debug(
         "db_pool_checkout",
-        extra={
-            "pool_size": size,
-            "checked_out": checked_out,
-            "overflow": overflow,
-        },
+        pool_size=size,
+        checked_out=checked_out,
+        overflow=overflow,
     )
     # Step 16 — update Prometheus gauges from the same hook. Importing
     # inside the listener keeps a circular-import risk off the module
@@ -237,8 +235,13 @@ def _pool_checkout(dbapi_conn, connection_record, connection_proxy) -> None:  # 
 
 @event.listens_for(Pool, "connect")
 def _pool_connect(dbapi_conn, connection_record) -> None:  # type: ignore[misc]
-    """Log when a new physical connection is created."""
-    logger.info("db_pool_new_connection")
+    """Log when a new physical connection is created.
+
+    DEBUG, not INFO: the pool opens connections in bursts under load, so at INFO
+    this floods the log with a bare line per connection for no actionable signal.
+    Flip LOG_LEVEL=DEBUG when diagnosing pool churn.
+    """
+    logger.debug("db_pool_new_connection")
 
 
 # Create async session factory
@@ -305,11 +308,9 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
                     text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
                     {"tenant_id": tenant_id},
                 )
-                logger.debug(f"Set RLS context for tenant: {tenant_id}")
+                logger.debug("rls_tenant_context_set", tenant_id=tenant_id)
             except ValueError:
-                logger.warning(
-                    f"Invalid tenant_id format: {tenant_id}, skipping RLS context"
-                )
+                logger.warning("invalid_tenant_id_format", tenant_id=tenant_id)
         else:
             # Clear any existing tenant context when no tenant is set
             await session.execute(
@@ -331,9 +332,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
                     {"user_id": user_id},
                 )
             except ValueError:
-                logger.warning(
-                    f"Invalid user_id format: {user_id}, skipping user RLS context"
-                )
+                logger.warning("invalid_user_id_format", user_id=user_id)
         else:
             await session.execute(
                 text("SELECT set_config('app.current_user', '', true)")
@@ -439,7 +438,7 @@ async def get_admin_db_session() -> AsyncGenerator[AsyncSession, None]:
 
         # Enable RLS bypass
         await session.execute(text("SELECT set_config('app.rls_bypass', 'true', true)"))
-        logger.warning("Admin session created with RLS bypass enabled")
+        logger.warning("admin_session_rls_bypass_enabled")
 
         try:
             yield session

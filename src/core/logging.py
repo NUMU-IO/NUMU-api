@@ -158,49 +158,70 @@ def redact_sensitive_fields(
 
 
 def configure_logging() -> None:
-    """Configure structlog for the whole application.
+    """Configure logging for the whole application. Call once at startup.
 
-    JSON in production, colourised console in development. Call once at startup.
+    Both structlog loggers AND plain stdlib ``logging.getLogger`` loggers are
+    routed through one structlog ``ProcessorFormatter``, so every line — wherever
+    it originates — is consistent JSON (or dev console) with request/tenant
+    context, secret redaction, and null-stripping. Legacy stdlib ``%s`` calls are
+    interpolated via ``PositionalArgumentsFormatter`` so they don't leak format
+    strings.
     """
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
+    renderer: Processor = (
+        structlog.processors.JSONRenderer()
+        if settings.log_format == "json"
+        else structlog.dev.ConsoleRenderer(colors=True)
+    )
+
+    # Build the event dict. Shared by structlog loggers and, via
+    # foreign_pre_chain below, by stdlib loggers too.
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
+        # Interpolate stdlib-style %-args, e.g. logger.info("x=%s", v).
+        structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
         add_app_context,
         add_request_context,
-        # Must come AFTER context processors and BEFORE any renderer so that
-        # secrets injected via .bind() or context vars also get redacted.
+        # AFTER context, BEFORE render: redact secrets from .bind()/context too.
         redact_sensitive_fields,
-        # Runs last: strip None-valued keys after all context is merged.
-        drop_none_values,
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
     ]
 
-    if settings.log_format == "json":
-        processors: list[Processor] = [
-            *shared_processors,
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer(),
-        ]
-    else:
-        processors = [
-            *shared_processors,
-            structlog.dev.ConsoleRenderer(colors=True),
-        ]
-
     structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
+        processors=[
+            *shared_processors,
+            # Hand the event dict to the stdlib ProcessorFormatter for rendering.
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
         logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
-    logging.basicConfig(format="%(message)s", stream=sys.stdout, level=log_level)
+    # One formatter renders records from BOTH structlog and plain stdlib loggers.
+    formatter = structlog.stdlib.ProcessorFormatter(
+        foreign_pre_chain=shared_processors,
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            # Runs last: strip None-valued keys after all context is merged.
+            drop_none_values,
+            structlog.processors.UnicodeDecoder(),
+            renderer,
+        ],
+    )
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(log_level)
 
     # Pin noisy third-party loggers to WARNING regardless of the root level.
     for logger_name in (
