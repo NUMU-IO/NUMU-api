@@ -147,15 +147,21 @@ async def generate_invoice_for_paid_order(
                 unit_price_cents = li.get("unit_price", 0)
                 qty = li.get("quantity", 1)
                 desc = li.get("product_name", "Product")
+                variant_lbl = li.get("variant_name")
                 sku = li.get("sku") or li.get("product_id", "ITEM")
             else:
                 unit_price_cents = getattr(li, "unit_price", 0)
                 qty = getattr(li, "quantity", 1)
                 desc = getattr(li, "product_name", "Product")
+                variant_lbl = getattr(li, "variant_name", None)
                 sku = getattr(li, "sku", None) or getattr(li, "product_id", "ITEM")
 
+            # Append the variant label ("Black, L") to the invoice line so the
+            # invoice reflects the exact variant ordered (matches cart/checkout).
+            desc_full = f"{desc} — {variant_lbl}" if variant_lbl else str(desc)
+
             invoice.add_line_item(
-                description=str(desc),
+                description=desc_full,
                 item_code=str(sku),
                 quantity=Decimal(str(qty)),
                 unit_price=Decimal(str(unit_price_cents)) / Decimal("100"),

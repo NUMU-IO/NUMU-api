@@ -2233,6 +2233,10 @@ async def checkout(
                 "items": [
                     {
                         "name": li.product_name,
+                        # Variant label ("Black, L") so the confirmation email
+                        # shows the exact variant ordered — same label the cart,
+                        # checkout summary and thank-you page render.
+                        "variant_name": li.variant_name,
                         "quantity": li.quantity,
                         "price": li.unit_price / 100,
                         "image_url": product_image_map.get(li.product_id),
