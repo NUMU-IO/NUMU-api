@@ -321,6 +321,15 @@ def _items_table(items: list[dict], currency: str, c: dict, language: str) -> st
     rows = ""
     for it in items:
         name = it.get("name") or ""
+        # Variant label ("Black, L") rendered as a muted sub-line under the
+        # product name, so the emailed order shows the exact variant ordered.
+        variant = it.get("variant_name") or ""
+        name_cell = name
+        if variant:
+            name_cell += (
+                f'<div style="font-size:12px;color:{MUTED};font-weight:400;'
+                f'margin-top:3px;">{variant}</div>'
+            )
         qty = it.get("quantity", 1)
         total_cents = it.get("total_cents", it.get("unit_price_cents", 0) * qty)
         image_url = it.get("image_url")
@@ -342,7 +351,7 @@ def _items_table(items: list[dict], currency: str, c: dict, language: str) -> st
             f'<td style="padding:12px 6px;border-bottom:1px solid {HAIRLINE};">'
             f'<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
             f'<td style="padding:0;">{thumb}</td>'
-            f'<td style="padding:0 10px;font-size:14px;color:{NAVY};font-weight:600;">{name}</td>'
+            f'<td style="padding:0 10px;font-size:14px;color:{NAVY};font-weight:600;">{name_cell}</td>'
             "</tr></table></td>"
             f'<td align="center" style="padding:12px 6px;border-bottom:1px solid {HAIRLINE};'
             f'font-size:14px;color:{NAVY};">{qty}</td>'

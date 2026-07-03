@@ -571,6 +571,9 @@ class ResendEmailService(IEmailService):
         rich_items = [
             {
                 "name": it.get("name", ""),
+                # Variant label ("Black, L") — rendered under the product name
+                # in the email's products table when present.
+                "variant_name": it.get("variant_name"),
                 "quantity": it.get("quantity", 1),
                 "total_cents": round(
                     float(it.get("price", 0)) * 100 * it.get("quantity", 1)
