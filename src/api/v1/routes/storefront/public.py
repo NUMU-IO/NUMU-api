@@ -281,6 +281,7 @@ async def get_store_page_public(
     handle: Annotated[str, Path(description="Page handle")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     page_repo: Annotated[PageRepository, Depends(get_page_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SuccessResponse[dict[str, Any]]:
     """A single published page by handle, for ``/pages/<handle>``."""
     store = await store_repo.get_by_id(store_id)
@@ -290,9 +291,11 @@ async def get_store_page_public(
     page = await page_repo.get_by_handle(store_id, handle)
     if not page or not page.is_published:
         raise EntityNotFoundError("Page", handle)
-    return SuccessResponse(
-        data=_public_page(page), message="Page retrieved successfully"
+    payload = _public_page(page)
+    payload["metafields"] = await _resolve_public_metafields(
+        session, store_id, "page", page.id
     )
+    return SuccessResponse(data=payload, message="Page retrieved successfully")
 
 
 # Router for routes that don't require a store_id path param
@@ -1141,6 +1144,9 @@ async def get_product_by_slug(
         options=_resolve_options_for_product(product),
         variants=variant_summaries,
         meta_catalog_id=product.meta_catalog_id,
+        metafields=await _resolve_public_metafields(
+            session, store_id, "product", product.id
+        ),
         created_at=str(product.created_at),
         updated_at=str(product.updated_at),
     )
@@ -1241,6 +1247,45 @@ async def _resolve_variants_for_product(
         }
         for v in variants
     ]
+
+
+async def _resolve_public_metafields(
+    session: AsyncSession,
+    store_id: UUID,
+    owner_type: str,
+    owner_id: UUID,
+) -> list[dict]:
+    """Public typed metafields for a resource, shaped for theme consumption.
+
+    Returns ``[{namespace, key, type, value}]`` with each value already
+    coerced to its declared Python type (number → int/float, boolean → bool,
+    json → dict/list, …). Only PUBLIC definitions are exposed.
+
+    Best-effort: any error resolving metafields returns an empty list rather
+    than failing the whole detail payload — a PDP must still render if the
+    metafields join hiccups (e.g. before the migration has run).
+    """
+    try:
+        from src.core.entities.metafield import MetafieldOwnerType
+        from src.infrastructure.repositories.metafield_repository import (
+            MetafieldValueRepository,
+        )
+
+        repo = MetafieldValueRepository(session)
+        resolved = await repo.list_public_for_owner(
+            store_id, MetafieldOwnerType(owner_type), owner_id
+        )
+        return [
+            {
+                "namespace": r.namespace,
+                "key": r.key,
+                "type": r.type.value,
+                "value": r.value,
+            }
+            for r in resolved
+        ]
+    except Exception:
+        return []
 
 
 class BackInStockSubscribeRequest(BaseModel):

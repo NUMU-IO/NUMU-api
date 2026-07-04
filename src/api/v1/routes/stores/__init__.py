@@ -61,6 +61,7 @@ from src.api.v1.routes.stores import (
     marketing_send_times as marketing_send_times_module,
 )
 from src.api.v1.routes.stores import menus as menus_module
+from src.api.v1.routes.stores import metafields as metafields_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
@@ -165,6 +166,7 @@ router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(menus_module.router, tags=["Store Menus"])
 router.include_router(pages_module.router, tags=["Store Pages"])
+router.include_router(metafields_module.router, tags=["Store Metafields"])
 router.include_router(theme_updates_module.router, tags=["Store Theme Updates"])
 router.include_router(promotions_module.router, tags=["Store Promotions"])
 router.include_router(settings_module.router, tags=["Store Settings"])
