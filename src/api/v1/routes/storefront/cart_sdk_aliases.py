@@ -82,6 +82,12 @@ class SdkAddItemRequest(BaseModel):
     product_id: UUID
     variant_id: UUID | None = None
     quantity: int = Field(default=1, ge=1)
+    # Selected option axes ({"Color": "Black", "Size": "L"}) sent by the SDK
+    # when the theme's picker can't resolve a real variant row — legacy
+    # products keep their axes in attributes JSON with a single placeholder
+    # variant whose option_values is {}. Used only as a variant_name fallback;
+    # pricing/stock still come from the variant row (or product) as before.
+    selected_options: dict[str, str] | None = None
 
 
 class SdkRemoveItemRequest(BaseModel):
@@ -209,6 +215,15 @@ async def sdk_add_cart_item(
                 ),
             )
         add_qty = min(request.quantity, allowed)
+
+    # Fallback label: the picker's selected axes ("Color: Black, Size: L")
+    # for products whose variant rows carry no option_values (or no variant
+    # resolved at all). Keeps the choice visible in cart → checkout → order
+    # → email/invoice even for legacy attributes-JSON products.
+    if not variant_name and request.selected_options:
+        variant_name = (
+            " / ".join(str(v) for v in request.selected_options.values() if v) or None
+        )
 
     cart.add_item(
         CartItem(
