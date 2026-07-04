@@ -29,6 +29,7 @@ from src.core.logging import get_logger
 from src.infrastructure.agent.persistence.repositories import (
     AuditRepository,
     ConversationRepository,
+    TurnRepository,
 )
 from src.infrastructure.database.connection import set_tenant_id
 
@@ -110,6 +111,40 @@ async def list_conversations(
             }
             for c in conversations
         ]
+    }
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: UUID,
+    ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
+) -> dict:
+    """One conversation + its turns, for resuming a thread in the panel.
+
+    RLS scopes the lookup to the tenant; we additionally require the caller to
+    be the thread's owner so staff members can't read each other's chats.
+    """
+    conversation = await ConversationRepository(ctx.session).get(conversation_id)
+    if conversation is None or conversation.staff_id != ctx.staff_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "not_found", "message": "Conversation not found"},
+        )
+    turns = await TurnRepository(ctx.session).list_for_conversation(conversation_id)
+    return {
+        "id": str(conversation.id),
+        "title": conversation.title,
+        "status": conversation.status.value,
+        "turns": [
+            {
+                "role": t.role.value,
+                "content": t.content,
+                "tool_calls": [tc.name for tc in t.tool_calls],
+                "model_used": t.model_used,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in turns
+        ],
     }
 
 
