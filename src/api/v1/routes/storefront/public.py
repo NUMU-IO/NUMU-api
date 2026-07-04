@@ -237,6 +237,7 @@ def _public_page(page: Any) -> dict[str, Any]:
         "body": page.body,
         "seo": page.seo,
         "template": page.template,
+        "template_suffix": page.template_suffix,
     }
 
 
@@ -1100,6 +1101,7 @@ async def get_product_by_slug(
             attributes=product.attributes,
             seo_title=product.seo_title,
             seo_description=product.seo_description,
+            template_suffix=product.template_suffix,
             options=_resolve_options_for_product(product),
             variants=variant_summaries,
             meta_catalog_id=product.meta_catalog_id,
@@ -1387,6 +1389,7 @@ async def browse_categories(
                 "image_url": r.image_url,
                 "parent_id": str(r.parent_id) if r.parent_id else None,
                 "position": r.position,
+                "template_suffix": r.template_suffix,
                 "product_count": r.product_count,
             }
             for r in results

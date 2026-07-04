@@ -39,6 +39,8 @@ class PageModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     seo: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     template: Mapped[str] = mapped_column(String(64), nullable=False, default="page")
+    # Alternate template variant key suffix (Shopify-style); null = base template.
+    template_suffix: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Reserved for full per-page section customization (Shopify parity).
     content_v3: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 

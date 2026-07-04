@@ -22,6 +22,7 @@ class CategoryDTO(BaseDTO):
     parent_id: UUID | None
     position: int
     is_active: bool
+    template_suffix: str | None
     metadata: dict[str, Any]
     product_count: int
     created_at: datetime
@@ -40,6 +41,7 @@ class CategoryDTO(BaseDTO):
             parent_id=entity.parent_id,
             position=entity.position,
             is_active=entity.is_active,
+            template_suffix=entity.template_suffix,
             metadata=entity.metadata,
             product_count=product_count,
             created_at=entity.created_at,
