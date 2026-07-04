@@ -177,7 +177,10 @@ jobs:
           AGENT_ENABLED: "true"
           AGENT_LLM_API_KEY: ${{ secrets.TEST_AGENT_LLM_API_KEY }}
           AGENT_LLM_BASE_URL: https://ai-gateway.vercel.sh/v1
-          AGENT_LLM_MODEL: alibaba/qwen-3-235b
+          # gpt-4o-mini: best tool-calling reliability per dollar on the gateway
+          # (~$0.0006/turn), solid Arabic. Verified live: correct get_orders call
+          # from an Egyptian-Arabic prompt on this key. See assistand-numu.md.
+          AGENT_LLM_MODEL: openai/gpt-4o-mini
         run: |
           SNIPPET=""
           for KEY in AGENT_ENABLED AGENT_LLM_API_KEY AGENT_LLM_BASE_URL AGENT_LLM_MODEL; do
