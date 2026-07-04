@@ -116,6 +116,12 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Read-only from the ORM's perspective. The `immutable_text_array_to_string`
     # wrapper is defined in that migration; the built-in `array_to_string` is
     # rejected as STABLE in a STORED expression on newer Postgres.
+    #
+    # `deferred=True` keeps this multi-KB tsvector OUT of the default
+    # `SELECT products.*` — the storefront loads products constantly and never
+    # reads this value (FTS references the column explicitly in WHERE / ts_rank,
+    # which is unaffected by deferral). Shipping it on every product read was a
+    # large, pointless chunk of Supabase egress.
     search_vector: Mapped[str | None] = mapped_column(
         TSVECTOR,
         Computed(
@@ -126,6 +132,7 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
             persisted=True,
         ),
         nullable=True,
+        deferred=True,
     )
 
     # Relationships
