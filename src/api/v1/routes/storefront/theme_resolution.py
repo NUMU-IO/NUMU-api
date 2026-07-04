@@ -13,6 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from src.api.dependencies import get_storefront_cache_service
 from src.api.dependencies.repositories import (
     get_store_theme_repository,
     get_theme_repository,
@@ -21,6 +22,7 @@ from src.api.dependencies.repositories import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.theme_v2 import StorefrontThemeResponse
 from src.application.services.theme_service import ThemeService
+from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_repository import ThemeRepository
 from src.infrastructure.repositories.theme_version_repository import (
@@ -71,6 +73,7 @@ async def resolve_storefront_theme(
         ),
     ] = False,
     svc: ThemeService = Depends(_get_svc),
+    cache: StorefrontCache = Depends(get_storefront_cache_service),
 ) -> SuccessResponse[StorefrontThemeResponse]:
     """Return the active theme data for a store for SSR rendering.
 
@@ -97,7 +100,23 @@ async def resolve_storefront_theme(
                 detail="Invalid installation_id format",
             )
 
+    draft_installation_id = inst_uid if draft else None
+
+    # Cache-aside for the LIVE resolution only. Draft/preview mode returns
+    # per-installation unpublished data that must never be shared, so it
+    # bypasses the cache entirely. Publish/activate invalidates this slot
+    # (see ThemeService._revalidate_storefront), with the short theme TTL
+    # as the safety net.
+    if draft_installation_id is None:
+        cached = await cache.get_theme(uid)
+        if cached is not None:
+            return SuccessResponse(data=StorefrontThemeResponse(**cached))
+
     data = await svc.resolve_storefront_theme(
-        uid, draft_installation_id=inst_uid if draft else None
+        uid, draft_installation_id=draft_installation_id
     )
+
+    if draft_installation_id is None:
+        await cache.set_theme(uid, data)
+
     return SuccessResponse(data=StorefrontThemeResponse(**data))
