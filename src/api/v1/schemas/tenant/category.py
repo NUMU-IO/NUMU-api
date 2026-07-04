@@ -71,6 +71,10 @@ class CategoryResponse(BaseModel):
     parent_id: str | None = Field(description="Parent category UUID")
     position: int = Field(description="Sort position")
     is_active: bool = Field(description="Whether the category is visible")
+    template_suffix: str | None = Field(
+        default=None,
+        description="Alternate template variant suffix; null = base template.",
+    )
     product_count: int = Field(description="Number of products in this category")
     extra_data: dict[str, Any] | None = Field(
         None, description="Extra metadata (e.g. name_ar, description_ar)"

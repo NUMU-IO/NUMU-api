@@ -114,6 +114,7 @@ async def create_product(
         attributes=request.attributes,
         seo_title=request.seo_title,
         seo_description=request.seo_description,
+        template_suffix=request.template_suffix,
     )
 
     result = await use_case.execute(
@@ -191,6 +192,7 @@ async def create_product(
             attributes=result.attributes,
             seo_title=result.seo_title,
             seo_description=result.seo_description,
+            template_suffix=result.template_suffix,
             options=[o.model_dump() for o in (options_in or [])],
             variants=variant_summaries,
             created_at=str(result.created_at),
@@ -568,6 +570,7 @@ async def list_products(
             attributes=product.attributes,
             seo_title=product.seo_title,
             seo_description=product.seo_description,
+            template_suffix=product.template_suffix,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         )
@@ -629,6 +632,7 @@ async def get_product(
             attributes=result.attributes,
             seo_title=result.seo_title,
             seo_description=result.seo_description,
+            template_suffix=result.template_suffix,
             created_at=str(result.created_at),
             updated_at=str(result.updated_at),
         ),
@@ -674,6 +678,11 @@ async def update_product(
         status=request.status,
         seo_title=request.seo_title,
         seo_description=request.seo_description,
+        template_suffix=request.template_suffix,
+        # Distinguish an explicit ``template_suffix: null`` (clear the override)
+        # from an omitted field (leave it alone) so a partial PATCH never wipes
+        # the merchant's template variant.
+        template_suffix_provided="template_suffix" in request.model_fields_set,
     )
 
     result = await use_case.execute(
@@ -767,6 +776,7 @@ async def update_product(
             attributes=result.attributes,
             seo_title=result.seo_title,
             seo_description=result.seo_description,
+            template_suffix=result.template_suffix,
             options=(
                 [o.model_dump() for o in options_in]
                 if options_in is not None

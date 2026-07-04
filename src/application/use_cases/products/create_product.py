@@ -292,6 +292,7 @@ class CreateProductUseCase:
             attributes=dto.attributes or {},
             seo_title=dto.seo_title,
             seo_description=dto.seo_description,
+            template_suffix=dto.template_suffix,
             meta_catalog_id=getattr(dto, "meta_catalog_id", None),
         )
 

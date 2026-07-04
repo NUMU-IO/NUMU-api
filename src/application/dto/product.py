@@ -41,6 +41,8 @@ class ProductDTO(BaseDTO):
     meta_catalog_id: str | None
     seo_title: str | None
     seo_description: str | None
+    # Alternate template variant suffix (Shopify-style); null = base template.
+    template_suffix: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -74,6 +76,7 @@ class ProductDTO(BaseDTO):
             meta_catalog_id=getattr(entity, "meta_catalog_id", None),
             seo_title=getattr(entity, "seo_title", None),
             seo_description=getattr(entity, "seo_description", None),
+            template_suffix=getattr(entity, "template_suffix", None),
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -103,6 +106,8 @@ class CreateProductDTO(BaseDTO):
     attributes: dict = field(default_factory=dict)
     seo_title: str | None = None
     seo_description: str | None = None
+    # Alternate template variant suffix (Shopify-style); null = base template.
+    template_suffix: str | None = None
 
 
 @dataclass
@@ -126,3 +131,12 @@ class UpdateProductDTO(BaseDTO):
     status: str | None = None
     seo_title: str | None = None
     seo_description: str | None = None
+    # Alternate template variant suffix (Shopify-style); null = base template.
+    # `template_suffix` is nullable AND clearable, so on a PATCH we cannot treat
+    # ``None`` as "leave alone" (that would make the override impossible to
+    # remove). `template_suffix_provided` carries whether the client actually
+    # sent the key (route derives it from the request's ``model_fields_set``):
+    # provided + value → set it, provided + None → clear it, not provided →
+    # leave the current variant untouched.
+    template_suffix: str | None = None
+    template_suffix_provided: bool = False

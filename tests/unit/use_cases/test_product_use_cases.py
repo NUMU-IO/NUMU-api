@@ -316,6 +316,67 @@ class TestUpdateProductUseCase:
 
         assert result.quantity == 50
 
+    @pytest.mark.asyncio
+    async def test_update_product_sets_template_suffix(self):
+        """A provided template_suffix is written to the entity + read-back DTO."""
+        self.mock_product_repo.get_by_id.return_value = self.sample_product
+        self.mock_store_repo.get_by_id.return_value = self.sample_store
+        self.mock_product_repo.update.return_value = self.sample_product
+
+        dto = UpdateProductDTO(
+            template_suffix="wholesale", template_suffix_provided=True
+        )
+
+        result = await self.use_case.execute(
+            product_id=self.product_id,
+            dto=dto,
+            user_id=self.user_id,
+        )
+
+        persisted = self.mock_product_repo.update.call_args.args[0]
+        assert persisted.template_suffix == "wholesale"
+        assert result.template_suffix == "wholesale"
+
+    @pytest.mark.asyncio
+    async def test_update_product_clears_template_suffix_on_null(self):
+        """An explicit null (provided) clears the template variant override."""
+        self.sample_product.template_suffix = "wholesale"
+        self.mock_product_repo.get_by_id.return_value = self.sample_product
+        self.mock_store_repo.get_by_id.return_value = self.sample_store
+        self.mock_product_repo.update.return_value = self.sample_product
+
+        dto = UpdateProductDTO(template_suffix=None, template_suffix_provided=True)
+
+        result = await self.use_case.execute(
+            product_id=self.product_id,
+            dto=dto,
+            user_id=self.user_id,
+        )
+
+        persisted = self.mock_product_repo.update.call_args.args[0]
+        assert persisted.template_suffix is None
+        assert result.template_suffix is None
+
+    @pytest.mark.asyncio
+    async def test_update_product_omitted_template_suffix_untouched(self):
+        """A partial PATCH that omits template_suffix leaves the variant alone."""
+        self.sample_product.template_suffix = "wholesale"
+        self.mock_product_repo.get_by_id.return_value = self.sample_product
+        self.mock_store_repo.get_by_id.return_value = self.sample_store
+        self.mock_product_repo.update.return_value = self.sample_product
+
+        # template_suffix_provided defaults to False → not sent on the wire.
+        dto = UpdateProductDTO(quantity=7)
+
+        await self.use_case.execute(
+            product_id=self.product_id,
+            dto=dto,
+            user_id=self.user_id,
+        )
+
+        persisted = self.mock_product_repo.update.call_args.args[0]
+        assert persisted.template_suffix == "wholesale"
+
 
 class TestDeleteProductUseCase:
     """Tests for DeleteProductUseCase."""

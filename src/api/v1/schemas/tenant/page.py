@@ -65,5 +65,9 @@ class PageResponse(BaseModel):
     seo: dict[str, Any] = Field(description="SEO overrides")
     is_published: bool = Field(description="Whether the page is visible")
     template: str = Field(description="Theme template key")
+    template_suffix: str | None = Field(
+        default=None,
+        description="Alternate template variant suffix; null = base template.",
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
