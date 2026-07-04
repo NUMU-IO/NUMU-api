@@ -32,16 +32,72 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
 from sqlalchemy import and_, select
 
+from src.application.services.link_builder import LinkBuilder
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 _loop: asyncio.AbstractEventLoop | None = None
+
+# Matches http(s) URLs inside a message body (stops at whitespace / quotes /
+# angle brackets so trailing punctuation in prose isn't swallowed).
+_URL_RE = re.compile(r"https?://[^\s\"'<>)]+")
+
+
+def _inject_campaign_utm(body: str, store, campaign) -> str:
+    """Stamp the campaign's UTM params onto storefront links in the body.
+
+    Merchant-composed campaign bodies embed the plain product/store URL
+    (e.g. ``https://<store>.numueg.app/product/x``) with no UTM, so campaign
+    clicks + orders were never attributed. Here we merge the canonical UTM
+    (``utm_campaign=<slug>-<short_code>`` + source/medium) into every link that
+    points at THIS store's storefront — leaving CDN/image and third-party URLs
+    untouched, and never overwriting UTM the merchant set by hand.
+    """
+    if not body or store is None:
+        return body
+    utm = LinkBuilder.utm_query_for(campaign)
+    if not utm:
+        return body
+
+    # The set of hosts that ARE this store's storefront (store_url origin +
+    # subdomain + custom domain), so we don't tag apex CDN or other stores.
+    hosts: set[str] = set()
+    try:
+        hosts.add(urlparse(store.store_url).netloc.lower())
+    except Exception:  # noqa: BLE001
+        pass
+    sub = getattr(store, "subdomain", None)
+    if sub:
+        hosts.add(f"{sub}.numueg.app".lower())
+    custom = getattr(store, "custom_domain", None)
+    if custom:
+        hosts.add(str(custom).strip().lower())
+    hosts.discard("")
+    if not hosts:
+        return body
+
+    def _rewrite(match: re.Match[str]) -> str:
+        url = match.group(0)
+        try:
+            parts = urlparse(url)
+        except Exception:  # noqa: BLE001
+            return url
+        if parts.netloc.lower() not in hosts:
+            return url  # not this storefront — leave as-is
+        existing = dict(parse_qsl(parts.query, keep_blank_values=True))
+        # Merchant-set UTM wins; we only fill what's missing.
+        merged = {**utm, **existing}
+        return urlunparse(parts._replace(query=urlencode(merged)))
+
+    return _URL_RE.sub(_rewrite, body)
 
 
 def _run_async(coro):
@@ -204,6 +260,15 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
             await repo.update_counters(campaign.id, total_recipients=len(recipients))
             await session.commit()
 
+            # Load the store once so we can UTM-tag the storefront links in the
+            # message body (attribution). Best-effort — a missing store just
+            # means the body sends as-authored.
+            from src.infrastructure.repositories.store_repository import (
+                StoreRepository,
+            )
+
+            store = await StoreRepository(session).get_by_id(campaign.store_id)
+
             # Spec 005 US6 v2 — auto-create a Meta Custom Conversion the
             # first time this campaign sends so Ads Manager can break
             # down Purchase events by this campaign's UTM. Best-effort:
@@ -241,7 +306,7 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
                 )
 
                 twilio = TwilioSMSService()
-                body = campaign.inline_body or ""
+                body = _inject_campaign_utm(campaign.inline_body or "", store, campaign)
                 for idx, to in enumerate(recipients):
                     if await _check_canceled(idx):
                         canceled = True
@@ -265,7 +330,7 @@ async def _dispatch_campaign_async(campaign_id: UUID) -> dict:
 
                 service = _email_module.ResendEmailService()
                 subject = campaign.inline_subject or campaign.name
-                body = campaign.inline_body or ""
+                body = _inject_campaign_utm(campaign.inline_body or "", store, campaign)
                 for idx, to in enumerate(recipients):
                     if await _check_canceled(idx):
                         canceled = True

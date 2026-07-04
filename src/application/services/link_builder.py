@@ -191,6 +191,42 @@ class LinkBuilder:
         return f"{slug}-{campaign.short_code}"
 
     @staticmethod
+    def utm_query_for(
+        campaign: MarketingCampaign | None,
+        *,
+        source: str | None = None,
+        medium: str | None = None,
+        term: str | None = None,
+        content: str | None = None,
+    ) -> dict[str, str]:
+        """The UTM query-param dict for a campaign (no URL, no path).
+
+        Same resolution rules as ``_compose`` — single source of truth so the
+        dispatch-time link rewriter and the link builder can never drift. Used
+        by the campaign send loop to stamp UTM onto storefront links the
+        merchant embedded in the message body (which otherwise ship untagged,
+        so campaign traffic/orders never get attributed).
+        """
+        query: dict[str, str] = {}
+        resolved_source = source
+        resolved_medium = medium
+        if campaign is not None:
+            query["utm_campaign"] = LinkBuilder.utm_campaign_for(campaign)
+            if resolved_source is None:
+                resolved_source = _CHANNEL_DEFAULT_SOURCE.get(campaign.channel)
+        if resolved_source:
+            query["utm_source"] = resolved_source
+            if resolved_medium is None:
+                resolved_medium = _SOURCE_DEFAULT_MEDIUM.get(resolved_source)
+        if resolved_medium:
+            query["utm_medium"] = resolved_medium
+        if term:
+            query["utm_term"] = term
+        if content:
+            query["utm_content"] = content
+        return query
+
+    @staticmethod
     def slug_from_campaign_name(name: str) -> str:
         """Kebab-case, lowercase, ASCII-only slug.
 
@@ -218,24 +254,15 @@ class LinkBuilder:
         content: str | None,
     ) -> str:
         query: dict[str, str] = dict(extra_query or {})
-
-        resolved_source = source
-        resolved_medium = medium
-
-        if campaign is not None:
-            query["utm_campaign"] = self.utm_campaign_for(campaign)
-            if resolved_source is None:
-                resolved_source = _CHANNEL_DEFAULT_SOURCE.get(campaign.channel)
-        if resolved_source:
-            query["utm_source"] = resolved_source
-            if resolved_medium is None:
-                resolved_medium = _SOURCE_DEFAULT_MEDIUM.get(resolved_source)
-        if resolved_medium:
-            query["utm_medium"] = resolved_medium
-        if term:
-            query["utm_term"] = term
-        if content:
-            query["utm_content"] = content
+        query.update(
+            self.utm_query_for(
+                campaign,
+                source=source,
+                medium=medium,
+                term=term,
+                content=content,
+            )
+        )
 
         url = f"{self.origin}{path}"
         if query:

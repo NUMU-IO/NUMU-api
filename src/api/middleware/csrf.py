@@ -19,6 +19,12 @@ CSRF_EXEMPT_PATHS = (
     "/api/v1/auth/login",
     "/api/v1/auth/2fa/complete-login",
     "/api/v1/auth/register",
+    # Google sign-in is a session-establishing entry point like login/register
+    # (the Google ID token IS the auth proof). A stale auth cookie from a prior
+    # session made has_cookie_auth true → the CSRF gate 403'd it before a token
+    # could exist, so signup/login-with-Google broke with "CSRF validation
+    # failed". Exempt it for the same reason login/register are exempt.
+    "/api/v1/auth/google",
     "/api/v1/auth/logout",
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
