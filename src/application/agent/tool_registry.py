@@ -21,6 +21,7 @@ from src.infrastructure.agent.tools import (
     store,
     theme_read,
     theme_write,
+    update_product,
 )
 
 # US1 read tools + US2/US3 theme read/write (CONFIRM-tier: propose only) + US4 RAG
@@ -35,6 +36,7 @@ _TOOL_SPECS = [
     knowledge.SPEC,
     growth.SPEC,
     create_discount.SPEC,
+    update_product.SPEC,
     orchestration.SPEC,
     *reserved.SPECS,
 ]

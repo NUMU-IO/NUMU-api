@@ -156,9 +156,121 @@ async def _apply_create_discount(
     }
 
 
+async def _apply_update_product(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    from src.application.dto.product import UpdateProductDTO
+    from src.application.use_cases.products.update_product import (
+        UpdateProductUseCase,
+    )
+    from src.infrastructure.repositories.product_repository import ProductRepository
+
+    product_repo = ProductRepository(session)
+    product_id = UUID(str(params["product_id"]))
+
+    # Re-fetch at apply time: the audit's before_state must reflect what the
+    # values actually were when applied (they may have drifted since propose).
+    current = await product_repo.get_by_id(product_id)
+    if current is None or current.store_id != store_id:
+        raise ProposalError("not_found", "Product no longer exists in this store.")
+    before_state = {
+        "product_id": str(product_id),
+        "price": str(current.price.amount),
+        "compare_at_price": (
+            str(current.compare_at_price.amount) if current.compare_at_price else None
+        ),
+        "quantity": current.quantity,
+    }
+
+    dto = UpdateProductDTO(
+        price=_to_decimal(params["price"]) if params.get("price") is not None else None,
+        compare_at_price=(
+            _to_decimal(params["compare_at_price"])
+            if params.get("compare_at_price") is not None
+            else None
+        ),
+        quantity=params.get("quantity"),
+    )
+    use_case = UpdateProductUseCase(
+        product_repository=product_repo,
+        store_repository=StoreRepository(session),
+    )
+    updated = await use_case.execute(product_id, dto, staff_id)
+    return {
+        "summary": f"Updated product {updated.name}",
+        "after_state": {
+            "product_id": str(product_id),
+            "price": str(updated.price),
+            "compare_at_price": (
+                str(updated.compare_at_price) if updated.compare_at_price else None
+            ),
+            "quantity": updated.quantity,
+        },
+        "before_state": before_state,
+        "result": {"product_id": str(product_id), "name": updated.name},
+    }
+
+
+async def _undo_create_discount(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    """Undo a created coupon by deleting it."""
+    from src.application.use_cases.coupons.delete_coupon import DeleteCouponUseCase
+
+    coupon_id = (audit.after_state or {}).get("coupon_id")
+    if not coupon_id:
+        raise NothingToUndoError("nothing_to_undo", "No coupon recorded to remove.")
+    use_case = DeleteCouponUseCase(
+        coupon_repository=CouponRepository(session),
+        store_repository=StoreRepository(session),
+    )
+    await use_case.execute(UUID(coupon_id), staff_id)
+    return {"undid": "create_discount", "deleted_coupon_id": coupon_id}
+
+
+async def _undo_update_product(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    """Undo a product update by restoring the audited before values."""
+    from src.application.dto.product import UpdateProductDTO
+    from src.application.use_cases.products.update_product import (
+        UpdateProductUseCase,
+    )
+    from src.infrastructure.repositories.product_repository import ProductRepository
+
+    before = audit.before_state or {}
+    product_id = before.get("product_id")
+    if not product_id:
+        raise NothingToUndoError("nothing_to_undo", "No prior product state recorded.")
+    dto = UpdateProductDTO(
+        price=_to_decimal(before["price"]) if before.get("price") is not None else None,
+        compare_at_price=(
+            _to_decimal(before["compare_at_price"])
+            if before.get("compare_at_price") is not None
+            else None
+        ),
+        quantity=before.get("quantity"),
+    )
+    use_case = UpdateProductUseCase(
+        product_repository=ProductRepository(session),
+        store_repository=StoreRepository(session),
+    )
+    await use_case.execute(UUID(product_id), dto, staff_id)
+    return {"undid": "update_product", "product_id": product_id}
+
+
 # tool_name → applier. Tools listed here follow the generic (non-theme) path.
 ACTION_APPLIERS = {
     "create_discount": _apply_create_discount,
+    "update_product": _apply_update_product,
+}
+
+# tool_name → undoer for applied action audits. Anything not listed here that
+# reaches undo_last follows the theme-restore path, so EVERY action applier must
+# have an entry (else its audit's before_state would be pushed into the theme).
+ACTION_UNDOERS = {
+    "create_discount": _undo_create_discount,
+    "update_product": _undo_update_product,
 }
 
 
@@ -212,7 +324,9 @@ async def _apply_action_proposal(
             conversation_id=conversation_id,
             tool_name=proposal.tool_name,
             params=proposal.params,
-            before_state={},
+            # Appliers report before_state when the action mutates existing data
+            # (e.g. update_product) — that is what makes the action undo-capable.
+            before_state=outcome.get("before_state", {}),
             after_state=outcome["after_state"],
             result=AuditResult.APPLIED,
             model_used=model_used,
@@ -368,7 +482,43 @@ async def undo_last(
 ) -> dict:
     audit_repo = AuditRepository(session)
     last = await audit_repo.get_last_applied_for_conversation(conversation_id)
-    if last is None or not last.before_state:
+    if last is None:
+        raise NothingToUndoError(
+            "nothing_to_undo", "There is no applied change to undo."
+        )
+
+    # Action audits (Pillar 2) undo through their registered undoer — NEVER the
+    # theme path (their before_state is domain data, not a theme draft).
+    if last.tool_name in ACTION_UNDOERS:
+        outcome = await ACTION_UNDOERS[last.tool_name](
+            session, store_id=store_id, staff_id=staff_id, audit=last
+        )
+        audit = await audit_repo.add(
+            AuditRecord(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                staff_id=staff_id,
+                conversation_id=conversation_id,
+                tool_name="undo",
+                params={"undid_audit_id": str(last.id), **outcome},
+                # Deliberately empty: if this undo record ever becomes "last",
+                # the `not before_state` guard below stops a second undo instead
+                # of pushing action data through the theme-restore path.
+                before_state={},
+                after_state=last.before_state,
+                result=AuditResult.APPLIED,
+                model_used=model_used,
+            )
+        )
+        logger.info(
+            "agent_action_undone",
+            conversation_id=str(conversation_id),
+            tool=last.tool_name,
+            audit_id=str(audit.id),
+        )
+        return {"undone": True, "audit_id": str(audit.id)}
+
+    if not last.before_state:
         raise NothingToUndoError(
             "nothing_to_undo", "There is no applied change to undo."
         )
