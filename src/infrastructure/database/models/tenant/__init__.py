@@ -117,6 +117,9 @@ from src.infrastructure.database.models.tenant.theme import (
     ThemeModel,
     ThemeVersionModel,
 )
+from src.infrastructure.database.models.tenant.theme_error_event import (
+    ThemeErrorEventModel,
+)
 from src.infrastructure.database.models.tenant.theme_update_notification import (
     ThemeUpdateNotificationModel,
 )
@@ -211,6 +214,7 @@ __all__ = [
     "ThemeVersionModel",
     "StoreThemeModel",
     "ThemeAssetModel",
+    "ThemeErrorEventModel",
     "ThemeUpdateNotificationModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",

@@ -28,6 +28,7 @@ from src.infrastructure.repositories import (
     ShippingZoneRepository,
     StoreRepository,
     StoreThemeRepository,
+    ThemeErrorEventRepository,
     ThemeRepository,
     ThemeVersionRepository,
     TwoFactorRepository,
@@ -328,6 +329,13 @@ def get_page_view_repository(
 ) -> PageViewRepository:
     """Get page view repository dependency."""
     return PageViewRepository(session)
+
+
+def get_theme_error_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ThemeErrorEventRepository:
+    """Get theme error event repository dependency."""
+    return ThemeErrorEventRepository(session)
 
 
 def get_analytics_rollup_repository(

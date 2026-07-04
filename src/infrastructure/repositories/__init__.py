@@ -75,6 +75,9 @@ from src.infrastructure.repositories.store_theme_repository import StoreThemeRep
 from src.infrastructure.repositories.theme_customization_version_repository import (
     ThemeCustomizationVersionRepository,
 )
+from src.infrastructure.repositories.theme_error_event_repository import (
+    ThemeErrorEventRepository,
+)
 from src.infrastructure.repositories.theme_repository import ThemeRepository
 from src.infrastructure.repositories.theme_version_repository import (
     ThemeVersionRepository,
@@ -106,6 +109,7 @@ __all__ = [
     "ThemeRepository",
     "MarketplaceRepository",
     "ThemeCustomizationVersionRepository",
+    "ThemeErrorEventRepository",
     "ThemeVersionRepository",
     "TwoFactorRepository",
     "CategoryRepository",

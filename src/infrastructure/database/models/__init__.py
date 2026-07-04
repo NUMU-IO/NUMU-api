@@ -87,6 +87,7 @@ from src.infrastructure.database.models.tenant import (
     StoreModel,
     StoreThemeModel,
     ThemeAssetModel,
+    ThemeErrorEventModel,
     ThemeModel,
     ThemeVersionModel,
     TikTokEventLogModel,
@@ -157,6 +158,7 @@ __all__ = [
     "ThemeVersionModel",
     "StoreThemeModel",
     "ThemeAssetModel",
+    "ThemeErrorEventModel",
     # NUMU Agent
     "AgentConversationModel",
     "AgentTurnModel",
