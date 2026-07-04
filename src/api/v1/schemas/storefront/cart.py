@@ -11,6 +11,9 @@ class AddCartItemRequest(BaseModel):
     product_id: UUID
     variant_id: UUID | None = None
     quantity: int = Field(default=1, ge=1, le=999)
+    # Picker axes ({"Color": "Black", "Size": "L"}) — variant_name fallback for
+    # products without resolvable variant rows (legacy attributes-JSON shape).
+    selected_options: dict[str, str] | None = None
 
 
 class UpdateCartItemRequest(BaseModel):

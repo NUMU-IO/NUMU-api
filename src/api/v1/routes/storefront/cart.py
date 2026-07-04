@@ -328,6 +328,14 @@ async def add_cart_item(
             )
         add_qty = min(request.quantity, allowed)
 
+    # Fallback label: the picker's selected axes for products whose variant
+    # rows carry no option_values (or none resolved) — mirrors the SDK alias
+    # route so the choice survives into cart/checkout/order/email/invoice.
+    if not variant_name and request.selected_options:
+        variant_name = (
+            " / ".join(str(v) for v in request.selected_options.values() if v) or None
+        )
+
     new_item = CartItem(
         product_id=request.product_id,
         product_name=product.name,
