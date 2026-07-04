@@ -61,6 +61,7 @@ from src.api.v1.routes.stores import (
     marketing_send_times as marketing_send_times_module,
 )
 from src.api.v1.routes.stores import menus as menus_module
+from src.api.v1.routes.stores import metafields as metafields_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
@@ -85,6 +86,7 @@ from src.api.v1.routes.stores import (
 from src.api.v1.routes.stores import stores as stores_module
 from src.api.v1.routes.stores import theme_code as theme_code_module
 from src.api.v1.routes.stores import theme_editor_v3 as theme_editor_v3_module
+from src.api.v1.routes.stores import theme_errors as theme_errors_module
 from src.api.v1.routes.stores import theme_installations as theme_installations_module
 from src.api.v1.routes.stores import theme_updates as theme_updates_module
 from src.api.v1.routes.stores import themes as themes_module
@@ -164,6 +166,7 @@ router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(menus_module.router, tags=["Store Menus"])
 router.include_router(pages_module.router, tags=["Store Pages"])
+router.include_router(metafields_module.router, tags=["Store Metafields"])
 router.include_router(theme_updates_module.router, tags=["Store Theme Updates"])
 router.include_router(promotions_module.router, tags=["Store Promotions"])
 router.include_router(settings_module.router, tags=["Store Settings"])
@@ -189,6 +192,7 @@ router.include_router(
 router.include_router(ai_module.router, tags=["Store AI"])
 router.include_router(themes_module.router, tags=["Store Themes"])
 router.include_router(theme_installations_module.router, tags=["Store Themes V2"])
+router.include_router(theme_errors_module.router, tags=["Store Theme Errors"])
 router.include_router(theme_code_module.router, tags=["Store Theme Code"])
 router.include_router(theme_editor_v3_module.router, tags=["Theme Editor V3"])
 router.include_router(customizer_undo_module.router, tags=["Theme Editor V3 — Undo"])

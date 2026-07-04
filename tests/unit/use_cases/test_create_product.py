@@ -164,6 +164,61 @@ class TestCreateProductUseCase:
         self.mock_product_repo.create.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_create_product_persists_template_suffix(self):
+        """template_suffix on the create DTO reaches the persisted entity."""
+        self.mock_store_repo.get_by_id.return_value = self.sample_store
+        self.mock_product_repo.create.return_value = Product(
+            id=uuid4(),
+            store_id=self.store_id,
+            name="Wholesale Product",
+            slug="wholesale-product",
+            price=Money(amount=Decimal("49.99"), currency=Currency.USD),
+            template_suffix="wholesale",
+        )
+
+        dto = CreateProductDTO(
+            name="Wholesale Product",
+            price=Decimal("49.99"),
+            price_currency="USD",
+            template_suffix="wholesale",
+        )
+
+        result = await self.use_case.execute(
+            dto=dto,
+            store_id=self.store_id,
+            user_id=self.user_id,
+        )
+
+        # The entity handed to the repository carries the suffix ...
+        persisted = self.mock_product_repo.create.call_args.args[0]
+        assert persisted.template_suffix == "wholesale"
+        # ... and the returned DTO exposes it for read-back.
+        assert result.template_suffix == "wholesale"
+
+    @pytest.mark.asyncio
+    async def test_create_product_without_template_suffix_defaults_none(self):
+        """Omitting template_suffix persists null (base template)."""
+        self.mock_store_repo.get_by_id.return_value = self.sample_store
+        self.mock_product_repo.create.return_value = Product(
+            id=uuid4(),
+            store_id=self.store_id,
+            name="Plain Product",
+            slug="plain-product",
+            price=Money(amount=Decimal("10.00"), currency=Currency.USD),
+        )
+
+        dto = CreateProductDTO(name="Plain Product", price=Decimal("10.00"))
+
+        await self.use_case.execute(
+            dto=dto,
+            store_id=self.store_id,
+            user_id=self.user_id,
+        )
+
+        persisted = self.mock_product_repo.create.call_args.args[0]
+        assert persisted.template_suffix is None
+
+    @pytest.mark.asyncio
     async def test_create_product_with_compare_price(self):
         """Test product creation with compare-at price."""
         self.mock_store_repo.get_by_id.return_value = self.sample_store

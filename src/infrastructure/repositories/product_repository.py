@@ -64,6 +64,7 @@ class ProductRepository(IProductRepository):
             metadata=model.extra_data or {},
             seo_title=model.seo_title,
             seo_description=model.seo_description,
+            template_suffix=model.template_suffix,
             meta_catalog_id=model.meta_catalog_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -99,6 +100,7 @@ class ProductRepository(IProductRepository):
             extra_data=entity.metadata,
             seo_title=entity.seo_title,
             seo_description=entity.seo_description,
+            template_suffix=entity.template_suffix,
             meta_catalog_id=entity.meta_catalog_id,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
@@ -177,6 +179,7 @@ class ProductRepository(IProductRepository):
             model.extra_data = entity.metadata
             model.seo_title = entity.seo_title
             model.seo_description = entity.seo_description
+            model.template_suffix = entity.template_suffix
             model.meta_catalog_id = entity.meta_catalog_id
             await self.session.flush()
             await self.session.refresh(model)
@@ -238,17 +241,29 @@ class ProductRepository(IProductRepository):
 
     async def get_by_category(
         self,
+        store_id: UUID,
         category_id: UUID,
         skip: int = 0,
         limit: int = 100,
+        is_active: bool | None = None,
     ) -> list[Product]:
-        """Get all products in a category."""
-        result = await self.session.execute(
-            select(ProductModel)
-            .where(ProductModel.category_id == category_id)
-            .offset(skip)
-            .limit(limit)
+        """Get products in a category, scoped to a store.
+
+        store_id scoping is required: category ids are not guaranteed unique
+        across tenants, so an unscoped lookup leaks another store's catalog
+        (including unpublished drafts). Pass ``is_active=True`` from public
+        storefront callers to restrict to published products.
+        """
+        query = select(ProductModel).where(
+            ProductModel.store_id == store_id,
+            ProductModel.category_id == category_id,
         )
+        # Mirror list_with_filters: the legacy is_active boolean maps onto the
+        # 3-state status column (ACTIVE for published, DRAFT otherwise).
+        if is_active is not None:
+            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
+            query = query.where(ProductModel.status == target_status)
+        result = await self.session.execute(query.offset(skip).limit(limit))
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def search(

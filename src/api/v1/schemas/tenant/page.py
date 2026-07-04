@@ -28,6 +28,12 @@ class CreatePageRequest(BaseModel):
     )
     is_published: bool = Field(True)
     template: str = Field("page", max_length=64)
+    template_suffix: str | None = Field(
+        default=None,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,31}$",
+        description="Alternate template variant suffix (Shopify-style); null = base template.",
+    )
 
 
 class UpdatePageRequest(BaseModel):
@@ -38,6 +44,12 @@ class UpdatePageRequest(BaseModel):
     seo: dict[str, Any] | None = Field(None)
     is_published: bool | None = Field(None)
     template: str | None = Field(None, max_length=64)
+    template_suffix: str | None = Field(
+        default=None,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,31}$",
+        description="Alternate template variant suffix (Shopify-style); null = base template.",
+    )
 
 
 class PageResponse(BaseModel):
@@ -53,5 +65,9 @@ class PageResponse(BaseModel):
     seo: dict[str, Any] = Field(description="SEO overrides")
     is_published: bool = Field(description="Whether the page is visible")
     template: str = Field(description="Theme template key")
+    template_suffix: str | None = Field(
+        default=None,
+        description="Alternate template variant suffix; null = base template.",
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")

@@ -78,6 +78,9 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     seo_title: Mapped[str | None] = mapped_column(String(60), nullable=True)
     seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
+    # Alternate template variant key suffix (Shopify-style); null = base template.
+    template_suffix: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Meta Commerce Catalog product ID — when the merchant has synced
     # their product catalog to Meta Business Manager, the storefront
     # uses this value as the `content_ids` field on ViewContent /
@@ -116,6 +119,12 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Read-only from the ORM's perspective. The `immutable_text_array_to_string`
     # wrapper is defined in that migration; the built-in `array_to_string` is
     # rejected as STABLE in a STORED expression on newer Postgres.
+    #
+    # `deferred=True` keeps this multi-KB tsvector OUT of the default
+    # `SELECT products.*` — the storefront loads products constantly and never
+    # reads this value (FTS references the column explicitly in WHERE / ts_rank,
+    # which is unaffected by deferral). Shipping it on every product read was a
+    # large, pointless chunk of Supabase egress.
     search_vector: Mapped[str | None] = mapped_column(
         TSVECTOR,
         Computed(
@@ -126,6 +135,7 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
             persisted=True,
         ),
         nullable=True,
+        deferred=True,
     )
 
     # Relationships

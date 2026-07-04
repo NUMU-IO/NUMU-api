@@ -165,6 +165,12 @@ class CreateProductRequest(BaseModel):
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
+    template_suffix: str | None = Field(
+        default=None,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,31}$",
+        description="Alternate template variant suffix (Shopify-style); null = base template.",
+    )
     meta_catalog_id: str | None = Field(
         None,
         max_length=255,
@@ -289,6 +295,12 @@ class UpdateProductRequest(BaseModel):
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
+    template_suffix: str | None = Field(
+        default=None,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,31}$",
+        description="Alternate template variant suffix (Shopify-style); null = base template.",
+    )
     meta_catalog_id: str | None = Field(
         None,
         max_length=255,
@@ -392,6 +404,14 @@ class ProductResponse(BaseModel):
         max_length=160,
         description="Per-product SEO description override (defaults to short_description).",
     )
+    # Alternate template variant suffix (Shopify-style) → the storefront
+    # resolves the resource to the ``<route>.<suffix>`` template variant.
+    # Null = base template.
+    template_suffix: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Alternate template variant suffix; null = base template.",
+    )
     # Phase 8.1 — option axes (e.g. [{name:"Size",values:["S","M","L"]}]).
     # Empty list when the product has no variants (single SKU). Themes
     # branch on `options.length > 0` to render a variant picker.
@@ -406,6 +426,14 @@ class ProductResponse(BaseModel):
     variants: list[ProductVariantSummary] = Field(
         default_factory=list,
         description="Purchasable variants — at least one per product",
+    )
+    # Typed custom data (metafields foundation). PUBLIC definitions only,
+    # each `{namespace, key, type, value}` with the value already coerced to
+    # its declared type. Empty list when the product has no public metafields.
+    # Themes read these instead of the untyped `attributes` blob.
+    metafields: list[dict] = Field(
+        default_factory=list,
+        description="Public typed metafields ({namespace, key, type, value})",
     )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")

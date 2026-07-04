@@ -237,6 +237,7 @@ def _public_page(page: Any) -> dict[str, Any]:
         "body": page.body,
         "seo": page.seo,
         "template": page.template,
+        "template_suffix": page.template_suffix,
     }
 
 
@@ -280,6 +281,7 @@ async def get_store_page_public(
     handle: Annotated[str, Path(description="Page handle")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     page_repo: Annotated[PageRepository, Depends(get_page_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SuccessResponse[dict[str, Any]]:
     """A single published page by handle, for ``/pages/<handle>``."""
     store = await store_repo.get_by_id(store_id)
@@ -289,9 +291,11 @@ async def get_store_page_public(
     page = await page_repo.get_by_handle(store_id, handle)
     if not page or not page.is_published:
         raise EntityNotFoundError("Page", handle)
-    return SuccessResponse(
-        data=_public_page(page), message="Page retrieved successfully"
+    payload = _public_page(page)
+    payload["metafields"] = await _resolve_public_metafields(
+        session, store_id, "page", page.id
     )
+    return SuccessResponse(data=payload, message="Page retrieved successfully")
 
 
 # Router for routes that don't require a store_id path param
@@ -814,10 +818,14 @@ async def browse_products(
             page_size=limit,
         )
     elif category_id:
+        # store_id + is_active are required: an unscoped category lookup would
+        # return another tenant's products, including unpublished drafts.
         result = await use_case.by_category(
+            store_id=store_id,
             category_id=category_id,
             page=page,
             page_size=limit,
+            is_active=True,
         )
     else:
         # Only show active products in storefront
@@ -891,6 +899,26 @@ async def browse_products(
                 },
                 "message": "Products retrieved successfully",
             }
+        )
+
+    # Populate the cache on the miss path so subsequent identical requests
+    # skip the DB. Only the cacheable path lands here: search bypasses the
+    # cache (use_cache=False) and sparse-fieldset responses returned above
+    # (their key omits `fields`, so caching them would poison the full
+    # payload). Mirror the exact key params used by get_products above.
+    if use_cache:
+        await product_cache.set_products(
+            store_id=store_id,
+            category_id=category_id,
+            page=page,
+            limit=limit,
+            data={
+                "items": products,
+                "total": result.total,
+                "page": page,
+                "page_size": limit,
+                "total_pages": total_pages,
+            },
         )
 
     return SuccessResponse(
@@ -1035,6 +1063,7 @@ async def get_product_by_slug(
     product_slug: Annotated[str, Path(description="Product slug or UUID")],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get a product by slug or UUID (public).
@@ -1042,11 +1071,23 @@ async def get_product_by_slug(
     We accept both so links minted by Next.js before the slug migration
     (bare UUIDs in `/product/<uuid>`) keep resolving, and the new
     `/product/<slug>` URLs work without a second round-trip.
+
+    Cached (30-min TTL) keyed by store + the request identifier. Product
+    create/update/delete invalidate via the ``products:store:{id}:*``
+    pattern sweep, so slug- and UUID-addressed entries both drop.
     """
     # Verify store exists
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
+
+    # Cache-aside: PDP is slug-first, so key by the identifier the caller used.
+    cached = await product_cache.get_product(store_id, product_slug)
+    if cached is not None:
+        return SuccessResponse(
+            data=ProductResponse(**cached),
+            message="Product retrieved successfully",
+        )
 
     product = None
     # Try UUID first — cheap string check before spending a parse exception.
@@ -1073,39 +1114,51 @@ async def get_product_by_slug(
     # `variants.length === 0` to fall back to product-level price.
     variant_summaries = await _resolve_variants_for_product(session, product.id)
 
-    return SuccessResponse(
-        data=ProductResponse(
-            id=str(product.id),
-            store_id=str(product.store_id),
-            name=product.name,
-            slug=product.slug,
-            description=product.description,
-            short_description=product.short_description,
-            product_type=product.product_type,
-            status=product.status,
-            price=str(product.price.amount),
-            price_currency=product.price.currency.value,
-            compare_at_price=str(product.compare_at_price.amount)
-            if product.compare_at_price
-            else None,
-            cost_price=None,  # Don't expose cost price in storefront
-            sku=product.sku,
-            quantity=product.quantity,
-            is_in_stock=product.is_in_stock,
-            is_low_stock=product.is_low_stock,
-            is_on_sale=product.is_on_sale,
-            category_id=str(product.category_id) if product.category_id else None,
-            images=product.images,
-            tags=product.tags,
-            attributes=product.attributes,
-            seo_title=product.seo_title,
-            seo_description=product.seo_description,
-            options=_resolve_options_for_product(product),
-            variants=variant_summaries,
-            meta_catalog_id=product.meta_catalog_id,
-            created_at=str(product.created_at),
-            updated_at=str(product.updated_at),
+    response = ProductResponse(
+        id=str(product.id),
+        store_id=str(product.store_id),
+        name=product.name,
+        slug=product.slug,
+        description=product.description,
+        short_description=product.short_description,
+        product_type=product.product_type,
+        status=product.status,
+        price=str(product.price.amount),
+        price_currency=product.price.currency.value,
+        compare_at_price=str(product.compare_at_price.amount)
+        if product.compare_at_price
+        else None,
+        cost_price=None,  # Don't expose cost price in storefront
+        sku=product.sku,
+        quantity=product.quantity,
+        is_in_stock=product.is_in_stock,
+        is_low_stock=product.is_low_stock,
+        is_on_sale=product.is_on_sale,
+        category_id=str(product.category_id) if product.category_id else None,
+        images=product.images,
+        tags=product.tags,
+        attributes=product.attributes,
+        seo_title=product.seo_title,
+        seo_description=product.seo_description,
+        template_suffix=product.template_suffix,
+        options=_resolve_options_for_product(product),
+        variants=variant_summaries,
+        meta_catalog_id=product.meta_catalog_id,
+        metafields=await _resolve_public_metafields(
+            session, store_id, "product", product.id
         ),
+        created_at=str(product.created_at),
+        updated_at=str(product.updated_at),
+    )
+
+    # Cache the fully-assembled payload (mode="json" so it round-trips
+    # through Redis' JSON serialization back into ProductResponse).
+    await product_cache.set_product(
+        store_id, product_slug, response.model_dump(mode="json")
+    )
+
+    return SuccessResponse(
+        data=response,
         message="Product retrieved successfully",
     )
 
@@ -1194,6 +1247,45 @@ async def _resolve_variants_for_product(
         }
         for v in variants
     ]
+
+
+async def _resolve_public_metafields(
+    session: AsyncSession,
+    store_id: UUID,
+    owner_type: str,
+    owner_id: UUID,
+) -> list[dict]:
+    """Public typed metafields for a resource, shaped for theme consumption.
+
+    Returns ``[{namespace, key, type, value}]`` with each value already
+    coerced to its declared Python type (number → int/float, boolean → bool,
+    json → dict/list, …). Only PUBLIC definitions are exposed.
+
+    Best-effort: any error resolving metafields returns an empty list rather
+    than failing the whole detail payload — a PDP must still render if the
+    metafields join hiccups (e.g. before the migration has run).
+    """
+    try:
+        from src.core.entities.metafield import MetafieldOwnerType
+        from src.infrastructure.repositories.metafield_repository import (
+            MetafieldValueRepository,
+        )
+
+        repo = MetafieldValueRepository(session)
+        resolved = await repo.list_public_for_owner(
+            store_id, MetafieldOwnerType(owner_type), owner_id
+        )
+        return [
+            {
+                "namespace": r.namespace,
+                "key": r.key,
+                "type": r.type.value,
+                "value": r.value,
+            }
+            for r in resolved
+        ]
+    except Exception:
+        return []
 
 
 class BackInStockSubscribeRequest(BaseModel):
@@ -1316,9 +1408,11 @@ async def get_related_products(
     # already filters to active products via the storefront use case.
     use_case = ListProductsUseCase(product_repository=product_repo)
     fetched = await use_case.by_category(
+        store_id=store_id,
         category_id=source.category_id,
         page=1,
         page_size=limit + 1,
+        is_active=True,
     )
     siblings = [p for p in fetched.items if p.id != product_id][:limit]
 
@@ -1387,6 +1481,7 @@ async def browse_categories(
                 "image_url": r.image_url,
                 "parent_id": str(r.parent_id) if r.parent_id else None,
                 "position": r.position,
+                "template_suffix": r.template_suffix,
                 "product_count": r.product_count,
             }
             for r in results

@@ -256,6 +256,33 @@ def create_event_bus() -> EventBus:
             exc,
         )
 
+    # Products — cache invalidation for the storefront listing + detail
+    # slots. Deferred dispatch runs these post-commit, so a racing read
+    # can't re-poison the cache with the pre-commit row. Lazy Redis like
+    # the promotion block above so import-time envs without Redis don't crash.
+    try:
+        from src.infrastructure.cache.product_cache import get_product_cache
+        from src.infrastructure.events.handlers.product_cache_invalidator import (
+            ProductCacheInvalidator,
+        )
+
+        _product_invalidator = ProductCacheInvalidator(get_product_cache())
+        # NOTE: the inline suppressions below silence the same handler-variance
+        # friction every subscribe() call in this file hits — subscribe() wants
+        # Callable[[DomainEvent], ...] but handlers are typed against the
+        # concrete event subtype. Suppressed so the new lines stay mypy-clean;
+        # the proper fix is a generic EventBus.subscribe (out of scope here).
+        bus.subscribe(ProductCreatedEvent, _product_invalidator.on_created)  # type: ignore[arg-type]
+        bus.subscribe(ProductUpdatedEvent, _product_invalidator.on_updated)  # type: ignore[arg-type]
+        bus.subscribe(ProductDeletedEvent, _product_invalidator.on_deleted)  # type: ignore[arg-type]
+    except Exception as exc:  # noqa: BLE001 — startup tolerates missing Redis
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(
+            "product_cache_invalidator_disabled error=%r — product cache will "
+            "only self-expire on TTL",
+            exc,
+        )
+
     # Staff events - invalidate cache + activity log + notifications
     bus.subscribe(StaffInvitedEvent, handle_staff_invited)
     bus.subscribe(StaffActivatedEvent, handle_staff_activated)

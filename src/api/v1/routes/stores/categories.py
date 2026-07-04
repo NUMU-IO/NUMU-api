@@ -49,6 +49,7 @@ def _category_response(result) -> CategoryResponse:
         parent_id=str(result.parent_id) if result.parent_id else None,
         position=result.position,
         is_active=result.is_active,
+        template_suffix=result.template_suffix,
         product_count=result.product_count,
         extra_data=result.metadata if result.metadata else None,
         created_at=str(result.created_at),
@@ -83,6 +84,7 @@ async def create_category(
         parent_id=UUID(request.parent_id) if request.parent_id else None,
         position=request.position,
         is_active=request.is_active,
+        template_suffix=request.template_suffix,
         extra_data=request.extra_data,
     )
 
@@ -179,6 +181,10 @@ async def update_category(
         parent_id=UUID(request.parent_id) if request.parent_id else None,
         position=request.position,
         is_active=request.is_active,
+        template_suffix=request.template_suffix,
+        # Distinguish an explicit ``template_suffix: null`` (clear the override)
+        # from an omitted field (leave it alone) on a partial PATCH.
+        template_suffix_provided="template_suffix" in request.model_fields_set,
         extra_data=request.extra_data,
     )
 

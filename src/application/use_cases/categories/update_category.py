@@ -81,6 +81,12 @@ class UpdateCategoryUseCase:
             category.position = dto.position
         if dto.is_active is not None:
             category.is_active = dto.is_active
+        # `template_suffix` is nullable AND clearable: only touch it when the
+        # caller actually sent the key (route sets `template_suffix_provided`
+        # from the request's `model_fields_set`) so an explicit null clears the
+        # variant while an omitted field leaves it untouched.
+        if dto.template_suffix_provided:
+            category.template_suffix = dto.template_suffix
         if dto.extra_data is not None:
             category.update_metadata(**dto.extra_data)
 

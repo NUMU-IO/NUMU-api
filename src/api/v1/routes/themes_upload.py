@@ -26,6 +26,8 @@ from pydantic import BaseModel
 
 from src.api.dependencies.auth import get_current_user_id
 from src.api.responses import SuccessResponse
+from src.infrastructure.cache import RedisCacheService
+from src.infrastructure.cache.theme_build_store import get_theme_build_store
 
 logger = logging.getLogger(__name__)
 
@@ -136,14 +138,25 @@ async def upload_theme_zip(
     with open(zip_path, "wb") as f:
         f.write(contents)
 
-    # Queue the build
+    # Queue the build. Seed the build-status key in Redis BEFORE dispatch so
+    # the cross-process worker's update-merge lands on an existing key and the
+    # poller can read the queued state immediately (the worker + poller run in
+    # different processes on prod, so an in-process dict never worked there).
     from src.infrastructure.messaging.tasks.theme_upload_tasks import (
-        _update_status,
         build_theme_from_zip,
     )
 
+    build_store = get_theme_build_store()
+
     if queue_build:
-        _update_status(build_id, status="queued", uploader_id=str(current_user_id))
+        await build_store.set(
+            build_id,
+            {
+                "build_id": build_id,
+                "status": "queued",
+                "uploader_id": str(current_user_id),
+            },
+        )
         build_theme_from_zip.delay(
             build_id=build_id,
             zip_path=zip_path,
@@ -157,7 +170,14 @@ async def upload_theme_zip(
         # responsible for kicking off whatever downstream pipeline needs
         # the ZIP (typically marketplace submit_version, which has its
         # own build worker that won't delete the file out from under us).
-        _update_status(build_id, status="stored", uploader_id=str(current_user_id))
+        await build_store.set(
+            build_id,
+            {
+                "build_id": build_id,
+                "status": "stored",
+                "uploader_id": str(current_user_id),
+            },
+        )
         upload_status = "stored"
         message = "Theme upload accepted; awaiting downstream consumer"
 
@@ -197,11 +217,7 @@ async def get_build_status(
     """Return the status of a theme build. Poll every 2s until status is
     `complete` or `failed`.
     """
-    from src.infrastructure.messaging.tasks.theme_upload_tasks import (
-        get_build_status as _get,
-    )
-
-    state = _get(build_id)
+    state = await get_theme_build_store().get(build_id)
     if not state:
         raise HTTPException(404, f"Build {build_id} not found")
 
@@ -210,23 +226,26 @@ async def get_build_status(
 
 # ── Preview token validation ──────────────────────────────────────────────────
 
-# In-memory preview token store (TODO: move to Redis in production).
-# Each token maps to { installation_id, theme_id, version_id, store_id, user_id, expires_at }
-_preview_tokens: dict[str, dict] = {}
+# Preview tokens live in Redis (with a TTL) so they survive across the two
+# prod API workers — the old in-process dict only worked when the SAME worker
+# both issued and validated a token; on prod the issue and validate calls land
+# on different workers, so ~half of previews 401'd. Redis' native key expiry
+# replaces the old manual sweep. Mirrors the Redis-backed ThemeBuildStore.
+_PREVIEW_TOKEN_PREFIX = "theme_preview_token:"
+
+_preview_token_cache: RedisCacheService | None = None
 
 
-def _cleanup_expired_tokens() -> None:
-    """Remove expired preview tokens."""
-    from datetime import UTC, datetime
+def _get_preview_token_cache() -> RedisCacheService:
+    """Process-wide RedisCacheService for preview tokens (lazy singleton).
 
-    now = datetime.now(UTC)
-    expired = [
-        token
-        for token, data in _preview_tokens.items()
-        if data.get("expires_at") and data["expires_at"] < now
-    ]
-    for token in expired:
-        _preview_tokens.pop(token, None)
+    Degrades to a cache-miss on Redis errors (see RedisCacheService), so a
+    Redis outage fails preview validation closed rather than 500-ing.
+    """
+    global _preview_token_cache
+    if _preview_token_cache is None:
+        _preview_token_cache = RedisCacheService()
+    return _preview_token_cache
 
 
 @router.post(
@@ -242,10 +261,10 @@ async def validate_preview_token(
     Called by the Next.js storefront's `/api/preview` route to resolve
     which store + installation the preview belongs to.
     """
-    _cleanup_expired_tokens()
-
-    data = _preview_tokens.get(request.token)
-    if not data:
+    data = await _get_preview_token_cache().get(
+        f"{_PREVIEW_TOKEN_PREFIX}{request.token}"
+    )
+    if not isinstance(data, dict):
         raise HTTPException(401, "Invalid or expired preview token")
 
     return SuccessResponse(
@@ -259,7 +278,7 @@ async def validate_preview_token(
 
 
 # Export a helper so other modules can register preview tokens
-def register_preview_token(
+async def register_preview_token(
     installation_id: str,
     theme_id: str,
     version_id: str,
@@ -267,16 +286,21 @@ def register_preview_token(
     user_id: str,
     ttl_seconds: int = 1800,
 ) -> str:
-    """Create a preview token + store it. Returns the token string."""
-    from datetime import UTC, datetime, timedelta
+    """Create a preview token + store it in Redis with a TTL. Returns the token.
 
+    Async because it performs Redis I/O — callers must ``await`` it. The TTL
+    is enforced by Redis key expiry, so tokens self-clean with no sweep.
+    """
     token = secrets.token_urlsafe(32)
-    _preview_tokens[token] = {
-        "installation_id": installation_id,
-        "theme_id": theme_id,
-        "version_id": version_id,
-        "store_id": store_id,
-        "user_id": user_id,
-        "expires_at": datetime.now(UTC) + timedelta(seconds=ttl_seconds),
-    }
+    await _get_preview_token_cache().set(
+        f"{_PREVIEW_TOKEN_PREFIX}{token}",
+        {
+            "installation_id": installation_id,
+            "theme_id": theme_id,
+            "version_id": version_id,
+            "store_id": store_id,
+            "user_id": user_id,
+        },
+        expire=ttl_seconds,
+    )
     return token

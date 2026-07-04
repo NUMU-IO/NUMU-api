@@ -61,6 +61,10 @@ from src.infrastructure.database.models.tenant.marketing_campaign import (
 from src.infrastructure.database.models.tenant.menu import MenuModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.meta_event_log import MetaEventLogModel
+from src.infrastructure.database.models.tenant.metafield import (
+    MetafieldDefinitionModel,
+    MetafieldValueModel,
+)
 from src.infrastructure.database.models.tenant.network_contribution_log import (
     NetworkContributionLogModel,
 )
@@ -117,6 +121,9 @@ from src.infrastructure.database.models.tenant.theme import (
     ThemeModel,
     ThemeVersionModel,
 )
+from src.infrastructure.database.models.tenant.theme_error_event import (
+    ThemeErrorEventModel,
+)
 from src.infrastructure.database.models.tenant.theme_update_notification import (
     ThemeUpdateNotificationModel,
 )
@@ -163,6 +170,8 @@ __all__ = [
     "LocationModel",
     "MarketingCampaignModel",
     "MenuModel",
+    "MetafieldDefinitionModel",
+    "MetafieldValueModel",
     "MessageLogModel",
     "MetaEventLogModel",
     "TikTokEventLogModel",
@@ -211,6 +220,7 @@ __all__ = [
     "ThemeVersionModel",
     "StoreThemeModel",
     "ThemeAssetModel",
+    "ThemeErrorEventModel",
     "ThemeUpdateNotificationModel",
     "WebhookSubscriptionModel",
     "WebhookDeliveryLogModel",

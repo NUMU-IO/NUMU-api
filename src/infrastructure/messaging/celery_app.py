@@ -167,9 +167,13 @@ celery_app.conf.update(
 
 # Beat schedule for periodic tasks
 celery_app.conf.beat_schedule = {
-    "daily-database-backup": {
+    "weekly-database-backup": {
+        # Weekly (was daily) — a full pg_dump streams the entire DB out of
+        # Supabase, which is billed egress and redundant with Supabase's own
+        # managed backups. Weekly keeps an independent R2 copy for DR without
+        # paying full-DB egress every night. Sundays 03:00 UTC.
         "task": "tasks.backup_database",
-        "schedule": crontab(hour=3, minute=0),  # Every day at 03:00 UTC
+        "schedule": crontab(hour=3, minute=0, day_of_week=0),
     },
     "nightly-trust-network-reconciliation": {
         # P1-1 — backfill any delivery/rto network events missed by a dropped
@@ -180,12 +184,16 @@ celery_app.conf.beat_schedule = {
     },
     "process-slack-alert-queue": {
         "task": "tasks.process_slack_alert_queue",
-        "schedule": 30.0,  # Every 30 seconds
+        "schedule": 60.0,  # Every 60s (was 30s) — halves Celery connection
+        # churn on the NullPool worker; alert latency of <1 min is fine.
         "kwargs": {"max_alerts": 10},
     },
     "retry-pending-webhook-deliveries": {
         "task": "tasks.retry_pending_webhook_deliveries",
-        "schedule": 15.0,  # Every 15 seconds (shortest retry delay is 10s)
+        "schedule": 60.0,  # Every 60s (was 15s) — biggest single churn source
+        # on the NullPool worker (fresh connection per run → asyncpg re-runs
+        # typeinfo_tree/DISCARD ALL each time). Retries still fire well within
+        # webhook SLAs; the per-delivery backoff is unchanged.
     },
     "daily-payment-reconciliation": {
         "task": "tasks.daily_payment_reconciliation",

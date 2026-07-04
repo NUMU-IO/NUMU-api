@@ -28,6 +28,7 @@ from src.infrastructure.repositories import (
     ShippingZoneRepository,
     StoreRepository,
     StoreThemeRepository,
+    ThemeErrorEventRepository,
     ThemeRepository,
     ThemeVersionRepository,
     TwoFactorRepository,
@@ -155,6 +156,28 @@ def get_page_repository(
     from src.infrastructure.repositories.page_repository import PageRepository
 
     return PageRepository(session)
+
+
+def get_metafield_definition_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get metafield definition repository dependency (typed custom data)."""
+    from src.infrastructure.repositories.metafield_repository import (
+        MetafieldDefinitionRepository,
+    )
+
+    return MetafieldDefinitionRepository(session)
+
+
+def get_metafield_value_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get metafield value repository dependency (typed custom data)."""
+    from src.infrastructure.repositories.metafield_repository import (
+        MetafieldValueRepository,
+    )
+
+    return MetafieldValueRepository(session)
 
 
 def get_theme_update_notification_repository(
@@ -328,6 +351,13 @@ def get_page_view_repository(
 ) -> PageViewRepository:
     """Get page view repository dependency."""
     return PageViewRepository(session)
+
+
+def get_theme_error_event_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ThemeErrorEventRepository:
+    """Get theme error event repository dependency."""
+    return ThemeErrorEventRepository(session)
 
 
 def get_analytics_rollup_repository(

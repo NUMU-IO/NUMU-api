@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from src.api.dependencies import (
     get_image_pipeline,
     get_onboarding_repository,
+    get_product_cache_service,
     get_product_repository,
     get_storage_service,
     get_store_repository,
@@ -53,6 +54,7 @@ from src.application.use_cases.products import (
 from src.application.use_cases.products.upload_image import UploadProductImageDTO
 from src.core.entities.product import ProductStatus
 from src.core.entities.store import Store
+from src.infrastructure.cache import ProductCacheService
 from src.infrastructure.events.setup import get_event_bus
 from src.infrastructure.external_services.cloudflare_r2 import (
     CloudflareR2StorageService,
@@ -114,6 +116,7 @@ async def create_product(
         attributes=request.attributes,
         seo_title=request.seo_title,
         seo_description=request.seo_description,
+        template_suffix=request.template_suffix,
     )
 
     result = await use_case.execute(
@@ -191,6 +194,7 @@ async def create_product(
             attributes=result.attributes,
             seo_title=result.seo_title,
             seo_description=result.seo_description,
+            template_suffix=result.template_suffix,
             options=[o.model_dump() for o in (options_in or [])],
             variants=variant_summaries,
             created_at=str(result.created_at),
@@ -568,6 +572,7 @@ async def list_products(
             attributes=product.attributes,
             seo_title=product.seo_title,
             seo_description=product.seo_description,
+            template_suffix=product.template_suffix,
             created_at=str(product.created_at),
             updated_at=str(product.updated_at),
         )
@@ -629,6 +634,7 @@ async def get_product(
             attributes=result.attributes,
             seo_title=result.seo_title,
             seo_description=result.seo_description,
+            template_suffix=result.template_suffix,
             created_at=str(result.created_at),
             updated_at=str(result.updated_at),
         ),
@@ -674,6 +680,11 @@ async def update_product(
         status=request.status,
         seo_title=request.seo_title,
         seo_description=request.seo_description,
+        template_suffix=request.template_suffix,
+        # Distinguish an explicit ``template_suffix: null`` (clear the override)
+        # from an omitted field (leave it alone) so a partial PATCH never wipes
+        # the merchant's template variant.
+        template_suffix_provided="template_suffix" in request.model_fields_set,
     )
 
     result = await use_case.execute(
@@ -767,6 +778,7 @@ async def update_product(
             attributes=result.attributes,
             seo_title=result.seo_title,
             seo_description=result.seo_description,
+            template_suffix=result.template_suffix,
             options=(
                 [o.model_dump() for o in options_in]
                 if options_in is not None
@@ -847,6 +859,7 @@ async def upload_product_image(
     store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
     image_pipeline: Annotated[ImagePipeline, Depends(get_image_pipeline)],
 ):
     """Upload an image for a product.
@@ -881,6 +894,12 @@ async def upload_product_image(
         store_id=store.id,
         user_id=store.owner_id,
     )
+
+    # The image use case writes via the repository directly (no domain
+    # event), so the ProductCacheInvalidator never fires for it — flush this
+    # product's Redis cache (detail + listing pages) so the storefront
+    # doesn't keep serving the pre-upload image set.
+    await product_cache.invalidate_product(store.id, product_id)
 
     # Step 12 — flush ISR cache so the new image shows up on PDP / PLP
     # without waiting out the 60s revalidate window. The use case result
@@ -932,6 +951,7 @@ async def delete_product_image(
     store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
     storage_service: Annotated[
         CloudflareR2StorageService, Depends(get_storage_service)
     ],
@@ -952,6 +972,10 @@ async def delete_product_image(
         store_id=store.id,
         user_id=store.owner_id,
     )
+
+    # No domain event on image mutation (see upload_product_image) — flush
+    # this product's Redis cache so the deleted image stops being served.
+    await product_cache.invalidate_product(store.id, product_id)
 
     # Step 12 — flush ISR cache so the removed image disappears from
     # PDP / PLP without waiting out the 60s revalidate window. Best-effort:
@@ -1021,6 +1045,7 @@ async def import_products(
     store: Annotated[Store, Depends(verify_store_ownership)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
 ):
     """Import products from a CSV file.
 
@@ -1042,6 +1067,12 @@ async def import_products(
         store_id=store.id,
         user_id=store.owner_id,
     )
+
+    # The bulk importer writes products via the repository directly (no
+    # per-row domain events), so the ProductCacheInvalidator never fires —
+    # sweep the whole store's product cache once so the storefront reflects
+    # the imported/updated rows.
+    await product_cache.invalidate_store_products(store.id)
 
     return SuccessResponse(
         data=ImportResultResponse(

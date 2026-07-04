@@ -58,6 +58,8 @@ class Product(BaseEntity):
     cost_price: Money | None = None
     seo_title: str | None = None
     seo_description: str | None = None
+    # Alternate template variant key suffix (Shopify-style); null = base template.
+    template_suffix: str | None = None
     # Meta Commerce Catalog product ID — pinned by merchant in dashboard
     # so storefront Pixel/CAPI events can reference the Catalog row Meta
     # has on file (enables dynamic ad matching). Null = use product.id.

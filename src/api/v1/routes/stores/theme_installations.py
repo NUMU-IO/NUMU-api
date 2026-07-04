@@ -407,8 +407,8 @@ async def generate_preview_url(
         store_id=store.id, installation_id=UUID(installation_id)
     )
 
-    # Register token in the in-memory store (replace with Redis in prod)
-    token = register_preview_token(
+    # Register the token in Redis (survives across API workers; TTL-expired).
+    token = await register_preview_token(
         installation_id=str(inst.id),
         theme_id=str(inst.theme_id),
         version_id=str(inst.theme_version_id),
