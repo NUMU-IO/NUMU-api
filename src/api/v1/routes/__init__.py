@@ -178,6 +178,9 @@ from src.api.v1.routes.storefront import (
     shipping_router as storefront_shipping_router,
 )
 from src.api.v1.routes.storefront import (
+    theme_error_router as storefront_theme_error_router,
+)
+from src.api.v1.routes.storefront import (
     tracking_router as storefront_tracking_router,
 )
 from src.api.v1.routes.storefront import (
@@ -484,6 +487,13 @@ api_router.include_router(
     storefront_tracking_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Tracking"],
+)
+
+# Storefront - theme error beacon (public, best-effort, scoped to store)
+api_router.include_router(
+    storefront_theme_error_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Theme Errors"],
 )
 
 # Storefront - shipping rate quotes (public, scoped to store, legacy)

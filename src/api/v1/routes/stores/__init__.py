@@ -85,6 +85,7 @@ from src.api.v1.routes.stores import (
 from src.api.v1.routes.stores import stores as stores_module
 from src.api.v1.routes.stores import theme_code as theme_code_module
 from src.api.v1.routes.stores import theme_editor_v3 as theme_editor_v3_module
+from src.api.v1.routes.stores import theme_errors as theme_errors_module
 from src.api.v1.routes.stores import theme_installations as theme_installations_module
 from src.api.v1.routes.stores import theme_updates as theme_updates_module
 from src.api.v1.routes.stores import themes as themes_module
@@ -189,6 +190,7 @@ router.include_router(
 router.include_router(ai_module.router, tags=["Store AI"])
 router.include_router(themes_module.router, tags=["Store Themes"])
 router.include_router(theme_installations_module.router, tags=["Store Themes V2"])
+router.include_router(theme_errors_module.router, tags=["Store Theme Errors"])
 router.include_router(theme_code_module.router, tags=["Store Theme Code"])
 router.include_router(theme_editor_v3_module.router, tags=["Theme Editor V3"])
 router.include_router(customizer_undo_module.router, tags=["Theme Editor V3 — Undo"])
