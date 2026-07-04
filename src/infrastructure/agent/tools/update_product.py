@@ -14,8 +14,8 @@ from typing import Any
 from uuid import UUID
 
 from src.application.agent.tools import ToolContext, ToolResult
-from src.core.logging import get_logger
 from src.core.agent.entities import RiskTier
+from src.core.logging import get_logger
 from src.infrastructure.repositories.product_repository import ProductRepository
 
 logger = get_logger(__name__)
