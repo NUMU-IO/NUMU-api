@@ -39,11 +39,17 @@ class IProductRepository(BaseRepository[Product]):
     @abstractmethod
     async def get_by_category(
         self,
+        store_id: UUID,
         category_id: UUID,
         skip: int = 0,
         limit: int = 100,
+        is_active: bool | None = None,
     ) -> list[Product]:
-        """Get all products in a category."""
+        """Get products in a category, scoped to a store.
+
+        store_id is required to prevent cross-tenant leaks; ``is_active=True``
+        restricts to published products for public storefront callers.
+        """
         ...
 
     @abstractmethod

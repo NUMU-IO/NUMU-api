@@ -10,7 +10,6 @@ This task handles the full pipeline:
 
 import json
 import logging
-import os
 import shutil
 import subprocess
 import tempfile
@@ -223,53 +222,41 @@ def build_external_theme(
 
         _update_build_status(build_id, theme_id=theme_id)
 
-        # ── Step 3: Install dependencies ─────────────────────────────────
+        # ── Steps 3+4: Install + build inside the SAME hardened sandbox ──
+        # SECURITY (Phase 0 RCE fix): installing and building a
+        # merchant-supplied theme executes untrusted code — npm/bun/pnpm
+        # lifecycle hooks, the theme's own build script, and every module it
+        # imports. This must NEVER run directly on the Celery worker, which
+        # holds every tenant's Postgres + R2 credentials. Delegate to the
+        # shared sandbox runner used by the code-editor/ZIP pipeline:
+        #   • production → Docker (`--network=none --read-only --cap-drop=ALL
+        #     --user=1000 --memory=512m`), install happens with
+        #     `--ignore-scripts` inside the image entrypoint;
+        #   • host fallback → `_run_local_build`, which HARD-REFUSES when
+        #     ENVIRONMENT=production so a misconfiguration can't silently
+        #     downgrade isolation (and still passes `--ignore-scripts` in dev).
+        # This replaces the previous host-level `npm/bun/pnpm install` (bun and
+        # pnpm ran WITHOUT --ignore-scripts) + `npm run build` that leaked the
+        # full worker `os.environ` into untrusted code.
         _update_build_status(build_id, status="building")
-        logger.info("Installing dependencies for theme: %s", theme_id)
+        logger.info("Building theme in sandbox: %s", theme_id)
 
-        # Determine package manager
-        has_bun_lock = (theme_dir / "bun.lock").exists() or (
-            theme_dir / "bun.lockb"
-        ).exists()
-        has_pnpm_lock = (theme_dir / "pnpm-lock.yaml").exists()
-
-        if has_bun_lock:
-            install_cmd = ["bun", "install", "--frozen-lockfile"]
-        elif has_pnpm_lock:
-            install_cmd = ["pnpm", "install", "--frozen-lockfile"]
-        else:
-            install_cmd = ["npm", "install", "--ignore-scripts"]
-
-        install_result = subprocess.run(
-            install_cmd,
-            cwd=str(theme_dir),
-            capture_output=True,
-            text=True,
-            timeout=120,
+        from src.infrastructure.messaging.tasks.theme_upload_tasks import (
+            USE_DOCKER,
+            _run_in_docker,
+            _run_local_build,
         )
 
-        if install_result.returncode != 0:
-            raise ValueError(
-                f"Dependency install failed: {install_result.stderr.strip()[:500]}"
-            )
+        dist_dir = theme_dir / "dist"
+        dist_dir.mkdir(exist_ok=True)
 
-        # ── Step 4: Build ────────────────────────────────────────────────
-        logger.info("Building theme: %s", theme_id)
-
-        build_result = subprocess.run(
-            ["npm", "run", "build"],
-            cwd=str(theme_dir),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env={**os.environ, "NODE_ENV": "production"},
+        build_result = (
+            _run_in_docker(theme_dir) if USE_DOCKER else _run_local_build(theme_dir)
         )
-
         if build_result.returncode != 0:
             raise ValueError(f"Build failed: {build_result.stderr.strip()[:500]}")
 
         # Find the output bundle
-        dist_dir = theme_dir / "dist"
         bundle_path = None
         for name in ["theme.js", "theme.mjs", "theme.esm.js"]:
             candidate = dist_dir / name

@@ -88,16 +88,24 @@ class ListProductsUseCase:
 
     async def by_category(
         self,
+        store_id: UUID,
         category_id: UUID,
         page: int = 1,
         page_size: int = 20,
+        is_active: bool | None = None,
     ) -> PaginatedDTO:
-        """List products by category."""
+        """List products by category, scoped to a store.
+
+        store_id is required to prevent cross-tenant leaks; pass
+        ``is_active=True`` from public storefront callers to hide drafts.
+        """
         skip = (page - 1) * page_size
         products = await self.product_repository.get_by_category(
+            store_id=store_id,
             category_id=category_id,
             skip=skip,
             limit=page_size,
+            is_active=is_active,
         )
 
         return PaginatedDTO.create(
