@@ -258,6 +258,23 @@ _BY_NAME_EN: dict[str, Governorate] = {
 }
 _BY_NAME_AR: dict[str, Governorate] = {g.name_ar: g for g in EGYPTIAN_GOVERNORATES}
 
+# Capital-city indexes. The storefront checkout stores the *city* a customer
+# picked (map pin / geocode / free-text) and, when no governorate is set,
+# falls back to sending that city as the governorate_code — relying on this
+# resolver to map a capital onto its governorate. English capitals were already
+# covered via _NAME_ALIASES ("mansoura"→Dakahlia, "tanta"→Gharbia), but the
+# Arabic capitals ("المنصورة", "طنطا", "الزقازيق", …) were never indexed, so
+# Arabic-first checkouts 422'd and showed "No shipping options available".
+# Built from capital_ar/capital_en so all 27 governorates are covered uniformly.
+# Consulted AFTER governorate-name matches so a real governorate name always
+# wins (capitals only fill the gap).
+_BY_CAPITAL_AR: dict[str, Governorate] = {
+    g.capital_ar: g for g in EGYPTIAN_GOVERNORATES
+}
+_BY_CAPITAL_EN: dict[str, Governorate] = {
+    g.capital_en.lower(): g for g in EGYPTIAN_GOVERNORATES
+}
+
 # Extra name aliases for fuzzy matching during legacy data migration.
 # Keys should be .lower().strip() before lookup.
 _NAME_ALIASES: dict[str, str] = {
@@ -390,6 +407,12 @@ def get_governorate_by_name(name: str) -> Governorate | None:
     canonical = _NAME_ALIASES.get(lowered)
     if canonical:
         return _BY_NAME_EN.get(canonical.lower())
+    # Capital-city fallback — a customer's city name maps onto its governorate
+    # (Arabic + English). Runs last so a governorate name always takes priority.
+    if raw in _BY_CAPITAL_AR:
+        return _BY_CAPITAL_AR[raw]
+    if lowered in _BY_CAPITAL_EN:
+        return _BY_CAPITAL_EN[lowered]
     return None
 
 
