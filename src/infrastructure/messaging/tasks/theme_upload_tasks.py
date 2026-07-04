@@ -506,22 +506,13 @@ def _validate_theme_contract(theme_dir: Path) -> dict:
     return manifest
 
 
-# ── Status tracking (Redis-backed, with in-memory fallback) ────────────────────
-
-
-_build_statuses: dict[str, dict] = {}
-
-
-def _update_status(build_id: str, **kwargs) -> None:
-    """Update build status. TODO: back with Redis in production."""
-    if build_id not in _build_statuses:
-        _build_statuses[build_id] = {"build_id": build_id}
-    _build_statuses[build_id].update(kwargs)
-    _build_statuses[build_id]["updated_at"] = datetime.now(UTC).isoformat()
-
-
-def get_build_status(build_id: str) -> dict | None:
-    return _build_statuses.get(build_id)
+# ── Status tracking (Redis-backed) ─────────────────────────────────────────────
+#
+# All build-status writes go through Redis (``ThemeBuildStore`` via
+# ``_redis_status``) so the API workers and the Celery worker — separate
+# processes in prod — share one source of truth. The previous in-process
+# ``_build_statuses`` dict only worked in single-process dev; on prod the
+# poller (a different process than the worker) never saw progress.
 
 
 async def _dispose_engine() -> None:
@@ -541,12 +532,13 @@ async def _dispose_engine() -> None:
 def _redis_status(build_id: str, **kwargs) -> None:
     """Status callback that writes to the Redis build store.
 
-    Used by the code-editor publish path so its existing poller
-    (``GET /themes/external/builds/{build_id}``, Redis-backed) sees progress
-    even though the worker runs in a different process than the API. The
-    marketplace ZIP path keeps the in-memory ``_update_status`` (it polls in
-    the same process). A fresh event loop per call is fine — there are only a
-    handful of status transitions per build.
+    The single status backend for every Celery build worker — code-editor
+    (``build_theme_from_files``), marketplace ZIP (``build_theme_from_zip``),
+    and GitHub (``build_external_theme``) — so their pollers see progress even
+    though each worker runs in a different process than the API. It performs an
+    update-merge, so the API route must ``set`` the initial key before
+    dispatching the task. A fresh event loop per call is fine — there are only
+    a handful of status transitions per build.
     """
     import asyncio
 
@@ -940,12 +932,15 @@ def build_theme_from_zip(
 ) -> dict:
     """Build a marketplace theme from an uploaded ZIP and register it.
 
-    Source = ZIP; status = in-memory (polled in-process). Delegates the
-    validate→build→…→register pipeline to the shared core.
+    Source = ZIP; status = Redis (``ThemeBuildStore`` via ``_redis_status``),
+    so the API poller — a different process than this worker on prod — sees
+    progress. The initial ``queued`` key is written by the upload route
+    before this task is dispatched. Delegates the validate→build→…→register
+    pipeline to the shared core.
     """
     work_dir: Path | None = None
     try:
-        _update_status(build_id, status="extracting")
+        _redis_status(build_id, status="extracting")
         logger.info("Extracting ZIP %s for build %s", zip_path, build_id)
 
         work_dir = Path(tempfile.mkdtemp(prefix="numu-theme-zip-"))
@@ -956,17 +951,17 @@ def build_theme_from_zip(
         return _build_register_activate(
             theme_dir=theme_dir,
             build_id=build_id,
-            status=_update_status,
+            status=_redis_status,
             uploader_id=uploader_id,
         )
 
     except ThemeBuildError as e:
         logger.error("Build %s failed: %s", build_id, e)
-        _update_status(build_id, status="failed", error=str(e))
-        return _build_statuses[build_id]
+        _redis_status(build_id, status="failed", error=str(e))
+        return {"build_id": build_id, "status": "failed", "error": str(e)}
     except Exception as e:
         logger.exception("Build %s crashed", build_id)
-        _update_status(build_id, status="failed", error=f"Internal error: {e}")
+        _redis_status(build_id, status="failed", error=f"Internal error: {e}")
         raise
     finally:
         if work_dir and work_dir.exists():

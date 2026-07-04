@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.orm import load_only
 
 from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
@@ -25,6 +26,14 @@ from src.infrastructure.messaging.celery_app import celery_app
 logger = get_logger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
+
+# Templates stuck PENDING longer than this are almost certainly orphaned —
+# Meta never returns them from list_templates (deleted/renamed out-of-band), so
+# their status can never flip and they'd otherwise be re-read on every 15-min
+# poll forever. Bounding the window stops that unbounded egress; a genuine
+# status change on a recent submission still arrives via the webhook (primary
+# signal). See the Supabase egress incident — this query was reading ~14M rows.
+_MAX_POLL_AGE_DAYS = 30
 
 
 def _run_async(coro: Any) -> Any:
@@ -62,7 +71,9 @@ async def _poll_all_tenants() -> dict[str, int]:
     from src.infrastructure.tenancy.rls import RLSBypassContext
 
     stats: dict[str, int] = {"polled": 0, "updated": 0, "failed": 0}
-    cutoff = datetime.now(UTC) - timedelta(minutes=5)
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=5)
+    floor = now - timedelta(days=_MAX_POLL_AGE_DAYS)
 
     async with AsyncSessionLocal() as session:
         async with RLSBypassContext(session):
@@ -72,6 +83,7 @@ async def _poll_all_tenants() -> dict[str, int]:
                     .where(
                         WhatsAppTemplateModel.status == "PENDING",
                         WhatsAppTemplateModel.submitted_at <= cutoff,
+                        WhatsAppTemplateModel.submitted_at >= floor,
                     )
                     .distinct()
                 )
@@ -118,16 +130,34 @@ async def _poll_for_tenant(tenant_id: Any) -> dict[str, int]:
     from src.infrastructure.tenancy.rls import RLSContext
 
     stats = {"polled": 0, "updated": 0, "failed": 0}
-    cutoff = datetime.now(UTC) - timedelta(minutes=5)
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=5)
+    floor = now - timedelta(days=_MAX_POLL_AGE_DAYS)
 
     async with AsyncSessionLocal() as session:
         async with RLSContext(session, tenant_id):
             pending_rows = (
                 (
                     await session.execute(
-                        select(WhatsAppTemplateModel).where(
+                        select(WhatsAppTemplateModel)
+                        # Only the columns the poller reads/writes — the heavy
+                        # body_text / header_content / buttons / footer_text
+                        # never leave the DB. This query was the top egress
+                        # source (≈14M row-reads of full templates).
+                        .options(
+                            load_only(
+                                WhatsAppTemplateModel.meta_template_id,
+                                WhatsAppTemplateModel.name,
+                                WhatsAppTemplateModel.language,
+                                WhatsAppTemplateModel.status,
+                                WhatsAppTemplateModel.approved_at,
+                                WhatsAppTemplateModel.rejection_reason,
+                            )
+                        )
+                        .where(
                             WhatsAppTemplateModel.status == "PENDING",
                             WhatsAppTemplateModel.submitted_at <= cutoff,
+                            WhatsAppTemplateModel.submitted_at >= floor,
                         )
                     )
                 )

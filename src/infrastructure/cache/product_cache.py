@@ -112,12 +112,15 @@ class ProductCacheService:
     # Product Detail Caching
     # =========================================================================
 
-    async def get_product(self, store_id: UUID, product_id: UUID) -> dict | None:
+    async def get_product(self, store_id: UUID, product_id: str | UUID) -> dict | None:
         """Get cached product detail.
 
         Args:
             store_id: Store identifier
-            product_id: Product identifier
+            product_id: Product identifier — the canonical UUID *or* the
+                slug/UUID string a storefront request addressed it by. The
+                storefront PDP is slug-first, so keying by the request
+                identifier keeps the cache effective for `/products/<slug>`.
 
         Returns:
             Cached product data or None if not cached
@@ -130,12 +133,15 @@ class ProductCacheService:
             record_cache_hit("product")
         return value
 
-    async def set_product(self, store_id: UUID, product_id: UUID, data: dict) -> None:
+    async def set_product(
+        self, store_id: UUID, product_id: str | UUID, data: dict
+    ) -> None:
         """Cache product detail.
 
         Args:
             store_id: Store identifier
-            product_id: Product identifier
+            product_id: Product identifier — canonical UUID or the
+                slug/UUID string the request used (see ``get_product``).
             data: Product data to cache
         """
         key = self._product_detail_key(store_id, product_id)
@@ -270,12 +276,16 @@ class ProductCacheService:
         filter_hash = self._hash_filters(filters) if filters else "none"
         return f"{self.PREFIX}:products:store:{store_id}:cat:{cat}:f:{filter_hash}:p:{page}:l:{limit}"
 
-    def _product_detail_key(self, store_id: UUID, product_id: UUID) -> str:
+    def _product_detail_key(self, store_id: UUID, product_id: str | UUID) -> str:
         """Generate cache key for product detail.
 
         Args:
             store_id: Store identifier
-            product_id: Product identifier
+            product_id: Product identifier (UUID or slug/UUID string). Both
+                land under the ``products:store:{store_id}:*`` namespace, so
+                ``invalidate_product`` / ``invalidate_store_products`` clear
+                slug-keyed and UUID-keyed detail entries alike via the
+                pattern sweep.
 
         Returns:
             Cache key string

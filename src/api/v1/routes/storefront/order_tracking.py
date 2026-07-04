@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
 
 from src.api.dependencies.repositories import (
@@ -114,11 +114,23 @@ async def track_order(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-):
+    expected_store: Annotated[
+        str | None,
+        Query(
+            alias="store",
+            description=(
+                "Expected store subdomain/custom-domain/id. When provided, the "
+                "order must belong to it (else 404). The storefront and newly "
+                "generated tracking links pass this to scope the lookup to the "
+                "tenant; omitting it preserves the legacy UUID-only behaviour."
+            ),
+        ),
+    ] = None,
+) -> SuccessResponse[OrderTrackingResponse]:
     """Public tracking view for an order. No auth required — protected
-    only by the unguessable order UUID. Returns a sanitised subset of the
-    order fields; notably omits: customer email/phone, exact street,
-    payment provider IDs, internal notes.
+    only by the unguessable order UUID (and, when supplied, the ``store``
+    scope). Returns a sanitised subset of the order fields; notably omits:
+    customer email/phone, exact street, payment provider IDs, internal notes.
     """
     order = await order_repo.get_by_id(order_id)
     if order is None:
@@ -135,6 +147,22 @@ async def track_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found.",
         )
+
+    # Tenant scoping (defense-in-depth): when the caller asserts a store, the
+    # order must belong to it — this stops one tenant's storefront from
+    # resolving another tenant's order by UUID. Same 404 as a missing order so
+    # existence isn't leaked.
+    if expected_store and expected_store.strip():
+        exp = expected_store.strip().lower()
+        if exp not in {
+            (store.subdomain or "").lower(),
+            (store.custom_domain or "").lower(),
+            str(order.store_id).lower(),
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found.",
+            )
 
     ship = order.shipping_address
     customer_name = f"{ship.first_name or ''} {ship.last_name or ''}".strip() or None

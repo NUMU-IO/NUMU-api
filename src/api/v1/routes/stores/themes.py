@@ -52,6 +52,7 @@ from src.core.entities.theme import (
     ThemeType,
     ThemeVersion,
 )
+from src.core.url_guard import UnsafeUrlError, assert_public_http_url
 from src.infrastructure.cache.theme_build_store import get_theme_build_store
 from src.infrastructure.repositories import StoreRepository
 from src.infrastructure.repositories.store_theme_repository import (
@@ -270,6 +271,16 @@ async def connect_dev_server(
     4. Developer edits files → vite rebuilds → developer refreshes storefront
     """
     dev_url = request.dev_url.rstrip("/")
+    # SSRF guard: dev_url is merchant-supplied and fetched server-side. Block
+    # cloud-metadata / loopback / internal addresses (in prod) so a store-owner
+    # token can't turn this probe into a request against internal services.
+    try:
+        assert_public_http_url(dev_url)
+    except UnsafeUrlError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     bundle_url = f"{dev_url}/theme.js"
     css_url = f"{dev_url}/theme.css"
     manifest_url = f"{dev_url}/theme.json"
@@ -283,7 +294,7 @@ async def connect_dev_server(
     settings_schema: list | dict | None = None
     sections_manifest: dict | None = None
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
             # theme.json is the source manifest — most dev servers serve it
             try:
                 manifest_res = await client.get(manifest_url)

@@ -33,14 +33,23 @@ DANGEROUS_PATTERNS = [
 
 
 def _update_build_status(build_id: str, **kwargs: object) -> None:
-    """Update the in-memory build status.
+    """Update the GitHub-build status in Redis.
 
-    In production, this should update Redis or the database.
+    Writes through the shared ``ThemeBuildStore`` (via ``_redis_status``) so
+    the poller — ``GET /stores/{id}/themes/external/builds/{build_id}``, which
+    already reads Redis — sees progress from this cross-process Celery worker.
+    The initial ``queued`` key is written by the submit/rebuild route before
+    this task is dispatched, so the update-merge always lands on an existing
+    key.
+
+    Previously this imported a module-level ``_build_statuses`` dict from the
+    ``stores.themes`` route that no longer exists — the ImportError was caught
+    by the task's broad ``except`` on the FIRST status write, so every GitHub
+    build failed immediately and never reported progress.
     """
-    from src.api.v1.routes.stores.themes import _build_statuses
+    from src.infrastructure.messaging.tasks.theme_upload_tasks import _redis_status
 
-    if build_id in _build_statuses:
-        _build_statuses[build_id].update(kwargs)
+    _redis_status(build_id, **kwargs)
 
 
 def _validate_theme_json(theme_dir: Path) -> dict:

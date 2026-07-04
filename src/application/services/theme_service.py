@@ -597,6 +597,7 @@ class ThemeService:
         its revalidate window (60s).
         """
         try:
+            from src.infrastructure.cache import get_storefront_cache
             from src.infrastructure.database.connection import commit_and_restore_rls
             from src.infrastructure.external_services.nextjs_revalidation import (
                 revalidate_on_customization_publish,
@@ -607,6 +608,14 @@ class ThemeService:
             # storefront refetch reads committed data, not the pre-commit row
             # (see commit_and_restore_rls).
             await commit_and_restore_rls(store_repo.session)
+
+            # Ordering: commit → invalidate cache → revalidate Next.js.
+            # Busting the theme slot here (post-commit) covers activate_theme,
+            # publish_customization, AND the code-editor worker publish
+            # (_activate_built_theme_for_store) — the last has no route-layer
+            # invalidation of its own, so this is its only bust. Keyed by
+            # store_id only, so it runs even for stores without a subdomain.
+            await get_storefront_cache().invalidate_theme(store_id)
 
             store = await store_repo.get_by_id(store_id)
             if not store or not store.subdomain:
