@@ -61,6 +61,10 @@ from src.infrastructure.database.models.tenant.marketing_campaign import (
 from src.infrastructure.database.models.tenant.menu import MenuModel
 from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.database.models.tenant.meta_event_log import MetaEventLogModel
+from src.infrastructure.database.models.tenant.metafield import (
+    MetafieldDefinitionModel,
+    MetafieldValueModel,
+)
 from src.infrastructure.database.models.tenant.network_contribution_log import (
     NetworkContributionLogModel,
 )
@@ -163,6 +167,8 @@ __all__ = [
     "LocationModel",
     "MarketingCampaignModel",
     "MenuModel",
+    "MetafieldDefinitionModel",
+    "MetafieldValueModel",
     "MessageLogModel",
     "MetaEventLogModel",
     "TikTokEventLogModel",

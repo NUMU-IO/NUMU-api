@@ -157,6 +157,28 @@ def get_page_repository(
     return PageRepository(session)
 
 
+def get_metafield_definition_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get metafield definition repository dependency (typed custom data)."""
+    from src.infrastructure.repositories.metafield_repository import (
+        MetafieldDefinitionRepository,
+    )
+
+    return MetafieldDefinitionRepository(session)
+
+
+def get_metafield_value_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get metafield value repository dependency (typed custom data)."""
+    from src.infrastructure.repositories.metafield_repository import (
+        MetafieldValueRepository,
+    )
+
+    return MetafieldValueRepository(session)
+
+
 def get_theme_update_notification_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):

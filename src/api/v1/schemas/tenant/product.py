@@ -407,6 +407,14 @@ class ProductResponse(BaseModel):
         default_factory=list,
         description="Purchasable variants — at least one per product",
     )
+    # Typed custom data (metafields foundation). PUBLIC definitions only,
+    # each `{namespace, key, type, value}` with the value already coerced to
+    # its declared type. Empty list when the product has no public metafields.
+    # Themes read these instead of the untyped `attributes` blob.
+    metafields: list[dict] = Field(
+        default_factory=list,
+        description="Public typed metafields ({namespace, key, type, value})",
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
 
