@@ -36,6 +36,8 @@ class CategoryModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Alternate template variant key suffix (Shopify-style); null = base template.
+    template_suffix: Mapped[str | None] = mapped_column(String(32), nullable=True)
     extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     # Relationships

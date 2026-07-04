@@ -34,5 +34,7 @@ class Page(BaseEntity):
     # Theme template key this page renders under (default "page"). Lets a
     # merchant route a page through an alternate template later.
     template: str = "page"
+    # Alternate template variant key suffix (Shopify-style); null = base template.
+    template_suffix: str | None = None
     # Reserved: page-scoped V3 section customization (full Shopify parity).
     content_v3: dict[str, Any] = Field(default_factory=dict)

@@ -78,6 +78,9 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     seo_title: Mapped[str | None] = mapped_column(String(60), nullable=True)
     seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
+    # Alternate template variant key suffix (Shopify-style); null = base template.
+    template_suffix: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Meta Commerce Catalog product ID — when the merchant has synced
     # their product catalog to Meta Business Manager, the storefront
     # uses this value as the `content_ids` field on ViewContent /

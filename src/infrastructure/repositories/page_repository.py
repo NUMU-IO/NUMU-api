@@ -35,6 +35,7 @@ class PageRepository(IPageRepository):
             seo=model.seo or {},
             is_published=model.is_published,
             template=model.template or "page",
+            template_suffix=model.template_suffix,
             content_v3=model.content_v3 or {},
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -51,6 +52,7 @@ class PageRepository(IPageRepository):
             seo=entity.seo or {},
             is_published=entity.is_published,
             template=entity.template or "page",
+            template_suffix=entity.template_suffix,
             content_v3=entity.content_v3 or {},
             created_at=entity.created_at,
             updated_at=entity.updated_at,
@@ -85,6 +87,7 @@ class PageRepository(IPageRepository):
             model.seo = entity.seo or {}
             model.is_published = entity.is_published
             model.template = entity.template or "page"
+            model.template_suffix = entity.template_suffix
             model.content_v3 = entity.content_v3 or {}
             await self.session.flush()
             await self.session.refresh(model)

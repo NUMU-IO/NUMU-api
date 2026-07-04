@@ -38,6 +38,7 @@ class CategoryRepository(ICategoryRepository):
             parent_id=model.parent_id,
             position=model.position,
             is_active=model.is_active,
+            template_suffix=model.template_suffix,
             metadata=model.extra_data or {},
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -56,6 +57,7 @@ class CategoryRepository(ICategoryRepository):
             parent_id=entity.parent_id,
             position=entity.position,
             is_active=entity.is_active,
+            template_suffix=entity.template_suffix,
             extra_data=entity.metadata,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
@@ -96,6 +98,7 @@ class CategoryRepository(ICategoryRepository):
             model.parent_id = entity.parent_id
             model.position = entity.position
             model.is_active = entity.is_active
+            model.template_suffix = entity.template_suffix
             model.extra_data = entity.metadata
             await self.session.flush()
             await self.session.refresh(model)

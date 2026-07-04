@@ -84,6 +84,14 @@ class UpdateProductUseCase:
             product.seo_title = dto.seo_title
         if dto.seo_description is not None:
             product.seo_description = dto.seo_description
+        # `template_suffix` is nullable AND clearable, so — unlike the
+        # `is not None` fields above — a null must be able to remove the
+        # override. The route sets `template_suffix_provided` from the
+        # request's `model_fields_set`, so we only touch it when the caller
+        # actually sent the key: provided → write it verbatim (null clears
+        # the variant), omitted → leave the current variant untouched.
+        if dto.template_suffix_provided:
+            product.template_suffix = dto.template_suffix
         # `meta_catalog_id` uses the same partial-update semantic — only
         # touched when explicitly provided on the wire. Pass an empty
         # string to unset (omit to leave alone).

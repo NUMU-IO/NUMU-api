@@ -24,6 +24,8 @@ class Category(BaseEntity):
     parent_id: UUID | None = None
     position: int = Field(default=0, ge=0)
     is_active: bool = True
+    # Alternate template variant key suffix (Shopify-style); null = base template.
+    template_suffix: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property

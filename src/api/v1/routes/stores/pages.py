@@ -42,6 +42,7 @@ def _page_response(entity: Page) -> PageResponse:
         seo=entity.seo or {},
         is_published=entity.is_published,
         template=entity.template or "page",
+        template_suffix=entity.template_suffix,
         created_at=str(entity.created_at),
         updated_at=str(entity.updated_at),
     )
@@ -136,6 +137,7 @@ async def create_page(
         seo=request.seo,
         is_published=request.is_published,
         template=request.template or "page",
+        template_suffix=request.template_suffix,
     )
     created = await page_repo.create(page)
     await _revalidate(store, handle)
@@ -170,6 +172,7 @@ async def update_page(
             if request.is_published is not None
             else True,
             template=request.template or "page",
+            template_suffix=request.template_suffix,
         )
         created = await page_repo.create(page)
         await _revalidate(store, handle)
@@ -187,6 +190,11 @@ async def update_page(
         page.is_published = request.is_published
     if request.template is not None:
         page.template = request.template
+    # `template_suffix` is nullable AND clearable: only touch it when the caller
+    # actually sent the key so an explicit null clears the variant while an
+    # omitted field leaves the current variant untouched.
+    if "template_suffix" in request.model_fields_set:
+        page.template_suffix = request.template_suffix
     updated = await page_repo.update(page)
     await _revalidate(store, handle)
     return SuccessResponse(

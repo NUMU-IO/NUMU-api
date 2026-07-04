@@ -21,6 +21,12 @@ class CreateCategoryRequest(BaseModel):
     parent_id: str | None = Field(None, description="Parent category UUID for nesting")
     position: int = Field(0, ge=0, description="Sort position (lower = first)")
     is_active: bool = Field(True, description="Whether the category is visible")
+    template_suffix: str | None = Field(
+        default=None,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,31}$",
+        description="Alternate template variant suffix (Shopify-style); null = base template.",
+    )
     extra_data: dict[str, Any] | None = Field(
         None, description="Extra metadata (e.g. name_ar, description_ar)"
     )
@@ -40,6 +46,12 @@ class UpdateCategoryRequest(BaseModel):
     parent_id: str | None = Field(None, description="Parent category UUID")
     position: int | None = Field(None, ge=0, description="Sort position")
     is_active: bool | None = Field(None, description="Whether the category is visible")
+    template_suffix: str | None = Field(
+        default=None,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,31}$",
+        description="Alternate template variant suffix (Shopify-style); null = base template.",
+    )
     extra_data: dict[str, Any] | None = Field(
         None, description="Extra metadata (e.g. name_ar, description_ar)"
     )
@@ -59,6 +71,10 @@ class CategoryResponse(BaseModel):
     parent_id: str | None = Field(description="Parent category UUID")
     position: int = Field(description="Sort position")
     is_active: bool = Field(description="Whether the category is visible")
+    template_suffix: str | None = Field(
+        default=None,
+        description="Alternate template variant suffix; null = base template.",
+    )
     product_count: int = Field(description="Number of products in this category")
     extra_data: dict[str, Any] | None = Field(
         None, description="Extra metadata (e.g. name_ar, description_ar)"

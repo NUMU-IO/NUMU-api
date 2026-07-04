@@ -64,6 +64,7 @@ class ProductRepository(IProductRepository):
             metadata=model.extra_data or {},
             seo_title=model.seo_title,
             seo_description=model.seo_description,
+            template_suffix=model.template_suffix,
             meta_catalog_id=model.meta_catalog_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -99,6 +100,7 @@ class ProductRepository(IProductRepository):
             extra_data=entity.metadata,
             seo_title=entity.seo_title,
             seo_description=entity.seo_description,
+            template_suffix=entity.template_suffix,
             meta_catalog_id=entity.meta_catalog_id,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
@@ -177,6 +179,7 @@ class ProductRepository(IProductRepository):
             model.extra_data = entity.metadata
             model.seo_title = entity.seo_title
             model.seo_description = entity.seo_description
+            model.template_suffix = entity.template_suffix
             model.meta_catalog_id = entity.meta_catalog_id
             await self.session.flush()
             await self.session.refresh(model)
