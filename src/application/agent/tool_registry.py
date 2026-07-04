@@ -11,6 +11,9 @@ from __future__ import annotations
 from src.application.agent.tools import ToolRegistry, ToolSpec
 from src.core.agent.entities import RiskTier
 from src.infrastructure.agent.tools import (
+    abandoned_carts,
+    analytics,
+    cart_recovery,
     create_discount,
     growth,
     knowledge,
@@ -30,6 +33,8 @@ _TOOL_SPECS = [
     products.SPEC,
     orders.SPEC,
     store.SPEC,
+    analytics.SPEC,
+    abandoned_carts.SPEC,
     theme_read.SPEC,
     theme_write.SPEC,
     theme_write.UPDATE_SETTING_SPEC,
@@ -37,6 +42,7 @@ _TOOL_SPECS = [
     growth.SPEC,
     create_discount.SPEC,
     update_product.SPEC,
+    cart_recovery.SPEC,
     orchestration.SPEC,
     *reserved.SPECS,
 ]

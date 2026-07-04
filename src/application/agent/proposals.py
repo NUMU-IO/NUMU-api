@@ -259,10 +259,76 @@ async def _undo_update_product(
     return {"undid": "update_product", "product_id": product_id}
 
 
+async def _apply_send_cart_recovery(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    """Send the recovery email + stamp the checkout (mirrors the dashboard route)."""
+    from datetime import UTC, datetime
+
+    from src.core.interfaces.services.email_service import EmailMessage
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+    from src.infrastructure.repositories import AbandonedCheckoutRepository
+
+    repo = AbandonedCheckoutRepository(session)
+    checkout_id = UUID(str(params["checkout_id"]))
+    checkout = await repo.get_by_id(checkout_id)
+    if checkout is None or checkout.store_id != store_id:
+        raise ProposalError("not_found", "Checkout no longer exists in this store.")
+    if checkout.recovered_at is not None:
+        raise ProposalError("already_recovered", "Checkout was already recovered.")
+    if not checkout.email:
+        raise ProposalError("no_email", "Checkout has no email address.")
+
+    store = await StoreRepository(session).get_by_id(store_id)
+    store_name = store.name if store else "your store"
+
+    items_html = "".join(
+        f"<li>{(li.get('product_name') or 'Item')} × {li.get('quantity', 1)}</li>"
+        for li in checkout.line_items
+    )
+    html = (
+        f"<p>Hi there,</p>"
+        f"<p>You left items in your cart at <strong>{store_name}</strong>.</p>"
+        f"<ul>{items_html}</ul>"
+        f"<p>Come back and finish your order whenever you're ready.</p>"
+    )
+    await ResendEmailService().send_email(
+        EmailMessage(
+            to=str(checkout.email),
+            subject=f"Complete your order at {store_name}",
+            html_content=html,
+        )
+    )
+    sent_at = datetime.now(UTC)
+    await repo.mark_recovery_email_sent(checkout_id, sent_at)
+    return {
+        "summary": "Sent cart recovery email",
+        "after_state": {
+            "checkout_id": str(checkout_id),
+            "recovery_email_sent_at": sent_at.isoformat(),
+        },
+        "result": {"checkout_id": str(checkout_id), "sent": True},
+    }
+
+
+async def _undo_send_cart_recovery(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    """A sent email cannot be unsent — fail with an honest message.
+
+    Registered anyway so this audit can never fall through to the
+    theme-restore path (see ACTION_UNDOERS note below).
+    """
+    raise NothingToUndoError("cannot_undo", "A sent recovery email can't be unsent.")
+
+
 # tool_name → applier. Tools listed here follow the generic (non-theme) path.
 ACTION_APPLIERS = {
     "create_discount": _apply_create_discount,
     "update_product": _apply_update_product,
+    "send_cart_recovery": _apply_send_cart_recovery,
 }
 
 # tool_name → undoer for applied action audits. Anything not listed here that
@@ -271,6 +337,7 @@ ACTION_APPLIERS = {
 ACTION_UNDOERS = {
     "create_discount": _undo_create_discount,
     "update_product": _undo_update_product,
+    "send_cart_recovery": _undo_send_cart_recovery,
 }
 
 
