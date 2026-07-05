@@ -46,6 +46,9 @@ class AnnouncementBarContent(_BaseContent):
     text_align: Literal["start", "center", "end"] = "center"
     # "marquee" scrolls the text (good for long copy); "pulse" gently fades.
     animation: Literal["none", "pulse", "marquee"] = "none"
+    # Coupon code auto-pinned to the shopper's cart when they follow this
+    # promo's CTA (so the discount is already applied at add-to-cart / checkout).
+    auto_apply_code: str | None = Field(default=None, max_length=64)
 
 
 class PopupContent(_BaseContent):
@@ -70,6 +73,8 @@ class PopupContent(_BaseContent):
     # Merchant-authored HTML for `layout="custom"`. Capped to keep the
     # JSONB row and the SSR payload bounded.
     custom_html: str | None = Field(default=None, max_length=50000)
+    # Coupon code auto-pinned to the cart when the shopper follows the CTA.
+    auto_apply_code: str | None = Field(default=None, max_length=64)
 
 
 class FloatingWidgetContent(_BaseContent):
@@ -82,6 +87,8 @@ class FloatingWidgetContent(_BaseContent):
     icon: str = "tag"
     expanded_default: bool = False
     color_bg: str = "#000000"
+    # Coupon code auto-pinned to the cart when the shopper follows the CTA.
+    auto_apply_code: str | None = Field(default=None, max_length=64)
 
 
 class CookieBannerContent(_BaseContent):
