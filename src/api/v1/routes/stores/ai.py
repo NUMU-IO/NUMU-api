@@ -336,26 +336,42 @@ async def generate_promo_content(
 
     try:
         if request.mode == "html" and request.surface == "popup":
-            cta = request.cta_url or "https://your-store-link"
+            # Default the CTA to the store's real storefront URL (not a
+            # placeholder) so a merchant who didn't type a link still gets a
+            # working "shop now" button pointing at their own store.
+            cta = request.cta_url or store.store_url
+            bg = request.primary_color or "#111827"
+            fg = request.text_color or "#ffffff"
             system = "You are an expert front-end designer and e-commerce copywriter."
             user = "\n".join([
                 "Design the inner HTML for an e-commerce popup modal. Output "
                 "ONLY one self-contained HTML snippet — no <html>/<head>/<body>, "
                 "no <script>, no markdown code fences.",
-                "Hard requirements (rendered inside a sandboxed iframe ~460px wide):",
-                "- Inline CSS only. No <script>, <link>, or external "
+                "The snippet is dropped edge-to-edge into a rounded modal frame "
+                "(~480px wide, up to ~560px tall) that already supplies the outer "
+                "white card and the close (X) button.",
+                "Hard requirements:",
+                "- Output a SINGLE root element that FILLS the modal: "
+                "style must include width:100%; box-sizing:border-box; margin:0; "
+                f"min-height:520px; background:{bg}; color:{fg}; and use flexbox "
+                "(display:flex; flex-direction:column; justify-content:center; "
+                "align-items:center) with generous padding (~32px). Do NOT wrap it "
+                "in a narrower centered card or add outer margins/max-width — your "
+                "background must reach all four edges so there is no white gutter.",
+                '- Inline CSS only (style="..."). No <script>, <link>, or external '
                 "fonts/images/URLs (they are stripped for security).",
-                "- Design for ~460px wide, responsive down to 320px; total "
-                "height under ~560px.",
+                "- Responsive down to 320px.",
                 f'- Include EXACTLY ONE call to action as a link: <a href="{cta}"'
                 ' target="_top" style="...">…</a>. target="_top" is REQUIRED so '
-                "the click navigates the storefront.",
+                "the click navigates the storefront. Do NOT invent any other URL.",
                 '- Write the visible copy in Egyptian Arabic and set dir="rtl" '
                 "on the root element.",
-                "- Do NOT add a close (X) button — our modal already provides one.",
-                f"Brand colors: background {request.primary_color or '#111827'}, "
-                f"text {request.text_color or '#ffffff'}.",
-                f'Store: "{store_name}". Offer to feature: {brief}.',
+                "- Do NOT add your own close (X) button — the modal provides one.",
+                f"Brand colors: background {bg}, text {fg}.",
+                f'Store: "{store_name}".',
+                "Use the merchant's own copy below as the source of truth for the "
+                "headline, body and button label — refine wording but keep their "
+                f"intent and any specifics. Brief / copy: {brief}.",
                 "Return only the HTML.",
             ])
             resp = await client.chat.completions.create(
