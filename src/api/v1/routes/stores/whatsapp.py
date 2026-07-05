@@ -3,6 +3,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_current_store, get_store_repository
+from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.stores.whatsapp import (
@@ -29,11 +31,17 @@ from src.api.v1.schemas.stores.whatsapp import (
 from src.api.v1.schemas.stores.whatsapp_connection import (
     BYOConnectRequest,
     BYOValidationFailure,
+    WhatsAppAccessRequestBody,
+    WhatsAppAccessState,
     WhatsAppSettingsUpdate,
     WhatsAppStatus,
 )
 from src.config import settings
 from src.core.entities.store import Store
+from src.infrastructure.database.models.public.whatsapp_access import (
+    WhatsAppAccessRequestModel,
+    WhatsAppAccessStatus,
+)
 from src.infrastructure.database.models.tenant.configuration import (
     ServiceCredential,
     ServiceName,
@@ -93,6 +101,7 @@ async def complete_signup(
     4. Subscribe to webhooks
     5. Store encrypted credentials
     """
+    await _require_whatsapp_access_approved(store, db)
     try:
         async with httpx.AsyncClient() as client:
             # Step 1: Exchange code for user access token
@@ -629,6 +638,7 @@ async def byo_connect(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WhatsAppStatus:
     """3-step validate + encrypt + persist + reset toggles (FR-019..FR-025)."""
+    await _require_whatsapp_access_approved(store, db)
     from src.application.use_cases.whatsapp.connect_byo_credentials import (
         BYOValidationError,
         ConnectBYOCredentialsUseCase,
@@ -844,6 +854,7 @@ async def byo_update_notifications(
     writes to the canonical path that the order-event handlers + the
     send guard read from (FR-019a).
     """
+    await _require_whatsapp_access_approved(store, db)
     from src.api.v1.schemas.stores.whatsapp_connection import (
         NotificationSettings as NotifSettings,
     )
@@ -861,3 +872,139 @@ async def byo_update_notifications(
     await store_repo.update(store)
 
     return NotifSettings(**current)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# WhatsApp access gate — platform entitlement (merchant self-serve side)
+# ─────────────────────────────────────────────────────────────────────
+#
+# A store must hold an APPROVED access row before it can connect a number
+# or enable notifications (enforced by _require_whatsapp_access_approved,
+# called from byo_connect / complete_signup / byo_update_notifications).
+# The admin approve/reject/disable/enable side lives in
+# src/api/v1/routes/admin/whatsapp_access.py.
+
+
+async def _load_access_row(
+    db: AsyncSession, store_id: UUID
+) -> WhatsAppAccessRequestModel | None:
+    return (
+        await db.execute(
+            select(WhatsAppAccessRequestModel).where(
+                WhatsAppAccessRequestModel.store_id == store_id
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _require_whatsapp_access_approved(store: Store, db: AsyncSession) -> None:
+    """Guard the 'turn WhatsApp on' actions behind an APPROVED access row.
+
+    Raises 403 unless the store has been granted WhatsApp access by a platform
+    admin. This is the gate that makes the request/approval workflow real rather
+    than cosmetic — without approval a store cannot connect a number, finish
+    embedded signup, or switch on any order notification.
+    """
+    row = await _load_access_row(db, store.id)
+    if row is None or row.status != WhatsAppAccessStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "whatsapp_access_not_approved",
+                "message": (
+                    "WhatsApp access has not been approved for this store yet."
+                    " Submit a request and wait for platform approval."
+                ),
+            },
+        )
+
+
+def _access_state(row: WhatsAppAccessRequestModel | None) -> WhatsAppAccessState:
+    """Serialize an access row (or its absence) to the merchant-hub shape."""
+    if row is None:
+        return WhatsAppAccessState(status="none", can_request=True)
+    return WhatsAppAccessState(
+        status=row.status.value,
+        note=row.note,
+        contact_phone=row.contact_phone,
+        expected_volume=row.expected_volume,
+        requested_at=row.created_at,
+        reviewed_at=row.reviewed_at,
+        review_reason=row.review_reason,
+        # Only a rejected store may re-request itself; pending/approved/disabled
+        # are all terminal from the merchant's side (admin drives the rest).
+        can_request=row.status == WhatsAppAccessStatus.REJECTED,
+    )
+
+
+@router.get(
+    "/access",
+    response_model=WhatsAppAccessState,
+    summary="Get the store's WhatsApp access-gate state",
+    operation_id="get_whatsapp_access",
+)
+async def get_whatsapp_access(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WhatsAppAccessState:
+    """Return whether this store is allowed to use WhatsApp (and where in the
+    request lifecycle it is). Drives the merchant-hub gate above the connection
+    UI. ``status='none'`` means no request has been made yet."""
+    return _access_state(await _load_access_row(db, store.id))
+
+
+@router.post(
+    "/access/request",
+    status_code=status.HTTP_201_CREATED,
+    response_model=WhatsAppAccessState,
+    summary="Request WhatsApp access for this store (merchant)",
+    operation_id="request_whatsapp_access",
+)
+async def request_whatsapp_access(
+    body: WhatsAppAccessRequestBody,
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+) -> WhatsAppAccessState:
+    """Submit (or re-submit after a rejection) a request for WhatsApp access.
+
+    One row per store: a first request inserts a PENDING row; a re-request on a
+    REJECTED store flips the same row back to PENDING and clears the prior
+    review. Requesting while already PENDING / APPROVED / DISABLED is a 409 —
+    the merchant can't self-serve past those (admin drives them).
+    """
+    row = await _load_access_row(db, store.id)
+    if row is None:
+        row = WhatsAppAccessRequestModel(
+            store_id=store.id,
+            tenant_id=store.tenant_id,
+            requester_user_id=user_id,
+            status=WhatsAppAccessStatus.PENDING,
+            note=body.note,
+            contact_phone=body.contact_phone,
+            expected_volume=body.expected_volume,
+        )
+        db.add(row)
+    elif row.status == WhatsAppAccessStatus.REJECTED:
+        row.status = WhatsAppAccessStatus.PENDING
+        row.requester_user_id = user_id
+        row.note = body.note
+        row.contact_phone = body.contact_phone
+        row.expected_volume = body.expected_volume
+        row.reviewer_user_id = None
+        row.reviewed_at = None
+        row.review_reason = None
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "whatsapp_access_not_requestable",
+                "message": (
+                    f"WhatsApp access for this store is already '{row.status.value}'."
+                ),
+            },
+        )
+
+    await db.commit()
+    await db.refresh(row)
+    return _access_state(row)

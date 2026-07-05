@@ -121,6 +121,56 @@ class BYOValidationFailure(BaseModel):
     meta_error: dict | None = None
 
 
+# ── WhatsApp access gate (platform entitlement) ──────────────────────────────
+#
+# Sits *above* the connection flow: a store must hold an APPROVED access row
+# before it can connect a number, complete embedded signup, or enable order
+# notifications. Surfaced to the merchant hub so it can render the
+# request / pending / rejected / disabled states. ``none`` = no row yet.
+
+WhatsAppAccessStatusLiteral = Literal[
+    "none", "pending", "approved", "rejected", "disabled"
+]
+
+
+class WhatsAppAccessState(BaseModel):
+    """Current WhatsApp access-gate state for a store (GET /whatsapp/access)."""
+
+    status: WhatsAppAccessStatusLiteral = "none"
+    note: str | None = None
+    contact_phone: str | None = None
+    expected_volume: str | None = None
+    requested_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    review_reason: str | None = Field(
+        default=None,
+        description="Admin's reason on reject/disable; safe to show the merchant.",
+    )
+    can_request: bool = Field(
+        default=True,
+        description=(
+            "True when the merchant may (re)submit a request — i.e. there is no"
+            " row yet, or the previous request was rejected."
+        ),
+    )
+
+
+class WhatsAppAccessRequestBody(BaseModel):
+    """Body for POST /whatsapp/access/request (merchant submits the form)."""
+
+    note: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Merchant's use-case / why they want WhatsApp.",
+    )
+    contact_phone: str | None = Field(default=None, max_length=32)
+    expected_volume: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Free-text expected monthly message volume (e.g. '1-500').",
+    )
+
+
 class CheckoutSessionIssueRequest(BaseModel):
     """Body for POST /storefront/{store_slug}/checkout-session (FR-007b)."""
 
