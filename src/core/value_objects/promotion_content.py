@@ -37,6 +37,15 @@ class AnnouncementBarContent(_BaseContent):
     icon: str | None = None
     dismissible: bool = True
     link_url: str | None = None
+    # Styling controls (2026-07-05). All optional/defaulted so existing rows
+    # keep rendering unchanged.
+    # When set, the bar background becomes a left→right linear gradient from
+    # `background` to `background_gradient_to`.
+    background_gradient_to: str | None = None
+    font_size: Literal["sm", "md", "lg"] = "md"
+    text_align: Literal["start", "center", "end"] = "center"
+    # "marquee" scrolls the text (good for long copy); "pulse" gently fades.
+    animation: Literal["none", "pulse", "marquee"] = "none"
 
 
 class PopupContent(_BaseContent):
