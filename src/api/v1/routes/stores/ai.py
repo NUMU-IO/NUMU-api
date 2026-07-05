@@ -3,7 +3,9 @@
 URL: /stores/{store_id}/ai
 """
 
+import json
 import logging
+import re
 import time
 from collections import defaultdict
 from typing import Annotated
@@ -19,6 +21,8 @@ from src.api.v1.schemas.tenant.ai import (
     GenerateDescriptionResponse,
     GeneratePolicyRequest,
     GeneratePolicyResponse,
+    GeneratePromoContentRequest,
+    GeneratePromoContentResponse,
 )
 from src.config import settings
 from src.core.entities.store import Store
@@ -247,3 +251,153 @@ async def generate_policy(
         "success": True,
         "data": GeneratePolicyResponse(policy_text=policy_text),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Promotion content generation ("Design by NUMU AI")                          #
+# --------------------------------------------------------------------------- #
+
+_PROMO_SURFACE_DESC = {
+    "announcement_bar": "a store's top announcement bar (a thin one-line strip)",
+    "floating_widget": "a small floating corner widget (a pill that expands to a card)",
+    "cookie_banner": "a cookie-consent banner",
+    "popup": "a popup modal",
+}
+
+
+def _strip_and_sanitize_html(raw: str) -> str:
+    """Unwrap markdown fences and strip <script> from AI-generated HTML.
+
+    The storefront renders popup custom_html in a sandboxed iframe (no
+    scripts) anyway, but we strip here too so the merchant's live preview
+    and the stored value are clean, and cap to the column limit (50000).
+    """
+    s = (raw or "").strip()
+    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+    s = re.sub(r"\s*```$", "", s).strip()
+    s = re.sub(r"<script\b[^>]*>.*?</script>", "", s, flags=re.IGNORECASE | re.DOTALL)
+    return s[:50000]
+
+
+@router.post(
+    "/generate-promo-content",
+    response_model=SuccessResponse[GeneratePromoContentResponse],
+    summary="Generate promotion content with NUMU AI",
+    operation_id="generate_ai_promo_content",
+)
+async def generate_promo_content(
+    request: GeneratePromoContentRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    ai_service: Annotated[OpenAIService, Depends(get_ai_service)],
+):
+    """Generate promo content with the integrated AI.
+
+    `mode="html"` (popup) returns a script-free, self-contained HTML
+    snippet designed for our sandboxed popup iframe. `mode="copy"` returns
+    short bilingual (EN + Egyptian Arabic) copy for the banner / floating
+    widget / cookie banner. Rate limited to 10 req/store/min.
+    """
+    _check_rate_limit(str(store.id))
+
+    if ai_service.client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "AI_SERVICE_UNAVAILABLE",
+                "message": "AI service is not configured.",
+            },
+        )
+
+    store_name = request.store_name or store.name or "our store"
+    brief = request.brief.strip() or "a general promotional offer"
+
+    try:
+        if request.mode == "html" and request.surface == "popup":
+            cta = request.cta_url or "https://your-store-link"
+            system = "You are an expert front-end designer and e-commerce copywriter."
+            user = "\n".join([
+                "Design the inner HTML for an e-commerce popup modal. Output "
+                "ONLY one self-contained HTML snippet — no <html>/<head>/<body>, "
+                "no <script>, no markdown code fences.",
+                "Hard requirements (rendered inside a sandboxed iframe ~460px wide):",
+                "- Inline CSS only. No <script>, <link>, or external "
+                "fonts/images/URLs (they are stripped for security).",
+                "- Design for ~460px wide, responsive down to 320px; total "
+                "height under ~560px.",
+                f'- Include EXACTLY ONE call to action as a link: <a href="{cta}"'
+                ' target="_top" style="...">…</a>. target="_top" is REQUIRED so '
+                "the click navigates the storefront.",
+                '- Write the visible copy in Egyptian Arabic and set dir="rtl" '
+                "on the root element.",
+                "- Do NOT add a close (X) button — our modal already provides one.",
+                f"Brand colors: background {request.primary_color or '#111827'}, "
+                f"text {request.text_color or '#ffffff'}.",
+                f'Store: "{store_name}". Offer to feature: {brief}.',
+                "Return only the HTML.",
+            ])
+            resp = await ai_service.client.chat.completions.create(
+                model=ai_service.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                max_tokens=1600,
+                temperature=0.6,
+            )
+            html = _strip_and_sanitize_html(resp.choices[0].message.content or "")
+            return {
+                "success": True,
+                "data": GeneratePromoContentResponse(mode="html", html=html),
+            }
+
+        # copy mode — bilingual short copy for banner / widget / cookie (or
+        # popup in template mode).
+        surface_desc = _PROMO_SURFACE_DESC.get(request.surface, "a promotion")
+        system = (
+            "You are a bilingual marketing copywriter for e-commerce. You write "
+            "in English and natural Egyptian Arabic. Return ONLY a JSON object."
+        )
+        user = "\n".join([
+            f"Write short marketing copy for {surface_desc} on the store "
+            f'"{store_name}".',
+            f"Offer / context: {brief}.",
+            "Return ONLY a JSON object with EXACTLY these string keys and no "
+            "others: headline_en, headline_ar, body_en, body_ar, cta_en, cta_ar.",
+            "Rules: headline_* max 60 chars (add one relevant emoji to "
+            "headline_en unless it is a cookie banner). body_* max 90 chars. "
+            "cta_* max 24 chars. Punchy and on-brand.",
+        ])
+        resp = await ai_service.client.chat.completions.create(
+            model=ai_service.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=500,
+            temperature=0.7,
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        return {
+            "success": True,
+            "data": GeneratePromoContentResponse(
+                mode="copy",
+                headline_en=str(data.get("headline_en") or ""),
+                headline_ar=str(data.get("headline_ar") or ""),
+                body_en=str(data.get("body_en") or ""),
+                body_ar=str(data.get("body_ar") or ""),
+                cta_en=str(data.get("cta_en") or ""),
+                cta_ar=str(data.get("cta_ar") or ""),
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — any provider error → graceful 503
+        logger.error("AI promo content generation error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "AI_SERVICE_UNAVAILABLE",
+                "message": "The AI service is temporarily unavailable. Please try again in a moment.",
+            },
+        )

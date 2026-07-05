@@ -1,5 +1,7 @@
 """AI description generator Pydantic schemas."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -80,3 +82,35 @@ class GeneratePolicyResponse(BaseModel):
     """Response from AI policy generation."""
 
     policy_text: str
+
+
+class GeneratePromoContentRequest(BaseModel):
+    """Request to generate promotion content with NUMU AI.
+
+    `mode="html"` (popup custom mode) returns a script-free HTML snippet;
+    `mode="copy"` returns short bilingual copy for a banner / floating
+    widget / cookie banner.
+    """
+
+    surface: Literal["announcement_bar", "popup", "floating_widget", "cookie_banner"]
+    mode: Literal["copy", "html"] = "copy"
+    brief: str = Field(default="", max_length=1000)
+    store_name: str = Field(default="", max_length=200)
+    primary_color: str | None = Field(default=None, max_length=32)
+    text_color: str | None = Field(default=None, max_length=32)
+    cta_url: str | None = Field(default=None, max_length=2048)
+
+
+class GeneratePromoContentResponse(BaseModel):
+    """Generated promotion content — one of the two shapes per `mode`."""
+
+    mode: Literal["copy", "html"]
+    # copy mode
+    headline_en: str | None = None
+    headline_ar: str | None = None
+    body_en: str | None = None
+    body_ar: str | None = None
+    cta_en: str | None = None
+    cta_ar: str | None = None
+    # html mode (popup)
+    html: str | None = None
