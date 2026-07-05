@@ -28,6 +28,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.repositories import (
     get_coupon_repository,
@@ -47,6 +49,7 @@ from src.api.v1.routes.storefront.cart import (
 from src.api.v1.schemas.storefront.cart import CartResponse
 from src.core.entities.product import ProductStatus
 from src.core.value_objects.cart_item import CartItem
+from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.repositories import ProductRepository
 from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.funnel_event_repository import (
@@ -104,6 +107,58 @@ class SdkUpdateItemRequest(BaseModel):
 
 class SdkDiscountRequest(BaseModel):
     code: str = Field(min_length=1, max_length=64)
+
+
+class SdkRecoverCartRequest(BaseModel):
+    # An `abandoned_checkouts.id` (merchant manual nudge) OR a `customer_id`
+    # whose Redis cart is still live (scheduled auto-detect job). Resolved in
+    # that order — see `_resolve_recover_line_items`.
+    recover_id: UUID
+
+
+async def _resolve_recover_line_items(
+    recover_id: UUID,
+    store_id: UUID,
+    admin_db: AsyncSession,
+) -> list[dict]:
+    """Line items for a recovery id, scoped to this store.
+
+    Tries the persisted `abandoned_checkouts` row first (the merchant's
+    manual WhatsApp nudge keys on the checkout id), then falls back to a
+    live Redis customer cart (the scheduled auto-detect job keys on
+    customer_id). Returns ``[]`` when neither resolves for this store — a
+    wrong-store / expired / unknown id restores nothing rather than
+    erroring. Read via the admin (RLS-bypassing) session because the
+    shopper clicking the link carries no tenant context, and we enforce
+    `store_id` ourselves.
+    """
+    from src.infrastructure.database.models.tenant.abandoned_checkout import (
+        AbandonedCheckoutModel,
+    )
+
+    row = (
+        await admin_db.execute(
+            select(AbandonedCheckoutModel).where(
+                AbandonedCheckoutModel.id == recover_id,
+                AbandonedCheckoutModel.store_id == store_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row and row.line_items:
+        return list(row.line_items)
+
+    # Fallback: a live Redis customer cart (auto-detect path).
+    cart = await _cart_repo.get_by_customer_id(recover_id, store_id)
+    if cart and cart.items:
+        return [
+            {
+                "product_id": str(ci.product_id),
+                "variant_id": str(ci.variant_id) if ci.variant_id else None,
+                "quantity": ci.quantity,
+            }
+            for ci in cart.items
+        ]
+    return []
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
@@ -415,4 +470,114 @@ async def sdk_remove_discount(
     if hasattr(cart, "discount_code") and cart.discount_code:
         cart.discount_code = None
         await _cart_repo.save(cart)
+    return await _build_cart_response(cart, product_repo)
+
+
+@router.post(
+    "/cart/recover",
+    response_model=SuccessResponse[CartResponse],
+    summary="Rebuild the session cart from a saved abandoned cart",
+    operation_id="sdk_recover_cart",
+)
+async def sdk_recover_cart(
+    request: SdkRecoverCartRequest,
+    owner: Annotated[CartOwner, Depends(get_cart_owner)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    admin_db: Annotated[AsyncSession, Depends(get_admin_db_session)],
+):
+    """Restore an abandoned cart's line items into the caller's session cart.
+
+    Powers the WhatsApp / email abandoned-cart recovery link: the shopper
+    (often on a fresh device with an empty cart) taps a link carrying
+    ``recover_id`` and lands back on their cart with the items restored.
+
+    Each line is re-validated against the CURRENT catalog — product +
+    variant must still exist, be ACTIVE, belong to this store, and be in
+    stock; price is snapshotted live. Anything that no longer qualifies is
+    skipped rather than failing the whole restore. Existing items in the
+    session cart are preserved (merge, not replace). ``get_cart_owner``
+    establishes the ``numu_cart_session`` cookie so the rebuilt cart sticks
+    to this browser.
+    """
+    line_items = await _resolve_recover_line_items(
+        request.recover_id, owner.store_id, admin_db
+    )
+    cart = await _get_cart_for(owner)
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.variant_repository import VariantRepository
+
+    for li in line_items:
+        try:
+            product_id = UUID(str(li.get("product_id")))
+        except (ValueError, TypeError):
+            continue
+        raw_variant = li.get("variant_id")
+        variant_id: UUID | None = None
+        if raw_variant:
+            try:
+                variant_id = UUID(str(raw_variant))
+            except (ValueError, TypeError):
+                variant_id = None
+        try:
+            want_qty = int(li.get("quantity") or 1)
+        except (ValueError, TypeError):
+            want_qty = 1
+        if want_qty <= 0:
+            continue
+
+        product = await product_repo.get_by_id(product_id)
+        if (
+            not product
+            or product.status != ProductStatus.ACTIVE
+            or product.store_id != owner.store_id
+            or not product.is_in_stock
+        ):
+            continue  # dead / cross-store / OOS product — skip, don't fail
+
+        unit_price_cents = product.price.cents
+        line_sku = product.sku
+        line_image = product.images[0] if product.images else None
+        variant_name: str | None = None
+        add_qty = want_qty
+
+        if variant_id:
+            async with AsyncSessionLocal() as _s:
+                variant = await VariantRepository(_s).get_by_id(variant_id)
+            if (
+                variant is None
+                or variant.product_id != product.id
+                or not variant.is_in_stock
+            ):
+                continue
+            unit_price_cents = variant.price.cents
+            line_sku = variant.sku or product.sku
+            if variant.image_url:
+                line_image = variant.image_url
+            if variant.option_values:
+                variant_name = " / ".join(
+                    str(v) for v in variant.option_values.values() if v
+                )
+            # Cap to remaining stock net of anything already in the cart.
+            existing = cart.get_item(product_id, variant_id)
+            existing_qty = existing.quantity if existing else 0
+            allowed = max(0, variant.inventory_quantity - existing_qty)
+            if allowed <= 0:
+                continue
+            add_qty = min(want_qty, allowed)
+
+        cart.add_item(
+            CartItem(
+                product_id=product_id,
+                product_name=product.name,
+                variant_id=variant_id,
+                variant_name=variant_name,
+                quantity=add_qty,
+                unit_price=unit_price_cents,
+                sku=line_sku,
+                image_url=line_image,
+            )
+        )
+
+    await _cart_repo.save(cart)
     return await _build_cart_response(cart, product_repo)

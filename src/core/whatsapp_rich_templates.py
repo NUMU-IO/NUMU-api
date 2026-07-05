@@ -272,7 +272,10 @@ RICH_TEMPLATES: list[dict] = [
                 "type": "URL",
                 "text": "Complete order",
                 "url": _CART_URL,
-                "example": ["https://numueg.app/cart/cairo-style"],
+                "example": [
+                    "https://numueg.app/cart/cairo-style/"
+                    "b3f1c2a4-5d6e-7f80-9a1b-2c3d4e5f6a7b"
+                ],
             }
         ],
         "body_examples": ["Ahmed", "Cairo Style"],
@@ -291,7 +294,10 @@ RICH_TEMPLATES: list[dict] = [
                 "type": "URL",
                 "text": "أكمل الطلب",
                 "url": _CART_URL,
-                "example": ["https://numueg.app/cart/cairo-style"],
+                "example": [
+                    "https://numueg.app/cart/cairo-style/"
+                    "b3f1c2a4-5d6e-7f80-9a1b-2c3d4e5f6a7b"
+                ],
             }
         ],
         "body_examples": ["أحمد", "متجر القاهرة"],

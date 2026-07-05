@@ -457,13 +457,15 @@ async def notify_whatsapp(
         name=_recipient_name_from_checkout(checkout),
         language=language,
     )
-    # cart_token button param: the store subdomain. The apex
-    # /cart/<subdomain> redirector forwards to the storefront where the
-    # cart persists client-side.
+    # cart_token button param: `<subdomain>/<checkout_id>`. The apex
+    # /cart/<subdomain>/<id> redirector forwards to the storefront's
+    # /api/cart/recover route, which rebuilds this exact abandoned cart
+    # into the shopper's session and drops them on /cart with the items
+    # restored (instead of a generic, empty cart page).
     result = await service.send_abandoned_cart(
         recipient,
         store.name,
-        cart_token=store.subdomain or "",
+        cart_token=(f"{store.subdomain}/{checkout_id}" if store.subdomain else ""),
     )
 
     if result.success:
