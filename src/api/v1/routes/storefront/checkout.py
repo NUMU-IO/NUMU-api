@@ -880,9 +880,37 @@ async def checkout(
         # Human-readable "Color: Red, Size: M" so the merchant sees what was
         # actually ordered in the order detail view, without needing to join
         # against a variant catalog.
+        #
+        # The storefront checkout payload only carries
+        # product_id/variant_id/quantity — it does NOT send the chosen axes —
+        # so `selections` is empty on the live path and the order showed no
+        # size/color. When that happens, reconstruct the options from the
+        # variant's own `option_values` (authoritative server-side catalog),
+        # which works for every client (storefront, SDK themes, reorder).
+        # Kept separate from the stock-check `selections` above so inventory
+        # behavior is unchanged.
+        display_options: dict[str, str] = (
+            {str(k): str(v) for k, v in selections.items()} if selections else {}
+        )
+        if not display_options and item.variant_id:
+            from src.infrastructure.database.connection import AsyncSessionLocal
+            from src.infrastructure.repositories.variant_repository import (
+                VariantRepository,
+            )
+
+            async with AsyncSessionLocal() as _s:
+                _variant = await VariantRepository(_s).get_by_id(item.variant_id)
+            if (
+                _variant is not None
+                and _variant.product_id == product.id
+                and _variant.option_values
+            ):
+                display_options = {
+                    str(k): str(v) for k, v in _variant.option_values.items() if v
+                }
         variant_name = (
-            ", ".join(f"{k}: {v}" for k, v in selections.items())
-            if selections
+            ", ".join(f"{k}: {v}" for k, v in display_options.items())
+            if display_options
             else None
         )
         line_items.append(
@@ -900,7 +928,7 @@ async def checkout(
                 # whether a combo matched — the customer's pick is useful
                 # context even on products that don't have a strict combo
                 # catalog yet (e.g. legacy data).
-                properties=dict(selections) if selections else None,
+                properties=display_options or None,
             )
         )
         line_item_inventory.append({
