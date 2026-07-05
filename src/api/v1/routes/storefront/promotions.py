@@ -26,7 +26,6 @@ from fastapi import APIRouter, Depends, Path, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.api.dependencies.auth import get_optional_customer
-from src.api.dependencies.feature_flags import require_feature_flag
 from src.api.dependencies.promotion_preview import maybe_preview_for_store
 from src.api.dependencies.repositories import (
     get_coupon_repository,
@@ -79,13 +78,12 @@ from src.infrastructure.repositories.promotion_repository import (
     PromotionTargetRepository,
 )
 
-router = APIRouter(
-    # Per the offers-v2 rollout plan (step 14 §2): the storefront's
-    # `/promotions/*` endpoints 404 until the tenant has
-    # `ff_storefront_promo_render` enabled. Returning 404 (not 403)
-    # avoids signalling the feature exists during phased rollout.
-    dependencies=[Depends(require_feature_flag("ff_storefront_promo_render"))],
-)
+# Offers-v2 is GA (2026-07-05). The phased-rollout gate
+# (`require_feature_flag("ff_storefront_promo_render")`) has been removed so
+# active promotions render on every store; the per-tenant flag is no longer
+# consulted here. Draft/preview access is still authenticated per-request via
+# the `X-Preview-Token` path (see `maybe_preview_for_store`).
+router = APIRouter()
 
 _VISITOR_COOKIE = "numu_visitor"
 
