@@ -283,6 +283,7 @@ async def _initiate_paymob(
             hmac_secret=credentials["hmac_secret"],
             card_integration_id=credentials.get("card_integration_id"),
             wallet_integration_id=credentials.get("wallet_integration_id"),
+            apple_pay_integration_id=credentials.get("apple_pay_integration_id"),
         )
         intent = await paymob_service.create_payment_intent(
             amount=amount_due,
@@ -361,6 +362,7 @@ async def _initiate_kashier(
             mid=creds["merchant_id"],
             api_key=creds["api_key"],
             secret_key=creds.get("secret_key"),
+            apple_pay_enabled=kashier_settings.get("apple_pay_enabled", False),
         )
         intent = await kashier_service.create_payment_intent(
             amount=amount_due,

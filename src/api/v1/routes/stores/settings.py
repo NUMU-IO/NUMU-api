@@ -712,6 +712,7 @@ async def save_paymob_credentials(
         "hmac_secret": request.hmac_secret,
         "card_integration_id": request.card_integration_id,
         "wallet_integration_id": request.wallet_integration_id,
+        "apple_pay_integration_id": request.apple_pay_integration_id,
     }
 
     encrypted = await secrets.encrypt(credential_data, key_id)
@@ -726,6 +727,10 @@ async def save_paymob_credentials(
         "last_configured": datetime.now(UTC).isoformat(),
         "encrypted_credentials": encrypted_b64,
         "encryption_key_id": key_id,
+        # Plain (non-secret) flag so the storefront payment-method endpoints
+        # can surface Apple Pay cheaply without decrypting the blob. The
+        # Apple Pay integration ID itself lives inside encrypted_credentials.
+        "apple_pay_enabled": bool(request.apple_pay_integration_id),
     }
 
     settings["payment"] = payment_settings
@@ -755,6 +760,7 @@ async def save_paymob_credentials(
             hmac_secret=request.hmac_secret,
             card_integration_id=request.card_integration_id,
             wallet_integration_id=request.wallet_integration_id,
+            apple_pay_integration_id=request.apple_pay_integration_id,
         )
         store_ccy = (
             store.default_currency.value
@@ -785,6 +791,7 @@ async def save_paymob_credentials(
             hmac_secret_masked=secrets.mask_credential(request.hmac_secret),
             card_integration_id=request.card_integration_id,
             wallet_integration_id=request.wallet_integration_id,
+            apple_pay_integration_id=request.apple_pay_integration_id,
             last_configured=payment_settings["paymob"]["last_configured"],
             validation_warning=validation_warning,
         ),
@@ -839,6 +846,7 @@ async def get_paymob_credentials(
             hmac_secret_masked=secrets.mask_credential(creds["hmac_secret"]),
             card_integration_id=creds.get("card_integration_id"),
             wallet_integration_id=creds.get("wallet_integration_id"),
+            apple_pay_integration_id=creds.get("apple_pay_integration_id"),
             last_configured=paymob_settings.get("last_configured"),
         ),
         message="Paymob credentials retrieved successfully",
@@ -920,6 +928,9 @@ async def save_kashier_credentials(
         "last_configured": datetime.now(UTC).isoformat(),
         "encrypted_credentials": encrypted_b64,
         "encryption_key_id": key_id,
+        # Plain opt-in flag: surfaced at checkout + toggles Apple Pay in the
+        # Kashier session. No secret, so it lives in the plain settings dict.
+        "apple_pay_enabled": bool(request.apple_pay_enabled),
     }
 
     settings["payment"] = payment_settings
@@ -937,6 +948,7 @@ async def save_kashier_credentials(
             is_configured=True,
             merchant_id=request.merchant_id,
             api_key_masked=secrets.mask_credential(request.api_key),
+            apple_pay_enabled=request.apple_pay_enabled,
             last_configured=payment_settings["kashier"]["last_configured"],
         ),
         message="Kashier credentials saved successfully",
@@ -987,6 +999,7 @@ async def get_kashier_credentials(
             is_configured=True,
             merchant_id=creds["merchant_id"],
             api_key_masked=secrets.mask_credential(creds["api_key"]),
+            apple_pay_enabled=kashier_settings.get("apple_pay_enabled", False),
             last_configured=kashier_settings.get("last_configured"),
         ),
         message="Kashier credentials retrieved successfully",

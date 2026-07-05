@@ -441,6 +441,13 @@ class Settings(BaseSettings):
     tap_secret_key: str | None = None
     tap_publishable_key: str | None = None
 
+    # Public base URL of THIS API as reachable from the internet, e.g.
+    # https://numueg.app — used to build OAuth callback/redirect URIs
+    # (Meta + TikTok + TikTok Shop). The routes fall back to
+    # http://localhost:8000 when unset, so OAuth connect flows only work
+    # in production once PUBLIC_API_URL is configured.
+    public_api_url: str | None = None
+
     # Meta (Facebook/Instagram) Graph API
     meta_app_id: str | None = None
     meta_app_secret: str | None = None

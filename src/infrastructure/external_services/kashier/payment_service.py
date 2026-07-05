@@ -27,6 +27,14 @@ logger = logging.getLogger(__name__)
 KASHIER_API_BASE = "https://api.kashier.io"
 KASHIER_TEST_API_BASE = "https://test-api.kashier.io"
 
+# Kashier `allowedMethods` token that adds the Apple Pay button to a session.
+# ⚠️ VERIFY WITH KASHIER before production: their public docs list
+# card/wallet/bank_installments but don't publish the Apple Pay token. This is
+# ONLY appended when a merchant opts in (apple_pay_enabled), so an incorrect
+# token can never affect normal card/wallet Kashier checkouts — and correcting
+# it is a one-line change here.
+KASHIER_APPLE_PAY_METHOD = "applepay"
+
 
 class KashierPaymentService(IPaymentService):
     """Kashier payment service using the Payment Sessions API.
@@ -45,12 +53,14 @@ class KashierPaymentService(IPaymentService):
         secret_key: str | None = None,
         mode: str | None = None,
         currency: str | None = None,
+        apple_pay_enabled: bool = False,
     ):
         self._mid = mid or settings.kashier_mid
         self._api_key = api_key or settings.kashier_api_key
         self._secret_key = secret_key
         self._mode = mode or settings.kashier_mode or "test"
         self._currency = currency or settings.kashier_currency or "EGP"
+        self._apple_pay_enabled = apple_pay_enabled
 
     @property
     def provider(self) -> PaymentProvider:
@@ -97,6 +107,13 @@ class KashierPaymentService(IPaymentService):
             f"https://numueg.app/api/v1/webhooks/kashier/redirect?order_id={order_id}",
         )
 
+        # Apple Pay is offered by appending its method token, but only when the
+        # merchant opted in — so a wrong/unknown token can never break normal
+        # Kashier card/wallet checkouts.
+        allowed_methods = "card,wallet"
+        if self._apple_pay_enabled:
+            allowed_methods = f"{allowed_methods},{KASHIER_APPLE_PAY_METHOD}"
+
         session_payload = {
             "merchantId": self._mid,
             "amount": amount_str,
@@ -104,7 +121,7 @@ class KashierPaymentService(IPaymentService):
             "paymentType": "credit",
             "order": order_id,
             "type": "one-time",
-            "allowedMethods": "card,wallet",
+            "allowedMethods": allowed_methods,
             "enable3DS": True,
             "display": "en",
             "defaultMethod": "card",

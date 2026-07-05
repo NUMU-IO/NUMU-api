@@ -27,6 +27,10 @@ from src.api.responses import SuccessResponse
 from src.application.services.platform_default_theme_service import (
     PlatformDefaultThemeService,
 )
+from src.application.services.platform_flags import (
+    PAYMENTS_KEY,
+    get_payments_config,
+)
 from src.core.exceptions import ValidationError as DomainValidationError
 from src.infrastructure.database.models.public.platform_config import (
     PlatformConfigModel,
@@ -63,6 +67,23 @@ async def _set_app_embeds_enabled(db: AsyncSession, enabled: bool) -> None:
             key=THEME_ENGINE_KEY,
             value=merged,
             description="Theme engine platform flags (App-embeds tab, …)",
+        )
+        .on_conflict_do_update(index_elements=["key"], set_={"value": merged})
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def _set_apple_pay_platform_enabled(db: AsyncSession, enabled: bool) -> None:
+    """Upsert payments.apple_pay_enabled — the Apple Pay master switch (race-safe)."""
+    existing = await get_payments_config(db)
+    merged = {**existing, "apple_pay_enabled": bool(enabled)}
+    stmt = (
+        pg_insert(PlatformConfigModel)
+        .values(
+            key=PAYMENTS_KEY,
+            value=merged,
+            description="Payment platform flags (Apple Pay master switch, …)",
         )
         .on_conflict_do_update(index_elements=["key"], set_={"value": merged})
     )
@@ -152,6 +173,8 @@ class UpdatePlatformConfigPayload(BaseModel):
     # Phase 5.2 — toggle the merchant editor's "App embeds" tab platform-wide.
     # Omitted = leave untouched; explicit bool = set.
     app_embeds_tab_enabled: bool | None = None
+    # Apple Pay master switch. Omitted = leave untouched; explicit bool = set.
+    apple_pay_enabled: bool | None = None
 
 
 class PlatformConfigSnapshot(BaseModel):
@@ -165,6 +188,8 @@ class PlatformConfigSnapshot(BaseModel):
     default_marketplace_theme: dict[str, str | None] | None = None
     # Phase 5.2 — App-embeds tab visibility (default False → hidden).
     app_embeds_tab_enabled: bool = False
+    # Apple Pay master switch (default True → available; admin can disable).
+    apple_pay_enabled: bool = True
 
 
 @router.get(
@@ -188,6 +213,7 @@ async def get_platform_config(
     default_id = await svc.get_default_theme_id()
     summary = await svc.get_default_theme_summary() if default_id else None
     theme_engine = await _get_theme_engine_config(db)
+    payments = await get_payments_config(db)
 
     return SuccessResponse(
         data=PlatformConfigSnapshot(
@@ -196,6 +222,7 @@ async def get_platform_config(
             app_embeds_tab_enabled=bool(
                 theme_engine.get("app_embeds_tab_enabled", False)
             ),
+            apple_pay_enabled=bool(payments.get("apple_pay_enabled", True)),
         ),
         message="Platform config retrieved",
     )
@@ -255,9 +282,20 @@ async def update_platform_config(
             },
         )
 
+    if "apple_pay_enabled" in fields_set:
+        await _set_apple_pay_platform_enabled(db, bool(payload.apple_pay_enabled))
+        logger.info(
+            "platform_apple_pay_toggled",
+            extra={
+                "admin_id": str(admin),
+                "new_value": bool(payload.apple_pay_enabled),
+            },
+        )
+
     default_id = await svc.get_default_theme_id()
     summary = await svc.get_default_theme_summary() if default_id else None
     theme_engine = await _get_theme_engine_config(db)
+    payments = await get_payments_config(db)
 
     return SuccessResponse(
         data=PlatformConfigSnapshot(
@@ -266,6 +304,7 @@ async def update_platform_config(
             app_embeds_tab_enabled=bool(
                 theme_engine.get("app_embeds_tab_enabled", False)
             ),
+            apple_pay_enabled=bool(payments.get("apple_pay_enabled", True)),
         ),
         message="Platform config updated",
     )
