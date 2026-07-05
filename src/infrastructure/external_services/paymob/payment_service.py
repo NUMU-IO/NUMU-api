@@ -36,7 +36,7 @@ async def get_merchant_paymob_credentials(store_settings: dict) -> dict:
 
     Returns:
         dict with keys: secret_key, public_key, hmac_secret,
-        card_integration_id, wallet_integration_id
+        card_integration_id, wallet_integration_id, apple_pay_integration_id
 
     Raises:
         PaymentError: If credentials are not configured or decryption fails.
@@ -84,12 +84,14 @@ class PaymobPaymentService(IPaymentService):
         hmac_secret: str | None = None,
         card_integration_id: str | None = None,
         wallet_integration_id: str | None = None,
+        apple_pay_integration_id: str | None = None,
     ) -> None:
         self.secret_key = secret_key
         self.public_key = public_key
         self.hmac_secret = hmac_secret
         self.card_integration_id = card_integration_id
         self.wallet_integration_id = wallet_integration_id
+        self.apple_pay_integration_id = apple_pay_integration_id
 
     @property
     def provider(self) -> PaymentProvider:
@@ -128,6 +130,11 @@ class PaymobPaymentService(IPaymentService):
         payment_methods = [int(self.card_integration_id)]
         if self.wallet_integration_id:
             payment_methods.append(int(self.wallet_integration_id))
+        # Apple Pay rides inside Paymob's checkout as its own integration ID
+        # (Paymob is the merchant-of-record for Apple Pay — hosted/embedded
+        # "Mode 1"). Present only when the merchant configured it.
+        if self.apple_pay_integration_id:
+            payment_methods.append(int(self.apple_pay_integration_id))
 
         # Default billing fields required by Paymob
         default_billing = {

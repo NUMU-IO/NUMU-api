@@ -12,7 +12,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
     get_network_reputation_repository,
     get_store_repository,
@@ -35,13 +37,15 @@ router = APIRouter()
 _PROVIDER_LABELS: dict[str, tuple[str, str]] = {
     "cod": ("Cash on Delivery", "الدفع عند الاستلام"),
     "paymob": ("Card / Wallet (Paymob)", "بطاقة / محفظة (باي موب)"),
+    "paymob_applepay": ("Apple Pay", "Apple Pay"),
     "fawry": ("Fawry", "فوري"),
     "fawaterak": ("Fawaterak", "فواتيرك"),
     "kashier": ("Card (Kashier)", "بطاقة (كاشير)"),
+    "kashier_applepay": ("Apple Pay", "Apple Pay"),
     "instapay": ("InstaPay", "انستا باي"),
     "vodafone_cash": ("Vodafone Cash", "فودافون كاش"),
     "bank_transfer": ("Bank Transfer", "تحويل بنكي"),
-    "moyasar": ("Card (Moyasar)", "بطاقة (ميسر)"),
+    "moyasar": ("Card / mada / Apple Pay (Moyasar)", "بطاقة / مدى / Apple Pay (ميسر)"),
     "hyperpay": ("HyperPay", "هايبر باي"),
     "tabby": ("Tabby", "تابي"),
     "tamara": ("Tamara", "تمارا"),
@@ -63,6 +67,7 @@ _CARD_TOKEN_PROVIDERS: frozenset[str] = frozenset({"paymob", "kashier", "moyasar
 async def get_public_checkout_config(
     store_id: Annotated[UUID, Path(description="Store ID")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[AsyncSession | None, Depends(get_db)] = None,
 ):
     store = await store_repo.get_by_id(store_id)
     if not store:
@@ -137,6 +142,27 @@ async def get_public_checkout_config(
             "label_ar": label_ar,
             "requires_deposit": provider == "cod" and deposit_enabled,
         })
+
+    # Apple Pay ride-along options — surfaced as their own one-tap method when
+    # the merchant enabled Apple Pay on that gateway AND the platform master
+    # switch is on. They dispatch through the same gateway branch at checkout
+    # (paymob*/kashier*), so they're additive to the richer payment_methods
+    # shape only (kept out of the provider-level `enabled_payment_methods` list).
+    from src.application.services.platform_flags import (
+        is_apple_pay_platform_enabled,
+    )
+
+    apple_pay_ok = await is_apple_pay_platform_enabled(db)
+    for _gw, _code in (("paymob", "paymob_applepay"), ("kashier", "kashier_applepay")):
+        _cfg = payment_settings.get(_gw) or {}
+        if apple_pay_ok and _gw in enabled_methods and _cfg.get("apple_pay_enabled"):
+            _lbl, _lbl_ar = _PROVIDER_LABELS[_code]
+            payment_methods.append({
+                "code": _code,
+                "label": _lbl,
+                "label_ar": _lbl_ar,
+                "requires_deposit": False,
+            })
 
     currency = (
         store.default_currency.value

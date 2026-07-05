@@ -166,6 +166,7 @@ async def get_paymob_service_for_store(store_settings: dict):
         hmac_secret=creds["hmac_secret"],
         card_integration_id=creds.get("card_integration_id"),
         wallet_integration_id=creds.get("wallet_integration_id"),
+        apple_pay_integration_id=creds.get("apple_pay_integration_id"),
     )
 
 

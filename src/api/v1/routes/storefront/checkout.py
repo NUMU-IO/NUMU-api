@@ -1726,6 +1726,7 @@ async def checkout(
                 hmac_secret=credentials["hmac_secret"],
                 card_integration_id=credentials.get("card_integration_id"),
                 wallet_integration_id=credentials.get("wallet_integration_id"),
+                apple_pay_integration_id=credentials.get("apple_pay_integration_id"),
             )
 
             customer_email_str = (
@@ -1778,8 +1779,10 @@ async def checkout(
                 detail="Online payment is not available for this store. Please choose another payment method.",
             )
 
-    elif _dispatch_method == "kashier":
-        # Kashier payment via store.settings encrypted credentials
+    elif _dispatch_method and _dispatch_method.startswith("kashier"):
+        # Kashier payment via store.settings encrypted credentials. Covers
+        # "kashier" and "kashier_applepay" — same session; Apple Pay is offered
+        # inside it when the merchant enabled it.
         try:
             from src.infrastructure.external_services.kashier.payment_service import (
                 KashierPaymentService,
@@ -1806,6 +1809,7 @@ async def checkout(
                 mid=creds["merchant_id"],
                 api_key=creds["api_key"],
                 secret_key=creds.get("secret_key"),
+                apple_pay_enabled=kashier_settings.get("apple_pay_enabled", False),
             )
 
             created_order.payment_id = str(created_order.id)

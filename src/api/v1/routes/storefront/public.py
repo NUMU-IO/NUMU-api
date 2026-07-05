@@ -1990,6 +1990,7 @@ async def resend_customer_verification(
 async def get_store_payment_methods(
     store_id: UUID = Path(...),
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)] = ...,
+    db: Annotated[AsyncSession | None, Depends(get_db)] = None,
 ):
     """Return enabled + configured payment methods for the storefront."""
     store = await store_repo.get_by_id(store_id)
@@ -1997,6 +1998,14 @@ async def get_store_payment_methods(
         raise HTTPException(status_code=404, detail="Store not found")
 
     payment_settings = (store.settings or {}).get("payment", {})
+
+    # Apple Pay master switch (super-admin). Defaults to on; None-safe for
+    # direct-call unit tests.
+    from src.application.services.platform_flags import (
+        is_apple_pay_platform_enabled,
+    )
+
+    apple_pay_platform_ok = await is_apple_pay_platform_enabled(db)
 
     # In non-production environments, surface methods that are merely `enabled`
     # (without `is_configured`) so merchants see what they selected during onboarding
@@ -2043,6 +2052,20 @@ async def get_store_payment_methods(
                 "label_en": "Mobile Wallet",
                 "type": "paymob",
             })
+        # Apple Pay via Paymob — surfaced only when the merchant configured a
+        # Paymob Apple Pay integration ID (tracked by a plain flag so we don't
+        # decrypt here) AND the platform master switch is on. It rides inside
+        # Paymob's hosted/embedded checkout, so it dispatches through the same
+        # `paymob*` branch at checkout.
+        if apple_pay_platform_ok and payment_settings.get("paymob", {}).get(
+            "apple_pay_enabled"
+        ):
+            methods.append({
+                "id": "paymob_applepay",
+                "label": "Apple Pay",
+                "label_en": "Apple Pay",
+                "type": "paymob",
+            })
     if _show("fawry"):
         methods.append({
             "id": "fawry",
@@ -2059,6 +2082,17 @@ async def get_store_payment_methods(
             "label_en": "Credit/Debit Card",
             "type": "kashier",
         })
+        # Apple Pay via Kashier — opt-in flag + platform master switch; rides
+        # inside the Kashier session.
+        if apple_pay_platform_ok and payment_settings.get("kashier", {}).get(
+            "apple_pay_enabled"
+        ):
+            methods.append({
+                "id": "kashier_applepay",
+                "label": "Apple Pay",
+                "label_en": "Apple Pay",
+                "type": "kashier",
+            })
 
     if _show("fawaterak"):
         methods.append({
