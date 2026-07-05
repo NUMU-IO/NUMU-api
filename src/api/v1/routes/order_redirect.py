@@ -194,24 +194,44 @@ async def redirect_to_cart(path: str) -> RedirectResponse:
     """Resolve an abandoned-cart template's URL-button substitution to the
     customer-facing storefront and return a 302.
 
-    The ``abandoned_cart_v2`` Meta template button is
-    ``https://numueg.app/cart/{{1}}`` where ``{{1}}`` is the store
-    **subdomain** (self-describing, no DB lookup — the messaging service
-    substitutes ``store.subdomain``). We forward to the storefront home on
-    that subdomain, where the cart persists client-side. Subdomain already
-    carries the env suffix on test/stage stores, so this resolves across
-    environments without consulting the prod DB.
+    The ``abandoned_cart_v3`` Meta template button is
+    ``https://numueg.app/cart/{{1}}`` where ``{{1}}`` is self-describing —
+    no DB lookup, so it resolves across environments (the subdomain already
+    carries the env suffix on test/stage stores). TWO shapes, branched on
+    whether a second path segment (the recovery id) is present:
+
+    1. ``<subdomain>/<recover_id>`` — **cart recovery**. Forwards to
+       ``https://<subdomain>.numueg.app/api/cart/recover?cart=<recover_id>``,
+       a storefront route that rebuilds the shopper's session cart from the
+       saved abandoned checkout (or live Redis cart) and then 302s them to
+       ``/cart`` with the items restored. ``<recover_id>`` is an
+       ``abandoned_checkouts.id`` (manual nudge) or a ``customer_id`` (the
+       scheduled auto-detect job) — a UUID, so it's unguessable.
+
+    2. ``<subdomain>`` — legacy single-segment (messages already in
+       customers' chat history). Forwards to the storefront home; the cart
+       persists client-side there.
 
     Anything that doesn't look like a subdomain falls back to the apex
     marketing site so the customer always lands on a NUMU surface.
     """
-    head = path.split("/", 1)[0]
-    if head and _SUBDOMAIN_RE.match(head):
-        target = f"https://{head}.{_PLATFORM_DOMAIN}/"
+    head, _, tail = path.partition("/")
+    if not head or not _SUBDOMAIN_RE.match(head):
+        logger.info("cart_redirect_malformed_path", extra={"path": path})
+        return RedirectResponse(url=_APEX_FALLBACK, status_code=302)
+
+    # Shape 1 — self-describing subdomain/<recover_id>. `tail` may itself
+    # contain further segments; take the first as the recovery id.
+    recover_id = tail.split("/", 1)[0].strip() if tail else ""
+    if recover_id:
+        target = f"https://{head}.{_PLATFORM_DOMAIN}/api/cart/recover?cart={recover_id}"
         logger.info(
-            "cart_redirect_resolved",
-            extra={"subdomain": head, "target": target},
+            "cart_redirect_recover",
+            extra={"subdomain": head, "recover_id": recover_id, "target": target},
         )
         return RedirectResponse(url=target, status_code=302)
-    logger.info("cart_redirect_malformed_path", extra={"path": path})
-    return RedirectResponse(url=_APEX_FALLBACK, status_code=302)
+
+    # Shape 2 — legacy subdomain-only.
+    target = f"https://{head}.{_PLATFORM_DOMAIN}/"
+    logger.info("cart_redirect_resolved", extra={"subdomain": head, "target": target})
+    return RedirectResponse(url=target, status_code=302)

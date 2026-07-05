@@ -131,3 +131,103 @@ async def test_checkout_config_still_has_legacy_fields():
     data = resp.data
     assert "standard_fields" in data
     assert "enabled_payment_methods" in data  # legacy list preserved
+
+
+@pytest.mark.asyncio
+async def test_checkout_config_surfaces_paymob_applepay_when_enabled():
+    """Apple Pay shows as its own method when the merchant enabled it on Paymob."""
+    settings = {
+        "payment": {
+            "paymob": {
+                "enabled": True,
+                "is_configured": True,
+                "apple_pay_enabled": True,
+            },
+        }
+    }
+    store = _store(settings)
+    resp = await get_public_checkout_config(
+        store_id=store.id, store_repo=_FakeStoreRepo(store)
+    )
+    methods = {m["code"]: m for m in resp.data["payment_methods"]}
+    assert "paymob" in methods
+    assert "paymob_applepay" in methods
+    assert methods["paymob_applepay"]["label"] == "Apple Pay"
+    assert methods["paymob_applepay"]["requires_deposit"] is False
+
+
+@pytest.mark.asyncio
+async def test_checkout_config_no_paymob_applepay_without_flag():
+    """No Apple Pay option when the merchant hasn't enabled it (opt-in)."""
+    settings = {"payment": {"paymob": {"enabled": True, "is_configured": True}}}
+    store = _store(settings)
+    resp = await get_public_checkout_config(
+        store_id=store.id, store_repo=_FakeStoreRepo(store)
+    )
+    codes = {m["code"] for m in resp.data["payment_methods"]}
+    assert "paymob" in codes
+    assert "paymob_applepay" not in codes
+
+
+@pytest.mark.asyncio
+async def test_checkout_config_surfaces_kashier_applepay_when_enabled():
+    settings = {
+        "payment": {
+            "kashier": {
+                "enabled": True,
+                "is_configured": True,
+                "apple_pay_enabled": True,
+            },
+        }
+    }
+    store = _store(settings)
+    resp = await get_public_checkout_config(
+        store_id=store.id, store_repo=_FakeStoreRepo(store)
+    )
+    codes = {m["code"] for m in resp.data["payment_methods"]}
+    assert "kashier" in codes
+    assert "kashier_applepay" in codes
+
+
+@pytest.mark.asyncio
+async def test_checkout_config_moyasar_label_mentions_apple_pay():
+    """KSA/Moyasar option advertises Apple Pay in its label (Phase 0)."""
+    settings = {"payment": {"moyasar": {"enabled": True, "is_configured": True}}}
+    store = _store(settings, country="SA")
+    resp = await get_public_checkout_config(
+        store_id=store.id, store_repo=_FakeStoreRepo(store)
+    )
+    moyasar = next(
+        (m for m in resp.data["payment_methods"] if m["code"] == "moyasar"), None
+    )
+    assert moyasar is not None
+    assert "Apple Pay" in moyasar["label"]
+
+
+@pytest.mark.asyncio
+async def test_checkout_config_hides_applepay_when_platform_disabled(monkeypatch):
+    """Super-admin master switch off hides Apple Pay even if the store enabled it."""
+
+    async def _disabled(_db):
+        return False
+
+    monkeypatch.setattr(
+        "src.application.services.platform_flags.is_apple_pay_platform_enabled",
+        _disabled,
+    )
+    settings = {
+        "payment": {
+            "paymob": {
+                "enabled": True,
+                "is_configured": True,
+                "apple_pay_enabled": True,
+            },
+        }
+    }
+    store = _store(settings)
+    resp = await get_public_checkout_config(
+        store_id=store.id, store_repo=_FakeStoreRepo(store)
+    )
+    codes = {m["code"] for m in resp.data["payment_methods"]}
+    assert "paymob" in codes
+    assert "paymob_applepay" not in codes  # gated off by the platform switch

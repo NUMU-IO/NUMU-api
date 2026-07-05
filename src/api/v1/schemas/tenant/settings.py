@@ -162,6 +162,10 @@ class SavePaymobCredentialsRequest(BaseModel):
     hmac_secret: str = Field(..., min_length=10, max_length=500)
     card_integration_id: str = Field(..., min_length=1, max_length=50)
     wallet_integration_id: str | None = Field(None, max_length=50)
+    # Paymob Apple Pay integration ID. When set, Apple Pay is offered at
+    # checkout (rendered inside Paymob's hosted/embedded flow). Merchants
+    # obtain it by asking Paymob to enable Apple Pay on their account.
+    apple_pay_integration_id: str | None = Field(None, max_length=50)
 
 
 class PaymobCredentialsResponse(BaseModel):
@@ -173,6 +177,7 @@ class PaymobCredentialsResponse(BaseModel):
     hmac_secret_masked: str | None = None
     card_integration_id: str | None = None
     wallet_integration_id: str | None = None
+    apple_pay_integration_id: str | None = None
     last_configured: str | None = None
     # Non-fatal warning from a live validation probe against Paymob at save
     # time — e.g. "Paymob rejected the request: incorrect combination of
@@ -267,6 +272,10 @@ class SaveKashierCredentialsRequest(BaseModel):
     merchant_id: str = Field(..., min_length=3, max_length=100)
     api_key: str = Field(..., min_length=5, max_length=500)
     secret_key: str | None = Field(None, max_length=500)
+    # Offer Apple Pay inside Kashier's hosted session/iframe. Requires Apple Pay
+    # to be enabled on the merchant's Kashier account. No extra ID needed
+    # (unlike Paymob) — a boolean opt-in is enough.
+    apple_pay_enabled: bool = False
 
 
 class KashierCredentialsResponse(BaseModel):
@@ -275,6 +284,7 @@ class KashierCredentialsResponse(BaseModel):
     is_configured: bool
     merchant_id: str | None = None
     api_key_masked: str | None = None
+    apple_pay_enabled: bool = False
     last_configured: str | None = None
 
 

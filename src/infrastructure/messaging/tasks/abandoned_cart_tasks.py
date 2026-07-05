@@ -283,12 +283,18 @@ async def _send_notification(
                     name=customer_name,
                     language=wa_language,
                 )
-                # cart_token = store subdomain; apex /cart/<subdomain>
-                # redirector forwards to the storefront.
+                # cart_token = `<subdomain>/<customer_id>`; the apex
+                # /cart/<subdomain>/<id> redirector forwards to the
+                # storefront's /api/cart/recover route, which rebuilds this
+                # customer's live cart into the shopper's session so they
+                # land on /cart with the items restored (customer_id resolves
+                # the still-live Redis cart in the recover endpoint).
                 result = await wa_service.send_abandoned_cart(
                     recipient,
                     store_name,
-                    cart_token=store.subdomain or "",
+                    cart_token=(
+                        f"{store.subdomain}/{customer_id}" if store.subdomain else ""
+                    ),
                 )
                 if result.success:
                     sent = True
