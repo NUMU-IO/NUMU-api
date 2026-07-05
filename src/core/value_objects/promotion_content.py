@@ -40,14 +40,27 @@ class AnnouncementBarContent(_BaseContent):
 
 
 class PopupContent(_BaseContent):
-    """Triggered modal config."""
+    """Triggered modal config.
+
+    `layout="custom"` switches the storefront from the templated
+    headline/body/form popup to rendering merchant-authored `custom_html`
+    (e.g. HTML a merchant pastes from an AI assistant). The storefront
+    renders it inside a sandboxed iframe — no scripts, no parent-DOM /
+    cookie access — so untrusted markup can't run code against shoppers;
+    the modal shell (backdrop, close button, dismissal, analytics) is
+    still owned by us. When `custom_html` is empty the storefront falls
+    back to the templated render.
+    """
 
     surface: Literal["popup"] = "popup"
-    layout: Literal["centered", "side"] = "centered"
+    layout: Literal["centered", "side", "custom"] = "centered"
     image_url: str | None = None
     form_fields: list[Literal["email", "phone", "name"]] = Field(default_factory=list)
     discount_code_to_reveal: str | None = None
     show_after_dismiss_days: int = Field(default=30, ge=0)
+    # Merchant-authored HTML for `layout="custom"`. Capped to keep the
+    # JSONB row and the SSR payload bounded.
+    custom_html: str | None = Field(default=None, max_length=50000)
 
 
 class FloatingWidgetContent(_BaseContent):
