@@ -38,6 +38,9 @@ from src.api.v1.routes.admin.reconciliation import router as reconciliation_rout
 from src.api.v1.routes.admin.stores import router as stores_router
 from src.api.v1.routes.admin.users import router as admin_users_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
+from src.api.v1.routes.admin.whatsapp_access import (
+    router as whatsapp_access_router,
+)
 from src.api.v1.routes.tenant.configuration.admin_routes import (
     router as credentials_router,
 )
@@ -92,6 +95,8 @@ router.include_router(
     prefix="/analytics-rollups",
     tags=["Admin - Analytics Rollups"],
 )
+# Router carries its own prefix="/whatsapp" → /api/v1/admin/whatsapp/...
+router.include_router(whatsapp_access_router)
 # Credentials router already has prefix="/admin/credentials" built-in,
 # so we include it at root "" to avoid /admin/admin/credentials
 router.include_router(credentials_router)

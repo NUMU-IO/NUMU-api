@@ -36,6 +36,7 @@ from src.infrastructure.database.models.public import (
     UserModel,
     WaitlistModel,
     WebhookEventModel,
+    WhatsAppAccessRequestModel,
 )
 
 # Access-control graph (public schema). UserModel and TenantMembershipModel have
@@ -108,6 +109,7 @@ __all__ = [
     "TenantModel",
     "UserModel",
     "WaitlistModel",
+    "WhatsAppAccessRequestModel",
     "AuditLogModel",
     "TenantMembershipModel",
     "RoleModel",
