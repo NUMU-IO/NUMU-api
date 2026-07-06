@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from src.api.dependencies import (
     get_current_store,
     get_onboarding_repository,
+    get_product_repository,
     get_store_repository,
     get_storefront_cache_service,
 )
@@ -45,6 +46,8 @@ from src.api.v1.schemas.tenant.settings import (
     PaymentMethodStatus,
     PaymentSettingsResponse,
     PaymobCredentialsResponse,
+    ProductLabelDef,
+    ProductLabelsResponse,
     SaveBostaCredentialsRequest,
     SaveFawaterakCredentialsRequest,
     SaveInstapayCredentialsRequest,
@@ -60,6 +63,7 @@ from src.api.v1.schemas.tenant.settings import (
     UpdateCustomizationRequest,
     UpdateInvoiceSettingsRequest,
     UpdatePaymentSettingsRequest,
+    UpdateProductLabelsRequest,
     UpdateShippingSettingsRequest,
     UpdateShippingZoneRequest,
     UpdateWhatsAppSettingsRequest,
@@ -72,7 +76,11 @@ from src.application.use_cases.onboarding.auto_complete import (
 from src.core.entities.onboarding import OnboardingStepKey
 from src.core.entities.store import Store
 from src.infrastructure.cache import StorefrontCache
-from src.infrastructure.repositories import OnboardingRepository, StoreRepository
+from src.infrastructure.repositories import (
+    OnboardingRepository,
+    ProductRepository,
+    StoreRepository,
+)
 
 router = APIRouter(prefix="/{store_id}/settings")
 
@@ -673,6 +681,96 @@ async def update_storefront_password(
             has_password=bool(pp.get("password_hash")),
         ),
         message="Storefront password updated",
+    )
+
+
+# ============ Product Labels ============
+
+
+def _stored_product_labels(store_settings: dict | None) -> list[ProductLabelDef]:
+    """Parse ``settings.product_labels`` defensively — malformed rows are
+    skipped rather than failing the whole response."""
+    raw = (store_settings or {}).get("product_labels")
+    if not isinstance(raw, list):
+        return []
+    labels: list[ProductLabelDef] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            labels.append(ProductLabelDef.model_validate(item))
+        except Exception:  # noqa: BLE001 — tolerate legacy/hand-edited rows
+            continue
+    return labels
+
+
+@router.get(
+    "/product-labels",
+    response_model=SuccessResponse[ProductLabelsResponse],
+    summary="Get the store's custom product-label definitions",
+    operation_id="get_product_labels",
+)
+async def get_product_labels(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Custom labels only — built-in presets (new/sale/bestseller/limited)
+    live in the hub, not in settings."""
+    return SuccessResponse(
+        data=ProductLabelsResponse(labels=_stored_product_labels(store.settings)),
+        message="Product labels retrieved",
+    )
+
+
+@router.put(
+    "/product-labels",
+    response_model=SuccessResponse[ProductLabelsResponse],
+    summary="Replace the store's custom product-label definitions",
+    operation_id="update_product_labels",
+)
+async def update_product_labels(
+    request: UpdateProductLabelsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+):
+    """Full-replace of ``settings.product_labels`` (the hub always sends the
+    complete list). Read-merge-write on the settings dict — only this key is
+    touched, everything else (payment config!) is preserved. Duplicate keys
+    are collapsed keeping the last occurrence.
+
+    Definition changes fan out to labeled products so the denormalized
+    ``attributes.label`` text never goes stale:
+      - renamed definition → text rewritten on every product carrying the key
+      - deleted definition → label stripped (products fall back to no label)
+    Built-in presets never live in settings, so they can't be renamed or
+    deleted here.
+    """
+    old = {label.key: label for label in _stored_product_labels(store.settings)}
+
+    deduped: dict[str, ProductLabelDef] = {}
+    for label in request.labels:
+        deduped[label.key] = label
+
+    settings = dict(store.settings) if store.settings else {}
+    settings["product_labels"] = [label.model_dump() for label in deduped.values()]
+    store.settings = settings
+    await store_repo.update(store)
+
+    for key, label in deduped.items():
+        previous = old.get(key)
+        if previous and (
+            previous.text_en != label.text_en or previous.text_ar != label.text_ar
+        ):
+            await product_repo.propagate_label_text(
+                store.id, key, label.text_en, label.text_ar
+            )
+    for key in old:
+        if key not in deduped:
+            await product_repo.clear_label(store.id, key)
+
+    return SuccessResponse(
+        data=ProductLabelsResponse(labels=list(deduped.values())),
+        message="Product labels updated",
     )
 
 
