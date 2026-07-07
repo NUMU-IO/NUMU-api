@@ -3,7 +3,8 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, tuple_, update
+from sqlalchemy import Text, cast, func, literal, or_, select, tuple_, update
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.product import Product, ProductStatus
@@ -421,6 +422,53 @@ class ProductRepository(IProductRepository):
         )
         await self.session.flush()
         return result.rowcount > 0
+
+    async def propagate_label_text(
+        self, store_id: UUID, key: str, text_en: str, text_ar: str
+    ) -> int:
+        """Rewrite the denormalized ``attributes.label`` text on every product
+        of the store that carries the given label key. Called when a merchant
+        renames a custom label definition so already-labeled products don't
+        keep the stale text. Returns the number of products updated."""
+        # literal(dict, JSONB) binds a real jsonb OBJECT; the path must bind
+        # as text[] — a plain str would bind VARCHAR and jsonb_set(jsonb,
+        # varchar, jsonb) doesn't exist.
+        new_label = literal(
+            {"key": key, "text_en": text_en, "text_ar": text_ar}, type_=JSONB
+        )
+        label_path = literal(["label"], type_=ARRAY(Text()))
+        query = (
+            update(ProductModel)
+            .where(
+                ProductModel.store_id == store_id,
+                ProductModel.attributes["label"]["key"].astext == key,
+            )
+            .values(
+                attributes=func.jsonb_set(
+                    ProductModel.attributes, label_path, new_label
+                )
+            )
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        await self.session.flush()
+        return result.rowcount or 0
+
+    async def clear_label(self, store_id: UUID, key: str) -> int:
+        """Strip ``attributes.label`` from every product of the store that
+        carries the given label key. Called when a custom label definition is
+        deleted — affected products safely fall back to "no label". Returns
+        the number of products updated."""
+        query = (
+            update(ProductModel)
+            .where(
+                ProductModel.store_id == store_id,
+                ProductModel.attributes["label"]["key"].astext == key,
+            )
+            .values(attributes=ProductModel.attributes.op("-")(cast("label", Text)))
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        await self.session.flush()
+        return result.rowcount or 0
 
     async def deduct_variant_stock(
         self,
