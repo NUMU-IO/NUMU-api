@@ -1104,16 +1104,26 @@ async def checkout(
         from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
 
         apply_coupon = ApplyCouponUseCase(coupon_repository=coupon_repo)
+        # Coupon math runs in STORE-CURRENCY DECIMALS (the entity's `value`,
+        # `min_order_amount` and `max_discount_amount` are EGP decimals, not
+        # cents). Feeding cents here capped every percentage coupon at
+        # `max_discount_amount` "cents" (int(0.50) → 0 — discount shown in
+        # the cart but never charged) and mis-scaled fixed coupons 100×.
+        # `_discount_line_items` stays in cents for the offers-v2 calculator
+        # below, so convert a copy for this call only.
         coupon_result = await apply_coupon.execute(
             store_id=store_id,
             code=request.coupon_code,
-            order_amount=Decimal(str(subtotal)),
+            order_amount=Decimal(str(subtotal)) / Decimal(100),
             for_update=True,
             # Pass line items so BUY_X_GET_Y coupons can compute the
             # cheapest-unit discount; ignored for simpler coupon types.
-            line_items=_discount_line_items,
+            line_items=[
+                {**li, "unit_price": Decimal(str(li["unit_price"])) / Decimal(100)}
+                for li in _discount_line_items
+            ],
         )
-        discount_amount = int(coupon_result.discount_amount)
+        discount_amount = int(coupon_result.discount_amount * Decimal(100))
         coupon_code = coupon_result.code
         coupon_id = coupon_result.coupon_id
         _coupon_campaign_id = coupon_result.campaign_id

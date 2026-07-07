@@ -116,3 +116,17 @@ class IProductRepository(BaseRepository[Product]):
     ) -> int:
         """Count products matching the given filters."""
         ...
+
+    @abstractmethod
+    async def propagate_label_text(
+        self, store_id: UUID, key: str, text_en: str, text_ar: str
+    ) -> int:
+        """Rewrite the denormalized attributes.label text on every product of
+        the store carrying `key` (custom-label rename propagation)."""
+        ...
+
+    @abstractmethod
+    async def clear_label(self, store_id: UUID, key: str) -> int:
+        """Strip attributes.label from every product of the store carrying
+        `key` (custom-label deletion — products fall back to no label)."""
+        ...

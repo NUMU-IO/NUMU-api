@@ -755,6 +755,37 @@ class UpdateInvoiceSettingsRequest(BaseModel):
     building_number: str | None = None
 
 
+# Product Labels (reusable custom label definitions)
+class ProductLabelDef(BaseModel):
+    """One reusable custom product label, stored under
+    ``store.settings["product_labels"]``. Built-in presets (new/sale/
+    bestseller/limited) are NOT stored — only merchant-created customs.
+    Text is denormalized onto products at assignment time, so renames
+    here don't back-propagate to already-labeled products (v1 trade-off)."""
+
+    key: str = Field(
+        min_length=8,
+        max_length=64,
+        pattern=r"^custom:[a-z0-9][a-z0-9_-]{0,47}$",
+        description="Stable identity, format custom:<slug>",
+    )
+    text_en: str = Field(min_length=1, max_length=80)
+    text_ar: str = Field(default="", max_length=80)
+
+
+class ProductLabelsResponse(BaseModel):
+    """The store's custom product-label definitions."""
+
+    labels: list[ProductLabelDef] = Field(default_factory=list)
+
+
+class UpdateProductLabelsRequest(BaseModel):
+    """Replace the store's custom product-label list (full replace —
+    the hub always sends the complete list)."""
+
+    labels: list[ProductLabelDef] = Field(default_factory=list, max_length=50)
+
+
 # Combined Store Settings
 class StoreSettingsResponse(BaseModel):
     """Combined store settings response."""

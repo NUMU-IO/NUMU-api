@@ -6,10 +6,37 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from src.api.dependencies.sanitization import SanitizedStr
 from src.core.value_objects.money import Currency
+
+
+class ProductLabelSchema(BaseModel):
+    """Merchant-assigned product label stored at ``attributes.label``.
+
+    v1 is text-only (no colors/icons). The text is denormalized onto the
+    product at assignment time, so renaming a custom label definition in
+    store settings does NOT back-propagate to already-labeled products —
+    accepted v1 trade-off (the storefront never joins store settings).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    key: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Preset key (new/sale/…) or custom:<slug>",
+    )
+    text_en: str = Field(default="", max_length=80)
+    text_ar: str = Field(default="", max_length=80)
 
 
 class SizeChartRow(BaseModel):
@@ -77,6 +104,21 @@ def _validate_size_chart(attributes: dict) -> dict:
     for row in validated["rows"]:
         row["values"] = row["values"][:headers_len]
     attributes["size_chart"] = validated
+    return attributes
+
+
+def _validate_label(attributes: dict) -> dict:
+    """If ``attributes.label`` is present, validate it through
+    ProductLabelSchema (extra keys dropped, lengths capped). A non-dict or
+    keyless value is removed instead of erroring — clearing the label is
+    expressed by omitting the key entirely."""
+    raw = attributes.get("label")
+    if raw is None:
+        return attributes
+    if not isinstance(raw, dict) or not raw.get("key"):
+        attributes.pop("label", None)
+        return attributes
+    attributes["label"] = ProductLabelSchema.model_validate(raw).model_dump()
     return attributes
 
 
@@ -196,7 +238,7 @@ class CreateProductRequest(BaseModel):
     @field_validator("attributes", mode="after")
     @classmethod
     def _normalize_attributes(cls, v: dict) -> dict:
-        return _validate_size_chart(v)
+        return _validate_label(_validate_size_chart(v))
 
 
 class ProductOptionInput(BaseModel):
@@ -324,7 +366,7 @@ class UpdateProductRequest(BaseModel):
     def _normalize_attributes(cls, v: dict | None) -> dict | None:
         if v is None:
             return None
-        return _validate_size_chart(v)
+        return _validate_label(_validate_size_chart(v))
 
 
 class ProductResponse(BaseModel):
@@ -382,6 +424,13 @@ class ProductResponse(BaseModel):
     category_id: str | None = Field(description="Category UUID")
     tags: list[str] = Field(description="Searchable tags")
     attributes: dict = Field(description="Key-value attributes")
+    # Derived from attributes.label by _derive_label below — a first-class
+    # field so storefront themes read `product.label` without digging into
+    # the attributes dict. None when the product has no label.
+    label: ProductLabelSchema | None = Field(
+        default=None,
+        description="Merchant-assigned label badge (from attributes.label)",
+    )
     meta_catalog_id: str | None = Field(
         default=None,
         description=(
@@ -437,6 +486,21 @@ class ProductResponse(BaseModel):
     )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
+
+    @model_validator(mode="after")
+    def _derive_label(self) -> ProductResponse:
+        """Populate `label` from attributes.label so every construction
+        site (merchant CRUD, storefront list/detail/related) carries it
+        without per-route changes. Malformed stored data degrades to None
+        rather than failing the whole response."""
+        if self.label is None:
+            raw = (self.attributes or {}).get("label")
+            if isinstance(raw, dict) and raw.get("key"):
+                try:
+                    self.label = ProductLabelSchema.model_validate(raw)
+                except ValidationError:
+                    self.label = None
+        return self
 
 
 class ProductVariantSummary(BaseModel):
