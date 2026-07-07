@@ -237,7 +237,16 @@ class CheckoutUseCase:
                     raise ValidationError("This coupon has reached its usage limit")
 
             subtotal_decimal = Decimal(subtotal)
-            if not coupon.meets_minimum_order(subtotal_decimal):
+            # Coupon fields (value / min_order_amount / max_discount_amount)
+            # are stored in STORE-CURRENCY DECIMALS (EGP), while `subtotal`
+            # here is integer cents — every comparison/calculation must use
+            # the decimal form. Feeding cents made a min of EGP 100 pass for
+            # a 100-CENT order, capped every percentage coupon at
+            # max_discount_amount "cents" (int(0.50) → 0, the "discount
+            # shown but not charged" bug), and turned fixed "EGP 50 off"
+            # into 50 cents off.
+            subtotal_major = subtotal_decimal / Decimal(100)
+            if not coupon.meets_minimum_order(subtotal_major):
                 raise ValidationError(
                     f"Order subtotal must be at least {coupon.min_order_amount} "
                     f"to use this coupon"
@@ -250,14 +259,11 @@ class CheckoutUseCase:
                 CouponType.BUY_X_GET_Y,
                 CouponType.TIERED,
             ):
-                # Phase 8.4 — BOGO + tiered calculators work in
-                # dollars-decimal (matching the convention used for
-                # config tier thresholds + line unit_prices). Convert
-                # the cents-Decimal subtotal back to dollars for the
-                # call, then back to cents for the order field. Simple
-                # types (PERCENTAGE / FIXED) keep working in raw cents
-                # because their math is unit-invariant under a single
-                # scale.
+                # Phase 8.4 — ALL coupon calculators work in
+                # store-currency decimals (config tier thresholds, line
+                # unit_prices, fixed values, max caps). Convert the
+                # cents subtotal to major units for the call, then the
+                # result back to cents for the order field.
                 bogo_lines: list[dict] = [
                     {
                         "product_id": str(line.product_id),
@@ -266,13 +272,17 @@ class CheckoutUseCase:
                     }
                     for line in line_items
                 ]
-                subtotal_dollars = subtotal_decimal / Decimal(100)
                 discount_dollars = coupon.calculate_discount(
-                    subtotal_dollars, line_items=bogo_lines
+                    subtotal_major, line_items=bogo_lines
                 )
                 discount_amount = int(discount_dollars * Decimal(100))
             else:
-                discount_amount = int(coupon.calculate_discount(subtotal_decimal))
+                # PERCENTAGE / FIXED — same decimal-major convention as
+                # BOGO/TIERED above (fixed `value` and `max_discount_amount`
+                # are EGP decimals, so cents in → wrong cap/amount out).
+                discount_amount = int(
+                    coupon.calculate_discount(subtotal_major) * Decimal(100)
+                )
 
             applied_coupon_code = coupon.code
             await self.coupon_repository.increment_usage(coupon.id)
