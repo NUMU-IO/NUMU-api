@@ -95,6 +95,16 @@ async def chat(
     )
 
 
+@router.get("/digest")
+async def daily_digest(
+    ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
+) -> dict:
+    """Proactive 'since yesterday' digest the panel greets the merchant with."""
+    from src.application.agent.digest import build_daily_digest
+
+    return await build_daily_digest(ctx.session, store_id=ctx.store_id)
+
+
 @router.get("/conversations")
 async def list_conversations(
     ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
