@@ -18,6 +18,7 @@ from src.api.dependencies import (
     get_token_service,
     get_user_repository,
 )
+from src.api.dependencies.auth import get_current_token_payload
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import get_two_factor_repository
 from src.api.dependencies.services import (
@@ -85,6 +86,7 @@ from src.application.use_cases.auth.two_factor import (
 )
 from src.config import settings
 from src.core.exceptions import EntityNotFoundError
+from src.core.interfaces.services.token_service import TokenPayload
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services import (
     PasswordService,
@@ -831,6 +833,74 @@ async def get_current_user(
             tenant=tenant_info,
         ),
         message="User retrieved successfully",
+    )
+
+
+class ApiKeyInfoResponse(BaseModel):
+    """Identity of the calling personal access token and its store binding.
+
+    Machine clients (the NUMU MCP server) call this once per session to learn
+    which store they operate on and which scopes they hold — so individual
+    tools never need a store_id parameter.
+    """
+
+    token_name: str
+    scopes: list[str] | None
+    store_id: str | None
+    store_name: str | None
+    subdomain: str | None
+    currency: str | None
+    default_language: str | None
+    tenant_id: str
+
+
+@router.get(
+    "/api-key/me",
+    response_model=SuccessResponse[ApiKeyInfoResponse],
+    summary="Identify the calling personal access token",
+    operation_id="get_api_key_info",
+)
+async def get_api_key_info(
+    request: Request,
+    _payload: Annotated[TokenPayload, Depends(get_current_token_payload)],
+):
+    """Return the calling PAT's store binding + scopes (PAT auth only)."""
+    pat = getattr(request.state, "pat", None)
+    if pat is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "This endpoint identifies personal access tokens; "
+                "authenticate with a numu_pat_… bearer token."
+            ),
+        )
+
+    store_name = subdomain = currency = default_language = None
+    if pat["store_id"]:
+        from src.api.dependencies.repositories import get_store_repository
+        from src.infrastructure.database.connection import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            store_repo = get_store_repository(session)
+            store = await store_repo.get_by_id(UUID(pat["store_id"]))
+            if store is not None:
+                store_name = store.name
+                subdomain = store.subdomain
+                currency = store.default_currency.value
+                default_language = store.default_language
+
+    return SuccessResponse(
+        data=ApiKeyInfoResponse(
+            token_name=pat["name"],
+            scopes=pat["scopes"],
+            store_id=pat["store_id"],
+            store_name=store_name,
+            subdomain=subdomain,
+            currency=currency,
+            default_language=default_language,
+            tenant_id=pat["tenant_id"],
+        ),
+        message="API key identified",
     )
 
 
