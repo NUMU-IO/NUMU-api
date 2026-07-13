@@ -20,6 +20,7 @@ from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.application.services.personal_access_token_service import (
+    VALID_SCOPES,
     PersonalAccessTokenService,
 )
 from src.core.entities.store import Store
@@ -44,6 +45,13 @@ class CreateAccessTokenRequest(BaseModel):
         le=3650,
         description="Optional lifetime in days. Omit for a non-expiring token.",
     )
+    scopes: list[str] | None = Field(
+        default=None,
+        description=(
+            "Scope strings such as 'catalog:read', 'orders:write', or '*'. "
+            "Omit for an unrestricted token (owner-equivalent)."
+        ),
+    )
 
 
 class AccessTokenResponse(BaseModel):
@@ -52,6 +60,7 @@ class AccessTokenResponse(BaseModel):
     id: str
     name: str
     token_prefix: str
+    scopes: list[str] | None
     last_used_at: str | None
     expires_at: str | None
     revoked_at: str | None
@@ -69,6 +78,7 @@ def _to_response(record: PersonalAccessTokenModel) -> AccessTokenResponse:
         id=str(record.id),
         name=record.name,
         token_prefix=record.token_prefix,
+        scopes=record.scopes,
         last_used_at=record.last_used_at.isoformat() if record.last_used_at else None,
         expires_at=record.expires_at.isoformat() if record.expires_at else None,
         revoked_at=record.revoked_at.isoformat() if record.revoked_at else None,
@@ -95,6 +105,19 @@ async def create_access_token(
             detail="Store is not associated with a tenant",
         )
 
+    if request.scopes is not None:
+        invalid = sorted(set(request.scopes) - VALID_SCOPES)
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown scopes: {', '.join(invalid)}",
+            )
+        if not request.scopes:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="scopes must be omitted (unrestricted) or a non-empty list",
+            )
+
     expires_at = (
         datetime.now(UTC) + timedelta(days=request.expires_in_days)
         if request.expires_in_days
@@ -108,6 +131,7 @@ async def create_access_token(
         store_id=store.id,
         name=request.name,
         expires_at=expires_at,
+        scopes=request.scopes,
     )
 
     base = _to_response(record)

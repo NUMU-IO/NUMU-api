@@ -14,7 +14,7 @@ enforced at authentication time (see ``PersonalAccessTokenService``).
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.database.connection import Base
@@ -59,6 +59,10 @@ class PersonalAccessTokenModel(Base, UUIDMixin, TimestampMixin):
     token_hash: Mapped[str] = mapped_column(
         String(64), unique=True, index=True, nullable=False
     )
+    # Scope strings ("catalog:read", "orders:write", … or "*"); NULL means an
+    # unrestricted legacy token. Enforced centrally in the auth dependency via
+    # required_scope_for()/scope_allows() — routes stay scope-unaware.
+    scopes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
