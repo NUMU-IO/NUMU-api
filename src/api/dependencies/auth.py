@@ -309,6 +309,8 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
     """
     from src.application.services.personal_access_token_service import (
         PersonalAccessTokenService,
+        required_scope_for,
+        scope_allows,
     )
     from src.infrastructure.database.connection import AsyncSessionLocal
 
@@ -332,8 +334,50 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
                 detail="Access token is not valid for this store",
             )
 
+        # Hard store binding: a store-bound PAT may only touch its own store's
+        # routes, even when the same owner has sibling stores in the tenant.
+        path = request.url.path
+        parts = [p for p in path.split("/") if p]
+        if (
+            record.store_id is not None
+            and len(parts) >= 4
+            and parts[0] == "api"
+            and parts[1] == "v1"
+            and parts[2] == "stores"
+            and parts[3] != str(record.store_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access token is bound to a different store",
+            )
+
+        # Central scope enforcement (routes stay scope-unaware). NULL scopes =
+        # unrestricted legacy token; scoped tokens are default-deny outside the
+        # mapped store surface and may never manage tokens themselves.
+        if record.scopes is not None:
+            required = required_scope_for(path, request.method)
+            if required is None or not scope_allows(record.scopes, required):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "Access token does not permit this operation"
+                        if required is None
+                        else f"Access token lacks the '{required}' scope"
+                    ),
+                )
+
         await service.mark_used(record)
         await session.commit()
+
+        # Expose PAT identity to downstream handlers (e.g. /auth/api-key/me)
+        # without re-authenticating the token.
+        request.state.pat = {
+            "token_id": str(record.id),
+            "name": record.name,
+            "scopes": record.scopes,
+            "store_id": str(record.store_id) if record.store_id else None,
+            "tenant_id": str(record.tenant_id),
+        }
 
         role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
         return TokenPayload(

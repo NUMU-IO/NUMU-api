@@ -29,6 +29,147 @@ PAT_PREFIX = "numu_pat_"
 _TOKEN_NBYTES = 32  # 256 bits → 43 url-safe base64 chars
 _PREFIX_DISPLAY_LEN = 13  # "numu_pat_" + 4 chars, fits the model's prefix column
 
+# ---------------------------------------------------------------------------
+# Scopes
+#
+# A token carries a list of scopes chosen at mint time; ``scopes = NULL``
+# (legacy tokens) or the literal ``"*"`` means unrestricted. Enforcement is
+# central (``required_scope_for`` + the check in ``_resolve_pat_principal``)
+# so individual routes stay scope-unaware.
+# ---------------------------------------------------------------------------
+
+SCOPE_DOMAINS = (
+    "catalog",
+    "media",
+    "orders",
+    "customers",
+    "analytics",
+    "marketing",
+    "themes",
+    "risk",
+    "settings",
+)
+VALID_SCOPES = frozenset(
+    f"{domain}:{access}" for domain in SCOPE_DOMAINS for access in ("read", "write")
+) | {"*"}
+
+# First path segment after /stores/{id}/ → scope domain. Segments not listed
+# here are denied for scoped tokens (default-deny; unscoped legacy tokens and
+# "*" tokens pass).
+_SEGMENT_DOMAINS: dict[str, str] = {
+    # catalog
+    "products": "catalog",
+    "categories": "catalog",
+    "variants": "catalog",
+    "inventory": "catalog",
+    "bundles": "catalog",
+    "gift-cards": "catalog",
+    "gift_cards": "catalog",
+    "upsells": "catalog",
+    # media
+    "files": "media",
+    "media": "media",
+    "uploads": "media",
+    # orders
+    "orders": "orders",
+    "shipments": "orders",
+    "returns": "orders",
+    "refunds": "orders",
+    "abandoned-checkouts": "orders",
+    "abandoned_checkouts": "orders",
+    "order-import": "orders",
+    "order_import": "orders",
+    # customers
+    "customers": "customers",
+    # analytics
+    "analytics": "analytics",
+    "dashboard": "analytics",
+    "reports": "analytics",
+    # marketing
+    "coupons": "marketing",
+    "promotions": "marketing",
+    "campaigns": "marketing",
+    "audiences": "marketing",
+    "email-templates": "marketing",
+    "email_templates": "marketing",
+    "social": "marketing",
+    "whatsapp": "marketing",
+    "channels": "marketing",
+    "threads": "marketing",
+    "messages": "marketing",
+    # themes / online store content
+    "themes": "themes",
+    "theme-installations": "themes",
+    "theme_installations": "themes",
+    "theme-editor": "themes",
+    "pages": "themes",
+    "menus": "themes",
+    # risk / trust network
+    "risk": "risk",
+    # settings & money
+    "settings": "settings",
+    "locations": "settings",
+    "shipping": "settings",
+    "payments": "settings",
+    "payment-proofs": "settings",
+    "payment_proofs": "settings",
+    "invoices": "settings",
+    "billing": "settings",
+    "reconciliation": "settings",
+    "onboarding": "settings",
+    "apps": "settings",
+}
+
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def required_scope_for(path: str, method: str) -> str | None:
+    """Map a request to the scope it requires, or ``None`` if no PAT may call it.
+
+    Only ``/api/v1/stores/{id}/<segment>/...`` paths (plus the PAT identity
+    endpoints) are reachable with a scoped token; everything else is denied.
+    """
+    parts = [p for p in path.split("/") if p]
+    # ["api", "v1", "stores", "{id}", "<segment>", ...]
+    if (
+        len(parts) >= 5
+        and parts[0] == "api"
+        and parts[1] == "v1"
+        and parts[2] == "stores"
+    ):
+        segment = parts[4]
+        if segment in ("access-tokens", "access_tokens"):
+            return None  # a PAT must never manage PATs (privilege escalation)
+        domain = _SEGMENT_DOMAINS.get(segment)
+        if domain is None:
+            return None
+        access = "read" if method.upper() in _READ_METHODS else "write"
+        return f"{domain}:{access}"
+    if (
+        len(parts) >= 3
+        and parts[0] == "api"
+        and parts[1] == "v1"
+        and parts[2] == "auth"
+    ):
+        # Identity endpoints only (/auth/me, /auth/api-key/me) — read-only.
+        if len(parts) <= 4 or (parts[3] == "api-key" and parts[4] == "me"):
+            if method.upper() in _READ_METHODS and (
+                (len(parts) == 4 and parts[3] == "me")
+                or (len(parts) == 5 and parts[3] == "api-key" and parts[4] == "me")
+            ):
+                return "__identity__"  # always allowed for any valid PAT
+        return None
+    return None
+
+
+def scope_allows(scopes: list[str] | None, required: str) -> bool:
+    """True if a token's scope list satisfies ``required``."""
+    if required == "__identity__":
+        return True
+    if scopes is None or "*" in scopes:  # legacy/unrestricted tokens
+        return True
+    return required in scopes
+
 
 def generate_raw_token() -> str:
     """Return a fresh, opaque PAT string. Shown to the user once, never stored."""
@@ -59,8 +200,13 @@ class PersonalAccessTokenService:
         store_id: UUID | None,
         name: str,
         expires_at: datetime | None = None,
+        scopes: list[str] | None = None,
     ) -> tuple[str, PersonalAccessTokenModel]:
-        """Mint a token. Returns ``(raw_token, record)`` — persist nothing else."""
+        """Mint a token. Returns ``(raw_token, record)`` — persist nothing else.
+
+        ``scopes=None`` mints an unrestricted token; otherwise every entry must
+        be in ``VALID_SCOPES`` (the route layer validates and 422s first).
+        """
         raw = generate_raw_token()
         record = PersonalAccessTokenModel(
             user_id=user_id,
@@ -70,6 +216,7 @@ class PersonalAccessTokenService:
             token_prefix=raw[:_PREFIX_DISPLAY_LEN],
             token_hash=hash_token(raw),
             expires_at=expires_at,
+            scopes=scopes,
         )
         self._session.add(record)
         await self._session.flush()
