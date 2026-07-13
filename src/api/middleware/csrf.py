@@ -36,6 +36,7 @@ CSRF_EXEMPT_PATHS = (
     "/api/v1/storefront/store/",
     "/api/v1/storefront/cart/",
     "/api/v1/storefront/checkout/",
+    "/api/shipping/options",
     "/api/v1/public/",
     "/admin/",
     "/docs",
