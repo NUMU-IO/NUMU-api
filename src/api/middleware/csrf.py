@@ -34,9 +34,10 @@ CSRF_EXEMPT_PATHS = (
     "/api/v1/auth/token-handoff",  # bootstrap: no CSRF cookie exists yet on redirect
     "/api/v1/staff/invitations/accept",  # guest action: user arrives from email link
     "/api/v1/storefront/store/",
+    "/api/storefront/promotions/",
     "/api/v1/storefront/cart/",
     "/api/v1/storefront/checkout/",
-    "/api/shipping/options",
+    "/api/shipping/options/",
     "/api/v1/public/",
     "/admin/",
     "/docs",
