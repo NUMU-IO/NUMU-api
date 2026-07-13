@@ -37,7 +37,10 @@ CSRF_EXEMPT_PATHS = (
     "/api/storefront/promotions/",
     "/api/v1/storefront/cart/",
     "/api/v1/storefront/checkout/",
-    "/api/shipping/options/",
+    # NOTE: shipping/options is exempted via STOREFRONT_CSRF_EXEMPT_SUFFIXES,
+    # NOT here. The old "/api/shipping/options/" entry was dead: that is the
+    # storefront's Next.js proxy path — the backend only ever sees the
+    # rewritten "/storefront/store/{id}/shipping/options".
     "/api/v1/public/",
     "/admin/",
     "/docs",
@@ -45,7 +48,17 @@ CSRF_EXEMPT_PATHS = (
     "/openapi.json",
 )
 
-STOREFRONT_AUTH_EXEMPT_SUFFIXES = (
+# Suffixes under /api/v1/storefront/store/{store_id}/... that skip CSRF.
+# The customer session cookie (customer_access_token) is domain-wide on
+# .numueg.app (path "/"), so once a customer logs into their storefront
+# account it rides EVERY request the storefront's Next.js proxy forwards
+# server-to-server — including calls to public, no-auth endpoints. That
+# trips `has_cookie_auth` below and demands an X-CSRF-Token the proxy
+# never sends, 403'ing the request. The paths below are genuinely
+# CSRF-irrelevant (auth entry points, or public read/compute with no
+# state mutation), so we exempt them explicitly.
+STOREFRONT_CSRF_EXEMPT_SUFFIXES = (
+    # --- Session-establishing / auth entry points ---
     "/auth/login",
     "/auth/register",
     "/auth/refresh",
@@ -58,6 +71,13 @@ STOREFRONT_AUTH_EXEMPT_SUFFIXES = (
     # CSRF header. Returning 403 on authenticated sessions caused the
     # frontend to log errors on every page view / add_to_cart.
     "/track",
+    # --- Public, no-auth rate calculators (no state mutation) ---
+    # POSTed from the checkout shipping step via the Next.js proxy, which
+    # forwards the customer cookie but no X-CSRF-Token. Without these,
+    # logged-in customers 403 at the shipping step ("CSRF validation
+    # failed") while guests sail through.
+    "/shipping/options",
+    "/shipping/quote",
 )
 
 
@@ -77,11 +97,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         # Skip CSRF check for exempt paths
         if path.startswith(CSRF_EXEMPT_PATHS):
-            # Storefront store routes: only exempt auth endpoints
+            # Storefront store routes: only exempt auth + public compute
+            # endpoints (see STOREFRONT_CSRF_EXEMPT_SUFFIXES); other
+            # /store/* mutations still require CSRF.
             if path.startswith("/api/v1/storefront/store/"):
-                if any(path.endswith(s) for s in STOREFRONT_AUTH_EXEMPT_SUFFIXES):
+                if any(path.endswith(s) for s in STOREFRONT_CSRF_EXEMPT_SUFFIXES):
                     return await call_next(request)
-                # Not an auth path — fall through to CSRF check
+                # Not an exempt path — fall through to CSRF check
             else:
                 return await call_next(request)
 
