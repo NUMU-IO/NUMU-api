@@ -8,7 +8,7 @@ Keys use `rt:{store_id}:` prefix and reset daily via TTL.
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -76,8 +76,16 @@ async def record_order_created(store_id: UUID, order_data: dict) -> None:
         pipe.ltrim(recent_key, 0, 19)  # Keep only latest 20
         pipe.expire(recent_key, _DAY_TTL)
 
-        # Track hourly orders and revenue
-        hour = datetime.now(UTC).hour
+        # Track hourly orders and revenue — bucketed on the platform's
+        # home wall clock (Africa/Cairo), matching the Live tab's hourly
+        # axis. UTC hours shifted the merchant's 9 PM rush to 6 PM. This
+        # module has no DB access, so the platform default stands in for
+        # the per-store timezone; threading the store's own tz through
+        # the callers is a follow-up (counters are 25h-ephemeral, so a
+        # keying change self-heals within a day).
+        from src.core.utils.store_timezone import DEFAULT_STORE_TIMEZONE, safe_zone
+
+        hour = datetime.now(safe_zone(DEFAULT_STORE_TIMEZONE)).hour
         hourly_orders_key = _key(store_id, f"hourly_orders:{hour}")
         pipe.incr(hourly_orders_key)
         pipe.expire(hourly_orders_key, _DAY_TTL)

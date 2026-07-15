@@ -30,7 +30,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import String, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
@@ -39,7 +39,6 @@ from src.application.services.attribution_models import (
     Touch,
     attribute,
 )
-from src.core.entities.order import OrderStatus
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models.tenant.customer_touch import (
     CustomerTouchModel,
@@ -59,10 +58,15 @@ MAX_TOUCHES_PER_ORDER = 50
 # Without this, refused-on-delivery orders would inflate channel
 # revenue and mislead the merchant about which channel actually
 # converted into kept-and-paid sales.
-_NON_REVENUE_STATUSES = (
-    OrderStatus.CANCELLED,
-    OrderStatus.REFUNDED,
-    OrderStatus.RETURNED,
+# Lowercased-text comparison, not enum binds: the PG orderstatus enum has
+# mixed-case labels (``payment_failed`` has no uppercase label at all, and
+# historical rows may carry either case) — see analytics_repository.
+_NON_REVENUE_STATUSES_LC = (
+    "cancelled",
+    "refunded",
+    "returned",
+    "draft",
+    "payment_failed",
 )
 
 
@@ -126,7 +130,9 @@ async def _fetch_orders(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            func.lower(cast(OrderModel.status, String)).notin_(
+                _NON_REVENUE_STATUSES_LC
+            ),
             OrderModel.customer_id.isnot(None),
         )
         .order_by(OrderModel.created_at.asc())

@@ -19,7 +19,10 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    Date,
     Integer,
+    Numeric,
+    String,
     case,
     cast,
     extract,
@@ -29,15 +32,32 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.order import OrderStatus
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.funnel_event import (
     FunnelEventModel,
 )
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.product import ProductModel
 
-_NON_REVENUE_STATUSES = (OrderStatus.CANCELLED, OrderStatus.REFUNDED)
+# Statuses that never represent demand: killed (cancelled), returned money
+# (refunded), never billable (draft — merchant-only, invisible to the
+# customer), never paid (payment_failed). RETURNED stays IN booked revenue
+# deliberately: it was real demand; the collected/COD views subtract it.
+#
+# ⚠️ Compared as lowercased TEXT, not enum binds: the PG ``orderstatus``
+# enum carries a historical mix of label cases (UPPERCASE names for most
+# members, lowercase for ``payment_failed``/``pending_deposit``/
+# ``returned``). Binding ``OrderStatus.PAYMENT_FAILED`` raises
+# ``invalid input value for enum`` (no uppercase label exists), and a
+# single-case text comparison silently misses rows stored in the other
+# case. ``lower(status::text)`` matches every label spelling.
+_NON_REVENUE_STATUSES_LC = ("cancelled", "refunded", "draft", "payment_failed")
+
+
+def _status_lc(col=None):
+    """``lower(status::text)`` — case-proof orderstatus comparisons."""
+    return func.lower(cast(OrderModel.status if col is None else col, String))
 
 
 class AnalyticsRepository:
@@ -58,7 +78,7 @@ class AnalyticsRepository:
             OrderModel.store_id == store_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
         ]
 
     # ── Traffic sources ─────────────────────────────────────────────
@@ -197,13 +217,18 @@ class AnalyticsRepository:
         store_id: UUID,
         date_from: datetime,
         date_to: datetime,
+        tz: str = "Africa/Cairo",
     ) -> dict[int, dict]:
         """Histogram by Postgres DOW (0=Sunday … 6=Saturday).
 
         Returns ``{dow: {orders, revenue_cents}}``. The endpoint maps
         Postgres DOW into the desired display order (Mon–Sun).
+
+        ``created_at`` is timestamptz; EXTRACT on it runs in the session
+        timezone (UTC), which put late-evening Cairo orders on the wrong
+        weekday. Convert to the store's wall clock first.
         """
-        dow = extract("dow", OrderModel.created_at).label("dow")
+        dow = extract("dow", func.timezone(tz, OrderModel.created_at)).label("dow")
         query = (
             select(
                 dow,
@@ -270,9 +295,14 @@ class AnalyticsRepository:
         store_id: UUID,
         date_from: datetime,
         date_to: datetime,
+        tz: str = "Africa/Cairo",
     ) -> dict[int, int]:
-        """Histogram by hour-of-day (0–23)."""
-        hr = extract("hour", OrderModel.created_at).label("hour")
+        """Histogram by hour-of-day (0–23) on the store's wall clock.
+
+        Without the timezone conversion the "peak hour" chart was shifted
+        2–3 hours (UTC vs Cairo) — a merchant's 9 PM rush showed as 6 PM.
+        """
+        hr = extract("hour", func.timezone(tz, OrderModel.created_at)).label("hour")
         query = (
             select(hr, func.count(OrderModel.id))
             .where(*self._store_window(store_id, date_from, date_to))
@@ -324,11 +354,12 @@ class AnalyticsRepository:
             func.coalesce(func.sum(OrderModel.subtotal), 0).label("gross"),
             func.coalesce(func.sum(OrderModel.discount_amount), 0).label("discounts"),
             func.coalesce(func.sum(OrderModel.shipping_cost), 0).label("shipping"),
+            func.coalesce(func.sum(OrderModel.tax_amount), 0).label("tax"),
         ).where(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             OrderModel.payment_status.in_([
                 PaymentStatus.PAID,
                 PaymentStatus.PARTIALLY_REFUNDED,
@@ -340,6 +371,73 @@ class AnalyticsRepository:
             "gross_cents": int(row.gross or 0),
             "discounts_cents": int(row.discounts or 0),
             "shipping_cents": int(row.shipping or 0),
+            "tax_cents": int(row.tax or 0),
+        }
+
+    async def tax_by_rate(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict:
+        """Tax collected, split by rate and by inclusive vs added.
+
+        Reads ``extra_data->tax_breakdown`` (rate / included_cents /
+        added_cents), populated at checkout. **Inclusive** tax is already
+        part of the order's price (gross) — it's what the merchant owes
+        the tax authority out of revenue they've collected, NOT an
+        addition on top — so the caller must present it informationally
+        and not double-count it in net revenue. Rate is stored as a
+        fraction (0.14) → surfaced as a percentage.
+        """
+        from src.core.entities.order import PaymentStatus
+
+        tb = OrderModel.extra_data["tax_breakdown"]
+        rate_expr = cast(tb["rate"].astext, Numeric)
+        included_expr = cast(func.coalesce(tb["included_cents"].astext, "0"), Integer)
+        added_expr = cast(func.coalesce(tb["added_cents"].astext, "0"), Integer)
+
+        base_filters = [
+            OrderModel.store_id == store_id,
+            OrderModel.created_at >= date_from,
+            OrderModel.created_at <= date_to,
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
+            OrderModel.payment_status.in_([
+                PaymentStatus.PAID,
+                PaymentStatus.PARTIALLY_REFUNDED,
+            ]),
+            OrderModel.tax_amount > 0,
+        ]
+
+        by_rate_q = (
+            select(
+                rate_expr.label("rate"),
+                func.count(OrderModel.id).label("orders"),
+                func.coalesce(func.sum(OrderModel.tax_amount), 0).label("tax_cents"),
+            )
+            .where(*base_filters)
+            .group_by(rate_expr)
+            .order_by(func.coalesce(func.sum(OrderModel.tax_amount), 0).desc())
+        )
+        by_rate = (await self.session.execute(self._tenant_filter(by_rate_q))).all()
+
+        split_q = select(
+            func.coalesce(func.sum(included_expr), 0).label("inclusive"),
+            func.coalesce(func.sum(added_expr), 0).label("added"),
+        ).where(*base_filters)
+        split = (await self.session.execute(self._tenant_filter(split_q))).one()
+
+        return {
+            "inclusive_cents": int(split.inclusive or 0),
+            "added_cents": int(split.added or 0),
+            "by_rate": [
+                {
+                    "rate_pct": round(float(r.rate) * 100, 2) if r.rate else 0.0,
+                    "orders": int(r.orders or 0),
+                    "tax_cents": int(r.tax_cents or 0),
+                }
+                for r in by_rate
+            ],
         }
 
     async def coupon_usage(
@@ -363,7 +461,7 @@ class AnalyticsRepository:
                 OrderModel.store_id == store_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
                 OrderModel.payment_status.in_([
                     PaymentStatus.PAID,
                     PaymentStatus.PARTIALLY_REFUNDED,
@@ -428,7 +526,7 @@ class AnalyticsRepository:
             )
             .where(
                 OrderModel.store_id == store_id,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id)
         )
@@ -488,19 +586,21 @@ class AnalyticsRepository:
         store_id: UUID,
         date_from: datetime,
         date_to: datetime,
+        tz: str = "Africa/Cairo",
     ) -> list[dict]:
-        """One row per UTC date that had at least one non-cancelled order.
+        """One row per store-local date that had at least one non-cancelled order.
 
         Fallback for the forecast endpoint when the daily-rollup task
         hasn't run yet for this store (brand-new merchants, or the
         cron hasn't fired since signup). Returns
         ``[{rollup_date, total_revenue_cents, total_orders}]`` so the
         route can wrap each row in a rollup-shaped object and feed it
-        to the existing forecast service unchanged.
+        to the existing forecast service unchanged. Days follow the
+        store's wall clock (``tz``), matching the rollup task's day keys.
         """
         from sqlalchemy import Date as _Date
 
-        day_expr = cast(OrderModel.created_at, _Date).label("day")
+        day_expr = cast(func.timezone(tz, OrderModel.created_at), _Date).label("day")
         query = (
             select(
                 day_expr,
@@ -520,6 +620,140 @@ class AnalyticsRepository:
             }
             for row in result.all()
         ]
+
+    # ── Search analytics (funnel_events step='search') ─────────────
+    def _search_window(self, store_id: UUID, date_from: datetime, date_to: datetime):
+        """Shared WHERE clauses for search-event queries (tenant-scoped)."""
+        clauses = [
+            FunnelEventModel.store_id == store_id,
+            FunnelEventModel.step == "search",
+            FunnelEventModel.created_at >= date_from,
+            FunnelEventModel.created_at <= date_to,
+        ]
+        tid = get_tenant_id()
+        if tid:
+            clauses.append(FunnelEventModel.tenant_id == tid)
+        return clauses
+
+    async def search_terms(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Top storefront search terms in the window.
+
+        Terms come from ``funnel_events.step_data->>'search_string'``,
+        populated since the /track step-whitelist expansion — before
+        that, search events were silently collapsed to page_view and
+        the query string was lost server-side. Terms are lower/trimmed
+        for grouping.
+
+        ``zero_result_searches`` counts events whose ``results_count``
+        payload field is a literal 0. The storefront doesn't emit
+        result counts yet, so this reads 0 until themes/the built-in
+        results grid start reporting them; the field is parsed through
+        a digits-only CASE guard so a malformed payload can never break
+        the aggregate.
+        """
+        term_expr = func.lower(
+            func.trim(FunnelEventModel.step_data["search_string"].astext)
+        ).label("term")
+        results_raw = FunnelEventModel.step_data["results_count"].astext
+        results_int = case(
+            (results_raw.op("~")(r"^\d+$"), cast(results_raw, Integer)),
+            else_=None,
+        )
+        query = (
+            select(
+                term_expr,
+                func.count().label("searches"),
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+                func.count().filter(results_int == 0).label("zero_result_searches"),
+            )
+            .where(
+                *self._search_window(store_id, date_from, date_to),
+                func.coalesce(
+                    func.trim(FunnelEventModel.step_data["search_string"].astext),
+                    "",
+                )
+                != "",
+            )
+            .group_by(term_expr)
+            .order_by(func.count().desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return [
+            {
+                "term": row.term,
+                "searches": int(row.searches or 0),
+                "sessions": int(row.sessions or 0),
+                "zero_result_searches": int(row.zero_result_searches or 0),
+            }
+            for row in result.all()
+        ]
+
+    async def search_summary(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict:
+        """Search totals + search→purchase session conversion.
+
+        ``converted_sessions`` = distinct searching fingerprints that
+        also produced an ``order_completed`` funnel event inside the
+        window. A session-level co-occurrence signal ("searchers buy
+        N× more"), deliberately NOT a causal attribution claim — the
+        multi-touch endpoints own attribution.
+        """
+        counts_q = select(
+            func.count().label("total_searches"),
+            func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                "unique_sessions"
+            ),
+        ).where(*self._search_window(store_id, date_from, date_to))
+        counts = (await self.session.execute(counts_q)).one()
+
+        search_fps = (
+            select(FunnelEventModel.session_fingerprint.label("fp"))
+            .where(
+                *self._search_window(store_id, date_from, date_to),
+                FunnelEventModel.session_fingerprint.isnot(None),
+            )
+            .distinct()
+            .subquery()
+        )
+        order_clauses = [
+            FunnelEventModel.store_id == store_id,
+            FunnelEventModel.step == "order_completed",
+            FunnelEventModel.created_at >= date_from,
+            FunnelEventModel.created_at <= date_to,
+            FunnelEventModel.session_fingerprint.isnot(None),
+        ]
+        tid = get_tenant_id()
+        if tid:
+            order_clauses.append(FunnelEventModel.tenant_id == tid)
+        order_fps = (
+            select(FunnelEventModel.session_fingerprint.label("fp"))
+            .where(*order_clauses)
+            .distinct()
+            .subquery()
+        )
+        converted_q = select(func.count()).select_from(
+            search_fps.join(order_fps, search_fps.c.fp == order_fps.c.fp)
+        )
+        converted = (await self.session.execute(converted_q)).scalar_one()
+
+        return {
+            "total_searches": int(counts.total_searches or 0),
+            "unique_sessions": int(counts.unique_sessions or 0),
+            "converted_sessions": int(converted or 0),
+        }
 
     # ── COD outcomes (order-derived, not shipment-derived) ─────────
     async def cod_summary(
@@ -647,15 +881,108 @@ class AnalyticsRepository:
             for row in result.all()
         ]
 
+    async def cod_outcomes_by_governorate(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """Resolved COD outcomes per governorate — prediction input.
+
+        Unlike :py:meth:`cod_summary` (dashboard semantics: rejected =
+        RETURNED + CANCELLED over ALL orders), this counts only orders
+        that reached a door outcome — DELIVERED vs RETURNED — because
+        the rejection *predictor* estimates P(refused at delivery);
+        cancellations end before shipping and would bias it.
+        """
+        from src.core.entities.order import OrderStatus
+
+        gov_expr = func.nullif(
+            func.lower(
+                func.trim(
+                    func.coalesce(
+                        OrderModel.shipping_address["state"].astext,
+                        OrderModel.shipping_address["city"].astext,
+                        "",
+                    )
+                )
+            ),
+            "",
+        ).label("governorate")
+        returned_filter = OrderModel.status == OrderStatus.RETURNED
+
+        query = (
+            select(
+                gov_expr,
+                func.count().label("resolved"),
+                func.count().filter(returned_filter).label("returned"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.payment_method == "cod",
+                OrderModel.status.in_([
+                    OrderStatus.DELIVERED,
+                    OrderStatus.RETURNED,
+                ]),
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                gov_expr.isnot(None),
+            )
+            .group_by(gov_expr)
+            .order_by(func.count().desc())
+            .limit(30)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            {
+                "governorate": row.governorate,
+                "resolved": int(row.resolved or 0),
+                "returned": int(row.returned or 0),
+            }
+            for row in result.all()
+        ]
+
+    async def cod_pending_exposure(self, store_id: UUID) -> dict:
+        """COD orders still in flight — the money currently at risk."""
+        from src.core.entities.order import OrderStatus
+
+        query = select(
+            func.count().label("orders"),
+            func.coalesce(func.sum(OrderModel.total), 0).label("value_cents"),
+        ).where(
+            OrderModel.store_id == store_id,
+            OrderModel.payment_method == "cod",
+            OrderModel.status.in_([
+                OrderStatus.PENDING,
+                OrderStatus.CONFIRMED,
+                OrderStatus.PROCESSING,
+                OrderStatus.SHIPPED,
+            ]),
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        row = result.one()
+        return {
+            "orders": int(row.orders or 0),
+            "value_cents": int(row.value_cents or 0),
+        }
+
     # ── Marketing attribution ──────────────────────────────────────
     @staticmethod
-    def _channel_case():
-        """SQL CASE that mirrors the Python ``_classify_channel`` rules."""
-        src_l = func.lower(func.coalesce(OrderModel.utm_source, ""))
-        med_l = func.lower(func.coalesce(OrderModel.utm_medium, ""))
+    def _channel_case(source_col=None, medium_col=None):
+        """SQL CASE that mirrors the Python ``_classify_channel`` rules.
+
+        Defaults to the ``orders`` UTM columns; pass the
+        ``funnel_events`` columns to classify the SESSION side with the
+        exact same rules — the two sides must agree or per-channel
+        conversion rates are meaningless.
+        """
+        source_col = OrderModel.utm_source if source_col is None else source_col
+        medium_col = OrderModel.utm_medium if medium_col is None else medium_col
+        src_l = func.lower(func.coalesce(source_col, ""))
+        med_l = func.lower(func.coalesce(medium_col, ""))
         return case(
             (
-                (OrderModel.utm_source.is_(None)) | (src_l == "direct"),
+                (source_col.is_(None)) | (src_l == "direct"),
                 "Direct",
             ),
             (med_l.in_(["cpc", "ppc", "paid", "ad"]), "Paid"),
@@ -675,6 +1002,79 @@ class AnalyticsRepository:
             (med_l == "referral", "Referral"),
             else_="Organic",
         )
+
+    async def sessions_by_channel(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict[str, int]:
+        """Distinct sessions per classified channel, from funnel_events.
+
+        The MEASURED session side of channel attribution — before this,
+        the route fabricated per-channel visits by prorating the store's
+        total visitors by each channel's ORDER share, which made the
+        displayed conversion rate quasi-circular. Fingerprints are
+        grouped by the same CASE rules as the order side. A visitor who
+        arrives through two channels in the window counts once in each
+        (events carry last-touch UTM) — same convention Shopify uses
+        for sessions.
+        """
+        channel_expr = self._channel_case(
+            FunnelEventModel.utm_source, FunnelEventModel.utm_medium
+        ).label("channel")
+        query = (
+            select(
+                channel_expr,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+                FunnelEventModel.session_fingerprint.isnot(None),
+            )
+            .group_by(channel_expr)
+        )
+        tid = get_tenant_id()
+        if tid:
+            query = query.where(FunnelEventModel.tenant_id == tid)
+        result = await self.session.execute(query)
+        return {row.channel: int(row.sessions or 0) for row in result.all()}
+
+    async def sessions_by_campaign(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict[str, int]:
+        """Distinct sessions per normalized utm_campaign (funnel_events)."""
+        campaign_expr = func.lower(func.trim(FunnelEventModel.utm_campaign)).label(
+            "campaign"
+        )
+        query = (
+            select(
+                campaign_expr,
+                func.count(func.distinct(FunnelEventModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                FunnelEventModel.store_id == store_id,
+                FunnelEventModel.created_at >= date_from,
+                FunnelEventModel.created_at <= date_to,
+                FunnelEventModel.session_fingerprint.isnot(None),
+                FunnelEventModel.utm_campaign.isnot(None),
+            )
+            .group_by(campaign_expr)
+        )
+        tid = get_tenant_id()
+        if tid:
+            query = query.where(FunnelEventModel.tenant_id == tid)
+        result = await self.session.execute(query)
+        return {row.campaign: int(row.sessions or 0) for row in result.all()}
 
     async def channel_attribution(
         self,
@@ -772,8 +1172,8 @@ class AnalyticsRepository:
         Each row has the data RFM/CLV needs: orders, total_spent_cents,
         first_order_at, last_order_at — computed in SQL so the scorer
         works on a customer-sized set instead of an order-sized one.
-        Cancelled and refunded orders are excluded so they don't
-        artificially inflate frequency or spend.
+        Non-revenue orders (cancelled/refunded/draft/payment_failed) are
+        excluded so they don't artificially inflate frequency or spend.
         """
         query = (
             select(
@@ -822,7 +1222,7 @@ class AnalyticsRepository:
             .where(
                 OrderModel.store_id == store_id,
                 OrderModel.customer_id.in_(customer_ids),
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id)
         )
@@ -850,7 +1250,7 @@ class AnalyticsRepository:
             .where(
                 OrderModel.store_id == store_id,
                 OrderModel.customer_id.in_(customer_ids),
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id, month_expr)
         )
@@ -1011,6 +1411,381 @@ class AnalyticsRepository:
             for row in result.all()
         ]
 
+    # ── Market-basket pairs (opportunity finder input) ─────────────
+    async def basket_pairs(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        min_support: int = 3,
+        limit: int = 20,
+    ) -> dict:
+        """Product pairs co-occurring in orders, for lift analysis.
+
+        Self-join over the line_items unnest: for every order with ≥2
+        distinct products, count each (a < b) pair once. Returns the
+        pair counts plus per-product order counts and the total order
+        count so the caller can compute lift =
+        P(a∧b) / (P(a)·P(b)) without another round-trip.
+        """
+        # Two-level unnest (same reason as ``top_products``): subscripting
+        # ``jsonb_array_elements`` directly raises "Operator 'getitem' is
+        # not supported" — unnest first, then cast the column back to JSONB.
+        raw = select(
+            OrderModel.id.label("order_id"),
+            func.jsonb_array_elements(OrderModel.line_items).label("li"),
+        ).where(*self._store_window(store_id, date_from, date_to))
+        raw = self._tenant_filter(raw).subquery()
+        items = select(
+            raw.c.order_id,
+            cast(raw.c.li, JSONB)["product_id"].astext.label("pid"),
+        ).subquery()
+
+        a, b = items.alias("a"), items.alias("b")
+        pair_q = (
+            select(
+                a.c.pid.label("a_id"),
+                b.c.pid.label("b_id"),
+                func.count(func.distinct(a.c.order_id)).label("pair_orders"),
+            )
+            .where(
+                a.c.order_id == b.c.order_id,
+                a.c.pid < b.c.pid,
+                a.c.pid.isnot(None),
+                b.c.pid.isnot(None),
+            )
+            .group_by(a.c.pid, b.c.pid)
+            .having(func.count(func.distinct(a.c.order_id)) >= min_support)
+            .order_by(func.count(func.distinct(a.c.order_id)).desc())
+            .limit(limit)
+        )
+        pairs = [
+            {
+                "a_id": r.a_id,
+                "b_id": r.b_id,
+                "pair_orders": int(r.pair_orders),
+            }
+            for r in (await self.session.execute(pair_q)).all()
+        ]
+
+        per_product_q = select(
+            items.c.pid,
+            func.count(func.distinct(items.c.order_id)).label("orders"),
+        ).group_by(items.c.pid)
+        per_product = {
+            r.pid: int(r.orders)
+            for r in (await self.session.execute(per_product_q)).all()
+        }
+
+        total_q = select(func.count(OrderModel.id)).where(
+            *self._store_window(store_id, date_from, date_to)
+        )
+        total = (await self.session.execute(self._tenant_filter(total_q))).scalar() or 0
+
+        return {
+            "pairs": pairs,
+            "product_orders": per_product,
+            "total_orders": int(total),
+        }
+
+    # ── Weekly aggregates (advisor rule engine input) ──────────────
+    async def weekly_order_aggregates(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        tz: str = "Africa/Cairo",
+    ) -> list[dict]:
+        """Per-ISO-week (Mon-start, store wall clock) order aggregates.
+
+        ``[{week_start, revenue_cents, orders, gross_cents,
+        discounts_cents}]`` ordered oldest→newest. One GROUP BY feeds
+        every weekly advisor rule (revenue drop, AOV trend, discount
+        creep) instead of N separate scans.
+        """
+        week_expr = func.date_trunc("week", func.timezone(tz, OrderModel.created_at))
+        query = (
+            select(
+                week_expr.label("week_start"),
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue_cents"),
+                func.count(OrderModel.id).label("orders"),
+                func.coalesce(func.sum(OrderModel.subtotal), 0).label("gross_cents"),
+                func.coalesce(func.sum(OrderModel.discount_amount), 0).label(
+                    "discounts_cents"
+                ),
+            )
+            .where(*self._store_window(store_id, date_from, date_to))
+            .group_by(week_expr)
+            .order_by(week_expr.asc())
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            {
+                "week_start": row.week_start,
+                "revenue_cents": int(row.revenue_cents or 0),
+                "orders": int(row.orders or 0),
+                "gross_cents": int(row.gross_cents or 0),
+                "discounts_cents": int(row.discounts_cents or 0),
+            }
+            for row in result.all()
+        ]
+
+    # ── Custom report builder (metric × dimension) ────────────────
+    # Whitelisted dimensions only — the value maps to a SQL grouping
+    # expression built here, never interpolated from the request, so the
+    # endpoint can't be turned into arbitrary SQL.
+    _REPORT_DIMENSIONS = (
+        "day",
+        "week",
+        "month",
+        "payment_method",
+        "governorate",
+        "channel",
+        "coupon",
+        "product",
+    )
+
+    async def run_report(
+        self,
+        store_id: UUID,
+        dimension: str,
+        date_from: datetime,
+        date_to: datetime,
+        tz: str = "Africa/Cairo",
+        limit: int = 100,
+    ) -> list[dict]:
+        """Group revenue / orders / AOV (and units for product) by a
+        whitelisted dimension. One GROUP BY over non-cancelled/refunded
+        orders — the generic engine behind the custom report builder.
+
+        Returns ``[{label, revenue_cents, orders, aov_cents, units}]``
+        (units is 0 except for the product dimension). Ordered by revenue
+        desc for categorical dimensions, chronologically for time ones.
+        """
+        if dimension not in self._REPORT_DIMENSIONS:
+            raise ValueError(f"Unsupported dimension: {dimension}")
+
+        if dimension == "product":
+            # Product needs the line-items unnest — reuse that path and
+            # shape it into the report row contract.
+            rows = await self.product_sales_window(store_id, date_from, date_to)
+            # product_sales_window returns product_id + units + revenue;
+            # fetch names via a second lightweight pass would be ideal, but
+            # top_products already carries names — merge for labels.
+            named = {
+                p["product_id"]: p
+                for p in await self.top_products(
+                    store_id, date_from, date_to, limit=200
+                )
+            }
+            out = []
+            for r in rows:
+                nm = named.get(r["product_id"], {})
+                orders = int(nm.get("orders", 0) or 0)
+                rev = int(r["revenue_cents"])
+                out.append({
+                    "label": nm.get("product_name") or "(unnamed product)",
+                    "revenue_cents": rev,
+                    "orders": orders,
+                    "aov_cents": rev // orders if orders > 0 else 0,
+                    "units": int(r["units_sold"]),
+                })
+            out.sort(key=lambda x: x["revenue_cents"], reverse=True)
+            return out[:limit]
+
+        # Order-level dimensions → a single GROUP BY.
+        is_time = dimension in ("day", "week", "month")
+        local_ts = func.timezone(tz, OrderModel.created_at)
+        if dimension == "day":
+            dim_expr = cast(local_ts, Date)
+            label_expr = func.to_char(dim_expr, "YYYY-MM-DD")
+        elif dimension == "week":
+            dim_expr = func.date_trunc("week", local_ts)
+            label_expr = func.to_char(dim_expr, 'YYYY-MM-DD"W"')
+        elif dimension == "month":
+            dim_expr = func.date_trunc("month", local_ts)
+            label_expr = func.to_char(dim_expr, "YYYY-MM")
+        elif dimension == "payment_method":
+            dim_expr = func.coalesce(OrderModel.payment_method, "unknown")
+            label_expr = dim_expr
+        elif dimension == "governorate":
+            dim_expr = func.nullif(
+                func.lower(
+                    func.trim(
+                        func.coalesce(
+                            OrderModel.shipping_address["state"].astext,
+                            OrderModel.shipping_address["city"].astext,
+                            "",
+                        )
+                    )
+                ),
+                "",
+            )
+            label_expr = dim_expr
+        elif dimension == "coupon":
+            dim_expr = func.coalesce(OrderModel.coupon_code, "—")
+            label_expr = dim_expr
+        else:  # channel
+            dim_expr = self._channel_case()
+            label_expr = dim_expr
+
+        revenue_expr = func.coalesce(func.sum(OrderModel.total), 0)
+        orders_expr = func.count(OrderModel.id)
+        query = (
+            select(
+                label_expr.label("label"),
+                revenue_expr.label("revenue_cents"),
+                orders_expr.label("orders"),
+            )
+            .where(*self._store_window(store_id, date_from, date_to))
+            .group_by(label_expr)
+        )
+        if dimension == "governorate":
+            query = query.where(label_expr.isnot(None))
+        query = query.order_by(
+            label_expr.asc() if is_time else revenue_expr.desc()
+        ).limit(limit)
+
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            {
+                "label": str(row.label),
+                "revenue_cents": int(row.revenue_cents or 0),
+                "orders": int(row.orders or 0),
+                "aov_cents": int(row.revenue_cents or 0) // int(row.orders)
+                if row.orders
+                else 0,
+                "units": 0,
+            }
+            for row in result.all()
+        ]
+
+    # ── Inventory analytics (sell-through / ABC / dead stock) ──────
+    async def product_sales_window(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """Units + revenue per product over the window — UNCAPPED.
+
+        Same line_items unnest as ``top_products`` but without a LIMIT:
+        ABC classification needs every selling product (the output is
+        bounded by catalog size, not order count, so this stays small).
+        """
+        line_items_cte = select(
+            OrderModel.id.label("order_id"),
+            func.jsonb_array_elements(OrderModel.line_items).label("li"),
+        ).where(*self._store_window(store_id, date_from, date_to))
+        line_items_cte = self._tenant_filter(line_items_cte).subquery()
+
+        li = cast(line_items_cte.c.li, JSONB)
+        product_id_expr = li["product_id"].astext.label("product_id")
+        quantity_expr = cast(func.coalesce(li["quantity"].astext, "0"), Integer)
+        revenue_per_line = func.coalesce(
+            cast(li["total_price"].astext, Integer),
+            cast(func.coalesce(li["unit_price"].astext, "0"), Integer)
+            * cast(func.coalesce(li["quantity"].astext, "0"), Integer),
+        )
+
+        query = (
+            select(
+                product_id_expr,
+                func.sum(quantity_expr).label("units_sold"),
+                func.sum(revenue_per_line).label("revenue_cents"),
+            )
+            .where(product_id_expr.isnot(None))
+            .group_by(product_id_expr)
+        )
+        result = await self.session.execute(query)
+        return [
+            {
+                "product_id": row.product_id,
+                "units_sold": int(row.units_sold or 0),
+                "revenue_cents": int(row.revenue_cents or 0),
+            }
+            for row in result.all()
+        ]
+
+    async def product_last_sold(
+        self,
+        store_id: UUID,
+        since: datetime,
+    ) -> dict[str, datetime]:
+        """Most recent sale timestamp per product since ``since``.
+
+        Bounded lookback (the dead-stock report only distinguishes aging
+        buckets up to its horizon; anything older is "no sale in the
+        horizon" regardless of exactly when it last sold).
+        """
+        line_items_cte = select(
+            OrderModel.created_at.label("order_at"),
+            func.jsonb_array_elements(OrderModel.line_items).label("li"),
+        ).where(
+            OrderModel.store_id == store_id,
+            OrderModel.created_at >= since,
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
+        )
+        line_items_cte = self._tenant_filter(line_items_cte).subquery()
+
+        li = cast(line_items_cte.c.li, JSONB)
+        product_id_expr = li["product_id"].astext.label("product_id")
+        query = (
+            select(
+                product_id_expr,
+                func.max(line_items_cte.c.order_at).label("last_sold_at"),
+            )
+            .where(product_id_expr.isnot(None))
+            .group_by(product_id_expr)
+        )
+        result = await self.session.execute(query)
+        return {row.product_id: row.last_sold_at for row in result.all()}
+
+    async def product_stock_snapshot(self, store_id: UUID) -> list[dict]:
+        """Current stock + pricing for every ACTIVE product.
+
+        Value uses ``cost_price`` when the merchant set one (true capital
+        tied up) and falls back to the sale price otherwise — flagged via
+        ``value_is_cost`` so the UI can caption honestly.
+        """
+        query = select(
+            ProductModel.id,
+            ProductModel.name,
+            ProductModel.quantity,
+            ProductModel.price_amount,
+            ProductModel.cost_price,
+            ProductModel.created_at,
+        ).where(
+            ProductModel.store_id == store_id,
+            cast(ProductModel.status, String) != "archived",
+        )
+        result = await self.session.execute(self._tenant_filter_product(query))
+        return [
+            {
+                "product_id": str(row.id),
+                "name": row.name,
+                "quantity": int(row.quantity or 0),
+                "unit_value_cents": int(
+                    row.cost_price
+                    if row.cost_price is not None
+                    else (row.price_amount or 0)
+                ),
+                "value_is_cost": row.cost_price is not None,
+                "price_cents": int(row.price_amount or 0),
+                "cost_cents": int(row.cost_price)
+                if row.cost_price is not None
+                else None,
+                "created_at": row.created_at,
+            }
+            for row in result.all()
+        ]
+
+    def _tenant_filter_product(self, query):
+        tid = get_tenant_id()
+        if tid:
+            return query.where(ProductModel.tenant_id == tid)
+        return query
+
     # ── Per-campaign performance (feature 001) ──────────────────────
     async def campaign_performance(
         self,
@@ -1107,7 +1882,7 @@ class AnalyticsRepository:
             OrderModel.campaign_id == campaign_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
         )
         order_query = self._tenant_filter(order_query)
         order_row = (await self.session.execute(order_query)).one()
@@ -1136,7 +1911,7 @@ class AnalyticsRepository:
             OrderModel.campaign_id == campaign_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
         )
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
         li = cast(line_items_cte.c.li, JSONB)
@@ -1208,7 +1983,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
                 OrderModel.coupon_code.isnot(None),
             )
             .group_by(OrderModel.coupon_code)
@@ -1329,7 +2104,7 @@ class AnalyticsRepository:
         join_clause = (
             (OrderModel.customer_id == CustomerModel.id)
             & (OrderModel.store_id == store_id)
-            & (OrderModel.status.notin_(_NON_REVENUE_STATUSES))
+            & (_status_lc().notin_(_NON_REVENUE_STATUSES_LC))
         )
         if tid:
             join_clause = join_clause & (OrderModel.tenant_id == tid)
@@ -1433,7 +2208,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(order_channel_expr)
         )
@@ -1524,7 +2299,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(
                 OrderModel.utm_source,
@@ -1615,7 +2390,7 @@ class AnalyticsRepository:
                 OrderModel.store_id == store_id,
                 OrderModel.campaign_id.is_not(None),
                 OrderModel.customer_id.is_not(None),
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id)
             .subquery()
@@ -1642,7 +2417,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by("kind")
         )
@@ -1713,7 +2488,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(bin_idx)
         )
@@ -1783,7 +2558,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id.in_(campaign_ids),
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.campaign_id)
         )
@@ -1831,7 +2606,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id.in_(campaign_ids),
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.campaign_id, order_bucket_expr)
             .order_by(order_bucket_expr)

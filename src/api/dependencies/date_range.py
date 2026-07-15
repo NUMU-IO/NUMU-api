@@ -14,7 +14,12 @@ Span clamping bounds the worst-case query cost:
 - ``day`` bucketing caps at 365 days (=> 365 buckets max)
 - ``week``/``month``/``quarter``/``year`` cap at 5 years
 
-Times are normalized to UTC; naive datetimes are assumed UTC.
+Times are normalized to UTC; naive datetimes are assumed UTC. Calendar-day
+projections (``start_date``/``end_date``) are taken on the STORE's wall
+clock, not UTC: the optional ``tz`` query param carries the store's IANA
+timezone (the hub sends it from store settings) and defaults to
+Africa/Cairo — the platform's home market. Bucketing by UTC used to shift
+every after-midnight Cairo order onto the previous day's charts.
 """
 
 from __future__ import annotations
@@ -24,6 +29,12 @@ from typing import Annotated, Literal
 
 from fastapi import Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
+
+from src.core.utils.store_timezone import (
+    DEFAULT_STORE_TIMEZONE,
+    resolve_store_timezone_name,
+    safe_zone,
+)
 
 Granularity = Literal["hour", "day", "week", "month", "quarter", "year"]
 
@@ -43,8 +54,12 @@ class DateRangeWindow(BaseModel):
     """Normalized analytics window passed into route handlers.
 
     `start` / `end` are UTC datetimes (inclusive). `start_date` /
-    `end_date` are the bare `date()` projections for endpoints that
-    query a daily rollups table keyed on `date`.
+    `end_date` are the calendar-date projections **on the store's wall
+    clock** (`tz`) for endpoints that query a daily rollups table keyed
+    on `date` — the rollup task keys its rows on the same local days.
+
+    `tz` is the validated IANA timezone name; repos that bucket by
+    day/hour must pass it into their `AT TIME ZONE` conversions.
 
     `days` is provided as a convenience for log lines and cache keys;
     endpoints should not depend on it for correctness.
@@ -58,6 +73,7 @@ class DateRangeWindow(BaseModel):
     end_date: date
     days: int
     granularity: Granularity
+    tz: str = DEFAULT_STORE_TIMEZONE
 
 
 def _parse_iso(value: str, field: str) -> datetime:
@@ -81,6 +97,7 @@ def resolve_date_range_window(
     start_date: str | None = None,
     end_date: str | None = None,
     granularity: Granularity = "day",
+    tz: str | None = None,
 ) -> DateRangeWindow:
     """Pure parser used by both the FastAPI dependency and unit tests.
 
@@ -130,13 +147,22 @@ def resolve_date_range_window(
             ),
         )
 
+    # Calendar-date projections on the store's wall clock. A malformed tz
+    # degrades to the platform default rather than 422ing — the window
+    # instants are still exactly what the caller asked for.
+    tz_name = resolve_store_timezone_name({"timezone": tz} if tz else None)
+    zone = safe_zone(tz_name)
+    local_start_date = start.astimezone(zone).date()
+    local_end_date = end.astimezone(zone).date()
+
     return DateRangeWindow(
         start=start,
         end=end,
-        start_date=start.date(),
-        end_date=end.date(),
-        days=span_days,
+        start_date=local_start_date,
+        end_date=local_end_date,
+        days=max(1, (local_end_date - local_start_date).days + 1),
         granularity=granularity,
+        tz=tz_name,
     )
 
 
@@ -161,6 +187,13 @@ def get_date_range_window(
         description="Bucket size for timeseries endpoints. Non-timeseries "
         "endpoints ignore this parameter.",
     ),
+    tz: str | None = Query(
+        None,
+        max_length=64,
+        description="IANA timezone for calendar-day bucketing (e.g. "
+        "Africa/Cairo). Send the store's timezone. Invalid or missing "
+        "values fall back to Africa/Cairo.",
+    ),
 ) -> DateRangeWindow:
     """FastAPI dependency wrapping ``resolve_date_range_window``."""
     return resolve_date_range_window(
@@ -168,6 +201,7 @@ def get_date_range_window(
         start_date=start_date,
         end_date=end_date,
         granularity=granularity,
+        tz=tz,
     )
 
 

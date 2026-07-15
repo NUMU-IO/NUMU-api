@@ -154,6 +154,22 @@ class ReviewPaymentProofUseCase:
             )
             await self.session.flush()
 
+            # Funnel: order_completed — InstaPay has no gateway webhook to
+            # emit this, and the customer may never revisit the thank-you
+            # page after uploading a proof. Fail-open inside the helper.
+            from src.application.services.funnel_emit_service import (
+                emit_order_completed,
+            )
+            from src.infrastructure.repositories.funnel_event_repository import (
+                FunnelEventRepository,
+            )
+
+            await emit_order_completed(
+                order,
+                FunnelEventRepository(self.session),
+                payment_method="instapay",
+            )
+
             try:
                 from src.infrastructure.events.setup import get_event_bus
 

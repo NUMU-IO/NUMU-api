@@ -533,14 +533,19 @@ class OrderRepository(IOrderRepository):
         store_id: UUID,
         start_date: datetime,
         end_date: datetime,
+        *,
+        timezone: str = "Africa/Cairo",
     ) -> list[tuple[date, int, int]]:
         """Daily ``(day, revenue_cents, order_count)`` tuples, one SQL round-trip.
 
         Replaces the sales-chart fallback that used to issue two queries per
         day (60 queries for a 30-day window). Cancelled/refunded orders are
-        excluded, matching ``get_revenue_by_date_range``.
+        excluded, matching ``get_revenue_by_date_range``. Days are bucketed
+        on the store's wall clock (``timezone``) — same convention as
+        ``get_order_day_set`` and the rollup task — so the chart's days
+        match what the merchant experienced.
         """
-        day = cast(OrderModel.created_at, SqlDate).label("day")
+        day = cast(func.timezone(timezone, OrderModel.created_at), SqlDate).label("day")
         query = (
             select(
                 day,

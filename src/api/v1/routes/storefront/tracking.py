@@ -50,14 +50,59 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-_VALID_FUNNEL_STEPS = {
+# Navigation steps represent an actual page load: they additionally write a
+# ``page_views`` row and bump the realtime view counters. Non-navigation
+# funnel steps (add_to_cart, search, …) must NOT create page_views rows —
+# sessions/bounce/landing-page analytics are computed from that table.
+_NAVIGATION_STEPS = {
     "page_view",
     "product_view",
+    "collection_view",
+}
+
+# Steps accepted verbatim from clients. Anything outside this set falls back
+# to path-based inference (page_view/product_view). Every entry either feeds
+# the funnel report directly or maps to a Meta/TikTok/GA4 standard event via
+# FUNNEL_STEP_TO_META_EVENT / FUNNEL_STEP_TO_TIKTOK_EVENT / the dispatcher —
+# steps without a mapping are simply skipped by that fan-out, never dropped
+# from funnel_events. Historically this set held only the 6 core steps, which
+# silently rewrote search/add_payment_info/… to page_view (losing the step
+# AND breaking Meta event_id dedup, since the browser had fired the correct
+# event name with the same event_id).
+_VALID_FUNNEL_STEPS = _NAVIGATION_STEPS | {
     "add_to_cart",
     "checkout_started",
+    "add_shipping_info",
+    "add_payment_info",
     "order_completed",
     "order_delivered",
+    "search",
+    "lead",
+    "sign_up",
+    "complete_registration",
+    "subscribe",
+    "contact",
+    "add_to_wishlist",
+    "customize_product",
+    "view_cart",
+    "remove_from_cart",
 }
+
+
+def resolve_funnel_step(body_step: str | None, path: str | None) -> str:
+    """Resolve the funnel step for a /track call: explicit > path inference.
+
+    An explicit step outside ``_VALID_FUNNEL_STEPS`` falls back to path
+    inference rather than being trusted verbatim — the endpoint is
+    unauthenticated, so arbitrary client strings must not become funnel
+    rows. The storefront routes ``/product/:id`` (singular) for detail
+    pages; ``/products`` (plural) is the listing page → page_view.
+    """
+    if body_step and body_step in _VALID_FUNNEL_STEPS:
+        return body_step
+    p = path or ""
+    is_product_detail = "/product/" in p and "/products/" not in p
+    return "product_view" if is_product_detail else "page_view"
 
 
 async def _emit_funnel_event(
@@ -301,20 +346,13 @@ async def track_page_view(
     ip = _anonymize_ip(raw_ip)
     ua = request.headers.get("user-agent", "")[:500]
 
-    # Resolve funnel step: explicit > path-based inference. The storefront
-    # routes `/product/:id` (singular) for detail pages, so check for that
-    # specifically. `/products` (plural) is the listing page → page_view.
-    if body.step and body.step in _VALID_FUNNEL_STEPS:
-        step = body.step
-    else:
-        path = body.path or ""
-        is_product_detail = "/product/" in path and "/products/" not in path
-        step = "product_view" if is_product_detail else "page_view"
+    step = resolve_funnel_step(body.step, body.path)
 
     # Only persist a page_view row when this is actually a navigation event.
-    # Pure funnel events (add_to_cart, etc.) shouldn't pollute the page_views
-    # table — they have no meaningful URL path of their own.
-    if step in ("page_view", "product_view"):
+    # Pure funnel events (add_to_cart, search, add_payment_info, etc.) must
+    # not pollute the page_views table — sessions, bounce rate, and landing
+    # pages are all derived from it.
+    if step in _NAVIGATION_STEPS:
         await pv_repo.create(
             store_id=store.id,
             tenant_id=store.tenant_id,

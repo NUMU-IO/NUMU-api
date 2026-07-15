@@ -38,6 +38,55 @@ def test_explicit_start_end_take_precedence() -> None:
     )
     assert win.start.isoformat().startswith("2026-05-01")
     assert win.end.isoformat().startswith("2026-05-15")
+    # Calendar-day projections default to Africa/Cairo (UTC+3 in May):
+    # 2026-05-15T23:59:59Z is already May 16 on the Cairo wall clock,
+    # so the local window spans 16 calendar days.
+    assert win.start_date.isoformat() == "2026-05-01"
+    assert win.end_date.isoformat() == "2026-05-16"
+    assert win.days == 16
+
+
+def test_calendar_dates_follow_store_timezone() -> None:
+    # 22:30 UTC on May 1 is already May 2 in Cairo (UTC+3 in summer).
+    win = resolve_date_range_window(
+        start_date="2026-05-01T22:30:00Z",
+        end_date="2026-05-01T23:30:00Z",
+    )
+    assert win.tz == "Africa/Cairo"
+    assert win.start_date.isoformat() == "2026-05-02"
+    assert win.end_date.isoformat() == "2026-05-02"
+    assert win.days == 1
+
+
+def test_explicit_tz_param_is_honored() -> None:
+    win = resolve_date_range_window(
+        start_date="2026-05-01T22:30:00Z",
+        end_date="2026-05-01T23:30:00Z",
+        tz="UTC",
+    )
+    assert win.tz == "UTC"
+    assert win.start_date.isoformat() == "2026-05-01"
+
+
+def test_invalid_tz_falls_back_to_cairo() -> None:
+    win = resolve_date_range_window(
+        start_date="2026-05-01T00:00:00Z",
+        end_date="2026-05-02T00:00:00Z",
+        tz="Not/AZone",
+    )
+    assert win.tz == "Africa/Cairo"
+
+
+def test_cairo_built_boundaries_project_cleanly() -> None:
+    # What the hub sends after the presets fix: Cairo midnight → Cairo
+    # end-of-day, as UTC instants. Must project to exactly those local
+    # dates with the right day count.
+    win = resolve_date_range_window(
+        start_date="2026-04-30T21:00:00Z",  # 2026-05-01T00:00 Cairo
+        end_date="2026-05-15T20:59:59Z",  # 2026-05-15T23:59:59 Cairo
+    )
+    assert win.start_date.isoformat() == "2026-05-01"
+    assert win.end_date.isoformat() == "2026-05-15"
     assert win.days == 15
 
 

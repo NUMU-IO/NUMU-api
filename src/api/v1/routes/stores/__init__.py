@@ -34,6 +34,7 @@ from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
+from src.api.v1.routes.stores import customer_import as customer_import_module
 from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import customizer_undo as customizer_undo_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
@@ -132,6 +133,11 @@ router.include_router(
 router.include_router(order_import_module.router, tags=["Store Order Import"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(audit_module.router, tags=["Store MCP Audit"])
+# customer_import must be registered BEFORE customers: it owns the static
+# paths under ``/{store_id}/customers/import`` which would otherwise be
+# shadowed by the customers router's UUID-typed ``/{customer_id}`` pattern
+# (same ordering rule as payment_proofs vs orders above).
+router.include_router(customer_import_module.router, tags=["Store Customer Import"])
 router.include_router(customers_module.router, tags=["Store Customers"])
 router.include_router(access_tokens_module.router, tags=["Store Access Tokens"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
