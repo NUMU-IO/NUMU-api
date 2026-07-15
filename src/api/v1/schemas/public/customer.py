@@ -99,6 +99,56 @@ class CustomerUpdateProfileRequest(BaseModel):
     )
 
 
+class MerchantCreateCustomerRequest(BaseModel):
+    """Merchant-created customer (no password — the customer can't log in
+    until they register themselves with the same email on the storefront)."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "ahmed@example.com",
+                "first_name": "Ahmed",
+                "last_name": "Hassan",
+                "phone": "+201234567890",
+                "accepts_marketing": True,
+                "notes": "VIP — met at the Cairo pop-up",
+                "tags": ["vip", "wholesale"],
+            }
+        }
+    )
+
+    email: EmailStr = Field(description="Customer email address")
+    first_name: SanitizedStr = Field(
+        ..., min_length=1, max_length=100, description="First name"
+    )
+    last_name: SanitizedStr = Field(
+        ..., min_length=1, max_length=100, description="Last name"
+    )
+    phone: PhoneField = Field(
+        None,
+        description=("Phone. Accepts E.164 or {country_code, local}; stored as E.164."),
+    )
+    accepts_marketing: bool = Field(
+        False, description="Whether the customer opts in to marketing"
+    )
+    notes: SanitizedStr | None = Field(
+        None, max_length=2000, description="Internal merchant notes"
+    )
+    tags: list[str] = Field(
+        default_factory=list, max_length=50, description="Customer tags"
+    )
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, v: list[str]) -> list[str]:
+        seen: list[str] = []
+        for tag in v:
+            normalized = tag.strip().lower()[:50]
+            if normalized and normalized not in seen:
+                seen.append(normalized)
+        return seen
+
+
 class CustomerChangePasswordRequest(BaseModel):
     """Customer change password request schema."""
 
