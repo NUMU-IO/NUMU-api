@@ -99,6 +99,13 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.warm_hf_vision_spaces",
         # Analytics retention — drops funnel/page-view rows past TTL.
         "src.infrastructure.messaging.tasks.analytics_retention_task",
+        # Weekly merchant analytics digest (email; WhatsApp deferred).
+        "src.infrastructure.messaging.tasks.analytics_digest_task",
+        # Nightly advisor rule engine (AI Commerce Intelligence).
+        "src.infrastructure.messaging.tasks.intelligence_task",
+        # Hourly smart-alerts sweep (time-critical rule subset).
+        "src.infrastructure.messaging.tasks.alerts_task",
+        "src.infrastructure.messaging.tasks.benchmarks_task",
         # Theme builds + marketplace
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
@@ -235,6 +242,32 @@ celery_app.conf.beat_schedule = {
     "beat-heartbeat": {
         "task": "tasks.beat_heartbeat",
         "schedule": 60.0,
+    },
+    # Weekly analytics digest — Sunday 06:00 UTC (≈ 08:00–09:00 Cairo,
+    # start of the Egyptian work week). Sends only to stores that opted
+    # in via settings.analytics_digest.enabled.
+    "weekly-analytics-digest": {
+        "task": "tasks.send_weekly_analytics_digests",
+        "schedule": crontab(hour=6, minute=0, day_of_week=0),
+    },
+    # Nightly advisor rule sweep — 04:15 UTC, after the analytics rollup
+    # (03:30) so weekly aggregates are fresh. Writes merchant_signals.
+    "nightly-intelligence-sweep": {
+        "task": "tasks.run_intelligence_sweep",
+        "schedule": crontab(hour=4, minute=15),
+    },
+    # Platform-level benchmark cells at 03:50 — after the rollup
+    # (03:30), before the intelligence sweep reads anything. Aggregates
+    # across tenants by design; only percentile cells are written.
+    "nightly-platform-benchmarks": {
+        "task": "tasks.compute_platform_benchmarks",
+        "schedule": crontab(hour=3, minute=50),
+    },
+    # Hourly smart alerts at :20 — cheap (rollups + Redis snapshot);
+    # cooldowns inside the service keep re-fires quiet.
+    "hourly-alerts-sweep": {
+        "task": "tasks.run_alerts_sweep",
+        "schedule": crontab(minute=20),
     },
     # Phase 4.4 — smart-collection membership recompute. Hourly at :30
     # so it doesn't pile onto the back-in-stock sweep at :15. Inline

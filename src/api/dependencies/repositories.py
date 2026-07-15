@@ -371,6 +371,28 @@ def get_analytics_rollup_repository(
     return AnalyticsRollupRepository(session)
 
 
+def get_metric_target_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get metric-target repository dependency."""
+    from src.infrastructure.repositories.metric_target_repository import (
+        MetricTargetRepository,
+    )
+
+    return MetricTargetRepository(session)
+
+
+def get_annotation_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get chart-annotation repository dependency."""
+    from src.infrastructure.repositories.annotation_repository import (
+        AnnotationRepository,
+    )
+
+    return AnnotationRepository(session)
+
+
 def get_funnel_event_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):

@@ -10,6 +10,7 @@ from src.core.interfaces.repositories.customer_repository import ICustomerReposi
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.utils.store_timezone import resolve_store_timezone_name, safe_zone
 
 
 @dataclass
@@ -255,45 +256,48 @@ class GetDashboardStatsUseCase:
 
         if period_start is not None and period_end is not None:
             now = period_end
-            window_days = max(1, (now - period_start).days + 1)
         else:
             now = datetime.now(UTC)
             period_start = now - timedelta(days=days)
-            window_days = days
 
-        # Pre-fetch daily visits in one query if repo available
+        # Store-local calendar days. The previous implementation issued
+        # TWO queries per day (60 for a 30-day chart) over rolling 24h
+        # windows labeled with the wrong date, while visits were keyed on
+        # true calendar days — so revenue and visits on the same chart row
+        # could describe different real days. One GROUP-BY-day query per
+        # series, both bucketed on the store's wall clock, fixes the N+1
+        # and the mismatch together.
+        tz_name = resolve_store_timezone_name(getattr(store, "settings", None) or {})
+        zone = safe_zone(tz_name)
+        first_day = period_start.astimezone(zone).date()
+        last_day = now.astimezone(zone).date()
+
         daily_visits_map: dict[str, int] = {}
         if page_view_repository:
             daily_visits = await page_view_repository.get_daily_visits(
-                store_id, period_start, now
+                store_id, period_start, now, tz=tz_name
             )
             daily_visits_map = dict(daily_visits)
 
+        rows = await self.order_repository.get_daily_aggregates(
+            store_id, period_start, now, timezone=tz_name
+        )
+        by_day = {row[0]: row for row in rows}
+
         data_points = []
-
-        # Get daily data for the period
-        for i in range(window_days - 1, -1, -1):
-            day_end = now - timedelta(days=i)
-            day_start = day_end - timedelta(days=1)
-
-            revenue = await self.order_repository.get_revenue_by_date_range(
-                store_id, day_start, day_end
-            )
-
-            # Get orders for the day
-            orders = await self.order_repository.get_by_date_range(
-                store_id, day_start, day_end
-            )
-
-            date_key = day_start.strftime("%Y-%m-%d")
+        d = first_day
+        while d <= last_day:
+            row = by_day.get(d)
+            date_key = d.strftime("%Y-%m-%d")
             data_points.append(
                 RevenueDataPoint(
                     date=date_key,
-                    revenue=revenue,
-                    orders=len(orders),
+                    revenue=row[1] if row else 0,
+                    orders=row[2] if row else 0,
                     visits=daily_visits_map.get(date_key, 0),
                 )
             )
+            d += timedelta(days=1)
 
         return data_points
 

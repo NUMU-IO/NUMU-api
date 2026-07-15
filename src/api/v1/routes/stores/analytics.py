@@ -4,15 +4,18 @@ URL: /stores/{store_id}/analytics
 """
 
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import String, cast, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_category_repository,
     get_customer_repository,
+    get_db,
     get_order_repository,
     get_product_repository,
     verify_store_ownership,
@@ -21,8 +24,11 @@ from src.api.dependencies.date_range import DateRangeWindow, get_date_range_wind
 from src.api.dependencies.repositories import (
     get_analytics_repository,
     get_analytics_rollup_repository,
+    get_annotation_repository,
     get_funnel_event_repository,
+    get_metric_target_repository,
     get_page_view_repository,
+    get_store_repository,
 )
 from src.api.responses import SuccessResponse
 from src.application.services.health_score_service import (
@@ -33,6 +39,12 @@ from src.application.services.health_score_service import (
 )
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.entities.store import Store
+from src.core.utils.store_timezone import (
+    local_date,
+    local_day_bounds,
+    resolve_store_timezone_name,
+    safe_zone,
+)
 from src.infrastructure.repositories import (
     AnalyticsRollupRepository,
     CategoryRepository,
@@ -41,8 +53,14 @@ from src.infrastructure.repositories import (
     StoreRepository,
 )
 from src.infrastructure.repositories.analytics_repository import AnalyticsRepository
+from src.infrastructure.repositories.annotation_repository import (
+    AnnotationRepository,
+)
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
+)
+from src.infrastructure.repositories.metric_target_repository import (
+    MetricTargetRepository,
 )
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
@@ -51,22 +69,47 @@ router = APIRouter(prefix="/{store_id}/analytics")
 
 
 class SalesOverviewResponse(BaseModel):
-    """Sales overview statistics."""
+    """Sales overview statistics.
 
-    total_sales: int  # In cents
+    ``total_sales`` is BOOKED revenue — every order except cancelled/
+    refunded, including still-unpaid COD (the dominant payment method in
+    Egypt: an order booked today is typically collected on delivery days
+    later). ``collected_revenue`` is the money actually received: paid
+    orders minus completed refunds — the Shopify-style gross/net split so
+    merchants see both realities side by side.
+    """
+
+    total_sales: int  # In cents — booked (see docstring)
     total_orders: int
     avg_order_value: int  # In cents
     sales_change_percent: float
     orders_change_percent: float
+    collected_revenue: int  # In cents — paid minus refunds
+    collected_change_percent: float
+    # Previous-window absolutes (same length, ending the day before the
+    # current window) so the UI can show "vs EGP X" and derive deltas
+    # for ratios like AOV without another round-trip.
+    previous_total_sales: int
+    previous_total_orders: int
+    previous_collected_revenue: int
     currency: str
 
 
 class SalesDataPointResponse(BaseModel):
-    """Sales data point for charts."""
+    """Sales data point for charts.
+
+    The ``prev_*`` fields are present only when the caller asked for a
+    comparison series (``?compare=previous_period|previous_year``); each
+    point carries the value of the SAME-POSITION bucket in the previous
+    window, so charts can overlay the two series without re-aligning.
+    """
 
     date: str
     sales: int
     orders: int
+    prev_date: str | None = None
+    prev_sales: int | None = None
+    prev_orders: int | None = None
 
 
 class AnalyticsTopProductResponse(BaseModel):
@@ -119,18 +162,28 @@ async def get_sales_overview(
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get sales overview for the store (uses pre-aggregated rollup data)."""
     today = window.end_date
     period_start = window.start_date
+
+    # Comparison window: same number of calendar days, ending the day
+    # BEFORE the current window starts. `get_aggregated` is inclusive on
+    # both ends, so the previous end must be `period_start - 1 day` —
+    # the old code passed `period_start` itself, counting that day in
+    # BOTH windows and making the previous window one day longer than
+    # the current one (the "vs previous period" % disagreed with the
+    # dashboard's correctly-computed version of the same number).
     span = timedelta(days=window.days)
     previous_period_start = period_start - span
+    previous_period_end = period_start - timedelta(days=1)
 
     # Try rollup table first
     current = await rollup_repo.get_aggregated(store.id, period_start, today)
     previous = await rollup_repo.get_aggregated(
-        store.id, previous_period_start, period_start
+        store.id, previous_period_start, previous_period_end
     )
 
     current_revenue = current["total_revenue_cents"]
@@ -142,15 +195,40 @@ async def get_sales_overview(
     if current_revenue == 0 and current_orders == 0:
         now = window.end
         ps = window.start
-        pps = ps - span
+        # Instant math for the fallback: previous window has the exact
+        # duration of the current one and ends just before it starts
+        # (the repo range is inclusive on both ends).
+        instant_span = now - ps
+        prev_end = ps - timedelta(microseconds=1)
+        pps = ps - instant_span
         current_revenue = await order_repo.get_revenue_by_date_range(store.id, ps, now)
         current_orders = await order_repo.count_by_store(
             store.id, date_from=ps, date_to=now
         )
-        previous_revenue = await order_repo.get_revenue_by_date_range(store.id, pps, ps)
-        previous_orders = await order_repo.count_by_store(
-            store.id, date_from=pps, date_to=ps
+        previous_revenue = await order_repo.get_revenue_by_date_range(
+            store.id, pps, prev_end
         )
+        previous_orders = await order_repo.count_by_store(
+            store.id, date_from=pps, date_to=prev_end
+        )
+
+    # Collected revenue — money actually received: paid orders minus
+    # completed refunds. Same sources /revenue-breakdown uses; refunds
+    # ride on the rollup aggregates fetched above (0 when the rollup is
+    # empty — a brand-new store has no refunds to subtract anyway).
+    # Negative values are possible and honest (a refund landing in a
+    # window with little new payment).
+    instant_span = window.end - window.start
+    prev_instant_start = window.start - instant_span
+    prev_instant_end = window.start - timedelta(microseconds=1)
+    paid_current = await analytics_repo.revenue_summary_paid(
+        store.id, window.start, window.end
+    )
+    paid_previous = await analytics_repo.revenue_summary_paid(
+        store.id, prev_instant_start, prev_instant_end
+    )
+    collected_current = paid_current["gross_cents"] - current["refund_amount_cents"]
+    collected_previous = paid_previous["gross_cents"] - previous["refund_amount_cents"]
 
     # Calculate changes
     if previous_revenue > 0:
@@ -163,6 +241,13 @@ async def get_sales_overview(
     else:
         orders_change = 100.0 if current_orders > 0 else 0.0
 
+    if collected_previous > 0:
+        collected_change = (
+            (collected_current - collected_previous) / collected_previous
+        ) * 100
+    else:
+        collected_change = 100.0 if collected_current > 0 else 0.0
+
     avg_order_value = current_revenue // current_orders if current_orders > 0 else 0
 
     return SuccessResponse(
@@ -172,6 +257,11 @@ async def get_sales_overview(
             avg_order_value=avg_order_value,
             sales_change_percent=round(sales_change, 1),
             orders_change_percent=round(orders_change, 1),
+            collected_revenue=collected_current,
+            collected_change_percent=round(collected_change, 1),
+            previous_total_sales=previous_revenue,
+            previous_total_orders=previous_orders,
+            previous_collected_revenue=collected_previous,
             currency=store.default_currency.value if store.default_currency else "EGP",
         ),
         message="Sales overview retrieved successfully",
@@ -191,6 +281,15 @@ async def get_sales_chart(
     ],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
+    compare: Annotated[
+        Literal["previous_period", "previous_year"] | None,
+        Query(
+            description="Attach an aligned comparison series to each point: "
+            "previous_period = same length ending the day before the window "
+            "starts; previous_year = same dates one year earlier. Ignored "
+            "for granularity=hour."
+        ),
+    ] = None,
 ):
     """Get sales data for chart visualization (single query via rollup).
 
@@ -206,7 +305,9 @@ async def get_sales_chart(
     # Hourly bucketing for short ranges (≤ 7 days enforced by the
     # dependency). Bypasses the rollup table since it's day-grained.
     if window.granularity == "hour":
-        rows = await order_repo.get_daily_aggregates(store.id, window.start, window.end)
+        rows = await order_repo.get_daily_aggregates(
+            store.id, window.start, window.end, timezone=window.tz
+        )
         # `get_daily_aggregates` returns daily rows; for hourly precision
         # we just emit a day per bucket — finer aggregation is a
         # follow-up that needs a new repo method.
@@ -225,9 +326,6 @@ async def get_sales_chart(
             message="Sales chart data retrieved successfully",
         )
 
-    # Single query on rollup table instead of N individual queries
-    rollups = await rollup_repo.get_range(store.id, date_from, today)
-
     def _bucket_key(d: date) -> date:
         if window.granularity == "week":
             return d - timedelta(days=d.weekday())  # Monday-start
@@ -242,60 +340,80 @@ async def get_sales_chart(
             return d.strftime("Wk of %b %d")
         return d.strftime("%b %d")
 
-    if rollups:
-        rollup_map = {r.rollup_date: r for r in rollups}
+    async def _bucketed_series(from_d: date, to_d: date) -> list[tuple[date, int, int]]:
+        """Zero-filled, bucketed ``(bucket_key, sales, orders)`` for a
+        window. Rollup-first with the live-SQL fallback — each window
+        decides independently (the previous window often has rollups
+        even when the current day doesn't yet)."""
+        n = (to_d - from_d).days + 1
+        daily: list[tuple[date, int, int]]
+        rollups = await rollup_repo.get_range(store.id, from_d, to_d)
+        if rollups:
+            rollup_map = {r.rollup_date: r for r in rollups}
+            daily = []
+            for i in range(n):
+                d = from_d + timedelta(days=i)
+                r = rollup_map.get(d)
+                daily.append((
+                    d,
+                    r.total_revenue_cents if r else 0,
+                    r.total_orders if r else 0,
+                ))
+        else:
+            # Rollup table empty (first run of the day, brand-new
+            # install). Single GROUP-BY-day query; `from_d`/`to_d` are
+            # store-local calendar dates — expand to UTC instants.
+            start_dt, _ = local_day_bounds(from_d, window.tz)
+            _, end_dt = local_day_bounds(to_d, window.tz)
+            rows = await order_repo.get_daily_aggregates(
+                store.id, start_dt, end_dt, timezone=window.tz
+            )
+            by_day = {row[0]: row for row in rows}
+            daily = []
+            for i in range(n):
+                d = from_d + timedelta(days=i)
+                row = by_day.get(d)
+                daily.append((d, row[1] if row else 0, row[2] if row else 0))
+
         agg: dict[date, tuple[int, int]] = {}
         order_lookup: list[date] = []
-        for i in range(days):
-            d = date_from + timedelta(days=i)
-            r = rollup_map.get(d)
-            sales = r.total_revenue_cents if r else 0
-            orders = r.total_orders if r else 0
+        for d, sales, orders in daily:
             bk = _bucket_key(d)
             if bk not in agg:
                 agg[bk] = (0, 0)
                 order_lookup.append(bk)
             s, o = agg[bk]
             agg[bk] = (s + sales, o + orders)
-        data_points = [
-            SalesDataPointResponse(
-                date=_bucket_label(bk),
-                sales=agg[bk][0],
-                orders=agg[bk][1],
-            )
-            for bk in order_lookup
-        ]
-    else:
-        # Fallback when the rollup table is empty (first run of the day,
-        # brand-new install). Single GROUP-BY-day query instead of the
-        # previous N+1. Gap-fills missing days with zeros so the chart
-        # shape stays consistent.
-        start_dt = datetime.combine(date_from, datetime.min.time(), tzinfo=UTC)
-        end_dt = datetime.combine(today, datetime.max.time(), tzinfo=UTC)
-        rows = await order_repo.get_daily_aggregates(store.id, start_dt, end_dt)
-        by_day = {row[0]: row for row in rows}
-        agg = {}
-        order_lookup = []
-        for i in range(days):
-            d = date_from + timedelta(days=i)
-            row = by_day.get(d)
-            sales = row[1] if row else 0
-            orders = row[2] if row else 0
-            bk = _bucket_key(d)
-            if bk not in agg:
-                agg[bk] = (0, 0)
-                order_lookup.append(bk)
-            s, o = agg[bk]
-            agg[bk] = (s + sales, o + orders)
-        data_points = [
-            SalesDataPointResponse(
-                date=_bucket_label(bk),
-                sales=agg[bk][0],
-                orders=agg[bk][1],
-            )
-            for bk in order_lookup
-        ]
+        return [(bk, agg[bk][0], agg[bk][1]) for bk in order_lookup]
 
+    current = await _bucketed_series(date_from, today)
+
+    previous: list[tuple[date, int, int]] | None = None
+    if compare == "previous_year":
+        previous = await _bucketed_series(
+            date_from - timedelta(days=365), today - timedelta(days=365)
+        )
+    elif compare == "previous_period":
+        previous = await _bucketed_series(
+            date_from - timedelta(days=days), date_from - timedelta(days=1)
+        )
+
+    data_points = [
+        SalesDataPointResponse(
+            date=_bucket_label(bk),
+            sales=sales,
+            orders=orders,
+            # Positional alignment — bucket i of the current window pairs
+            # with bucket i of the previous one (the standard "compare"
+            # convention; windows are the same length by construction).
+            prev_date=_bucket_label(previous[i][0])
+            if previous and i < len(previous)
+            else None,
+            prev_sales=previous[i][1] if previous and i < len(previous) else None,
+            prev_orders=previous[i][2] if previous and i < len(previous) else None,
+        )
+        for i, (bk, sales, orders) in enumerate(current)
+    ]
     return SuccessResponse(
         data=data_points,
         message="Sales chart data retrieved successfully",
@@ -883,7 +1001,9 @@ async def get_orders_breakdown(
         "Sunday",
     ]
     pg_to_iso = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 0: 6}
-    dow_raw = await analytics_repo.orders_by_day_of_week(store.id, period_start, now)
+    dow_raw = await analytics_repo.orders_by_day_of_week(
+        store.id, period_start, now, tz=window.tz
+    )
     by_iso: dict[int, dict] = {i: {"orders": 0, "revenue_cents": 0} for i in range(7)}
     for pg_dow, vals in dow_raw.items():
         iso = pg_to_iso.get(pg_dow, 0)
@@ -897,7 +1017,9 @@ async def get_orders_breakdown(
         for i in range(7)
     ]
 
-    hour_map = await analytics_repo.orders_by_hour(store.id, period_start, now)
+    hour_map = await analytics_repo.orders_by_hour(
+        store.id, period_start, now, tz=window.tz
+    )
     by_hour_of_day = [
         OrdersByHourItem(hour=h, orders=hour_map.get(h, 0)) for h in range(24)
     ]
@@ -923,12 +1045,27 @@ class CouponUsageItem(BaseModel):
     revenue_impact: int  # cents (discount amount)
 
 
+class TaxByRateItem(BaseModel):
+    rate_pct: float
+    orders: int
+    tax_cents: int
+
+
 class RevenueBreakdownResponse(BaseModel):
     gross_revenue: int  # cents
     discounts: int  # cents
     shipping_collected: int  # cents
     refunds: int  # cents
     net_revenue: int  # cents
+    # Tax collected (paid orders). Egyptian VAT is INCLUSIVE — it is part
+    # of gross, not added on top — so it is NOT subtracted in net_revenue;
+    # it's what the merchant owes the tax authority out of that revenue.
+    # ``tax_inclusive`` is the portion embedded in prices; ``tax_added``
+    # the portion charged on top (exclusive tax).
+    tax_collected: int  # cents
+    tax_inclusive: int  # cents
+    tax_added: int  # cents
+    tax_by_rate: list[TaxByRateItem]
     coupon_usage: list[CouponUsageItem]
 
 
@@ -960,6 +1097,7 @@ async def get_revenue_breakdown(
 
     summary = await analytics_repo.revenue_summary_paid(store.id, period_start, now)
     coupons = await analytics_repo.coupon_usage(store.id, period_start, now)
+    tax = await analytics_repo.tax_by_rate(store.id, period_start, now)
 
     agg = await rollup_repo.get_aggregated(store.id, date_from_d, today)
     refunds = agg["refund_amount_cents"]
@@ -972,6 +1110,17 @@ async def get_revenue_breakdown(
             shipping_collected=summary["shipping_cents"],
             refunds=refunds,
             net_revenue=net_revenue,
+            tax_collected=summary["tax_cents"],
+            tax_inclusive=tax["inclusive_cents"],
+            tax_added=tax["added_cents"],
+            tax_by_rate=[
+                TaxByRateItem(
+                    rate_pct=t["rate_pct"],
+                    orders=t["orders"],
+                    tax_cents=t["tax_cents"],
+                )
+                for t in tax["by_rate"]
+            ],
             coupon_usage=[
                 CouponUsageItem(
                     code=c["code"],
@@ -1251,6 +1400,210 @@ class ProductPerformanceResponse(BaseModel):
     inventory: InventoryHealthResponse
 
 
+class AbcClassSummary(BaseModel):
+    count: int
+    revenue_cents: int
+    revenue_share_pct: float
+
+
+class AbcProductItem(BaseModel):
+    product_id: str
+    name: str
+    abc_class: str  # "A" | "B" | "C"
+    revenue_cents: int
+    revenue_share_pct: float
+    sell_through_pct: float
+
+
+class DeadStockBucket(BaseModel):
+    label: str  # "30-60" | "60-90" | "90+"
+    products: int
+    units: int
+    value_cents: int
+
+
+class DeadStockProductItem(BaseModel):
+    product_id: str
+    name: str
+    quantity: int
+    value_cents: int
+    days_since_last_sale: int | None  # None = never sold in the horizon
+
+
+class InventoryAnalyticsResponse(BaseModel):
+    """Sell-through, ABC classification, and dead-stock aging.
+
+    - Sell-through = units sold ÷ (units sold + units still in stock)
+      over the selected window — the standard retail definition.
+    - ABC: products ranked by window revenue; A = the head that makes
+      up 80% of revenue, B = the next 15%, C = the tail (incl. products
+      with zero sales).
+    - Dead stock: in-stock products with no sale in ≥30 days, bucketed
+      by age of last sale (never-sold products age from their creation
+      date). Value uses cost_price when set, else sale price
+      (``value_is_cost`` tells the UI which caption to show).
+    """
+
+    sell_through_pct: float
+    units_sold: int
+    units_in_stock: int
+    abc: dict[str, AbcClassSummary]  # keys "A" | "B" | "C"
+    abc_products: list[AbcProductItem]
+    dead_stock_buckets: list[DeadStockBucket]
+    dead_stock_products: list[DeadStockProductItem]
+    dead_stock_value_cents: int
+    value_is_cost: bool
+
+
+_DEAD_STOCK_HORIZON_DAYS = 180
+
+
+@router.get(
+    "/inventory-analytics",
+    response_model=SuccessResponse[InventoryAnalyticsResponse],
+    summary="Get inventory analytics (sell-through, ABC, dead stock)",
+    operation_id="get_inventory_analytics",
+)
+async def get_inventory_analytics(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
+):
+    """Inventory health beyond restock suggestions — what to reorder
+    (A), what to watch (B), and what to discount or retire (dead C)."""
+    sales = await analytics_repo.product_sales_window(
+        store.id, window.start, window.end
+    )
+    stock = await analytics_repo.product_stock_snapshot(store.id)
+    horizon_start = window.end - timedelta(days=_DEAD_STOCK_HORIZON_DAYS)
+    last_sold = await analytics_repo.product_last_sold(store.id, horizon_start)
+
+    sales_by_pid = {s["product_id"]: s for s in sales}
+    stock_by_pid = {p["product_id"]: p for p in stock}
+
+    # ── Sell-through (store level) ─────────────────────────────────
+    units_sold = sum(s["units_sold"] for s in sales)
+    units_in_stock = sum(p["quantity"] for p in stock)
+    denominator = units_sold + units_in_stock
+    sell_through = (units_sold / denominator * 100) if denominator > 0 else 0.0
+
+    # ── ABC classification on window revenue ───────────────────────
+    total_revenue = sum(s["revenue_cents"] for s in sales)
+    ranked = sorted(sales, key=lambda s: s["revenue_cents"], reverse=True)
+    abc_class: dict[str, str] = {}
+    cumulative = 0
+    for s in ranked:
+        # Classify by the cumulative share BEFORE this product: the item
+        # that crosses the 80% boundary still belongs to the head (A).
+        # Classifying on the after-share put a single product carrying
+        # 98% of revenue into C — the exact opposite of its importance.
+        share_before = cumulative / total_revenue if total_revenue > 0 else 1.0
+        cumulative += s["revenue_cents"]
+        abc_class[s["product_id"]] = (
+            "A" if share_before < 0.80 else ("B" if share_before < 0.95 else "C")
+        )
+    # Zero-sales products are C by definition.
+    for pid in stock_by_pid:
+        abc_class.setdefault(pid, "C")
+
+    abc_summary: dict[str, dict] = {
+        k: {"count": 0, "revenue_cents": 0} for k in ("A", "B", "C")
+    }
+    for pid, cls in abc_class.items():
+        abc_summary[cls]["count"] += 1
+        abc_summary[cls]["revenue_cents"] += sales_by_pid.get(pid, {}).get(
+            "revenue_cents", 0
+        )
+
+    abc_products = []
+    for s in ranked[:50]:
+        pid = s["product_id"]
+        p = stock_by_pid.get(pid)
+        st_den = s["units_sold"] + (p["quantity"] if p else 0)
+        abc_products.append(
+            AbcProductItem(
+                product_id=pid,
+                name=(p["name"] if p else "") or "",
+                abc_class=abc_class[pid],
+                revenue_cents=s["revenue_cents"],
+                revenue_share_pct=round(s["revenue_cents"] / total_revenue * 100, 1)
+                if total_revenue > 0
+                else 0.0,
+                sell_through_pct=round(s["units_sold"] / st_den * 100, 1)
+                if st_den > 0
+                else 0.0,
+            )
+        )
+
+    # ── Dead stock aging ───────────────────────────────────────────
+    now = window.end
+    buckets = {"30-60": [0, 0, 0], "60-90": [0, 0, 0], "90+": [0, 0, 0]}
+    dead_products: list[DeadStockProductItem] = []
+    any_price_fallback = False
+    for p in stock:
+        if p["quantity"] <= 0:
+            continue
+        sold_at = last_sold.get(p["product_id"])
+        if sold_at is not None:
+            days = (now - sold_at).days
+        else:
+            # Never sold in the horizon — age from creation, capped at
+            # the horizon so ancient catalogs don't overflow the label.
+            created = p.get("created_at")
+            days = (
+                min((now - created).days, _DEAD_STOCK_HORIZON_DAYS)
+                if created
+                else _DEAD_STOCK_HORIZON_DAYS
+            )
+        if days < 30:
+            continue
+        label = "30-60" if days < 60 else ("60-90" if days < 90 else "90+")
+        value = p["quantity"] * p["unit_value_cents"]
+        if not p["value_is_cost"]:
+            any_price_fallback = True
+        buckets[label][0] += 1
+        buckets[label][1] += p["quantity"]
+        buckets[label][2] += value
+        dead_products.append(
+            DeadStockProductItem(
+                product_id=p["product_id"],
+                name=p["name"] or "",
+                quantity=p["quantity"],
+                value_cents=value,
+                days_since_last_sale=(now - sold_at).days if sold_at else None,
+            )
+        )
+
+    dead_products.sort(key=lambda d: d.value_cents, reverse=True)
+
+    return SuccessResponse(
+        data=InventoryAnalyticsResponse(
+            sell_through_pct=round(sell_through, 1),
+            units_sold=units_sold,
+            units_in_stock=units_in_stock,
+            abc={
+                k: AbcClassSummary(
+                    count=v["count"],
+                    revenue_cents=v["revenue_cents"],
+                    revenue_share_pct=round(v["revenue_cents"] / total_revenue * 100, 1)
+                    if total_revenue > 0
+                    else 0.0,
+                )
+                for k, v in abc_summary.items()
+            },
+            abc_products=abc_products,
+            dead_stock_buckets=[
+                DeadStockBucket(label=k, products=v[0], units=v[1], value_cents=v[2])
+                for k, v in buckets.items()
+            ],
+            dead_stock_products=dead_products[:20],
+            dead_stock_value_cents=sum(v[2] for v in buckets.values()),
+            value_is_cost=not any_price_fallback,
+        ),
+        message="Inventory analytics retrieved successfully",
+    )
+
+
 @router.get(
     "/product-performance",
     response_model=SuccessResponse[ProductPerformanceResponse],
@@ -1450,6 +1803,1415 @@ class FunnelResponse(BaseModel):
     cart_abandonment: CartAbandonmentResponse
 
 
+class SearchTermItem(BaseModel):
+    term: str
+    searches: int
+    sessions: int  # distinct fingerprints that searched this term
+    zero_result_searches: int  # 0 until storefront reports results_count
+
+
+class SearchTermsResponse(BaseModel):
+    """Storefront search analytics — data exists since the /track
+    step-whitelist fix (before it, search events were collapsed to
+    page_view and the query strings were lost)."""
+
+    total_searches: int
+    unique_search_sessions: int
+    # % of searching sessions that also completed an order in-window.
+    # Session co-occurrence, not attribution.
+    search_conversion_rate: float
+    terms: list[SearchTermItem]
+
+
+@router.get(
+    "/search-terms",
+    response_model=SuccessResponse[SearchTermsResponse],
+    summary="Get top storefront search terms",
+    operation_id="get_search_terms",
+)
+async def get_search_terms(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+):
+    """Top search terms, volumes, and search→purchase session conversion."""
+    summary = await analytics_repo.search_summary(store.id, window.start, window.end)
+    terms = await analytics_repo.search_terms(
+        store.id, window.start, window.end, limit=limit
+    )
+
+    sessions = summary["unique_sessions"]
+    conversion = (
+        (summary["converted_sessions"] / sessions) * 100 if sessions > 0 else 0.0
+    )
+
+    return SuccessResponse(
+        data=SearchTermsResponse(
+            total_searches=summary["total_searches"],
+            unique_search_sessions=sessions,
+            search_conversion_rate=round(conversion, 1),
+            terms=[SearchTermItem(**t) for t in terms],
+        ),
+        message="Search terms retrieved successfully",
+    )
+
+
+# ── Customer health (AI-3) ──────────────────────────────────────────
+
+
+class HealthStateCount(BaseModel):
+    state: str
+    count: int
+
+
+class CustomerHealthItem(BaseModel):
+    customer_id: UUID
+    name: str
+    score: int
+    state: str
+    orders: int
+    total_spent_cents: int
+    days_since_last: int
+
+
+class CustomerHealthResponse(BaseModel):
+    distribution: list[HealthStateCount]
+    median_gap_days: float
+    customers: list[CustomerHealthItem]
+
+
+async def _live_customer_scores(
+    db: AsyncSession, store_id: UUID, now: datetime
+) -> tuple[list[dict], list[dict]]:
+    """(rows, scored) for the AI-3 health model, computed live over 365d.
+
+    Shared by ``/customer-health`` (full list UI) and ``/executive``
+    (distribution collapsed to a gauge) so the two never disagree.
+    """
+    from src.application.services.customer_health_service import (
+        score_store_customers,
+    )
+    from src.infrastructure.database.models.tenant.funnel_event import (
+        FunnelEventModel,
+    )
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    since = now - timedelta(days=365)
+    # lower(status::text) — mixed-case enum labels (see analytics_repository)
+    status_lc = func.lower(cast(OrderModel.status, String))
+    non_revenue_lc = ("cancelled", "refunded", "draft", "payment_failed")
+    ninety = now - timedelta(days=90)
+    one80 = now - timedelta(days=180)
+
+    q = (
+        select(
+            OrderModel.customer_id,
+            func.count(OrderModel.id).label("orders"),
+            func.coalesce(func.sum(OrderModel.total), 0).label("spent"),
+            func.min(OrderModel.created_at).label("first_at"),
+            func.max(OrderModel.created_at).label("last_at"),
+            func.count().filter(OrderModel.coupon_code.isnot(None)).label("couponed"),
+            func.count().filter(status_lc == "returned").label("returned"),
+            func.coalesce(
+                func.sum(OrderModel.total).filter(OrderModel.created_at >= ninety), 0
+            ).label("last90"),
+            func.coalesce(
+                func.sum(OrderModel.total).filter(
+                    OrderModel.created_at >= one80, OrderModel.created_at < ninety
+                ),
+                0,
+            ).label("prior90"),
+        )
+        .where(
+            OrderModel.store_id == store_id,
+            OrderModel.created_at >= since,
+            OrderModel.customer_id.isnot(None),
+            status_lc.notin_(non_revenue_lc),
+        )
+        .group_by(OrderModel.customer_id)
+    )
+    rows_db = (await db.execute(q)).all()
+    if not rows_db:
+        return [], []
+
+    ids = [r.customer_id for r in rows_db]
+    eng_q = (
+        select(
+            FunnelEventModel.customer_id,
+            func.count().label("events"),
+        )
+        .where(
+            FunnelEventModel.store_id == store_id,
+            FunnelEventModel.customer_id.in_(ids),
+            FunnelEventModel.created_at >= now - timedelta(days=30),
+        )
+        .group_by(FunnelEventModel.customer_id)
+    )
+    events = {r.customer_id: int(r.events) for r in (await db.execute(eng_q)).all()}
+
+    rows = [
+        {
+            "customer_id": r.customer_id,
+            "orders": int(r.orders),
+            "total_spent_cents": int(r.spent),
+            "first_at": r.first_at,
+            "last_at": r.last_at,
+            "coupon_orders": int(r.couponed),
+            "returned_orders": int(r.returned),
+            "spend_last_90": int(r.last90),
+            "spend_prior_90": int(r.prior90),
+            "events_30d": events.get(r.customer_id, 0),
+        }
+        for r in rows_db
+    ]
+    total_orders = sum(r["orders"] for r in rows)
+    store_aov = (
+        sum(r["total_spent_cents"] for r in rows) // total_orders if total_orders else 0
+    )
+    return rows, score_store_customers(rows, now, store_aov)
+
+
+@router.get(
+    "/customer-health",
+    response_model=SuccessResponse[CustomerHealthResponse],
+    summary="Customer health scores + states",
+    operation_id="get_customer_health",
+)
+async def get_customer_health(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    state: Annotated[str | None, Query(max_length=30)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+):
+    """0–100 health per customer + lifecycle state (VIP … churned),
+    computed live over 365d of orders. Recency decays on the STORE's own
+    repurchase rhythm, and the monetary quintile finally participates
+    (the legacy RFM segmenter ignored it — D14)."""
+    from src.application.services.customer_health_service import (
+        median_interpurchase_gap,
+    )
+    from src.infrastructure.database.models.tenant.customer import CustomerModel
+
+    now = datetime.now(UTC)
+    rows, scored = await _live_customer_scores(db, store.id, now)
+    if not rows:
+        return SuccessResponse(
+            data=CustomerHealthResponse(
+                distribution=[], median_gap_days=30.0, customers=[]
+            ),
+            message="No customers yet",
+        )
+
+    names_q = select(
+        CustomerModel.id, CustomerModel.first_name, CustomerModel.last_name
+    ).where(CustomerModel.id.in_([r["customer_id"] for r in rows]))
+    names = {
+        r.id: f"{r.first_name} {r.last_name}".strip()
+        for r in (await db.execute(names_q)).all()
+    }
+
+    dist: dict[str, int] = {}
+    for s in scored:
+        dist[s["state"]] = dist.get(s["state"], 0) + 1
+
+    filtered = [s for s in scored if state is None or s["state"] == state]
+    return SuccessResponse(
+        data=CustomerHealthResponse(
+            distribution=[
+                HealthStateCount(state=k, count=v)
+                for k, v in sorted(dist.items(), key=lambda x: -x[1])
+            ],
+            median_gap_days=round(median_interpurchase_gap(rows), 1),
+            customers=[
+                CustomerHealthItem(
+                    customer_id=s["customer_id"],
+                    name=names.get(s["customer_id"], ""),
+                    score=s["score"],
+                    state=s["state"],
+                    orders=s["orders"],
+                    total_spent_cents=s["total_spent_cents"],
+                    days_since_last=int((now - s["last_at"]).total_seconds() // 86400)
+                    if s["last_at"]
+                    else 0,
+                )
+                for s in filtered[:limit]
+            ],
+        ),
+        message="Customer health computed",
+    )
+
+
+# ── Predictions v1 (AI Commerce Intelligence) ───────────────────────
+
+
+def _gap_filled_history(
+    series: list[dict], today_local: date
+) -> tuple[list[float], list[float]]:
+    """Contiguous (revenue, orders) daily series up to yesterday.
+
+    Zero-order days are absent from the query result but real to a
+    forecasting model — a hole would shift the weekly seasonality.
+    Today is excluded: it's partial and would drag the level down.
+    """
+    by_day = {r["rollup_date"]: r for r in series}
+    rev_hist: list[float] = []
+    ord_hist: list[float] = []
+    if series:
+        d = series[0]["rollup_date"]
+        while d < today_local:
+            row = by_day.get(d)
+            rev_hist.append(float(row["total_revenue_cents"]) if row else 0.0)
+            ord_hist.append(float(row["total_orders"]) if row else 0.0)
+            d += timedelta(days=1)
+    return rev_hist, ord_hist
+
+
+class StockoutPrediction(BaseModel):
+    product_id: str
+    name: str
+    quantity: int
+    velocity_per_day: float
+    days_left: float
+    run_out_date: str
+    early_date: str
+    late_date: str | None
+    urgent: bool
+    confidence: str
+    suggested_reorder_qty: int
+
+
+class MonthRevenueBand(BaseModel):
+    expected_cents: int
+    lower_cents: int
+    upper_cents: int
+    mtd_cents: int
+    remaining_days: int
+    confidence: str
+
+
+class TodayOrdersBand(BaseModel):
+    predicted: int
+    lower: int
+    upper: int
+
+
+class RepeatProfile(BaseModel):
+    customers: int
+    repeat_customers: int
+    repeat_rate_pct: float
+    p_next_30d_pct: float
+    median_gap_days: float | None
+    confidence: str
+
+
+class CodGovernorateRate(BaseModel):
+    governorate: str
+    resolved: int
+    returned: int
+    rate_pct: float
+    shrunk_rate_pct: float
+
+
+class CodRejectionProfile(BaseModel):
+    store_rate_pct: float
+    wilson_low_pct: float
+    wilson_high_pct: float
+    resolved_orders: int
+    pending_orders: int
+    pending_value_cents: int
+    expected_loss_cents: int
+    by_governorate: list[CodGovernorateRate]
+    confidence: str
+
+
+class PredictionsResponse(BaseModel):
+    stockouts: list[StockoutPrediction]
+    revenue_month: MonthRevenueBand | None
+    orders_today: TodayOrdersBand | None
+    repeat: RepeatProfile
+    cod: CodRejectionProfile | None
+    generated_at: str
+
+
+@router.get(
+    "/predictions",
+    response_model=SuccessResponse[PredictionsResponse],
+    summary="Statistical predictions (stockouts, bands, repeat, COD)",
+    operation_id="get_predictions",
+)
+async def get_predictions(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+):
+    """Predictions v1 — all statistical, all self-hosted (AI-5).
+
+    Stock depletion windows (EWMA velocity + Poisson band), month-end
+    revenue and today's-orders bands (the forecast service's
+    Holt-Winters), empirical repeat-purchase probability, and COD
+    rejection risk with Wilson intervals + per-governorate shrinkage.
+    Every block carries a confidence tier; blocks without enough data
+    return null rather than a confident-looking guess.
+    """
+    from src.application.services import prediction_service as ps
+
+    now = datetime.now(UTC)
+    tz_name = resolve_store_timezone_name(store.settings)
+    today_local = local_date(now, tz_name)
+
+    # ── Stockouts: current stock + 7d/28d velocity ──
+    stock = await analytics_repo.product_stock_snapshot(store.id)
+    sales_7d = await analytics_repo.product_sales_window(
+        store.id, now - timedelta(days=7), now
+    )
+    sales_28d = await analytics_repo.product_sales_window(
+        store.id, now - timedelta(days=28), now
+    )
+    u7 = {p["product_id"]: p["units_sold"] for p in sales_7d}
+    u28 = {p["product_id"]: p["units_sold"] for p in sales_28d}
+    products = [
+        {
+            "product_id": s["product_id"],
+            "name": s["name"],
+            "quantity": s["quantity"],
+            "units_7d": u7.get(s["product_id"], 0),
+            "units_28d": u28.get(s["product_id"], 0),
+        }
+        for s in stock
+    ]
+    stockouts = ps.predict_stockouts(products, today_local)
+
+    # ── Revenue / orders series (store-local days, last 120) ──
+    series = await analytics_repo.daily_revenue_series(
+        store.id, now - timedelta(days=120), now, tz=tz_name
+    )
+    month_start = today_local.replace(day=1)
+    mtd = sum(
+        r["total_revenue_cents"] for r in series if r["rollup_date"] >= month_start
+    )
+    rev_hist, ord_hist = _gap_filled_history(series, today_local)
+    next_month = (month_start + timedelta(days=32)).replace(day=1)
+    remaining = (next_month - today_local).days
+
+    revenue_month = ps.month_revenue_band(rev_hist, mtd, remaining)
+    orders_today = ps.today_orders_band(ord_hist)
+
+    # ── Repeat purchase (365d) ──
+    cust = await analytics_repo.customer_period_aggregates(
+        store.id, now - timedelta(days=365), now
+    )
+    repeat = ps.repeat_probability(cust, now)
+
+    # ── COD rejection (180d resolved outcomes) ──
+    gov_rows = await analytics_repo.cod_outcomes_by_governorate(
+        store.id, now - timedelta(days=180), now
+    )
+    pending = await analytics_repo.cod_pending_exposure(store.id)
+    cod = ps.cod_rejection_profile(gov_rows, pending)
+
+    return SuccessResponse(
+        data=PredictionsResponse(
+            stockouts=[StockoutPrediction(**s) for s in stockouts],
+            revenue_month=MonthRevenueBand(**revenue_month) if revenue_month else None,
+            orders_today=TodayOrdersBand(**orders_today) if orders_today else None,
+            repeat=RepeatProfile(**repeat),
+            cod=CodRejectionProfile(**cod) if cod else None,
+            generated_at=now.isoformat(),
+        ),
+        message="Predictions computed",
+    )
+
+
+# ── Advisor signals (AI Commerce Intelligence) ──────────────────────
+
+
+class SignalItem(BaseModel):
+    id: UUID
+    kind: str  # advice | opportunity | alert
+    rule_id: str
+    severity: str  # critical | warning | opportunity | info
+    title: str
+    action: str
+    expected_impact_cents: int | None
+    created_at: str
+
+
+class SignalsResponse(BaseModel):
+    signals: list[SignalItem]
+
+
+@router.get(
+    "/signals",
+    response_model=SuccessResponse[SignalsResponse],
+    summary="Get active advisor signals",
+    operation_id="get_signals",
+)
+async def get_signals(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated["AsyncSession", Depends(get_db)],
+    lang: Annotated[Literal["en", "ar"], Query()] = "en",
+):
+    """Active advice/opportunities for this store, ranked by expected
+    EGP impact. Copy is rendered from the rule templates at read time."""
+    from src.application.services.advisor_rules import render_signal
+    from src.application.services.alert_service import render_alert
+    from src.infrastructure.database.models.tenant.merchant_signal import (
+        MerchantSignalModel,
+    )
+
+    rows = (
+        (
+            await db.execute(
+                select(MerchantSignalModel)
+                .where(
+                    MerchantSignalModel.store_id == store.id,
+                    MerchantSignalModel.status == "active",
+                )
+                .order_by(MerchantSignalModel.expected_impact_cents.desc().nulls_last())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    signals = []
+    for r in rows:
+        # AL-* rows come from the hourly alert engine; everything else
+        # from the nightly advisor. Each owns its template registry.
+        renderer = render_alert if r.rule_id.startswith("AL-") else render_signal
+        rendered = renderer(r.rule_id, r.metrics_snapshot or {}, lang)
+        signals.append(
+            SignalItem(
+                id=r.id,
+                kind=r.kind,
+                rule_id=r.rule_id,
+                severity=r.severity,
+                title=rendered["title"],
+                action=rendered["action"],
+                expected_impact_cents=r.expected_impact_cents,
+                created_at=r.created_at.isoformat(),
+            )
+        )
+    return SuccessResponse(
+        data=SignalsResponse(signals=signals),
+        message="Signals retrieved",
+    )
+
+
+@router.post(
+    "/signals/{signal_id}/dismiss",
+    response_model=SuccessResponse[dict],
+    summary="Dismiss an advisor signal",
+    operation_id="dismiss_signal",
+)
+async def dismiss_signal(
+    signal_id: UUID,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated["AsyncSession", Depends(get_db)],
+):
+    """Hide a signal the merchant doesn't want to act on. It won't
+    re-notify while its cooldown holds; a later re-fire creates a fresh
+    signal if the condition persists."""
+    from src.infrastructure.database.models.tenant.merchant_signal import (
+        MerchantSignalModel,
+    )
+
+    row = (
+        await db.execute(
+            select(MerchantSignalModel).where(
+                MerchantSignalModel.id == signal_id,
+                MerchantSignalModel.store_id == store.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    row.status = "dismissed"
+    await db.commit()
+    return SuccessResponse(data={"dismissed": True}, message="Signal dismissed")
+
+
+@router.post(
+    "/signals/refresh",
+    response_model=SuccessResponse[dict],
+    summary="Re-run the advisor rules for this store now",
+    operation_id="refresh_signals",
+)
+async def refresh_signals(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated["AsyncSession", Depends(get_db)],
+):
+    """On-demand rule evaluation (the nightly sweep does this
+    automatically). Synchronous — a store's rule pass is ~10 queries."""
+    from src.application.services.alert_service import run_store_alerts
+    from src.application.services.intelligence_service import run_store
+
+    tz_name = resolve_store_timezone_name(store.settings)
+    currency = store.default_currency.value if store.default_currency else "EGP"
+    out = await run_store(db, store.id, store.tenant_id, tz_name, currency)
+    alerts = await run_store_alerts(db, store.id, store.tenant_id, tz_name, currency)
+    await db.commit()
+    return SuccessResponse(
+        data={"advisor": out, "alerts": alerts}, message="Signals refreshed"
+    )
+
+
+# ── Executive dashboard (AI Commerce Intelligence) ──────────────────
+
+
+class ExecutiveGauges(BaseModel):
+    revenue: int | None
+    profit: int | None
+    store: int | None
+    marketing: int | None
+    inventory: int | None
+    customer: int | None
+
+
+class ExecutiveResponse(BaseModel):
+    briefing: str
+    problems: list[SignalItem]
+    opportunities: list[SignalItem]
+    gauges: ExecutiveGauges
+    weekly_priorities: list[SignalItem]
+    generated_at: str
+
+
+@router.get(
+    "/executive",
+    response_model=SuccessResponse[ExecutiveResponse],
+    summary="Executive dashboard — what should I do today?",
+    operation_id="get_executive_dashboard",
+)
+async def get_executive_dashboard(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated["AsyncSession", Depends(get_db)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    lang: Annotated[Literal["en", "ar"], Query()] = "en",
+):
+    """Composed entirely from outputs other layers already produce
+    (AI-6): signals ranked by EGP impact, prediction bands, and six
+    0–100 health gauges. No new computation — only ranking and
+    presentation; every drill-down leads to a classic analytics tab.
+    """
+    from src.application.services import (
+        executive_service as ex,
+    )
+    from src.application.services import (
+        prediction_service as ps,
+    )
+    from src.application.services.advisor_rules import render_signal
+    from src.application.services.alert_service import render_alert
+    from src.infrastructure.database.models.tenant.merchant_signal import (
+        MerchantSignalModel,
+    )
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    now = datetime.now(UTC)
+    tz_name = resolve_store_timezone_name(store.settings)
+    now_local = now.astimezone(safe_zone(tz_name))
+    today_local = now_local.date()
+    currency = store.default_currency.value if store.default_currency else "EGP"
+
+    def fmt(cents: int) -> str:
+        return f"{cents / 100:,.0f} {currency}"
+
+    # ── Active signals, ranked by expected impact ──
+    rows = (
+        (
+            await db.execute(
+                select(MerchantSignalModel)
+                .where(
+                    MerchantSignalModel.store_id == store.id,
+                    MerchantSignalModel.status == "active",
+                )
+                .order_by(MerchantSignalModel.expected_impact_cents.desc().nulls_last())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    def to_item(r) -> SignalItem:
+        renderer = render_alert if r.rule_id.startswith("AL-") else render_signal
+        rendered = renderer(r.rule_id, r.metrics_snapshot or {}, lang)
+        return SignalItem(
+            id=r.id,
+            kind=r.kind,
+            rule_id=r.rule_id,
+            severity=r.severity,
+            title=rendered["title"],
+            action=rendered["action"],
+            expected_impact_cents=r.expected_impact_cents,
+            created_at=r.created_at.isoformat(),
+        )
+
+    problems = [to_item(r) for r in rows if r.severity in ("critical", "warning")][:5]
+    opportunities = [to_item(r) for r in rows if r.kind == "opportunity"][:5]
+    # Persisted ≥3 days = worth a week of focus, not a blip.
+    weekly_priorities = [to_item(r) for r in rows if (now - r.created_at).days >= 3][:3]
+
+    # ── Prediction bands for the briefing line ──
+    series = await analytics_repo.daily_revenue_series(
+        store.id, now - timedelta(days=120), now, tz=tz_name
+    )
+    month_start = today_local.replace(day=1)
+    # Completed days only — same today-double-count guard as /predictions.
+    mtd_completed = sum(
+        r["total_revenue_cents"]
+        for r in series
+        if month_start <= r["rollup_date"] < today_local
+    )
+    rev_hist, ord_hist = _gap_filled_history(series, today_local)
+    next_month = (month_start + timedelta(days=32)).replace(day=1)
+    month_band = ps.month_revenue_band(
+        rev_hist, mtd_completed, (next_month - today_local).days
+    )
+    orders_band = ps.today_orders_band(ord_hist)
+
+    # ── Six gauges ──
+    weekly = list(
+        reversed(
+            await analytics_repo.weekly_order_aggregates(
+                store.id, now - timedelta(days=56), now, tz=tz_name
+            )
+        )
+    )
+
+    orders_q = select(
+        func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+        func.coalesce(func.sum(OrderModel.discount_amount), 0).label("discounts"),
+        func.count().label("orders"),
+        func.count().filter(OrderModel.utm_source.isnot(None)).label("tagged"),
+    ).where(*analytics_repo._store_window(store.id, now - timedelta(days=30), now))
+    orow = (await db.execute(analytics_repo._tenant_filter(orders_q))).one()
+
+    cod = await analytics_repo.cod_summary(store.id, now - timedelta(days=30), now)
+    stock = await analytics_repo.product_stock_snapshot(store.id)
+    channels = await analytics_repo.sessions_by_channel(
+        store.id, now - timedelta(days=30), now
+    )
+    _, scored = await _live_customer_scores(db, store.id, now)
+    dist: dict[str, int] = {}
+    for s in scored:
+        dist[s["state"]] = dist.get(s["state"], 0) + 1
+
+    health = await calculate_store_health_score(db, store.id, lang=lang)
+
+    n_orders = int(orow.orders or 0)
+    gauges = ExecutiveGauges(
+        revenue=ex.revenue_gauge(weekly),
+        profit=ex.profit_gauge(
+            int(orow.revenue or 0),
+            int(orow.discounts or 0),
+            cod.get("rejected_amount", 0),
+            cod.get("total_cod_amount", 0),
+        ),
+        store=health.get("score"),
+        marketing=ex.marketing_gauge(
+            (int(orow.tagged or 0) / n_orders * 100) if n_orders else None,
+            channels,
+        ),
+        inventory=ex.inventory_gauge(stock),
+        customer=ex.customer_gauge(dist),
+    )
+
+    briefing = ex.briefing(
+        now_local, orders_band, month_band, len(problems), len(opportunities), fmt
+    )[lang]
+
+    return SuccessResponse(
+        data=ExecutiveResponse(
+            briefing=briefing,
+            problems=problems,
+            opportunities=opportunities,
+            gauges=gauges,
+            weekly_priorities=weekly_priorities,
+            generated_at=now.isoformat(),
+        ),
+        message="Executive dashboard composed",
+    )
+
+
+# ── Peer benchmarks (AI Commerce Intelligence) ──────────────────────
+
+
+class BenchmarkItem(BaseModel):
+    metric: str
+    yours: float | None
+    p25: float
+    p50: float
+    p75: float
+    n_stores_bucket: str
+    segment_used: str
+
+
+class BenchmarksResponse(BaseModel):
+    published: bool
+    reason: str | None  # not_opted_in | insufficient_peers | None
+    opted_in: bool
+    period: str
+    benchmarks: list[BenchmarkItem]
+
+
+@router.get(
+    "/benchmarks",
+    response_model=SuccessResponse[BenchmarksResponse],
+    summary="Anonymous peer benchmarks (k-anonymity gated)",
+    operation_id="get_benchmarks",
+)
+async def get_benchmarks(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated["AsyncSession", Depends(get_db)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+):
+    """Your KPIs vs anonymous peer percentiles (AI-7).
+
+    Reciprocity: you see benchmarks only if your store contributes
+    (``settings.benchmarks_opt_in``). Cells are published only when
+    they aggregate ≥10 stores — with fewer, the response says so
+    honestly instead of showing numbers that could deanonymize peers.
+    """
+    from src.application.services.benchmark_service import (
+        K_ANONYMITY,
+        n_bucket,
+        resolve_cell,
+        size_tier,
+    )
+    from src.infrastructure.database.models.public.platform_benchmark import (
+        PlatformBenchmarkModel,
+    )
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    settings = store.settings or {}
+    opted_in = settings.get("benchmarks_opt_in") is True
+    now = datetime.now(UTC)
+    period = now.strftime("%Y-%m")
+
+    if not opted_in:
+        return SuccessResponse(
+            data=BenchmarksResponse(
+                published=False,
+                reason="not_opted_in",
+                opted_in=False,
+                period=period,
+                benchmarks=[],
+            ),
+            message="Benchmarks require opt-in",
+        )
+
+    # Latest period with any cells (current month may not be computed yet).
+    latest = (
+        await db.execute(
+            select(func.max(PlatformBenchmarkModel.period)).where(
+                PlatformBenchmarkModel.period.in_([
+                    period,
+                    (now - timedelta(days=28)).strftime("%Y-%m"),
+                ])
+            )
+        )
+    ).scalar()
+    cells_by_key: dict[tuple[str, str], dict] = {}
+    if latest:
+        rows = (
+            (
+                await db.execute(
+                    select(PlatformBenchmarkModel).where(
+                        PlatformBenchmarkModel.period == latest
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        cells_by_key = {
+            (r.segment_key, r.metric): {
+                "p25": r.p25,
+                "p50": r.p50,
+                "p75": r.p75,
+                "n_stores": r.n_stores,
+            }
+            for r in rows
+        }
+
+    # ── This store's own values — EXACTLY the task's definitions, or
+    # "yours vs peers" compares apples to oranges. placed = all real
+    # customer orders (no drafts / failed payments); net = placed minus
+    # cancelled/refunded (AOV basis); refund_rate = refunded / placed;
+    # sessions = distinct funnel fingerprints (NOT the per-channel sum,
+    # which double-counts sessions that touched two channels). ──
+    from src.infrastructure.database.models.tenant.funnel_event import (
+        FunnelEventModel,
+    )
+
+    d30, d90 = now - timedelta(days=30), now - timedelta(days=90)
+    # lower(status::text) — mixed-case enum labels; binding
+    # OrderStatus.PAYMENT_FAILED raises (see analytics_repository).
+    status_lc = func.lower(cast(OrderModel.status, String))
+    placed_filter = status_lc.notin_(("draft", "payment_failed"))
+    net_filter = status_lc.notin_(("draft", "payment_failed", "cancelled", "refunded"))
+    o30_q = select(
+        func.count().filter(placed_filter).label("placed"),
+        func.count().filter(status_lc == "refunded").label("refunded"),
+        func.count().filter(net_filter).label("net_orders"),
+        func.coalesce(func.sum(OrderModel.total).filter(net_filter), 0).label(
+            "net_revenue"
+        ),
+    ).where(
+        OrderModel.store_id == store.id,
+        OrderModel.created_at >= d30,
+    )
+    o = (await db.execute(analytics_repo._tenant_filter(o30_q))).one()
+    placed = int(o.placed or 0)
+    net_orders = int(o.net_orders or 0)
+
+    cust = await analytics_repo.customer_period_aggregates(store.id, d90, now)
+    repeaters = sum(1 for c in cust if c["orders"] >= 2)
+
+    cod_q = select(
+        func.count().label("resolved"),
+        func.count().filter(status_lc == "returned").label("returned"),
+    ).where(
+        OrderModel.store_id == store.id,
+        OrderModel.created_at >= d90,
+        OrderModel.payment_method == "cod",
+        status_lc.in_(("delivered", "returned")),
+    )
+    cod_row = (await db.execute(analytics_repo._tenant_filter(cod_q))).one()
+    cod_resolved = int(cod_row.resolved or 0)
+    cod_returned = int(cod_row.returned or 0)
+
+    sess_q = select(
+        func.count(func.distinct(FunnelEventModel.session_fingerprint)).label("n")
+    ).where(
+        FunnelEventModel.store_id == store.id,
+        FunnelEventModel.created_at >= d30,
+        FunnelEventModel.session_fingerprint.isnot(None),
+    )
+    sessions = int((await db.execute(sess_q)).scalar() or 0)
+
+    yours: dict[str, float | None] = {
+        "aov_cents": int(o.net_revenue) / net_orders if net_orders else None,
+        "refund_rate_pct": int(o.refunded) / placed * 100 if placed else None,
+        "repeat_rate_pct": repeaters / len(cust) * 100 if cust else None,
+        "cod_rejection_rate_pct": (
+            cod_returned / cod_resolved * 100 if cod_resolved >= 5 else None
+        ),
+        "conversion_rate_pct": placed / sessions * 100 if sessions >= 100 else None,
+    }
+
+    industry = settings.get("industry") or None
+    tier = size_tier(placed)
+    items = []
+    for metric, own_value in yours.items():
+        cell = resolve_cell(cells_by_key, industry, tier, metric)
+        if cell is None:
+            continue
+        items.append(
+            BenchmarkItem(
+                metric=metric,
+                yours=round(own_value, 2) if own_value is not None else None,
+                p25=cell["p25"],
+                p50=cell["p50"],
+                p75=cell["p75"],
+                n_stores_bucket=n_bucket(cell["n_stores"]),
+                segment_used=cell["segment_key"],
+            )
+        )
+
+    return SuccessResponse(
+        data=BenchmarksResponse(
+            published=bool(items),
+            reason=None if items else "insufficient_peers",
+            opted_in=True,
+            period=latest or period,
+            benchmarks=items,
+        ),
+        message=(
+            "Benchmarks computed"
+            if items
+            else f"Fewer than {K_ANONYMITY} peer stores per segment so far"
+        ),
+    )
+
+
+# ── Custom report builder ───────────────────────────────────────────
+
+
+class ReportRow(BaseModel):
+    label: str
+    revenue_cents: int
+    orders: int
+    aov_cents: int
+    units: int
+
+
+class ReportBuilderResponse(BaseModel):
+    dimension: str
+    rows: list[ReportRow]
+    totals: ReportRow
+
+
+_REPORT_DIMENSION = Literal[
+    "day",
+    "week",
+    "month",
+    "payment_method",
+    "governorate",
+    "channel",
+    "coupon",
+    "product",
+]
+
+
+@router.get(
+    "/report-builder",
+    response_model=SuccessResponse[ReportBuilderResponse],
+    summary="Custom report: metrics grouped by a chosen dimension",
+    operation_id="get_report_builder",
+)
+async def get_report_builder(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
+    dimension: Annotated[_REPORT_DIMENSION, Query()] = "day",
+):
+    """Group revenue / orders / AOV (and units, for products) by any
+    supported dimension — the merchant-facing custom report builder.
+    Metric selection happens client-side from the columns returned here,
+    so switching metric doesn't re-query."""
+    rows = await analytics_repo.run_report(
+        store.id, dimension, window.start, window.end, tz=window.tz
+    )
+    total_rev = sum(r["revenue_cents"] for r in rows)
+    total_orders = sum(r["orders"] for r in rows)
+    total_units = sum(r["units"] for r in rows)
+    return SuccessResponse(
+        data=ReportBuilderResponse(
+            dimension=dimension,
+            rows=[ReportRow(**r) for r in rows],
+            totals=ReportRow(
+                label="Total",
+                revenue_cents=total_rev,
+                orders=total_orders,
+                aov_cents=total_rev // total_orders if total_orders else 0,
+                units=total_units,
+            ),
+        ),
+        message="Report generated",
+    )
+
+
+# ── Weekly digest (preview + test send) ─────────────────────────────
+
+
+class DigestContent(BaseModel):
+    headline: str
+    highlights: list[str]
+    has_sales: bool
+    period_start: str
+    period_end: str
+
+
+async def _compute_weekly_digest(
+    store: Store,
+    rollup_repo: AnalyticsRollupRepository,
+    analytics_repo: AnalyticsRepository,
+    lang: str,
+) -> DigestContent:
+    """Assemble this-week metrics (store-local) and build the digest."""
+    from src.application.services.analytics_digest_service import build_weekly_digest
+
+    tz_name = resolve_store_timezone_name(store.settings)
+    today = datetime.now(UTC).astimezone(safe_zone(tz_name)).date()
+    week_start = today - timedelta(days=6)  # 7-day window incl. today
+    prev_end = week_start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=6)
+
+    cur = await rollup_repo.get_aggregated(store.id, week_start, today)
+    prev = await rollup_repo.get_aggregated(store.id, prev_start, prev_end)
+
+    # Top product across the week (rollup JSONB merge).
+    rollups = await rollup_repo.get_range(store.id, week_start, today)
+    prod_units: dict[str, tuple[str, int]] = {}
+    for r in rollups or []:
+        for item in r.top_products_json or []:
+            pid = str(item.get("product_id", ""))
+            if not pid:
+                continue
+            name, units = prod_units.get(pid, (item.get("name", ""), 0))
+            prod_units[pid] = (
+                name or item.get("name", ""),
+                units + int(item.get("quantity", 0) or 0),
+            )
+    top = max(prod_units.values(), key=lambda x: x[1], default=None)
+
+    orders = int(cur["total_orders"])
+    revenue = int(cur["total_revenue_cents"])
+    currency = store.default_currency.value if store.default_currency else "EGP"
+
+    def _fmt(cents: int) -> str:
+        return f"{cents / 100:,.2f} {currency}"
+
+    metrics = {
+        "revenue_cents": revenue,
+        "prev_revenue_cents": int(prev["total_revenue_cents"]),
+        "orders": orders,
+        "prev_orders": int(prev["total_orders"]),
+        "new_customers": int(cur.get("new_customers", 0) or 0),
+        "aov_cents": revenue // orders if orders > 0 else 0,
+        "top_product_name": top[0] if top else None,
+        "top_product_units": top[1] if top else 0,
+    }
+    built = build_weekly_digest(metrics, lang, _fmt)
+    return DigestContent(
+        headline=built["headline"],
+        highlights=built["highlights"],
+        has_sales=built["has_sales"],
+        period_start=week_start.isoformat(),
+        period_end=today.isoformat(),
+    )
+
+
+class DigestSettings(BaseModel):
+    enabled: bool = False
+    channels: list[Literal["email", "whatsapp"]] = ["email"]
+
+
+class PutDigestSettingsRequest(BaseModel):
+    enabled: bool
+    channels: list[Literal["email", "whatsapp"]] = Field(min_length=1, max_length=2)
+
+
+@router.get(
+    "/digest/settings",
+    response_model=SuccessResponse[DigestSettings],
+    summary="Get weekly-digest preferences",
+    operation_id="get_digest_settings",
+)
+async def get_digest_settings(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+):
+    """The store's weekly-digest opt-in (defaults off, email channel)."""
+    cfg = ((store.settings or {}).get("analytics_digest")) or {}
+    return SuccessResponse(
+        data=DigestSettings(
+            enabled=bool(cfg.get("enabled", False)),
+            channels=cfg.get("channels") or ["email"],
+        ),
+        message="Digest settings retrieved",
+    )
+
+
+@router.put(
+    "/digest/settings",
+    response_model=SuccessResponse[DigestSettings],
+    summary="Set weekly-digest preferences",
+    operation_id="put_digest_settings",
+)
+async def put_digest_settings(
+    body: PutDigestSettingsRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Enable/disable the weekly digest and pick channels."""
+    settings = dict(store.settings or {})
+    settings["analytics_digest"] = {
+        "enabled": body.enabled,
+        "channels": body.channels,
+    }
+    store.settings = settings
+    await store_repo.update(store)
+    return SuccessResponse(
+        data=DigestSettings(enabled=body.enabled, channels=body.channels),
+        message="Digest settings saved",
+    )
+
+
+@router.get(
+    "/digest/preview",
+    response_model=SuccessResponse[DigestContent],
+    summary="Preview the weekly analytics digest",
+    operation_id="get_digest_preview",
+)
+async def get_digest_preview(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    rollup_repo: Annotated[
+        AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
+    ],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    lang: Annotated[Literal["en", "ar"], Query()] = "en",
+):
+    """The exact recap the merchant would receive by email/WhatsApp — so
+    they can see it before enabling scheduled sends."""
+    content = await _compute_weekly_digest(store, rollup_repo, analytics_repo, lang)
+    return SuccessResponse(data=content, message="Digest preview generated")
+
+
+# ── Chart annotations (store events) ────────────────────────────────
+
+
+class AnnotationItem(BaseModel):
+    # `date` matches the sales-chart day label ("Jul 14") so the UI can
+    # pin a marker to the right bucket without re-parsing dates.
+    date: str
+    iso_date: str  # store-local YYYY-MM-DD
+    type: str  # product | coupon | campaign | theme
+    label: str
+
+
+class AnnotationsResponse(BaseModel):
+    annotations: list[AnnotationItem]
+
+
+@router.get(
+    "/annotations",
+    response_model=SuccessResponse[AnnotationsResponse],
+    summary="Get store-event annotations for charts",
+    operation_id="get_annotations",
+)
+async def get_annotations(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    annotation_repo: Annotated[
+        "AnnotationRepository", Depends(get_annotation_repository)
+    ],
+    window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
+):
+    """Store events (product/coupon/campaign/theme) in the window, as
+    chart markers — the merchant sees WHAT caused a spike or dip. Dates
+    are labeled to match the sales chart's day buckets on the store's
+    wall clock."""
+    events = await annotation_repo.get_events(store.id, window.start, window.end)
+    zone = safe_zone(window.tz)
+
+    out: list[AnnotationItem] = []
+    for e in events:
+        at = e["at"]
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=UTC)
+        local = at.astimezone(zone)
+        out.append(
+            AnnotationItem(
+                date=local.strftime("%b %d"),
+                iso_date=local.date().isoformat(),
+                type=e["type"],
+                label=e["label"],
+            )
+        )
+    return SuccessResponse(
+        data=AnnotationsResponse(annotations=out),
+        message="Annotations retrieved successfully",
+    )
+
+
+# ── Metric targets (goals + pace) ───────────────────────────────────
+
+
+class MetricTargetProgress(BaseModel):
+    """One goal with its live progress and pace.
+
+    ``target_value``/``actual_value``/``projected_value`` are integers in
+    the metric's smallest unit: cents (revenue, aov), count (orders), or
+    basis points (conversion — 250 = 2.5%).
+    """
+
+    metric: str
+    period: str
+    target_value: int
+    actual_value: int
+    progress_pct: float
+    expected_pct: float  # share of the period already elapsed
+    pace: str  # "ahead" | "on_track" | "behind"
+    projected_value: int  # linear run-rate projection to period end
+    days_elapsed: int
+    days_remaining: int
+    days_total: int
+    period_start: str  # ISO date, store-local
+    period_end: str
+
+
+class MetricTargetsResponse(BaseModel):
+    targets: list[MetricTargetProgress]
+
+
+class MetricTargetInput(BaseModel):
+    metric: Literal["revenue", "orders", "aov", "conversion"]
+    period: Literal["month", "quarter"] = "month"
+    # 0 = stop tracking this goal (deletes the row).
+    target_value: int = Field(ge=0, le=10**15)
+
+
+class PutMetricTargetsRequest(BaseModel):
+    targets: list[MetricTargetInput] = Field(min_length=1, max_length=8)
+
+
+def _period_bounds(now_local: datetime, period: str) -> tuple[date, date]:
+    """Store-local [start, end) calendar bounds of the current period."""
+    if period == "quarter":
+        q_start_month = ((now_local.month - 1) // 3) * 3 + 1
+        start = date(now_local.year, q_start_month, 1)
+        if q_start_month == 10:
+            end = date(now_local.year + 1, 1, 1)
+        else:
+            end = date(now_local.year, q_start_month + 3, 1)
+    else:
+        start = date(now_local.year, now_local.month, 1)
+        if now_local.month == 12:
+            end = date(now_local.year + 1, 1, 1)
+        else:
+            end = date(now_local.year, now_local.month + 1, 1)
+    return start, end
+
+
+@router.get(
+    "/targets",
+    response_model=SuccessResponse[MetricTargetsResponse],
+    summary="Get metric targets with live pace",
+    operation_id="get_metric_targets",
+)
+async def get_metric_targets(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    target_repo: Annotated[
+        "MetricTargetRepository", Depends(get_metric_target_repository)
+    ],
+    rollup_repo: Annotated[
+        AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
+    ],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    pv_repo: Annotated[PageViewRepository, Depends(get_page_view_repository)],
+):
+    """Each stored goal + actual-to-date, elapsed pace, and a linear
+    run-rate projection — the Shopify-style target gauge, computed on
+    the store's wall clock so "this month" means the merchant's month."""
+    rows = await target_repo.get_for_store(store.id)
+    if not rows:
+        return SuccessResponse(
+            data=MetricTargetsResponse(targets=[]),
+            message="No targets set",
+        )
+
+    tz_name = resolve_store_timezone_name(store.settings)
+    now_local = datetime.now(UTC).astimezone(safe_zone(tz_name))
+
+    out: list[MetricTargetProgress] = []
+    # Group by period so each period's aggregates are fetched once even
+    # with all four metrics configured.
+    for period in {r.period for r in rows}:
+        start_d, end_d = _period_bounds(now_local, period)
+        days_total = (end_d - start_d).days
+        days_elapsed = min((now_local.date() - start_d).days + 1, days_total)
+        days_remaining = max(days_total - days_elapsed, 0)
+
+        agg = await rollup_repo.get_aggregated(store.id, start_d, now_local.date())
+        revenue = int(agg["total_revenue_cents"])
+        orders = int(agg["total_orders"])
+
+        start_instant, _ = local_day_bounds(start_d, tz_name)
+        # Rollup-empty fallback (new store / cron hasn't run) — same
+        # convention as /overview: live aggregation over orders.
+        if revenue == 0 and orders == 0:
+            now_utc = datetime.now(UTC)
+            revenue = await order_repo.get_revenue_by_date_range(
+                store.id, start_instant, now_utc
+            )
+            orders = await order_repo.count_by_store(
+                store.id, date_from=start_instant, date_to=now_utc
+            )
+        visitors = await pv_repo.count_unique_visitors(
+            store.id, start_instant, datetime.now(UTC)
+        )
+
+        actuals = {
+            "revenue": revenue,
+            "orders": orders,
+            "aov": revenue // orders if orders > 0 else 0,
+            # Basis points; conversion is orders per unique visitor.
+            "conversion": round(orders / visitors * 10_000) if visitors > 0 else 0,
+        }
+
+        expected_pct = round(days_elapsed / days_total * 100, 1)
+        for r in (x for x in rows if x.period == period):
+            actual = actuals.get(r.metric, 0)
+            progress = (
+                round(actual / r.target_value * 100, 1) if r.target_value > 0 else 0.0
+            )
+            # Ratio metrics (aov, conversion) don't accumulate over the
+            # period — pace compares them to the target directly, and
+            # the linear projection only applies to volume metrics.
+            is_ratio = r.metric in ("aov", "conversion")
+            if is_ratio:
+                pace = (
+                    "ahead"
+                    if progress >= 105
+                    else ("behind" if progress < 95 else "on_track")
+                )
+                projected = actual
+            else:
+                pace = (
+                    "ahead"
+                    if progress >= expected_pct + 5
+                    else ("behind" if progress < expected_pct - 5 else "on_track")
+                )
+                projected = (
+                    round(actual / days_elapsed * days_total) if days_elapsed > 0 else 0
+                )
+            out.append(
+                MetricTargetProgress(
+                    metric=r.metric,
+                    period=r.period,
+                    target_value=r.target_value,
+                    actual_value=actual,
+                    progress_pct=progress,
+                    expected_pct=expected_pct,
+                    pace=pace,
+                    projected_value=projected,
+                    days_elapsed=days_elapsed,
+                    days_remaining=days_remaining,
+                    days_total=days_total,
+                    period_start=start_d.isoformat(),
+                    period_end=(end_d - timedelta(days=1)).isoformat(),
+                )
+            )
+
+    order_key = {"revenue": 0, "orders": 1, "aov": 2, "conversion": 3}
+    out.sort(key=lambda t: (t.period, order_key.get(t.metric, 9)))
+    return SuccessResponse(
+        data=MetricTargetsResponse(targets=out),
+        message="Metric targets retrieved successfully",
+    )
+
+
+@router.put(
+    "/targets",
+    response_model=SuccessResponse[dict],
+    summary="Set metric targets",
+    operation_id="put_metric_targets",
+)
+async def put_metric_targets(
+    body: PutMetricTargetsRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    target_repo: Annotated[
+        "MetricTargetRepository", Depends(get_metric_target_repository)
+    ],
+):
+    """Upsert goals; a target_value of 0 removes that goal."""
+    for t in body.targets:
+        if t.target_value == 0:
+            await target_repo.remove(store.id, t.metric, t.period)
+        else:
+            await target_repo.upsert(
+                tenant_id=store.tenant_id,
+                store_id=store.id,
+                metric=t.metric,
+                period=t.period,
+                target_value=t.target_value,
+            )
+    await target_repo.session.commit()
+    return SuccessResponse(
+        data={"updated": len(body.targets)},
+        message="Metric targets saved successfully",
+    )
+
+
 @router.get(
     "/funnel",
     response_model=SuccessResponse[FunnelResponse],
@@ -1591,11 +3353,25 @@ class CampaignItem(BaseModel):
     revenue: int  # cents
 
 
+class LandingPageItem(BaseModel):
+    path: str
+    sessions: int
+
+
+class ReferrerItem(BaseModel):
+    host: str
+    sessions: int
+
+
 class MarketingAttributionResponse(BaseModel):
     channels: list[ChannelAttributionItem]
     campaigns: list[CampaignItem]
     total_visits: int
     attributed_visits: int  # visits with UTM data
+    # Acquisition detail (real session data): where sessions ENTER the
+    # store and which external hosts send them.
+    top_landing_pages: list[LandingPageItem] = []
+    top_referrers: list[ReferrerItem] = []
 
 
 def _classify_channel(source: str | None, medium: str | None) -> str:
@@ -1652,13 +3428,25 @@ async def get_marketing_attribution(
     campaign_rows = await analytics_repo.campaign_attribution(
         store.id, period_start, now, limit=20
     )
-
-    total_orders = sum(r["orders"] for r in channel_rows)
+    # MEASURED sessions per channel/campaign from funnel_events UTM.
+    # The previous implementation fabricated per-channel visits by
+    # prorating total visitors by each channel's ORDER share, which
+    # made conversion_rate quasi-circular and invented traffic for
+    # channels with orders but no real visits. Channels with orders
+    # and 0 tracked sessions (history predating session tracking) now
+    # honestly show 0 visits and a 0% rate rather than a guess.
+    channel_sessions = await analytics_repo.sessions_by_channel(
+        store.id, period_start, now
+    )
+    campaign_sessions = await analytics_repo.sessions_by_campaign(
+        store.id, period_start, now
+    )
+    landing_pages = await pv_repo.top_landing_pages(store.id, period_start, now)
+    referrers = await pv_repo.top_referrers(store.id, period_start, now)
 
     channels = []
     for r in channel_rows:
-        ratio = r["orders"] / total_orders if total_orders > 0 else 0
-        visits = max(r["orders"], int(total_visits * ratio))
+        visits = channel_sessions.get(r["channel"], 0)
         channels.append(
             ChannelAttributionItem(
                 channel=r["channel"],
@@ -1673,12 +3461,10 @@ async def get_marketing_attribution(
 
     campaigns = []
     for r in campaign_rows:
-        ratio = r["orders"] / total_orders if total_orders > 0 else 0
-        visits = max(r["orders"], int(total_visits * ratio))
         campaigns.append(
             CampaignItem(
                 campaign=r["campaign"],
-                visits=visits,
+                visits=campaign_sessions.get(r["campaign"], 0),
                 orders=r["orders"],
                 revenue=r["revenue_cents"],
             )
@@ -1690,6 +3476,8 @@ async def get_marketing_attribution(
             campaigns=campaigns,
             total_visits=total_visits,
             attributed_visits=attributed_visits,
+            top_landing_pages=[LandingPageItem(**p) for p in landing_pages],
+            top_referrers=[ReferrerItem(**r) for r in referrers],
         ),
         message="Marketing attribution retrieved successfully",
     )
@@ -1961,7 +3749,10 @@ async def get_insights(
     period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
     period_to = datetime.now(UTC)
     order_rows = await analytics_repo.daily_revenue_series(
-        store.id, period_from, period_to
+        store.id,
+        period_from,
+        period_to,
+        tz=resolve_store_timezone_name(store.settings),
     )
     if len(order_rows) > len(rollups):
 
@@ -2119,7 +3910,10 @@ async def get_forecast(
         period_from = _dt.combine(date_from, _dt.min.time()).replace(tzinfo=UTC)
         period_to = datetime.now(UTC)
         order_rows = await analytics_repo.daily_revenue_series(
-            store.id, period_from, period_to
+            store.id,
+            period_from,
+            period_to,
+            tz=resolve_store_timezone_name(store.settings),
         )
         if len(order_rows) > len(rollups):
 
@@ -2254,7 +4048,11 @@ async def get_sessions(
         duration = int((ended - started).total_seconds()) if started and ended else 0
         device_type = _parse_device_type(s.get("user_agent"))
         fp_steps = steps_by_fp.get(fp, set())
-        in_orders = "checkout_started" in fp_steps
+        # A session "has an order" only when a purchase actually
+        # completed — the previous check used checkout_started, which
+        # counted every abandoned checkout as a conversion and
+        # overstated sessions_with_order_pct.
+        in_orders = "order_completed" in fp_steps
 
         # Deepest funnel step (last one of the canonical order present
         # in the session's step set).

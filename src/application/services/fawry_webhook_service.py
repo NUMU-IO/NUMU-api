@@ -329,6 +329,40 @@ class FawryWebhookService:
             amount=payment_amount,
         )
 
+        # Emit funnel event: order_completed — mirrors paymob/kashier/
+        # moyasar/fawaterak webhooks so Fawry purchases count in the
+        # conversion funnel even when the customer never returns to the
+        # thank-you page (common for outlet payments, where the shopper
+        # pays at a kiosk hours later). Deposit payments are skipped:
+        # the order was created as COD and the checkout route already
+        # emitted order_completed for it. Best-effort — never fails the
+        # webhook.
+        if order.payment_status == PaymentStatus.PAID:
+            try:
+                from src.infrastructure.repositories.funnel_event_repository import (
+                    FunnelEventRepository,
+                )
+
+                fe_repo = FunnelEventRepository(self.db)
+                await fe_repo.create(
+                    tenant_id=order.tenant_id,
+                    store_id=order.store_id,
+                    step="order_completed",
+                    customer_id=order.customer_id,
+                    session_fingerprint=order.session_fingerprint,
+                    step_data={
+                        "order_id": str(order.id),
+                        "total": order.total,
+                        "payment_method": "fawry",
+                    },
+                )
+            except Exception:
+                logger.warning(
+                    "funnel_order_completed_emit_failed",
+                    order_id=str(order.id),
+                    exc_info=True,
+                )
+
         # Meta CAPI Purchase fan-out — server-side authoritative for
         # Purchase per plan §5.4. Best-effort: a failed enqueue should
         # never fail the webhook (the hourly orphan-purchase sweep

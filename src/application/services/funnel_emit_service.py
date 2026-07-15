@@ -31,6 +31,53 @@ logger = get_logger(__name__)
 _DELIVERED_FLAG = "funnel_delivered_recorded"
 
 
+async def emit_order_completed(
+    order: Order,
+    funnel_repo: FunnelEventRepository,
+    *,
+    payment_method: str,
+) -> None:
+    """Record an ``order_completed`` funnel event for ``order``.
+
+    For payment paths with a gateway webhook (paymob/kashier/moyasar/
+    fawaterak/fawry) the webhook handler emits inline; COD emits at
+    checkout. This helper covers the paths that confirm payment inside
+    a use case instead — today that is InstaPay proof approval (manual
+    merchant review and OCR auto-approve).
+
+    Only fires when the order is fully paid: a deposit payment leaves
+    ``payment_status`` PENDING, and its COD parent order already emitted
+    ``order_completed`` at checkout. Fail-open — funnel analytics must
+    never block a payment confirmation.
+    """
+    from src.core.entities.order import PaymentStatus
+
+    if order.tenant_id is None:
+        return
+    if order.payment_status != PaymentStatus.PAID:
+        return
+    try:
+        await funnel_repo.create(
+            tenant_id=order.tenant_id,
+            store_id=order.store_id,
+            step="order_completed",
+            customer_id=order.customer_id,
+            session_fingerprint=order.session_fingerprint,
+            step_data={
+                "order_id": str(order.id),
+                "order_number": order.order_number,
+                "total": order.total,
+                "payment_method": payment_method,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.warning(
+            "funnel_order_completed_emit_failed",
+            order_id=str(order.id),
+            error=str(exc),
+        )
+
+
 async def emit_order_delivered(
     order: Order,
     funnel_repo: FunnelEventRepository,
