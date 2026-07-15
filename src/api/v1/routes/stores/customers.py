@@ -6,7 +6,7 @@ URL: /stores/{store_id}/customers
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
 
 from src.api.dependencies import verify_store_ownership
@@ -17,15 +17,47 @@ from src.api.dependencies.repositories import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import PaginatedListResponse
-from src.api.v1.schemas.public.customer import CustomerResponse
+from src.api.v1.schemas.public.customer import (
+    CustomerResponse,
+    MerchantCreateCustomerRequest,
+)
 from src.application.use_cases.customers.list_customers import ListCustomersUseCase
+from src.core.entities.customer import Customer
 from src.core.entities.store import Store
+from src.core.exceptions import EntityAlreadyExistsError
+from src.core.value_objects.email import Email
 from src.infrastructure.repositories import CustomerRepository, OrderRepository
 from src.infrastructure.repositories.shopify_repository import (
     NetworkReputationRepository,
 )
 
 router = APIRouter(prefix="/{store_id}/customers")
+
+
+def _customer_response(
+    customer, total_orders: int = 0, total_spent: int = 0
+) -> CustomerResponse:
+    """Build the wire shape once — list/get/create must never drift apart.
+
+    ``customer`` may be a Customer entity or a CustomerDTO; both expose the
+    same attribute names and CustomerResponse._stringify coerces the VOs.
+    """
+    return CustomerResponse(
+        id=customer.id,
+        store_id=customer.store_id,
+        email=customer.email,
+        first_name=customer.first_name,
+        last_name=customer.last_name,
+        full_name=f"{customer.first_name} {customer.last_name}",
+        phone=customer.phone,
+        accepts_marketing=customer.accepts_marketing,
+        is_verified=customer.is_verified,
+        total_orders=total_orders,
+        total_spent=total_spent,
+        default_address_id=customer.default_address_id,
+        created_at=str(customer.created_at) if customer.created_at else None,
+        updated_at=str(customer.updated_at) if customer.updated_at else None,
+    )
 
 
 @router.get(
@@ -59,21 +91,10 @@ async def list_store_customers(
     order_stats = {str(k): v for k, v in raw_stats.items()}
 
     customers = [
-        CustomerResponse(
-            id=customer.id,
-            store_id=customer.store_id,
-            email=customer.email,
-            first_name=customer.first_name,
-            last_name=customer.last_name,
-            full_name=f"{customer.first_name} {customer.last_name}",
-            phone=customer.phone,
-            accepts_marketing=customer.accepts_marketing,
-            is_verified=customer.is_verified,
+        _customer_response(
+            customer,
             total_orders=order_stats.get(customer.id, (0, 0))[0],
             total_spent=order_stats.get(customer.id, (0, 0))[1],
-            default_address_id=customer.default_address_id,
-            created_at=str(customer.created_at) if customer.created_at else None,
-            updated_at=str(customer.updated_at) if customer.updated_at else None,
         )
         for customer in result.items
     ]
@@ -87,6 +108,57 @@ async def list_store_customers(
             total_pages=(result.total + limit - 1) // limit if limit > 0 else 0,
         ),
         message="Customers retrieved successfully",
+    )
+
+
+@router.post(
+    "/",
+    response_model=SuccessResponse[CustomerResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a customer manually",
+    operation_id="create_store_customer",
+)
+async def create_store_customer(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    request: MerchantCreateCustomerRequest,
+):
+    """Create a customer on behalf of the merchant (no login credentials).
+
+    Mirrors Shopify's admin "Add customer": the record exists for orders,
+    marketing, and segmentation. If the person later registers on the
+    storefront with the same email, that flow sets their password on a
+    separate row check — this endpoint rejects duplicate emails outright.
+    """
+    if store.tenant_id is None:
+        # Repo create() raises a bare ValueError for this, which no
+        # exception handler maps — surface a clean 400 instead of a 500.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="store_missing_tenant",
+        )
+
+    email = Email(value=request.email)
+    if await customer_repo.email_exists(store.id, email):
+        raise EntityAlreadyExistsError("Customer", "email", request.email)
+
+    customer = Customer(
+        store_id=store.id,
+        email=email,
+        first_name=request.first_name,
+        last_name=request.last_name,
+        phone=request.phone or None,
+        accepts_marketing=request.accepts_marketing,
+        is_verified=False,
+        notes=request.notes,
+        tags=request.tags,
+        metadata={"source": "manual"},
+    )
+    created = await customer_repo.create(customer, tenant_id=store.tenant_id)
+
+    return SuccessResponse(
+        data=_customer_response(created),
+        message="Customer created successfully",
     )
 
 
@@ -115,22 +187,7 @@ async def get_store_customer(
     stats = raw_stats.get(customer_id, (0, 0))
 
     return SuccessResponse(
-        data=CustomerResponse(
-            id=customer.id,
-            store_id=customer.store_id,
-            email=customer.email,
-            first_name=customer.first_name,
-            last_name=customer.last_name,
-            full_name=f"{customer.first_name} {customer.last_name}",
-            phone=customer.phone,
-            accepts_marketing=customer.accepts_marketing,
-            is_verified=customer.is_verified,
-            total_orders=stats[0],
-            total_spent=stats[1],
-            default_address_id=customer.default_address_id,
-            created_at=str(customer.created_at) if customer.created_at else None,
-            updated_at=str(customer.updated_at) if customer.updated_at else None,
-        ),
+        data=_customer_response(customer, total_orders=stats[0], total_spent=stats[1]),
         message="Customer retrieved successfully",
     )
 
