@@ -865,6 +865,91 @@ class AnalyticsRepository:
             for row in result.all()
         ]
 
+    async def cod_outcomes_by_governorate(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> list[dict]:
+        """Resolved COD outcomes per governorate — prediction input.
+
+        Unlike :py:meth:`cod_summary` (dashboard semantics: rejected =
+        RETURNED + CANCELLED over ALL orders), this counts only orders
+        that reached a door outcome — DELIVERED vs RETURNED — because
+        the rejection *predictor* estimates P(refused at delivery);
+        cancellations end before shipping and would bias it.
+        """
+        from src.core.entities.order import OrderStatus
+
+        gov_expr = func.nullif(
+            func.lower(
+                func.trim(
+                    func.coalesce(
+                        OrderModel.shipping_address["state"].astext,
+                        OrderModel.shipping_address["city"].astext,
+                        "",
+                    )
+                )
+            ),
+            "",
+        ).label("governorate")
+        returned_filter = OrderModel.status == OrderStatus.RETURNED
+
+        query = (
+            select(
+                gov_expr,
+                func.count().label("resolved"),
+                func.count().filter(returned_filter).label("returned"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.payment_method == "cod",
+                OrderModel.status.in_([
+                    OrderStatus.DELIVERED,
+                    OrderStatus.RETURNED,
+                ]),
+                OrderModel.created_at >= date_from,
+                OrderModel.created_at <= date_to,
+                gov_expr.isnot(None),
+            )
+            .group_by(gov_expr)
+            .order_by(func.count().desc())
+            .limit(30)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            {
+                "governorate": row.governorate,
+                "resolved": int(row.resolved or 0),
+                "returned": int(row.returned or 0),
+            }
+            for row in result.all()
+        ]
+
+    async def cod_pending_exposure(self, store_id: UUID) -> dict:
+        """COD orders still in flight — the money currently at risk."""
+        from src.core.entities.order import OrderStatus
+
+        query = select(
+            func.count().label("orders"),
+            func.coalesce(func.sum(OrderModel.total), 0).label("value_cents"),
+        ).where(
+            OrderModel.store_id == store_id,
+            OrderModel.payment_method == "cod",
+            OrderModel.status.in_([
+                OrderStatus.PENDING,
+                OrderStatus.CONFIRMED,
+                OrderStatus.PROCESSING,
+                OrderStatus.SHIPPED,
+            ]),
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        row = result.one()
+        return {
+            "orders": int(row.orders or 0),
+            "value_cents": int(row.value_cents or 0),
+        }
+
     # ── Marketing attribution ──────────────────────────────────────
     @staticmethod
     def _channel_case(source_col=None, medium_col=None):
@@ -1310,6 +1395,83 @@ class AnalyticsRepository:
             for row in result.all()
         ]
 
+    # ── Market-basket pairs (opportunity finder input) ─────────────
+    async def basket_pairs(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        min_support: int = 3,
+        limit: int = 20,
+    ) -> dict:
+        """Product pairs co-occurring in orders, for lift analysis.
+
+        Self-join over the line_items unnest: for every order with ≥2
+        distinct products, count each (a < b) pair once. Returns the
+        pair counts plus per-product order counts and the total order
+        count so the caller can compute lift =
+        P(a∧b) / (P(a)·P(b)) without another round-trip.
+        """
+        # Two-level unnest (same reason as ``top_products``): subscripting
+        # ``jsonb_array_elements`` directly raises "Operator 'getitem' is
+        # not supported" — unnest first, then cast the column back to JSONB.
+        raw = select(
+            OrderModel.id.label("order_id"),
+            func.jsonb_array_elements(OrderModel.line_items).label("li"),
+        ).where(*self._store_window(store_id, date_from, date_to))
+        raw = self._tenant_filter(raw).subquery()
+        items = select(
+            raw.c.order_id,
+            cast(raw.c.li, JSONB)["product_id"].astext.label("pid"),
+        ).subquery()
+
+        a, b = items.alias("a"), items.alias("b")
+        pair_q = (
+            select(
+                a.c.pid.label("a_id"),
+                b.c.pid.label("b_id"),
+                func.count(func.distinct(a.c.order_id)).label("pair_orders"),
+            )
+            .where(
+                a.c.order_id == b.c.order_id,
+                a.c.pid < b.c.pid,
+                a.c.pid.isnot(None),
+                b.c.pid.isnot(None),
+            )
+            .group_by(a.c.pid, b.c.pid)
+            .having(func.count(func.distinct(a.c.order_id)) >= min_support)
+            .order_by(func.count(func.distinct(a.c.order_id)).desc())
+            .limit(limit)
+        )
+        pairs = [
+            {
+                "a_id": r.a_id,
+                "b_id": r.b_id,
+                "pair_orders": int(r.pair_orders),
+            }
+            for r in (await self.session.execute(pair_q)).all()
+        ]
+
+        per_product_q = select(
+            items.c.pid,
+            func.count(func.distinct(items.c.order_id)).label("orders"),
+        ).group_by(items.c.pid)
+        per_product = {
+            r.pid: int(r.orders)
+            for r in (await self.session.execute(per_product_q)).all()
+        }
+
+        total_q = select(func.count(OrderModel.id)).where(
+            *self._store_window(store_id, date_from, date_to)
+        )
+        total = (await self.session.execute(self._tenant_filter(total_q))).scalar() or 0
+
+        return {
+            "pairs": pairs,
+            "product_orders": per_product,
+            "total_orders": int(total),
+        }
+
     # ── Weekly aggregates (advisor rule engine input) ──────────────
     async def weekly_order_aggregates(
         self,
@@ -1593,6 +1755,10 @@ class AnalyticsRepository:
                     else (row.price_amount or 0)
                 ),
                 "value_is_cost": row.cost_price is not None,
+                "price_cents": int(row.price_amount or 0),
+                "cost_cents": int(row.cost_price)
+                if row.cost_price is not None
+                else None,
                 "created_at": row.created_at,
             }
             for row in result.all()

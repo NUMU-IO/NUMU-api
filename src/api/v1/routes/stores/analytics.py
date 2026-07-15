@@ -40,6 +40,7 @@ from src.application.services.health_score_service import (
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.entities.store import Store
 from src.core.utils.store_timezone import (
+    local_date,
     local_day_bounds,
     resolve_store_timezone_name,
     safe_zone,
@@ -1880,33 +1881,22 @@ class CustomerHealthResponse(BaseModel):
     customers: list[CustomerHealthItem]
 
 
-@router.get(
-    "/customer-health",
-    response_model=SuccessResponse[CustomerHealthResponse],
-    summary="Customer health scores + states",
-    operation_id="get_customer_health",
-)
-async def get_customer_health(
-    store: Annotated[Store, Depends(verify_store_ownership)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    state: Annotated[str | None, Query(max_length=30)] = None,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
-):
-    """0–100 health per customer + lifecycle state (VIP … churned),
-    computed live over 365d of orders. Recency decays on the STORE's own
-    repurchase rhythm, and the monetary quintile finally participates
-    (the legacy RFM segmenter ignored it — D14)."""
+async def _live_customer_scores(
+    db: AsyncSession, store_id: UUID, now: datetime
+) -> tuple[list[dict], list[dict]]:
+    """(rows, scored) for the AI-3 health model, computed live over 365d.
+
+    Shared by ``/customer-health`` (full list UI) and ``/executive``
+    (distribution collapsed to a gauge) so the two never disagree.
+    """
     from src.application.services.customer_health_service import (
-        median_interpurchase_gap,
         score_store_customers,
     )
-    from src.infrastructure.database.models.tenant.customer import CustomerModel
     from src.infrastructure.database.models.tenant.funnel_event import (
         FunnelEventModel,
     )
     from src.infrastructure.database.models.tenant.order import OrderModel
 
-    now = datetime.now(UTC)
     since = now - timedelta(days=365)
     non_revenue = (OrderStatus.CANCELLED, OrderStatus.REFUNDED)
     ninety = now - timedelta(days=90)
@@ -1934,7 +1924,7 @@ async def get_customer_health(
             ).label("prior90"),
         )
         .where(
-            OrderModel.store_id == store.id,
+            OrderModel.store_id == store_id,
             OrderModel.created_at >= since,
             OrderModel.customer_id.isnot(None),
             OrderModel.status.notin_(non_revenue),
@@ -1943,12 +1933,7 @@ async def get_customer_health(
     )
     rows_db = (await db.execute(q)).all()
     if not rows_db:
-        return SuccessResponse(
-            data=CustomerHealthResponse(
-                distribution=[], median_gap_days=30.0, customers=[]
-            ),
-            message="No customers yet",
-        )
+        return [], []
 
     ids = [r.customer_id for r in rows_db]
     eng_q = (
@@ -1957,21 +1942,13 @@ async def get_customer_health(
             func.count().label("events"),
         )
         .where(
-            FunnelEventModel.store_id == store.id,
+            FunnelEventModel.store_id == store_id,
             FunnelEventModel.customer_id.in_(ids),
             FunnelEventModel.created_at >= now - timedelta(days=30),
         )
         .group_by(FunnelEventModel.customer_id)
     )
     events = {r.customer_id: int(r.events) for r in (await db.execute(eng_q)).all()}
-
-    names_q = select(
-        CustomerModel.id, CustomerModel.first_name, CustomerModel.last_name
-    ).where(CustomerModel.id.in_(ids))
-    names = {
-        r.id: f"{r.first_name} {r.last_name}".strip()
-        for r in (await db.execute(names_q)).all()
-    }
 
     rows = [
         {
@@ -1992,8 +1969,48 @@ async def get_customer_health(
     store_aov = (
         sum(r["total_spent_cents"] for r in rows) // total_orders if total_orders else 0
     )
+    return rows, score_store_customers(rows, now, store_aov)
 
-    scored = score_store_customers(rows, now, store_aov)
+
+@router.get(
+    "/customer-health",
+    response_model=SuccessResponse[CustomerHealthResponse],
+    summary="Customer health scores + states",
+    operation_id="get_customer_health",
+)
+async def get_customer_health(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    state: Annotated[str | None, Query(max_length=30)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+):
+    """0–100 health per customer + lifecycle state (VIP … churned),
+    computed live over 365d of orders. Recency decays on the STORE's own
+    repurchase rhythm, and the monetary quintile finally participates
+    (the legacy RFM segmenter ignored it — D14)."""
+    from src.application.services.customer_health_service import (
+        median_interpurchase_gap,
+    )
+    from src.infrastructure.database.models.tenant.customer import CustomerModel
+
+    now = datetime.now(UTC)
+    rows, scored = await _live_customer_scores(db, store.id, now)
+    if not rows:
+        return SuccessResponse(
+            data=CustomerHealthResponse(
+                distribution=[], median_gap_days=30.0, customers=[]
+            ),
+            message="No customers yet",
+        )
+
+    names_q = select(
+        CustomerModel.id, CustomerModel.first_name, CustomerModel.last_name
+    ).where(CustomerModel.id.in_([r["customer_id"] for r in rows]))
+    names = {
+        r.id: f"{r.first_name} {r.last_name}".strip()
+        for r in (await db.execute(names_q)).all()
+    }
+
     dist: dict[str, int] = {}
     for s in scored:
         dist[s["state"]] = dist.get(s["state"], 0) + 1
@@ -2022,6 +2039,186 @@ async def get_customer_health(
             ],
         ),
         message="Customer health computed",
+    )
+
+
+# ── Predictions v1 (AI Commerce Intelligence) ───────────────────────
+
+
+def _gap_filled_history(
+    series: list[dict], today_local: date
+) -> tuple[list[float], list[float]]:
+    """Contiguous (revenue, orders) daily series up to yesterday.
+
+    Zero-order days are absent from the query result but real to a
+    forecasting model — a hole would shift the weekly seasonality.
+    Today is excluded: it's partial and would drag the level down.
+    """
+    by_day = {r["rollup_date"]: r for r in series}
+    rev_hist: list[float] = []
+    ord_hist: list[float] = []
+    if series:
+        d = series[0]["rollup_date"]
+        while d < today_local:
+            row = by_day.get(d)
+            rev_hist.append(float(row["total_revenue_cents"]) if row else 0.0)
+            ord_hist.append(float(row["total_orders"]) if row else 0.0)
+            d += timedelta(days=1)
+    return rev_hist, ord_hist
+
+
+class StockoutPrediction(BaseModel):
+    product_id: str
+    name: str
+    quantity: int
+    velocity_per_day: float
+    days_left: float
+    run_out_date: str
+    early_date: str
+    late_date: str | None
+    urgent: bool
+    confidence: str
+    suggested_reorder_qty: int
+
+
+class MonthRevenueBand(BaseModel):
+    expected_cents: int
+    lower_cents: int
+    upper_cents: int
+    mtd_cents: int
+    remaining_days: int
+    confidence: str
+
+
+class TodayOrdersBand(BaseModel):
+    predicted: int
+    lower: int
+    upper: int
+
+
+class RepeatProfile(BaseModel):
+    customers: int
+    repeat_customers: int
+    repeat_rate_pct: float
+    p_next_30d_pct: float
+    median_gap_days: float | None
+    confidence: str
+
+
+class CodGovernorateRate(BaseModel):
+    governorate: str
+    resolved: int
+    returned: int
+    rate_pct: float
+    shrunk_rate_pct: float
+
+
+class CodRejectionProfile(BaseModel):
+    store_rate_pct: float
+    wilson_low_pct: float
+    wilson_high_pct: float
+    resolved_orders: int
+    pending_orders: int
+    pending_value_cents: int
+    expected_loss_cents: int
+    by_governorate: list[CodGovernorateRate]
+    confidence: str
+
+
+class PredictionsResponse(BaseModel):
+    stockouts: list[StockoutPrediction]
+    revenue_month: MonthRevenueBand | None
+    orders_today: TodayOrdersBand | None
+    repeat: RepeatProfile
+    cod: CodRejectionProfile | None
+    generated_at: str
+
+
+@router.get(
+    "/predictions",
+    response_model=SuccessResponse[PredictionsResponse],
+    summary="Statistical predictions (stockouts, bands, repeat, COD)",
+    operation_id="get_predictions",
+)
+async def get_predictions(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+):
+    """Predictions v1 — all statistical, all self-hosted (AI-5).
+
+    Stock depletion windows (EWMA velocity + Poisson band), month-end
+    revenue and today's-orders bands (the forecast service's
+    Holt-Winters), empirical repeat-purchase probability, and COD
+    rejection risk with Wilson intervals + per-governorate shrinkage.
+    Every block carries a confidence tier; blocks without enough data
+    return null rather than a confident-looking guess.
+    """
+    from src.application.services import prediction_service as ps
+
+    now = datetime.now(UTC)
+    tz_name = resolve_store_timezone_name(store.settings)
+    today_local = local_date(now, tz_name)
+
+    # ── Stockouts: current stock + 7d/28d velocity ──
+    stock = await analytics_repo.product_stock_snapshot(store.id)
+    sales_7d = await analytics_repo.product_sales_window(
+        store.id, now - timedelta(days=7), now
+    )
+    sales_28d = await analytics_repo.product_sales_window(
+        store.id, now - timedelta(days=28), now
+    )
+    u7 = {p["product_id"]: p["units_sold"] for p in sales_7d}
+    u28 = {p["product_id"]: p["units_sold"] for p in sales_28d}
+    products = [
+        {
+            "product_id": s["product_id"],
+            "name": s["name"],
+            "quantity": s["quantity"],
+            "units_7d": u7.get(s["product_id"], 0),
+            "units_28d": u28.get(s["product_id"], 0),
+        }
+        for s in stock
+    ]
+    stockouts = ps.predict_stockouts(products, today_local)
+
+    # ── Revenue / orders series (store-local days, last 120) ──
+    series = await analytics_repo.daily_revenue_series(
+        store.id, now - timedelta(days=120), now, tz=tz_name
+    )
+    month_start = today_local.replace(day=1)
+    mtd = sum(
+        r["total_revenue_cents"] for r in series if r["rollup_date"] >= month_start
+    )
+    rev_hist, ord_hist = _gap_filled_history(series, today_local)
+    next_month = (month_start + timedelta(days=32)).replace(day=1)
+    remaining = (next_month - today_local).days
+
+    revenue_month = ps.month_revenue_band(rev_hist, mtd, remaining)
+    orders_today = ps.today_orders_band(ord_hist)
+
+    # ── Repeat purchase (365d) ──
+    cust = await analytics_repo.customer_period_aggregates(
+        store.id, now - timedelta(days=365), now
+    )
+    repeat = ps.repeat_probability(cust, now)
+
+    # ── COD rejection (180d resolved outcomes) ──
+    gov_rows = await analytics_repo.cod_outcomes_by_governorate(
+        store.id, now - timedelta(days=180), now
+    )
+    pending = await analytics_repo.cod_pending_exposure(store.id)
+    cod = ps.cod_rejection_profile(gov_rows, pending)
+
+    return SuccessResponse(
+        data=PredictionsResponse(
+            stockouts=[StockoutPrediction(**s) for s in stockouts],
+            revenue_month=MonthRevenueBand(**revenue_month) if revenue_month else None,
+            orders_today=TodayOrdersBand(**orders_today) if orders_today else None,
+            repeat=RepeatProfile(**repeat),
+            cod=CodRejectionProfile(**cod) if cod else None,
+            generated_at=now.isoformat(),
+        ),
+        message="Predictions computed",
     )
 
 
@@ -2155,6 +2352,345 @@ async def refresh_signals(
     await db.commit()
     return SuccessResponse(
         data={"advisor": out, "alerts": alerts}, message="Signals refreshed"
+    )
+
+
+# ── Executive dashboard (AI Commerce Intelligence) ──────────────────
+
+
+class ExecutiveGauges(BaseModel):
+    revenue: int | None
+    profit: int | None
+    store: int | None
+    marketing: int | None
+    inventory: int | None
+    customer: int | None
+
+
+class ExecutiveResponse(BaseModel):
+    briefing: str
+    problems: list[SignalItem]
+    opportunities: list[SignalItem]
+    gauges: ExecutiveGauges
+    weekly_priorities: list[SignalItem]
+    generated_at: str
+
+
+@router.get(
+    "/executive",
+    response_model=SuccessResponse[ExecutiveResponse],
+    summary="Executive dashboard — what should I do today?",
+    operation_id="get_executive_dashboard",
+)
+async def get_executive_dashboard(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated["AsyncSession", Depends(get_db)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    lang: Annotated[Literal["en", "ar"], Query()] = "en",
+):
+    """Composed entirely from outputs other layers already produce
+    (AI-6): signals ranked by EGP impact, prediction bands, and six
+    0–100 health gauges. No new computation — only ranking and
+    presentation; every drill-down leads to a classic analytics tab.
+    """
+    from src.application.services import (
+        executive_service as ex,
+    )
+    from src.application.services import (
+        prediction_service as ps,
+    )
+    from src.application.services.advisor_rules import render_signal
+    from src.application.services.alert_service import render_alert
+    from src.infrastructure.database.models.tenant.merchant_signal import (
+        MerchantSignalModel,
+    )
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    now = datetime.now(UTC)
+    tz_name = resolve_store_timezone_name(store.settings)
+    now_local = now.astimezone(safe_zone(tz_name))
+    today_local = now_local.date()
+    currency = store.default_currency.value if store.default_currency else "EGP"
+
+    def fmt(cents: int) -> str:
+        return f"{cents / 100:,.0f} {currency}"
+
+    # ── Active signals, ranked by expected impact ──
+    rows = (
+        (
+            await db.execute(
+                select(MerchantSignalModel)
+                .where(
+                    MerchantSignalModel.store_id == store.id,
+                    MerchantSignalModel.status == "active",
+                )
+                .order_by(MerchantSignalModel.expected_impact_cents.desc().nulls_last())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    def to_item(r) -> SignalItem:
+        renderer = render_alert if r.rule_id.startswith("AL-") else render_signal
+        rendered = renderer(r.rule_id, r.metrics_snapshot or {}, lang)
+        return SignalItem(
+            id=r.id,
+            kind=r.kind,
+            rule_id=r.rule_id,
+            severity=r.severity,
+            title=rendered["title"],
+            action=rendered["action"],
+            expected_impact_cents=r.expected_impact_cents,
+            created_at=r.created_at.isoformat(),
+        )
+
+    problems = [to_item(r) for r in rows if r.severity in ("critical", "warning")][:5]
+    opportunities = [to_item(r) for r in rows if r.kind == "opportunity"][:5]
+    # Persisted ≥3 days = worth a week of focus, not a blip.
+    weekly_priorities = [to_item(r) for r in rows if (now - r.created_at).days >= 3][:3]
+
+    # ── Prediction bands for the briefing line ──
+    series = await analytics_repo.daily_revenue_series(
+        store.id, now - timedelta(days=120), now, tz=tz_name
+    )
+    month_start = today_local.replace(day=1)
+    mtd = sum(
+        r["total_revenue_cents"] for r in series if r["rollup_date"] >= month_start
+    )
+    rev_hist, ord_hist = _gap_filled_history(series, today_local)
+    next_month = (month_start + timedelta(days=32)).replace(day=1)
+    month_band = ps.month_revenue_band(rev_hist, mtd, (next_month - today_local).days)
+    orders_band = ps.today_orders_band(ord_hist)
+
+    # ── Six gauges ──
+    weekly = list(
+        reversed(
+            await analytics_repo.weekly_order_aggregates(
+                store.id, now - timedelta(days=56), now, tz=tz_name
+            )
+        )
+    )
+
+    orders_q = select(
+        func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+        func.coalesce(func.sum(OrderModel.discount_amount), 0).label("discounts"),
+        func.count().label("orders"),
+        func.count().filter(OrderModel.utm_source.isnot(None)).label("tagged"),
+    ).where(*analytics_repo._store_window(store.id, now - timedelta(days=30), now))
+    orow = (await db.execute(analytics_repo._tenant_filter(orders_q))).one()
+
+    cod = await analytics_repo.cod_summary(store.id, now - timedelta(days=30), now)
+    stock = await analytics_repo.product_stock_snapshot(store.id)
+    channels = await analytics_repo.sessions_by_channel(
+        store.id, now - timedelta(days=30), now
+    )
+    _, scored = await _live_customer_scores(db, store.id, now)
+    dist: dict[str, int] = {}
+    for s in scored:
+        dist[s["state"]] = dist.get(s["state"], 0) + 1
+
+    health = await calculate_store_health_score(db, store.id, lang=lang)
+
+    n_orders = int(orow.orders or 0)
+    gauges = ExecutiveGauges(
+        revenue=ex.revenue_gauge(weekly),
+        profit=ex.profit_gauge(
+            int(orow.revenue or 0),
+            int(orow.discounts or 0),
+            cod.get("rejected_amount", 0),
+            cod.get("total_cod_amount", 0),
+        ),
+        store=health.get("score"),
+        marketing=ex.marketing_gauge(
+            (int(orow.tagged or 0) / n_orders * 100) if n_orders else None,
+            channels,
+        ),
+        inventory=ex.inventory_gauge(stock),
+        customer=ex.customer_gauge(dist),
+    )
+
+    briefing = ex.briefing(
+        now_local, orders_band, month_band, len(problems), len(opportunities), fmt
+    )[lang]
+
+    return SuccessResponse(
+        data=ExecutiveResponse(
+            briefing=briefing,
+            problems=problems,
+            opportunities=opportunities,
+            gauges=gauges,
+            weekly_priorities=weekly_priorities,
+            generated_at=now.isoformat(),
+        ),
+        message="Executive dashboard composed",
+    )
+
+
+# ── Peer benchmarks (AI Commerce Intelligence) ──────────────────────
+
+
+class BenchmarkItem(BaseModel):
+    metric: str
+    yours: float | None
+    p25: float
+    p50: float
+    p75: float
+    n_stores_bucket: str
+    segment_used: str
+
+
+class BenchmarksResponse(BaseModel):
+    published: bool
+    reason: str | None  # not_opted_in | insufficient_peers | None
+    opted_in: bool
+    period: str
+    benchmarks: list[BenchmarkItem]
+
+
+@router.get(
+    "/benchmarks",
+    response_model=SuccessResponse[BenchmarksResponse],
+    summary="Anonymous peer benchmarks (k-anonymity gated)",
+    operation_id="get_benchmarks",
+)
+async def get_benchmarks(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated["AsyncSession", Depends(get_db)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+):
+    """Your KPIs vs anonymous peer percentiles (AI-7).
+
+    Reciprocity: you see benchmarks only if your store contributes
+    (``settings.benchmarks_opt_in``). Cells are published only when
+    they aggregate ≥10 stores — with fewer, the response says so
+    honestly instead of showing numbers that could deanonymize peers.
+    """
+    from src.application.services.benchmark_service import (
+        K_ANONYMITY,
+        n_bucket,
+        resolve_cell,
+        size_tier,
+    )
+    from src.core.entities.order import OrderStatus
+    from src.infrastructure.database.models.public.platform_benchmark import (
+        PlatformBenchmarkModel,
+    )
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    settings = store.settings or {}
+    opted_in = settings.get("benchmarks_opt_in") is True
+    now = datetime.now(UTC)
+    period = now.strftime("%Y-%m")
+
+    if not opted_in:
+        return SuccessResponse(
+            data=BenchmarksResponse(
+                published=False,
+                reason="not_opted_in",
+                opted_in=False,
+                period=period,
+                benchmarks=[],
+            ),
+            message="Benchmarks require opt-in",
+        )
+
+    # Latest period with any cells (current month may not be computed yet).
+    latest = (
+        await db.execute(
+            select(func.max(PlatformBenchmarkModel.period)).where(
+                PlatformBenchmarkModel.period.in_([
+                    period,
+                    (now - timedelta(days=28)).strftime("%Y-%m"),
+                ])
+            )
+        )
+    ).scalar()
+    cells_by_key: dict[tuple[str, str], dict] = {}
+    if latest:
+        rows = (
+            (
+                await db.execute(
+                    select(PlatformBenchmarkModel).where(
+                        PlatformBenchmarkModel.period == latest
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        cells_by_key = {
+            (r.segment_key, r.metric): {
+                "p25": r.p25,
+                "p50": r.p50,
+                "p75": r.p75,
+                "n_stores": r.n_stores,
+            }
+            for r in rows
+        }
+
+    # ── This store's own values (30/90d, same definitions as the task) ──
+    d30, d90 = now - timedelta(days=30), now - timedelta(days=90)
+    o30_q = select(
+        func.count().label("orders"),
+        func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+        func.count()
+        .filter(OrderModel.status == OrderStatus.REFUNDED)
+        .label("refunded"),
+    ).where(*analytics_repo._store_window(store.id, d30, now))
+    o = (await db.execute(analytics_repo._tenant_filter(o30_q))).one()
+    orders = int(o.orders or 0)
+
+    cust = await analytics_repo.customer_period_aggregates(store.id, d90, now)
+    repeaters = sum(1 for c in cust if c["orders"] >= 2)
+    gov_rows = await analytics_repo.cod_outcomes_by_governorate(store.id, d90, now)
+    cod_resolved = sum(r["resolved"] for r in gov_rows)
+    cod_returned = sum(r["returned"] for r in gov_rows)
+    channels = await analytics_repo.sessions_by_channel(store.id, d30, now)
+    sessions = sum(channels.values())
+
+    yours: dict[str, float | None] = {
+        "aov_cents": int(o.revenue) / orders if orders else None,
+        "refund_rate_pct": int(o.refunded) / orders * 100 if orders else None,
+        "repeat_rate_pct": repeaters / len(cust) * 100 if cust else None,
+        "cod_rejection_rate_pct": (
+            cod_returned / cod_resolved * 100 if cod_resolved >= 5 else None
+        ),
+        "conversion_rate_pct": orders / sessions * 100 if sessions >= 100 else None,
+    }
+
+    industry = settings.get("industry") or None
+    tier = size_tier(orders)
+    items = []
+    for metric, own_value in yours.items():
+        cell = resolve_cell(cells_by_key, industry, tier, metric)
+        if cell is None:
+            continue
+        items.append(
+            BenchmarkItem(
+                metric=metric,
+                yours=round(own_value, 2) if own_value is not None else None,
+                p25=cell["p25"],
+                p50=cell["p50"],
+                p75=cell["p75"],
+                n_stores_bucket=n_bucket(cell["n_stores"]),
+                segment_used=cell["segment_key"],
+            )
+        )
+
+    return SuccessResponse(
+        data=BenchmarksResponse(
+            published=bool(items),
+            reason=None if items else "insufficient_peers",
+            opted_in=True,
+            period=latest or period,
+            benchmarks=items,
+        ),
+        message=(
+            "Benchmarks computed"
+            if items
+            else f"Fewer than {K_ANONYMITY} peer stores per segment so far"
+        ),
     )
 
 

@@ -106,7 +106,7 @@ async def build_context(
     )
     reachable = (await session.execute(reachable_q)).one()
 
-    # ── Repeat rate (90d) ──
+    # ── Repeat rate (90d) + due-now customers (OP-DUE) ──
     cust = await analytics.customer_period_aggregates(
         store_id, now - timedelta(days=90), now
     )
@@ -114,6 +114,21 @@ async def build_context(
         "customers": len(cust),
         "repeat_customers": sum(1 for c in cust if c["orders"] >= 2),
     }
+    from src.application.services.customer_health_service import (
+        median_interpurchase_gap,
+    )
+
+    gap = median_interpurchase_gap(cust)
+    due_customers = 0
+    for c in cust:
+        if not c.get("last_at"):
+            continue
+        days_since = (now - c["last_at"]).total_seconds() / 86400
+        if c["orders"] >= 2 and 0.8 * gap <= days_since <= 1.3 * gap:
+            due_customers += 1
+
+    # ── Market basket (90d) for the bundle detector ──
+    basket = await analytics.basket_pairs(store_id, now - timedelta(days=90), now)
 
     # ── Coupon share + AOV (30d) ──
     orders_q = select(
@@ -141,6 +156,8 @@ async def build_context(
         "abandoned_reachable_7d": int(reachable.n or 0),
         "abandoned_value_7d_cents": int(reachable.value or 0),
         "repeat": repeat,
+        "due_customers": due_customers,
+        "basket": basket,
         "orders_30d": orders_30d,
         "coupon_orders_30d": int(orow.couponed or 0),
         "discounts_30d_cents": int(orow.discounts or 0),

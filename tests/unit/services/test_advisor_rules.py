@@ -266,8 +266,8 @@ class TestRendering:
         out = render_signal("IV-1", {}, "en")
         assert "{product_name}" in out["title"]  # rendered as-is, no crash
 
-    def test_registry_has_15_rules_with_bilingual_copy(self):
-        assert len(RULES) == 15
+    def test_registry_has_18_rules_with_bilingual_copy(self):
+        assert len(RULES) == 18
         for rule in RULES:
             assert set(rule.title) >= {"en", "ar"}
             assert set(rule.action) >= {"en", "ar"}
@@ -281,3 +281,77 @@ class TestRendering:
         )
         fired = {f["rule_id"] for f in run_rules(ctx)}
         assert "CA-4" in fired
+
+
+class TestOpportunities:
+    def test_op_bundle_lift(self):
+        ctx = _base_ctx(
+            basket={
+                "total_orders": 40,
+                "pairs": [{"a_id": "a", "b_id": "b", "pair_orders": 6}],
+                "product_orders": {"a": 10, "b": 8},
+            },
+            product_names={"a": "Tee", "b": "Cap"},
+            aov_cents=100_00,
+        )
+        fired = {f["rule_id"]: f for f in run_rules(ctx)}
+        assert "OP-BUNDLE" in fired  # lift = 6*40/(10*8) = 3.0
+        assert fired["OP-BUNDLE"]["metrics"]["product_a"] == "Tee"
+
+    def test_op_bundle_needs_lift_3(self):
+        ctx = _base_ctx(
+            basket={
+                "total_orders": 40,
+                "pairs": [{"a_id": "a", "b_id": "b", "pair_orders": 5}],
+                "product_orders": {"a": 10, "b": 8},
+            },
+        )
+        assert "OP-BUNDLE" not in {f["rule_id"] for f in run_rules(ctx)}
+
+    def test_op_ads_ready(self):
+        ctx = _base_ctx(
+            products_28d=[
+                {"product_id": "a", "units_sold": 28, "revenue_cents": 2_800_00}
+            ],
+            stock=[
+                {
+                    "product_id": "a",
+                    "name": "Hero",
+                    "quantity": 40,
+                    "unit_value_cents": 40_00,
+                    "value_is_cost": True,
+                    "price_cents": 100_00,
+                    "cost_cents": 40_00,
+                    "created_at": None,
+                }
+            ],
+        )
+        fired = {f["rule_id"]: f for f in run_rules(ctx)}
+        assert "OP-ADS-READY" in fired  # 60% margin, 40d cover
+        assert fired["OP-ADS-READY"]["metrics"]["margin_pct"] == 60
+
+    def test_op_ads_ready_skips_thin_margin(self):
+        ctx = _base_ctx(
+            products_28d=[
+                {"product_id": "a", "units_sold": 28, "revenue_cents": 2_800_00}
+            ],
+            stock=[
+                {
+                    "product_id": "a",
+                    "name": "Hero",
+                    "quantity": 40,
+                    "unit_value_cents": 80_00,
+                    "value_is_cost": True,
+                    "price_cents": 100_00,
+                    "cost_cents": 80_00,
+                    "created_at": None,
+                }
+            ],
+        )
+        assert "OP-ADS-READY" not in {f["rule_id"] for f in run_rules(ctx)}
+
+    def test_op_due_customers(self):
+        ctx = _base_ctx(due_customers=5, aov_cents=200_00)
+        fired = {f["rule_id"]: f for f in run_rules(ctx)}
+        assert "OP-DUE" in fired
+        assert fired["OP-DUE"]["impact_cents"] == 20_000  # 5 * 0.2 * 20000

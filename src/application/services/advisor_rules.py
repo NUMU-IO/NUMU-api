@@ -603,6 +603,129 @@ RULES: list[Rule] = [
 
 RULES_BY_ID: dict[str, Rule] = {r.rule_id: r for r in RULES}
 
+# ── OP: opportunity detectors (AI-4) ───────────────────────────────
+
+
+def _op_bundle(ctx: dict) -> dict | None:
+    """Best product pair with lift ≥ 3 — a natural bundle."""
+    basket = ctx.get("basket") or {}
+    total = basket.get("total_orders", 0)
+    if total < 10:
+        return None
+    names = ctx.get("product_names", {})
+    per = basket.get("product_orders", {})
+    best = None
+    for pair in basket.get("pairs", []):
+        a_o, b_o = per.get(pair["a_id"], 0), per.get(pair["b_id"], 0)
+        if a_o == 0 or b_o == 0:
+            continue
+        lift = (pair["pair_orders"] * total) / (a_o * b_o)
+        if lift >= 3 and (best is None or lift > best[0]):
+            best = (lift, pair)
+    if best is None:
+        return None
+    lift, pair = best
+    return {
+        "severity": OPPORTUNITY,
+        "metrics": {
+            "product_a": names.get(pair["a_id"], "(unnamed)"),
+            "product_b": names.get(pair["b_id"], "(unnamed)"),
+            "lift": round(lift, 1),
+            "pair_orders": pair["pair_orders"],
+        },
+        "impact_cents": pair["pair_orders"] * ctx.get("aov_cents", 0),
+    }
+
+
+def _op_ads_ready(ctx: dict) -> dict | None:
+    """A proven seller with margin headroom and stock to scale — a
+    low-risk first paid-ads candidate."""
+    stock = {p["product_id"]: p for p in ctx.get("stock", [])}
+    for p in sorted(
+        ctx.get("products_28d", []), key=lambda x: x["revenue_cents"], reverse=True
+    ):
+        if p["units_sold"] < 10:
+            break  # revenue-sorted; smaller ones won't qualify either
+        st = stock.get(p["product_id"])
+        if not st or st.get("cost_cents") is None or st["price_cents"] <= 0:
+            continue
+        margin = (st["price_cents"] - st["cost_cents"]) / st["price_cents"]
+        if margin < 0.40:
+            continue
+        velocity = p["units_sold"] / 28
+        if velocity <= 0 or st["quantity"] / velocity < 21:
+            continue
+        return {
+            "severity": OPPORTUNITY,
+            "metrics": {
+                "product_name": st["name"] or "(unnamed)",
+                "margin_pct": round(margin * 100),
+                "units": p["units_sold"],
+            },
+            "impact_cents": None,
+        }
+    return None
+
+
+def _op_due_customers(ctx: dict) -> dict | None:
+    """Customers inside their personal reorder window right now."""
+    count = ctx.get("due_customers", 0)
+    if count < 3:
+        return None
+    aov = ctx.get("aov_cents", 0)
+    return {
+        "severity": OPPORTUNITY,
+        "metrics": {"count": count},
+        # Conservative: ~20% of due customers reorder when nudged.
+        "impact_cents": round(count * 0.2 * aov) if aov else None,
+    }
+
+
+OPPORTUNITY_RULES: list[Rule] = [
+    Rule(
+        "OP-BUNDLE",
+        "opportunity",
+        _op_bundle,
+        {
+            "en": "{product_a} + {product_b} are bought together {lift}x more than chance ({pair_orders} orders).",
+            "ar": "{product_a} + {product_b} بيتشتروا مع بعض {lift} ضعف الصدفة ({pair_orders} طلب).",
+        },
+        {
+            "en": "Create a bundle with a small discount — it sells itself.",
+            "ar": "اعملهم باقة بخصم بسيط — هتبيع نفسها.",
+        },
+    ),
+    Rule(
+        "OP-ADS-READY",
+        "opportunity",
+        _op_ads_ready,
+        {
+            "en": "{product_name} is ad-ready: {units} sold organically at {margin_pct}% margin with stock to scale.",
+            "ar": "{product_name} جاهز للإعلانات: {units} مبيعة أورجانيك بهامش {margin_pct}% ومخزون يكفي.",
+        },
+        {
+            "en": "Test a small Meta or TikTok campaign on it this week.",
+            "ar": "جرب عليه حملة صغيرة على ميتا أو تيك توك الأسبوع ده.",
+        },
+    ),
+    Rule(
+        "OP-DUE",
+        "opportunity",
+        _op_due_customers,
+        {
+            "en": "{count} customers are due for their next order right now (based on their own buying rhythm).",
+            "ar": "{count} عميل معاد طلبهم الجاي دلوقتي (حسب إيقاع شراء كل واحد).",
+        },
+        {
+            "en": "Message them today — a simple 'we miss you' with their favorites works.",
+            "ar": "ابعتلهم النهارده — رسالة بسيطة بمنتجاتهم المفضلة بتجيب نتيجة.",
+        },
+    ),
+]
+
+RULES.extend(OPPORTUNITY_RULES)
+RULES_BY_ID.update({r.rule_id: r for r in OPPORTUNITY_RULES})
+
 
 def run_rules(ctx: dict) -> list[dict]:
     """Evaluate every rule; a rule that crashes is skipped (fail-open),

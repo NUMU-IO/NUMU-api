@@ -105,6 +105,7 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.intelligence_task",
         # Hourly smart-alerts sweep (time-critical rule subset).
         "src.infrastructure.messaging.tasks.alerts_task",
+        "src.infrastructure.messaging.tasks.benchmarks_task",
         # Theme builds + marketplace
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
@@ -254,6 +255,13 @@ celery_app.conf.beat_schedule = {
     "nightly-intelligence-sweep": {
         "task": "tasks.run_intelligence_sweep",
         "schedule": crontab(hour=4, minute=15),
+    },
+    # Platform-level benchmark cells at 03:50 — after the rollup
+    # (03:30), before the intelligence sweep reads anything. Aggregates
+    # across tenants by design; only percentile cells are written.
+    "nightly-platform-benchmarks": {
+        "task": "tasks.compute_platform_benchmarks",
+        "schedule": crontab(hour=3, minute=50),
     },
     # Hourly smart alerts at :20 — cheap (rollups + Redis snapshot);
     # cooldowns inside the service keep re-fires quiet.
