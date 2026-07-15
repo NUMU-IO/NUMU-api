@@ -55,9 +55,17 @@ class PageViewRepository:
         store_id: UUID,
         date_from: datetime,
         date_to: datetime,
+        tz: str = "Africa/Cairo",
     ) -> list[tuple[str, int]]:
-        """Get daily visit counts grouped by date."""
-        date_col = func.date(PageViewModel.created_at).label("visit_date")
+        """Get daily visit counts grouped by store-local date.
+
+        ``func.date()`` on a timestamptz truncates in the session timezone
+        (UTC); convert to the store's wall clock first so visit days line
+        up with the order days on the same chart.
+        """
+        date_col = func.date(func.timezone(tz, PageViewModel.created_at)).label(
+            "visit_date"
+        )
         query = (
             select(date_col, func.count().label("visit_count"))
             .where(PageViewModel.store_id == store_id)
@@ -69,6 +77,103 @@ class PageViewRepository:
         query = self._tenant_filter(query)
         result = await self.session.execute(query)
         return [(str(row.visit_date), row.visit_count) for row in result.all()]
+
+    async def top_landing_pages(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Top entry pages: each session's FIRST page view in the window,
+        grouped by path.
+
+        ``DISTINCT ON (session_fingerprint) … ORDER BY created_at`` picks
+        one row per session (its earliest view); the outer GROUP BY counts
+        sessions per landing path. Window-scoped "first" — a session that
+        started before the window counts its first in-window page, which
+        is the honest choice for a bounded report.
+        """
+        first_views = (
+            select(
+                PageViewModel.session_fingerprint,
+                PageViewModel.path,
+            )
+            .where(
+                PageViewModel.store_id == store_id,
+                PageViewModel.created_at >= date_from,
+                PageViewModel.created_at <= date_to,
+                PageViewModel.session_fingerprint.isnot(None),
+            )
+            .distinct(PageViewModel.session_fingerprint)
+            .order_by(
+                PageViewModel.session_fingerprint,
+                PageViewModel.created_at.asc(),
+            )
+        )
+        first_views = self._tenant_filter(first_views).subquery()
+
+        query = (
+            select(
+                first_views.c.path,
+                func.count().label("sessions"),
+            )
+            .group_by(first_views.c.path)
+            .order_by(func.count().desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return [
+            {"path": row.path, "sessions": int(row.sessions or 0)}
+            for row in result.all()
+        ]
+
+    async def top_referrers(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Top external referrer hosts by distinct sessions.
+
+        Host is extracted in SQL (``substring(referrer from
+        '^https?://([^/]+)')``); rows with no referrer (direct traffic)
+        or an unparseable value fall out via the NULL filter. Self-
+        referrals (the store's own domain, SPA soft-nav artifacts) are
+        left in — filtering them needs the store's domain list and is a
+        presentation choice for the caller.
+        """
+        host_expr = func.substring(PageViewModel.referrer, r"^https?://([^/]+)").label(
+            "host"
+        )
+        query = (
+            select(
+                host_expr,
+                func.count(func.distinct(PageViewModel.session_fingerprint)).label(
+                    "sessions"
+                ),
+            )
+            .where(
+                PageViewModel.store_id == store_id,
+                PageViewModel.created_at >= date_from,
+                PageViewModel.created_at <= date_to,
+                PageViewModel.referrer.isnot(None),
+                PageViewModel.referrer != "",
+                host_expr.isnot(None),
+            )
+            .group_by(host_expr)
+            .order_by(
+                func.count(func.distinct(PageViewModel.session_fingerprint)).desc()
+            )
+            .limit(limit)
+        )
+        query = self._tenant_filter(query)
+        result = await self.session.execute(query)
+        return [
+            {"host": row.host, "sessions": int(row.sessions or 0)}
+            for row in result.all()
+        ]
 
     async def count_unique_visitors(
         self,

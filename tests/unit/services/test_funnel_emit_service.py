@@ -21,10 +21,14 @@ from src.application.services.funnel_emit_service import (
     emit_order_delivered,
 )
 
+_UNSET = object()
 
-def _make_order(*, metadata: dict | None = None, tenant_id=None):
+
+def _make_order(*, metadata: dict | None = None, tenant_id=_UNSET):
     """Lightweight order-shaped object — we only touch the attributes
-    the helper reads, so a plain object is enough."""
+    the helper reads, so a plain object is enough. ``tenant_id`` uses a
+    sentinel default so callers can explicitly pass ``None`` to model a
+    tenant-less order (``None`` must not silently become a real UUID)."""
 
     class _O:
         pass
@@ -33,7 +37,7 @@ def _make_order(*, metadata: dict | None = None, tenant_id=None):
     o.id = uuid4()
     o.order_number = "NUM-000123"
     o.store_id = uuid4()
-    o.tenant_id = tenant_id if tenant_id is not None else uuid4()
+    o.tenant_id = uuid4() if tenant_id is _UNSET else tenant_id
     o.customer_id = uuid4()
     o.metadata = metadata if metadata is not None else {}
     o.total = 12_500

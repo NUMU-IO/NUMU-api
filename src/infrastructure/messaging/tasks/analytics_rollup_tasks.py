@@ -13,7 +13,7 @@ on every later store. Now isolated rollbacks contain the blast radius.
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 
 from src.infrastructure.messaging.celery_app import celery_app
 
@@ -107,6 +107,7 @@ async def _backfill_single_store(store_id, days: int) -> dict:
     """Run the standard backfill path for one store across ``days`` days."""
     from sqlalchemy import select
 
+    from src.core.utils.store_timezone import resolve_store_timezone_name
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.store import StoreModel
 
@@ -115,7 +116,7 @@ async def _backfill_single_store(store_id, days: int) -> dict:
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(StoreModel.id, StoreModel.tenant_id).where(
+            select(StoreModel.id, StoreModel.tenant_id, StoreModel.settings).where(
                 StoreModel.id == store_id, StoreModel.status == "ACTIVE"
             )
         )
@@ -124,7 +125,8 @@ async def _backfill_single_store(store_id, days: int) -> dict:
     if row is None:
         return {"processed": 0, "days_written": 0, "errors": 0}
 
-    out = await _backfill_store(row.tenant_id, row.id, dates_to_process)
+    tz_name = resolve_store_timezone_name(row.settings)
+    out = await _backfill_store(row.tenant_id, row.id, dates_to_process, tz_name)
     return {
         "processed": 1,
         "days_written": out["days_written"],
@@ -136,6 +138,7 @@ async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> 
     """Calculate and persist daily rollups for all active stores."""
     from sqlalchemy import select
 
+    from src.core.utils.store_timezone import resolve_store_timezone_name
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.store import StoreModel
 
@@ -146,7 +149,7 @@ async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> 
     # held open across the full backfill loop.
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(StoreModel.id, StoreModel.tenant_id).where(
+            select(StoreModel.id, StoreModel.tenant_id, StoreModel.settings).where(
                 StoreModel.status == "ACTIVE"
             )
         )
@@ -163,7 +166,10 @@ async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> 
 
     for store_row in stores:
         store_stats = await _backfill_store(
-            store_row.tenant_id, store_row.id, dates_to_process
+            store_row.tenant_id,
+            store_row.id,
+            dates_to_process,
+            resolve_store_timezone_name(store_row.settings),
         )
         stats["days_written"] += store_stats["days_written"]
         stats["errors"] += store_stats["errors"]
@@ -184,8 +190,20 @@ async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> 
     return stats
 
 
-async def _backfill_store(tenant_id, store_id, dates_to_process: list[date]) -> dict:
+async def _backfill_store(
+    tenant_id,
+    store_id,
+    dates_to_process: list[date],
+    tz_name: str = "Africa/Cairo",
+) -> dict:
     """Compute and upsert rollups for one store across a list of dates.
+
+    ``tz_name`` is the store's wall-clock timezone: each rollup day covers
+    local midnight → local midnight (converted to UTC instants for the
+    queries), so a 1 AM Cairo order lands on the Cairo date the merchant
+    experienced, not the previous UTC date. Because this task recomputes a
+    90-day window on every nightly run, a deploy that changes day
+    boundaries self-heals the recent history automatically.
 
     Each date runs in its own session. If one day's `_aggregate_day` or
     `_upsert_rollup` raises (bad data, connection blip, schema drift),
@@ -201,7 +219,7 @@ async def _backfill_store(tenant_id, store_id, dates_to_process: list[date]) -> 
         try:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
-                    data = await _aggregate_day(session, store_id, rollup_date)
+                    data = await _aggregate_day(session, store_id, rollup_date, tz_name)
                     await _upsert_rollup(
                         session, tenant_id, store_id, rollup_date, data
                     )
@@ -231,6 +249,7 @@ async def backfill_store_range(store_id, start_date: date, end_date: date) -> di
     """
     from sqlalchemy import select
 
+    from src.core.utils.store_timezone import resolve_store_timezone_name
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.store import StoreModel
 
@@ -240,7 +259,9 @@ async def backfill_store_range(store_id, start_date: date, end_date: date) -> di
     async with AsyncSessionLocal() as session:
         row = (
             await session.execute(
-                select(StoreModel.tenant_id).where(StoreModel.id == store_id)
+                select(StoreModel.tenant_id, StoreModel.settings).where(
+                    StoreModel.id == store_id
+                )
             )
         ).first()
     if row is None:
@@ -250,27 +271,33 @@ async def backfill_store_range(store_id, start_date: date, end_date: date) -> di
     span = (end_date - start_date).days + 1
     dates_to_process = [start_date + timedelta(days=i) for i in range(span)]
 
-    return await _backfill_store(tenant_id, store_id, dates_to_process)
+    return await _backfill_store(
+        tenant_id, store_id, dates_to_process, resolve_store_timezone_name(row.settings)
+    )
 
 
 async def _aggregate_day(
     session,
     store_id,
     rollup_date: date,
+    tz_name: str = "Africa/Cairo",
 ) -> dict:
-    """Aggregate all metrics for one store on one day."""
+    """Aggregate all metrics for one store on one local calendar day.
+
+    ``rollup_date`` is a wall-clock date in the store's timezone; the query
+    window is the matching UTC instant range (e.g. Cairo 2026-07-13 =
+    UTC 2026-07-12T21:00 → 2026-07-13T21:00 in summer).
+    """
     from sqlalchemy import String, and_, cast, func, select
 
+    from src.core.utils.store_timezone import local_day_bounds
     from src.infrastructure.database.models.tenant.customer import CustomerModel
     from src.infrastructure.database.models.tenant.order import OrderModel
     from src.infrastructure.database.models.tenant.page_view import PageViewModel
     from src.infrastructure.database.models.tenant.refund import RefundModel
     from src.infrastructure.database.models.tenant.shipment import ShipmentModel
 
-    day_start = datetime(
-        rollup_date.year, rollup_date.month, rollup_date.day, tzinfo=UTC
-    )
-    day_end = day_start + timedelta(days=1)
+    day_start, day_end = local_day_bounds(rollup_date, tz_name)
 
     # ── Orders ──
     order_query = select(
@@ -413,10 +440,13 @@ async def _aggregate_day(
     )[:20]
 
     # ── Customers ──
+    # Same local-day instant window as everything else — `func.date()`
+    # would truncate in UTC and disagree with the rollup's day key.
     new_customers_query = select(func.count()).where(
         and_(
             CustomerModel.store_id == store_id,
-            func.date(CustomerModel.created_at) == rollup_date,
+            CustomerModel.created_at >= day_start,
+            CustomerModel.created_at < day_end,
         )
     )
     new_customers_result = await session.execute(new_customers_query)
