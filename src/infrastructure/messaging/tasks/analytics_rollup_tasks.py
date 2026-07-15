@@ -306,18 +306,23 @@ async def _aggregate_day(
         func.count()
         .filter(OrderModel.payment_status.in_(["paid", "partially_refunded"]))
         .label("paid_orders"),
-        func.count().filter(OrderModel.status == "cancelled").label("cancelled_orders"),
+        func.count()
+        .filter(func.lower(cast(OrderModel.status, String)) == "cancelled")
+        .label("cancelled_orders"),
     ).where(
         and_(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            # The orderstatus enum has the lowercase value `payment_failed`
-            # from an early migration. SQLAlchemy's default enum binding
-            # would send the uppercase member name `PAYMENT_FAILED`, which
-            # PG rejects with `invalid input value for enum`. Cast to text
-            # so the comparison runs against the actual enum value.
-            cast(OrderModel.status, String) != "payment_failed",
+            # The orderstatus enum carries MIXED-case labels: uppercase
+            # member names for most values but only lowercase
+            # `payment_failed` (binding the enum member raises), while
+            # ORM-written rows store the UPPERCASE names. lower(::text)
+            # matches every label spelling.
+            func.lower(cast(OrderModel.status, String)).notin_((
+                "payment_failed",
+                "draft",
+            )),
         )
     )
     order_result = await session.execute(order_query)
@@ -330,7 +335,7 @@ async def _aggregate_day(
     avg_order_value = total_revenue // total_orders if total_orders > 0 else 0
 
     # ── Top products + location + UTM (from individual orders) ──
-    # WHERE excludes the three statuses that never represent realized demand:
+    # WHERE excludes the statuses that never represent realized demand:
     # cancelled (merchant or customer killed it), refunded (returned), and
     # payment_failed (customer never completed payment). Anything else —
     # including pending COD that hasn't been delivered yet — counts toward
@@ -349,15 +354,16 @@ async def _aggregate_day(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            # The orderstatus enum has lowercase values from an early
-            # migration. SQLAlchemy's default enum binding would send the
-            # uppercase member name (e.g. `PAYMENT_FAILED`), which PG
-            # rejects with `invalid input value for enum`. Cast to text
-            # so the comparison runs against the actual enum value.
-            cast(OrderModel.status, String).notin_((
+            # Mixed-case enum labels + UPPERCASE-stored rows (see the
+            # order_query note above): a lowercase-only text comparison
+            # silently misses `CANCELLED`/`REFUNDED` rows, so cancelled
+            # orders were leaking into Top Products. lower(::text) is
+            # case-proof.
+            func.lower(cast(OrderModel.status, String)).notin_((
                 "cancelled",
                 "refunded",
                 "payment_failed",
+                "draft",
             )),
         )
     )

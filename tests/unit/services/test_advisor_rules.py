@@ -355,3 +355,28 @@ class TestOpportunities:
         fired = {f["rule_id"]: f for f in run_rules(ctx)}
         assert "OP-DUE" in fired
         assert fired["OP-DUE"]["impact_cents"] == 20_000  # 5 * 0.2 * 20000
+
+    def test_op_ads_ready_not_blocked_by_low_unit_top_earner(self):
+        # #1 by revenue is a 5-unit luxury item; the qualifying candidate
+        # is #2 by revenue. A `break` on units would miss it.
+        ctx = _base_ctx(
+            products_28d=[
+                {"product_id": "lux", "units_sold": 5, "revenue_cents": 10_000_00},
+                {"product_id": "vol", "units_sold": 28, "revenue_cents": 2_800_00},
+            ],
+            stock=[
+                {
+                    "product_id": "vol",
+                    "name": "Volume",
+                    "quantity": 40,
+                    "unit_value_cents": 40_00,
+                    "value_is_cost": True,
+                    "price_cents": 100_00,
+                    "cost_cents": 40_00,
+                    "created_at": None,
+                }
+            ],
+        )
+        fired = {f["rule_id"]: f for f in run_rules(ctx)}
+        assert "OP-ADS-READY" in fired
+        assert fired["OP-ADS-READY"]["metrics"]["product_name"] == "Volume"

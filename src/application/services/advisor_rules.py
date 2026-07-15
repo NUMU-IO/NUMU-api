@@ -645,7 +645,7 @@ def _op_ads_ready(ctx: dict) -> dict | None:
         ctx.get("products_28d", []), key=lambda x: x["revenue_cents"], reverse=True
     ):
         if p["units_sold"] < 10:
-            break  # revenue-sorted; smaller ones won't qualify either
+            continue  # revenue order does not imply units order
         st = stock.get(p["product_id"])
         if not st or st.get("cost_cents") is None or st["price_cents"] <= 0:
             continue

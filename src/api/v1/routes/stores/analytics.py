@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
@@ -1898,7 +1898,9 @@ async def _live_customer_scores(
     from src.infrastructure.database.models.tenant.order import OrderModel
 
     since = now - timedelta(days=365)
-    non_revenue = (OrderStatus.CANCELLED, OrderStatus.REFUNDED)
+    # lower(status::text) — mixed-case enum labels (see analytics_repository)
+    status_lc = func.lower(cast(OrderModel.status, String))
+    non_revenue_lc = ("cancelled", "refunded", "draft", "payment_failed")
     ninety = now - timedelta(days=90)
     one80 = now - timedelta(days=180)
 
@@ -1910,9 +1912,7 @@ async def _live_customer_scores(
             func.min(OrderModel.created_at).label("first_at"),
             func.max(OrderModel.created_at).label("last_at"),
             func.count().filter(OrderModel.coupon_code.isnot(None)).label("couponed"),
-            func.count()
-            .filter(OrderModel.status == OrderStatus.RETURNED)
-            .label("returned"),
+            func.count().filter(status_lc == "returned").label("returned"),
             func.coalesce(
                 func.sum(OrderModel.total).filter(OrderModel.created_at >= ninety), 0
             ).label("last90"),
@@ -1927,7 +1927,7 @@ async def _live_customer_scores(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= since,
             OrderModel.customer_id.isnot(None),
-            OrderModel.status.notin_(non_revenue),
+            status_lc.notin_(non_revenue_lc),
         )
         .group_by(OrderModel.customer_id)
     )
@@ -2455,12 +2455,17 @@ async def get_executive_dashboard(
         store.id, now - timedelta(days=120), now, tz=tz_name
     )
     month_start = today_local.replace(day=1)
-    mtd = sum(
-        r["total_revenue_cents"] for r in series if r["rollup_date"] >= month_start
+    # Completed days only — same today-double-count guard as /predictions.
+    mtd_completed = sum(
+        r["total_revenue_cents"]
+        for r in series
+        if month_start <= r["rollup_date"] < today_local
     )
     rev_hist, ord_hist = _gap_filled_history(series, today_local)
     next_month = (month_start + timedelta(days=32)).replace(day=1)
-    month_band = ps.month_revenue_band(rev_hist, mtd, (next_month - today_local).days)
+    month_band = ps.month_revenue_band(
+        rev_hist, mtd_completed, (next_month - today_local).days
+    )
     orders_band = ps.today_orders_band(ord_hist)
 
     # ── Six gauges ──
@@ -2572,7 +2577,6 @@ async def get_benchmarks(
         resolve_cell,
         size_tier,
     )
-    from src.core.entities.order import OrderStatus
     from src.infrastructure.database.models.public.platform_benchmark import (
         PlatformBenchmarkModel,
     )
@@ -2629,38 +2633,74 @@ async def get_benchmarks(
             for r in rows
         }
 
-    # ── This store's own values (30/90d, same definitions as the task) ──
+    # ── This store's own values — EXACTLY the task's definitions, or
+    # "yours vs peers" compares apples to oranges. placed = all real
+    # customer orders (no drafts / failed payments); net = placed minus
+    # cancelled/refunded (AOV basis); refund_rate = refunded / placed;
+    # sessions = distinct funnel fingerprints (NOT the per-channel sum,
+    # which double-counts sessions that touched two channels). ──
+    from src.infrastructure.database.models.tenant.funnel_event import (
+        FunnelEventModel,
+    )
+
     d30, d90 = now - timedelta(days=30), now - timedelta(days=90)
+    # lower(status::text) — mixed-case enum labels; binding
+    # OrderStatus.PAYMENT_FAILED raises (see analytics_repository).
+    status_lc = func.lower(cast(OrderModel.status, String))
+    placed_filter = status_lc.notin_(("draft", "payment_failed"))
+    net_filter = status_lc.notin_(("draft", "payment_failed", "cancelled", "refunded"))
     o30_q = select(
-        func.count().label("orders"),
-        func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
-        func.count()
-        .filter(OrderModel.status == OrderStatus.REFUNDED)
-        .label("refunded"),
-    ).where(*analytics_repo._store_window(store.id, d30, now))
+        func.count().filter(placed_filter).label("placed"),
+        func.count().filter(status_lc == "refunded").label("refunded"),
+        func.count().filter(net_filter).label("net_orders"),
+        func.coalesce(func.sum(OrderModel.total).filter(net_filter), 0).label(
+            "net_revenue"
+        ),
+    ).where(
+        OrderModel.store_id == store.id,
+        OrderModel.created_at >= d30,
+    )
     o = (await db.execute(analytics_repo._tenant_filter(o30_q))).one()
-    orders = int(o.orders or 0)
+    placed = int(o.placed or 0)
+    net_orders = int(o.net_orders or 0)
 
     cust = await analytics_repo.customer_period_aggregates(store.id, d90, now)
     repeaters = sum(1 for c in cust if c["orders"] >= 2)
-    gov_rows = await analytics_repo.cod_outcomes_by_governorate(store.id, d90, now)
-    cod_resolved = sum(r["resolved"] for r in gov_rows)
-    cod_returned = sum(r["returned"] for r in gov_rows)
-    channels = await analytics_repo.sessions_by_channel(store.id, d30, now)
-    sessions = sum(channels.values())
+
+    cod_q = select(
+        func.count().label("resolved"),
+        func.count().filter(status_lc == "returned").label("returned"),
+    ).where(
+        OrderModel.store_id == store.id,
+        OrderModel.created_at >= d90,
+        OrderModel.payment_method == "cod",
+        status_lc.in_(("delivered", "returned")),
+    )
+    cod_row = (await db.execute(analytics_repo._tenant_filter(cod_q))).one()
+    cod_resolved = int(cod_row.resolved or 0)
+    cod_returned = int(cod_row.returned or 0)
+
+    sess_q = select(
+        func.count(func.distinct(FunnelEventModel.session_fingerprint)).label("n")
+    ).where(
+        FunnelEventModel.store_id == store.id,
+        FunnelEventModel.created_at >= d30,
+        FunnelEventModel.session_fingerprint.isnot(None),
+    )
+    sessions = int((await db.execute(sess_q)).scalar() or 0)
 
     yours: dict[str, float | None] = {
-        "aov_cents": int(o.revenue) / orders if orders else None,
-        "refund_rate_pct": int(o.refunded) / orders * 100 if orders else None,
+        "aov_cents": int(o.net_revenue) / net_orders if net_orders else None,
+        "refund_rate_pct": int(o.refunded) / placed * 100 if placed else None,
         "repeat_rate_pct": repeaters / len(cust) * 100 if cust else None,
         "cod_rejection_rate_pct": (
             cod_returned / cod_resolved * 100 if cod_resolved >= 5 else None
         ),
-        "conversion_rate_pct": orders / sessions * 100 if sessions >= 100 else None,
+        "conversion_rate_pct": placed / sessions * 100 if sessions >= 100 else None,
     }
 
     industry = settings.get("industry") or None
-    tier = size_tier(orders)
+    tier = size_tier(placed)
     items = []
     for metric, own_value in yours.items():
         cell = resolve_cell(cells_by_key, industry, tier, metric)

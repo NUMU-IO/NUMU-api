@@ -32,7 +32,6 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.order import OrderStatus
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.funnel_event import (
@@ -41,7 +40,24 @@ from src.infrastructure.database.models.tenant.funnel_event import (
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.product import ProductModel
 
-_NON_REVENUE_STATUSES = (OrderStatus.CANCELLED, OrderStatus.REFUNDED)
+# Statuses that never represent demand: killed (cancelled), returned money
+# (refunded), never billable (draft — merchant-only, invisible to the
+# customer), never paid (payment_failed). RETURNED stays IN booked revenue
+# deliberately: it was real demand; the collected/COD views subtract it.
+#
+# ⚠️ Compared as lowercased TEXT, not enum binds: the PG ``orderstatus``
+# enum carries a historical mix of label cases (UPPERCASE names for most
+# members, lowercase for ``payment_failed``/``pending_deposit``/
+# ``returned``). Binding ``OrderStatus.PAYMENT_FAILED`` raises
+# ``invalid input value for enum`` (no uppercase label exists), and a
+# single-case text comparison silently misses rows stored in the other
+# case. ``lower(status::text)`` matches every label spelling.
+_NON_REVENUE_STATUSES_LC = ("cancelled", "refunded", "draft", "payment_failed")
+
+
+def _status_lc(col=None):
+    """``lower(status::text)`` — case-proof orderstatus comparisons."""
+    return func.lower(cast(OrderModel.status if col is None else col, String))
 
 
 class AnalyticsRepository:
@@ -62,7 +78,7 @@ class AnalyticsRepository:
             OrderModel.store_id == store_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
         ]
 
     # ── Traffic sources ─────────────────────────────────────────────
@@ -343,7 +359,7 @@ class AnalyticsRepository:
             OrderModel.store_id == store_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             OrderModel.payment_status.in_([
                 PaymentStatus.PAID,
                 PaymentStatus.PARTIALLY_REFUNDED,
@@ -385,7 +401,7 @@ class AnalyticsRepository:
             OrderModel.store_id == store_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             OrderModel.payment_status.in_([
                 PaymentStatus.PAID,
                 PaymentStatus.PARTIALLY_REFUNDED,
@@ -445,7 +461,7 @@ class AnalyticsRepository:
                 OrderModel.store_id == store_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
                 OrderModel.payment_status.in_([
                     PaymentStatus.PAID,
                     PaymentStatus.PARTIALLY_REFUNDED,
@@ -510,7 +526,7 @@ class AnalyticsRepository:
             )
             .where(
                 OrderModel.store_id == store_id,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id)
         )
@@ -1156,8 +1172,8 @@ class AnalyticsRepository:
         Each row has the data RFM/CLV needs: orders, total_spent_cents,
         first_order_at, last_order_at — computed in SQL so the scorer
         works on a customer-sized set instead of an order-sized one.
-        Cancelled and refunded orders are excluded so they don't
-        artificially inflate frequency or spend.
+        Non-revenue orders (cancelled/refunded/draft/payment_failed) are
+        excluded so they don't artificially inflate frequency or spend.
         """
         query = (
             select(
@@ -1206,7 +1222,7 @@ class AnalyticsRepository:
             .where(
                 OrderModel.store_id == store_id,
                 OrderModel.customer_id.in_(customer_ids),
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id)
         )
@@ -1234,7 +1250,7 @@ class AnalyticsRepository:
             .where(
                 OrderModel.store_id == store_id,
                 OrderModel.customer_id.in_(customer_ids),
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id, month_expr)
         )
@@ -1708,7 +1724,7 @@ class AnalyticsRepository:
         ).where(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= since,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
         )
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
 
@@ -1866,7 +1882,7 @@ class AnalyticsRepository:
             OrderModel.campaign_id == campaign_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
         )
         order_query = self._tenant_filter(order_query)
         order_row = (await self.session.execute(order_query)).one()
@@ -1895,7 +1911,7 @@ class AnalyticsRepository:
             OrderModel.campaign_id == campaign_id,
             OrderModel.created_at >= date_from,
             OrderModel.created_at <= date_to,
-            OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+            _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
         )
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
         li = cast(line_items_cte.c.li, JSONB)
@@ -1967,7 +1983,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
                 OrderModel.coupon_code.isnot(None),
             )
             .group_by(OrderModel.coupon_code)
@@ -2088,7 +2104,7 @@ class AnalyticsRepository:
         join_clause = (
             (OrderModel.customer_id == CustomerModel.id)
             & (OrderModel.store_id == store_id)
-            & (OrderModel.status.notin_(_NON_REVENUE_STATUSES))
+            & (_status_lc().notin_(_NON_REVENUE_STATUSES_LC))
         )
         if tid:
             join_clause = join_clause & (OrderModel.tenant_id == tid)
@@ -2192,7 +2208,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(order_channel_expr)
         )
@@ -2283,7 +2299,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(
                 OrderModel.utm_source,
@@ -2374,7 +2390,7 @@ class AnalyticsRepository:
                 OrderModel.store_id == store_id,
                 OrderModel.campaign_id.is_not(None),
                 OrderModel.customer_id.is_not(None),
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.customer_id)
             .subquery()
@@ -2401,7 +2417,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by("kind")
         )
@@ -2472,7 +2488,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id == campaign_id,
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(bin_idx)
         )
@@ -2542,7 +2558,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id.in_(campaign_ids),
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.campaign_id)
         )
@@ -2590,7 +2606,7 @@ class AnalyticsRepository:
                 OrderModel.campaign_id.in_(campaign_ids),
                 OrderModel.created_at >= date_from,
                 OrderModel.created_at <= date_to,
-                OrderModel.status.notin_(_NON_REVENUE_STATUSES),
+                _status_lc().notin_(_NON_REVENUE_STATUSES_LC),
             )
             .group_by(OrderModel.campaign_id, order_bucket_expr)
             .order_by(order_bucket_expr)

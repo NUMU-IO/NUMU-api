@@ -53,10 +53,9 @@ async def _collect_store_metrics(session) -> list[dict]:
     """
     from datetime import UTC, datetime, timedelta
 
-    from sqlalchemy import func, select
+    from sqlalchemy import String, cast, func, select
 
     from src.application.services.benchmark_service import size_tier
-    from src.core.entities.order import OrderStatus
     from src.infrastructure.database.models.tenant.funnel_event import (
         FunnelEventModel,
     )
@@ -79,20 +78,33 @@ async def _collect_store_metrics(session) -> list[dict]:
 
     ids = list(opted_in.keys())
 
+    # Metric definitions (MUST stay identical to the /benchmarks read
+    # endpoint or "yours vs peers" compares apples to oranges):
+    #   placed = every real customer order (drafts and failed payments
+    #            never happened as demand)
+    #   net    = placed minus cancelled/refunded → AOV basis
+    #   refund_rate = refunded / placed
+    # Status comparisons use lower(status::text) — the orderstatus enum
+    # has mixed-case labels (payment_failed has no uppercase label at
+    # all; binding the enum member raises) — see analytics_repository.
+    status_lc = func.lower(cast(OrderModel.status, String))
+    placed_filter = status_lc.notin_(("draft", "payment_failed"))
+    net_filter = status_lc.notin_(("draft", "payment_failed", "cancelled", "refunded"))
+
     # ── 30d orders: volume, AOV, refund rate ──
     o30_q = (
         select(
             OrderModel.store_id,
-            func.count().label("orders"),
-            func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
-            func.count()
-            .filter(OrderModel.status == OrderStatus.REFUNDED)
-            .label("refunded"),
+            func.count().filter(placed_filter).label("placed"),
+            func.count().filter(status_lc == "refunded").label("refunded"),
+            func.count().filter(net_filter).label("net_orders"),
+            func.coalesce(func.sum(OrderModel.total).filter(net_filter), 0).label(
+                "net_revenue"
+            ),
         )
         .where(
             OrderModel.store_id.in_(ids),
             OrderModel.created_at >= d30,
-            OrderModel.status != OrderStatus.DRAFT,
         )
         .group_by(OrderModel.store_id)
     )
@@ -109,7 +121,7 @@ async def _collect_store_metrics(session) -> list[dict]:
             OrderModel.store_id.in_(ids),
             OrderModel.created_at >= d90,
             OrderModel.customer_id.isnot(None),
-            OrderModel.status.notin_([OrderStatus.CANCELLED, OrderStatus.REFUNDED]),
+            net_filter,
         )
         .group_by(OrderModel.store_id, OrderModel.customer_id)
         .subquery()
@@ -126,15 +138,13 @@ async def _collect_store_metrics(session) -> list[dict]:
         select(
             OrderModel.store_id,
             func.count().label("resolved"),
-            func.count()
-            .filter(OrderModel.status == OrderStatus.RETURNED)
-            .label("returned"),
+            func.count().filter(status_lc == "returned").label("returned"),
         )
         .where(
             OrderModel.store_id.in_(ids),
             OrderModel.created_at >= d90,
             OrderModel.payment_method == "cod",
-            OrderModel.status.in_([OrderStatus.DELIVERED, OrderStatus.RETURNED]),
+            status_lc.in_(("delivered", "returned")),
         )
         .group_by(OrderModel.store_id)
     )
@@ -162,18 +172,19 @@ async def _collect_store_metrics(session) -> list[dict]:
     rows = []
     for store_id, industry in opted_in.items():
         o = o30.get(store_id)
-        orders = int(o.orders) if o else 0
-        if orders == 0:
+        placed = int(o.placed) if o else 0
+        if placed == 0:
             continue  # dormant this month — nothing meaningful to contribute
+        net_orders = int(o.net_orders)
         rep = repeat.get(store_id)
         cd = cod.get(store_id)
         sess = sessions.get(store_id, 0)
         rows.append({
             "industry": industry,
-            "size_tier": size_tier(orders),
+            "size_tier": size_tier(placed),
             "metrics": {
-                "aov_cents": int(o.revenue) / orders,
-                "refund_rate_pct": int(o.refunded) / orders * 100,
+                "aov_cents": (int(o.net_revenue) / net_orders if net_orders else None),
+                "refund_rate_pct": int(o.refunded) / placed * 100,
                 "repeat_rate_pct": (
                     int(rep.repeaters) / int(rep.customers) * 100
                     if rep and int(rep.customers) > 0
@@ -184,7 +195,7 @@ async def _collect_store_metrics(session) -> list[dict]:
                     if cd and int(cd.resolved) >= 5
                     else None
                 ),
-                "conversion_rate_pct": (orders / sess * 100 if sess >= 100 else None),
+                "conversion_rate_pct": (placed / sess * 100 if sess >= 100 else None),
             },
         })
     return rows
