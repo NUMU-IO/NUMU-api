@@ -164,6 +164,15 @@ class MarketplaceThemeVersionModel(Base, UUIDMixin):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()"), nullable=False
     )
+    # Advances on every status transition (pending_build → building →
+    # published/build_failed). The theme_marketplace_watchdog task relies on
+    # this to detect versions stuck in `building` past the build timeout.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("NOW()"),
+        onupdate=text("NOW()"),
+        nullable=False,
+    )
 
     theme: Mapped[MarketplaceThemeModel] = relationship(
         "MarketplaceThemeModel", back_populates="versions", lazy="selectin"
