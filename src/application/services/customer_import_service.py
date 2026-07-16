@@ -38,6 +38,7 @@ TARGET_FIELDS: tuple[str, ...] = (
     "last_name",
     "email",
     "phone",
+    "location",
     "accepts_marketing",
     "notes",
     "tags",
@@ -92,6 +93,21 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
         "موبايل",
         "هاتف",
         "واتساب",
+    ),
+    "location": (
+        "location",
+        "city",
+        "governorate",
+        "gov",
+        "region",
+        "state",
+        "area",
+        "address",
+        "المدينة",
+        "المحافظة",
+        "المنطقة",
+        "العنوان",
+        "الموقع",
     ),
     "accepts_marketing": (
         "accepts marketing",
@@ -234,11 +250,13 @@ def _split_name(full: str) -> tuple[str, str]:
     return full.strip(), ""
 
 
-def _placeholder_email(phone: str, store_slug: str) -> str:
-    """Deterministic placeholder for phone-only rows.
+def placeholder_email(phone: str, store_slug: str) -> str:
+    """Deterministic placeholder for phone-only customers.
 
+    Public: the manual-create route uses it too, so a phone-only customer
+    added by hand dedupes against the same person imported from a sheet.
     MUST stay byte-identical to order_import_service._placeholder_email —
-    the two importers dedupe against each other through this format.
+    the importers dedupe against each other through this format.
     The slug is sanitized so a legacy/unicode slug can't produce a string
     the Email VO rejects (which would fail every phone-only row).
     """
@@ -341,11 +359,13 @@ class CustomerImportService:
             tgt: col for col, tgt in mapping.items() if tgt in TARGET_FIELDS
         }
 
-        # A row needs a name (full or first) and a way to reach the customer.
+        # A row needs a name (full or first) and a phone. Email/location are
+        # optional — the merchant's rule: only name/phone/location matter,
+        # and sheets frequently lack a location column entirely.
         if "name" not in field_to_col and "first_name" not in field_to_col:
             raise ValueError("missing_required_field:name")
-        if "email" not in field_to_col and "phone" not in field_to_col:
-            raise ValueError("missing_required_field:email_or_phone")
+        if "phone" not in field_to_col:
+            raise ValueError("missing_required_field:phone")
 
         errors: list[ImportRowError] = []
         created = 0
@@ -391,9 +411,9 @@ class CustomerImportService:
             raise _RowSkipped("missing_name")
 
         phone = val("phone")
+        if not phone:
+            raise _RowSkipped("missing_phone")
         email_raw = val("email")
-        if not email_raw and not phone:
-            raise _RowSkipped("missing_contact")
 
         # Email — fall back to a phone-derived placeholder so phone-only
         # sheets still import and dedupe on re-upload.
@@ -402,15 +422,13 @@ class CustomerImportService:
         except Exception:
             email_vo = None
         if email_vo is None:
-            if not phone:
-                raise _RowSkipped("invalid_email")
             # Phone-only row: the phone IS the identity — dedupe against
             # customers who already exist with that number under a real
             # email (e.g. created by an earlier row or by order import).
             e164 = PhoneNumber(value=phone).value
             if await self.customer_repo.get_by_phone(store.id, e164):
                 raise _RowSkipped(f"duplicate:{phone}")
-            email_vo = Email(value=_placeholder_email(phone, store.slug))
+            email_vo = Email(value=placeholder_email(phone, store.slug))
 
         if await self.customer_repo.email_exists(store.id, email_vo):
             raise _RowSkipped(f"duplicate:{email_vo}")
@@ -418,18 +436,23 @@ class CustomerImportService:
         notes = val("notes") or None
         tags = _parse_tags(val("tags"))
         accepts_marketing = _parse_bool(val("accepts_marketing"))
+        location = val("location") or None
+
+        metadata: dict[str, Any] = {"source": "import"}
+        if location:
+            metadata["location"] = location
 
         customer = Customer(
             store_id=store.id,
             email=email_vo,
             first_name=first,
             last_name=last or "—",
-            phone=phone or None,
+            phone=phone,
             accepts_marketing=accepts_marketing,
             is_verified=False,
             notes=notes,
             tags=tags,
-            metadata={"source": "import"},
+            metadata=metadata,
         )
         await self.customer_repo.create(customer, tenant_id=store.tenant_id)
 
