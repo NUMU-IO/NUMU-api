@@ -101,15 +101,22 @@ class CustomerUpdateProfileRequest(BaseModel):
 
 class MerchantCreateCustomerRequest(BaseModel):
     """Merchant-created customer (no password — the customer can't log in
-    until they register themselves with the same email on the storefront)."""
+    until they register themselves with the same email on the storefront).
+
+    Required: name + phone + location — matching how Egyptian merchants
+    actually capture customers (Instagram/WhatsApp orders). Email is
+    optional; when absent, a phone-derived placeholder is stored using the
+    same convention as the CSV importers so dedupe keeps working.
+    """
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "email": "ahmed@example.com",
                 "first_name": "Ahmed",
                 "last_name": "Hassan",
                 "phone": "+201234567890",
+                "location": "Cairo",
+                "email": "ahmed@example.com",
                 "accepts_marketing": True,
                 "notes": "VIP — met at the Cairo pop-up",
                 "tags": ["vip", "wholesale"],
@@ -117,17 +124,23 @@ class MerchantCreateCustomerRequest(BaseModel):
         }
     )
 
-    email: EmailStr = Field(description="Customer email address")
     first_name: SanitizedStr = Field(
         ..., min_length=1, max_length=100, description="First name"
     )
-    last_name: SanitizedStr = Field(
-        ..., min_length=1, max_length=100, description="Last name"
+    last_name: SanitizedStr | None = Field(
+        None, max_length=100, description="Last name (optional)"
     )
     phone: PhoneField = Field(
-        None,
+        ...,
         description=("Phone. Accepts E.164 or {country_code, local}; stored as E.164."),
     )
+    location: SanitizedStr = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="City / governorate / area the customer ships to",
+    )
+    email: EmailStr | None = Field(None, description="Email (optional)")
     accepts_marketing: bool = Field(
         False, description="Whether the customer opts in to marketing"
     )
@@ -137,6 +150,14 @@ class MerchantCreateCustomerRequest(BaseModel):
     tags: list[str] = Field(
         default_factory=list, max_length=50, description="Customer tags"
     )
+
+    @field_validator("phone")
+    @classmethod
+    def _require_phone(cls, v: str | None) -> str:
+        # PhoneField maps ""/None to None — phone is required here.
+        if not v:
+            raise ValueError("Phone number is required.")
+        return v
 
     @field_validator("tags")
     @classmethod
@@ -382,6 +403,9 @@ class CustomerResponse(BaseModel):
     phone: str | None = Field(None, description="Phone number")
     accepts_marketing: bool = Field(False, description="Marketing opt-in")
     is_verified: bool = Field(False, description="Whether email is verified")
+    location: str | None = Field(
+        None, description="Merchant-captured city / governorate (from metadata)"
+    )
     total_orders: int = Field(0, description="Lifetime order count")
     total_spent: int = Field(0, description="Lifetime spend in cents")
     default_address_id: str | None = Field(None, description="Default address UUID")

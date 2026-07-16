@@ -21,6 +21,7 @@ from src.api.v1.schemas.public.customer import (
     CustomerResponse,
     MerchantCreateCustomerRequest,
 )
+from src.application.services.customer_import_service import placeholder_email
 from src.application.use_cases.customers.list_customers import ListCustomersUseCase
 from src.core.entities.customer import Customer
 from src.core.entities.store import Store
@@ -42,16 +43,23 @@ def _customer_response(
     ``customer`` may be a Customer entity or a CustomerDTO; both expose the
     same attribute names and CustomerResponse._stringify coerces the VOs.
     """
+    meta = getattr(customer, "metadata", None) or {}
+    # "—" is the storage sentinel for "no last name" (import + manual create);
+    # don't leak it into the display name.
+    last = customer.last_name if customer.last_name not in ("—", "") else None
+    full_name = f"{customer.first_name} {last}" if last else str(customer.first_name)
     return CustomerResponse(
         id=customer.id,
         store_id=customer.store_id,
         email=customer.email,
         first_name=customer.first_name,
         last_name=customer.last_name,
-        full_name=f"{customer.first_name} {customer.last_name}",
+        full_name=full_name,
         phone=customer.phone,
         accepts_marketing=customer.accepts_marketing,
         is_verified=customer.is_verified,
+        location=(meta.get("location") if isinstance(meta, dict) else None)
+        or getattr(customer, "location", None),
         total_orders=total_orders,
         total_spent=total_spent,
         default_address_id=customer.default_address_id,
@@ -138,21 +146,27 @@ async def create_store_customer(
             detail="store_missing_tenant",
         )
 
-    email = Email(value=request.email)
+    # Email is optional — fall back to the phone-derived placeholder shared
+    # with the CSV importers, so a phone-only customer created here dedupes
+    # against the same person imported from a sheet (and vice versa).
+    if request.email:
+        email = Email(value=request.email)
+    else:
+        email = Email(value=placeholder_email(request.phone, store.slug))
     if await customer_repo.email_exists(store.id, email):
-        raise EntityAlreadyExistsError("Customer", "email", request.email)
+        raise EntityAlreadyExistsError("Customer", "email", str(email))
 
     customer = Customer(
         store_id=store.id,
         email=email,
         first_name=request.first_name,
-        last_name=request.last_name,
-        phone=request.phone or None,
+        last_name=request.last_name or "—",
+        phone=request.phone,
         accepts_marketing=request.accepts_marketing,
         is_verified=False,
         notes=request.notes,
         tags=request.tags,
-        metadata={"source": "manual"},
+        metadata={"source": "manual", "location": request.location},
     )
     created = await customer_repo.create(customer, tenant_id=store.tenant_id)
 

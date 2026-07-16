@@ -19,6 +19,7 @@ class CustomerDTO(BaseDTO):
     phone: str | None = None
     accepts_marketing: bool = False
     is_verified: bool = False
+    location: str | None = None  # merchant-captured city/area (metadata)
     total_orders: int = 0
     total_spent: int = 0
     default_address_id: str | None = None
@@ -28,6 +29,7 @@ class CustomerDTO(BaseDTO):
     @classmethod
     def from_entity(cls, entity) -> "CustomerDTO":
         """Create DTO from entity."""
+        meta = getattr(entity, "metadata", None) or {}
         return cls(
             id=str(entity.id),
             store_id=str(entity.store_id),
@@ -38,6 +40,7 @@ class CustomerDTO(BaseDTO):
             phone=str(entity.phone) if entity.phone else None,
             accepts_marketing=entity.accepts_marketing,
             is_verified=entity.is_verified,
+            location=meta.get("location") if isinstance(meta, dict) else None,
             total_orders=entity.total_orders,
             total_spent=entity.total_spent,
             default_address_id=str(entity.default_address_id)
