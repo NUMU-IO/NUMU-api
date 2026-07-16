@@ -14,6 +14,7 @@ from src.infrastructure.database.models.public.tenant_membership import (
     TenantMembershipModel,
 )
 from src.infrastructure.messaging.celery_app import celery_app
+from src.infrastructure.tenancy.rls import enable_rls_bypass
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ async def expire_temporary_grants(grant_id: str | None = None) -> dict:
     extended after scheduling is left for a later sweep). Idempotent either way.
     """
     async with AsyncSessionLocal() as db:
+        await enable_rls_bypass(db)  # cross-tenant platform sweep
         conditions = [
             TemporaryAccessGrantModel.valid_until < datetime.utcnow(),
             TemporaryAccessGrantModel.revoked_at.is_(None),
@@ -64,6 +66,7 @@ async def expire_temporary_grants(grant_id: str | None = None) -> dict:
 async def expire_access_requests() -> dict:
     """Expire pending access requests that have passed their expiry time."""
     async with AsyncSessionLocal() as db:
+        await enable_rls_bypass(db)  # cross-tenant platform sweep
         from src.infrastructure.database.models.public.access_request import (
             AccessRequestModel,
             AccessRequestStatus,
@@ -90,6 +93,7 @@ async def expire_access_requests() -> dict:
 async def cleanup_staff_sessions() -> dict:
     """Clean up old revoked staff sessions."""
     async with AsyncSessionLocal() as db:
+        await enable_rls_bypass(db)  # cross-tenant platform sweep
         from src.infrastructure.database.models.public.staff_session import (
             StaffSessionModel,
         )

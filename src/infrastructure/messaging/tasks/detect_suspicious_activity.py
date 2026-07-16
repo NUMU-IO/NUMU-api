@@ -15,6 +15,7 @@ from src.infrastructure.database.models.public.tenant_membership import (
 )
 from src.infrastructure.messaging.celery_app import celery_app
 from src.infrastructure.services.staff_risk_service import SuspiciousActivityDetector
+from src.infrastructure.tenancy.rls import enable_rls_bypass
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 async def detect_suspicious_activity() -> dict:
     """Detect suspicious staff activity patterns."""
     async with AsyncSessionLocal() as db:
+        await enable_rls_bypass(db)  # cross-tenant platform sweep
         detector = SuspiciousActivityDetector(db)
 
         result = await db.execute(
@@ -85,6 +87,7 @@ async def detect_suspicious_activity() -> dict:
 async def compute_staff_risk_scores(tenant_id: str | None = None) -> dict:
     """Compute risk scores for all staff memberships."""
     async with AsyncSessionLocal() as db:
+        await enable_rls_bypass(db)  # cross-tenant platform sweep
         from uuid import UUID
 
         calc = RiskScoreCalculator(db)
