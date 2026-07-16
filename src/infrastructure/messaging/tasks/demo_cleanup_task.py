@@ -43,20 +43,25 @@ async def _async_cleanup(batch_size: int) -> dict:
                 subdomain = tenant.subdomain
                 owner_id = tenant.owner_id
 
-                # Delete the tenant row — cascading FKs handle stores/etc.
-                await session.delete(tenant)
-                await session.flush()
+                # SAVEPOINT per tenant — without it, one failed delete
+                # aborts the outer transaction and every remaining tenant
+                # (and the final commit) fails with it.
+                async with session.begin_nested():
+                    # Delete the tenant row — DB-level ON DELETE CASCADE
+                    # FKs handle stores/products/etc.
+                    await session.delete(tenant)
+                    await session.flush()
 
-                # Delete the ephemeral demo user if present
-                if owner_id:
-                    from sqlalchemy import select
+                    # Delete the ephemeral demo user if present
+                    if owner_id:
+                        from sqlalchemy import select
 
-                    from src.infrastructure.database.models import UserModel
+                        from src.infrastructure.database.models import UserModel
 
-                    user_q = select(UserModel).where(UserModel.id == owner_id)
-                    user = (await session.execute(user_q)).scalar_one_or_none()
-                    if user and str(user.email).endswith("@demo.numu.local"):
-                        await session.delete(user)
+                        user_q = select(UserModel).where(UserModel.id == owner_id)
+                        user = (await session.execute(user_q)).scalar_one_or_none()
+                        if user and str(user.email).endswith("@demo.numu.local"):
+                            await session.delete(user)
 
                 deleted += 1
                 logger.info(
