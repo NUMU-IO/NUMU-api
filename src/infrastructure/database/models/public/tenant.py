@@ -157,7 +157,17 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
 
     # Relationships
     owner = relationship("UserModel", back_populates="owned_tenants", lazy="selectin")
-    stores = relationship("StoreModel", back_populates="tenant", lazy="selectin")
+    # passive_deletes="all": stores.tenant_id is NOT NULL with DB-level
+    # ON DELETE CASCADE, so on tenant delete the ORM must leave the loaded
+    # stores untouched — its default "nullify the FK" emits
+    # `UPDATE stores SET tenant_id=NULL` and violates the NOT NULL
+    # constraint (broke the demo-cleanup beat task).
+    stores = relationship(
+        "StoreModel",
+        back_populates="tenant",
+        lazy="selectin",
+        passive_deletes="all",
+    )
 
     @property
     def schema_name(self) -> str:

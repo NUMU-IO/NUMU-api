@@ -41,16 +41,20 @@ async def _async_purge(batch_size: int) -> dict:
                 subdomain = tenant.subdomain
                 owner_id = tenant.owner_id
 
-                await session.delete(tenant)
-                await session.flush()
+                # SAVEPOINT per tenant — without it, one failed delete
+                # aborts the outer transaction and every remaining tenant
+                # (and the final commit) fails with it.
+                async with session.begin_nested():
+                    await session.delete(tenant)
+                    await session.flush()
 
-                # Clean up orphaned owner user if it's a demo-converted
-                # or trial-only user with no other tenants
-                if owner_id:
-                    user_q = select(UserModel).where(UserModel.id == owner_id)
-                    user = (await session.execute(user_q)).scalar_one_or_none()
-                    if user and str(user.email).endswith("@demo.numu.local"):
-                        await session.delete(user)
+                    # Clean up orphaned owner user if it's a demo-converted
+                    # or trial-only user with no other tenants
+                    if owner_id:
+                        user_q = select(UserModel).where(UserModel.id == owner_id)
+                        user = (await session.execute(user_q)).scalar_one_or_none()
+                        if user and str(user.email).endswith("@demo.numu.local"):
+                            await session.delete(user)
 
                 deleted += 1
                 logger.info(
