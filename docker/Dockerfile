@@ -62,9 +62,13 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check. The API serves HTTP on :8000; celery worker/beat containers
+# reuse this image with PROCESS_ROLE=celery and run no HTTP server, so the curl
+# probe would fail forever and mark them (falsely) unhealthy. Skip the probe for
+# celery roles — their liveness is tracked via task execution + beat heartbeat.
+# `test ...` (not `[ ... ]`) so Docker doesn't parse the CMD as JSON exec form.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+    CMD test "$PROCESS_ROLE" = "celery" || curl -f http://localhost:8000/api/v1/health || exit 1
 
 # Run the application.
 # --no-access-log: LoggingMiddleware already emits one structured line per
