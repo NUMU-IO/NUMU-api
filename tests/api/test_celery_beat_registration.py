@@ -1,10 +1,16 @@
 """Regression: every Celery beat-schedule entry must reference a registered task.
 
-A ``@celery_app.task(name=...)`` whose name doesn't match the ``"task"`` string
-in ``beat_schedule`` means the scheduled job fails on every tick with "Received
-unregistered task" and silently never runs. That is exactly how the five
-staff-permission sweeps were dead in production: each was registered without the
-``tasks.`` prefix that its beat entry (and the staff event handler) reference.
+A beat entry whose ``"task"`` name isn't registered fails on every tick with
+"Received unregistered task" and silently never runs. Two ways that happened in
+this codebase, both fixed:
+
+- Name mismatch: the five staff-permission sweeps were ``@celery_app.task(
+  name="X")`` while beat + the event handler send ``"tasks.X"``.
+- Missing import: ``ai_insights_tasks`` and ``onboarding_nudge_tasks`` weren't in
+  ``celery_app.conf.imports``, so the worker never loaded them to register.
+
+This suite loads ``conf.include``/``imports`` the way the worker does and asserts
+the whole schedule is wired, so either failure mode is caught before prod.
 """
 
 from __future__ import annotations
@@ -14,10 +20,9 @@ import pytest
 from src.infrastructure.messaging.celery_app import celery_app
 
 # A bare ``import celery_app`` does NOT import the task modules listed in
-# ``conf.include`` — the worker imports those at startup via
+# ``conf.imports`` — the worker imports those at startup via
 # ``import_default_modules()``. Do the same here so the task registry is
-# complete before we assert against it (otherwise every ``include``-only task,
-# including the staff sweeps, looks "unregistered" for the wrong reason).
+# complete before we assert against it.
 celery_app.loader.import_default_modules()
 
 # The staff-permission sweeps that were registered without the ``tasks.`` prefix
@@ -30,17 +35,6 @@ STAFF_PERMISSION_TASKS = (
     "tasks.compute_staff_risk_scores",
 )
 
-# Pre-existing beat entries whose task name is not registered — the SAME bug
-# class as the staff sweeps above, but in separate task families that are out of
-# scope for this fix. Tracked here so the invariant below still guards against
-# NEW breakage while tolerating this known (reported) debt. Shrink this set as
-# each is fixed.
-KNOWN_UNREGISTERED_BEAT_TASKS = frozenset({
-    "tasks.generate_ai_insights",
-    "tasks.send_inactive_merchant_nudges",
-    "tasks.send_trial_expiry_warnings",
-})
-
 
 def _unregistered_beat_tasks() -> set[str]:
     registered = set(celery_app.tasks)
@@ -52,20 +46,13 @@ def _unregistered_beat_tasks() -> set[str]:
     return scheduled - registered
 
 
-def test_no_new_unregistered_beat_tasks() -> None:
-    """Every beat task must be registered, except the documented known-broken
-    set. A NEW mismatch (e.g. a task renamed without updating its beat entry)
-    fails here instead of silently never running in production."""
-    new_breakage = sorted(_unregistered_beat_tasks() - KNOWN_UNREGISTERED_BEAT_TASKS)
-    assert not new_breakage, (
-        "beat_schedule references newly-unregistered tasks "
-        f"('Received unregistered task' every tick): {new_breakage}"
+def test_every_beat_task_is_registered() -> None:
+    """No beat entry may reference an unregistered task."""
+    unregistered = sorted(_unregistered_beat_tasks())
+    assert not unregistered, (
+        "beat_schedule references tasks with no matching registration "
+        f"('Received unregistered task' every tick): {unregistered}"
     )
-
-
-def test_fixed_staff_sweeps_are_no_longer_broken() -> None:
-    """The five staff sweeps must not regress back into the unregistered set."""
-    assert not (set(STAFF_PERMISSION_TASKS) & _unregistered_beat_tasks())
 
 
 @pytest.mark.parametrize("task_name", STAFF_PERMISSION_TASKS)

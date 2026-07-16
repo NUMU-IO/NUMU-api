@@ -76,9 +76,13 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
         "src.infrastructure.messaging.tasks.analytics_rollup_tasks",
+        # Daily AI insights generation (5 AM UTC, after rollups).
+        "src.infrastructure.messaging.tasks.ai_insights_tasks",
         "src.infrastructure.messaging.tasks.social_tasks",
         # Stream 7.1: Onboarding abandoned nudges
         "src.infrastructure.messaging.tasks.onboarding_nudge_task",
+        # Onboarding inactivity + trial-expiry nudges (separate `_tasks` module).
+        "src.infrastructure.messaging.tasks.onboarding_nudge_tasks",
         # Stream 1.5 + 4.6: Demo + trial lifecycle sweepers
         "src.infrastructure.messaging.tasks.demo_cleanup_task",
         "src.infrastructure.messaging.tasks.trial_expiry_task",
