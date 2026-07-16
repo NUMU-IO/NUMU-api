@@ -5,7 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 
-from src.infrastructure.database.connection import get_db_session
+from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.public.permission_change_log import (
     PermissionChangeLogModel,
     PermissionChangeTargetType,
@@ -19,10 +19,10 @@ from src.infrastructure.services.staff_risk_service import SuspiciousActivityDet
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="detect_suspicious_activity")
+@celery_app.task(name="tasks.detect_suspicious_activity")
 async def detect_suspicious_activity() -> dict:
     """Detect suspicious staff activity patterns."""
-    async with get_db_session() as db:
+    async with AsyncSessionLocal() as db:
         detector = SuspiciousActivityDetector(db)
 
         result = await db.execute(
@@ -81,10 +81,10 @@ async def detect_suspicious_activity() -> dict:
         }
 
 
-@celery_app.task(name="compute_staff_risk_scores")
+@celery_app.task(name="tasks.compute_staff_risk_scores")
 async def compute_staff_risk_scores(tenant_id: str | None = None) -> dict:
     """Compute risk scores for all staff memberships."""
-    async with get_db_session() as db:
+    async with AsyncSessionLocal() as db:
         from uuid import UUID
 
         calc = RiskScoreCalculator(db)
