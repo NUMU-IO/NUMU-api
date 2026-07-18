@@ -456,6 +456,7 @@ def compute_full_risk_score(
             # never depends on the network's availability.
             from src.application.services.trust_network_shadow import (
                 compare_with_trust_network,
+                network_factors_to_numu,
                 resolve_authoritative_score,
             )
 
@@ -491,6 +492,26 @@ def compute_full_risk_score(
                 )
 
                 authoritative_level = _risk_level(authoritative_score)
+                # Replace NUMU's factor breakdown with the network's own, so the
+                # stored explanation matches the authoritative score (they
+                # explain different numbers once the models diverge). If the
+                # network sent none, stamp a provenance marker rather than
+                # leaving NUMU's factors under a network score.
+                network_factors = network_factors_to_numu(
+                    tn_comparison.get("service_factors")
+                )
+                if not network_factors:
+                    network_factors = [
+                        {
+                            "name": "trust_network_authoritative",
+                            "score": float(authoritative_score),
+                            "weight": 1.0,
+                            "detail": (
+                                "Score sourced from the NUMU Trust Network; "
+                                "embedded factors superseded."
+                            ),
+                        }
+                    ]
                 await session.execute(
                     update(RiskAssessmentModel)
                     .where(RiskAssessmentModel.id == UUID(assessment_id))
@@ -498,6 +519,7 @@ def compute_full_risk_score(
                         risk_score=authoritative_score,
                         risk_level=authoritative_level,
                         suggested_action=_suggested_action(authoritative_score),
+                        factors=network_factors,
                     )
                 )
                 logger.info(
