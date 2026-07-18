@@ -401,6 +401,7 @@ async def send_daily_digests(
         .all()
     )
     stats["stores_scanned"] = len(stores)
+    bypass_broken = False
 
     for store in stores:
         try:
@@ -569,7 +570,14 @@ async def send_daily_digests(
             try:
                 await enable_rls_bypass(session)
             except Exception:
+                # RLS context is now unknown — continuing could process the
+                # next store under the PREVIOUS tenant's context (sentry PR
+                # review). Abort; the beat retry gets a fresh session.
                 logger.exception("autopilot_digest_bypass_reset_failed")
+                bypass_broken = True
+        if bypass_broken:
+            stats["errors"] += 1
+            break
 
     await session.commit()
     return stats
@@ -797,6 +805,7 @@ async def create_due_checks(session: AsyncSession, now: datetime | None = None) 
         .all()
     )
     stats["scanned"] = len(candidates)
+    bypass_broken = False
 
     for model in candidates:
         try:
@@ -848,7 +857,12 @@ async def create_due_checks(session: AsyncSession, now: datetime | None = None) 
             try:
                 await enable_rls_bypass(session)
             except Exception:
+                # See send_daily_digests — unknown RLS context, abort.
                 logger.exception("autopilot_check_bypass_reset_failed")
+                bypass_broken = True
+        if bypass_broken:
+            stats["errors"] += 1
+            break
 
     await session.commit()
     return stats
@@ -879,6 +893,7 @@ async def send_due_checks(session: AsyncSession, now: datetime | None = None) ->
     check_repo = WhatsAppDeliveryCheckRepository(session)
     due = await check_repo.list_due_sends(now)
     stats["due"] = len(due)
+    bypass_broken = False
 
     for row in due:
         try:
@@ -990,7 +1005,12 @@ async def send_due_checks(session: AsyncSession, now: datetime | None = None) ->
             try:
                 await enable_rls_bypass(session)
             except Exception:
+                # See send_daily_digests — unknown RLS context, abort.
                 logger.exception("autopilot_send_bypass_reset_failed")
+                bypass_broken = True
+        if bypass_broken:
+            stats["errors"] += 1
+            break
 
     await session.commit()
     return stats
@@ -1099,6 +1119,17 @@ async def handle_delivery_response(
             await _ack_customer(session, row, store, "received", language, order)
             return True
         # Terminal-outcome-first so the use case's supersede hook no-ops.
+        # Snapshot the fields we mutate so a failed order transition can
+        # restore the row to a FULLY consistent pre-tap state — restoring
+        # only `outcome` would leave response="received" alongside a
+        # non-terminal outcome AND next_attempt_at=None, stranding the row
+        # outside every sweep's selection criteria (sentry PR review).
+        prior = {
+            "response": row.response,
+            "responded_at": row.responded_at,
+            "outcome": row.outcome,
+            "next_attempt_at": row.next_attempt_at,
+        }
         row.response = "received"
         row.responded_at = now
         row.outcome = "delivered_confirmed"
@@ -1118,9 +1149,8 @@ async def handle_delivery_response(
             await session.commit()
         except Exception:
             await session.rollback()
-            row.outcome = (
-                "pending" if row.attempts < row.max_attempts else ("response_exhausted")
-            )
+            for key, value in prior.items():
+                setattr(row, key, value)
             await session.commit()
             logger.exception("autopilot_deliver_failed", order_id=str(order_id))
             return False
@@ -1201,6 +1231,7 @@ async def close_assumed_delivered(
     check_repo = WhatsAppDeliveryCheckRepository(session)
     due = await check_repo.list_fallback_due(now)
     stats["due"] = len(due)
+    bypass_broken = False
 
     for row in due:
         try:
@@ -1269,7 +1300,12 @@ async def close_assumed_delivered(
             try:
                 await enable_rls_bypass(session)
             except Exception:
+                # See send_daily_digests — unknown RLS context, abort.
                 logger.exception("autopilot_fallback_bypass_reset_failed")
+                bypass_broken = True
+        if bypass_broken:
+            stats["errors"] += 1
+            break
 
     await session.commit()
     return stats
