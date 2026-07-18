@@ -599,6 +599,16 @@ def compute_full_risk_score(
                 # decision as the assessment's suggested_action instead of the
                 # raw ladder. Default off until the shadow log validates
                 # FSM-vs-ladder agreement in production.
+                #
+                # suggested_action precedence — all writes below run in this one
+                # transaction, last wins: FSM (here, when enabled) > cutover
+                # network-ladder action (authoritative_action) > NUMU ladder.
+                # When the Trust Network cutover is ALSO active the FSM decided on
+                # authoritative_score, so the final persisted action stays
+                # consistent with the persisted score / level / factors. Nothing
+                # downstream reads the superseded intermediate action — auto-
+                # cancel/approve, the automation rules (OrderContext), and the
+                # finalised event all key off the score/level, never the action.
                 if get_settings().trust_fsm_decision_enabled:
                     from src.application.services.trust_decision_service import (
                         fsm_to_suggested_action,
