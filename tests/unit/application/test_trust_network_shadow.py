@@ -9,6 +9,8 @@ import httpx
 from src.application.services.trust_network_shadow import (
     build_shadow_request,
     compare_with_trust_network,
+    network_factors_to_numu,
+    resolve_authoritative_score,
     shadow_config,
 )
 
@@ -108,6 +110,40 @@ def test_shadow_drift(monkeypatch):
     assert out["drift"] == 3
 
 
+def test_shadow_captures_network_factors(monkeypatch):
+    # The network's factor breakdown flows through for persistence under cutover.
+    factors = [
+        {
+            "factor": "network_reputation",
+            "score": 90.0,
+            "weight": 0.4,
+            "reason": "3 RTOs across 2 stores",
+        }
+    ]
+    transport = _enable(
+        monkeypatch,
+        lambda r: httpx.Response(200, json={"risk_score": 80, "factors": factors}),
+    )
+    out = asyncio.run(
+        compare_with_trust_network(
+            decision_inputs=DI, numu_risk_score=50, transport=transport
+        )
+    )
+    assert out["service_factors"] == factors
+
+
+def test_shadow_missing_factors_defaults_empty(monkeypatch):
+    transport = _enable(
+        monkeypatch, lambda r: httpx.Response(200, json={"risk_score": 50})
+    )
+    out = asyncio.run(
+        compare_with_trust_network(
+            decision_inputs=DI, numu_risk_score=50, transport=transport
+        )
+    )
+    assert out["service_factors"] == []
+
+
 def test_shadow_non_200_returns_none(monkeypatch):
     transport = _enable(
         monkeypatch, lambda r: httpx.Response(500, json={"detail": "boom"})
@@ -118,3 +154,81 @@ def test_shadow_non_200_returns_none(monkeypatch):
         )
     )
     assert out is None
+
+
+# ── P1-7 cutover: resolve_authoritative_score ───────────────────────────────
+
+
+def test_resolve_cutover_off_uses_numu():
+    # Flag off: NUMU's score wins even when the network score differs wildly.
+    assert resolve_authoritative_score(
+        numu_risk_score=50,
+        tn_comparison={"service_risk_score": 80, "match": False, "drift": 30},
+        cutover_enabled=False,
+    ) == (50, "numu")
+
+
+def test_resolve_cutover_on_uses_network():
+    assert resolve_authoritative_score(
+        numu_risk_score=50,
+        tn_comparison={"service_risk_score": 80},
+        cutover_enabled=True,
+    ) == (80, "network")
+
+
+def test_resolve_fails_open_when_network_silent():
+    # Cutover on but the network didn't answer (None) → NUMU score, never raises.
+    assert resolve_authoritative_score(
+        numu_risk_score=42,
+        tn_comparison=None,
+        cutover_enabled=True,
+    ) == (42, "numu")
+
+
+def test_resolve_ignores_non_numeric_service_score():
+    # Malformed/absent service score → fail open to NUMU (bool is not numeric).
+    for bad in (None, "80", True):
+        assert resolve_authoritative_score(
+            numu_risk_score=42,
+            tn_comparison={"service_risk_score": bad},
+            cutover_enabled=True,
+        ) == (42, "numu")
+
+
+def test_resolve_coerces_float_service_score():
+    assert resolve_authoritative_score(
+        numu_risk_score=10,
+        tn_comparison={"service_risk_score": 73.0},
+        cutover_enabled=True,
+    ) == (73, "network")
+
+
+# ── P1-7 cutover: network_factors_to_numu (factor-shape mapping) ─────────────
+
+
+def test_network_factors_remaps_keys_to_numu_shape():
+    # FactorOut {factor, score, weight, reason} -> NUMU {name, score, weight, detail}
+    out = network_factors_to_numu([
+        {
+            "factor": "network_reputation",
+            "score": 90.0,
+            "weight": 0.4,
+            "reason": "risky (2 stores)",
+        }
+    ])
+    assert out == [
+        {
+            "name": "network_reputation",
+            "score": 90.0,
+            "weight": 0.4,
+            "detail": "risky (2 stores)",
+        }
+    ]
+
+
+def test_network_factors_handles_missing_and_malformed():
+    assert network_factors_to_numu(None) == []
+    assert network_factors_to_numu([]) == []
+    # Non-dict entries are skipped; a partial dict maps present keys, None else.
+    out = network_factors_to_numu(["nope", {"factor": "x"}])
+    assert out == [{"name": "x", "score": None, "weight": None, "detail": None}]

@@ -394,6 +394,27 @@ def compute_full_risk_score(
             if salt:
                 persisted_phone_hash = normalize_and_hash(phone, salt)
 
+        # ── Trust Network cutover — network call (P1-7) ────────────────────
+        # Consult the standalone Trust Network OUTSIDE any DB session, so a
+        # pooled connection is never held across the up-to-3s network call
+        # (Celery pools are small — holding one here would risk pool exhaustion
+        # under concurrent load). Best-effort; rebuilt from decision_inputs so
+        # no PII leaves. The result is resolved into the authoritative score
+        # inside the session below.
+        from src.application.services.trust_network_shadow import (
+            compare_with_trust_network,
+        )
+
+        tn_comparison = None
+        try:
+            tn_comparison = await compare_with_trust_network(
+                decision_inputs=decision_inputs_snapshot,
+                numu_risk_score=full_result.risk_score,
+                order_ref=str(assessment_id),
+            )
+        except Exception as _tn_exc:  # noqa: BLE001 — shadow never affects scoring
+            logger.warning("trust_network_shadow_call_error error=%s", _tn_exc)
+
         async with AsyncSessionLocal() as session:
             await session.execute(text("SET search_path TO public"))
             await session.execute(
@@ -444,6 +465,91 @@ def compute_full_risk_score(
                         days_since,
                     )
 
+            # ── Trust Network cutover gate (P1-7) ──────────────────────────
+            # Resolve which score is authoritative from the network comparison
+            # fetched above (outside this session). When
+            # get_settings().trust_network_authoritative is flipped on — only
+            # after the shadow log confirms sustained zero drift — the network's
+            # risk_score becomes authoritative and drives the persistence,
+            # auto-cancel, and auto-approve below. Fail-open: if the network
+            # didn't answer, NUMU's embedded score is used, so scoring never
+            # depends on the network's availability.
+            from src.application.services.trust_network_shadow import (
+                network_factors_to_numu,
+                resolve_authoritative_score,
+            )
+
+            cutover_enabled = get_settings().trust_network_authoritative
+            authoritative_score, score_source = resolve_authoritative_score(
+                numu_risk_score=full_result.risk_score,
+                tn_comparison=tn_comparison,
+                cutover_enabled=cutover_enabled,
+            )
+            # Default to NUMU's embedded banding; under cutover, re-band the
+            # network's score through NUMU's OWN ladder so the merchant-facing
+            # level / action / automation rules stay consistent with NUMU's
+            # thresholds (identical at zero drift; diverges only as the network's
+            # model improves — the point of the cutover). authoritative_score /
+            # _level / _action flow into every FINAL-decision consumer below: the
+            # FSM (decision + shadow-agreement baseline), auto-cancel,
+            # auto-approve, the automation-rules engine, the finalised event, and
+            # the task's return payload.
+            authoritative_level = full_result.risk_level
+            authoritative_action = full_result.suggested_action
+            if score_source == "network":
+                from src.application.use_cases.shopify.risk_scoring_engine import (
+                    _risk_level,
+                    _suggested_action,
+                )
+
+                authoritative_level = _risk_level(authoritative_score)
+                authoritative_action = _suggested_action(authoritative_score)
+                # Replace NUMU's factor breakdown with the network's own, so the
+                # stored explanation matches the authoritative score (they
+                # explain different numbers once the models diverge). If the
+                # network sent none, stamp a provenance marker rather than
+                # leaving NUMU's factors under a network score.
+                network_factors = network_factors_to_numu(
+                    tn_comparison.get("service_factors")
+                )
+                if not network_factors:
+                    network_factors = [
+                        {
+                            "name": "trust_network_authoritative",
+                            "score": float(authoritative_score),
+                            "weight": 1.0,
+                            "detail": (
+                                "Score sourced from the NUMU Trust Network; "
+                                "embedded factors superseded."
+                            ),
+                        }
+                    ]
+                await session.execute(
+                    update(RiskAssessmentModel)
+                    .where(RiskAssessmentModel.id == UUID(assessment_id))
+                    .values(
+                        risk_score=authoritative_score,
+                        risk_level=authoritative_level,
+                        suggested_action=authoritative_action,
+                        factors=network_factors,
+                    )
+                )
+                logger.info(
+                    "trust_network_cutover source=network assessment=%s "
+                    "numu=%s network=%s",
+                    assessment_id,
+                    full_result.risk_score,
+                    authoritative_score,
+                )
+            elif cutover_enabled:
+                # Cutover is on but the network didn't answer — we fell back to
+                # NUMU's embedded score. Surface it: the authority is degraded.
+                logger.warning(
+                    "trust_network_cutover source=numu_fallback assessment=%s "
+                    "reason=network_no_answer",
+                    assessment_id,
+                )
+
             # ── Phase C Shopify shadow (read-only) ─────────────────────────
             # Log the canonical FSM decision next to the live suggested_action
             # so agreement can be measured before the Shopify path is cut over
@@ -461,7 +567,7 @@ def compute_full_risk_score(
 
                 _fsm_state = decide(
                     DecisionInputs(
-                        risk_score=full_result.risk_score,
+                        risk_score=authoritative_score,
                         customer_trust=trust_result.customer_trust,
                         score_type="final",
                         auto_approve_on_trust_enabled=bool(
@@ -484,8 +590,8 @@ def compute_full_risk_score(
                     "trust_fsm_shadow surface=shopify fsm=%s suggested=%s "
                     "risk=%s trust=%s",
                     _fsm_state.value,
-                    full_result.suggested_action,
-                    full_result.risk_score,
+                    authoritative_action,
+                    authoritative_score,
                     trust_result.customer_trust,
                 )
 
@@ -493,6 +599,16 @@ def compute_full_risk_score(
                 # decision as the assessment's suggested_action instead of the
                 # raw ladder. Default off until the shadow log validates
                 # FSM-vs-ladder agreement in production.
+                #
+                # suggested_action precedence — all writes below run in this one
+                # transaction, last wins: FSM (here, when enabled) > cutover
+                # network-ladder action (authoritative_action) > NUMU ladder.
+                # When the Trust Network cutover is ALSO active the FSM decided on
+                # authoritative_score, so the final persisted action stays
+                # consistent with the persisted score / level / factors. Nothing
+                # downstream reads the superseded intermediate action — auto-
+                # cancel/approve, the automation rules (OrderContext), and the
+                # finalised event all key off the score/level, never the action.
                 if get_settings().trust_fsm_decision_enabled:
                     from src.application.services.trust_decision_service import (
                         fsm_to_suggested_action,
@@ -508,26 +624,10 @@ def compute_full_risk_score(
                     "trust_fsm_shadow_error surface=shopify error=%s", _shadow_exc
                 )
 
-            # ── External shadow: NUMU's embedded scorer vs the standalone Trust
-            # Network /v1/decisions (live equivalence gate before any cutover). OFF
-            # by default; best-effort; rebuilt from decision_inputs so no PII leaves.
-            try:
-                from src.application.services.trust_network_shadow import (
-                    compare_with_trust_network,
-                )
-
-                await compare_with_trust_network(
-                    decision_inputs=decision_inputs_snapshot,
-                    numu_risk_score=full_result.risk_score,
-                    order_ref=str(assessment_id),
-                )
-            except Exception as _tn_exc:  # noqa: BLE001 — shadow never affects scoring
-                logger.warning("trust_network_shadow_call_error error=%s", _tn_exc)
-
             auto_cancelled = bool(
                 settings
                 and settings.cod_risk_scoring_enabled
-                and full_result.risk_score >= settings.auto_cancel_threshold
+                and authoritative_score >= settings.auto_cancel_threshold
                 and cancel_allowed
             )
             if auto_cancelled:
@@ -539,7 +639,7 @@ def compute_full_risk_score(
                 logger.info(
                     "Auto-cancel applied on final score: assessment=%s score=%d threshold=%d",
                     assessment_id,
-                    full_result.risk_score,
+                    authoritative_score,
                     settings.auto_cancel_threshold,
                 )
 
@@ -571,7 +671,7 @@ def compute_full_risk_score(
                 )
                 if should_auto_approve_trusted(
                     customer_trust=trust_result.customer_trust,
-                    risk_score=full_result.risk_score,
+                    risk_score=authoritative_score,
                     auto_approve_on_trust_enabled=True,
                     auto_approve_trust_threshold=int(
                         getattr(settings, "auto_approve_trust_threshold", 80)
@@ -593,7 +693,7 @@ def compute_full_risk_score(
                         "manual_approves=%d",
                         assessment_id,
                         trust_result.customer_trust,
-                        full_result.risk_score,
+                        authoritative_score,
                         manual_approve_count,
                     )
 
@@ -622,8 +722,8 @@ def compute_full_risk_score(
                 installation = install_row.scalar_one_or_none()
 
                 ctx = OrderContext(
-                    risk_score=full_result.risk_score,
-                    risk_level=full_result.risk_level,
+                    risk_score=authoritative_score,
+                    risk_level=authoritative_level,
                     score_type="final",
                     payment_method=payment_method or "unknown",
                     total_cents=total_cents,
@@ -648,8 +748,8 @@ def compute_full_risk_score(
                         shop_domain=installation.shopify_domain,
                         access_token=installation.access_token_encrypted,
                         shopify_order_id=order_id_for_log,
-                        risk_score=full_result.risk_score,
-                        risk_level=full_result.risk_level,
+                        risk_score=authoritative_score,
+                        risk_level=authoritative_level,
                         score_type="final",
                         store_id=store_id,
                         order_number=order_number_for_log,
@@ -776,8 +876,8 @@ def compute_full_risk_score(
                     else None,
                     order_id=assessment.order_id,
                     customer_phone=phone,
-                    risk_score=full_result.risk_score,
-                    risk_level=full_result.risk_level,
+                    risk_score=authoritative_score,
+                    risk_level=authoritative_level,
                     score_type="final",
                     recovery_enabled=recovery_on,
                     has_payment_gateway=has_gateway,
@@ -793,13 +893,13 @@ def compute_full_risk_score(
             "Full risk score computed: assessment=%s store=%s score=%d level=%s",
             assessment_id,
             store_id,
-            full_result.risk_score,
-            full_result.risk_level,
+            authoritative_score,
+            authoritative_level,
         )
         return {
             "assessment_id": assessment_id,
-            "risk_score": full_result.risk_score,
-            "risk_level": full_result.risk_level,
+            "risk_score": authoritative_score,
+            "risk_level": authoritative_level,
             "score_type": "final",
         }
 

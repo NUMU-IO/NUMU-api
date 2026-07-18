@@ -146,6 +146,37 @@ def _review_to_dict(r: Any) -> dict[str, Any]:
     }
 
 
+async def _delivery_checks_export(
+    order_repo: OrderRepository, customer_id: UUID
+) -> list[dict[str, Any]]:
+    """COD Autopilot delivery-check state for the customer's orders
+    (004-cod-autopilot). Best-effort — an export must never 500 over an
+    optional category."""
+    try:
+        from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
+            WhatsAppDeliveryCheckRepository,
+        )
+
+        rows = await WhatsAppDeliveryCheckRepository(
+            order_repo.session
+        ).list_for_customer(customer_id)
+        return [
+            {
+                "order_id": str(r.order_id),
+                "attempts": r.attempts,
+                "response": r.response,
+                "outcome": r.outcome,
+                "first_sent_at": r.first_sent_at.isoformat()
+                if r.first_sent_at
+                else None,
+                "responded_at": r.responded_at.isoformat() if r.responded_at else None,
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
 # ─── Routes ───────────────────────────────────────────────────────
 
 
@@ -202,9 +233,11 @@ async def data_export(
         reviews=[_review_to_dict(r) for r in reviews],
         notification_preferences=current_customer.notification_preferences or {},
         extras={
-            # Reserved for future categories — we surface an empty
-            # dict so themes can reference `extras.X` without checking
-            # for the key first.
+            # COD Autopilot delivery-check conversation state for the
+            # customer's orders (004-cod-autopilot, DSAR path R-13.2).
+            "delivery_checks": await _delivery_checks_export(
+                order_repo, current_customer.id
+            ),
         },
     )
 
@@ -288,6 +321,20 @@ async def delete_account(
         except Exception:
             # Best-effort — don't bail on a single delete failure.
             pass
+
+    # 2b. COD Autopilot (004): blank the raw phone snapshot on the
+    #     customer's delivery-check rows and cancel pending pings —
+    #     erasure path R-13.3. Best-effort like the address sweep.
+    try:
+        from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
+            WhatsAppDeliveryCheckRepository,
+        )
+
+        await WhatsAppDeliveryCheckRepository(
+            customer_repo.session
+        ).anonymize_for_customer(deleted_id)
+    except Exception:
+        pass
 
     # 3. Clear auth cookies so the customer's next request is a guest.
     clear_customer_auth_cookies(response)

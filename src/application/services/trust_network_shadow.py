@@ -81,6 +81,54 @@ def shadow_config() -> dict[str, Any]:
     }
 
 
+def resolve_authoritative_score(
+    *,
+    numu_risk_score: int,
+    tn_comparison: dict[str, Any] | None,
+    cutover_enabled: bool,
+) -> tuple[int, str]:
+    """Pick the authoritative COD risk score — the P1-7 cutover decision.
+
+    Returns ``(score, source)``. ``source`` is ``"network"`` when the cutover is
+    on AND the Trust Network returned a usable score; otherwise ``"numu"``.
+
+    Fail-open by construction: when ``cutover_enabled`` is True but
+    ``tn_comparison`` is ``None`` (network disabled / timeout / non-200) or the
+    service score is missing/non-numeric, the score falls back to NUMU's
+    embedded ``score_order`` result — so COD scoring never depends on network
+    availability (constitution: never block the order flow on the network).
+    """
+    if cutover_enabled and tn_comparison:
+        service = tn_comparison.get("service_risk_score")
+        if isinstance(service, int | float) and not isinstance(service, bool):
+            return int(service), "network"
+    return numu_risk_score, "numu"
+
+
+def network_factors_to_numu(service_factors: Any) -> list[dict[str, Any]]:
+    """Map the Trust Network's ``FactorOut`` list to NUMU's persisted
+    ``factors`` shape.
+
+    Network sends ``{factor, score, weight, reason}`` (it was forked from NUMU's
+    engine); NUMU persists ``{name, score, weight, detail}``. Under cutover the
+    network's score becomes authoritative, so its factors must replace NUMU's on
+    the assessment row or the stored explanation would describe a different
+    score. Returns ``[]`` on missing/malformed input (the caller substitutes a
+    provenance marker so factors are never silently mismatched with the score).
+    """
+    mapped: list[dict[str, Any]] = []
+    for f in service_factors or []:
+        if not isinstance(f, dict):
+            continue
+        mapped.append({
+            "name": f.get("factor"),
+            "score": f.get("score"),
+            "weight": f.get("weight"),
+            "detail": f.get("reason"),
+        })
+    return mapped
+
+
 async def compare_with_trust_network(
     *,
     decision_inputs: dict[str, Any] | None,
@@ -113,7 +161,8 @@ async def compare_with_trust_network(
                 order_ref,
             )
             return None
-        service_score = resp.json().get("risk_score")
+        body = resp.json()
+        service_score = body.get("risk_score")
         if service_score is None:
             return None
         drift = abs(int(service_score) - int(numu_risk_score))
@@ -129,6 +178,10 @@ async def compare_with_trust_network(
         return {
             "numu_risk_score": numu_risk_score,
             "service_risk_score": service_score,
+            # The network's own factor breakdown — persisted under cutover so the
+            # stored explanation matches the network's authoritative score
+            # (raw FactorOut dicts: {factor, score, weight, reason}).
+            "service_factors": body.get("factors") or [],
             "drift": drift,
             "match": match,
         }

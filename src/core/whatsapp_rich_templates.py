@@ -354,4 +354,108 @@ RICH_TEMPLATES: list[dict] = [
             "خصم 10% عند الدفع أونلاين.",
         ],
     },
+    # ─── COD Autopilot (004-cod-autopilot) ────────────────────────────
+    # Daily ship digest — to the MERCHANT's contact phone. One quick-reply
+    # button ("All shipped" → ``shipall:<subdomain>/<digest_id>`` payload);
+    # partial days are handled by a free-text numeric-exceptions reply, so
+    # no second button is needed. {{3}} is a single-line "; "-separated
+    # numbered order list — Meta rejects newlines inside body PARAMETERS,
+    # so the list cannot be multi-line. {{4}} is the capped-count note
+    # (always non-empty; "-" when nothing was capped). UTILITY.
+    {
+        "name": "cod_ship_digest_v1",
+        "language": "en_US",
+        "category": "UTILITY",
+        "body": (
+            "Hello *{{1}}* team 👋 You have {{2}} confirmed orders ready to "
+            "ship today:\n\n"
+            "📦 {{3}}\n\n"
+            "ℹ️ {{4}}\n\n"
+            "Handed everything to your courier? Tap *All shipped* below. "
+            "Shipped only some? Reply with the numbers you did NOT ship, "
+            "for example: except 2, 5"
+        ),
+        "footer": "One tap a day keeps your orders in sync.",
+        "buttons": [
+            {"type": "QUICK_REPLY", "text": "All shipped"},
+        ],
+        "body_examples": [
+            "Cairo Style",
+            "3",
+            "1) ORD-000041 Sara - Nasr City - EGP 450; "
+            "2) ORD-000042 Ahmed - Maadi - EGP 320; "
+            "3) ORD-000043 Mona - Giza - EGP 780",
+            "All your confirmed orders are listed.",
+        ],
+    },
+    {
+        "name": "cod_ship_digest_v1",
+        "language": "ar",
+        "category": "UTILITY",
+        "body": (
+            "أهلاً بفريق *{{1}}* 👋 عندكم {{2}} أوردر متأكد جاهز للشحن "
+            "النهارده:\n\n"
+            "📦 {{3}}\n\n"
+            "ℹ️ {{4}}\n\n"
+            "سلمت كل الأوردرات للمندوب؟ اضغط *تم شحن الكل* تحت. شحنت جزء "
+            "بس؟ رد بأرقام اللي ماتشحنش، مثال: ماعدا 2، 5"
+        ),
+        "footer": "ضغطة واحدة في اليوم وأوردراتك متظبطة.",
+        "buttons": [
+            {"type": "QUICK_REPLY", "text": "تم شحن الكل"},
+        ],
+        "body_examples": [
+            "متجر القاهرة",
+            "٣",
+            "1) ORD-000041 سارة - مدينة نصر - EGP 450; "
+            "2) ORD-000042 أحمد - المعادي - EGP 320; "
+            "3) ORD-000043 منى - الجيزة - EGP 780",
+            "كل الأوردرات المتأكدة موجودة في القايمة.",
+        ],
+    },
+    # Delivery check — to the CUSTOMER, N days after shipped. Three
+    # quick-reply buttons whose payloads carry the action prefix
+    # (``dlvyes:`` / ``dlvnot:`` / ``dlvref:``) + ``<subdomain>/<order_id>``.
+    # UTILITY (order-centric) so the MARKETING frequency cap (131049)
+    # never suppresses it.
+    {
+        "name": "order_delivery_check_v1",
+        "language": "en_US",
+        "category": "UTILITY",
+        "body": (
+            "Hi {{1}} 👋 Quick question — did you receive your order {{2}} "
+            "from *{{3}}*? Tap a button below to let us know."
+        ),
+        "footer": "Your answer helps us serve you better.",
+        "buttons": [
+            {"type": "QUICK_REPLY", "text": "Received"},
+            {"type": "QUICK_REPLY", "text": "Not yet"},
+            {"type": "QUICK_REPLY", "text": "Refused"},
+        ],
+        "body_examples": [
+            "Ahmed",
+            "ORD-000032",
+            "Cairo Style",
+        ],
+    },
+    {
+        "name": "order_delivery_check_v1",
+        "language": "ar",
+        "category": "UTILITY",
+        "body": (
+            "أهلاً يا {{1}} 👋 سؤال سريع — استلمت طلبك {{2}} من *{{3}}*؟ "
+            "اضغط أحد الأزرار تحت وقولنا."
+        ),
+        "footer": "إجابتك بتساعدنا نخدمك أحسن.",
+        "buttons": [
+            {"type": "QUICK_REPLY", "text": "استلمته"},
+            {"type": "QUICK_REPLY", "text": "لسه"},
+            {"type": "QUICK_REPLY", "text": "رفضته"},
+        ],
+        "body_examples": [
+            "أحمد",
+            "ORD-000032",
+            "متجر القاهرة",
+        ],
+    },
 ]

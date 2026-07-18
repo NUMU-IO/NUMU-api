@@ -160,6 +160,11 @@ async def whatsapp_callback(
                     # COD "tap to confirm": process quick-reply button taps
                     # on order_confirmation_request_v1 messages.
                     await _process_confirm_replies(db, change.get("value", {}))
+
+                    # COD Autopilot (004): merchant free-text replies to an
+                    # open ship digest ("except 2, 5"). Button taps ride the
+                    # confirm-replies dispatcher above.
+                    await _process_digest_text_replies(db, change.get("value", {}))
                 elif field == "message_template_status_update":
                     # backend-030 / US5 / FR-028 — template approval
                     # status updates from Meta. Routed here by the
@@ -267,6 +272,12 @@ async def _process_confirm_replies(db: AsyncSession, value: dict) -> None:
     phone / already-acted all no-op). Failures are swallowed so a reply error
     never blocks the 200 the webhook owes Meta.
     """
+    from functools import partial
+
+    from src.application.services.cod_autopilot_service import (
+        handle_delivery_response,
+        handle_shipall,
+    )
     from src.application.services.order_confirmation_service import (
         cancel_order_from_whatsapp,
         confirm_order_from_whatsapp,
@@ -278,6 +289,12 @@ async def _process_confirm_replies(db: AsyncSession, value: dict) -> None:
         "confirm": confirm_order_from_whatsapp,
         "postpone": postpone_order_from_whatsapp,
         "cancel": cancel_order_from_whatsapp,
+        # COD Autopilot (004): merchant digest tap + customer delivery
+        # check. Same defensive/idempotent contract as the confirm flow.
+        "shipall": handle_shipall,
+        "dlvyes": partial(handle_delivery_response, action="dlvyes"),
+        "dlvnot": partial(handle_delivery_response, action="dlvnot"),
+        "dlvref": partial(handle_delivery_response, action="dlvref"),
     }
 
     for message in value.get("messages", []):
@@ -294,6 +311,32 @@ async def _process_confirm_replies(db: AsyncSession, value: dict) -> None:
             await handler(db, payload=payload, from_phone=from_number)
         except Exception:
             logger.exception("whatsapp_confirm_reply_failed")
+
+
+async def _process_digest_text_replies(db: AsyncSession, value: dict) -> None:
+    """COD Autopilot (004, FR-006/FR-007): route merchant free-text
+    messages to their open ship digest.
+
+    Only text messages whose sender matches an open, unexpired digest's
+    merchant phone are consumed; everything else is untouched (regular
+    customers never hit this path because they have no digest row).
+    Failures are swallowed so a reply error never blocks Meta's 200.
+    """
+    from src.application.services.cod_autopilot_service import (
+        handle_digest_text_reply,
+    )
+
+    for message in value.get("messages", []):
+        if message.get("type") != "text":
+            continue
+        text = (message.get("text") or {}).get("body")
+        from_number = message.get("from")
+        if not text or not from_number:
+            continue
+        try:
+            await handle_digest_text_reply(db, text=text, from_phone=from_number)
+        except Exception:
+            logger.exception("whatsapp_digest_text_reply_failed")
 
 
 async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> None:

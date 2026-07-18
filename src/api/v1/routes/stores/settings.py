@@ -21,6 +21,7 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     BostaCredentialsResponse,
+    CodAutopilotResponse,
     CodDepositPolicy,
     CodTrustResponse,
     CreateShippingZoneRequest,
@@ -59,6 +60,7 @@ from src.api.v1.schemas.tenant.settings import (
     ShippingZone,
     StoreSettingsResponse,
     UpdateAssetMetaRequest,
+    UpdateCodAutopilotRequest,
     UpdateCodTrustRequest,
     UpdateCustomizationRequest,
     UpdateInvoiceSettingsRequest,
@@ -580,6 +582,86 @@ async def update_cod_trust_settings_endpoint(
     return SuccessResponse(
         data=CodTrustResponse(**cod_trust),
         message="COD trust settings updated",
+    )
+
+
+# ============ COD Autopilot (004-cod-autopilot) ============
+
+
+def _build_cod_autopilot_response(store: Store) -> CodAutopilotResponse:
+    from src.application.services.cod_autopilot_service import (
+        get_cod_autopilot_settings,
+    )
+
+    config = get_cod_autopilot_settings(store.settings)
+    cod_trust = _get_cod_trust_settings(store.settings)
+    return CodAutopilotResponse(
+        enabled=config.enabled,
+        digest_hour=config.digest_hour,
+        delivery_check_delay_days=config.delivery_check_delay_days,
+        delivery_check_retry_days=config.delivery_check_retry_days,
+        delivery_check_max_attempts=config.delivery_check_max_attempts,
+        assumed_delivered_days=config.assumed_delivered_days,
+        # The daily digest goes to the store's contact phone (research
+        # R-10); without one the digest flow silently never fires, so the
+        # UI must surface it.
+        digest_deliverable=bool(store.contact_phone),
+        auto_rto_days=int(cod_trust.get("auto_rto_days", 14)),
+    )
+
+
+@router.get(
+    "/cod-autopilot",
+    response_model=SuccessResponse[CodAutopilotResponse],
+    summary="Get COD Autopilot settings",
+    operation_id="get_cod_autopilot_settings",
+)
+async def get_cod_autopilot_settings_endpoint(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """COD Autopilot (WhatsApp ship digest + delivery checks + assumed-
+    delivered fallback) settings for the store. Defaults apply when the
+    section is absent."""
+    return SuccessResponse(
+        data=_build_cod_autopilot_response(store),
+        message="COD Autopilot settings retrieved",
+    )
+
+
+@router.patch(
+    "/cod-autopilot",
+    response_model=SuccessResponse[CodAutopilotResponse],
+    summary="Update COD Autopilot settings",
+    operation_id="update_cod_autopilot_settings",
+)
+async def update_cod_autopilot_settings_endpoint(
+    request: UpdateCodAutopilotRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Update COD Autopilot settings. Disabling takes effect immediately
+    (FR-023) — the beat sweeps re-read settings every run and skip
+    disabled stores; no order state is altered."""
+    from src.application.services.cod_autopilot_service import COD_AUTOPILOT_DEFAULTS
+
+    settings = dict(store.settings) if store.settings else {}
+    section = dict(COD_AUTOPILOT_DEFAULTS)
+    raw = settings.get("cod_autopilot") or {}
+    if isinstance(raw, dict):
+        section.update({k: v for k, v in raw.items() if k in COD_AUTOPILOT_DEFAULTS})
+
+    for key in COD_AUTOPILOT_DEFAULTS:
+        value = getattr(request, key, None)
+        if value is not None:
+            section[key] = value
+
+    settings["cod_autopilot"] = section
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data=_build_cod_autopilot_response(store),
+        message="COD Autopilot settings updated",
     )
 
 

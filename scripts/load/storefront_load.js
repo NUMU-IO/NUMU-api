@@ -159,6 +159,11 @@ export default function (data) {
     const res = http.get(`${BASE_URL}/api/v1/storefront/me/cart`, {
       headers: baseHeaders,
       tags: { route: "cart_get" },
+      // Cart may legitimately 401 for anonymous + un-cookied sessions.
+      // Without declaring that, every cart 401 counts toward the global
+      // http_req_failed rate and single-handedly trips the <1% threshold
+      // (20/101 ≈ 19.8% — the reason this job failed on every PR).
+      responseCallback: http.expectedStatuses({ min: 200, max: 299 }, 401),
     });
     cartLatency.add(res.timings.duration);
     // Cart endpoint may legitimately 401 for anonymous + un-cookied;

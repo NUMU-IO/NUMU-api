@@ -287,3 +287,117 @@ async def test_processing_to_shipped_does_not_fire_network_event():
     )
 
     network_repo.record_event.assert_not_called()
+
+
+# ─── 004-cod-autopilot: source attribution + R-06 confidence gating ───
+
+
+@pytest.mark.asyncio
+async def test_assumed_delivered_source_excludes_network_delivery_event():
+    """FR-019 / research R-06: a timer-driven assumed-delivered closure
+    must NEVER be recorded as a full-weight network delivery. The skip is
+    stamped on order.metadata for auditability."""
+    order = _build_order(status=OrderStatus.SHIPPED, payment_method="cod")
+    network_repo = AsyncMock()
+    network_repo.record_event = AsyncMock()
+    network_repo.upsert_order = AsyncMock()
+
+    use_case, store, _ = _build_use_case(order=order, network_repo=network_repo)
+    await use_case.execute(
+        order_id=order.id,
+        dto=UpdateOrderStatusDTO(
+            status="delivered",
+            reason="autopilot_assumed_delivered",
+            source="assumed_delivered",
+        ),
+        store_id=order.store_id,
+        user_id=store.owner_id,
+    )
+
+    assert order.status == OrderStatus.DELIVERED
+    network_repo.record_event.assert_not_called()
+    network_repo.upsert_order.assert_not_called()
+    assert order.metadata.get("network_delivery_skipped") == "assumed_delivered"
+    assert order.metadata.get("network_delivery_recorded") is None
+
+
+@pytest.mark.asyncio
+async def test_customer_confirmed_source_fires_full_weight_delivery_event():
+    """A customer-confirmed delivery (delivery-check Received tap) is a
+    high-confidence signal and fires exactly like a manual mark."""
+    order = _build_order(status=OrderStatus.SHIPPED, payment_method="cod")
+    network_repo = AsyncMock()
+    network_repo.upsert_order = AsyncMock()
+    network_repo.record_event = AsyncMock()
+    network_repo.update_store_count = AsyncMock()
+    network_repo.recompute_cached_score = AsyncMock()
+
+    use_case, store, _ = _build_use_case(order=order, network_repo=network_repo)
+    await use_case.execute(
+        order_id=order.id,
+        dto=UpdateOrderStatusDTO(
+            status="delivered",
+            reason="customer_confirmed_via_whatsapp",
+            source="customer_confirmed",
+        ),
+        store_id=order.store_id,
+        user_id=store.owner_id,
+    )
+
+    network_repo.record_event.assert_awaited_once()
+    assert network_repo.record_event.await_args.kwargs["event_type"] == "delivery"
+    assert order.metadata.get("network_delivery_recorded") is True
+    assert order.metadata.get("network_delivery_skipped") is None
+
+
+@pytest.mark.asyncio
+async def test_source_recorded_in_status_history():
+    """FR-020: automated transitions carry their source in the order's
+    status_history audit trail; manual transitions carry none."""
+    order = _build_order(status=OrderStatus.PROCESSING, payment_method="cod")
+    use_case, store, _ = _build_use_case(order=order, network_repo=None)
+    await use_case.execute(
+        order_id=order.id,
+        dto=UpdateOrderStatusDTO(
+            status="shipped", reason="autopilot_digest", source="merchant_digest"
+        ),
+        store_id=order.store_id,
+        user_id=store.owner_id,
+    )
+
+    history = order.metadata["status_history"]
+    assert history[-1]["to"] == "shipped"
+    assert history[-1]["source"] == "merchant_digest"
+
+
+@pytest.mark.asyncio
+async def test_manual_transition_records_no_source_key():
+    order = _build_order(status=OrderStatus.PROCESSING, payment_method="cod")
+    use_case, store, _ = _build_use_case(order=order, network_repo=None)
+    await use_case.execute(
+        order_id=order.id,
+        dto=UpdateOrderStatusDTO(status="shipped"),
+        store_id=order.store_id,
+        user_id=store.owner_id,
+    )
+
+    history = order.metadata["status_history"]
+    assert history[-1]["to"] == "shipped"
+    assert "source" not in history[-1]
+
+
+@pytest.mark.asyncio
+async def test_assumed_delivered_cod_still_marks_paid():
+    """The COD cash-collected side-effect is status-driven, not
+    source-driven — an assumed-delivered closure still records the cash
+    as collected (FR-016)."""
+    order = _build_order(status=OrderStatus.SHIPPED, payment_method="cod")
+    use_case, store, _ = _build_use_case(order=order, network_repo=None)
+    await use_case.execute(
+        order_id=order.id,
+        dto=UpdateOrderStatusDTO(status="delivered", source="assumed_delivered"),
+        store_id=order.store_id,
+        user_id=store.owner_id,
+    )
+
+    assert order.payment_status == PaymentStatus.PAID

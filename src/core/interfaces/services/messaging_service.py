@@ -36,6 +36,10 @@ class MessageType(StrEnum):
     ABANDONED_CART = "abandoned_cart"
     # COD-to-prepaid recovery offer (the "recover" cod_trust flow).
     COD_RECOVERY_OFFER = "cod_recovery_offer"
+    # COD Autopilot (004-cod-autopilot): daily ship digest to the MERCHANT.
+    SHIP_DIGEST = "ship_digest"
+    # COD Autopilot: post-shipped delivery check to the CUSTOMER.
+    DELIVERY_CHECK = "delivery_check"
 
 
 class MessageStatus(StrEnum):
@@ -454,6 +458,121 @@ EGYPTIAN_TEMPLATES = {
                     "sub_type": "url",
                     "index": "0",
                     "parameters": ["pay_payload"],
+                },
+            ],
+        ),
+    },
+    # ─── COD Autopilot (004-cod-autopilot) ────────────────────────────
+    MessageType.SHIP_DIGEST: {
+        "en": MessageTemplate(
+            type=MessageType.SHIP_DIGEST,
+            name="cod_ship_digest_v1",
+            language="en_US",
+            components=[
+                # Body: {{1}} store name, {{2}} order count, {{3}} single-line
+                # "; "-separated numbered order list (Meta rejects newlines in
+                # body PARAMETERS), {{4}} capped-count note (never empty).
+                {
+                    "type": "body",
+                    "parameters": [
+                        "store_name",
+                        "order_count",
+                        "orders_line",
+                        "capped_note",
+                    ],
+                },
+                # Quick-reply "All shipped" — payload echoed back to the
+                # inbound webhook as ``shipall:<subdomain>/<digest_id>``.
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": ["shipall_payload"],
+                },
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.SHIP_DIGEST,
+            name="cod_ship_digest_v1",
+            language="ar",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        "store_name",
+                        "order_count",
+                        "orders_line",
+                        "capped_note",
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": ["shipall_payload"],
+                },
+            ],
+        ),
+    },
+    MessageType.DELIVERY_CHECK: {
+        "en": MessageTemplate(
+            type=MessageType.DELIVERY_CHECK,
+            name="order_delivery_check_v1",
+            language="en_US",
+            components=[
+                # Body: {{1}} customer name, {{2}} order number, {{3}} store.
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "order_number", "store_name"],
+                },
+                # Three quick-reply buttons — payloads carry the action
+                # prefix (dlvyes:/dlvnot:/dlvref:) + <subdomain>/<order_id>.
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": ["received_payload"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "1",
+                    "parameters": ["notyet_payload"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "2",
+                    "parameters": ["refused_payload"],
+                },
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.DELIVERY_CHECK,
+            name="order_delivery_check_v1",
+            language="ar",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "order_number", "store_name"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": ["received_payload"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "1",
+                    "parameters": ["notyet_payload"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "2",
+                    "parameters": ["refused_payload"],
                 },
             ],
         ),
