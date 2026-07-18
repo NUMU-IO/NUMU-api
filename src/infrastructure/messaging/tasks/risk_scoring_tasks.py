@@ -480,11 +480,13 @@ def compute_full_risk_score(
             # network's score through NUMU's OWN ladder so the merchant-facing
             # level / action / automation rules stay consistent with NUMU's
             # thresholds (identical at zero drift; diverges only as the network's
-            # model improves — the point of the cutover). authoritative_score and
-            # authoritative_level flow into every FINAL-decision consumer below:
-            # the FSM, auto-cancel, auto-approve, the automation-rules engine,
-            # the finalised event, and the task's return payload.
+            # model improves — the point of the cutover). authoritative_score /
+            # _level / _action flow into every FINAL-decision consumer below: the
+            # FSM (decision + shadow-agreement baseline), auto-cancel,
+            # auto-approve, the automation-rules engine, the finalised event, and
+            # the task's return payload.
             authoritative_level = full_result.risk_level
+            authoritative_action = full_result.suggested_action
             if score_source == "network":
                 from src.application.use_cases.shopify.risk_scoring_engine import (
                     _risk_level,
@@ -492,6 +494,7 @@ def compute_full_risk_score(
                 )
 
                 authoritative_level = _risk_level(authoritative_score)
+                authoritative_action = _suggested_action(authoritative_score)
                 # Replace NUMU's factor breakdown with the network's own, so the
                 # stored explanation matches the authoritative score (they
                 # explain different numbers once the models diverge). If the
@@ -518,7 +521,7 @@ def compute_full_risk_score(
                     .values(
                         risk_score=authoritative_score,
                         risk_level=authoritative_level,
-                        suggested_action=_suggested_action(authoritative_score),
+                        suggested_action=authoritative_action,
                         factors=network_factors,
                     )
                 )
@@ -578,7 +581,7 @@ def compute_full_risk_score(
                     "trust_fsm_shadow surface=shopify fsm=%s suggested=%s "
                     "risk=%s trust=%s",
                     _fsm_state.value,
-                    full_result.suggested_action,
+                    authoritative_action,
                     authoritative_score,
                     trust_result.customer_trust,
                 )
