@@ -40,8 +40,20 @@ def _parse_order_id(payload: str) -> UUID | None:
         return None
 
 
-# The three quick-reply actions the COD confirm-request template offers.
-_VALID_ACTIONS = {"confirm", "postpone", "cancel"}
+# The quick-reply actions carried in template button payloads:
+# - confirm/postpone/cancel — COD confirm-request (order_confirmation_request_v2)
+# - shipall — merchant ship-digest "All shipped" (cod_ship_digest_v1,
+#   payload id segment = DIGEST id, not an order id)
+# - dlvyes/dlvnot/dlvref — customer delivery check (order_delivery_check_v1)
+_VALID_ACTIONS = {
+    "confirm",
+    "postpone",
+    "cancel",
+    "shipall",
+    "dlvyes",
+    "dlvnot",
+    "dlvref",
+}
 
 
 def parse_quick_reply_action(payload: str) -> str:
