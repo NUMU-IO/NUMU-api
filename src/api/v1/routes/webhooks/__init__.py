@@ -12,6 +12,9 @@ from src.api.v1.routes.webhooks.meta import router as meta_router
 from src.api.v1.routes.webhooks.moyasar import router as moyasar_router
 from src.api.v1.routes.webhooks.mylerz import router as mylerz_router
 from src.api.v1.routes.webhooks.paymob import router as paymob_router
+from src.api.v1.routes.webhooks.paymob_platform import (
+    router as paymob_platform_router,
+)
 from src.api.v1.routes.webhooks.resend import router as resend_router
 from src.api.v1.routes.webhooks.tiktok_shop import router as tiktok_shop_router
 from src.api.v1.routes.webhooks.whatsapp import router as whatsapp_router
@@ -20,6 +23,11 @@ from src.api.v1.routes.webhooks.whatsapp import router as whatsapp_router
 router = APIRouter()
 
 router.include_router(paymob_router, prefix="/paymob", tags=["Webhooks - Paymob"])
+# Platform-directed Paymob payments (wallet top-ups) — NUMU's own account,
+# hard-enforced platform HMAC. Separate handler from the merchant callback.
+router.include_router(
+    paymob_platform_router, prefix="/paymob", tags=["Webhooks - Paymob"]
+)
 router.include_router(meta_router, prefix="/meta", tags=["Webhooks - Meta"])
 router.include_router(fawry_router, prefix="/fawry", tags=["Webhooks - Fawry"])
 router.include_router(instapay_router, prefix="/instapay", tags=["Webhooks - InstaPay"])

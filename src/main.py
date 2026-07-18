@@ -229,8 +229,18 @@ OPENAPI_TAGS = [
         "name": "Configuration Requests",
         "description": "Tenant configuration requests (payment, shipping, etc.)",
     },
+    # ── Billing / wallet ──────────────────────────────────
+    {
+        "name": "Wallet",
+        "description": "Merchant prepaid wallet — balance, ledger, top-ups "
+        "(pay-as-you-go tier)",
+    },
     # ── Admin ─────────────────────────────────────────────
     {"name": "Admin", "description": "Admin panel endpoints"},
+    {
+        "name": "Admin - Wallets",
+        "description": "Admin merchant-wallet management and top-up review",
+    },
     {"name": "Admin - Tenants", "description": "Admin tenant management"},
     {"name": "Admin - Waitlist", "description": "Admin waitlist management"},
     {"name": "Admin - Feedback", "description": "Admin feedback management"},

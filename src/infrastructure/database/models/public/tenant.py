@@ -32,6 +32,7 @@ class TenantPlan(StrEnum):
     FREE = "free"  # deprecated — see plan.py module docs
     DEMO = "demo"  # internal sandbox: Try-a-Demo flow
     TRIAL = "trial"  # 30-day free trial; auto-transitions to read_only on expiry
+    PAYG = "payg"  # pay-as-you-go: wallet-funded per-order commission
     STARTER = "starter"
     PRO = "pro"
     ENTERPRISE = "enterprise"
