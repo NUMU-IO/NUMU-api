@@ -258,6 +258,17 @@ class Settings(BaseSettings):
     # — flip once the shadow log shows acceptable FSM-vs-ladder agreement.
     trust_fsm_decision_enabled: bool = False
 
+    # Trust Network cutover (P1-7): when True, the COD final-score path treats
+    # the standalone NUMU Trust Network's /v1/decisions risk_score as
+    # authoritative — it drives persistence, auto-cancel, and auto-approve
+    # instead of NUMU's embedded score_order() result. Default off — flip only
+    # after the shadow log (trust_network_shadow) shows sustained zero drift.
+    # Fail-open: if the network doesn't answer (disabled / timeout / non-200)
+    # the embedded score is used, so COD scoring never depends on network
+    # availability. The same shadow call (TRUST_NETWORK_SHADOW_ENABLED) carries
+    # the authoritative score, so keep the shadow on when this is flipped.
+    trust_network_authoritative: bool = False
+
     # Commerce-correctness Phase 1: when True, the storefront checkout runs
     # the offers-v2 engine (CalculateCartDiscountsUseCase / DiscountCalculator)
     # against the cart at order-create time and folds the resulting automatic
