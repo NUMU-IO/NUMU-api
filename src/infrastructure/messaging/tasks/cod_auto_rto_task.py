@@ -139,6 +139,7 @@ async def _sweep() -> dict:
         # Cache store settings to avoid re-fetching for orders from the
         # same store within one sweep.
         store_cache: dict = {}
+        bypass_broken = False
 
         for model in candidates:
             try:
@@ -218,7 +219,14 @@ async def _sweep() -> dict:
                 try:
                     await enable_rls_bypass(session)
                 except Exception:
+                    # RLS context is now unknown — continuing could write
+                    # under the PREVIOUS order's tenant context. Abort the
+                    # sweep; the task retry gets a fresh session.
                     logger.exception("auto_rto_bypass_reset_failed")
+                    bypass_broken = True
+            if bypass_broken:
+                stats["errors"] += 1
+                break
 
         await session.commit()
 
