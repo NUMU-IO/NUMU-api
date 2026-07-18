@@ -3,10 +3,10 @@ For additional context about technologies, project structure, schema changes,
 contracts, and verification steps, read the current plan and its supporting
 artifacts:
 
-- Plan: [specs/backend-030-whatsapp-foundation/plan.md](specs/backend-030-whatsapp-foundation/plan.md)
-- Spec: [specs/backend-030-whatsapp-foundation/spec.md](specs/backend-030-whatsapp-foundation/spec.md)
-- Research: [specs/backend-030-whatsapp-foundation/research.md](specs/backend-030-whatsapp-foundation/research.md)
-- Data model: [specs/backend-030-whatsapp-foundation/data-model.md](specs/backend-030-whatsapp-foundation/data-model.md)
-- Contracts: [specs/backend-030-whatsapp-foundation/contracts/](specs/backend-030-whatsapp-foundation/contracts/)
-- Quickstart: [specs/backend-030-whatsapp-foundation/quickstart.md](specs/backend-030-whatsapp-foundation/quickstart.md)
+- Plan: [specs/004-cod-autopilot/plan.md](specs/004-cod-autopilot/plan.md)
+- Spec: [specs/004-cod-autopilot/spec.md](specs/004-cod-autopilot/spec.md)
+- Research: [specs/004-cod-autopilot/research.md](specs/004-cod-autopilot/research.md)
+- Data model: [specs/004-cod-autopilot/data-model.md](specs/004-cod-autopilot/data-model.md)
+- Contracts: [specs/004-cod-autopilot/contracts/](specs/004-cod-autopilot/contracts/)
+- Quickstart: [specs/004-cod-autopilot/quickstart.md](specs/004-cod-autopilot/quickstart.md)
 <!-- SPECKIT END -->
