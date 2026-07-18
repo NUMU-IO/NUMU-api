@@ -194,3 +194,25 @@ async def write_network_event(
         await cache.close()
     except Exception:
         pass  # Non-fatal
+
+    # P1-7.5: mirror this outcome to the standalone Trust Network (/v1/events) — the
+    # cross-partner contribution feed. Non-blocking (a post-commit handler does the
+    # POST), fail-open, and off unless TRUST_NETWORK_FEED_ENABLED is set. Published for
+    # every recorded outcome; the handler enforces strict per-store consent.
+    try:
+        from src.core.events.network_events import NetworkOutcomeRecordedEvent
+        from src.infrastructure.events.setup import get_event_bus
+
+        get_event_bus().publish(
+            NetworkOutcomeRecordedEvent(
+                store_id=store_id,
+                phone_hash=phone_hash,
+                event_type=event_type,
+                dedup_key=dedup_key,
+            )
+        )
+    except Exception:  # publishing must never break the reputation write
+        logger.warning(
+            "network_outcome_event_publish_failed",
+            extra={"store_id": str(store_id), "event_type": event_type},
+        )

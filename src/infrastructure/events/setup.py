@@ -225,6 +225,16 @@ def create_event_bus() -> EventBus:
 
     bus.subscribe(OtpVerifiedEvent, handle_otp_verified_trust_signal)
 
+    # P1-7.5: mirror recorded COD outcomes to the standalone Trust Network's
+    # /v1/events (the cross-partner contribution feed). Post-commit, strict-consent,
+    # fail-open; off unless TRUST_NETWORK_FEED_ENABLED is set.
+    from src.core.events.network_events import NetworkOutcomeRecordedEvent
+    from src.infrastructure.events.handlers.network_feed_handler import (
+        handle_network_outcome_recorded,
+    )
+
+    bus.subscribe(NetworkOutcomeRecordedEvent, handle_network_outcome_recorded)
+
     # P1-3: active merchant notification when the trust auto-approve
     # kill-switch fires — the persisted banner alone is passive.
     bus.subscribe(TrustKillSwitchFiredEvent, handle_trust_kill_switch_fired)
