@@ -394,6 +394,27 @@ def compute_full_risk_score(
             if salt:
                 persisted_phone_hash = normalize_and_hash(phone, salt)
 
+        # ── Trust Network cutover — network call (P1-7) ────────────────────
+        # Consult the standalone Trust Network OUTSIDE any DB session, so a
+        # pooled connection is never held across the up-to-3s network call
+        # (Celery pools are small — holding one here would risk pool exhaustion
+        # under concurrent load). Best-effort; rebuilt from decision_inputs so
+        # no PII leaves. The result is resolved into the authoritative score
+        # inside the session below.
+        from src.application.services.trust_network_shadow import (
+            compare_with_trust_network,
+        )
+
+        tn_comparison = None
+        try:
+            tn_comparison = await compare_with_trust_network(
+                decision_inputs=decision_inputs_snapshot,
+                numu_risk_score=full_result.risk_score,
+                order_ref=str(assessment_id),
+            )
+        except Exception as _tn_exc:  # noqa: BLE001 — shadow never affects scoring
+            logger.warning("trust_network_shadow_call_error error=%s", _tn_exc)
+
         async with AsyncSessionLocal() as session:
             await session.execute(text("SET search_path TO public"))
             await session.execute(
@@ -445,30 +466,18 @@ def compute_full_risk_score(
                     )
 
             # ── Trust Network cutover gate (P1-7) ──────────────────────────
-            # Call the standalone Trust Network in parallel (the live
-            # equivalence shadow) and decide which score is authoritative for
-            # THIS decision. Best-effort; rebuilt from decision_inputs so no PII
-            # leaves. When get_settings().trust_network_authoritative is flipped
-            # on — only after the shadow log confirms sustained zero drift — the
-            # network's risk_score becomes authoritative and drives the
-            # persistence, auto-cancel, and auto-approve below. Fail-open: if the
-            # network doesn't answer, NUMU's embedded score is used, so scoring
-            # never depends on the network's availability.
+            # Resolve which score is authoritative from the network comparison
+            # fetched above (outside this session). When
+            # get_settings().trust_network_authoritative is flipped on — only
+            # after the shadow log confirms sustained zero drift — the network's
+            # risk_score becomes authoritative and drives the persistence,
+            # auto-cancel, and auto-approve below. Fail-open: if the network
+            # didn't answer, NUMU's embedded score is used, so scoring never
+            # depends on the network's availability.
             from src.application.services.trust_network_shadow import (
-                compare_with_trust_network,
                 network_factors_to_numu,
                 resolve_authoritative_score,
             )
-
-            tn_comparison = None
-            try:
-                tn_comparison = await compare_with_trust_network(
-                    decision_inputs=decision_inputs_snapshot,
-                    numu_risk_score=full_result.risk_score,
-                    order_ref=str(assessment_id),
-                )
-            except Exception as _tn_exc:  # noqa: BLE001 — shadow never affects scoring
-                logger.warning("trust_network_shadow_call_error error=%s", _tn_exc)
 
             cutover_enabled = get_settings().trust_network_authoritative
             authoritative_score, score_source = resolve_authoritative_score(
