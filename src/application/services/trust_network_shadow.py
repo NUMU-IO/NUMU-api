@@ -81,6 +81,30 @@ def shadow_config() -> dict[str, Any]:
     }
 
 
+def resolve_authoritative_score(
+    *,
+    numu_risk_score: int,
+    tn_comparison: dict[str, Any] | None,
+    cutover_enabled: bool,
+) -> tuple[int, str]:
+    """Pick the authoritative COD risk score — the P1-7 cutover decision.
+
+    Returns ``(score, source)``. ``source`` is ``"network"`` when the cutover is
+    on AND the Trust Network returned a usable score; otherwise ``"numu"``.
+
+    Fail-open by construction: when ``cutover_enabled`` is True but
+    ``tn_comparison`` is ``None`` (network disabled / timeout / non-200) or the
+    service score is missing/non-numeric, the score falls back to NUMU's
+    embedded ``score_order`` result — so COD scoring never depends on network
+    availability (constitution: never block the order flow on the network).
+    """
+    if cutover_enabled and tn_comparison:
+        service = tn_comparison.get("service_risk_score")
+        if isinstance(service, int | float) and not isinstance(service, bool):
+            return int(service), "network"
+    return numu_risk_score, "numu"
+
+
 async def compare_with_trust_network(
     *,
     decision_inputs: dict[str, Any] | None,

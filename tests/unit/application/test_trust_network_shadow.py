@@ -9,6 +9,7 @@ import httpx
 from src.application.services.trust_network_shadow import (
     build_shadow_request,
     compare_with_trust_network,
+    resolve_authoritative_score,
     shadow_config,
 )
 
@@ -118,3 +119,50 @@ def test_shadow_non_200_returns_none(monkeypatch):
         )
     )
     assert out is None
+
+
+# ── P1-7 cutover: resolve_authoritative_score ───────────────────────────────
+
+
+def test_resolve_cutover_off_uses_numu():
+    # Flag off: NUMU's score wins even when the network score differs wildly.
+    assert resolve_authoritative_score(
+        numu_risk_score=50,
+        tn_comparison={"service_risk_score": 80, "match": False, "drift": 30},
+        cutover_enabled=False,
+    ) == (50, "numu")
+
+
+def test_resolve_cutover_on_uses_network():
+    assert resolve_authoritative_score(
+        numu_risk_score=50,
+        tn_comparison={"service_risk_score": 80},
+        cutover_enabled=True,
+    ) == (80, "network")
+
+
+def test_resolve_fails_open_when_network_silent():
+    # Cutover on but the network didn't answer (None) → NUMU score, never raises.
+    assert resolve_authoritative_score(
+        numu_risk_score=42,
+        tn_comparison=None,
+        cutover_enabled=True,
+    ) == (42, "numu")
+
+
+def test_resolve_ignores_non_numeric_service_score():
+    # Malformed/absent service score → fail open to NUMU (bool is not numeric).
+    for bad in (None, "80", True):
+        assert resolve_authoritative_score(
+            numu_risk_score=42,
+            tn_comparison={"service_risk_score": bad},
+            cutover_enabled=True,
+        ) == (42, "numu")
+
+
+def test_resolve_coerces_float_service_score():
+    assert resolve_authoritative_score(
+        numu_risk_score=10,
+        tn_comparison={"service_risk_score": 73.0},
+        cutover_enabled=True,
+    ) == (73, "network")
