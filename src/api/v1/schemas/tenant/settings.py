@@ -154,6 +154,36 @@ class UpdateCodTrustRequest(BaseModel):
     auto_rto_days: int | None = Field(None, ge=7, le=60)
 
 
+class CodAutopilotResponse(BaseModel):
+    """COD Autopilot settings (004-cod-autopilot FR-022).
+
+    ``digest_deliverable`` and ``auto_rto_days`` are read-only computed
+    fields: the first reflects whether the store has a usable contact
+    phone for the daily ship digest; the second surfaces the auto-RTO
+    window so the UI can warn when it overlaps ``assumed_delivered_days``.
+    """
+
+    enabled: bool = False
+    digest_hour: int = 18
+    delivery_check_delay_days: int = 3
+    delivery_check_retry_days: int = 2
+    delivery_check_max_attempts: int = 3
+    assumed_delivered_days: int = 10
+    digest_deliverable: bool = False
+    auto_rto_days: int = 14
+
+
+class UpdateCodAutopilotRequest(BaseModel):
+    """Update COD Autopilot settings (all fields optional)."""
+
+    enabled: bool | None = None
+    digest_hour: int | None = Field(None, ge=0, le=23)
+    delivery_check_delay_days: int | None = Field(None, ge=1, le=7)
+    delivery_check_retry_days: int | None = Field(None, ge=1, le=7)
+    delivery_check_max_attempts: int | None = Field(None, ge=1, le=3)
+    assumed_delivered_days: int | None = Field(None, ge=5, le=30)
+
+
 class SavePaymobCredentialsRequest(BaseModel):
     """Save Paymob gateway credentials for a store."""
 

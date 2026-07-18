@@ -679,6 +679,146 @@ async def list_orders(
     )
 
 
+# ============================================================================
+# COD Autopilot exception queue (004-cod-autopilot, FR-021)
+# ============================================================================
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class AutopilotExceptionItem(BaseModel):
+    """One order the Autopilot could not close on its own."""
+
+    order_id: UUID
+    order_number: str
+    customer_name: str | None = None
+    total_cents: int
+    currency: str
+    exception_reason: str
+    flagged_at: datetime
+    age_hours: int
+    attempts: int
+    order_status: str
+
+
+class AutopilotExceptionListResponse(BaseModel):
+    items: list[AutopilotExceptionItem]
+    total: int
+
+
+class ResolveAutopilotExceptionRequest(BaseModel):
+    action: str = "dismiss"
+
+
+class ResolveAutopilotExceptionResponse(BaseModel):
+    resolved: bool
+
+
+@router.get(
+    "/autopilot-exceptions",
+    response_model=SuccessResponse[AutopilotExceptionListResponse],
+    summary="List COD Autopilot exception orders",
+    operation_id="list_autopilot_exceptions",
+)
+async def list_autopilot_exceptions(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Orders flagged by COD Autopilot: customer tapped Refused, exhausted
+    delivery checks, or a late tap contradicting a recorded closure.
+    Resolve them with existing order actions (mark returned / delivered /
+    cancel) or dismiss the flag."""
+    from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
+        WhatsAppDeliveryCheckRepository,
+    )
+
+    check_repo = WhatsAppDeliveryCheckRepository(order_repo.session)
+    rows, total = await check_repo.list_exceptions(store.id, limit=limit, offset=offset)
+
+    now = datetime.now(UTC)
+    items: list[AutopilotExceptionItem] = []
+    for row in rows:
+        order = await order_repo.get_by_id(row.order_id)
+        if order is None:
+            continue
+        addr = order.shipping_address
+        customer_name = None
+        if addr is not None:
+            first = getattr(addr, "first_name", None) or ""
+            last = getattr(addr, "last_name", None) or ""
+            customer_name = f"{first} {last}".strip() or None
+        flagged_at = row.responded_at or row.updated_at
+        items.append(
+            AutopilotExceptionItem(
+                order_id=row.order_id,
+                order_number=order.order_number,
+                customer_name=customer_name,
+                total_cents=order.total,
+                currency=order.currency,
+                exception_reason=row.exception_reason or "refused",
+                flagged_at=flagged_at,
+                age_hours=max(0, int((now - flagged_at).total_seconds() // 3600)),
+                attempts=row.attempts,
+                order_status=order.status.value,
+            )
+        )
+
+    return SuccessResponse(
+        data=AutopilotExceptionListResponse(items=items, total=total),
+        message="Autopilot exceptions retrieved",
+    )
+
+
+@router.post(
+    "/autopilot-exceptions/{order_id}/resolve",
+    response_model=SuccessResponse[ResolveAutopilotExceptionResponse],
+    summary="Resolve (dismiss) a COD Autopilot exception",
+    operation_id="resolve_autopilot_exception",
+)
+async def resolve_autopilot_exception(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    request: ResolveAutopilotExceptionRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+):
+    """Dismiss the exception flag without changing the order. Status
+    changes themselves go through the existing order endpoints, which
+    clear pending Autopilot automation as a side effect (FR-018)."""
+    if request.action != "dismiss":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported action — only 'dismiss' is available",
+        )
+
+    from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
+        WhatsAppDeliveryCheckRepository,
+    )
+
+    check_repo = WhatsAppDeliveryCheckRepository(order_repo.session)
+    row = await check_repo.get_by_order(order_id)
+    if (
+        row is None
+        or row.store_id != store.id
+        or row.exception_resolved_at is not None
+        or (row.outcome != "exception" and row.exception_reason != "late_contradiction")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No unresolved Autopilot exception for this order",
+        )
+
+    row.exception_resolved_at = datetime.now(UTC)
+    row.next_attempt_at = None
+    await order_repo.session.commit()
+
+    return SuccessResponse(
+        data=ResolveAutopilotExceptionResponse(resolved=True),
+        message="Autopilot exception dismissed",
+    )
+
+
 @router.get(
     "/{order_id}",
     response_model=SuccessResponse[OrderResponse],

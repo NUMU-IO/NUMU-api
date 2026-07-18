@@ -595,6 +595,75 @@ class WhatsAppMessagingService(IMessagingService):
         )
         return await self.send_message(content)
 
+    async def send_ship_digest(
+        self,
+        recipient: MessageRecipient,
+        store_name: str,
+        order_count: str,
+        orders_line: str,
+        capped_note: str,
+        shipall_payload: str,
+    ) -> MessageResult:
+        """Send the COD Autopilot daily ship digest to the MERCHANT
+        (cod_ship_digest_v1, 004-cod-autopilot US2).
+
+        Body carries 4 variables — {{1}} store name, {{2}} order count,
+        {{3}} the numbered order list as ONE single-line "; "-separated
+        string (Meta rejects newline/tab characters inside body
+        parameters), {{4}} the capped-count note (never empty; pass "-"
+        or a filler when nothing was capped) — plus one quick-reply
+        button whose payload is ``shipall:<subdomain>/<digest_id>``.
+
+        ``shipall_payload`` is the base digest locator
+        (``<subdomain>/<digest_id>``); the ``shipall:`` prefix is applied
+        here, mirroring ``send_order_confirmation_request``.
+        """
+        base_loc = shipall_payload.split(":", 1)[-1] if shipall_payload else ""
+        content = MessageContent(
+            type=MessageType.SHIP_DIGEST,
+            recipient=recipient,
+            template_params={
+                "store_name": store_name,
+                "order_count": order_count,
+                "orders_line": orders_line,
+                "capped_note": capped_note or "-",
+                "shipall_payload": f"shipall:{base_loc}",
+            },
+        )
+        return await self.send_message(content)
+
+    async def send_delivery_check(
+        self,
+        recipient: MessageRecipient,
+        order_number: str,
+        store_name: str,
+        check_payload: str,
+    ) -> MessageResult:
+        """Send the COD Autopilot delivery check to the CUSTOMER
+        (order_delivery_check_v1, 004-cod-autopilot US1).
+
+        Body: {{1}} customer name, {{2}} order number, {{3}} store name.
+        Three quick-reply buttons — Received / Not yet / Refused — whose
+        payloads are derived from ``check_payload`` (the base order
+        locator ``<subdomain>/<order_id>``) with the ``dlvyes:`` /
+        ``dlvnot:`` / ``dlvref:`` action prefixes the inbound webhook
+        routes on.
+        """
+        base_loc = check_payload.split(":", 1)[-1] if check_payload else ""
+        content = MessageContent(
+            type=MessageType.DELIVERY_CHECK,
+            recipient=recipient,
+            template_params={
+                "customer_name": recipient.name or "Customer",
+                "order_number": order_number,
+                "store_name": store_name,
+                "received_payload": f"dlvyes:{base_loc}",
+                "notyet_payload": f"dlvnot:{base_loc}",
+                "refused_payload": f"dlvref:{base_loc}",
+            },
+        )
+        return await self.send_message(content)
+
     async def send_shipping_notification(
         self,
         recipient: MessageRecipient,

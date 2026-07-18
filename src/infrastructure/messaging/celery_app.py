@@ -99,6 +99,9 @@ celery_app.conf.update(
         # COD trust network — auto-flag stale SHIPPED orders as RETURNED
         # so manual-ship merchants feed RTO signals into the network.
         "src.infrastructure.messaging.tasks.cod_auto_rto_task",
+        # 004-cod-autopilot — merchant ship digests, customer delivery
+        # checks, assumed-delivered fallback closure.
+        "src.infrastructure.messaging.tasks.cod_autopilot_tasks",
         # Phase C — keep HF OCR Spaces warm for stores that opt in.
         "src.infrastructure.messaging.tasks.warm_hf_vision_spaces",
         # Analytics retention — drops funnel/page-view rows past TTL.
@@ -379,6 +382,25 @@ celery_app.conf.beat_schedule = {
     "auto-rto-stale-shipped-orders": {
         "task": "tasks.auto_rto_stale_shipped_orders",
         "schedule": crontab(hour=3, minute=0),
+    },
+    # ─── 004-cod-autopilot: COD Autopilot sweeps ─────────────────────
+    # Digests are hourly — each run sends only to stores whose LOCAL hour
+    # (market timezone) matches their configured digest_hour (R-02).
+    "cod-autopilot-send-digests": {
+        "task": "tasks.cod_autopilot_send_digests",
+        "schedule": crontab(minute=5),
+    },
+    # Delivery checks: create rows for newly-shipped eligible orders and
+    # send due checks (initial + retries).
+    "cod-autopilot-delivery-checks": {
+        "task": "tasks.cod_autopilot_delivery_checks",
+        "schedule": crontab(minute=20),
+    },
+    # Assumed-delivered fallback closure — 03:30 UTC, deliberately AFTER
+    # the 03:00 auto-RTO sweep so an RTO outcome always wins (FR-018).
+    "cod-autopilot-assumed-delivered": {
+        "task": "tasks.cod_autopilot_assumed_delivered",
+        "schedule": crontab(hour=3, minute=30),
     },
     # ─── backend-023: Courier delivery stats nightly rollup ──────────
     # Aggregates the trailing 30-day shipment outcomes per (store,

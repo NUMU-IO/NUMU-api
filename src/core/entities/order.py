@@ -445,12 +445,21 @@ class Order(BaseEntity):
                 f"Valid transitions from {self.status.value}: {valid or 'none (terminal state)'}"
             )
 
-    def transition_to(self, new_status: OrderStatus, reason: str | None = None) -> None:
+    def transition_to(
+        self,
+        new_status: OrderStatus,
+        reason: str | None = None,
+        source: str | None = None,
+    ) -> None:
         """Transition order to a new status with validation.
 
         Args:
             new_status: The target status.
             reason: Optional reason for the transition.
+            source: Optional machine-readable attribution of WHO/WHAT drove
+                the transition (004-cod-autopilot FR-020): e.g.
+                ``customer_confirmed``, ``merchant_digest``,
+                ``assumed_delivered``. Absent = manual/dashboard.
 
         Raises:
             ValueError: If transition is not allowed.
@@ -464,12 +473,15 @@ class Order(BaseEntity):
         if "status_history" not in self.metadata:
             self.metadata["status_history"] = []
 
-        self.metadata["status_history"].append({
+        entry: dict = {
             "from": old_status.value,
             "to": new_status.value,
             "timestamp": datetime.now(UTC).isoformat(),
             "reason": reason,
-        })
+        }
+        if source is not None:
+            entry["source"] = source
+        self.metadata["status_history"].append(entry)
 
         # Update timestamps based on new status
         if new_status == OrderStatus.CANCELLED:
@@ -567,35 +579,45 @@ class Order(BaseEntity):
         self.transition_to(OrderStatus.PROCESSING, reason="processing")
 
     def ship(
-        self, tracking_number: str | None = None, tracking_url: str | None = None
+        self,
+        tracking_number: str | None = None,
+        tracking_url: str | None = None,
+        source: str | None = None,
     ) -> None:
         """Ship the order.
 
         Args:
             tracking_number: Optional tracking number
             tracking_url: Optional tracking URL
+            source: Optional transition attribution (FR-020), e.g.
+                ``merchant_digest`` for Autopilot ship-digest taps.
         """
         if self.status != OrderStatus.PROCESSING:
             raise ValueError(f"Cannot ship order in {self.status} status")
         # transition_to records status_history (P0-5) and sets shipped_at /
         # fulfilled_at / fulfillment_status = FULFILLED.
-        self.transition_to(OrderStatus.SHIPPED, reason="shipped")
+        self.transition_to(OrderStatus.SHIPPED, reason="shipped", source=source)
         if tracking_number:
             self.tracking_number = tracking_number
         if tracking_url:
             self.tracking_url = tracking_url
 
-    def deliver(self) -> None:
+    def deliver(self, source: str | None = None) -> None:
         """Mark order as delivered.
 
         For COD orders, payment_status is automatically set to PAID
         since cash is collected at delivery.
+
+        Args:
+            source: Optional transition attribution (FR-020), e.g.
+                ``customer_confirmed`` (delivery-check tap) or
+                ``assumed_delivered`` (Autopilot fallback closure).
         """
         if self.status != OrderStatus.SHIPPED:
             raise ValueError(f"Cannot deliver order in {self.status} status")
         # transition_to records status_history (P0-5), sets delivered_at, and
         # applies the COD cash-collected-at-delivery → PAID side-effect.
-        self.transition_to(OrderStatus.DELIVERED, reason="delivered")
+        self.transition_to(OrderStatus.DELIVERED, reason="delivered", source=source)
 
     def cancel(self, reason: str | None = None) -> None:
         """Cancel the order.

@@ -49,6 +49,11 @@ class Market:
     # display order. Must match the keys in PROVIDER_BUILDERS once the
     # corresponding gateway lands (Phase 3 for the Saudi rails).
     payment_providers: tuple[str, ...]
+    # IANA timezone used for store-local scheduling (e.g. the COD
+    # Autopilot ship-digest hour, 004-cod-autopilot R-02). Stores carry
+    # no timezone column; their market's zone is the best available
+    # store-local clock.
+    timezone: str = "Africa/Cairo"
 
 
 EGYPT = Market(
@@ -59,6 +64,7 @@ EGYPT = Market(
     default_vat_rate=0.14,
     tax_country_code="EG",
     payment_providers=("paymob", "fawry", "kashier", "instapay", "cod"),
+    timezone="Africa/Cairo",
 )
 
 SAUDI_ARABIA = Market(
@@ -71,6 +77,7 @@ SAUDI_ARABIA = Market(
     # Phase 3 implements these gateway services; until then they're
     # advertised by the registry but won't resolve at checkout.
     payment_providers=("moyasar", "hyperpay", "tabby", "tamara", "stcpay", "cod"),
+    timezone="Asia/Riyadh",
 )
 
 
