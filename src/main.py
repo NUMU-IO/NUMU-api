@@ -55,7 +55,7 @@ def init_sentry() -> None:
 
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
-        environment=settings.environment,
+        environment=settings.sentry_environment or settings.environment,
         release=f"numu-api@{settings.app_version}",
         traces_sample_rate=settings.sentry_traces_sample_rate,
         profiles_sample_rate=settings.sentry_profiles_sample_rate,
@@ -69,7 +69,7 @@ def init_sentry() -> None:
     )
     logger.info(
         "sentry_initialized",
-        environment=settings.environment,
+        environment=settings.sentry_environment or settings.environment,
         traces_sample_rate=settings.sentry_traces_sample_rate,
     )
 
