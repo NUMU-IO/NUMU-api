@@ -8,6 +8,13 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 os.environ["CREDENTIAL_ENCRYPTION_KEY"] = (
     "dGVzdF9lbmNyeXB0aW9uX2tleV9mb3JfdGVzdGluZzEyMzQ1Njc4OQ=="
 )
+# Test runs must NEVER ship events to Sentry. A real SENTRY_DSN in the
+# developer's .env otherwise turns every deliberately-exercised error path
+# (mocked failures, missing-credential guards, event-loop teardown noise)
+# into a Sentry issue — including tests that rebuild the app with a patched
+# environment, which then mislabel local noise as "staging". An env var
+# overrides .env for pydantic-settings, and init_sentry() no-ops on blank.
+os.environ["SENTRY_DSN"] = ""
 
 # Import configuration fixtures
 pytest_plugins = [
