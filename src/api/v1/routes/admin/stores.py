@@ -234,6 +234,192 @@ async def list_stores(
     )
 
 
+@router.get(
+    "/{store_id}/detail",
+    response_model=SuccessResponse[dict],
+    summary="Full merchant profile for one store (admin)",
+    operation_id="admin_get_store_detail",
+)
+async def get_store_detail(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Everything the admin needs about one merchant on a single page:
+    store, tenant lifecycle/billing (incl. demo lead capture for demo
+    tenants), owner account, wallet summary (payg), commerce metrics,
+    and the most recent orders. Works for real merchants AND demos."""
+    from src.infrastructure.database.models.public.wallet import (
+        MerchantWalletModel,
+    )
+    from src.infrastructure.database.models.tenant.customer import CustomerModel
+    from src.infrastructure.database.models.tenant.product import ProductModel
+
+    store = (
+        await db.execute(select(StoreModel).where(StoreModel.id == store_id))
+    ).scalar_one_or_none()
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
+        )
+
+    tenant = None
+    if store.tenant_id:
+        tenant = (
+            await db.execute(
+                select(TenantModel).where(TenantModel.id == store.tenant_id)
+            )
+        ).scalar_one_or_none()
+
+    owner = None
+    if store.owner_id:
+        owner = (
+            await db.execute(select(UserModel).where(UserModel.id == store.owner_id))
+        ).scalar_one_or_none()
+
+    wallet = None
+    if tenant is not None:
+        wallet = (
+            await db.execute(
+                select(MerchantWalletModel).where(
+                    MerchantWalletModel.tenant_id == tenant.id
+                )
+            )
+        ).scalar_one_or_none()
+
+    # Commerce metrics — one aggregate per table, store-scoped.
+    orders_row = (
+        await db.execute(
+            select(
+                func.count(OrderModel.id),
+                func.coalesce(
+                    func.sum(OrderModel.total).filter(
+                        OrderModel.payment_status == "PAID"
+                    ),
+                    0,
+                ),
+                func.max(OrderModel.created_at),
+            ).where(OrderModel.store_id == store_id)
+        )
+    ).one()
+    products_count = (
+        await db.execute(
+            select(func.count(ProductModel.id)).where(ProductModel.store_id == store_id)
+        )
+    ).scalar_one()
+    customers_count = (
+        await db.execute(
+            select(func.count(CustomerModel.id)).where(
+                CustomerModel.store_id == store_id
+            )
+        )
+    ).scalar_one()
+
+    recent_orders = (
+        (
+            await db.execute(
+                select(OrderModel)
+                .where(OrderModel.store_id == store_id)
+                .order_by(OrderModel.created_at.desc())
+                .limit(5)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    def _iso(dt) -> str | None:
+        return dt.isoformat() if dt else None
+
+    def _enum(v) -> str | None:
+        if v is None:
+            return None
+        return v.value if hasattr(v, "value") else str(v)
+
+    data = {
+        "store": {
+            "id": str(store.id),
+            "name": store.name,
+            "slug": store.slug,
+            "subdomain": store.subdomain,
+            "custom_domain": store.custom_domain,
+            "status": _enum(store.status),
+            "logo_url": store.logo_url,
+            "country": getattr(store, "country", None),
+            "default_currency": _enum(store.default_currency),
+            "default_language": store.default_language,
+            "storefront_url": (
+                f"https://{store.subdomain}.numueg.app" if store.subdomain else None
+            ),
+            "created_at": _iso(store.created_at),
+        },
+        "tenant": None
+        if tenant is None
+        else {
+            "id": str(tenant.id),
+            "name": tenant.name,
+            "plan": tenant.plan,
+            "lifecycle_state": _enum(tenant.lifecycle_state),
+            "expires_at": _iso(tenant.expires_at),
+            "trial_started_at": _iso(tenant.trial_started_at),
+            "trial_converted_at": _iso(tenant.trial_converted_at),
+            "billing_cycle": tenant.billing_cycle,
+            "next_renewal_at": _iso(tenant.next_renewal_at),
+            "payment_method_last4": tenant.payment_method_last4,
+            "feature_flags": tenant.feature_flags or {},
+            # Demo lead capture — who this demo belongs to.
+            "is_demo": tenant.demo_email is not None
+            or _enum(tenant.lifecycle_state) == "demo",
+            "demo_name": tenant.demo_name,
+            "demo_email": tenant.demo_email,
+            "demo_whatsapp": tenant.demo_whatsapp,
+            "demo_started_at": _iso(tenant.demo_started_at),
+        },
+        "owner": None
+        if owner is None
+        else {
+            "id": str(owner.id),
+            "name": f"{owner.first_name} {owner.last_name}".strip(),
+            "email": str(owner.email),
+            "phone": owner.phone,
+            "status": _enum(owner.status),
+            "plan_intent": owner.plan_intent,
+            "trial_ends_at": _iso(owner.trial_ends_at),
+            "last_login_at": _iso(owner.last_login_at),
+            "created_at": _iso(owner.created_at),
+        },
+        "wallet": None
+        if wallet is None
+        else {
+            "balance_cents": wallet.balance_cents,
+            "pending_balance_cents": wallet.pending_balance_cents,
+            "currency": wallet.currency,
+            "status": wallet.status,
+            "commission_bps_override": wallet.commission_bps_override,
+        },
+        "metrics": {
+            "orders_count": int(orders_row[0] or 0),
+            "paid_revenue_cents": int(orders_row[1] or 0),
+            "last_order_at": _iso(orders_row[2]),
+            "products_count": int(products_count or 0),
+            "customers_count": int(customers_count or 0),
+        },
+        "recent_orders": [
+            {
+                "id": str(o.id),
+                "order_number": o.order_number,
+                "total_cents": o.total,
+                "currency": o.currency,
+                "status": _enum(o.status),
+                "payment_status": _enum(o.payment_status),
+                "created_at": _iso(o.created_at),
+            }
+            for o in recent_orders
+        ],
+    }
+    return SuccessResponse(data=data, message="Store detail")
+
+
 @router.patch(
     "/{store_id}/status",
     response_model=SuccessResponse[dict],
