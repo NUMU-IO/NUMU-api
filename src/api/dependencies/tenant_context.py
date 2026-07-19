@@ -74,3 +74,20 @@ async def get_owner_tenant(
 ) -> TenantModel:
     """FastAPI dependency form of :func:`resolve_owner_tenant`."""
     return await resolve_owner_tenant(request, db, user_id)
+
+
+async def get_owner_tenant_or_none(
+    request: Request,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TenantModel | None:
+    """Lenient variant for read endpoints whose contract predates the
+    resolver: a user with no tenant yet (registered, store not created)
+    gets ``None`` so the route can return an empty result instead of 404.
+    """
+    try:
+        return await resolve_owner_tenant(request, db, user_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return None
+        raise

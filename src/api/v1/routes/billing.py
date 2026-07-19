@@ -15,7 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
-from src.api.dependencies.tenant_context import get_owner_tenant
+from src.api.dependencies.tenant_context import (
+    get_owner_tenant,
+    get_owner_tenant_or_none,
+)
 from src.api.responses import SuccessResponse
 from src.application.use_cases.billing.cancel_subscription import (
     CancelSubscriptionUseCase,
@@ -154,9 +157,14 @@ async def cancel_subscription(
     operation_id="list_invoices",
 )
 async def list_invoices(
-    tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
+    tenant: Annotated[TenantModel | None, Depends(get_owner_tenant_or_none)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    # Contract predates the tenant resolver: a user without a tenant yet
+    # (registered, no store created) gets an empty list, not a 404.
+    if tenant is None:
+        return SuccessResponse(data=[], message="No invoices")
+
     inv_q = (
         select(BillingInvoiceModel)
         .where(BillingInvoiceModel.tenant_id == tenant.id)

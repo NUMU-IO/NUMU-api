@@ -15,7 +15,10 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from src.api.dependencies.tenant_context import resolve_owner_tenant
+from src.api.dependencies.tenant_context import (
+    get_owner_tenant_or_none,
+    resolve_owner_tenant,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
 
 
@@ -92,3 +95,11 @@ async def test_no_tenant_raises_404(test_session):
     with pytest.raises(HTTPException) as exc:
         await resolve_owner_tenant(_req(), test_session, uuid4())
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_lenient_variant_returns_none_instead_of_404(test_session):
+    # Read endpoints (GET /billing/invoices) return an empty list for a
+    # user with no tenant yet — the lenient dependency maps 404 to None.
+    resolved = await get_owner_tenant_or_none(_req(), uuid4(), test_session)
+    assert resolved is None
