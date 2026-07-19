@@ -79,7 +79,7 @@ def _no_redis(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_network_intelligence_feeds_the_gate(monkeypatch):
-    async def fake_fetch(*, phone_hash):
+    async def fake_fetch(*, phone_hash, total_cents=None):
         return (90, "high", "serial_abuser (8 stores)")
 
     monkeypatch.setattr(
@@ -101,7 +101,7 @@ async def test_network_intelligence_feeds_the_gate(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tn_silence_falls_back_to_local(monkeypatch):
-    async def fake_fetch(*, phone_hash):
+    async def fake_fetch(*, phone_hash, total_cents=None):
         return None  # disabled / timeout / error — all collapse to None
 
     monkeypatch.setattr(
@@ -122,7 +122,7 @@ async def test_tn_silence_falls_back_to_local(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tn_raising_is_contained_and_falls_back(monkeypatch):
-    async def fake_fetch(*, phone_hash):
+    async def fake_fetch(*, phone_hash, total_cents=None):
         raise RuntimeError("unexpected SDK explosion")
 
     monkeypatch.setattr(
