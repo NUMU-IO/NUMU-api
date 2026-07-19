@@ -15,6 +15,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import src.infrastructure.events.handlers.wallet_commission_handler as handler_mod
+from src.application.services.wallet_settings import (
+    invalidate_wallet_settings_cache,
+)
 from src.core.events.order_events import OrderPaidEvent, OrderStatusChangedEvent
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.wallet import (
@@ -23,6 +26,13 @@ from src.infrastructure.database.models.public.wallet import (
 )
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.store import StoreModel
+
+
+@pytest.fixture(autouse=True)
+def _fresh_wallet_settings():
+    invalidate_wallet_settings_cache()
+    yield
+    invalidate_wallet_settings_cache()
 
 
 @pytest.fixture

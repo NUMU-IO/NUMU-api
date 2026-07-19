@@ -87,6 +87,17 @@ class WalletService:
         self._default_allowance = settings.wallet_negative_allowance_cents
         self._low_threshold = settings.wallet_low_balance_threshold_cents
 
+    async def load_admin_defaults(self):
+        """Overlay admin-panel wallet settings (platform_config) onto the
+        env defaults for thresholds. Returns the settings object so callers
+        can also read method switches / rates. Cached (60s) upstream."""
+        from src.application.services.wallet_settings import get_wallet_settings
+
+        admin = await get_wallet_settings(self.db)
+        self._default_allowance = admin.negative_allowance_cents
+        self._low_threshold = admin.low_balance_threshold_cents
+        return admin
+
     # ------------------------------------------------------------------
     # Wallet row
     # ------------------------------------------------------------------
@@ -210,6 +221,42 @@ class WalletService:
                 return wallet.commission_bps_override
         return get_plan_features(tenant.plan).commission_bps
 
+    async def effective_commission_bps_admin(
+        self, tenant: TenantModel, wallet: MerchantWalletModel | None
+    ) -> int:
+        """Like :meth:`effective_commission_bps` but honours the admin-panel
+        default rate (tenant override > admin default > plan rate)."""
+        from src.application.services.wallet_settings import resolve_commission_bps
+
+        if wallet is not None and wallet.status == WalletStatus.EXEMPT.value:
+            return 0
+        admin = await self.load_admin_defaults()
+        return resolve_commission_bps(
+            get_plan_features(tenant.plan).commission_bps,
+            wallet.commission_bps_override if wallet is not None else None,
+            admin,
+        )
+
+    # ------------------------------------------------------------------
+    # On-hold (pending) credits — optimistic UX for manual top-ups
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def add_pending_hold(wallet: MerchantWalletModel, amount_cents: int) -> None:
+        """Show a manual top-up as ON HOLD while verification runs.
+
+        Provisional only: not a ledger row, not spendable, ignored by the
+        checkout gate and commission math.
+        """
+        wallet.pending_balance_cents += amount_cents
+
+    @staticmethod
+    def release_pending_hold(wallet: MerchantWalletModel, amount_cents: int) -> None:
+        """Remove a hold (on approval → real credit; on rejection → gone)."""
+        wallet.pending_balance_cents = max(
+            0, wallet.pending_balance_cents - amount_cents
+        )
+
     # ------------------------------------------------------------------
     # Warning ladder
     # ------------------------------------------------------------------
@@ -279,11 +326,17 @@ class WalletService:
         if tenant is None:
             return "ok"
 
-        # Canary rollout: the gate must be armed globally
-        # (ff_wallet_checkout_gate) or per-tenant via feature_flags.
+        # Armed by the admin-panel switch, the env flag, or a per-tenant
+        # canary feature flag. load_admin_defaults also overlays the
+        # admin-configured allowance/threshold used below.
+        admin = await self.load_admin_defaults()
         settings = get_settings()
         tenant_flag = bool((tenant.feature_flags or {}).get("wallet_checkout_gate"))
-        if not settings.ff_wallet_checkout_gate and not tenant_flag:
+        if (
+            not admin.checkout_gate_enabled
+            and not settings.ff_wallet_checkout_gate
+            and not tenant_flag
+        ):
             return "ok"
 
         wallet = (
@@ -294,7 +347,7 @@ class WalletService:
             )
         ).scalar_one_or_none()
 
-        if self.effective_commission_bps(tenant, wallet) == 0:
+        if await self.effective_commission_bps_admin(tenant, wallet) == 0:
             return "ok"  # not a commission-bearing tenant
         if wallet is None or wallet.status != WalletStatus.ACTIVE.value:
             # exempt/suspended wallets never block shoppers; suspension is

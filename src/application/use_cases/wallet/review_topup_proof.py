@@ -18,6 +18,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.wallet_service import WalletService
 from src.application.use_cases.wallet.credit_wallet import credit_topup_intent
 from src.core.entities.wallet import TopupIntentStatus
 from src.infrastructure.database.models.public.wallet import (
@@ -77,6 +78,13 @@ class ReviewTopupProofUseCase:
         proof.review_decision_by = admin_user_id
         proof.review_decision_at = datetime.now(UTC)
 
+        # The optimistic hold becomes real money: release the pending
+        # amount and write the settled ledger credit.
+        service = WalletService(self.db)
+        wallet = await service.get_or_create_wallet(intent.tenant_id, for_update=True)
+        if intent.status == TopupIntentStatus.UNDER_REVIEW.value:
+            service.release_pending_hold(wallet, intent.amount_cents)
+
         tx = await credit_topup_intent(
             self.db,
             intent=intent,
@@ -107,6 +115,13 @@ class ReviewTopupProofUseCase:
         proof.review_decision_by = admin_user_id
         proof.review_decision_at = datetime.now(UTC)
         proof.rejection_reason = reason.strip() or "Rejected by admin"
+
+        # Drop the optimistic hold — the merchant's on-hold credit
+        # disappears (they were never able to spend it).
+        service = WalletService(self.db)
+        wallet = await service.get_or_create_wallet(intent.tenant_id, for_update=True)
+        if intent.status == TopupIntentStatus.UNDER_REVIEW.value:
+            service.release_pending_hold(wallet, intent.amount_cents)
 
         # Give the merchant another shot while the window is open;
         # otherwise the expiry sweep will close the intent.

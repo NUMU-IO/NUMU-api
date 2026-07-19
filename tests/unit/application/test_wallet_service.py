@@ -17,8 +17,19 @@ from src.application.services.wallet_service import (
     WalletSuspendedError,
     warning_level_for,
 )
+from src.application.services.wallet_settings import (
+    invalidate_wallet_settings_cache,
+)
 from src.core.entities.wallet import WalletTransactionKind
 from src.infrastructure.database.models.public.tenant import TenantModel
+
+
+@pytest.fixture(autouse=True)
+def _fresh_wallet_settings():
+    """The admin-settings TTL cache must never leak between tests."""
+    invalidate_wallet_settings_cache()
+    yield
+    invalidate_wallet_settings_cache()
 
 
 async def _mk_tenant(session, plan: str = "payg") -> TenantModel:

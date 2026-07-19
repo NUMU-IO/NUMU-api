@@ -97,7 +97,7 @@ async def _async_run() -> dict:  # noqa: PLR0915 — linear sweep
                 )
             ).scalar_one_or_none()
             service = WalletService(session)
-            bps = service.effective_commission_bps(tenant, wallet)
+            bps = await service.effective_commission_bps_admin(tenant, wallet)
             if bps <= 0:
                 continue
 

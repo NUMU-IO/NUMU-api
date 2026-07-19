@@ -26,11 +26,24 @@ class WalletTransactionKind(StrEnum):
 
 
 class TopupMethod(StrEnum):
-    """How a top-up intent is paid."""
+    """How a top-up intent is paid.
 
-    PAYMOB_CARD = "paymob_card"
-    PAYMOB_WALLET = "paymob_wallet"  # mobile wallets (Vodafone Cash etc.)
+    ``CARD`` is gateway-backed (Kashier hosted session on NUMU's platform
+    account — instant webhook credit). ``VODAFONE_CASH`` and ``INSTAPAY``
+    are manual: the merchant transfers to NUMU's own wallet number / IPA
+    and uploads a receipt (auto-verified, else held for admin review).
+    """
+
+    CARD = "card"
+    VODAFONE_CASH = "vodafone_cash"
     INSTAPAY = "instapay"
+
+
+# Manual (proof-upload) methods share the receipt/auto-approval pipeline.
+MANUAL_TOPUP_METHODS = frozenset({
+    TopupMethod.VODAFONE_CASH.value,
+    TopupMethod.INSTAPAY.value,
+})
 
 
 class TopupIntentStatus(StrEnum):

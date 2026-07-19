@@ -8,6 +8,9 @@ from src.api.v1.routes.webhooks.fawry import router as fawry_router
 from src.api.v1.routes.webhooks.instapay import router as instapay_router
 from src.api.v1.routes.webhooks.jt import router as jt_router
 from src.api.v1.routes.webhooks.kashier import router as kashier_router
+from src.api.v1.routes.webhooks.kashier_platform import (
+    router as kashier_platform_router,
+)
 from src.api.v1.routes.webhooks.meta import router as meta_router
 from src.api.v1.routes.webhooks.moyasar import router as moyasar_router
 from src.api.v1.routes.webhooks.mylerz import router as mylerz_router
@@ -36,6 +39,11 @@ router.include_router(mylerz_router, prefix="/mylerz", tags=["Webhooks - Mylerz"
 router.include_router(jt_router, prefix="/jt", tags=["Webhooks - J&T"])
 router.include_router(whatsapp_router, prefix="/whatsapp", tags=["Webhooks - WhatsApp"])
 router.include_router(kashier_router, prefix="/kashier", tags=["Webhooks - Kashier"])
+# Platform-directed Kashier payments (wallet card top-ups) — NUMU's own
+# account, hard-enforced platform signature. Separate from the merchant route.
+router.include_router(
+    kashier_platform_router, prefix="/kashier", tags=["Webhooks - Kashier"]
+)
 router.include_router(
     fawaterak_router, prefix="/fawaterak", tags=["Webhooks - Fawaterak"]
 )

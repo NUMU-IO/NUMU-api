@@ -47,6 +47,13 @@ class MerchantWalletModel(Base, UUIDMixin, TimestampMixin):
     # Denormalized; ledger is authoritative. May be negative down to the
     # allowance (checkout gate) and further when the gate fails open.
     balance_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Provisional credits shown to the merchant while a manual top-up
+    # receipt is under verification ("on hold"). NOT spendable — the gate
+    # and commissions use balance_cents only — and never a ledger row:
+    # verification releases the hold into a real topup ledger entry.
+    pending_balance_cents: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EGP")
     # NULL -> settings.wallet_negative_allowance_cents
     negative_allowance_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -135,7 +142,7 @@ class WalletTopupIntentModel(Base, UUIDMixin, TimestampMixin):
         Index("ix_wallet_topup_intents_tenant_created", "tenant_id", "created_at"),
         UniqueConstraint("special_reference", name="uq_wallet_topup_intents_reference"),
         UniqueConstraint(
-            "paymob_transaction_id", name="uq_wallet_topup_intents_paymob_tx"
+            "gateway_transaction_id", name="uq_wallet_topup_intents_gateway_tx"
         ),
         {"schema": "public"},
     )
@@ -153,21 +160,23 @@ class WalletTopupIntentModel(Base, UUIDMixin, TimestampMixin):
     )
     method: Mapped[str] = mapped_column(
         String(20), nullable=False
-    )  # paymob_card, paymob_wallet, instapay (TopupMethod)
+    )  # card, vodafone_cash, instapay (TopupMethod)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EGP")
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )  # TopupIntentStatus
-    # Paymob merchant_order_id ("WTOP-{uuid}") or InstaPay reference ("WT-XXXXXX").
+    # Gateway merchant reference ("WTOP-{uuid}") or manual reference
+    # ("WT-XXXXXX" InstaPay / "VC-XXXXXX" Vodafone Cash).
     special_reference: Mapped[str] = mapped_column(String(48), nullable=False)
-    paymob_intention_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    paymob_client_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
-    paymob_transaction_id: Mapped[str | None] = mapped_column(
+    # Gateway-agnostic session/intent handles (Kashier session today).
+    gateway_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gateway_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gateway_transaction_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )
-    # InstaPay payload (mirrors instapay_intents)
-    display_ipa: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Manual-method payload: IPA (InstaPay) or wallet number (Vodafone Cash).
+    display_destination: Mapped[str | None] = mapped_column(String(80), nullable=True)
     qr_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -181,7 +190,7 @@ class WalletTopupIntentModel(Base, UUIDMixin, TimestampMixin):
 
 
 class WalletTopupProofModel(Base, UUIDMixin, TimestampMixin):
-    """Merchant-uploaded InstaPay receipt for a wallet top-up.
+    """Merchant-uploaded manual top-up receipt (InstaPay / Vodafone Cash).
 
     Deliberately a parallel table to ``payment_proofs`` (which hard-requires
     order_id/store_id and store-scoped dedup): the reusable parts of that

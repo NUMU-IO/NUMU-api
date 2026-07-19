@@ -639,9 +639,18 @@ class Settings(BaseSettings):
     platform_paymob_card_integration_id: str | None = None
     platform_paymob_wallet_integration_id: str | None = None  # Vodafone Cash etc.
 
+    # Platform Kashier account (NUMU as the payee — card top-ups for the
+    # merchant wallet). Secrets stay env-only; non-secret wallet knobs are
+    # admin-editable via platform_config (see wallet_settings service).
+    platform_kashier_mid: str | None = None
+    platform_kashier_api_key: str | None = None
+    platform_kashier_mode: str = "test"  # "test" or "live"
+
     # Platform InstaPay identity (NUMU's own IPA) for merchant-wallet top-ups.
     platform_instapay_ipa: str | None = None
     platform_instapay_display_name: str | None = None
+    # Platform Vodafone Cash wallet number for manual (non-gateway) top-ups.
+    platform_vodafone_cash_number: str | None = None
     # Optional OCR provider for top-up receipts (google_vision | deepseek_hf
     # | glm_hf); empty/None -> Noop (rules that need OCR silently no-op).
     platform_instapay_ocr_provider: str | None = None

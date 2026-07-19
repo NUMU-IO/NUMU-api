@@ -78,7 +78,9 @@ async def handle_commission_charge_on_order_paid(event: OrderPaidEvent) -> None:
                 ).scalar_one_or_none()
 
                 service = WalletService(session)
-                bps = service.effective_commission_bps(tenant, wallet)
+                # Admin-panel default rate applies to commission-bearing
+                # plans; per-tenant override still wins (wallet_settings).
+                bps = await service.effective_commission_bps_admin(tenant, wallet)
                 if bps <= 0:
                     return  # subscription tenant — no per-order fee
 

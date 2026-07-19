@@ -68,6 +68,7 @@ def _wallet_dict(w: MerchantWalletModel) -> dict:
         "id": str(w.id),
         "tenant_id": str(w.tenant_id),
         "balance_cents": w.balance_cents,
+        "pending_balance_cents": w.pending_balance_cents,
         "currency": w.currency,
         "status": w.status,
         "commission_bps_override": w.commission_bps_override,
@@ -99,6 +100,64 @@ async def list_wallets(
 
 
 # Static paths must be declared before /{tenant_id} — repo convention.
+
+
+class WalletSettingsPatch(BaseModel):
+    """Partial update; ``None`` clears the override back to env default."""
+
+    topups_enabled: bool | None = None
+    checkout_gate_enabled: bool | None = None
+    card_enabled: bool | None = None
+    vodafone_cash_enabled: bool | None = None
+    instapay_enabled: bool | None = None
+    commission_bps_default: int | None = Field(default=None, ge=0, le=10_000)
+    negative_allowance_cents: int | None = Field(default=None, ge=0)
+    low_balance_threshold_cents: int | None = Field(default=None, ge=0)
+    vodafone_cash_number: str | None = Field(default=None, max_length=20)
+    instapay_ipa: str | None = Field(default=None, max_length=80)
+    instapay_display_name: str | None = Field(default=None, max_length=80)
+
+
+@router.get("/settings", response_model=SuccessResponse[dict])
+async def get_wallet_admin_settings(
+    _admin: Annotated[object, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Effective wallet configuration (env defaults + admin overrides)."""
+    from src.application.services.wallet_settings import (
+        get_wallet_settings,
+        wallet_settings_to_dict,
+    )
+
+    admin_settings = await get_wallet_settings(db, use_cache=False)
+    return SuccessResponse(data=wallet_settings_to_dict(admin_settings))
+
+
+@router.put("/settings", response_model=SuccessResponse[dict])
+async def update_wallet_admin_settings(
+    request: WalletSettingsPatch,
+    _admin: Annotated[object, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Persist admin overrides for wallet behaviour (platform_config).
+
+    Controls the top-up methods offered to merchants, the default
+    commission rate for commission-bearing plans, thresholds, and the
+    platform's Vodafone Cash number / InstaPay IPA — no deploy needed.
+    """
+    from src.application.services.wallet_settings import (
+        update_wallet_settings,
+        wallet_settings_to_dict,
+    )
+
+    # exclude_unset so "field absent" (keep) differs from "field: null" (clear).
+    patch = request.model_dump(exclude_unset=True)
+    merged = await update_wallet_settings(db, patch)
+    await db.commit()
+    logger.info("admin_wallet_settings_updated", extra={"fields": list(patch)})
+    return SuccessResponse(
+        data=wallet_settings_to_dict(merged), message="Wallet settings updated"
+    )
 
 
 @router.get("/topup-proofs", response_model=SuccessResponse[list[dict]])

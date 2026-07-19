@@ -1,4 +1,4 @@
-"""Use case: merchant uploads an InstaPay receipt for a wallet top-up.
+"""Use case: merchant uploads a manual top-up receipt (InstaPay / Vodafone Cash).
 
 Mirrors :mod:`src.application.use_cases.payments.submit_payment_proof`
 (the order-scoped original) but against NUMU's platform IPA and the
@@ -26,7 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.use_cases.wallet.credit_wallet import credit_topup_intent
 from src.config.settings import get_settings
-from src.core.entities.wallet import TopupIntentStatus, TopupMethod
+from src.core.entities.wallet import (
+    MANUAL_TOPUP_METHODS,
+    TopupIntentStatus,
+)
 from src.core.interfaces.services.storage_service import (
     IStorageService,
     StorageBucket,
@@ -94,6 +97,7 @@ class SubmitTopupProofResult:
     intent: WalletTopupIntentModel
     decision: AutoApprovalDecision
     credited_balance_cents: int | None  # set when auto-approved
+    on_hold: bool = False  # amount added to pending_balance_cents
 
 
 def platform_auto_approval_config() -> AutoApprovalConfig:
@@ -171,10 +175,10 @@ class SubmitTopupProofUseCase:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Top-up not found.",
             )
-        if intent.method != TopupMethod.INSTAPAY.value:
+        if intent.method not in MANUAL_TOPUP_METHODS:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="This top-up was not created for InstaPay.",
+                detail="This top-up method does not use receipt upload.",
             )
         if intent.status == TopupIntentStatus.SUCCEEDED.value:
             raise HTTPException(
@@ -239,14 +243,16 @@ class SubmitTopupProofUseCase:
         ocr_ok = ocr.status == "ok"
 
         # ── Auto-approval rules (platform config + facts) ──────────
-        settings = get_settings()
+        # The "IPA" fact is the intent's destination (IPA for InstaPay,
+        # Vodafone Cash number for VC) — the OCR match rule no-ops when
+        # the receipt doesn't expose a comparable value.
         day_start = datetime.now(UTC) - timedelta(hours=24)
         daily_count, daily_cents = await self._daily_auto_approved(day_start)
         facts = AutoApprovalFacts(
             order_total_cents=intent.amount_cents,
             daily_auto_approved_count=daily_count,
             daily_auto_approved_cents=daily_cents,
-            merchant_ipa=settings.platform_instapay_ipa,
+            merchant_ipa=intent.display_destination,
             intent_reference_code=intent.special_reference,
             submitted_transaction_ref=transaction_ref,
         )
@@ -305,12 +311,13 @@ class SubmitTopupProofUseCase:
             ) from exc
 
         credited_balance: int | None = None
+        on_hold = False
         if decision.approved:
             tx = await credit_topup_intent(
                 self.session,
                 intent=intent,
                 idempotency_key=f"proof:{proof.id}",
-                source="instapay_auto_approval",
+                source=f"{intent.method}_auto_approval",
             )
             credited_balance = tx.balance_after_cents if tx else None
             logger.info(
@@ -322,6 +329,18 @@ class SubmitTopupProofUseCase:
                 },
             )
         else:
+            # Optimistic UX: the merchant sees the amount immediately as
+            # ON HOLD while an admin verifies. Held only once per intent —
+            # guarded by the awaiting_proof → under_review transition (a
+            # rejected re-upload releases the hold first, see review use
+            # case). Not spendable: gate/commissions read balance_cents.
+            from src.application.services.wallet_service import WalletService
+
+            if intent.status == TopupIntentStatus.AWAITING_PROOF.value:
+                service = WalletService(self.session)
+                wallet = await service.get_or_create_wallet(tenant_id, for_update=True)
+                service.add_pending_hold(wallet, intent.amount_cents)
+                on_hold = True
             intent.status = TopupIntentStatus.UNDER_REVIEW.value
             logger.info(
                 "wallet_topup_proof_queued_for_review",
@@ -339,6 +358,7 @@ class SubmitTopupProofUseCase:
             intent=intent,
             decision=decision,
             credited_balance_cents=credited_balance,
+            on_hold=on_hold,
         )
 
     async def _daily_auto_approved(self, since: datetime) -> tuple[int, int]:

@@ -33,7 +33,12 @@ from src.application.use_cases.wallet.credit_wallet import notify_topup_credited
 from src.application.use_cases.wallet.submit_topup_proof import (
     SubmitTopupProofUseCase,
 )
-from src.core.entities.wallet import TopupMethod, WalletStatus
+from src.config.settings import get_settings
+from src.core.entities.wallet import (
+    MANUAL_TOPUP_METHODS,
+    TopupMethod,
+    WalletStatus,
+)
 from src.core.interfaces.services.storage_service import IStorageService
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.wallet import (
@@ -54,6 +59,9 @@ router = APIRouter()
 
 class WalletResponse(BaseModel):
     balance_cents: int
+    # Manual top-ups awaiting verification — shown as "on hold", not
+    # spendable (gate/commissions read balance_cents only).
+    pending_balance_cents: int
     currency: str
     status: str
     effective_commission_bps: int
@@ -61,6 +69,9 @@ class WalletResponse(BaseModel):
     low_balance_threshold_cents: int
     is_blocked: bool
     low_balance_level: int  # 0 healthy, 1 low, 2 negative, 3 blocked
+    # Admin-controlled: which top-up methods the dialog should offer.
+    methods_enabled: dict[str, bool]
+    topups_enabled: bool
 
 
 class WalletTransactionResponse(BaseModel):
@@ -87,7 +98,9 @@ class TopupResponse(BaseModel):
     status: str
     special_reference: str
     checkout_url: str | None = None
-    instapay: dict | None = None
+    # Manual-method payload (InstaPay / Vodafone Cash): destination,
+    # reference, QR (InstaPay only), expiry.
+    manual: dict | None = None
     expires_at: datetime | None = None
 
 
@@ -107,12 +120,14 @@ def _topup_response(
     intent: WalletTopupIntentModel,
     *,
     checkout_url: str | None = None,
-    instapay: dict | None = None,
+    manual: dict | None = None,
 ) -> TopupResponse:
-    if instapay is None and intent.method == TopupMethod.INSTAPAY.value:
-        instapay = {
+    if manual is None and intent.method in MANUAL_TOPUP_METHODS:
+        manual = {
+            "method": intent.method,
             "reference_code": intent.special_reference,
-            "ipa": intent.display_ipa,
+            "destination": intent.display_destination,
+            "destination_label": intent.display_destination,
             "qr_payload": intent.qr_payload,
             "expires_at": intent.expires_at.isoformat() if intent.expires_at else None,
         }
@@ -123,8 +138,13 @@ def _topup_response(
         currency=intent.currency,
         status=intent.status,
         special_reference=intent.special_reference,
-        checkout_url=checkout_url,
-        instapay=instapay,
+        # For card intents the stored gateway_payload IS the hosted
+        # session URL — return it on polling too so a refresh can resume.
+        checkout_url=checkout_url
+        or (
+            intent.gateway_payload if intent.method == TopupMethod.CARD.value else None
+        ),
+        manual=manual,
         expires_at=intent.expires_at,
     )
 
@@ -144,26 +164,31 @@ async def get_wallet(
 ):
     tenant = await _resolve_tenant(db, user_id)
     service = WalletService(db)
+    admin = await service.load_admin_defaults()
     wallet = await service.get_or_create_wallet(tenant.id)
     await db.commit()
 
     allowance = service.allowance_for(wallet)
     level = service.current_warning_level(wallet)
+    bps = await service.effective_commission_bps_admin(tenant, wallet)
     is_blocked = (
-        service.effective_commission_bps(tenant, wallet) > 0
+        bps > 0
         and wallet.status == WalletStatus.ACTIVE.value
         and wallet.balance_cents < -allowance
     )
     return SuccessResponse(
         data=WalletResponse(
             balance_cents=wallet.balance_cents,
+            pending_balance_cents=wallet.pending_balance_cents,
             currency=wallet.currency,
             status=wallet.status,
-            effective_commission_bps=service.effective_commission_bps(tenant, wallet),
+            effective_commission_bps=bps,
             negative_allowance_cents=allowance,
             low_balance_threshold_cents=service._low_threshold,
             is_blocked=is_blocked,
             low_balance_level=level,
+            methods_enabled=admin.methods_map(),
+            topups_enabled=admin.topups_enabled or get_settings().ff_wallet_topups,
         )
     )
 
@@ -256,7 +281,7 @@ async def create_wallet_topup(
         data=_topup_response(
             result.intent,
             checkout_url=result.checkout_url,
-            instapay=result.instapay,
+            manual=result.manual,
         ),
         message="Top-up created",
     )
@@ -291,7 +316,7 @@ async def get_wallet_topup(
     "/wallet/topups/{topup_id}/proof",
     response_model=SuccessResponse[dict],
     status_code=201,
-    summary="Upload an InstaPay receipt for a top-up",
+    summary="Upload a transfer receipt for a manual top-up",
     operation_id="submit_wallet_topup_proof",
 )
 async def submit_wallet_topup_proof(
@@ -337,6 +362,10 @@ async def submit_wallet_topup_proof(
             balance_after_cents=result.credited_balance_cents,
         )
 
+    if result.on_hold:
+        # The hold is committed — refresh the hub's cached wallet view.
+        await WalletService(db).invalidate_cache(tenant.id)
+
     return SuccessResponse(
         data={
             "proof_id": str(result.proof.id),
@@ -345,10 +374,14 @@ async def submit_wallet_topup_proof(
             "topup_status": result.intent.status,
             "reasons": result.decision.reasons,
             "credited_balance_cents": result.credited_balance_cents,
+            "on_hold": result.on_hold,
+            "pending_balance_cents": (
+                result.intent.amount_cents if result.on_hold else 0
+            ),
         },
         message=(
             "Top-up credited"
             if result.credited_balance_cents is not None
-            else "Receipt received — under review"
+            else "Credit added on hold — verification in progress"
         ),
     )
