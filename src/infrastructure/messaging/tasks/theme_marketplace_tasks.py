@@ -20,7 +20,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import random
+import subprocess
 import tempfile
 import time
 from collections.abc import Callable
@@ -44,6 +46,76 @@ from src.infrastructure.messaging.tasks.theme_upload_tasks import (
 )
 
 T = TypeVar("T")
+
+# ── Certification lint gate ──────────────────────────────────────────────────
+# The theme CLI owns the 12 lint rules. We shell out to it rather than porting
+# them, because a second implementation is a second thing to drift -- exactly
+# the duplication problem the shared-primitive work exists to remove.
+#
+# NUMU_THEME_LINT_GATE:
+#   "enforce" — error-severity issues fail the build (recommended)
+#   "warn"    — record the result, never block (roll-out mode)
+#   "off"     — don't run it at all
+# NUMU_THEME_CLI_BIN may point at a `numu-theme` executable; otherwise we try
+# the locally-installed CLI via npx without letting it reach the network.
+LINT_GATE_MODE = os.getenv("NUMU_THEME_LINT_GATE", "warn").lower()
+THEME_CLI_BIN = os.getenv("NUMU_THEME_CLI_BIN", "").strip()
+LINT_TIMEOUT_SECONDS = 120
+
+
+def _lint_candidates() -> list[list[str]]:
+    """Command forms to try, most explicit first."""
+    if THEME_CLI_BIN:
+        return [[THEME_CLI_BIN]]
+    # --no-install keeps this offline: if the CLI isn't already present we
+    # report `unavailable` rather than silently pulling code from the network
+    # into the build path.
+    return [["npx", "--no-install", "numu-theme"], ["numu-theme"]]
+
+
+def _lint_theme(theme_dir: Path) -> tuple[str, list[dict[str, Any]]]:
+    """Run the theme CLI's lint rules over extracted theme source.
+
+    Returns ``(status, issues)`` where status is passed | failed | unavailable.
+    A linter that cannot run yields `unavailable`, never `passed` -- an absent
+    gate must not be indistinguishable from a satisfied one.
+    """
+    last_err: str | None = None
+    for cmd in _lint_candidates():
+        try:
+            result = subprocess.run(
+                [*cmd, "lint", "--json", "--dir", str(theme_dir)],
+                capture_output=True,
+                text=True,
+                timeout=LINT_TIMEOUT_SECONDS,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            last_err = str(exc)
+            continue
+
+        # The CLI exits 1 when it finds errors, so a non-zero code is a normal
+        # outcome; only unparseable output means we failed to run it.
+        try:
+            issues = json.loads(result.stdout).get("issues", [])
+        except (json.JSONDecodeError, AttributeError):
+            last_err = (result.stderr or result.stdout or "no output")[:300]
+            continue
+
+        errors = [i for i in issues if i.get("severity") == "error"]
+        return ("failed" if errors else "passed"), issues
+
+    logger.warning(
+        "theme_lint_unavailable",
+        extra={"theme_dir": str(theme_dir), "error": last_err},
+    )
+    return "unavailable", []
+
+
+def _certification_tier(lint_status: str, issues: list[dict[str, Any]]) -> str:
+    """Map a lint outcome onto the published certification tier."""
+    if lint_status != "passed":
+        return "legacy"
+    return "compatible" if issues else "certified"
 
 
 def _retry_with_backoff(
@@ -291,6 +363,43 @@ def build_marketplace_theme(self, version_id: str) -> dict:
         if violations:
             raise ThemeBuildError(f"security scan failed: {'; '.join(violations[:5])}")
 
+        # ── Certification lint gate ───────────────────────────────────────
+        # Runs against the extracted SOURCE (the rules read theme.json,
+        # settings_schema.json, locales and section components -- none of
+        # which survive bundling). Until this existed, the 12 lint rules ran
+        # only if a developer chose to run them locally; nothing on the path
+        # to publication checked anything.
+        if LINT_GATE_MODE == "off":
+            lint_status, lint_issues = "skipped", []
+        else:
+            lint_status, lint_issues = _lint_theme(theme_dir)
+
+        lint_errors = [i for i in lint_issues if i.get("severity") == "error"]
+        if LINT_GATE_MODE == "enforce" and lint_status != "passed":
+            if lint_status == "unavailable":
+                raise ThemeBuildError(
+                    "certification lint could not run and the gate is set to "
+                    "enforce; install @numueg/theme-cli on the build host or "
+                    "set NUMU_THEME_LINT_GATE=warn"
+                )
+            detail = "; ".join(
+                f"{i.get('rule', '?')}: {i.get('message', '')}" for i in lint_errors[:5]
+            )
+            raise ThemeBuildError(f"certification lint failed: {detail}")
+
+        tier = _certification_tier(lint_status, lint_issues)
+        logger.info(
+            "marketplace_build_lint",
+            extra={
+                "version_id": version_id,
+                "lint_status": lint_status,
+                "errors": len(lint_errors),
+                "warnings": len(lint_issues) - len(lint_errors),
+                "tier": tier,
+                "mode": LINT_GATE_MODE,
+            },
+        )
+
         # ── Upload to R2 ──────────────────────────────────────────────────
         bundle_bytes = bundle_path.read_bytes()
         checksum = hashlib.sha256(bundle_bytes).hexdigest()
@@ -467,6 +576,9 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 settings_schema=settings_schema,
                 section_schemas=section_schemas,
                 presets=presets,
+                lint_status=lint_status,
+                lint_issues={"issues": lint_issues},
+                certification_tier=tier,
                 build_log=f"Build succeeded at {datetime.now(UTC).isoformat()}",
             )
         )

@@ -161,6 +161,24 @@ class MarketplaceThemeVersionModel(Base, UUIDMixin):
     reviewed_by: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # ── Certification (the automated quality gate) ───────────────────────
+    # Result of running the theme CLI's lint rules server-side during the
+    # build. Three states, because "we could not run the linter" must not
+    # look like "the linter passed":
+    #   passed      — ran, no error-severity issues
+    #   failed      — ran, error-severity issues (build is failed outright)
+    #   unavailable — linter could not be run (no Node / CLI not resolvable)
+    #   skipped     — gate disabled by config
+    # Reviewers see this; approval refuses anything that is not `passed`
+    # unless an admin explicitly overrides.
+    lint_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Full issue list from the linter, verbatim, so the reason a theme was
+    # rejected survives without re-running the build.
+    lint_issues: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # certified — passed lint with no warnings either
+    # compatible — passed lint, warnings present
+    # legacy     — predates the gate, or the linter could not run
+    certification_tier: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()"), nullable=False
     )

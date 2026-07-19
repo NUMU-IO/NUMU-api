@@ -121,6 +121,12 @@ class MarketplaceThemeVersion(BaseEntity):
     source_zip_path: str | None = None
     review_notes: str | None = None
     reviewed_by: UUID | None = None
+    # Automated certification gate — see MarketplaceThemeVersionModel for the
+    # meaning of each state. `unavailable` is deliberately distinct from
+    # `passed`: a gate that could not run has proven nothing.
+    lint_status: str | None = None
+    lint_issues: dict[str, Any] | None = None
+    certification_tier: str | None = None
 
 
 class MarketplaceThemeInstallation(BaseEntity):

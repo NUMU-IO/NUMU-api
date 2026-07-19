@@ -358,6 +358,10 @@ class MarketplaceService:
                 "bundle_url": v.bundle_url,
                 "css_url": v.css_url,
                 "build_log": v.build_log,
+                # Certification gate — the automated signal behind the click
+                "lint_status": v.lint_status,
+                "lint_issues": v.lint_issues,
+                "certification_tier": v.certification_tier,
                 # Listing
                 "theme_name": theme.name if theme else None,
                 "theme_slug": theme.slug if theme else None,
@@ -448,6 +452,7 @@ class MarketplaceService:
         version_id: UUID,
         decision: str,
         notes: str | None = None,
+        override_certification: bool = False,
     ) -> dict[str, Any]:
         """Admin reviews a version (approve/reject)."""
         if decision not in ("approve", "reject"):
@@ -459,6 +464,28 @@ class MarketplaceService:
         if version.status != MarketplaceVersionStatus.PENDING_REVIEW:
             raise ValueError(
                 f"version is not pending_review (status={version.status.value})"
+            )
+
+        # Approval used to be a bare human click with no automated signal
+        # behind it. Publishing now requires the certification gate to have
+        # actually run and passed. `unavailable` blocks too -- a gate that
+        # could not run has proven nothing, and letting it read as a pass is
+        # how a gate quietly stops being one.
+        #
+        # `override_certification` exists because the alternative is an admin
+        # with no way to publish a theme the linter is wrong about; it is
+        # recorded in review_notes so the exception stays visible.
+        if decision == "approve" and version.lint_status != "passed":
+            if not override_certification:
+                raise ValueError(
+                    "cannot publish: certification lint status is "
+                    f"'{version.lint_status or 'not run'}'. Fix the reported "
+                    "issues and resubmit, or approve with "
+                    "override_certification=true to publish anyway."
+                )
+            notes = (
+                f"[certification override: lint={version.lint_status or 'not run'}] "
+                f"{notes or ''}".strip()
             )
 
         new_version_status = (
@@ -904,6 +931,11 @@ class MarketplaceService:
                 "settings_schema": version.settings_schema,
                 "section_schemas": version.section_schemas,
                 "presets": version.presets,
+                # Carried through so the storefront can verify the bundle it
+                # fetches. Must be refreshed alongside bundle_url — a stale
+                # checksum against a new bundle fails closed and blanks the
+                # store, so the two always move together.
+                "checksum": version.checksum,
             }
             logger.info(
                 "marketplace_activate_restored_customization",
@@ -935,6 +967,7 @@ class MarketplaceService:
                     if _api_settings.environment == "production"
                     else "development"
                 ),
+                checksum=version.checksum,
             )
             seed = v3.model_dump()
 
