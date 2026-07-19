@@ -239,6 +239,7 @@ async def check_customer_trust(
     store_settings: dict | None,
     network_repo: NetworkReputationRepository,
     location: LocationSignals | None = None,
+    order_total_cents: int | None = None,
 ) -> CodTrustDecision:
     """Evaluate whether a COD order from this customer should be allowed.
 
@@ -277,7 +278,9 @@ async def check_customer_trust(
             fetch_network_intelligence,
         )
 
-        tn_intelligence = await fetch_network_intelligence(phone_hash=phone_hash)
+        tn_intelligence = await fetch_network_intelligence(
+            phone_hash=phone_hash, total_cents=order_total_cents
+        )
     except Exception as exc:  # noqa: BLE001 — the gate never depends on the TN
         logger.warning("cod_trust_tn_error: %s", exc)
 
