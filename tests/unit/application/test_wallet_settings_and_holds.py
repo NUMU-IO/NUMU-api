@@ -478,3 +478,56 @@ async def test_no_ocr_never_auto_approves(test_session):
     wallet = await WalletService(test_session).get_or_create_wallet(tenant.id)
     assert wallet.pending_balance_cents == 1_000
     assert wallet.balance_cents == 0
+
+
+@pytest.mark.asyncio
+async def test_ocr_text_without_amount_gets_specific_reason(test_session):
+    """OCR that reads text but finds NO payment amount (screenshot of a
+    non-receipt) must block with ocr_no_amount_found — not the
+    misleading 'unavailable' (OCR ran fine, seen live 2026-07-19)."""
+    from datetime import UTC, datetime, timedelta
+
+    from src.application.use_cases.wallet.submit_topup_proof import (
+        SubmitTopupProofUseCase,
+    )
+    from src.infrastructure.external_services.vision import ProofVisionResult
+
+    class _OkNoAmountVision:
+        async def extract(self, image_bytes, *, hint_currency="EGP"):
+            return ProofVisionResult(
+                status="ok",
+                provider="google_vision",
+                raw_text="an architecture diagram with lots of words but no money",
+            )
+
+    tenant = await _mk_tenant(test_session)
+    intent = WalletTopupIntentModel(
+        tenant_id=tenant.id,
+        method="vodafone_cash",
+        amount_cents=25_000,
+        currency="EGP",
+        status=TopupIntentStatus.AWAITING_PROOF.value,
+        special_reference=f"VC-{uuid4().hex[:6].upper()}",
+        display_destination="01000000000",
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+    )
+    test_session.add(intent)
+    await test_session.commit()
+
+    result = await SubmitTopupProofUseCase(
+        session=test_session,
+        storage_service=_FakeStorage(),
+        vision_service=_OkNoAmountVision(),
+    ).execute(
+        tenant_id=tenant.id,
+        topup_intent_id=intent.id,
+        image_bytes=b"screenshot-of-a-diagram",
+        image_content_type="image/png",
+        transaction_ref=f"ref-{uuid4().hex[:8]}",
+    )
+    await test_session.commit()
+
+    assert result.credited_balance_cents is None
+    assert result.on_hold is True
+    assert "ocr_no_amount_found" in result.decision.reasons
+    assert "ocr_verification_unavailable" not in result.decision.reasons
