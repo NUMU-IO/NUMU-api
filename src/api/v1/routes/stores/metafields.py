@@ -18,6 +18,7 @@ from src.api.dependencies.repositories import (
     get_metafield_definition_repository,
     get_metafield_value_repository,
 )
+from src.api.dependencies.services import get_product_cache_service
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.metafield import (
     CreateMetafieldDefinitionRequest,
@@ -34,12 +35,32 @@ from src.core.entities.metafield import (
     serialize_metafield_value,
 )
 from src.core.entities.store import Store
+from src.infrastructure.cache import ProductCacheService
 from src.infrastructure.repositories.metafield_repository import (
     MetafieldDefinitionRepository,
     MetafieldValueRepository,
 )
 
 router = APIRouter(prefix="/{store_id}/metafields")
+
+
+async def _invalidate_owner_cache(
+    cache: ProductCacheService,
+    store_id: UUID,
+    owner_type: MetafieldOwnerType,
+    owner_id: UUID,
+) -> None:
+    """Bust the storefront cache for the owner whose metafields changed, so a
+    value edit shows up without waiting out the cached-payload TTL. Products
+    carry metafields on their detail payload; collections on the category
+    listing. Best-effort — a cache miss must never fail the write."""
+    try:
+        if owner_type == MetafieldOwnerType.PRODUCT:
+            await cache.invalidate_product(store_id, owner_id)
+        elif owner_type == MetafieldOwnerType.COLLECTION:
+            await cache.invalidate_categories(store_id)
+    except Exception:  # noqa: BLE001 — cache invalidation is best-effort
+        pass
 
 
 def _definition_response(entity: MetafieldDefinition) -> MetafieldDefinitionResponse:
@@ -256,6 +277,7 @@ async def set_owner_metafield_value(
     value_repo: Annotated[
         MetafieldValueRepository, Depends(get_metafield_value_repository)
     ],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
 ):
     """Set a value for a defined field. The value is validated against the
     definition's declared type before it is stored."""
@@ -291,10 +313,47 @@ async def set_owner_metafield_value(
                 value=serialized,
             )
         )
+    await _invalidate_owner_cache(product_cache, store.id, owner_type, owner_id)
     return SuccessResponse(
         data=_value_response(saved, definition),
         message="Metafield value saved successfully",
     )
+
+
+@router.delete(
+    "/owners/{owner_type}/{owner_id}/{namespace}/{key}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Unset a metafield value on an owner",
+    operation_id="unset_owner_metafield_value",
+)
+async def unset_owner_metafield_value(
+    owner_type: Annotated[MetafieldOwnerType, Path(description="Owner resource type")],
+    owner_id: Annotated[UUID, Path(description="Owner UUID")],
+    namespace: Annotated[str, Path(description="Definition namespace")],
+    key: Annotated[str, Path(description="Definition key")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    def_repo: Annotated[
+        MetafieldDefinitionRepository, Depends(get_metafield_definition_repository)
+    ],
+    value_repo: Annotated[
+        MetafieldValueRepository, Depends(get_metafield_value_repository)
+    ],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
+):
+    """Remove one owner's value for a field (the definition stays). The
+    storefront then renders the setting's default — the contract's
+    missing-value behavior, not an error."""
+    definition = await def_repo.get_by_key(store.id, owner_type, namespace, key)
+    if not definition:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No {owner_type.value} metafield definition '{namespace}.{key}'",
+        )
+    existing = await value_repo.get_by_definition_and_owner(definition.id, owner_id)
+    if existing:
+        await value_repo.delete(existing.id)
+        await _invalidate_owner_cache(product_cache, store.id, owner_type, owner_id)
+    return None
 
 
 @router.delete(

@@ -331,6 +331,9 @@ async def mylerz_callback(
                     order.return_to_origin(reason="Returned by carrier (Mylerz)")
                 elif order.can_be_cancelled:
                     order.cancel(reason="Returned by carrier (Mylerz)")
+                from src.application.services.stock_service import try_restock_order
+
+                await try_restock_order(session, order, reason="mylerz_returned")
                 await order_repo.update(order)
                 log.info("order_returned", order_id=str(order.id))
             except Exception as e:
@@ -421,6 +424,11 @@ async def mylerz_callback(
             try:
                 if order.can_be_cancelled:
                     order.cancel(reason="Cancelled via Mylerz")
+                    from src.application.services.stock_service import (
+                        try_restock_order,
+                    )
+
+                    await try_restock_order(session, order, reason="mylerz_cancelled")
                     await order_repo.update(order)
                     log.info("order_cancelled_mylerz", order_id=str(order.id))
             except Exception as e:

@@ -32,6 +32,7 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
+from src.application.services.variant_sync_service import recompute_product_quantity
 from src.core.entities.store import Store
 from src.core.entities.variant import Variant
 from src.core.value_objects.money import Currency, Money
@@ -245,11 +246,21 @@ async def create_variant_route(
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> VariantResponse:
-    """Create a new variant under the given product. Duplicate
-    SKU per store is enforced at the DB layer (uq_variants_store_sku)
-    — that raises an IntegrityError we let bubble to FastAPI's 500
-    handler today; could be promoted to a 409 in a follow-up."""
+    """Create a new variant under the given product. Duplicate SKU per
+    store is rejected with a bilingual 409 (checked up-front; the DB's
+    uq_variants_store_sku stays as the backstop)."""
     product = await _load_product_for_store(product_id, store, product_repo)
+    if request.sku and (request.sku or "").strip():
+        from src.application.services.sku_service import (
+            duplicate_sku_error_detail,
+            sku_in_use,
+        )
+
+        if await sku_in_use(session, store.id, request.sku.strip()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=duplicate_sku_error_detail(request.sku.strip()),
+            )
     repo = VariantRepository(session)
     currency = _currency(request.price_currency)
     variant = await repo.create(
@@ -277,6 +288,7 @@ async def create_variant_route(
         metadata=request.metadata,
     )
     await _sync_product_base_price(session, product_repo, product)
+    await recompute_product_quantity(session, product_id=product_id)
     await session.commit()
     return _to_response(variant)
 
@@ -308,6 +320,32 @@ async def update_variant_route(
         )
 
     body = request.model_dump(exclude_unset=True)
+
+    # Duplicate-SKU guard aligned with uq_variants_store_sku (excludes this
+    # variant itself so re-saving an unchanged SKU is not a conflict).
+    if body.get("sku"):
+        from sqlalchemy import select as _select
+
+        from src.application.services.sku_service import duplicate_sku_error_detail
+        from src.infrastructure.database.models.tenant.variant import VariantModel
+
+        taken = (
+            await session.execute(
+                _select(VariantModel.id)
+                .where(
+                    VariantModel.store_id == store.id,
+                    VariantModel.sku == body["sku"].strip(),
+                    VariantModel.id != variant_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if taken is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=duplicate_sku_error_detail(body["sku"].strip()),
+            )
+
     currency = _currency(
         body.get("price_currency")
         or (
@@ -353,6 +391,7 @@ async def update_variant_route(
 
     updated = await repo.update(existing)
     await _sync_product_base_price(session, product_repo, product)
+    await recompute_product_quantity(session, product_id=product_id)
     await session.commit()
     return _to_response(updated)
 
@@ -385,4 +424,5 @@ async def delete_variant_route(
         )
     await repo.delete_by_id(variant_id)
     await _sync_product_base_price(session, product_repo, product)
+    await recompute_product_quantity(session, product_id=product_id)
     await session.commit()

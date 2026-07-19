@@ -64,7 +64,10 @@ class Variant(BaseEntity):
     # (Phase 8.2) will replace this single column with a join to
     # `inventory_levels` aggregating across locations; until then this
     # is the canonical stock count.
-    inventory_quantity: int = Field(default=0, ge=0)
+    # May go negative: continue_selling_when_out_of_stock oversell debits
+    # below zero on purpose (same rule as Product.quantity — a ge=0 guard
+    # here made every read that hydrates the variant 500 after an oversell).
+    inventory_quantity: int = Field(default=0)
     # Variants can have their own image (e.g. a "Red" variant shows
     # the red photo on the PDP when selected). Empty → fall back to
     # the product's first image.
