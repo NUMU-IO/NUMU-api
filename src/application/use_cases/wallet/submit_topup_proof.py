@@ -282,12 +282,19 @@ class SubmitTopupProofUseCase:
         # downgrade to the on-hold review path. The merchant still sees
         # the credit instantly (as pending) — the optimistic-UX contract
         # holds; only the irreversible part waits for a human.
+        #
+        # Two distinct reasons so the admin card explains itself:
+        # - OCR read the image but found NO payment amount (screenshot
+        #   of something that isn't a receipt) -> ocr_no_amount_found
+        # - OCR never produced text (provider off/failed/empty image)
+        #   -> ocr_verification_unavailable
         if decision.approved and not (
             ocr_ok and ocr.extracted_amount_cents is not None
         ):
+            reason = "ocr_no_amount_found" if ocr_ok else "ocr_verification_unavailable"
             decision = AutoApprovalDecision(
                 approved=False,
-                reasons=[*decision.reasons, "ocr_verification_unavailable"],
+                reasons=[*decision.reasons, reason],
             )
 
         # ── Persist proof ──────────────────────────────────────────
