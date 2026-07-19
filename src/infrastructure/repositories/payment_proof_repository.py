@@ -18,18 +18,25 @@ _UINT64_MOD = 1 << 64
 _INT64_MAX = (1 << 63) - 1
 
 
-def _phash_to_db(value: int | None) -> int | None:
-    # imagehash returns an unsigned 64-bit int; Postgres BIGINT is signed.
-    # Map values above 2^63-1 into the negative half so asyncpg accepts them.
+def phash_to_db(value: int | None) -> int | None:
+    """imagehash returns an unsigned 64-bit int; Postgres BIGINT is signed.
+    Map values above 2^63-1 into the negative half so asyncpg accepts them.
+    EVERY write of a perceptual hash to a BigInteger column must go through
+    this (wallet top-up proofs skipped it and 500'd on real receipts)."""
     if value is None:
         return None
     return value - _UINT64_MOD if value > _INT64_MAX else value
 
 
-def _phash_from_db(value: int | None) -> int | None:
+def phash_from_db(value: int | None) -> int | None:
     if value is None:
         return None
     return value + _UINT64_MOD if value < 0 else value
+
+
+# Internal aliases (historic private names).
+_phash_to_db = phash_to_db
+_phash_from_db = phash_from_db
 
 
 class PaymentProofRepository:
