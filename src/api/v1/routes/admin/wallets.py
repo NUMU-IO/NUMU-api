@@ -18,7 +18,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -178,7 +178,6 @@ async def update_wallet_admin_settings(
 async def list_topup_proofs(
     _admin: Annotated[object, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[IStorageService, Depends(get_storage_service)],
     status: str = "awaiting_review",
     skip: int = 0,
     limit: int = 50,
@@ -210,12 +209,6 @@ async def list_topup_proofs(
     ).all()
     counts = {status_val: int(n) for status_val, n in count_rows}
 
-    async def _signed(key: str) -> str | None:
-        try:
-            return await storage.get_signed_url(key, expires_in=3600)
-        except Exception:  # noqa: BLE001 — a broken URL must not kill the queue
-            return None
-
     proofs = []
     for p, i, tenant_name in rows:
         proofs.append({
@@ -236,10 +229,51 @@ async def list_topup_proofs(
             "ocr_extracted_ipa": p.ocr_extracted_ipa,
             "ocr_extracted_note": p.ocr_extracted_note,
             "rejection_reason": p.rejection_reason,
-            "image_url": await _signed(p.proof_image_key),
+            # Relative API path streamed by the route below — NOT a
+            # presigned R2 URL. The `numu` bucket's presigned URLs are
+            # built against the public CDN host and 403 in the browser;
+            # streaming through the authenticated API sidesteps that
+            # (same pattern as merchant payment-proof images).
+            "image_url": f"/api/v1/admin/wallets/topup-proofs/{p.id}/image",
             "created_at": p.created_at.isoformat() if p.created_at else None,
         })
     return SuccessResponse(data={"proofs": proofs, "counts": counts})
+
+
+@router.get("/topup-proofs/{proof_id}/image")
+async def stream_topup_proof_image(
+    proof_id: UUID,
+    _admin: Annotated[object, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    storage: Annotated[IStorageService, Depends(get_storage_service)],
+):
+    """Stream the receipt image bytes (admin-authenticated).
+
+    Presigned URLs for this bucket are built against the public CDN
+    host, so their SigV4 signature never validates in the browser
+    (403). The admin is cookie-authenticated through the /api proxy —
+    fetch the object server-side and return it inline.
+    """
+    proof = (
+        await db.execute(
+            select(WalletTopupProofModel).where(WalletTopupProofModel.id == proof_id)
+        )
+    ).scalar_one_or_none()
+    if proof is None:
+        raise HTTPException(status_code=404, detail="Proof not found")
+
+    try:
+        body, content_type = await storage.get_object_bytes(proof.proof_image_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Proof image is missing")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not fetch the proof image")
+
+    return Response(
+        content=body,
+        media_type=content_type or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.post("/topup-proofs/{proof_id}/approve", response_model=SuccessResponse[dict])
