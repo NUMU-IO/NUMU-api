@@ -274,6 +274,21 @@ class SubmitTopupProofUseCase:
             config=platform_auto_approval_config(),
             facts=facts,
         )
+        # The engine's OCR cross-checks no-op when OCR is unavailable —
+        # so with no OCR provider configured, a below-threshold receipt
+        # would auto-approve on pure trust (fake image + wrong ref
+        # included, seen live 2026-07-19). For the PLATFORM wallet an
+        # unverified receipt must never auto-credit spendable balance:
+        # downgrade to the on-hold review path. The merchant still sees
+        # the credit instantly (as pending) — the optimistic-UX contract
+        # holds; only the irreversible part waits for a human.
+        if decision.approved and not (
+            ocr_ok and ocr.extracted_amount_cents is not None
+        ):
+            decision = AutoApprovalDecision(
+                approved=False,
+                reasons=[*decision.reasons, "ocr_verification_unavailable"],
+            )
 
         # ── Persist proof ──────────────────────────────────────────
         proof = WalletTopupProofModel(
