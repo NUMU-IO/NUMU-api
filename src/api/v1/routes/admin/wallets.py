@@ -20,11 +20,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
+from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
 from src.application.services.wallet_service import (
     WalletService,
@@ -35,6 +36,7 @@ from src.application.use_cases.wallet.review_topup_proof import (
     ReviewTopupProofUseCase,
 )
 from src.core.entities.wallet import WalletStatus, WalletTransactionKind
+from src.core.interfaces.services.storage_service import IStorageService
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.wallet import (
     MerchantWalletModel,
@@ -160,47 +162,72 @@ async def update_wallet_admin_settings(
     )
 
 
-@router.get("/topup-proofs", response_model=SuccessResponse[list[dict]])
+@router.get("/topup-proofs", response_model=SuccessResponse[dict])
 async def list_topup_proofs(
     _admin: Annotated[object, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: Annotated[IStorageService, Depends(get_storage_service)],
     status: str = "awaiting_review",
     skip: int = 0,
     limit: int = 50,
 ):
     rows = (
         await db.execute(
-            select(WalletTopupProofModel, WalletTopupIntentModel)
+            select(WalletTopupProofModel, WalletTopupIntentModel, TenantModel.name)
             .join(
                 WalletTopupIntentModel,
                 WalletTopupIntentModel.id == WalletTopupProofModel.topup_intent_id,
             )
+            .join(TenantModel, TenantModel.id == WalletTopupProofModel.tenant_id)
             .where(WalletTopupProofModel.status == status)
             .order_by(WalletTopupProofModel.created_at.asc())
             .offset(max(skip, 0))
             .limit(min(max(limit, 1), 200))
         )
     ).all()
-    return SuccessResponse(
-        data=[
-            {
-                "proof_id": str(p.id),
-                "tenant_id": str(p.tenant_id),
-                "topup_id": str(i.id),
-                "amount_cents": i.amount_cents,
-                "reference": i.special_reference,
-                "transaction_ref": p.transaction_ref,
-                "declared_amount_cents": p.declared_amount_cents,
-                "block_reasons": p.auto_approval_block_reasons,
-                "ocr_status": p.ocr_status,
-                "ocr_extracted_amount_cents": p.ocr_extracted_amount_cents,
-                "ocr_extracted_ipa": p.ocr_extracted_ipa,
-                "image_key": p.proof_image_key,
-                "created_at": p.created_at.isoformat() if p.created_at else None,
-            }
-            for p, i in rows
-        ]
-    )
+
+    # Global per-status counts so the queue can label its tabs (mirrors
+    # the WhatsApp access-request queue shape).
+    count_rows = (
+        await db.execute(
+            select(
+                WalletTopupProofModel.status,
+                func.count(WalletTopupProofModel.id),
+            ).group_by(WalletTopupProofModel.status)
+        )
+    ).all()
+    counts = {status_val: int(n) for status_val, n in count_rows}
+
+    async def _signed(key: str) -> str | None:
+        try:
+            return await storage.get_signed_url(key, expires_in=3600)
+        except Exception:  # noqa: BLE001 — a broken URL must not kill the queue
+            return None
+
+    proofs = []
+    for p, i, tenant_name in rows:
+        proofs.append({
+            "proof_id": str(p.id),
+            "tenant_id": str(p.tenant_id),
+            "tenant_name": tenant_name,
+            "topup_id": str(i.id),
+            "method": i.method,
+            "amount_cents": i.amount_cents,
+            "reference": i.special_reference,
+            "destination": i.display_destination,
+            "transaction_ref": p.transaction_ref,
+            "declared_amount_cents": p.declared_amount_cents,
+            "status": p.status,
+            "block_reasons": p.auto_approval_block_reasons,
+            "ocr_status": p.ocr_status,
+            "ocr_extracted_amount_cents": p.ocr_extracted_amount_cents,
+            "ocr_extracted_ipa": p.ocr_extracted_ipa,
+            "ocr_extracted_note": p.ocr_extracted_note,
+            "rejection_reason": p.rejection_reason,
+            "image_url": await _signed(p.proof_image_key),
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        })
+    return SuccessResponse(data={"proofs": proofs, "counts": counts})
 
 
 @router.post("/topup-proofs/{proof_id}/approve", response_model=SuccessResponse[dict])
