@@ -294,28 +294,35 @@ class WalletService:
     # ------------------------------------------------------------------
 
     async def checkout_gate_allows(self, tenant_id: UUID) -> bool:
+        """Backwards-compatible boolean wrapper over :meth:`checkout_gate_state`."""
+        return await self.checkout_gate_state(tenant_id) == "ok"
+
+    async def checkout_gate_state(self, tenant_id: UUID) -> str:
         """Cheap gate for storefront checkout. FAILS OPEN on any error —
         never lose a merchant's sale to our infra; the commission handler
         and reconciliation sweep still charge, so the balance self-corrects.
+
+        States: ``ok`` | ``blocked`` (payg wallet below allowance) |
+        ``not_live`` (new tenant hasn't chosen a plan yet — go-live gate).
         """
         try:
             key = gate_cache_key(tenant_id)
             if self._cache:
                 cached = await self._cache.get(key)
-                if cached in ("ok", "blocked"):
-                    return cached == "ok"
+                if cached in ("ok", "blocked", "not_live"):
+                    return cached
 
             state = await self._compute_gate_state(tenant_id)
             if self._cache:
                 await self._cache.set(key, state, expire=_GATE_CACHE_TTL_SECONDS)
-            return state == "ok"
+            return state
         except Exception:  # noqa: BLE001 — fail open by design
             logger.warning(
                 "wallet_gate_check_failed_open",
                 extra={"tenant_id": str(tenant_id)},
                 exc_info=True,
             )
-            return True
+            return "ok"
 
     async def _compute_gate_state(self, tenant_id: UUID) -> str:
         tenant = (
@@ -326,12 +333,26 @@ class WalletService:
         if tenant is None:
             return "ok"
 
+        admin = await self.load_admin_defaults()
+        settings = get_settings()
+        flags = tenant.feature_flags or {}
+
+        # ── Go-live gate ─────────────────────────────────────────────
+        # New tenants (created after the golive_exempt backfill) can build
+        # their store but cannot take orders until they choose a paid plan
+        # or Pay as you Grow. Existing tenants carry golive_exempt=true.
+        if (
+            (admin.golive_gate_enabled or settings.ff_golive_gate)
+            and tenant.plan in ("trial", "demo", "free")
+            and not flags.get("golive_exempt")
+        ):
+            return "not_live"
+
+        # ── Payg balance gate ────────────────────────────────────────
         # Armed by the admin-panel switch, the env flag, or a per-tenant
         # canary feature flag. load_admin_defaults also overlays the
         # admin-configured allowance/threshold used below.
-        admin = await self.load_admin_defaults()
-        settings = get_settings()
-        tenant_flag = bool((tenant.feature_flags or {}).get("wallet_checkout_gate"))
+        tenant_flag = bool(flags.get("wallet_checkout_gate"))
         if (
             not admin.checkout_gate_enabled
             and not settings.ff_wallet_checkout_gate

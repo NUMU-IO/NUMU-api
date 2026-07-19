@@ -122,6 +122,11 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     )
     # Demo flow specifics
     demo_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Visitor's name + optional WhatsApp from the landing "Try a Demo"
+    # form — makes every demo attributable to a person, reachable on the
+    # channel that actually converts in Egypt.
+    demo_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    demo_whatsapp: Mapped[str | None] = mapped_column(String(20), nullable=True)
     demo_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

@@ -31,7 +31,9 @@ router = APIRouter()
 class DemoRowResponse(BaseModel):
     tenant_id: UUID
     subdomain: str
+    demo_name: str | None = None
     demo_email: str | None
+    demo_whatsapp: str | None = None
     demo_started_at: datetime | None
     expires_at: datetime | None
     lifecycle_state: str
@@ -86,7 +88,9 @@ async def list_demos(
         DemoRowResponse(
             tenant_id=t.id,
             subdomain=t.subdomain,
+            demo_name=t.demo_name,
             demo_email=t.demo_email,
+            demo_whatsapp=t.demo_whatsapp,
             demo_started_at=t.demo_started_at,
             expires_at=t.expires_at,
             lifecycle_state=t.lifecycle_state,

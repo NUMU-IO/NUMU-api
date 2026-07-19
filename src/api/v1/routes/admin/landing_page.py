@@ -10,7 +10,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -237,3 +237,67 @@ async def admin_update_pricing_plans(
     logger.info("Pricing plans updated by admin %s", _admin_id)
 
     return SuccessResponse(data=new_value, message="Pricing plans updated")
+
+
+# ---------------------------------------------------------------------------
+# Signup & trial settings (trial length/visibility, payg card visibility)
+# ---------------------------------------------------------------------------
+
+
+class SignupSettingsPatch(BaseModel):
+    """Partial update; ``None`` clears an override back to the default."""
+
+    trial_enabled: bool | None = None
+    trial_days: int | None = Field(default=None, ge=1, le=365)
+    trial_visible_on_landing: bool | None = None
+    payg_visible_on_landing: bool | None = None
+
+
+@router.get(
+    "/signup",
+    response_model=SuccessResponse[dict],
+    summary="Get signup & trial settings (admin)",
+    operation_id="admin_get_signup_settings",
+)
+async def admin_get_signup_settings(
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Effective signup/trial configuration (defaults + admin overrides)."""
+    from src.application.services.signup_settings import (
+        get_signup_settings,
+        signup_settings_to_dict,
+    )
+
+    signup = await get_signup_settings(db, use_cache=False)
+    return SuccessResponse(
+        data=signup_settings_to_dict(signup), message="Signup settings"
+    )
+
+
+@router.put(
+    "/signup",
+    response_model=SuccessResponse[dict],
+    summary="Update signup & trial settings (admin)",
+    operation_id="admin_update_signup_settings",
+)
+async def admin_update_signup_settings(
+    request: SignupSettingsPatch,
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Control the free trial (on/off, length in days, landing visibility)
+    and whether the Pay-as-you-Grow card appears on the landing page.
+    Live immediately — registration and ``GET /public/pricing-plans``
+    both read this config."""
+    from src.application.services.signup_settings import (
+        signup_settings_to_dict,
+        update_signup_settings,
+    )
+
+    merged = await update_signup_settings(db, request.model_dump(exclude_unset=True))
+    await db.commit()
+    logger.info("Signup settings updated by admin %s", _admin_id)
+    return SuccessResponse(
+        data=signup_settings_to_dict(merged), message="Signup settings updated"
+    )
