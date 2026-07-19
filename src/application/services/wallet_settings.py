@@ -27,6 +27,7 @@ from src.infrastructure.database.models.public.platform_config import (
 
 WALLET_SETTINGS_KEY = "wallet_settings"
 _CACHE_TTL_SECONDS = 60
+DEFAULT_MIN_TOPUP_CENTS = 5_000  # 50 EGP
 
 # Fields an admin may override. Anything else in the stored dict is ignored,
 # so a stale/renamed key can never crash the merge.
@@ -40,6 +41,7 @@ _OVERRIDABLE_FIELDS = frozenset({
     "commission_bps_default",
     "negative_allowance_cents",
     "low_balance_threshold_cents",
+    "min_topup_cents",
     "vodafone_cash_number",
     "instapay_ipa",
     "instapay_display_name",
@@ -63,6 +65,7 @@ class WalletAdminSettings:
     commission_bps_default: int | None
     negative_allowance_cents: int
     low_balance_threshold_cents: int
+    min_topup_cents: int
     vodafone_cash_number: str | None
     instapay_ipa: str | None
     instapay_display_name: str | None
@@ -81,6 +84,24 @@ class WalletAdminSettings:
             "instapay": self.instapay_enabled,
         }
 
+    def method_configured(self, method: str) -> bool:
+        """Whether the platform-side destination/credentials for a method
+        actually exist. An admin toggle alone is not enough to offer a
+        method to merchants — a VC/InstaPay top-up with no destination
+        number would 503 at creation."""
+        s = get_settings()
+        return {
+            "card": bool(s.platform_kashier_mid and s.platform_kashier_api_key),
+            "vodafone_cash": bool(self.vodafone_cash_number),
+            "instapay": bool(self.instapay_ipa),
+        }.get(method, False)
+
+    def effective_methods_map(self) -> dict[str, bool]:
+        """enabled AND configured — what merchants should be offered."""
+        return {
+            m: on and self.method_configured(m) for m, on in self.methods_map().items()
+        }
+
 
 def _env_defaults() -> WalletAdminSettings:
     s = get_settings()
@@ -96,6 +117,7 @@ def _env_defaults() -> WalletAdminSettings:
         commission_bps_default=None,
         negative_allowance_cents=s.wallet_negative_allowance_cents,
         low_balance_threshold_cents=s.wallet_low_balance_threshold_cents,
+        min_topup_cents=DEFAULT_MIN_TOPUP_CENTS,
         vodafone_cash_number=s.platform_vodafone_cash_number,
         instapay_ipa=s.platform_instapay_ipa,
         instapay_display_name=s.platform_instapay_display_name,

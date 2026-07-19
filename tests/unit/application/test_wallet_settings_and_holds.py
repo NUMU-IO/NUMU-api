@@ -124,6 +124,7 @@ def test_resolve_commission_bps_precedence():
             commission_bps_default=default,
             negative_allowance_cents=5_000,
             low_balance_threshold_cents=10_000,
+            min_topup_cents=5_000,
             vodafone_cash_number=None,
             instapay_ipa=None,
             instapay_display_name=None,
@@ -297,3 +298,71 @@ async def test_admin_reject_drops_hold_without_credit(test_session):
         .all()
     )
     assert txs == []
+
+
+# ─── Method configuration gating + admin min top-up ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_effective_methods_require_configuration(test_session):
+    """An enabled method with no platform destination must NOT be offered
+    to merchants (the hub dialog reads effective_methods_map)."""
+    admin = await get_wallet_settings(test_session, use_cache=False)
+    # Test env has no VC number / InstaPay IPA configured.
+    assert admin.vodafone_cash_enabled is True
+    assert admin.effective_methods_map()["vodafone_cash"] is False
+    assert admin.effective_methods_map()["instapay"] is False
+
+    merged = await update_wallet_settings(
+        test_session, {"vodafone_cash_number": "01012345678"}
+    )
+    await test_session.commit()
+    assert merged.effective_methods_map()["vodafone_cash"] is True
+    # Toggle off wins over configured.
+    merged = await update_wallet_settings(
+        test_session, {"vodafone_cash_enabled": False}
+    )
+    await test_session.commit()
+    assert merged.effective_methods_map()["vodafone_cash"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_min_topup_enforced(test_session):
+    """CreateTopupUseCase rejects amounts below the admin-set minimum."""
+    from fastapi import HTTPException
+
+    from src.application.use_cases.wallet.create_topup import CreateTopupUseCase
+    from src.core.entities.wallet import TopupMethod
+
+    tenant = await _mk_tenant(test_session)
+    await update_wallet_settings(
+        test_session,
+        {
+            "topups_enabled": True,
+            "instapay_enabled": True,
+            "instapay_ipa": "numu@instapay",
+            "min_topup_cents": 10_000,
+        },
+    )
+    await test_session.commit()
+    invalidate_wallet_settings_cache()
+
+    with pytest.raises(HTTPException) as exc:
+        await CreateTopupUseCase(test_session).execute(
+            tenant_id=tenant.id,
+            user_id=uuid4(),
+            method=TopupMethod.INSTAPAY,
+            amount_cents=6_000,
+        )
+    assert exc.value.status_code == 422
+    assert "100" in exc.value.detail  # dynamic min (100 EGP) in the message
+
+    # At the minimum it goes through.
+    result = await CreateTopupUseCase(test_session).execute(
+        tenant_id=tenant.id,
+        user_id=uuid4(),
+        method=TopupMethod.INSTAPAY,
+        amount_cents=10_000,
+    )
+    await test_session.commit()
+    assert result.intent.amount_cents == 10_000

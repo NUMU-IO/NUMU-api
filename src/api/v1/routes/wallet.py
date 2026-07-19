@@ -71,8 +71,11 @@ class WalletResponse(BaseModel):
     is_blocked: bool
     low_balance_level: int  # 0 healthy, 1 low, 2 negative, 3 blocked
     # Admin-controlled: which top-up methods the dialog should offer.
+    # Only methods that are BOTH enabled and platform-configured (VC
+    # number / InstaPay IPA / Kashier creds present) appear as true.
     methods_enabled: dict[str, bool]
     topups_enabled: bool
+    min_topup_cents: int
 
 
 class WalletTransactionResponse(BaseModel):
@@ -190,8 +193,9 @@ async def get_wallet(
             low_balance_threshold_cents=service._low_threshold,
             is_blocked=is_blocked,
             low_balance_level=level,
-            methods_enabled=admin.methods_map(),
+            methods_enabled=admin.effective_methods_map(),
             topups_enabled=admin.topups_enabled or get_settings().ff_wallet_topups,
+            min_topup_cents=admin.min_topup_cents,
         )
     )
 
