@@ -283,6 +283,10 @@ async def register(
         .values(trial_ends_at=trial_ends, plan_intent=request.plan_intent)
     )
     await db.commit()
+    # Keep the response honest: the use case stamped the legacy 30-day
+    # constant on the domain entity; reflect the admin-configured value
+    # we just persisted so the client never sees a trial that isn't real.
+    result.user.trial_ends_at = trial_ends
 
     # Set tokens as httpOnly cookies
     set_auth_cookies(

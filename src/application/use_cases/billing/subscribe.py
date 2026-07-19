@@ -170,8 +170,10 @@ class SubscribeUseCase:
         await self.tenant_repo.update(tenant)
         await self.db.flush()
 
-        # The tenant just went live on a paid plan — drop the cached
-        # checkout-gate state so the storefront opens within seconds.
+        # Best-effort PRE-commit gate-cache drop. Harmless on rollback (a
+        # cold cache just recomputes from committed truth), but a concurrent
+        # read may re-cache the old state until the caller's post-commit
+        # invalidation (billing route) or the 60s TTL clears it.
         from src.application.services.wallet_service import WalletService
 
         await WalletService(self.db).invalidate_cache(tenant_id)
@@ -225,7 +227,8 @@ class SubscribeUseCase:
                 get_plan_features("payg").commission_bps, None, admin
             )
         await self.db.flush()
-        # The tenant just went live — drop the cached checkout-gate state.
+        # Best-effort PRE-commit gate-cache drop (see the paid path above);
+        # bounded by the 60s gate TTL if a concurrent read re-caches.
         await service.invalidate_cache(tenant.id)
 
         logger.info(

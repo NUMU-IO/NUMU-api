@@ -249,6 +249,7 @@ async def get_store_detail(
     store, tenant lifecycle/billing (incl. demo lead capture for demo
     tenants), owner account, wallet summary (payg), commerce metrics,
     and the most recent orders. Works for real merchants AND demos."""
+    from src.core.entities.order import PaymentStatus
     from src.infrastructure.database.models.public.wallet import (
         MerchantWalletModel,
     )
@@ -294,7 +295,7 @@ async def get_store_detail(
                 func.count(OrderModel.id),
                 func.coalesce(
                     func.sum(OrderModel.total).filter(
-                        OrderModel.payment_status == "PAID"
+                        OrderModel.payment_status == PaymentStatus.PAID
                     ),
                     0,
                 ),

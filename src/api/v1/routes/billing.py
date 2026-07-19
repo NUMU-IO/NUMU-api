@@ -108,6 +108,15 @@ async def subscribe(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    # POST-COMMIT gate-cache invalidation: the use case's own best-effort
+    # invalidation runs pre-commit, so a concurrent gate read could re-cache
+    # the old (not-live) state for up to the 60s TTL. Dropping the key again
+    # here — after the commit is durable — guarantees the storefront opens
+    # within seconds of choosing a plan.
+    from src.application.services.wallet_service import WalletService
+
+    await WalletService(db).invalidate_cache(tenant.id)
+
     return SuccessResponse(
         data=SubscribeResponse(
             tenant_id=str(result.id),

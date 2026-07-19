@@ -213,6 +213,9 @@ async def create_store(
             if tenant_row is not None:
                 await SubscribeUseCase(db).execute(tenant_id=tenant_row.id, plan="payg")
                 user.plan_intent = None  # applied — don't re-run on store #2
+                # Make the clear part of the pending statements now rather
+                # than relying on request-teardown autoflush semantics.
+                await db.flush()
         except Exception:
             # Never fail store creation over plan activation — the
             # merchant can still pick payg from Billing.
