@@ -156,7 +156,10 @@ async def start_demo(
     # 5. Provision
     try:
         result = await use_case.execute(
-            captured_email=request.email, language=request.language, niche=request.niche
+            captured_email=request.email,
+            captured_name=request.name,
+            language=request.language,
+            niche=request.niche,
         )
     except Exception:
         logger.exception("demo_start_failed")

@@ -1,5 +1,6 @@
 """Store CRUD routes."""
 
+import logging
 import re
 from datetime import UTC, datetime
 from typing import Annotated
@@ -43,6 +44,8 @@ from src.application.use_cases.stores.create_store import (
     validate_subdomain,
 )
 from src.core.entities.store import Store
+
+logger = logging.getLogger(__name__)
 from src.core.value_objects.money import Currency
 from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.external_services.cloudflare import (
@@ -187,6 +190,33 @@ async def create_store(
     )
 
     result = await use_case.execute(dto, owner_id=user_id, plan=plan)
+
+    # Landing plan intent: a visitor who clicked "Pay as you Grow" on the
+    # pricing page goes straight onto payg — no billing page detour. The
+    # activation snapshots today's commission rate into their wallet
+    # (rate lock) and opens the go-live gate. Paid intents (starter/pro)
+    # are left recorded — those merchants still subscribe normally.
+    if user and user.plan_intent == "payg":
+        try:
+            from src.application.use_cases.billing.subscribe import (
+                SubscribeUseCase,
+            )
+            from src.infrastructure.database.models.public.tenant import (
+                TenantModel,
+            )
+
+            tenant_row = (
+                await db.execute(
+                    select(TenantModel).where(TenantModel.owner_id == user_id)
+                )
+            ).scalar_one_or_none()
+            if tenant_row is not None:
+                await SubscribeUseCase(db).execute(tenant_id=tenant_row.id, plan="payg")
+                user.plan_intent = None  # applied — don't re-run on store #2
+        except Exception:
+            # Never fail store creation over plan activation — the
+            # merchant can still pick payg from Billing.
+            logger.warning("payg_intent_activation_failed", exc_info=True)
 
     if result.subdomain:
         await cloudflare_dns_service.ensure_store_subdomain(result.subdomain)

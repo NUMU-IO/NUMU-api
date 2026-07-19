@@ -8,6 +8,9 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class StartDemoRequest(BaseModel):
+    # Name + email are both required so every demo is attributable to a
+    # person (sales follow-up), not just an inbox.
+    name: str = Field(min_length=2, max_length=120)
     email: EmailStr
     language: Literal["ar", "en"] = "ar"
     turnstile_token: str | None = Field(None, max_length=2048)

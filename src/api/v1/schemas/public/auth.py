@@ -1,7 +1,7 @@
 """Authentication Pydantic schemas."""
 
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
 
@@ -64,6 +64,14 @@ class RegisterRequest(BaseModel):
             "Phone number. Accepts E.164 (e.g. '+201001234567') or an "
             "object {'country_code': 'EG', 'local': '01001234567'}. "
             "Always stored as E.164."
+        ),
+    )
+    plan_intent: Literal["payg", "starter", "pro"] | None = Field(
+        None,
+        description=(
+            "Which pricing card the visitor clicked on the landing before "
+            "registering. 'payg' auto-activates Pay as you Grow at store "
+            "creation; paid intents are recorded for attribution."
         ),
     )
 

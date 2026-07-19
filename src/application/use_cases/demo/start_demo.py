@@ -66,7 +66,11 @@ class StartDemoUseCase:
         self.dashboard_base_url = dashboard_base_url
 
     async def execute(
-        self, captured_email: str, language: str = "ar", niche: str = "fashion"
+        self,
+        captured_email: str,
+        captured_name: str | None = None,
+        language: str = "ar",
+        niche: str = "fashion",
     ) -> DemoCreationResult:
         logger.info(
             "demo_start_attempt", extra={"email_hash": _hash_email(captured_email)}
@@ -75,8 +79,9 @@ class StartDemoUseCase:
         # 1. Generate unique demo subdomain
         subdomain = await self._generate_unique_subdomain()
 
-        # 2. Create ephemeral demo user
-        user = await self._create_demo_user(subdomain)
+        # 2. Create ephemeral demo user (carries the visitor's real name
+        #    so the hub greets them personally)
+        user = await self._create_demo_user(subdomain, captured_name)
 
         # 3. Create demo tenant
         now = datetime.now(UTC)
@@ -91,6 +96,10 @@ class StartDemoUseCase:
             demo_email=captured_email,
             demo_started_at=now,
         )
+        # Lead attribution: who this demo belongs to. Set post-create so
+        # the tenant-service signature stays untouched.
+        if captured_name:
+            tenant.demo_name = captured_name.strip()[:120]
 
         # 4. Create demo store
         store = await self._create_demo_store(tenant.id, user.id, subdomain, language)
@@ -147,7 +156,9 @@ class StartDemoUseCase:
             f"Failed to generate unique demo subdomain after {max_attempts} attempts"
         )
 
-    async def _create_demo_user(self, subdomain: str) -> User:
+    async def _create_demo_user(
+        self, subdomain: str, captured_name: str | None = None
+    ) -> User:
         user_repo = UserRepository(self.db)
         local_part = subdomain.replace(DEMO_SUBDOMAIN_PREFIX, "demo-")
         internal_email = f"{local_part}@{DEMO_INTERNAL_EMAIL_DOMAIN}"
@@ -155,13 +166,18 @@ class StartDemoUseCase:
         if await user_repo.email_exists(Email(value=internal_email)):
             raise EntityAlreadyExistsError("User", "email", internal_email)
 
+        name_parts = (captured_name or "").strip().split(" ", 1)
+        first = (name_parts[0] or "Demo")[:100] if name_parts else "Demo"
+        last = (
+            name_parts[1][:100] if len(name_parts) > 1 and name_parts[1] else "Merchant"
+        )
         user = User(
             email=Email(value=internal_email),
             hashed_password=self.password_service.hash_password(
                 secrets.token_urlsafe(32)
             ),
-            first_name="Demo",
-            last_name="Merchant",
+            first_name=first,
+            last_name=last,
             role=UserRole.STORE_OWNER,
             status=UserStatus.ACTIVE,
             email_verified_at=datetime.now(UTC),
