@@ -216,11 +216,11 @@ export function pickItems<T = Record<string, unknown>>(
   return raw.length > 0 ? raw : fallback;
 }
 
-/** Compose a product detail URL the SDK's <Link> understands. */
-export function productHref(slugOrId: string | undefined | null): string {
-  if (!slugOrId) return "/products";
-  return `/products/${slugOrId}`;
-}
+// Storefront route builders now live in the SDK (>= 0.11.0) rather than being
+// hand-copied per theme -- the URL shape is platform knowledge, and every local
+// copy was a place the fleet could disagree with the host. Re-exported so
+// sections keep importing from "./_shared" unchanged.
+export { productHref, collectionHref } from "@numueg/theme-sdk";
 
 
 // â”€â”€ Non-destructive image transform (focal / zoom / rotation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
