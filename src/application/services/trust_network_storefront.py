@@ -55,6 +55,7 @@ async def fetch_network_intelligence(
     *,
     phone_hash: str,
     total_cents: int | None = None,
+    idempotency_key: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[int, str, str] | None:
     """Consult the Trust Network for this buyer; ``(score, confidence, label)``.
@@ -83,11 +84,14 @@ async def fetch_network_intelligence(
             transport=transport,
         ) as tn:
             if total_cents is not None:
-                body = await tn.decide({
-                    "total_cents": int(total_cents),
-                    "payment_method": "cod",
-                    "buyer_token": phone_hash,
-                })
+                body = await tn.decide(
+                    {
+                        "total_cents": int(total_cents),
+                        "payment_method": "cod",
+                        "buyer_token": phone_hash,
+                    },
+                    idempotency_key=idempotency_key,
+                )
                 score = body.get("risk_score")
                 confidence = body.get("confidence")
                 label = body.get("network_label")
