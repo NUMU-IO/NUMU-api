@@ -57,6 +57,9 @@ from src.infrastructure.external_services.vision import (
     NoopProofVisionService,
     ProofVisionResult,
 )
+from src.infrastructure.repositories.payment_proof_repository import (
+    phash_to_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +281,9 @@ class SubmitTopupProofUseCase:
             topup_intent_id=intent.id,
             proof_image_key=uploaded.key,
             proof_image_hash=image_hash,
-            perceptual_hash=image_perceptual_hash,
+            # Unsigned 64-bit hash → signed BIGINT range (else asyncpg
+            # rejects any hash with the top bit set — ~half of real images).
+            perceptual_hash=phash_to_db(image_perceptual_hash),
             transaction_ref=transaction_ref,
             declared_amount_cents=declared_amount_cents,
             status="auto_approved" if decision.approved else "awaiting_review",

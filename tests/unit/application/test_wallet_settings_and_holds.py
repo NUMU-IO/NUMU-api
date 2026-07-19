@@ -366,3 +366,50 @@ async def test_admin_min_topup_enforced(test_session):
     )
     await test_session.commit()
     assert result.intent.amount_cents == 10_000
+
+
+# ─── Perceptual hash: unsigned 64-bit → signed BIGINT ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_topup_proof_phash_top_bit_set_persists(test_session):
+    """Real receipt images produce unsigned 64-bit hashes; any hash with
+    the top bit set (~half of them) overflows a signed BIGINT unless
+    mapped through phash_to_db. The raw value 500'd on prod (asyncpg
+    'value out of int64 range')."""
+    from src.infrastructure.repositories.payment_proof_repository import (
+        phash_from_db,
+        phash_to_db,
+    )
+
+    raw = 12076796887427370150  # the exact prod-crashing value
+    assert raw > (1 << 63) - 1
+    stored = phash_to_db(raw)
+    assert stored is not None and stored < 0
+    assert phash_from_db(stored) == raw
+    assert phash_to_db(None) is None
+
+    tenant = await _mk_tenant(test_session)
+    intent = WalletTopupIntentModel(
+        tenant_id=tenant.id,
+        method="vodafone_cash",
+        amount_cents=1_000,
+        currency="EGP",
+        status=TopupIntentStatus.AWAITING_PROOF.value,
+        special_reference=f"VC-{uuid4().hex[:6].upper()}",
+        display_destination="01000000000",
+    )
+    test_session.add(intent)
+    await test_session.flush()
+    proof = WalletTopupProofModel(
+        tenant_id=tenant.id,
+        topup_intent_id=intent.id,
+        proof_image_key=f"wallet-topups/{tenant.id}/x.bin",
+        proof_image_hash=uuid4().bytes,
+        perceptual_hash=phash_to_db(raw),
+        transaction_ref=f"tx-{uuid4().hex[:10]}",
+        status="awaiting_review",
+    )
+    test_session.add(proof)
+    await test_session.commit()
+    assert phash_from_db(proof.perceptual_hash) == raw
