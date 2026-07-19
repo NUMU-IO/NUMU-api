@@ -86,9 +86,21 @@ export function placeholderize<T>(items: T[]): T[] {
   });
 }
 
-/** demo ? items : placeholderize(items) â€” the canonical fallback gate. */
+/**
+ * Canonical fallback gate. demo -> the demo array; real store -> [].
+ *
+ * On a REAL installed store (demo=false) a section must render the merchant's
+ * actual data or a real empty-state — NEVER demo/placeholder shapes. Returning
+ * [] makes every `real.length ? real : demoOrPlaceholder(...)` collapse to the
+ * real-empty path, so phantom products, "0 EGP" cards and blank demo panels
+ * never appear on a live store.
+ *
+ * This previously returned `placeholderize(items)` here, which rendered
+ * skeleton cards to real shoppers. `placeholderize` stays for per-image
+ * neutral fallbacks on REAL items — see PLACEHOLDER_IMG.
+ */
 export function demoOrPlaceholder<T>(demo: boolean, items: T[]): T[] {
-  return demo ? items : placeholderize(items);
+  return demo ? items : [];
 }
 
 /**

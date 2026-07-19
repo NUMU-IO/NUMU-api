@@ -7,7 +7,6 @@ import {
   asImageTransform,
   asImageUrl,
   asString,
-  demoOrPlaceholder,
   localized,
   useDemo,
   type SectionRenderProps,
@@ -42,9 +41,7 @@ const BzPromoBanner = ({ instance, sectionId }: SectionRenderProps) => {
   const storeName = (shop?.name || "BAZAR").toUpperCase();
   // Demo placeholderize the store-name overline only when the merchant truly
   // has no store name in context.
-  const overline = demoOrPlaceholder(demo || Boolean(shop?.name), [
-    { name: storeName },
-  ])[0].name || "BAZAR";
+  const overline = storeName;
 
   return (
     <section className="py-12 md:py-16 lg:py-24 bg-[var(--bz-cream)]">

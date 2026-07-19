@@ -142,7 +142,9 @@ const BzAboutSection = ({ instance, sectionId }: SectionRenderProps) => {
         </div>
       </section>
 
-      {/* VALUES */}
+      {/* VALUES — hidden entirely when the merchant has configured none, so a
+          live store shows no orphaned heading over an empty grid. */}
+      {values.length > 0 && (
       <section className="relative py-12 md:py-20 lg:py-32 bg-[var(--bz-dark)] overflow-hidden">
         <svg viewBox="0 0 1440 60" className="absolute top-0 start-0 w-full -mt-px" preserveAspectRatio="none" aria-hidden="true">
           <path d="M0,0 C360,50 720,10 1080,40 C1260,55 1380,20 1440,30 L1440,0 L0,0 Z" fill="var(--bz-navy)" />
@@ -175,6 +177,7 @@ const BzAboutSection = ({ instance, sectionId }: SectionRenderProps) => {
           <path d="M0,60 C360,10 720,50 1080,20 C1260,5 1380,40 1440,30 L1440,60 L0,60 Z" fill="var(--bz-cream)" />
         </svg>
       </section>
+      )}
 
       {/* CTA */}
       <section className="py-12 md:py-20 lg:py-28 bg-[var(--bz-cream)]">
