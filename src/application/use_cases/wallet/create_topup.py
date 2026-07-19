@@ -39,7 +39,8 @@ from src.infrastructure.database.models.public.wallet import WalletTopupIntentMo
 
 logger = logging.getLogger(__name__)
 
-MIN_TOPUP_CENTS = 5_000  # 50 EGP
+# Minimum is admin-controlled (wallet_settings.min_topup_cents); the cap
+# stays a hard platform constant.
 MAX_TOPUP_CENTS = 5_000_000  # 50,000 EGP
 MANUAL_EXPIRY_MINUTES = 30
 GATEWAY_EXPIRY_HOURS = 24
@@ -78,11 +79,12 @@ class CreateTopupUseCase:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="This top-up method is currently disabled.",
             )
-        if not MIN_TOPUP_CENTS <= amount_cents <= MAX_TOPUP_CENTS:
+        min_cents = admin.min_topup_cents
+        if not min_cents <= amount_cents <= MAX_TOPUP_CENTS:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"Top-up amount must be between {MIN_TOPUP_CENTS // 100} "
+                    f"Top-up amount must be between {min_cents // 100} "
                     f"and {MAX_TOPUP_CENTS // 100} EGP."
                 ),
             )

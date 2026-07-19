@@ -115,6 +115,7 @@ class WalletSettingsPatch(BaseModel):
     commission_bps_default: int | None = Field(default=None, ge=0, le=10_000)
     negative_allowance_cents: int | None = Field(default=None, ge=0)
     low_balance_threshold_cents: int | None = Field(default=None, ge=0)
+    min_topup_cents: int | None = Field(default=None, ge=100, le=5_000_000)
     vodafone_cash_number: str | None = Field(default=None, max_length=20)
     instapay_ipa: str | None = Field(default=None, max_length=80)
     instapay_display_name: str | None = Field(default=None, max_length=80)
@@ -132,7 +133,18 @@ async def get_wallet_admin_settings(
     )
 
     admin_settings = await get_wallet_settings(db, use_cache=False)
-    return SuccessResponse(data=wallet_settings_to_dict(admin_settings))
+    return SuccessResponse(
+        data={
+            **wallet_settings_to_dict(admin_settings),
+            # Configuration status per method, so the admin UI can warn
+            # "enabled but not configured — hidden from merchants".
+            "methods_configured": {
+                m: admin_settings.method_configured(m)
+                for m in ("card", "vodafone_cash", "instapay")
+            },
+            "effective_methods": admin_settings.effective_methods_map(),
+        }
+    )
 
 
 @router.put("/settings", response_model=SuccessResponse[dict])
