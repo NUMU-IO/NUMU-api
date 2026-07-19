@@ -413,3 +413,68 @@ async def test_topup_proof_phash_top_bit_set_persists(test_session):
     test_session.add(proof)
     await test_session.commit()
     assert phash_from_db(proof.perceptual_hash) == raw
+
+
+# ─── No blind auto-approval without OCR verification ─────────────────────
+
+
+class _FakeStorage:
+    async def upload_file(self, *, file_content, filename, content_type, bucket):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(key=filename)
+
+    async def delete_file(self, key):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_no_ocr_never_auto_approves(test_session):
+    """With no OCR provider the engine's cross-checks no-op, so a fake
+    image + wrong ref below the threshold used to auto-approve on pure
+    trust (seen live 2026-07-19). Unverified receipts must land ON HOLD
+    for admin review instead — never as spendable balance."""
+    from datetime import UTC, datetime, timedelta
+
+    from src.application.use_cases.wallet.submit_topup_proof import (
+        SubmitTopupProofUseCase,
+    )
+    from src.infrastructure.external_services.vision import NoopProofVisionService
+
+    tenant = await _mk_tenant(test_session)
+    intent = WalletTopupIntentModel(
+        tenant_id=tenant.id,
+        method="vodafone_cash",
+        amount_cents=1_000,  # far below the auto-approve threshold
+        currency="EGP",
+        status=TopupIntentStatus.AWAITING_PROOF.value,
+        special_reference=f"VC-{uuid4().hex[:6].upper()}",
+        display_destination="01000000000",
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+    )
+    test_session.add(intent)
+    await test_session.commit()
+
+    result = await SubmitTopupProofUseCase(
+        session=test_session,
+        storage_service=_FakeStorage(),
+        vision_service=NoopProofVisionService(),
+    ).execute(
+        tenant_id=tenant.id,
+        topup_intent_id=intent.id,
+        image_bytes=b"definitely-not-a-real-receipt",
+        image_content_type="image/jpeg",
+        transaction_ref=f"fake-{uuid4().hex[:8]}",
+    )
+    await test_session.commit()
+
+    assert result.credited_balance_cents is None
+    assert result.on_hold is True
+    assert result.proof.status == "awaiting_review"
+    assert "ocr_verification_unavailable" in result.decision.reasons
+    assert result.intent.status == TopupIntentStatus.UNDER_REVIEW.value
+
+    # The merchant sees the amount as pending, not spendable.
+    wallet = await WalletService(test_session).get_or_create_wallet(tenant.id)
+    assert wallet.pending_balance_cents == 1_000
+    assert wallet.balance_cents == 0
