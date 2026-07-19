@@ -170,6 +170,12 @@ class SubscribeUseCase:
         await self.tenant_repo.update(tenant)
         await self.db.flush()
 
+        # The tenant just went live on a paid plan — drop the cached
+        # checkout-gate state so the storefront opens within seconds.
+        from src.application.services.wallet_service import WalletService
+
+        await WalletService(self.db).invalidate_cache(tenant_id)
+
         logger.info(
             "subscription_started",
             extra={
@@ -182,8 +188,21 @@ class SubscribeUseCase:
         return tenant
 
     async def _activate_payg(self, tenant: TenantModel) -> TenantModel:
-        """Switch a tenant to pay-as-you-go and ensure their wallet exists."""
+        """Switch a tenant to Pay as you Grow and ensure their wallet exists.
+
+        The commission rate is SNAPSHOTTED at activation: the admin-panel
+        default (or the plan rate) is copied into
+        ``wallet.commission_bps_override``, so later changes to the global
+        default only apply to NEW signups — existing merchants keep the
+        rate they agreed to (an admin can still change a specific tenant
+        from the Wallets tab).
+        """
         from src.application.services.wallet_service import WalletService
+        from src.application.services.wallet_settings import (
+            get_wallet_settings,
+            resolve_commission_bps,
+        )
+        from src.core.entities.plan import get_plan_features
 
         now = datetime.now(UTC)
         tenant.lifecycle_state = TenantLifecycleState.ACTIVE
@@ -198,12 +217,23 @@ class SubscribeUseCase:
             tenant.trial_converted_at = now
 
         await self.tenant_repo.update(tenant)
-        await WalletService(self.db).get_or_create_wallet(tenant.id)
+        service = WalletService(self.db)
+        wallet = await service.get_or_create_wallet(tenant.id)
+        if wallet.commission_bps_override is None:
+            admin = await get_wallet_settings(self.db)
+            wallet.commission_bps_override = resolve_commission_bps(
+                get_plan_features("payg").commission_bps, None, admin
+            )
         await self.db.flush()
+        # The tenant just went live — drop the cached checkout-gate state.
+        await service.invalidate_cache(tenant.id)
 
         logger.info(
             "payg_activated",
-            extra={"tenant_id": str(tenant.id)},
+            extra={
+                "tenant_id": str(tenant.id),
+                "locked_commission_bps": wallet.commission_bps_override,
+            },
         )
         return tenant
 

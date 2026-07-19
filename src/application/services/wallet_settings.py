@@ -33,6 +33,7 @@ _CACHE_TTL_SECONDS = 60
 _OVERRIDABLE_FIELDS = frozenset({
     "topups_enabled",
     "checkout_gate_enabled",
+    "golive_gate_enabled",
     "card_enabled",
     "vodafone_cash_enabled",
     "instapay_enabled",
@@ -51,6 +52,9 @@ class WalletAdminSettings:
 
     topups_enabled: bool
     checkout_gate_enabled: bool
+    # New tenants (without the golive_exempt feature flag) cannot take
+    # storefront orders until they choose a paid plan or Pay as you Grow.
+    golive_gate_enabled: bool
     card_enabled: bool
     vodafone_cash_enabled: bool
     instapay_enabled: bool
@@ -83,6 +87,7 @@ def _env_defaults() -> WalletAdminSettings:
     return WalletAdminSettings(
         topups_enabled=s.ff_wallet_topups,
         checkout_gate_enabled=s.ff_wallet_checkout_gate,
+        golive_gate_enabled=s.ff_golive_gate,
         # Methods default ON — the real gate is topups_enabled plus the
         # presence of platform credentials/numbers for each method.
         card_enabled=True,

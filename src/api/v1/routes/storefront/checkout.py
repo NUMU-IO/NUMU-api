@@ -357,9 +357,25 @@ async def checkout(
     if store.tenant_id is not None:
         from src.application.services.wallet_service import WalletService
 
-        if not await WalletService(store_repo.session).checkout_gate_allows(
+        _gate = await WalletService(store_repo.session).checkout_gate_state(
             store.tenant_id
-        ):
+        )
+        if _gate == "not_live":
+            # Go-live gate: the merchant hasn't chosen a plan yet. The
+            # shopper-facing copy reads as "opening soon" — it never
+            # exposes the merchant's billing state.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "store_not_live",
+                    "message": (
+                        "This store is not accepting orders yet — "
+                        "opening soon. | "
+                        "هذا المتجر لا يستقبل الطلبات بعد — قريباً."
+                    ),
+                },
+            )
+        if _gate != "ok":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={

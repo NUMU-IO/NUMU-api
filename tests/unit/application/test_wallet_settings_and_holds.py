@@ -117,6 +117,7 @@ def test_resolve_commission_bps_precedence():
         return WalletAdminSettings(
             topups_enabled=True,
             checkout_gate_enabled=False,
+            golive_gate_enabled=False,
             card_enabled=True,
             vodafone_cash_enabled=True,
             instapay_enabled=True,
@@ -154,6 +155,71 @@ async def test_admin_commission_rate_applies_to_payg(test_session):
     # Subscription tenants stay at zero regardless of the admin default.
     tenant.plan = "starter"
     assert await service.effective_commission_bps_admin(tenant, None) == 0
+
+
+# ─── Go-live gate + rate lock at signup ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_golive_gate_blocks_new_trial_tenants_only(test_session, monkeypatch):
+    from src.config.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "ff_golive_gate", True)
+    service = WalletService(test_session, cache=None)
+
+    # New trial tenant (no golive_exempt flag) -> not live.
+    gated = await _mk_tenant(test_session, plan="trial")
+    assert await service.checkout_gate_state(gated.id) == "not_live"
+
+    # Grandfathered trial tenant (backfilled flag) -> unaffected.
+    exempt = await _mk_tenant(test_session, plan="trial")
+    exempt.feature_flags = {"golive_exempt": True}
+    await test_session.commit()
+    assert await service.checkout_gate_state(exempt.id) == "ok"
+
+    # Choosing Pay as you Grow opens the gate.
+    gated.plan = "payg"
+    await test_session.commit()
+    assert await service.checkout_gate_state(gated.id) == "ok"
+
+    # Gate off -> nobody is blocked. (Drop the 60s settings cache the
+    # way production does when the admin flips the switch.)
+    monkeypatch.setattr(get_settings(), "ff_golive_gate", False)
+    invalidate_wallet_settings_cache()
+    fresh = await _mk_tenant(test_session, plan="trial")
+    assert await service.checkout_gate_state(fresh.id) == "ok"
+
+
+@pytest.mark.asyncio
+async def test_payg_activation_locks_commission_rate(test_session):
+    from src.application.use_cases.billing.subscribe import SubscribeUseCase
+
+    # Admin default at signup time is 250 bps.
+    await update_wallet_settings(test_session, {"commission_bps_default": 250})
+    await test_session.commit()
+
+    tenant = await _mk_tenant(test_session, plan="trial")
+    tenant.lifecycle_state = "trial"
+    await test_session.commit()
+
+    await SubscribeUseCase(test_session).execute(tenant_id=tenant.id, plan="payg")
+    await test_session.commit()
+
+    service = WalletService(test_session, cache=None)
+    wallet = await service.get_or_create_wallet(tenant.id)
+    assert wallet.commission_bps_override == 250  # locked at signup
+
+    # Admin later raises the default -> existing merchant keeps 250.
+    await update_wallet_settings(test_session, {"commission_bps_default": 400})
+    await test_session.commit()
+    assert await service.effective_commission_bps_admin(tenant, wallet) == 250
+
+    # ...while a brand-new signup gets the new rate.
+    newcomer = await _mk_tenant(test_session, plan="trial")
+    await SubscribeUseCase(test_session).execute(tenant_id=newcomer.id, plan="payg")
+    await test_session.commit()
+    new_wallet = await service.get_or_create_wallet(newcomer.id)
+    assert new_wallet.commission_bps_override == 400
 
 
 # ─── On-hold (pending) credits ───────────────────────────────────────────
