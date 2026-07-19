@@ -245,6 +245,67 @@ async def list_wallet_transactions(
     )
 
 
+class TopupHistoryItem(BaseModel):
+    id: str
+    method: str
+    amount_cents: int
+    currency: str
+    # pending | awaiting_proof | under_review | succeeded | rejected | expired
+    status: str
+    special_reference: str
+    created_at: datetime
+    # Set when the latest receipt for this top-up was rejected — the
+    # merchant-visible "why" (the wallet ledger only shows money that
+    # actually moved, so without this a rejection is invisible).
+    rejection_reason: str | None = None
+
+
+@router.get(
+    "/wallet/topups",
+    response_model=SuccessResponse[list[TopupHistoryItem]],
+    summary="List the merchant's top-ups (newest first, all statuses)",
+    operation_id="list_wallet_topups",
+)
+async def list_wallet_topups(
+    http_request: Request,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 20,
+):
+    tenant = await _resolve_tenant(http_request, db, user_id)
+    intents = (
+        (
+            await db.execute(
+                select(WalletTopupIntentModel)
+                .where(WalletTopupIntentModel.tenant_id == tenant.id)
+                .order_by(WalletTopupIntentModel.created_at.desc())
+                .limit(min(max(limit, 1), 50))
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return SuccessResponse(
+        data=[
+            TopupHistoryItem(
+                id=str(i.id),
+                method=i.method,
+                amount_cents=i.amount_cents,
+                currency=i.currency,
+                status=i.status,
+                special_reference=i.special_reference,
+                created_at=i.created_at,
+                # Set by the admin reject flow (review_topup_proof) —
+                # survives on the intent so the merchant sees the "why"
+                # even after the intent reopens for a new receipt.
+                rejection_reason=i.failure_reason,
+            )
+            for i in intents
+        ]
+    )
+
+
 @router.post(
     "/wallet/topups",
     response_model=SuccessResponse[TopupResponse],
