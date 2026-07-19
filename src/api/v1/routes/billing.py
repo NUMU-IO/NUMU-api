@@ -8,15 +8,17 @@ POST /api/v1/billing/discount-code/validate
 
 import logging
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_current_user_id
 from src.api.dependencies.database import get_db
+from src.api.dependencies.tenant_context import (
+    get_owner_tenant,
+    get_owner_tenant_or_none,
+)
 from src.api.responses import SuccessResponse
 from src.application.use_cases.billing.cancel_subscription import (
     CancelSubscriptionUseCase,
@@ -86,15 +88,9 @@ class ValidateDiscountResponse(BaseModel):
 )
 async def subscribe(
     request: SubscribeRequest,
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    # Resolve tenant
-    q = select(TenantModel).where(TenantModel.owner_id == user_id)
-    tenant = (await db.execute(q)).scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="No tenant found")
-
     try:
         use_case = SubscribeUseCase(db)
         result = await use_case.execute(
@@ -107,6 +103,15 @@ async def subscribe(
         await db.commit()
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+    # POST-COMMIT gate-cache invalidation: the use case's own best-effort
+    # invalidation runs pre-commit, so a concurrent gate read could re-cache
+    # the old (not-live) state for up to the 60s TTL. Dropping the key again
+    # here — after the commit is durable — guarantees the storefront opens
+    # within seconds of choosing a plan.
+    from src.application.services.wallet_service import WalletService
+
+    await WalletService(db).invalidate_cache(tenant.id)
 
     return SuccessResponse(
         data=SubscribeResponse(
@@ -129,14 +134,9 @@ async def subscribe(
     operation_id="cancel_subscription",
 )
 async def cancel_subscription(
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    q = select(TenantModel).where(TenantModel.owner_id == user_id)
-    tenant = (await db.execute(q)).scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="No tenant found")
-
     try:
         use_case = CancelSubscriptionUseCase(db)
         await use_case.execute(tenant.id)
@@ -157,12 +157,12 @@ async def cancel_subscription(
     operation_id="list_invoices",
 )
 async def list_invoices(
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    tenant: Annotated[TenantModel | None, Depends(get_owner_tenant_or_none)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    q = select(TenantModel).where(TenantModel.owner_id == user_id)
-    tenant = (await db.execute(q)).scalar_one_or_none()
-    if not tenant:
+    # Contract predates the tenant resolver: a user without a tenant yet
+    # (registered, no store created) gets an empty list, not a 404.
+    if tenant is None:
         return SuccessResponse(data=[], message="No invoices")
 
     inv_q = (

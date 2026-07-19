@@ -259,6 +259,35 @@ async def register(
     )
     result = await use_case.execute(dto)
 
+    # Apply admin-controlled signup settings on top of the use case's
+    # defaults (the use case stamps the legacy 30-day constant): the
+    # trial window length + enabled switch live in platform_config
+    # (signup_settings), and the landing's plan intent is recorded so
+    # store creation can auto-activate Pay as you Grow.
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update as sa_update
+
+    from src.application.services.signup_settings import get_signup_settings
+    from src.infrastructure.database.models.public.user import UserModel
+
+    signup = await get_signup_settings(db)
+    trial_ends = (
+        datetime.now(UTC) + timedelta(days=signup.trial_days)
+        if signup.trial_enabled
+        else None
+    )
+    await db.execute(
+        sa_update(UserModel)
+        .where(UserModel.id == result.user.id)
+        .values(trial_ends_at=trial_ends, plan_intent=request.plan_intent)
+    )
+    await db.commit()
+    # Keep the response honest: the use case stamped the legacy 30-day
+    # constant on the domain entity; reflect the admin-configured value
+    # we just persisted so the client never sees a trial that isn't real.
+    result.user.trial_ends_at = trial_ends
+
     # Set tokens as httpOnly cookies
     set_auth_cookies(
         response,

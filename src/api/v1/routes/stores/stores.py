@@ -1,5 +1,6 @@
 """Store CRUD routes."""
 
+import logging
 import re
 from datetime import UTC, datetime
 from typing import Annotated
@@ -43,6 +44,8 @@ from src.application.use_cases.stores.create_store import (
     validate_subdomain,
 )
 from src.core.entities.store import Store
+
+logger = logging.getLogger(__name__)
 from src.core.value_objects.money import Currency
 from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.external_services.cloudflare import (
@@ -187,6 +190,32 @@ async def create_store(
     )
 
     result = await use_case.execute(dto, owner_id=user_id, plan=plan)
+
+    # Landing plan intent: a visitor who clicked "Pay as you Grow" on the
+    # pricing page goes straight onto payg — no billing page detour. The
+    # activation snapshots today's commission rate into their wallet
+    # (rate lock) and opens the go-live gate. Paid intents (starter/pro)
+    # are left recorded — those merchants still subscribe normally.
+    #
+    # The target is the tenant of the store we JUST created (each store
+    # creation mints its own tenant) — never looked up by owner_id, which
+    # is not unique for multi-store owners and would raise
+    # MultipleResultsFound on the second store.
+    if user and user.plan_intent == "payg" and result.tenant_id is not None:
+        try:
+            from src.application.use_cases.billing.subscribe import (
+                SubscribeUseCase,
+            )
+
+            await SubscribeUseCase(db).execute(tenant_id=result.tenant_id, plan="payg")
+            user.plan_intent = None  # applied — don't re-run on store #2
+            # Make the clear part of the pending statements now rather
+            # than relying on request-teardown autoflush semantics.
+            await db.flush()
+        except Exception:
+            # Never fail store creation over plan activation — the
+            # merchant can still pick payg from Billing.
+            logger.warning("payg_intent_activation_failed", exc_info=True)
 
     if result.subdomain:
         await cloudflare_dns_service.ensure_store_subdomain(result.subdomain)

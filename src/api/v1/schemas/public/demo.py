@@ -8,7 +8,13 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class StartDemoRequest(BaseModel):
+    # Name + email are both required so every demo is attributable to a
+    # person (sales follow-up), not just an inbox. WhatsApp is optional —
+    # it's the lead channel that actually converts in Egypt, but forcing
+    # it would cost top-of-funnel conversions.
+    name: str = Field(min_length=2, max_length=120)
     email: EmailStr
+    whatsapp: str | None = Field(None, max_length=20)
     language: Literal["ar", "en"] = "ar"
     turnstile_token: str | None = Field(None, max_length=2048)
     niche: Literal["fashion"] = "fashion"

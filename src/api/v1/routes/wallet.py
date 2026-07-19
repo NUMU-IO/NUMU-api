@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.dependencies.services import get_storage_service
+from src.api.dependencies.tenant_context import resolve_owner_tenant
 from src.api.responses import SuccessResponse
 from src.api.utils.upload_validation import validate_image_upload
 from src.application.services.wallet_service import WalletService
@@ -107,13 +108,14 @@ class TopupResponse(BaseModel):
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
 
-async def _resolve_tenant(db: AsyncSession, user_id: UUID) -> TenantModel:
-    tenant = (
-        await db.execute(select(TenantModel).where(TenantModel.owner_id == user_id))
-    ).scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="No tenant found")
-    return tenant
+async def _resolve_tenant(
+    http_request: Request, db: AsyncSession, user_id: UUID
+) -> TenantModel:
+    """Current-store tenant first (X-Tenant-Id via middleware), then the
+    owner's most relevant tenant. One owner can have MULTIPLE tenants
+    (one per store), so a bare owner_id scalar_one_or_none would raise
+    MultipleResultsFound for multi-store merchants."""
+    return await resolve_owner_tenant(http_request, db, user_id)
 
 
 def _topup_response(
@@ -159,10 +161,11 @@ def _topup_response(
     operation_id="get_wallet",
 )
 async def get_wallet(
+    http_request: Request,
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    tenant = await _resolve_tenant(db, user_id)
+    tenant = await _resolve_tenant(http_request, db, user_id)
     service = WalletService(db)
     admin = await service.load_admin_defaults()
     wallet = await service.get_or_create_wallet(tenant.id)
@@ -200,12 +203,13 @@ async def get_wallet(
     operation_id="list_wallet_transactions",
 )
 async def list_wallet_transactions(
+    http_request: Request,
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
     limit: int = 50,
 ):
-    tenant = await _resolve_tenant(db, user_id)
+    tenant = await _resolve_tenant(http_request, db, user_id)
     limit = min(max(limit, 1), 100)
     rows = (
         (
@@ -245,11 +249,12 @@ async def list_wallet_transactions(
     operation_id="create_wallet_topup",
 )
 async def create_wallet_topup(
+    http_request: Request,
     request: CreateTopupRequest,
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    tenant = await _resolve_tenant(db, user_id)
+    tenant = await _resolve_tenant(http_request, db, user_id)
 
     # Rate-bound open intents so a stuck client can't mint hundreds.
     open_count = (
@@ -294,11 +299,12 @@ async def create_wallet_topup(
     operation_id="get_wallet_topup",
 )
 async def get_wallet_topup(
+    http_request: Request,
     topup_id: UUID,
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    tenant = await _resolve_tenant(db, user_id)
+    tenant = await _resolve_tenant(http_request, db, user_id)
     intent = (
         await db.execute(
             select(WalletTopupIntentModel).where(
@@ -320,6 +326,7 @@ async def get_wallet_topup(
     operation_id="submit_wallet_topup_proof",
 )
 async def submit_wallet_topup_proof(
+    http_request: Request,
     topup_id: UUID,
     transaction_ref: Annotated[str, Form(min_length=3, max_length=64)],
     file: Annotated[UploadFile, File(description="Transfer receipt")],
@@ -328,7 +335,7 @@ async def submit_wallet_topup_proof(
     storage_service: Annotated[IStorageService, Depends(get_storage_service)],
     declared_amount_cents: Annotated[int | None, Form()] = None,
 ):
-    tenant = await _resolve_tenant(db, user_id)
+    tenant = await _resolve_tenant(http_request, db, user_id)
 
     raw_bytes = await validate_image_upload(file)
     try:

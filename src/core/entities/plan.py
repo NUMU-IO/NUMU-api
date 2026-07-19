@@ -143,7 +143,7 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
     # the meter. Requires a funded merchant wallet (checkout gate blocks
     # storefront orders below the negative allowance).
     "payg": PlanFeatures(
-        display_name="Pay as you go",
+        display_name="Pay as you Grow",
         max_products=100,
         max_orders_per_month=-1,  # commission is the meter, not a cap
         max_stores=1,
