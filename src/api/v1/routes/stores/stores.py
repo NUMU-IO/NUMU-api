@@ -201,8 +201,8 @@ async def create_store(
     # creation mints its own tenant) — never looked up by owner_id, which
     # is not unique for multi-store owners and would raise
     # MultipleResultsFound on the second store.
-    if user and user.plan_intent == "payg" and result.tenant_id is not None:
-        try:
+    try:
+        if user and user.plan_intent == "payg" and result.tenant_id is not None:
             from src.application.use_cases.billing.subscribe import (
                 SubscribeUseCase,
             )
@@ -212,10 +212,12 @@ async def create_store(
             # Make the clear part of the pending statements now rather
             # than relying on request-teardown autoflush semantics.
             await db.flush()
-        except Exception:
-            # Never fail store creation over plan activation — the
-            # merchant can still pick payg from Billing.
-            logger.warning("payg_intent_activation_failed", exc_info=True)
+    except Exception:
+        # Never fail store creation over plan activation — the merchant
+        # can still pick payg from Billing. The condition itself is
+        # inside the try: an attribute regression here once 500'd every
+        # payg-intent signup on prod (StoreDTO had no tenant_id).
+        logger.warning("payg_intent_activation_failed", exc_info=True)
 
     if result.subdomain:
         await cloudflare_dns_service.ensure_store_subdomain(result.subdomain)
