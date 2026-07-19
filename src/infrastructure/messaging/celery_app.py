@@ -125,6 +125,10 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.beat_heartbeat",
         # backend-005 — Paymob recurring subscription renewals.
         "src.infrastructure.messaging.tasks.subscription_renewal_task",
+        # payg — merchant-wallet commission reconciliation + notifications.
+        "src.infrastructure.messaging.tasks.wallet_reconciliation_task",
+        "src.infrastructure.messaging.tasks.wallet_notification_tasks",
+        "src.infrastructure.messaging.tasks.wallet_topup_expiry_task",
         # backend-017 — daily Shopify-side verification overage relay.
         "src.infrastructure.messaging.tasks.usage_overage_task",
         # backend-021 — RecoveryFlow cadence Celery worker + Shopify outbox.
@@ -444,6 +448,18 @@ celery_app.conf.beat_schedule = {
     "process-due-renewals": {
         "task": "tasks.process_due_renewals",
         "schedule": crontab(minute=20),  # Hourly at :20
+    },
+    # ─── payg: heal missed wallet commissions + ledger integrity ─────
+    # The OrderPaidEvent commission handler is fire-and-forget; this
+    # nightly sweep charges anything it dropped (idempotent via the
+    # ledger's unique constraints) and self-heals balance drift.
+    "wallet-commission-reconciliation": {
+        "task": "tasks.wallet_commission_reconciliation",
+        "schedule": crontab(hour=3, minute=15),
+    },
+    "expire-wallet-topups": {
+        "task": "tasks.expire_wallet_topups",
+        "schedule": crontab(minute="*/15"),
     },
     # ─── backend-017: Shopify verification-overage relay (daily) ─────
     # Daily at 04:00 UTC (~06:00 Cairo) — after the 03:30 reconciliation

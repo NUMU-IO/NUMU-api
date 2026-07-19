@@ -65,11 +65,17 @@ class SubscribeUseCase:
         if not tenant:
             raise ValueError("Tenant not found")
 
-        if tenant.lifecycle_state == TenantLifecycleState.ACTIVE:
+        if tenant.lifecycle_state == TenantLifecycleState.ACTIVE and plan != "payg":
             logger.info(
                 "subscribe_skipped_already_active", extra={"tenant_id": str(tenant_id)}
             )
             return tenant
+
+        # Pay-as-you-go: no card, no charge, no invoice — the wallet-funded
+        # per-order commission is the revenue. Activate + ensure the wallet
+        # row exists so the hub Wallet page has something to show.
+        if plan == "payg":
+            return await self._activate_payg(tenant)
 
         # Resolve plan pricing
         from src.core.entities.plan import get_plan_features
@@ -172,6 +178,32 @@ class SubscribeUseCase:
                 "billing_cycle": billing_cycle,
                 "amount_cents": final_amount,
             },
+        )
+        return tenant
+
+    async def _activate_payg(self, tenant: TenantModel) -> TenantModel:
+        """Switch a tenant to pay-as-you-go and ensure their wallet exists."""
+        from src.application.services.wallet_service import WalletService
+
+        now = datetime.now(UTC)
+        tenant.lifecycle_state = TenantLifecycleState.ACTIVE
+        tenant.plan = "payg"
+        tenant.billing_cycle = None
+        tenant.next_renewal_at = None  # nothing to renew
+        tenant.expires_at = None
+        tenant.read_only_at = None
+        tenant.delete_at = None
+        tenant.renewal_retry_count = 0
+        if not tenant.trial_converted_at:
+            tenant.trial_converted_at = now
+
+        await self.tenant_repo.update(tenant)
+        await WalletService(self.db).get_or_create_wallet(tenant.id)
+        await self.db.flush()
+
+        logger.info(
+            "payg_activated",
+            extra={"tenant_id": str(tenant.id)},
         )
         return tenant
 

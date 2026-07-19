@@ -349,6 +349,30 @@ async def checkout(
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
 
+    # ── Wallet gate (payg tier): block order creation when the merchant's
+    # prepaid wallet is below the negative allowance. Redis-cached (60s)
+    # and FAIL-OPEN — an infra error must never cost the merchant a sale.
+    # The shopper-facing message deliberately does not reveal the
+    # merchant's billing state.
+    if store.tenant_id is not None:
+        from src.application.services.wallet_service import WalletService
+
+        if not await WalletService(store_repo.session).checkout_gate_allows(
+            store.tenant_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "store_checkout_unavailable",
+                    "message": (
+                        "Checkout is temporarily unavailable for this store. "
+                        "Please try again later. | "
+                        "إتمام الطلب غير متاح مؤقتاً لهذا المتجر. "
+                        "يرجى المحاولة لاحقاً."
+                    ),
+                },
+            )
+
     # ── Checkout-fields: validate submitted custom fields against live config ──
     checkout_config = resolve_checkout_config(store.settings)
     accepted_custom_fields, custom_field_errors = validate_custom_field_values(

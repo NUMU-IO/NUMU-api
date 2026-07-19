@@ -630,6 +630,41 @@ class Settings(BaseSettings):
     paymob_hmac_secret: str | None = None  # Webhook verification
     paymob_wallet_integration_id: str | None = None  # Mobile wallets
 
+    # Platform Paymob account (NUMU as the payee — subscription billing and
+    # merchant-wallet top-ups). Distinct from the per-merchant defaults above:
+    # money collected here lands in NUMU's own Paymob account.
+    platform_paymob_secret_key: str | None = None
+    platform_paymob_public_key: str | None = None
+    platform_paymob_hmac_secret: str | None = None
+    platform_paymob_card_integration_id: str | None = None
+    platform_paymob_wallet_integration_id: str | None = None  # Vodafone Cash etc.
+
+    # Platform Kashier account (NUMU as the payee — card top-ups for the
+    # merchant wallet). Secrets stay env-only; non-secret wallet knobs are
+    # admin-editable via platform_config (see wallet_settings service).
+    platform_kashier_mid: str | None = None
+    platform_kashier_api_key: str | None = None
+    platform_kashier_mode: str = "test"  # "test" or "live"
+
+    # Platform InstaPay identity (NUMU's own IPA) for merchant-wallet top-ups.
+    platform_instapay_ipa: str | None = None
+    platform_instapay_display_name: str | None = None
+    # Platform Vodafone Cash wallet number for manual (non-gateway) top-ups.
+    platform_vodafone_cash_number: str | None = None
+    # Optional OCR provider for top-up receipts (google_vision | deepseek_hf
+    # | glm_hf); empty/None -> Noop (rules that need OCR silently no-op).
+    platform_instapay_ocr_provider: str | None = None
+
+    # Public base URL of this API — used to build absolute webhook
+    # notification URLs for platform-directed payments (wallet top-ups).
+    platform_api_base_url: str = "https://numueg.app"
+
+    # Merchant wallet (pay-as-you-go commission tier)
+    wallet_negative_allowance_cents: int = 5_000  # checkout blocked below -50 EGP
+    wallet_low_balance_threshold_cents: int = 10_000  # warn below 100 EGP
+    ff_wallet_topups: bool = False
+    ff_wallet_checkout_gate: bool = False
+
     # Fawry (Retail Pay Points)
     fawry_merchant_code: str | None = None
     fawry_security_key: str | None = None

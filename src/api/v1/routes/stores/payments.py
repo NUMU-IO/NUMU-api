@@ -86,9 +86,23 @@ async def get_balances(
         result_orders = await db.execute(q_orders)
         store_balance = result_orders.scalar() or 0
 
+    # Wallet = the tenant's prepaid platform wallet (shared across the
+    # tenant's stores). Zero when no wallet row exists yet.
+    from src.infrastructure.database.models.public.wallet import (
+        MerchantWalletModel,
+    )
+
+    wallet_balance = (
+        await db.execute(
+            select(MerchantWalletModel.balance_cents).where(
+                MerchantWalletModel.tenant_id == store.tenant_id
+            )
+        )
+    ).scalar_one_or_none() or 0
+
     return SuccessResponse(
         data=BalancesResponse(
-            wallet_balance_cents=0,
+            wallet_balance_cents=wallet_balance,
             store_balance_cents=store_balance,
         )
     )

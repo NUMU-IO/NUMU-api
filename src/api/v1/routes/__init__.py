@@ -211,6 +211,9 @@ from src.api.v1.routes.themes import router as themes_marketplace_router
 # Theme ZIP upload + build status + preview token (authenticated developers)
 from src.api.v1.routes.themes_upload import router as themes_upload_router
 
+# Merchant wallet routes (pay-as-you-go balance + top-ups)
+from src.api.v1.routes.wallet import router as wallet_router
+
 # Webhook routes (external service callbacks)
 from src.api.v1.routes.webhooks import router as webhooks_router
 
@@ -578,6 +581,9 @@ api_router.include_router(demo_router, tags=["Demo"])
 
 # Billing routes (subscribe, cancel, invoices, discount codes)
 api_router.include_router(billing_router, tags=["Billing"])
+
+# Merchant wallet (payg): balance, ledger, top-ups
+api_router.include_router(wallet_router, tags=["Wallet"])
 
 # Referral routes (merchant referral program)
 api_router.include_router(referrals_router, tags=["Referrals"])

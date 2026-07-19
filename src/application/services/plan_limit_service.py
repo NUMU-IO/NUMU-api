@@ -18,6 +18,7 @@ from src.infrastructure.tenancy.repository import TenantRepository
 _UPGRADE_MAP: dict[str, str] = {
     "demo": "free",
     "free": "starter",
+    "payg": "starter",
     "starter": "pro",
     "pro": "enterprise",
 }
