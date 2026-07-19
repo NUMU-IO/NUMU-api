@@ -158,6 +158,7 @@ async def start_demo(
         result = await use_case.execute(
             captured_email=request.email,
             captured_name=request.name,
+            captured_whatsapp=request.whatsapp,
             language=request.language,
             niche=request.niche,
         )

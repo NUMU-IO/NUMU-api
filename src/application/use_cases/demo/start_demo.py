@@ -69,6 +69,7 @@ class StartDemoUseCase:
         self,
         captured_email: str,
         captured_name: str | None = None,
+        captured_whatsapp: str | None = None,
         language: str = "ar",
         niche: str = "fashion",
     ) -> DemoCreationResult:
@@ -96,10 +97,12 @@ class StartDemoUseCase:
             demo_email=captured_email,
             demo_started_at=now,
         )
-        # Lead attribution: who this demo belongs to. Set post-create so
-        # the tenant-service signature stays untouched.
+        # Lead attribution: who this demo belongs to + how to reach them.
+        # Set post-create so the tenant-service signature stays untouched.
         if captured_name:
             tenant.demo_name = captured_name.strip()[:120]
+        if captured_whatsapp:
+            tenant.demo_whatsapp = captured_whatsapp.strip()[:20]
 
         # 4. Create demo store
         store = await self._create_demo_store(tenant.id, user.id, subdomain, language)

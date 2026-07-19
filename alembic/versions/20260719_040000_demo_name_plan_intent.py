@@ -1,8 +1,10 @@
 """Demo lead capture + signup plan intent.
 
-- ``tenants.demo_name`` — the visitor's name captured by the landing
-  "Try a Demo" form, next to the existing ``demo_email``, so every demo
-  is attributable to a person (sales follow-up).
+- ``tenants.demo_name`` / ``tenants.demo_whatsapp`` — the visitor's
+  name (required) and WhatsApp number (optional) captured by the
+  landing "Try a Demo" form, next to the existing ``demo_email``, so
+  every demo is attributable to a person and reachable on the channel
+  that actually converts in Egypt.
 - ``users.plan_intent`` — which pricing card the visitor clicked on the
   landing before registering (``payg`` / ``starter`` / ``pro``). A payg
   intent auto-activates Pay as you Grow at store creation; paid intents
@@ -34,6 +36,11 @@ def upgrade() -> None:
         schema="public",
     )
     op.add_column(
+        "tenants",
+        sa.Column("demo_whatsapp", sa.String(20), nullable=True),
+        schema="public",
+    )
+    op.add_column(
         "users",
         sa.Column("plan_intent", sa.String(20), nullable=True),
         schema="public",
@@ -42,4 +49,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("users", "plan_intent", schema="public")
+    op.drop_column("tenants", "demo_whatsapp", schema="public")
     op.drop_column("tenants", "demo_name", schema="public")
