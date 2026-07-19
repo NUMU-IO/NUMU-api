@@ -54,15 +54,22 @@ def storefront_tn_config() -> dict[str, Any]:
 async def fetch_network_intelligence(
     *,
     phone_hash: str,
+    total_cents: int | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[int, str, str] | None:
     """Consult the Trust Network for this buyer; ``(score, confidence, label)``.
 
+    Two modes, honest about what the caller knows:
+    - ``total_cents`` known → a full ``/v1/decisions`` call (``total_cents`` is
+      REQUIRED by the TN's DecisionRequest; the FSM + ML shadow engage and a
+      shadow row accrues toward the live promotion gate).
+    - ``total_cents`` unknown (the storefront gate runs before totals are
+      computed) → ``/v1/reputation/buyer/{token}`` — the reputation read-model,
+      exact semantic parity with the local lookup, no fabricated order inputs.
+
     Returns ``None`` when disabled / unconfigured / on ANY failure — the caller
     falls back to the local reputation lookup (fail-open, never blocks checkout
-    on network availability). The TN reads its own graph (``network_source=
-    graph``): the decision request carries only the buyer token + payment
-    method, so the network-reputation factor dominates the returned score.
+    on network availability).
     """
     cfg = storefront_tn_config()
     if not cfg["enabled"] or not cfg["url"] or not cfg["api_key"]:
@@ -75,23 +82,30 @@ async def fetch_network_intelligence(
             max_retries=0,  # checkout latency budget — fail open, don't retry
             transport=transport,
         ) as tn:
-            decision = await tn.decide({
-                "payment_method": "cod",
-                "buyer_token": phone_hash,
-            })
-        score = decision.get("risk_score")
-        confidence = decision.get("confidence")
-        label = decision.get("network_label")
+            if total_cents is not None:
+                body = await tn.decide({
+                    "total_cents": int(total_cents),
+                    "payment_method": "cod",
+                    "buyer_token": phone_hash,
+                })
+                score = body.get("risk_score")
+                confidence = body.get("confidence")
+                label = body.get("network_label")
+                mode = "decision"
+            else:
+                body = await tn.get_buyer_reputation(phone_hash)
+                score = body.get("network_risk_score")
+                confidence = body.get("confidence")
+                label = body.get("label")
+                mode = "reputation"
         if not isinstance(score, int) or not confidence or not label:
             return None
         logger.info(
-            "trust_network_storefront decision score=%s confidence=%s label=%s "
-            "source=%s decided_by=%s",
+            "trust_network_storefront %s score=%s confidence=%s label=%s",
+            mode,
             score,
             confidence,
             label,
-            decision.get("network_source"),
-            decision.get("decided_by"),
         )
         return score, str(confidence), str(label)
     except Exception as exc:  # noqa: BLE001 — fail-open: checkout never depends on TN
