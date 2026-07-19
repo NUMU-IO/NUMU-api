@@ -734,6 +734,12 @@ class Settings(BaseSettings):
 
     # Sentry
     sentry_dsn: str | None = None
+    # Overrides the environment tag on Sentry events. The prod EC2 box runs
+    # with ENVIRONMENT=staging (its .env is a copy of the droplet's staging
+    # file, and flipping it would arm the strict production validators), so
+    # without this override prod errors are tagged "staging" and invisible
+    # to production-scoped Sentry alerts.
+    sentry_environment: str | None = None
     sentry_traces_sample_rate: float = 0.1  # 10% of transactions
     sentry_profiles_sample_rate: float = 0.1  # 10% of profiled transactions
     sentry_send_default_pii: bool = False  # Set True to capture user emails, IPs

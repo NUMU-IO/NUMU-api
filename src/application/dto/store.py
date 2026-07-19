@@ -35,6 +35,9 @@ class StoreDTO(BaseDTO):
     business_hours: dict
     created_at: datetime
     updated_at: datetime
+    # Tenant of this store (each store creation mints its own tenant).
+    # Defaulted last so older call sites constructing the DTO keep working.
+    tenant_id: UUID | None = None
 
     @classmethod
     def from_entity(cls, entity: Store) -> "StoreDTO":
@@ -63,6 +66,7 @@ class StoreDTO(BaseDTO):
             business_hours=entity.business_hours or {},
             created_at=entity.created_at,
             updated_at=entity.updated_at,
+            tenant_id=getattr(entity, "tenant_id", None),
         )
 
 
