@@ -1491,6 +1491,37 @@ async def checkout(
 
     created_order = await order_repo.create(order)
 
+    # ── Full-partner Trust Network recording ──────────────────────────
+    # The COD gate above ran in reputation mode (pre-totals). Now the real
+    # total exists, record a FULL /v1/decisions with the TN — its FSM + ML
+    # shadow engage and the shadow row is what the live §5.6 promotion gate
+    # labels once this order's outcome flows back through the feed. Decides
+    # NOTHING here (the gate already decided); best-effort + fail-open, and
+    # a no-op unless TRUST_NETWORK_STOREFRONT_ENABLED is on. Idempotent per
+    # order so client retries can't double-record.
+    if (
+        is_cod
+        and trust_decision is not None
+        and trust_decision.reason not in {"disabled", "no_phone"}
+    ):
+        try:
+            from src.application.services.network_reputation_service import (
+                extract_phone_hash_from_string as _tn_hash,
+            )
+            from src.application.services.trust_network_storefront import (
+                fetch_network_intelligence as _tn_record,
+            )
+
+            _tn_ph = _tn_hash(customer_phone)
+            if _tn_ph:
+                await _tn_record(
+                    phone_hash=_tn_ph,
+                    total_cents=created_order.total,
+                    idempotency_key=f"sf-order-{created_order.id}",
+                )
+        except Exception as _tn_exc:  # noqa: BLE001 — recording never blocks checkout
+            logger.warning("trust_network_order_record_error err=%s", _tn_exc)
+
     # ── COD-trust "recover" flow ──────────────────────────────────────
     # A high-risk COD order the merchant chose to CONVERT rather than block:
     # the order is created as COD, and we schedule a WhatsApp pay-online offer
