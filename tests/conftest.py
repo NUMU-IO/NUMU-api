@@ -117,6 +117,20 @@ def _patch_metadata_for_sqlite(metadata):
                 if getattr(column, "computed", None) is not None:
                     column.computed = None
 
+    # Translate Postgres partial indexes to their SQLite equivalent.
+    # Without this, `postgresql_where` is silently ignored on SQLite and a
+    # partial UNIQUE index (e.g. wallet_transactions uq per (order_id, kind))
+    # degrades into a FULL unique index — breaking legitimate inserts.
+    from sqlalchemy import text as sa_text
+
+    for table in metadata.tables.values():
+        for idx in table.indexes:
+            pg_where = idx.dialect_options.get("postgresql", {}).get("where")
+            if pg_where is not None:
+                if isinstance(pg_where, str):
+                    pg_where = sa_text(pg_where)
+                idx._validate_dialect_kwargs({"sqlite_where": pg_where})
+
     # Strip schema from ForeignKey references that use schema-qualified names
     for table in metadata.tables.values():
         for fk in table.foreign_keys:

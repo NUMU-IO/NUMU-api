@@ -1,0 +1,233 @@
+"""Unit tests — admin wallet settings (platform_config) + on-hold credits."""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+import pytest
+
+from src.application.services.wallet_service import WalletService
+from src.application.services.wallet_settings import (
+    get_wallet_settings,
+    invalidate_wallet_settings_cache,
+    resolve_commission_bps,
+    update_wallet_settings,
+)
+from src.application.use_cases.wallet.review_topup_proof import (
+    ReviewTopupProofUseCase,
+)
+from src.core.entities.wallet import TopupIntentStatus
+from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.public.wallet import (
+    MerchantWalletModel,
+    WalletTopupIntentModel,
+    WalletTopupProofModel,
+    WalletTransactionModel,
+)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_wallet_settings():
+    invalidate_wallet_settings_cache()
+    yield
+    invalidate_wallet_settings_cache()
+
+
+async def _mk_tenant(session, plan: str = "payg") -> TenantModel:
+    tenant = TenantModel(
+        id=uuid4(),
+        name="Payg Tenant",
+        subdomain=f"payg-{uuid4().hex[:8]}",
+        plan=plan,
+        lifecycle_state="active",
+    )
+    session.add(tenant)
+    await session.commit()
+    return tenant
+
+
+async def _mk_under_review_topup(
+    session, tenant_id, amount_cents=10_000
+) -> tuple[WalletTopupIntentModel, WalletTopupProofModel]:
+    """Seed the state submit_topup_proof leaves after a soft-block:
+    intent under_review + proof awaiting_review + pending hold."""
+    intent = WalletTopupIntentModel(
+        tenant_id=tenant_id,
+        method="vodafone_cash",
+        amount_cents=amount_cents,
+        currency="EGP",
+        status=TopupIntentStatus.UNDER_REVIEW.value,
+        special_reference=f"VC-{uuid4().hex[:6].upper()}",
+        display_destination="01000000000",
+    )
+    session.add(intent)
+    await session.flush()
+    proof = WalletTopupProofModel(
+        tenant_id=tenant_id,
+        topup_intent_id=intent.id,
+        proof_image_key=f"wallet-topups/{tenant_id}/x.bin",
+        proof_image_hash=uuid4().bytes,
+        transaction_ref=f"tx-{uuid4().hex[:10]}",
+        status="awaiting_review",
+    )
+    session.add(proof)
+
+    service = WalletService(session)
+    wallet = await service.get_or_create_wallet(tenant_id)
+    service.add_pending_hold(wallet, amount_cents)
+    await session.commit()
+    return intent, proof
+
+
+# ─── Admin settings ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_settings_default_from_env_then_admin_override(test_session):
+    admin = await get_wallet_settings(test_session, use_cache=False)
+    assert admin.commission_bps_default is None
+    assert admin.card_enabled is True
+
+    merged = await update_wallet_settings(
+        test_session,
+        {
+            "card_enabled": False,
+            "commission_bps_default": 250,
+            "vodafone_cash_number": "01012345678",
+            "not_a_real_field": "ignored",
+        },
+    )
+    await test_session.commit()
+    assert merged.card_enabled is False
+    assert merged.commission_bps_default == 250
+    assert merged.vodafone_cash_number == "01012345678"
+    assert merged.method_enabled("card") is False
+    assert merged.method_enabled("vodafone_cash") is True
+
+    # None clears an override back to the env default.
+    merged = await update_wallet_settings(test_session, {"card_enabled": None})
+    await test_session.commit()
+    assert merged.card_enabled is True
+
+
+def test_resolve_commission_bps_precedence():
+    from src.application.services.wallet_settings import WalletAdminSettings
+
+    def mk(default):
+        return WalletAdminSettings(
+            topups_enabled=True,
+            checkout_gate_enabled=False,
+            card_enabled=True,
+            vodafone_cash_enabled=True,
+            instapay_enabled=True,
+            commission_bps_default=default,
+            negative_allowance_cents=5_000,
+            low_balance_threshold_cents=10_000,
+            vodafone_cash_number=None,
+            instapay_ipa=None,
+            instapay_display_name=None,
+        )
+
+    # Tenant override always wins.
+    assert resolve_commission_bps(300, 150, mk(250)) == 150
+    # Admin default tunes commission-bearing plans...
+    assert resolve_commission_bps(300, None, mk(250)) == 250
+    # ...but can never start charging subscription tenants (plan bps 0).
+    assert resolve_commission_bps(0, None, mk(250)) == 0
+    # No admin default -> plan rate.
+    assert resolve_commission_bps(300, None, mk(None)) == 300
+
+
+@pytest.mark.asyncio
+async def test_admin_commission_rate_applies_to_payg(test_session):
+    tenant = await _mk_tenant(test_session, plan="payg")
+    service = WalletService(test_session, cache=None)
+    wallet = await service.get_or_create_wallet(tenant.id)
+    await test_session.commit()
+
+    assert await service.effective_commission_bps_admin(tenant, wallet) == 300
+
+    await update_wallet_settings(test_session, {"commission_bps_default": 200})
+    await test_session.commit()
+    assert await service.effective_commission_bps_admin(tenant, wallet) == 200
+
+    # Subscription tenants stay at zero regardless of the admin default.
+    tenant.plan = "starter"
+    assert await service.effective_commission_bps_admin(tenant, None) == 0
+
+
+# ─── On-hold (pending) credits ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_pending_hold_add_and_release():
+    wallet = MerchantWalletModel(
+        tenant_id=uuid4(), balance_cents=0, pending_balance_cents=0
+    )
+    WalletService.add_pending_hold(wallet, 10_000)
+    assert wallet.pending_balance_cents == 10_000
+    WalletService.release_pending_hold(wallet, 10_000)
+    assert wallet.pending_balance_cents == 0
+    # Never goes negative even on a double release.
+    WalletService.release_pending_hold(wallet, 10_000)
+    assert wallet.pending_balance_cents == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_approve_converts_hold_to_real_credit(test_session):
+    tenant = await _mk_tenant(test_session)
+    intent, proof = await _mk_under_review_topup(test_session, tenant.id)
+
+    result = await ReviewTopupProofUseCase(test_session).approve(
+        proof_id=proof.id, admin_user_id=None
+    )
+    await test_session.commit()
+
+    wallet = await WalletService(test_session).get_or_create_wallet(tenant.id)
+    assert wallet.pending_balance_cents == 0  # hold released
+    assert wallet.balance_cents == 10_000  # real ledger credit
+    assert result.credited_balance_cents == 10_000
+    assert intent.status == TopupIntentStatus.SUCCEEDED.value
+
+    from sqlalchemy import select
+
+    tx = (
+        await test_session.execute(
+            select(WalletTransactionModel).where(
+                WalletTransactionModel.tenant_id == tenant.id
+            )
+        )
+    ).scalar_one()
+    assert tx.kind == "topup"
+    assert tx.idempotency_key == f"proof:{proof.id}"
+
+
+@pytest.mark.asyncio
+async def test_admin_reject_drops_hold_without_credit(test_session):
+    tenant = await _mk_tenant(test_session)
+    intent, proof = await _mk_under_review_topup(test_session, tenant.id)
+
+    await ReviewTopupProofUseCase(test_session).reject(
+        proof_id=proof.id, admin_user_id=None, reason="Amount not received"
+    )
+    await test_session.commit()
+
+    wallet = await WalletService(test_session).get_or_create_wallet(tenant.id)
+    assert wallet.pending_balance_cents == 0  # hold gone
+    assert wallet.balance_cents == 0  # nothing credited
+    assert intent.status == TopupIntentStatus.AWAITING_PROOF.value  # retryable
+
+    from sqlalchemy import select
+
+    txs = (
+        (
+            await test_session.execute(
+                select(WalletTransactionModel).where(
+                    WalletTransactionModel.tenant_id == tenant.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert txs == []

@@ -54,7 +54,7 @@ def _categorize(name: str) -> str:
     n = name.lower()
     if "shopify" in n or "catalogmapping" in n:
         return "Integrations"
-    if any(k in n for k in ("payment", "invoice", "refund", "instapay")):
+    if any(k in n for k in ("payment", "invoice", "refund", "instapay", "wallet")):
         return "Payments"
     if any(k in n for k in ("network", "reputation", "risk")):
         return "Trust & Risk"
