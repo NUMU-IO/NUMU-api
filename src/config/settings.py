@@ -664,6 +664,10 @@ class Settings(BaseSettings):
     wallet_low_balance_threshold_cents: int = 10_000  # warn below 100 EGP
     ff_wallet_topups: bool = False
     ff_wallet_checkout_gate: bool = False
+    # Go-live gate: NEW tenants (no golive_exempt feature flag) cannot take
+    # storefront orders until they pick a paid plan or Pay as you Grow.
+    # Admin-overridable via wallet_settings (golive_gate_enabled).
+    ff_golive_gate: bool = False
 
     # Fawry (Retail Pay Points)
     fawry_merchant_code: str | None = None
