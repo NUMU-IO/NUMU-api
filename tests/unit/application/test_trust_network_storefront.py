@@ -96,6 +96,34 @@ def test_decision_mode_with_total(monkeypatch):
     }
 
 
+def test_decision_mode_idempotency_key_passthrough(monkeypatch):
+    # The post-creation order recording pins its key to the order id so client
+    # retries can't double-record.
+    _enable(monkeypatch)
+    captured: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["idem"] = request.headers.get("Idempotency-Key")
+        return httpx.Response(
+            200,
+            json={
+                "risk_score": 40,
+                "confidence": "low",
+                "network_label": "new_to_network",
+            },
+        )
+
+    asyncio.run(
+        fetch_network_intelligence(
+            phone_hash=HASH,
+            total_cents=5000,
+            idempotency_key="sf-order-abc123",
+            transport=httpx.MockTransport(handler),
+        )
+    )
+    assert captured["idem"] == "sf-order-abc123"
+
+
 def test_non_200_and_malformed_fail_open(monkeypatch):
     _enable(monkeypatch)
     for response in (
