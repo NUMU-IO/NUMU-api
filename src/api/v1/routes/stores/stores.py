@@ -196,26 +196,22 @@ async def create_store(
     # activation snapshots today's commission rate into their wallet
     # (rate lock) and opens the go-live gate. Paid intents (starter/pro)
     # are left recorded — those merchants still subscribe normally.
-    if user and user.plan_intent == "payg":
+    #
+    # The target is the tenant of the store we JUST created (each store
+    # creation mints its own tenant) — never looked up by owner_id, which
+    # is not unique for multi-store owners and would raise
+    # MultipleResultsFound on the second store.
+    if user and user.plan_intent == "payg" and result.tenant_id is not None:
         try:
             from src.application.use_cases.billing.subscribe import (
                 SubscribeUseCase,
             )
-            from src.infrastructure.database.models.public.tenant import (
-                TenantModel,
-            )
 
-            tenant_row = (
-                await db.execute(
-                    select(TenantModel).where(TenantModel.owner_id == user_id)
-                )
-            ).scalar_one_or_none()
-            if tenant_row is not None:
-                await SubscribeUseCase(db).execute(tenant_id=tenant_row.id, plan="payg")
-                user.plan_intent = None  # applied — don't re-run on store #2
-                # Make the clear part of the pending statements now rather
-                # than relying on request-teardown autoflush semantics.
-                await db.flush()
+            await SubscribeUseCase(db).execute(tenant_id=result.tenant_id, plan="payg")
+            user.plan_intent = None  # applied — don't re-run on store #2
+            # Make the clear part of the pending statements now rather
+            # than relying on request-teardown autoflush semantics.
+            await db.flush()
         except Exception:
             # Never fail store creation over plan activation — the
             # merchant can still pick payg from Billing.
