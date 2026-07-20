@@ -12,6 +12,7 @@ live storefronts depend on, nor re-enable one that was suspended for cause.
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -35,6 +36,8 @@ from src.core.entities.platform_capability import (
 from src.infrastructure.database.models.tenant.platform_capability import (
     PlatformCapabilityModel,
 )
+
+logger = logging.getLogger(__name__)
 
 # Prefix is supplied by the admin package router (see admin/__init__.py).
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -75,7 +78,11 @@ class CapabilityUpsert(BaseModel):
     kind: CapabilityKind
     owner: str = Field(max_length=128)
     description: str | None = None
-    lifecycle_state: LifecycleState = LifecycleState.DRAFT
+    # Deliberately NOT accepted on create. Allowing it would let a caller
+    # create a capability straight into `ga` (live, no review) or `suspended`
+    # without the 2FA step-up the lifecycle endpoint exists to enforce —
+    # bypassing the gate by taking a different door. New capabilities always
+    # start as draft, which grants nothing, and move via /lifecycle.
     data_classification: DataClassification = DataClassification.TENANT_SCOPED
     min_tier: ExtensionTier = ExtensionTier.PARTNER
     unavailable_behavior: UnavailableBehavior = UnavailableBehavior.FAIL_OPEN
@@ -110,11 +117,19 @@ class GrantCheckRequest(BaseModel):
     requested_slugs: list[str]
 
 
+class GrantDenialItem(BaseModel):
+    """Why one capability was refused. The reason is the point of /check, so
+    it gets a real schema rather than an untyped dict that generates `any`."""
+
+    capability_slug: str
+    reason: str | None = None
+
+
 class GrantCheckResponse(BaseModel):
     tier: str
     ok: bool
     granted: list[str]
-    denied: list[dict]
+    denied: list[GrantDenialItem]
 
 
 # ── Mapping ──────────────────────────────────────────────────────────────────
@@ -243,7 +258,8 @@ async def create_capability(
         kind=body.kind.value,
         owner=body.owner,
         description=body.description,
-        lifecycle_state=body.lifecycle_state.value,
+        # Always draft — see CapabilityUpsert. Promotion is a 2FA-gated action.
+        lifecycle_state=LifecycleState.DRAFT.value,
         data_classification=body.data_classification.value,
         min_tier=body.min_tier.value,
         unavailable_behavior=body.unavailable_behavior.value,
@@ -272,7 +288,11 @@ async def update_capability(
     general-purpose PATCH would quietly bypass.
     """
     row = await _get_row(session, slug)
-    patch = body.model_dump(exclude_unset=True, exclude_none=True)
+    # exclude_unset only: an omitted field is left alone, but an explicit null
+    # must actually clear the column. Adding exclude_none here would make
+    # `{"description": null}` a silent no-op, leaving no way to remove a
+    # description or unset an active version through the API at all.
+    patch = body.model_dump(exclude_unset=True)
     patch.pop("lifecycle_state", None)
 
     for key, value in patch.items():
@@ -303,9 +323,26 @@ async def set_lifecycle(
     render.
     """
     row = await _get_row(session, slug)
+    previous = row.lifecycle_state
     row.lifecycle_state = body.lifecycle_state.value
     await session.commit()
     await session.refresh(row)
+
+    # The kill switch has to leave a trail. Who suspended what, when, and why
+    # is the first question asked when a capability stops being granted, and
+    # accepting `reason` without recording it anywhere would make the operator
+    # type into a black hole.
+    logger.warning(
+        "platform_capability_lifecycle_changed",
+        extra={
+            "capability_slug": slug,
+            "from_state": previous,
+            "to_state": row.lifecycle_state,
+            "admin_id": str(admin_id),
+            "reason": body.reason,
+            "grantable_now": _to_item(row).grantable,
+        },
+    )
     return SuccessResponse(data=_to_item(row))
 
 
@@ -330,7 +367,7 @@ async def check_grant(
             ok=grant.ok,
             granted=grant.granted,
             denied=[
-                {"capability_slug": d.capability_slug, "reason": d.reason}
+                GrantDenialItem(capability_slug=d.capability_slug, reason=d.reason)
                 for d in grant.denied
             ],
         )
