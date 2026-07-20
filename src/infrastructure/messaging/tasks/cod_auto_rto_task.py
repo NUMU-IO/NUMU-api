@@ -113,16 +113,23 @@ async def _sweep() -> dict:
         # Coarse scan: any COD order that's been shipped at least the
         # MIN window. Per-store cutoff (which may be larger) is applied
         # after we read the store's settings.
+        # NOTE: the orders table has NO shipped_at column — the entity's
+        # shipped_at is in-memory only. fulfilled_at IS persisted and is
+        # stamped by transition_to(SHIPPED) at the same moment, so it is
+        # the ship timestamp at the model layer. (The previous
+        # OrderModel.shipped_at reference raised AttributeError on every
+        # sweep — fixed as part of 004-cod-autopilot, which relies on
+        # this sweep as its RTO backstop.)
         query = (
             select(OrderModel)
             .where(
                 OrderModel.status == OrderStatus.SHIPPED,
                 OrderModel.payment_method == "cod",
-                OrderModel.shipped_at.isnot(None),
-                OrderModel.shipped_at <= latest_cutoff,
-                OrderModel.shipped_at >= earliest_cutoff - timedelta(days=365),
+                OrderModel.fulfilled_at.isnot(None),
+                OrderModel.fulfilled_at <= latest_cutoff,
+                OrderModel.fulfilled_at >= earliest_cutoff - timedelta(days=365),
             )
-            .order_by(OrderModel.shipped_at.asc())
+            .order_by(OrderModel.fulfilled_at.asc())
             .limit(500)
         )
         result = await session.execute(query)
@@ -132,6 +139,7 @@ async def _sweep() -> dict:
         # Cache store settings to avoid re-fetching for orders from the
         # same store within one sweep.
         store_cache: dict = {}
+        bypass_broken = False
 
         for model in candidates:
             try:
@@ -153,7 +161,7 @@ async def _sweep() -> dict:
 
                 per_store_days = _resolve_auto_rto_days(store_settings)
                 cutoff = now - timedelta(days=per_store_days)
-                if model.shipped_at > cutoff:
+                if model.fulfilled_at > cutoff:
                     # Not yet stale per this store's window.
                     continue
 
@@ -211,7 +219,14 @@ async def _sweep() -> dict:
                 try:
                     await enable_rls_bypass(session)
                 except Exception:
+                    # RLS context is now unknown — continuing could write
+                    # under the PREVIOUS order's tenant context. Abort the
+                    # sweep; the task retry gets a fresh session.
                     logger.exception("auto_rto_bypass_reset_failed")
+                    bypass_broken = True
+            if bypass_broken:
+                stats["errors"] += 1
+                break
 
         await session.commit()
 

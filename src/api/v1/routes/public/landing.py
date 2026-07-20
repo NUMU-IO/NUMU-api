@@ -279,6 +279,43 @@ DEFAULT_PRICING_PLANS = {
 }
 
 
+def build_payg_plan_card(commission_percent: float) -> dict:
+    """The Pay-as-you-Grow card injected into the public pricing payload.
+
+    Kept as a builder (not a stored config) so the commission % is ALWAYS
+    the live admin-controlled rate — the same number a new signup gets
+    locked at — and can never drift from what the wallet actually charges.
+    """
+    pct_en = f"{commission_percent:g}%"  # 3% not 3.0%
+    return {
+        "key": "payg",
+        "name_en": "Pay as you Grow",
+        "name_ar": "ادفع وأنت تنمو",
+        "price_monthly": 0,
+        "price_annual": 0,
+        "currency": "EGP",
+        "cta": "signup_payg",
+        "popular": False,
+        "commission_percent": commission_percent,
+        "features": [
+            {"en": "No monthly subscription", "ar": "بدون اشتراك شهري"},
+            {
+                "en": f"{pct_en} per paid order only",
+                "ar": f"{pct_en} فقط على كل طلب مدفوع",
+            },
+            {
+                "en": "Prepaid wallet — top up as you grow",
+                "ar": "محفظة مسبقة الشحن — اشحن مع نموك",
+            },
+            {
+                "en": "Rate locked from the day you join",
+                "ar": "السعر مثبّت من يوم اشتراكك",
+            },
+            {"en": "All Starter features", "ar": "كل مميزات ستارتر"},
+        ],
+    }
+
+
 @router.get(
     "/pricing-plans",
     summary="Pricing plans for landing page (admin-editable)",
@@ -291,14 +328,74 @@ async def get_public_pricing_plans(
 
     If an admin has customized the plans via the backoffice, those
     overrides are returned. Otherwise, falls back to the hardcoded
-    defaults. This lets the admin change prices, feature lists, and
-    promo banners without a code deploy.
+    defaults. On top of the stored/default plans, the response is
+    enriched from live admin settings:
+
+    * a ``trial`` block ({enabled, days, visible}) so the landing renders
+      the real trial length (or hides trial messaging entirely), and the
+      trial card is dropped when the trial is hidden;
+    * the **Pay as you Grow** card (commission % straight from the wallet
+      admin settings — the exact rate a new signup locks in), injected
+      when ``payg_visible_on_landing`` is on and no admin-customized payg
+      card exists.
     """
+    from src.application.services.signup_settings import get_signup_settings
+    from src.application.services.wallet_settings import (
+        get_wallet_settings,
+        resolve_commission_bps,
+    )
+    from src.core.entities.plan import get_plan_features
+
     result = await db.execute(
         select(PlatformConfigModel).where(PlatformConfigModel.key == "pricing_plans")
     )
     config = result.scalar_one_or_none()
 
-    data = config.value if config else DEFAULT_PRICING_PLANS
+    stored = config.value if config else DEFAULT_PRICING_PLANS
+    plans = [dict(p) for p in stored.get("plans", [])]
 
+    signup = await get_signup_settings(db)
+    wallet_admin = await get_wallet_settings(db)
+
+    trial_visible = signup.trial_enabled and signup.trial_visible_on_landing
+    if not trial_visible:
+        plans = [p for p in plans if p.get("key") != "trial"]
+
+    if signup.payg_visible_on_landing:
+        payg_bps = resolve_commission_bps(
+            get_plan_features("payg").commission_bps, None, wallet_admin
+        )
+        payg_card = build_payg_plan_card(payg_bps / 100)
+        existing = next(
+            (i for i, p in enumerate(plans) if p.get("key") == "payg"), None
+        )
+        if existing is not None:
+            # Admin customized the card text — keep it, but the live
+            # commission % always wins so marketing can't drift from
+            # what the wallet charges.
+            plans[existing] = {
+                **payg_card,
+                **plans[existing],
+                "commission_percent": payg_card["commission_percent"],
+                "cta": "signup_payg",
+            }
+        else:
+            # After the trial card (or first) — payg is the free tier.
+            insert_at = next(
+                (i + 1 for i, p in enumerate(plans) if p.get("key") == "trial"),
+                0,
+            )
+            plans.insert(insert_at, payg_card)
+    else:
+        plans = [p for p in plans if p.get("key") != "payg"]
+
+    data = {
+        **stored,
+        "plans": plans,
+        "trial": {
+            "enabled": signup.trial_enabled,
+            "days": signup.trial_days,
+            "visible": trial_visible,
+        },
+    }
     return SuccessResponse(data=data, message="Pricing plans")

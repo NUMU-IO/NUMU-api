@@ -65,11 +65,17 @@ class SubscribeUseCase:
         if not tenant:
             raise ValueError("Tenant not found")
 
-        if tenant.lifecycle_state == TenantLifecycleState.ACTIVE:
+        if tenant.lifecycle_state == TenantLifecycleState.ACTIVE and plan != "payg":
             logger.info(
                 "subscribe_skipped_already_active", extra={"tenant_id": str(tenant_id)}
             )
             return tenant
+
+        # Pay-as-you-go: no card, no charge, no invoice — the wallet-funded
+        # per-order commission is the revenue. Activate + ensure the wallet
+        # row exists so the hub Wallet page has something to show.
+        if plan == "payg":
+            return await self._activate_payg(tenant)
 
         # Resolve plan pricing
         from src.core.entities.plan import get_plan_features
@@ -164,6 +170,14 @@ class SubscribeUseCase:
         await self.tenant_repo.update(tenant)
         await self.db.flush()
 
+        # Best-effort PRE-commit gate-cache drop. Harmless on rollback (a
+        # cold cache just recomputes from committed truth), but a concurrent
+        # read may re-cache the old state until the caller's post-commit
+        # invalidation (billing route) or the 60s TTL clears it.
+        from src.application.services.wallet_service import WalletService
+
+        await WalletService(self.db).invalidate_cache(tenant_id)
+
         logger.info(
             "subscription_started",
             extra={
@@ -171,6 +185,57 @@ class SubscribeUseCase:
                 "plan": plan,
                 "billing_cycle": billing_cycle,
                 "amount_cents": final_amount,
+            },
+        )
+        return tenant
+
+    async def _activate_payg(self, tenant: TenantModel) -> TenantModel:
+        """Switch a tenant to Pay as you Grow and ensure their wallet exists.
+
+        The commission rate is SNAPSHOTTED at activation: the admin-panel
+        default (or the plan rate) is copied into
+        ``wallet.commission_bps_override``, so later changes to the global
+        default only apply to NEW signups — existing merchants keep the
+        rate they agreed to (an admin can still change a specific tenant
+        from the Wallets tab).
+        """
+        from src.application.services.wallet_service import WalletService
+        from src.application.services.wallet_settings import (
+            get_wallet_settings,
+            resolve_commission_bps,
+        )
+        from src.core.entities.plan import get_plan_features
+
+        now = datetime.now(UTC)
+        tenant.lifecycle_state = TenantLifecycleState.ACTIVE
+        tenant.plan = "payg"
+        tenant.billing_cycle = None
+        tenant.next_renewal_at = None  # nothing to renew
+        tenant.expires_at = None
+        tenant.read_only_at = None
+        tenant.delete_at = None
+        tenant.renewal_retry_count = 0
+        if not tenant.trial_converted_at:
+            tenant.trial_converted_at = now
+
+        await self.tenant_repo.update(tenant)
+        service = WalletService(self.db)
+        wallet = await service.get_or_create_wallet(tenant.id)
+        if wallet.commission_bps_override is None:
+            admin = await get_wallet_settings(self.db)
+            wallet.commission_bps_override = resolve_commission_bps(
+                get_plan_features("payg").commission_bps, None, admin
+            )
+        await self.db.flush()
+        # Best-effort PRE-commit gate-cache drop (see the paid path above);
+        # bounded by the 60s gate TTL if a concurrent read re-caches.
+        await service.invalidate_cache(tenant.id)
+
+        logger.info(
+            "payg_activated",
+            extra={
+                "tenant_id": str(tenant.id),
+                "locked_commission_bps": wallet.commission_bps_override,
             },
         )
         return tenant

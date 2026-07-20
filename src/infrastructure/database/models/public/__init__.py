@@ -43,6 +43,12 @@ from src.infrastructure.database.models.public.theme_admin_config import (
 from src.infrastructure.database.models.public.two_factor import TwoFactorAuthModel
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.public.waitlist import WaitlistModel
+from src.infrastructure.database.models.public.wallet import (
+    MerchantWalletModel,
+    WalletTopupIntentModel,
+    WalletTopupProofModel,
+    WalletTransactionModel,
+)
 from src.infrastructure.database.models.public.whatsapp_access import (
     WhatsAppAccessRequestModel,
     WhatsAppAccessStatus,
@@ -64,6 +70,11 @@ __all__ = [
     "TwoFactorAuthModel",
     "UserModel",
     "WaitlistModel",
+    # Merchant wallet (pay-as-you-go)
+    "MerchantWalletModel",
+    "WalletTransactionModel",
+    "WalletTopupIntentModel",
+    "WalletTopupProofModel",
     "WhatsAppAccessRequestModel",
     "WhatsAppAccessStatus",
     # Omnichannel

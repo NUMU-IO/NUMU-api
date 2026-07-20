@@ -239,6 +239,7 @@ async def check_customer_trust(
     store_settings: dict | None,
     network_repo: NetworkReputationRepository,
     location: LocationSignals | None = None,
+    order_total_cents: int | None = None,
 ) -> CodTrustDecision:
     """Evaluate whether a COD order from this customer should be allowed.
 
@@ -263,14 +264,38 @@ async def check_customer_trust(
     if not phone_hash:
         return CodTrustDecision(allowed=True, reason="no_phone")
 
-    # 3. Lookup network reputation (never raises — fail-open)
+    # 3. Network intelligence for the gate. Full-partner mode
+    # (TRUST_NETWORK_STOREFRONT_ENABLED): consult the standalone Trust
+    # Network's /v1/decisions — its OWN graph (cross-partner data), FSM, and
+    # ML shadow engage, and the checkout accrues a TN shadow row for the live
+    # promotion gate. Fail-open + latency-capped: any failure falls back to
+    # the LOCAL reputation lookup below, exactly as before. Flag off =
+    # byte-identical to the historical behaviour.
+    intelligence_source = "local"
+    tn_intelligence: tuple[int, str, str] | None = None
     try:
-        score, confidence, label = await lookup_network_reputation(
-            phone_hash, network_repo
+        from src.application.services.trust_network_storefront import (
+            fetch_network_intelligence,
         )
-    except Exception as exc:
-        logger.warning("cod_trust_lookup_error: %s", exc)
-        return CodTrustDecision(allowed=True, reason="lookup_error")
+
+        tn_intelligence = await fetch_network_intelligence(
+            phone_hash=phone_hash, total_cents=order_total_cents
+        )
+    except Exception as exc:  # noqa: BLE001 — the gate never depends on the TN
+        logger.warning("cod_trust_tn_error: %s", exc)
+
+    if tn_intelligence is not None:
+        score, confidence, label = tn_intelligence
+        intelligence_source = "network"
+    else:
+        # Local lookup (never raises — fail-open)
+        try:
+            score, confidence, label = await lookup_network_reputation(
+                phone_hash, network_repo
+            )
+        except Exception as exc:
+            logger.warning("cod_trust_lookup_error: %s", exc)
+            return CodTrustDecision(allowed=True, reason="lookup_error")
 
     # Location-based signals. Evaluated regardless of the network score so
     # the factors list stays informative even for new/below-threshold
@@ -280,6 +305,18 @@ async def check_customer_trust(
     location_factors: list[dict[str, Any]] = []
     if location is not None:
         location_adjustment, location_factors = _evaluate_location_signals(location)
+
+    # Provenance for the merchant decisions feed: which intelligence source
+    # fed this gate (informational, weight 0 — never affects the score).
+    if intelligence_source == "network":
+        location_factors = [
+            *location_factors,
+            {
+                "code": "network_intelligence",
+                "weight": 0,
+                "detail": "Score from the NUMU Trust Network (cross-partner graph).",
+            },
+        ]
 
     adjusted_score = min(100, max(0, score + location_adjustment))
     is_new_customer = score == _BASELINE_SCORE and label == "new_to_network"

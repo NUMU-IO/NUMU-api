@@ -41,6 +41,7 @@ from src.api.v1.routes.admin.reconciliation import router as reconciliation_rout
 from src.api.v1.routes.admin.stores import router as stores_router
 from src.api.v1.routes.admin.users import router as admin_users_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
+from src.api.v1.routes.admin.wallets import router as wallets_router
 from src.api.v1.routes.admin.whatsapp_access import (
     router as whatsapp_access_router,
 )
@@ -62,6 +63,7 @@ router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
 router.include_router(
     plan_limits_router, prefix="/plan-limits", tags=["Admin - Plan Limits"]
 )
+router.include_router(wallets_router, prefix="/wallets", tags=["Admin - Wallets"])
 router.include_router(
     landing_page_router, prefix="/landing-config", tags=["Admin - Landing Page"]
 )

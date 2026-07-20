@@ -115,6 +115,10 @@ from src.infrastructure.events.handlers.trust_kill_switch_notification_handler i
 from src.infrastructure.events.handlers.trust_signal_handler import (
     handle_recovery_succeeded_trust_signal,
 )
+from src.infrastructure.events.handlers.wallet_commission_handler import (
+    handle_commission_charge_on_order_paid,
+    handle_commission_reversal_on_refund,
+)
 from src.infrastructure.events.handlers.webhook_handler import (
     handle_webhook_order_created,
     handle_webhook_order_paid,
@@ -191,6 +195,11 @@ def create_event_bus() -> EventBus:
     # Issue the ETA invoice + email PDF when the merchant marks a COD
     # order paid (or a future payment-gateway webhook fires OrderPaidEvent).
     bus.subscribe(OrderPaidEvent, handle_invoice_on_order_paid)
+    # Pay-as-you-go: debit the platform commission from the merchant wallet
+    # when an order is paid; reverse it on a full refund. Missed events are
+    # healed by the daily wallet_reconciliation_task.
+    bus.subscribe(OrderPaidEvent, handle_commission_charge_on_order_paid)
+    bus.subscribe(OrderStatusChangedEvent, handle_commission_reversal_on_refund)
 
     # InstaPay proof lifecycle — short customer confirmation / rejection
     # emails that fire independently of the invoice handler so they
@@ -224,6 +233,16 @@ def create_event_bus() -> EventBus:
     from src.core.events.otp_events import OtpVerifiedEvent
 
     bus.subscribe(OtpVerifiedEvent, handle_otp_verified_trust_signal)
+
+    # P1-7.5: mirror recorded COD outcomes to the standalone Trust Network's
+    # /v1/events (the cross-partner contribution feed). Post-commit, strict-consent,
+    # fail-open; off unless TRUST_NETWORK_FEED_ENABLED is set.
+    from src.core.events.network_events import NetworkOutcomeRecordedEvent
+    from src.infrastructure.events.handlers.network_feed_handler import (
+        handle_network_outcome_recorded,
+    )
+
+    bus.subscribe(NetworkOutcomeRecordedEvent, handle_network_outcome_recorded)
 
     # P1-3: active merchant notification when the trust auto-approve
     # kill-switch fires — the persisted banner alone is passive.

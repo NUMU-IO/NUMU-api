@@ -349,6 +349,46 @@ async def checkout(
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
 
+    # ── Wallet gate (payg tier): block order creation when the merchant's
+    # prepaid wallet is below the negative allowance. Redis-cached (60s)
+    # and FAIL-OPEN — an infra error must never cost the merchant a sale.
+    # The shopper-facing message deliberately does not reveal the
+    # merchant's billing state.
+    if store.tenant_id is not None:
+        from src.application.services.wallet_service import WalletService
+
+        _gate = await WalletService(store_repo.session).checkout_gate_state(
+            store.tenant_id
+        )
+        if _gate == "not_live":
+            # Go-live gate: the merchant hasn't chosen a plan yet. The
+            # shopper-facing copy reads as "opening soon" — it never
+            # exposes the merchant's billing state.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "store_not_live",
+                    "message": (
+                        "This store is not accepting orders yet — "
+                        "opening soon. | "
+                        "هذا المتجر لا يستقبل الطلبات بعد — قريباً."
+                    ),
+                },
+            )
+        if _gate != "ok":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "store_checkout_unavailable",
+                    "message": (
+                        "Checkout is temporarily unavailable for this store. "
+                        "Please try again later. | "
+                        "إتمام الطلب غير متاح مؤقتاً لهذا المتجر. "
+                        "يرجى المحاولة لاحقاً."
+                    ),
+                },
+            )
+
     # ── Checkout-fields: validate submitted custom fields against live config ──
     checkout_config = resolve_checkout_config(store.settings)
     accepted_custom_fields, custom_field_errors = validate_custom_field_values(
@@ -1504,6 +1544,37 @@ async def checkout(
     )
 
     created_order = await order_repo.create(order)
+
+    # ── Full-partner Trust Network recording ──────────────────────────
+    # The COD gate above ran in reputation mode (pre-totals). Now the real
+    # total exists, record a FULL /v1/decisions with the TN — its FSM + ML
+    # shadow engage and the shadow row is what the live §5.6 promotion gate
+    # labels once this order's outcome flows back through the feed. Decides
+    # NOTHING here (the gate already decided); best-effort + fail-open, and
+    # a no-op unless TRUST_NETWORK_STOREFRONT_ENABLED is on. Idempotent per
+    # order so client retries can't double-record.
+    if (
+        is_cod
+        and trust_decision is not None
+        and trust_decision.reason not in {"disabled", "no_phone"}
+    ):
+        try:
+            from src.application.services.network_reputation_service import (
+                extract_phone_hash_from_string as _tn_hash,
+            )
+            from src.application.services.trust_network_storefront import (
+                fetch_network_intelligence as _tn_record,
+            )
+
+            _tn_ph = _tn_hash(customer_phone)
+            if _tn_ph:
+                await _tn_record(
+                    phone_hash=_tn_ph,
+                    total_cents=created_order.total,
+                    idempotency_key=f"sf-order-{created_order.id}",
+                )
+        except Exception as _tn_exc:  # noqa: BLE001 — recording never blocks checkout
+            logger.warning("trust_network_order_record_error err=%s", _tn_exc)
 
     # ── COD-trust "recover" flow ──────────────────────────────────────
     # A high-risk COD order the merchant chose to CONVERT rather than block:

@@ -119,9 +119,9 @@ class UpdateOrderStatusUseCase:
             elif new_status == OrderStatus.PROCESSING:
                 order.start_processing()
             elif new_status == OrderStatus.SHIPPED:
-                order.ship()
+                order.ship(source=dto.source)
             elif new_status == OrderStatus.DELIVERED:
-                order.deliver()
+                order.deliver(source=dto.source)
             elif new_status == OrderStatus.CANCELLED:
                 order.cancel(dto.reason)
             elif new_status == OrderStatus.RETURNED:
@@ -162,7 +162,22 @@ class UpdateOrderStatusUseCase:
         # COD orders. Idempotent + fail-open — never breaks the status
         # update. Bosta webhook also stamps the same flag, so the path
         # that fires first wins.
-        await self._record_network_event(updated_order, new_status, log)
+        await self._record_network_event(
+            updated_order, new_status, log, source=dto.source
+        )
+
+        # COD Autopilot (FR-018/FR-021): any terminal outcome closes the
+        # order's open delivery-check row so pending pings/fallbacks stop.
+        # Done here — the single choke point for status changes — so every
+        # call site (routes, webhooks, beat tasks) gets it without
+        # constructor changes. Fail-open.
+        if new_status in (
+            OrderStatus.DELIVERED,
+            OrderStatus.RETURNED,
+            OrderStatus.CANCELLED,
+            OrderStatus.REFUNDED,
+        ):
+            await self._supersede_delivery_check(updated_order, new_status, dto, log)
 
         # Funnel: record the post-purchase delivered step. Idempotent via
         # order.metadata flag; fail-open inside the helper.
@@ -198,7 +213,9 @@ class UpdateOrderStatusUseCase:
         except Exception as exc:  # noqa: BLE001 — fail-open
             log.warning("order_restock_failed", error=str(exc))
 
-    async def _record_network_event(self, order, new_status: OrderStatus, log) -> None:
+    async def _record_network_event(
+        self, order, new_status: OrderStatus, log, source: str | None = None
+    ) -> None:
         """Write a delivery/RTO event to ``network_reputation``.
 
         DELIVERED fires only for COD (cash-collected is the positive
@@ -206,9 +223,33 @@ class UpdateOrderStatusUseCase:
         refused delivery is a reliability signal regardless of how it was
         paid (P0-4). Idempotent via ``order.metadata`` so the same outcome
         can't be double-counted by Bosta + manual marks.
+
+        004-cod-autopilot FR-019 / research R-06: an ``assumed_delivered``
+        closure (timer-driven, no human confirmed it) must NEVER feed the
+        network as a full-weight delivery. The model has no per-event
+        weight column, so the conservative v1 choice is to EXCLUDE it —
+        the skip is stamped on ``order.metadata`` for auditability.
+        Customer-confirmed and manual marks fire as before; RTO is
+        unaffected (the negative path has its own sweep).
         """
         event_type = _NETWORK_EVENT_FOR_STATUS.get(new_status)
         if not event_type:
+            return
+        if event_type == "delivery" and source == "assumed_delivered":
+            try:
+                order.metadata = {
+                    **(order.metadata or {}),
+                    "network_delivery_skipped": "assumed_delivered",
+                }
+                await self.order_repository.update(order)
+            except Exception:  # noqa: BLE001 — audit stamp is best-effort
+                log.warning("network_delivery_skip_stamp_failed")
+            log.info(
+                "network_event_excluded_low_confidence",
+                event_type=event_type,
+                order_id=str(order.id),
+                source=source,
+            )
             return
         # RTO fires for every returned order, COD or prepaid (P0-4): a refused
         # delivery is a reliability signal regardless of how it was paid. The
@@ -262,6 +303,39 @@ class UpdateOrderStatusUseCase:
                 event_type=event_type,
                 error=str(exc),
             )
+
+    async def _supersede_delivery_check(
+        self, order, new_status: OrderStatus, dto: UpdateOrderStatusDTO, log
+    ) -> None:
+        """Close the order's open Autopilot delivery-check row (FR-018).
+
+        Uses the order repository's session directly (every call site
+        already provides one), so no constructor change is needed. The
+        Autopilot handlers set their own terminal outcome BEFORE calling
+        this use case, which makes this a no-op on their paths; it only
+        bites when the merchant/courier/RTO-sweep closes an order that
+        still has a pending or exhausted check. Fail-open.
+        """
+        session = getattr(self.order_repository, "session", None)
+        if session is None:
+            return
+        try:
+            from src.infrastructure.repositories.whatsapp_delivery_check_repository import (  # noqa: E501
+                WhatsAppDeliveryCheckRepository,
+            )
+
+            changed = await WhatsAppDeliveryCheckRepository(
+                session
+            ).supersede_for_order(order.id)
+            if changed:
+                log.info(
+                    "autopilot_delivery_check_superseded",
+                    order_id=str(order.id),
+                    new_status=new_status.value,
+                    source=dto.source,
+                )
+        except Exception:  # noqa: BLE001 — fail-open, never break the update
+            log.warning("autopilot_delivery_check_supersede_failed")
 
     async def _publish_status_event(
         self, order, old_status, new_status, store, reason, log

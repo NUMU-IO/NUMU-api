@@ -55,7 +55,7 @@ def init_sentry() -> None:
 
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
-        environment=settings.environment,
+        environment=settings.sentry_environment or settings.environment,
         release=f"numu-api@{settings.app_version}",
         traces_sample_rate=settings.sentry_traces_sample_rate,
         profiles_sample_rate=settings.sentry_profiles_sample_rate,
@@ -69,7 +69,7 @@ def init_sentry() -> None:
     )
     logger.info(
         "sentry_initialized",
-        environment=settings.environment,
+        environment=settings.sentry_environment or settings.environment,
         traces_sample_rate=settings.sentry_traces_sample_rate,
     )
 
@@ -229,8 +229,18 @@ OPENAPI_TAGS = [
         "name": "Configuration Requests",
         "description": "Tenant configuration requests (payment, shipping, etc.)",
     },
+    # ── Billing / wallet ──────────────────────────────────
+    {
+        "name": "Wallet",
+        "description": "Merchant prepaid wallet — balance, ledger, top-ups "
+        "(pay-as-you-go tier)",
+    },
     # ── Admin ─────────────────────────────────────────────
     {"name": "Admin", "description": "Admin panel endpoints"},
+    {
+        "name": "Admin - Wallets",
+        "description": "Admin merchant-wallet management and top-up review",
+    },
     {"name": "Admin - Tenants", "description": "Admin tenant management"},
     {"name": "Admin - Waitlist", "description": "Admin waitlist management"},
     {"name": "Admin - Feedback", "description": "Admin feedback management"},

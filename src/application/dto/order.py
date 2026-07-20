@@ -315,3 +315,8 @@ class UpdateOrderStatusDTO(BaseDTO):
 
     status: str
     reason: str | None = None
+    # Machine-readable transition attribution (004-cod-autopilot FR-020):
+    # customer_confirmed | merchant_digest | assumed_delivered. Set by
+    # INTERNAL callers only (Autopilot service/tasks/webhooks); the public
+    # status endpoints do not expose it. None = manual/dashboard.
+    source: str | None = None

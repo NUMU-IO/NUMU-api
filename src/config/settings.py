@@ -258,6 +258,17 @@ class Settings(BaseSettings):
     # — flip once the shadow log shows acceptable FSM-vs-ladder agreement.
     trust_fsm_decision_enabled: bool = False
 
+    # Trust Network cutover (P1-7): when True, the COD final-score path treats
+    # the standalone NUMU Trust Network's /v1/decisions risk_score as
+    # authoritative — it drives persistence, auto-cancel, and auto-approve
+    # instead of NUMU's embedded score_order() result. Default off — flip only
+    # after the shadow log (trust_network_shadow) shows sustained zero drift.
+    # Fail-open: if the network doesn't answer (disabled / timeout / non-200)
+    # the embedded score is used, so COD scoring never depends on network
+    # availability. The same shadow call (TRUST_NETWORK_SHADOW_ENABLED) carries
+    # the authoritative score, so keep the shadow on when this is flipped.
+    trust_network_authoritative: bool = False
+
     # Commerce-correctness Phase 1: when True, the storefront checkout runs
     # the offers-v2 engine (CalculateCartDiscountsUseCase / DiscountCalculator)
     # against the cart at order-create time and folds the resulting automatic
@@ -619,6 +630,45 @@ class Settings(BaseSettings):
     paymob_hmac_secret: str | None = None  # Webhook verification
     paymob_wallet_integration_id: str | None = None  # Mobile wallets
 
+    # Platform Paymob account (NUMU as the payee — subscription billing and
+    # merchant-wallet top-ups). Distinct from the per-merchant defaults above:
+    # money collected here lands in NUMU's own Paymob account.
+    platform_paymob_secret_key: str | None = None
+    platform_paymob_public_key: str | None = None
+    platform_paymob_hmac_secret: str | None = None
+    platform_paymob_card_integration_id: str | None = None
+    platform_paymob_wallet_integration_id: str | None = None  # Vodafone Cash etc.
+
+    # Platform Kashier account (NUMU as the payee — card top-ups for the
+    # merchant wallet). Secrets stay env-only; non-secret wallet knobs are
+    # admin-editable via platform_config (see wallet_settings service).
+    platform_kashier_mid: str | None = None
+    platform_kashier_api_key: str | None = None
+    platform_kashier_mode: str = "test"  # "test" or "live"
+
+    # Platform InstaPay identity (NUMU's own IPA) for merchant-wallet top-ups.
+    platform_instapay_ipa: str | None = None
+    platform_instapay_display_name: str | None = None
+    # Platform Vodafone Cash wallet number for manual (non-gateway) top-ups.
+    platform_vodafone_cash_number: str | None = None
+    # Optional OCR provider for top-up receipts (google_vision | deepseek_hf
+    # | glm_hf); empty/None -> Noop (rules that need OCR silently no-op).
+    platform_instapay_ocr_provider: str | None = None
+
+    # Public base URL of this API — used to build absolute webhook
+    # notification URLs for platform-directed payments (wallet top-ups).
+    platform_api_base_url: str = "https://numueg.app"
+
+    # Merchant wallet (pay-as-you-go commission tier)
+    wallet_negative_allowance_cents: int = 5_000  # checkout blocked below -50 EGP
+    wallet_low_balance_threshold_cents: int = 10_000  # warn below 100 EGP
+    ff_wallet_topups: bool = False
+    ff_wallet_checkout_gate: bool = False
+    # Go-live gate: NEW tenants (no golive_exempt feature flag) cannot take
+    # storefront orders until they pick a paid plan or Pay as you Grow.
+    # Admin-overridable via wallet_settings (golive_gate_enabled).
+    ff_golive_gate: bool = False
+
     # Fawry (Retail Pay Points)
     fawry_merchant_code: str | None = None
     fawry_security_key: str | None = None
@@ -684,6 +734,12 @@ class Settings(BaseSettings):
 
     # Sentry
     sentry_dsn: str | None = None
+    # Overrides the environment tag on Sentry events. The prod EC2 box runs
+    # with ENVIRONMENT=staging (its .env is a copy of the droplet's staging
+    # file, and flipping it would arm the strict production validators), so
+    # without this override prod errors are tagged "staging" and invisible
+    # to production-scoped Sentry alerts.
+    sentry_environment: str | None = None
     sentry_traces_sample_rate: float = 0.1  # 10% of transactions
     sentry_profiles_sample_rate: float = 0.1  # 10% of profiled transactions
     sentry_send_default_pii: bool = False  # Set True to capture user emails, IPs

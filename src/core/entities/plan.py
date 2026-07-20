@@ -2,14 +2,21 @@
 
 Defines what each tenant plan tier allows. All limit values of -1 mean unlimited.
 
-Pricing model (Stream 4 of the NUMU plan):
+Pricing model:
 
-* **No perpetual free tier.** ``free`` is retained in the dictionary for legacy
-  data only — new signups go to ``trial`` and convert to ``starter`` or higher.
-* **No per-order transaction fees.** NUMU collects 100% of revenue via
-  predictable monthly subscriptions; merchants keep all of their order revenue.
-  This eliminates the wallet/credit system and the CBE payment-aggregation
-  license blocker.
+* **Subscriptions are the primary model.** New signups go to ``trial`` and
+  convert to ``starter`` or higher; ``free`` is retained in the dictionary for
+  legacy data only.
+* **``payg`` (pay-as-you-go)** is the commission-funded alternative: no monthly
+  fee; NUMU charges ``commission_bps`` of each PAID order, debited from a
+  prepaid merchant wallet (``merchant_wallets``, WalletService). All other
+  plans have ``commission_bps=0`` — merchants on subscriptions keep 100% of
+  order revenue.
+  ⚠ Regulatory note: per-order fees + a stored wallet balance were originally
+  removed to sidestep the CBE payment-aggregation licensing question. The
+  wallet holds prepayment of NUMU's own service fees (not pass-through
+  consumer funds) and balances are refundable on request, but this framing
+  must be cleared by counsel before payg GA.
 * **30-day trial, then 30-day read-only grace, then hard delete.** The
   lifecycle state machine on the tenant model handles the transitions; this
   module just defines what each plan can *do*.
@@ -45,6 +52,11 @@ class PlanFeatures:
 
     # Display
     display_name: str
+
+    # Per-paid-order commission in basis points (100 bps = 1%), debited
+    # from the tenant's prepaid wallet. Only payg is nonzero; a per-tenant
+    # negotiated rate lives in merchant_wallets.commission_bps_override.
+    commission_bps: int = 0
 
 
 PLAN_LIMITS: dict[str, PlanFeatures] = {
@@ -125,6 +137,26 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
         discount_codes_enabled=True,
         monthly_price_piasters=-1,  # custom contract
         annual_price_piasters=-1,
+    ),
+    # ─── Pay-as-you-go: no subscription, wallet-funded commission ─────────
+    # Starter-like features; orders are unmetered because the commission is
+    # the meter. Requires a funded merchant wallet (checkout gate blocks
+    # storefront orders below the negative allowance).
+    "payg": PlanFeatures(
+        display_name="Pay as you Grow",
+        max_products=100,
+        max_orders_per_month=-1,  # commission is the meter, not a cap
+        max_stores=1,
+        max_staff_members=3,
+        max_customers=5_000,
+        webhooks_enabled=True,
+        custom_domain_enabled=True,
+        api_access_enabled=False,
+        analytics_enabled=True,
+        discount_codes_enabled=True,
+        monthly_price_piasters=0,
+        annual_price_piasters=0,
+        commission_bps=300,  # 3% of each paid order
     ),
     # ─── Deprecated: legacy free plan ─────────────────────────────────────
     # Retained for backwards compatibility with existing tenant rows. New

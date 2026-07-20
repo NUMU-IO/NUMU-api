@@ -60,6 +60,10 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Which pricing card the visitor clicked on the landing before
+    # registering (payg / starter / pro). payg auto-activates at store
+    # creation; paid intents are kept for attribution.
+    plan_intent: Mapped[str | None] = mapped_column(String(20), nullable=True)
     auth_provider: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )

@@ -8,6 +8,13 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 os.environ["CREDENTIAL_ENCRYPTION_KEY"] = (
     "dGVzdF9lbmNyeXB0aW9uX2tleV9mb3JfdGVzdGluZzEyMzQ1Njc4OQ=="
 )
+# Test runs must NEVER ship events to Sentry. A real SENTRY_DSN in the
+# developer's .env otherwise turns every deliberately-exercised error path
+# (mocked failures, missing-credential guards, event-loop teardown noise)
+# into a Sentry issue — including tests that rebuild the app with a patched
+# environment, which then mislabel local noise as "staging". An env var
+# overrides .env for pydantic-settings, and init_sentry() no-ops on blank.
+os.environ["SENTRY_DSN"] = ""
 
 # Import configuration fixtures
 pytest_plugins = [
@@ -109,6 +116,20 @@ def _patch_metadata_for_sqlite(metadata):
                 column.server_onupdate = None
                 if getattr(column, "computed", None) is not None:
                     column.computed = None
+
+    # Translate Postgres partial indexes to their SQLite equivalent.
+    # Without this, `postgresql_where` is silently ignored on SQLite and a
+    # partial UNIQUE index (e.g. wallet_transactions uq per (order_id, kind))
+    # degrades into a FULL unique index — breaking legitimate inserts.
+    from sqlalchemy import text as sa_text
+
+    for table in metadata.tables.values():
+        for idx in table.indexes:
+            pg_where = idx.dialect_options.get("postgresql", {}).get("where")
+            if pg_where is not None:
+                if isinstance(pg_where, str):
+                    pg_where = sa_text(pg_where)
+                idx._validate_dialect_kwargs({"sqlite_where": pg_where})
 
     # Strip schema from ForeignKey references that use schema-qualified names
     for table in metadata.tables.values():
