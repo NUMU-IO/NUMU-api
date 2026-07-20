@@ -263,6 +263,12 @@ class PendingReviewItem(BaseModel):
     bundle_url: str | None = None
     css_url: str | None = None
     build_log: str | None = None
+    # Certification gate result. Before this existed the packet carried no
+    # automated quality signal at all -- `build_log` was free text and the
+    # decision was a bare human click.
+    lint_status: str | None = None
+    lint_issues: dict[str, Any] | None = None
+    certification_tier: str | None = None
 
     # Listing metadata
     theme_name: str | None = None
@@ -308,6 +314,13 @@ class PendingReviewListResponse(BaseModel):
 class ReviewDecisionRequest(BaseModel):
     decision: str = Field(description="'approve' or 'reject'")
     notes: str | None = Field(default=None, max_length=2000)
+    override_certification: bool = Field(
+        default=False,
+        description=(
+            "Publish even though the certification lint did not pass. The "
+            "override and the status it bypassed are recorded in review_notes."
+        ),
+    )
 
     @field_validator("decision")
     @classmethod

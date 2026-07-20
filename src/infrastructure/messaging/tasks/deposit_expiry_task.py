@@ -110,6 +110,17 @@ async def _sweep() -> dict:
                 if not order.can_be_cancelled:
                     continue
                 order.cancel(reason="COD deposit payment window expired")
+                # Give the debited stock back (idempotent; stamps
+                # order.metadata, persisted by the update below).
+                try:
+                    from src.application.services.stock_service import restock_order
+
+                    await restock_order(session, order, reason="deposit_window_expired")
+                except Exception:
+                    logger.exception(
+                        "pending_deposit_expiry_restock_failed",
+                        order_id=str(order.id),
+                    )
                 await order_repo.update(order)
                 stats["cancelled"] += 1
             except Exception:

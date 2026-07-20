@@ -336,6 +336,9 @@ async def jt_callback(
                     order.return_to_origin(reason="Returned by carrier (J&T)")
                 elif order.can_be_cancelled:
                     order.cancel(reason="Returned by carrier (J&T)")
+                from src.application.services.stock_service import try_restock_order
+
+                await try_restock_order(session, order, reason="jt_returned")
                 await order_repo.update(order)
                 log.info("order_returned", order_id=str(order.id))
             except Exception as e:
@@ -424,6 +427,11 @@ async def jt_callback(
             try:
                 if order.can_be_cancelled:
                     order.cancel(reason="Cancelled via J&T")
+                    from src.application.services.stock_service import (
+                        try_restock_order,
+                    )
+
+                    await try_restock_order(session, order, reason="jt_cancelled")
                     await order_repo.update(order)
                     log.info("order_cancelled_jt", order_id=str(order.id))
             except Exception as e:

@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 
+from src.core.entities.marketplace_theme import MarketplaceThemeStatus
 from src.core.entities.theme import StoreTheme, Theme, ThemeVersion
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_repository import ThemeRepository
@@ -37,10 +38,15 @@ class ThemeService:
         theme_repo: ThemeRepository,
         version_repo: ThemeVersionRepository,
         store_theme_repo: StoreThemeRepository,
+        marketplace_repo: Any | None = None,
     ) -> None:
         self.theme_repo = theme_repo
         self.version_repo = version_repo
         self.store_theme_repo = store_theme_repo
+        # Optional so every existing construction site keeps working. When
+        # absent the suspension check short-circuits to "not suspended",
+        # which is the same fail-open posture as a lookup error.
+        self._marketplace_repo = marketplace_repo
 
     # ── Marketplace ────────────────────────────────────────────────────────────
 
@@ -511,6 +517,57 @@ class ThemeService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No active theme found for store {store_id}",
             )
+
+        # ── Suspension enforcement (ADR-6) ────────────────────────────────
+        # `MarketplaceThemeStatus.SUSPENDED` existed but was enforced
+        # NOWHERE: an admin could suspend a malicious or broken third-party
+        # theme and it would keep serving every store that had it active. The
+        # platform's only lever against bad theme code did nothing.
+        #
+        # Enforced HERE rather than at activate time because suspension
+        # happens *after* activation by definition — the whole point is to
+        # stop code that is already live.
+        #
+        # Deliberately fail-SAFE, not fail-closed: a suspended theme is
+        # stripped of its bundle so the untrusted code cannot run, but the
+        # store keeps serving from the platform's built-in rendering path.
+        # Blanking live storefronts would turn the safety lever into an
+        # outage weapon, and nobody would ever dare pull it.
+        if await self._is_theme_suspended(active):
+            logger.warning(
+                "storefront_theme_suspended_fallback",
+                extra={
+                    "store_id": str(store_id),
+                    "theme_id": str(active.theme_id),
+                    "theme_slug": active.theme_slug,
+                },
+            )
+            v3_suspended = resolve_theme_settings(
+                customization_v3=active.customization_v3 or {},
+                legacy_settings=active.customization,
+            ).model_dump()
+            # Drop the external_theme block along with the URLs — the
+            # storefront activates BYOT off `external_theme.bundle_url`, so
+            # leaving it would re-point the host straight back at the
+            # suspended bundle.
+            if isinstance(v3_suspended, dict):
+                v3_suspended.pop("external_theme", None)
+            return {
+                "theme_id": str(active.theme_id),
+                "theme_slug": active.theme_slug,
+                "theme_type": "internal",
+                "version": active.theme_version,
+                "bundle_url": None,
+                "css_url": None,
+                "customization": active.customization,
+                "customization_v3": v3_suspended,
+                "settings_schema": active.settings_schema or {},
+                "section_schemas": active.section_schemas,
+                "installation_id": str(active.id),
+                "bundle_checksum": None,
+                "theme_suspended": True,
+            }
+
         v3_resolved = resolve_theme_settings(
             customization_v3=active.customization_v3 or {},
             legacy_settings=active.customization,
@@ -529,6 +586,40 @@ class ThemeService:
             "installation_id": str(active.id),
             "bundle_checksum": getattr(active, "bundle_checksum", None),
         }
+
+    async def _is_theme_suspended(self, active: Any) -> bool:
+        """Is the store's active theme suspended at the marketplace level?
+
+        Only marketplace (external) themes can be suspended — a built-in
+        theme has no listing to suspend, so it short-circuits.
+
+        Fails OPEN on any lookup error. A transient DB blip must not take
+        every storefront on the platform down to the built-in renderer; the
+        cost of missing one suspension for one request is far lower than the
+        cost of a platform-wide false positive.
+        """
+        theme_type = getattr(active, "theme_type", None)
+        type_value = getattr(theme_type, "value", theme_type)
+        if type_value != "external":
+            return False
+
+        slug = getattr(active, "theme_slug", None)
+        if not slug or self._marketplace_repo is None:
+            return False
+
+        try:
+            listing = await self._marketplace_repo.get_theme_by_slug(slug)
+        except Exception:  # noqa: BLE001 — see fail-open note above
+            logger.warning(
+                "theme_suspension_check_failed",
+                extra={"theme_slug": slug},
+                exc_info=True,
+            )
+            return False
+
+        if listing is None:
+            return False
+        return listing.status == MarketplaceThemeStatus.SUSPENDED
 
     # ── Internal helpers ───────────────────────────────────────────────────────
 

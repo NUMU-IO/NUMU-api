@@ -933,11 +933,14 @@ async def checkout(
         )
         line_item_inventory.append({
             "product_id": product.id,
-            # Use the normalised dict for stock deduction so deduct_variant_stock
+            # Use the normalised dict for stock deduction so the debit
             # finds the same combo we matched above. The unnormalised dict is
             # what we display to the merchant and what gets stored on the order
             # line — those go through `properties` above.
             "selections": normalised_selections if matching_combo is not None else None,
+            # The live storefront payload carries variant_id but no selections;
+            # the stock service uses it to resolve which variant row to debit.
+            "variant_id": item.variant_id,
             "allow_negative": allow_negative,
             "quantity": item.quantity,
         })
@@ -1227,39 +1230,42 @@ async def checkout(
                 len(applied_promotions),
             )
 
-    # Atomically deduct stock BEFORE creating the order. Variant combos
-    # use a row-lock path (deduct_variant_stock); non-variant flows keep
-    # the original conditional-UPDATE path (deduct_stock). Transaction
-    # rollback restores both. When the merchant enabled
+    # Atomically debit stock BEFORE creating the order, through the single
+    # write path (stock_service) so products.quantity, the variant row the
+    # cart's availability guard reads, the legacy combo JSONB, and any
+    # existing inventory_levels all move together. Transaction rollback
+    # restores everything. When the merchant enabled
     # continue_selling_when_out_of_stock, the atomic guard is loosened
-    # (stock can go negative) so the order still succeeds.
+    # (stock can go negative) so the order still succeeds. Each successful
+    # debit returns a replay entry; the list is stamped on order.metadata
+    # so cancel/return can restock exactly what was debited.
+    from src.application.services.stock_service import (
+        build_debit_manifest,
+        debit_order_line,
+    )
+
+    stock_debit_lines: list[dict] = []
     for li, inv in zip(line_items, line_item_inventory):
-        if inv["selections"] is not None:
-            success, reason = await product_repo.deduct_variant_stock(
-                inv["product_id"],
-                inv["selections"],
-                inv["quantity"],
-                allow_negative=inv["allow_negative"],
-            )
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f"Insufficient stock for {li.product_name} "
-                        f"({reason}). Please refresh and try again."
-                    ),
+        success, reason, replay = await debit_order_line(
+            product_repo.session,
+            tenant_id=store.tenant_id,
+            product_id=inv["product_id"],
+            variant_id=inv.get("variant_id"),
+            selections=inv["selections"],
+            quantity=inv["quantity"],
+            allow_negative=inv["allow_negative"],
+        )
+        if not success:
+            if inv["selections"] is not None:
+                detail = (
+                    f"Insufficient stock for {li.product_name} "
+                    f"({reason}). Please refresh and try again."
                 )
-        else:
-            success = await product_repo.deduct_stock(
-                inv["product_id"],
-                inv["quantity"],
-                allow_negative=inv["allow_negative"],
-            )
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Insufficient stock for {li.product_name}. Please refresh and try again.",
-                )
+            else:
+                detail = f"Insufficient stock for {li.product_name}. Please refresh and try again."
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+        if replay:
+            stock_debit_lines.append(replay)
 
     # ── Server-side shipping resolution (trust-gap closure) ──
     # The client NEVER sets shipping_cost. If a rate was selected via
@@ -1455,6 +1461,14 @@ async def checkout(
         shipping_rate_id=resolved_rate_id,
         customer_notes=request.customer_notes,
         metadata={
+            # Exact record of what the debit loop above took, so a later
+            # cancel/return restocks precisely this — and orders that never
+            # debited (imports, pre-existing) are never wrongly restocked.
+            **(
+                {"stock_debited": build_debit_manifest(stock_debit_lines)}
+                if stock_debit_lines
+                else {}
+            ),
             **({"ip_address": client_ip} if client_ip else {}),
             **({"user_agent": client_user_agent} if client_user_agent else {}),
             **(

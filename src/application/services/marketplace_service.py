@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +24,13 @@ from src.core.entities.marketplace_theme import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: How long a developer may run an UNREVIEWED build on a real store before it
+#: stops resolving (ADR-6). Long enough for a genuine iteration session, short
+#: enough that unreviewed third-party JavaScript can't quietly become the
+#: permanent state of a public storefront. Expiry falls back to the last
+#: published version rather than taking the store dark.
+DEVELOPER_PREVIEW_WINDOW = timedelta(hours=24)
 
 
 _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][\w\.\-]+)?$")
@@ -358,6 +365,10 @@ class MarketplaceService:
                 "bundle_url": v.bundle_url,
                 "css_url": v.css_url,
                 "build_log": v.build_log,
+                # Certification gate — the automated signal behind the click
+                "lint_status": v.lint_status,
+                "lint_issues": v.lint_issues,
+                "certification_tier": v.certification_tier,
                 # Listing
                 "theme_name": theme.name if theme else None,
                 "theme_slug": theme.slug if theme else None,
@@ -442,12 +453,96 @@ class MarketplaceService:
             raise ValueError(f"theme not found: {theme_id}")
         return _admin_metadata_dict(updated)
 
+    async def set_theme_suspension(
+        self,
+        *,
+        theme_id: UUID,
+        suspended: bool,
+        reason: str | None = None,
+        storefront_cache: Any | None = None,
+    ) -> dict[str, Any]:
+        """Suspend or reinstate a marketplace theme (ADR-6 kill switch).
+
+        Suspension is the platform's only lever against a malicious or broken
+        third-party theme that is ALREADY live on merchant storefronts. It was
+        previously unusable: `MarketplaceThemeStatus.SUSPENDED` existed as an
+        enum value with no endpoint that could set it and no code that read
+        it, so the lever was connected to nothing.
+
+        What it does now:
+          * flips the listing status, which storefront theme resolution reads
+            on every cache miss and responds to by stripping the bundle URLs
+            (`ThemeService._is_theme_suspended`);
+          * busts the cached theme payload for every store running the theme,
+            so it takes effect in seconds instead of waiting out the TTL — a
+            kill switch with a cache-shaped delay isn't one.
+
+        Deliberately NOT destructive: installations stay, customization stays,
+        and the store keeps serving from the built-in renderer. Suspension
+        stops untrusted code; it doesn't take merchants offline. Reinstating
+        is the same call with ``suspended=False``.
+        """
+        theme = await self._marketplace_repo.get_theme_by_id(theme_id)
+        if theme is None:
+            raise ValueError(f"theme {theme_id} not found")
+
+        new_status = (
+            MarketplaceThemeStatus.SUSPENDED
+            if suspended
+            else MarketplaceThemeStatus.PUBLISHED
+        )
+        if not suspended and theme.status != MarketplaceThemeStatus.SUSPENDED:
+            raise ValueError(f"theme is not suspended (status={theme.status.value})")
+
+        await self._marketplace_repo.update_theme(
+            theme_id, {"status": new_status.value}
+        )
+
+        # Bust every affected store's cached theme payload. Best-effort: a
+        # cache miss re-resolves and picks up the new status anyway, so a
+        # failure here delays enforcement rather than defeating it — but we
+        # must not fail the suspension itself over it.
+        affected: list[str] = []
+        try:
+            installs = await self._marketplace_repo.list_installations_for_theme(
+                theme_id
+            )
+            for inst in installs:
+                affected.append(str(inst.store_id))
+                if storefront_cache is not None:
+                    await storefront_cache.invalidate_theme(inst.store_id)
+        except Exception:  # noqa: BLE001 — see best-effort note above
+            logger.warning(
+                "marketplace_suspension_cache_bust_failed",
+                extra={"theme_id": str(theme_id)},
+                exc_info=True,
+            )
+
+        logger.warning(
+            "marketplace_theme_suspension_changed",
+            extra={
+                "theme_id": str(theme_id),
+                "theme_slug": theme.slug,
+                "suspended": suspended,
+                "reason": reason,
+                "affected_store_count": len(affected),
+            },
+        )
+        return {
+            "theme_id": str(theme_id),
+            "slug": theme.slug,
+            "status": new_status.value,
+            "suspended": suspended,
+            "affected_store_count": len(affected),
+        }
+
     async def review_version(
         self,
         reviewer_id: UUID,
         version_id: UUID,
         decision: str,
         notes: str | None = None,
+        override_certification: bool = False,
     ) -> dict[str, Any]:
         """Admin reviews a version (approve/reject)."""
         if decision not in ("approve", "reject"):
@@ -459,6 +554,28 @@ class MarketplaceService:
         if version.status != MarketplaceVersionStatus.PENDING_REVIEW:
             raise ValueError(
                 f"version is not pending_review (status={version.status.value})"
+            )
+
+        # Approval used to be a bare human click with no automated signal
+        # behind it. Publishing now requires the certification gate to have
+        # actually run and passed. `unavailable` blocks too -- a gate that
+        # could not run has proven nothing, and letting it read as a pass is
+        # how a gate quietly stops being one.
+        #
+        # `override_certification` exists because the alternative is an admin
+        # with no way to publish a theme the linter is wrong about; it is
+        # recorded in review_notes so the exception stays visible.
+        if decision == "approve" and version.lint_status != "passed":
+            if not override_certification:
+                raise ValueError(
+                    "cannot publish: certification lint status is "
+                    f"'{version.lint_status or 'not run'}'. Fix the reported "
+                    "issues and resubmit, or approve with "
+                    "override_certification=true to publish anyway."
+                )
+            notes = (
+                f"[certification override: lint={version.lint_status or 'not run'}] "
+                f"{notes or ''}".strip()
             )
 
         new_version_status = (
@@ -608,11 +725,35 @@ class MarketplaceService:
                 "submit a new version."
             )
 
+        # ADR-6: an unreviewed version installed this way is a PREVIEW and is
+        # time-boxed. Unbounded, this path put unreviewed third-party
+        # JavaScript in front of real shoppers permanently — the bypass ADR-6
+        # forbids. A version that IS published carries no window, so the
+        # ordinary case is unaffected.
+        is_unreviewed = version.status != MarketplaceVersionStatus.PUBLISHED
+        preview_expires_at = (
+            datetime.now(UTC) + DEVELOPER_PREVIEW_WINDOW if is_unreviewed else None
+        )
+
         installation = await self._marketplace_repo.create_or_reactivate_installation(
             store_id=store_id,
             marketplace_theme_id=marketplace_theme_id,
             marketplace_version_id=version.id,
+            preview_expires_at=preview_expires_at,
         )
+        if is_unreviewed:
+            logger.warning(
+                "marketplace_developer_preview_installed",
+                extra={
+                    "store_id": str(store_id),
+                    "marketplace_theme_id": str(marketplace_theme_id),
+                    "version_id": str(version.id),
+                    "version_status": version.status.value,
+                    "expires_at": preview_expires_at.isoformat()
+                    if preview_expires_at
+                    else None,
+                },
+            )
         # We deliberately DON'T bump the public install_count for
         # developer self-installs; they'd inflate marketplace metrics.
         return {
@@ -623,6 +764,10 @@ class MarketplaceService:
             "version_status": version.status.value,
             "is_active": installation.is_active,
             "is_developer_install": True,
+            "is_unreviewed_preview": is_unreviewed,
+            "preview_expires_at": preview_expires_at.isoformat()
+            if preview_expires_at
+            else None,
         }
 
     async def install_theme(
@@ -720,6 +865,18 @@ class MarketplaceService:
         )
         if not installation or installation.uninstalled_at is not None:
             raise ValueError("theme is not installed for this store")
+
+        # ADR-6: an unreviewed developer preview is time-boxed. Activation is
+        # the moment it would start serving real shoppers, so an expired one
+        # stops here. This closes the half of the self-install bypass that
+        # mattered: activate previously never re-checked review status at all,
+        # so an unreviewed build could be promoted to live indefinitely.
+        expires_at = getattr(installation, "preview_expires_at", None)
+        if expires_at is not None and datetime.now(UTC) >= expires_at:
+            raise ValueError(
+                "This developer preview has expired. Re-install to start a new "
+                "preview window, or submit the version for review and publish it."
+            )
 
         version = await self._marketplace_repo.get_version_by_id(
             installation.marketplace_version_id
@@ -904,6 +1061,11 @@ class MarketplaceService:
                 "settings_schema": version.settings_schema,
                 "section_schemas": version.section_schemas,
                 "presets": version.presets,
+                # Carried through so the storefront can verify the bundle it
+                # fetches. Must be refreshed alongside bundle_url — a stale
+                # checksum against a new bundle fails closed and blanks the
+                # store, so the two always move together.
+                "checksum": version.checksum,
             }
             logger.info(
                 "marketplace_activate_restored_customization",
@@ -935,6 +1097,7 @@ class MarketplaceService:
                     if _api_settings.environment == "production"
                     else "development"
                 ),
+                checksum=version.checksum,
             )
             seed = v3.model_dump()
 

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from src.api.dependencies import get_storefront_cache_service
 from src.api.dependencies.repositories import (
+    get_marketplace_repository,
     get_store_theme_repository,
     get_theme_repository,
     get_theme_version_repository,
@@ -23,6 +24,9 @@ from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.theme_v2 import StorefrontThemeResponse
 from src.application.services.theme_service import ThemeService
 from src.infrastructure.cache import StorefrontCache
+from src.infrastructure.repositories.marketplace_repository import (
+    MarketplaceRepository,
+)
 from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
 from src.infrastructure.repositories.theme_repository import ThemeRepository
 from src.infrastructure.repositories.theme_version_repository import (
@@ -36,11 +40,16 @@ def _get_svc(
     theme_repo: ThemeRepository = Depends(get_theme_repository),
     version_repo: ThemeVersionRepository = Depends(get_theme_version_repository),
     store_theme_repo: StoreThemeRepository = Depends(get_store_theme_repository),
+    marketplace_repo: MarketplaceRepository = Depends(get_marketplace_repository),
 ) -> ThemeService:
+    # marketplace_repo is what lets resolution see a SUSPENDED listing. Without
+    # it the suspension check short-circuits to "not suspended" and a
+    # suspended theme keeps serving — which was the behaviour before ADR-6.
     return ThemeService(
         theme_repo=theme_repo,
         version_repo=version_repo,
         store_theme_repo=store_theme_repo,
+        marketplace_repo=marketplace_repo,
     )
 
 

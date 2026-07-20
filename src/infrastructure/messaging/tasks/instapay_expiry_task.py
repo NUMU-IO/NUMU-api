@@ -141,6 +141,19 @@ async def _sweep(
                         else "InstaPay payment window expired"
                     )
                     order.cancel(reason=reason)
+                    # Give the debited stock back (idempotent; stamps
+                    # order.metadata, persisted by the update below).
+                    try:
+                        from src.application.services.stock_service import (
+                            restock_order,
+                        )
+
+                        await restock_order(session, order, reason=reason)
+                    except Exception:
+                        logger.exception(
+                            "instapay_expiry_restock_failed",
+                            order_id=str(order.id),
+                        )
                     await order_repo.update(order)
                     stats["cancelled"] += 1
             except Exception:

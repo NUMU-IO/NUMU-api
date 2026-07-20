@@ -104,6 +104,7 @@ def generate_initial_v3_customization(
     mode: str = "production",
     error_template_url: str | None = None,
     loading_template_url: str | None = None,
+    checksum: str | None = None,
 ) -> ThemeSettingsV3:
     """Generate a V3 customization payload from theme presets.
 
@@ -194,6 +195,10 @@ def generate_initial_v3_customization(
             mode="development" if mode == "development" else "production",
             error_template_url=error_template_url,
             loading_template_url=loading_template_url,
+            # Only meaningful for a fixed, published bundle. A dev-mode bundle
+            # is served from a live Vite server whose bytes change on every
+            # save, so pinning a digest there would blank the store mid-edit.
+            checksum=checksum if mode != "development" else None,
         )
 
     return ThemeSettingsV3(

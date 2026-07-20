@@ -193,6 +193,14 @@ class ExternalThemeMetadata(BaseModel):
 
     bundle_url: str
     css_url: str | None = None
+    # SHA-256 hex digest of the built bundle, copied from
+    # ``marketplace_theme_versions.checksum`` at activation. The storefront
+    # verifies the fetched bytes against this before evaluating them, so a
+    # bundle swapped at the CDN after review fails closed instead of running.
+    # Optional because dev-mode bundles are served from a live Vite server
+    # whose bytes change on every edit; absent means the allowlist is the
+    # only gate, which is the pre-existing behaviour.
+    checksum: str | None = None
     # Shopify-style schema is a *list* of setting defs; legacy callers may
     # pass a wrapped dict. JSONB on the DB side accepts either.
     settings_schema: list[Any] | dict[str, Any] | None = None

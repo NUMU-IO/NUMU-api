@@ -248,6 +248,17 @@ async def process_refund(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    restock_items: Annotated[
+        bool,
+        Query(
+            description=(
+                "Shopify-style 'restock items': when true and the refund "
+                "completes, the order's checkout debit manifest is replayed "
+                "(ALL lines, once — idempotent). Default false: refunds do "
+                "not auto-restock (money back ≠ goods back)."
+            )
+        ),
+    ] = False,
 ):
     """Process an approved refund through the payment provider."""
     use_case = ProcessRefundUseCase(refund_repo, order_repo, store_repo)
@@ -262,6 +273,23 @@ async def process_refund(
             pass  # Will fall through to manual processing
 
     result = await use_case.execute(refund_id, store_id, user_id, payment_service)
+
+    # ── Per-refund "restock items" (merchant opt-in) ─────────────────
+    # Replays the checkout debit manifest exactly once; stamps the
+    # idempotency flag on order.metadata via the same update below.
+    if restock_items and result.status == "completed":
+        try:
+            order = await order_repo.get_by_id(order_id)
+            if order is not None:
+                from src.application.services.stock_service import try_restock_order
+
+                restocked = await try_restock_order(
+                    order_repo.session, order, reason="refund_restock_items"
+                )
+                if restocked:
+                    await order_repo.update(order)
+        except Exception as exc:  # noqa: BLE001 — fail-open
+            logger.warning("refund_restock_failed: %s", exc)
 
     # ── Network reputation: record the refund event ──────────────────
     # Mirrors the Shopify webhook path (refunds increment total_refunds).

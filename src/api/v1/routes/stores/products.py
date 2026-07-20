@@ -89,6 +89,25 @@ async def create_product(
     ],
 ):
     """Create a new product for the store."""
+    # SKU policy: blank → the platform generates a stable store-unique code
+    # (never regenerated later); provided → duplicate rejected with a
+    # bilingual 409 instead of surfacing as a silent shadow or a 500.
+    from src.application.services.sku_service import (
+        duplicate_sku_error_detail,
+        generate_unique_sku,
+        sku_in_use,
+    )
+
+    sku_in = (request.sku or "").strip() or None
+    if sku_in is not None:
+        if await sku_in_use(product_repo.session, store.id, sku_in):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=duplicate_sku_error_detail(sku_in),
+            )
+    else:
+        sku_in = await generate_unique_sku(product_repo.session, store.id)
+
     use_case = CreateProductUseCase(
         product_repository=product_repo,
         store_repository=store_repo,
@@ -99,7 +118,7 @@ async def create_product(
     dto = CreateProductDTO(
         name=request.name,
         slug=request.slug,
-        sku=request.sku,
+        sku=sku_in,
         description=request.description,
         short_description=request.short_description,
         product_type=request.product_type,
@@ -166,6 +185,20 @@ async def create_product(
         default_quantity=result.quantity,
         default_sku=result.sku,
     )
+    # Headline count := SUM of the materialized variants (no-op for the
+    # default-variant case, where the sum IS the submitted quantity).
+    from src.application.services.variant_sync_service import (
+        recompute_product_quantity,
+    )
+
+    await recompute_product_quantity(product_repo.session, product_id=result.id)
+
+    # Serve the post-rollup quantity — the use-case result predates the
+    # materialization above (same freshness rule as the update route).
+    from src.infrastructure.database.models.tenant.product import ProductModel
+
+    _fresh = await product_repo.session.get(ProductModel, result.id)
+    fresh_quantity = _fresh.quantity if _fresh is not None else result.quantity
 
     return SuccessResponse(
         data=ProductResponse(
@@ -184,8 +217,8 @@ async def create_product(
             else None,
             cost_price=str(result.cost_price) if result.cost_price else None,
             sku=result.sku,
-            quantity=result.quantity,
-            is_in_stock=result.is_in_stock,
+            quantity=fresh_quantity,
+            is_in_stock=fresh_quantity > 0,
             is_low_stock=result.is_low_stock,
             is_on_sale=result.is_on_sale,
             category_id=str(result.category_id) if result.category_id else None,
@@ -202,6 +235,33 @@ async def create_product(
         ),
         message="Product created successfully",
     )
+
+
+def _legacy_variant_snapshot(attributes) -> tuple:
+    """The comparable identity of the legacy variant data inside an
+    ``attributes`` dict: (variants, variant_combinations) as canonical JSON
+    strings, or (None, None) when neither key holds a list. Used to detect
+    whether an update actually CHANGED the legacy card's data versus the
+    hub's routine resend of what it loaded."""
+    import json
+
+    if not isinstance(attributes, dict):
+        return (None, None)
+    axes = attributes.get("variants")
+    combos = attributes.get("variant_combinations")
+    if not isinstance(axes, list) and not isinstance(combos, list):
+        return (None, None)
+    # Empty lists carry no bridgeable data — treat them as absent so a
+    # simple product's `variants: []` never registers as a legacy edit.
+    axes_key = (
+        json.dumps(axes, sort_keys=True) if isinstance(axes, list) and axes else None
+    )
+    combos_key = (
+        json.dumps(combos, sort_keys=True)
+        if isinstance(combos, list) and combos
+        else None
+    )
+    return (axes_key, combos_key)
 
 
 def _options_variants_from_legacy_attributes(attributes):
@@ -257,11 +317,13 @@ def _options_variants_from_legacy_attributes(attributes):
         # Match the axis name/value casing exactly (the SDK matches with a
         # strict `===` + key-count check), trimmed of stray whitespace.
         option_values = {str(k).strip(): str(val).strip() for k, val in raw_ov.items()}
-        # The variant repo stores Money.amount straight into the integer
-        # "cents" column and the storefront divides by 100, so convert the
-        # merchant's MAJOR combo price (10 = 10 EGP) to that representation.
+        # Combo prices are MAJOR units (10 = 10 EGP) — the same convention
+        # as every other variant write path: Money(amount=majors), the repo
+        # persists .cents. A historical ×100 here double-converted (majors
+        # were treated as cents and multiplied again), storing bridge-created
+        # variant prices 100× too high; migration 20260718 normalizes those.
         try:
-            price = Decimal(str(combo.get("price") or "0")) * 100
+            price = Decimal(str(combo.get("price") or "0"))
         except (InvalidOperation, ValueError, TypeError):
             price = Decimal("0")
         try:
@@ -328,6 +390,11 @@ async def _materialize_product_variants(
     existing = await repo.list_for_product(product_id)
     existing_by_id = {v.id: v for v in existing}
 
+    # SKU policy for variant rows: a NEW row with no SKU gets a generated
+    # one (same stable format as products); existing rows are never
+    # regenerated. One policy across product create, import, and matrix.
+    from src.application.services.sku_service import generate_unique_sku
+
     if not variants:
         # No variants in the request: keep the existing default
         # variant if there's exactly one and it has no option_values.
@@ -348,7 +415,7 @@ async def _materialize_product_variants(
                 price=Money(
                     amount=int(float(default_price)), currency=default_currency
                 ),
-                sku=default_sku,
+                sku=default_sku or await generate_unique_sku(session, store_id),
                 inventory_quantity=default_quantity,
             )
         else:
@@ -405,7 +472,10 @@ async def _materialize_product_variants(
             v.price = price
             v.compare_at_price = compare_at
             v.cost_price = cost
-            v.sku = vin.sku
+            # Manual-or-auto SKU rule: a submitted SKU wins; a blank one
+            # keeps the row's existing SKU (never blanked, never
+            # regenerated); a row that never had one gets generated.
+            v.sku = vin.sku or v.sku or await generate_unique_sku(session, store_id)
             v.barcode = vin.barcode
             v.inventory_quantity = vin.inventory_quantity
             v.image_url = vin.image_url
@@ -421,7 +491,7 @@ async def _materialize_product_variants(
                 price=price,
                 compare_at_price=compare_at,
                 cost_price=cost,
-                sku=vin.sku,
+                sku=vin.sku or await generate_unique_sku(session, store_id),
                 barcode=vin.barcode,
                 inventory_quantity=vin.inventory_quantity,
                 image_url=vin.image_url,
@@ -607,6 +677,21 @@ async def get_product(
 
     result = await use_case.execute(product_id=product_id)
 
+    # Hydrate the canonical variant model so the hub's merged editor can
+    # load axes + matrix in one fetch (the detail response used to omit
+    # both, forcing a second request and stale-looking empty lists).
+    from src.infrastructure.database.models.tenant.product import ProductModel
+    from src.infrastructure.repositories.variant_repository import VariantRepository
+
+    prod_row = await product_repo.session.get(ProductModel, result.id)
+    product_options = (prod_row.options if prod_row is not None else None) or []
+    variant_summaries = [
+        _variant_to_summary_dict(v)
+        for v in await VariantRepository(product_repo.session).list_for_product(
+            result.id
+        )
+    ]
+
     return SuccessResponse(
         data=ProductResponse(
             id=str(result.id),
@@ -635,6 +720,8 @@ async def get_product(
             seo_title=result.seo_title,
             seo_description=result.seo_description,
             template_suffix=result.template_suffix,
+            options=product_options,
+            variants=variant_summaries,
             created_at=str(result.created_at),
             updated_at=str(result.updated_at),
         ),
@@ -656,6 +743,35 @@ async def update_product(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Update product details."""
+    # Snapshot the legacy variant keys BEFORE the update overwrites
+    # `attributes`, so we can tell a REAL legacy-card edit apart from the
+    # hub's routine resend of what it loaded (the main form always sends
+    # the full attributes back). Bridging on every save used to clobber
+    # SKU-card / variants-API edits with the stale JSONB copy.
+    prior = await product_repo.get_by_id(product_id)
+    prior_legacy = (
+        _legacy_variant_snapshot(prior.attributes)
+        if prior is not None
+        else (None, None)
+    )
+
+    # SKU policy on edit: duplicates 409 (bilingual); an existing SKU is
+    # never auto-regenerated — SKUs are external identifiers.
+    if request.sku is not None and (request.sku or "").strip():
+        from src.application.services.sku_service import (
+            duplicate_sku_error_detail,
+            sku_in_use,
+        )
+
+        _sku = request.sku.strip()
+        if await sku_in_use(
+            product_repo.session, store.id, _sku, exclude_product_id=product_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=duplicate_sku_error_detail(_sku),
+            )
+
     use_case = UpdateProductUseCase(
         product_repository=product_repo,
         store_repository=store_repo,
@@ -713,16 +829,23 @@ async def update_product(
     # Phase 8.1 — re-materialize options/variants when the merchant sent them.
     # UI #2 ("SKU-tracked variants") sends the top-level options/variants; the
     # main "Product Options" + "Variant Combinations" editor sends them only
-    # inside `attributes`, so bridge those into the canonical model so a
-    # combination becomes a real, purchasable variant. A partial-update on other
-    # fields (no variant data anywhere) leaves the matrix alone.
+    # inside `attributes`. The legacy bridge now runs ONLY when the request's
+    # own attributes carry variant data that DIFFERS from what was stored —
+    # i.e. the merchant actually edited the legacy card. The hub's routine
+    # resend of unchanged attributes (or a PATCH with no attributes at all)
+    # no longer re-materializes from the stale JSONB, which used to clobber
+    # every edit made through the variants API/card.
     options_in = request.options
     variants_in = request.variants
-    if options_in is None and variants_in is None:
-        b_opts, b_vars = _options_variants_from_legacy_attributes(result.attributes)
-        if b_opts is not None or b_vars is not None:
-            options_in = b_opts or []
-            variants_in = b_vars or []
+    if options_in is None and variants_in is None and request.attributes is not None:
+        request_legacy = _legacy_variant_snapshot(request.attributes)
+        if request_legacy != prior_legacy and request_legacy != (None, None):
+            b_opts, b_vars = _options_variants_from_legacy_attributes(
+                request.attributes
+            )
+            if b_opts is not None or b_vars is not None:
+                options_in = b_opts or []
+                variants_in = b_vars or []
 
     variant_summaries: list[dict] | None = None
     if options_in is not None or variants_in is not None:
@@ -738,18 +861,41 @@ async def update_product(
             default_quantity=result.quantity,
             default_sku=result.sku,
         )
+        # Variant rows are now the stock authority — roll their total back
+        # up into the headline count so list pages agree with the matrix.
+        from src.application.services.variant_sync_service import (
+            recompute_product_quantity,
+        )
+
+        await recompute_product_quantity(product_repo.session, product_id=result.id)
     else:
-        # Just hydrate the existing variants for the response.
-        from src.infrastructure.database.connection import AsyncSessionLocal
+        # No variant data in the request: write the simple product's
+        # headline fields (sku / quantity / price) through to its default
+        # variant — the row cart availability and checkout debits read.
+        # Multi-variant products are left alone (safe no-op inside).
+        from src.application.services.variant_sync_service import (
+            sync_simple_product_to_variant,
+        )
         from src.infrastructure.repositories.variant_repository import (
             VariantRepository,
         )
 
-        async with AsyncSessionLocal() as _s:
-            variant_summaries = [
-                _variant_to_summary_dict(v)
-                for v in await VariantRepository(_s).list_for_product(result.id)
-            ]
+        await sync_simple_product_to_variant(product_repo.session, product_id=result.id)
+        variant_summaries = [
+            _variant_to_summary_dict(v)
+            for v in await VariantRepository(product_repo.session).list_for_product(
+                result.id
+            )
+        ]
+
+    # The use-case result predates the variant materialization/sync above,
+    # so its headline fields can lag by one rollup. Serve the row's current
+    # quantity and sku so the response the hub renders is never stale.
+    from src.infrastructure.database.models.tenant.product import ProductModel
+
+    _fresh = await product_repo.session.get(ProductModel, result.id)
+    fresh_quantity = _fresh.quantity if _fresh is not None else result.quantity
+    fresh_sku = _fresh.sku if _fresh is not None else result.sku
 
     return SuccessResponse(
         data=ProductResponse(
@@ -767,9 +913,9 @@ async def update_product(
             if result.compare_at_price
             else None,
             cost_price=str(result.cost_price) if result.cost_price else None,
-            sku=result.sku,
-            quantity=result.quantity,
-            is_in_stock=result.is_in_stock,
+            sku=fresh_sku,
+            quantity=fresh_quantity,
+            is_in_stock=fresh_quantity > 0,
             is_low_stock=result.is_low_stock,
             is_on_sale=result.is_on_sale,
             category_id=str(result.category_id) if result.category_id else None,

@@ -45,7 +45,12 @@ class Product(BaseEntity):
     short_description: str | None = None
     product_type: ProductType = ProductType.PHYSICAL
     status: ProductStatus = ProductStatus.DRAFT
-    quantity: int = Field(default=0, ge=0)
+    # Negative quantity is a legitimate domain state: merchants who enable
+    # continue_selling_when_out_of_stock oversell on purpose and the count
+    # shows how deep they are in the hole. The ge=0 guard here made every
+    # list/read hydration 500 for the whole store the moment one product
+    # went negative. API write schemas still enforce ge=0 on merchant input.
+    quantity: int = Field(default=0)
     low_stock_threshold: int = Field(default=5, ge=0)
     weight: Decimal | None = None
     dimensions: dict[str, Any] = Field(default_factory=dict)
@@ -103,8 +108,8 @@ class Product(BaseEntity):
 
     @property
     def is_out_of_stock(self) -> bool:
-        """Check if product is out of stock."""
-        return self.quantity == 0
+        """Check if product is out of stock (0 or oversold below zero)."""
+        return self.quantity <= 0
 
     @property
     def is_on_sale(self) -> bool:

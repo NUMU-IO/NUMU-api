@@ -140,6 +140,14 @@ class UpdateOrderStatusUseCase:
             )
             raise ValidationError(str(e))
 
+        # Cancelled/returned orders give their stock back (refunds don't —
+        # money back ≠ goods back). restock_order replays the debit manifest
+        # checkout stamped on order.metadata and stamps the idempotency flag
+        # there too, so the repository update below persists both together.
+        # Fail-open: a restock problem must not block the status change.
+        if new_status in (OrderStatus.CANCELLED, OrderStatus.RETURNED):
+            await self._restock_order_stock(order, dto.reason, log)
+
         # Save order
         updated_order = await self.order_repository.update(order)
 
@@ -169,6 +177,26 @@ class UpdateOrderStatusUseCase:
         )
 
         return OrderDTO.from_entity(updated_order)
+
+    async def _restock_order_stock(self, order, reason: str | None, log) -> None:
+        """Replay the order's checkout debit manifest via the stock service.
+
+        Needs the repository's DB session; the interface doesn't expose one,
+        so fall back to skipping (with a log) when the concrete repo doesn't
+        carry a ``session`` attribute (e.g. a test fake).
+        """
+        session = getattr(self.order_repository, "session", None)
+        if session is None:
+            log.warning("order_restock_skipped", reason="no_session_on_repository")
+            return
+        try:
+            from src.application.services.stock_service import restock_order
+
+            restored = await restock_order(session, order, reason=reason)
+            if restored:
+                log.info("order_stock_restocked", order_id=str(order.id))
+        except Exception as exc:  # noqa: BLE001 — fail-open
+            log.warning("order_restock_failed", error=str(exc))
 
     async def _record_network_event(self, order, new_status: OrderStatus, log) -> None:
         """Write a delivery/RTO event to ``network_reputation``.
