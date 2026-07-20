@@ -453,6 +453,89 @@ class MarketplaceService:
             raise ValueError(f"theme not found: {theme_id}")
         return _admin_metadata_dict(updated)
 
+    async def set_theme_suspension(
+        self,
+        *,
+        theme_id: UUID,
+        suspended: bool,
+        reason: str | None = None,
+        storefront_cache: Any | None = None,
+    ) -> dict[str, Any]:
+        """Suspend or reinstate a marketplace theme (ADR-6 kill switch).
+
+        Suspension is the platform's only lever against a malicious or broken
+        third-party theme that is ALREADY live on merchant storefronts. It was
+        previously unusable: `MarketplaceThemeStatus.SUSPENDED` existed as an
+        enum value with no endpoint that could set it and no code that read
+        it, so the lever was connected to nothing.
+
+        What it does now:
+          * flips the listing status, which storefront theme resolution reads
+            on every cache miss and responds to by stripping the bundle URLs
+            (`ThemeService._is_theme_suspended`);
+          * busts the cached theme payload for every store running the theme,
+            so it takes effect in seconds instead of waiting out the TTL — a
+            kill switch with a cache-shaped delay isn't one.
+
+        Deliberately NOT destructive: installations stay, customization stays,
+        and the store keeps serving from the built-in renderer. Suspension
+        stops untrusted code; it doesn't take merchants offline. Reinstating
+        is the same call with ``suspended=False``.
+        """
+        theme = await self._marketplace_repo.get_theme_by_id(theme_id)
+        if theme is None:
+            raise ValueError(f"theme {theme_id} not found")
+
+        new_status = (
+            MarketplaceThemeStatus.SUSPENDED
+            if suspended
+            else MarketplaceThemeStatus.PUBLISHED
+        )
+        if not suspended and theme.status != MarketplaceThemeStatus.SUSPENDED:
+            raise ValueError(f"theme is not suspended (status={theme.status.value})")
+
+        await self._marketplace_repo.update_theme(
+            theme_id, {"status": new_status.value}
+        )
+
+        # Bust every affected store's cached theme payload. Best-effort: a
+        # cache miss re-resolves and picks up the new status anyway, so a
+        # failure here delays enforcement rather than defeating it — but we
+        # must not fail the suspension itself over it.
+        affected: list[str] = []
+        try:
+            installs = await self._marketplace_repo.list_installations_for_theme(
+                theme_id
+            )
+            for inst in installs:
+                affected.append(str(inst.store_id))
+                if storefront_cache is not None:
+                    await storefront_cache.invalidate_theme(inst.store_id)
+        except Exception:  # noqa: BLE001 — see best-effort note above
+            logger.warning(
+                "marketplace_suspension_cache_bust_failed",
+                extra={"theme_id": str(theme_id)},
+                exc_info=True,
+            )
+
+        logger.warning(
+            "marketplace_theme_suspension_changed",
+            extra={
+                "theme_id": str(theme_id),
+                "theme_slug": theme.slug,
+                "suspended": suspended,
+                "reason": reason,
+                "affected_store_count": len(affected),
+            },
+        )
+        return {
+            "theme_id": str(theme_id),
+            "slug": theme.slug,
+            "status": new_status.value,
+            "suspended": suspended,
+            "affected_store_count": len(affected),
+        }
+
     async def review_version(
         self,
         reviewer_id: UUID,

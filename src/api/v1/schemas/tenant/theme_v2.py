@@ -331,6 +331,12 @@ class StorefrontThemeResponse(BaseModel):
     # Populated when the active version is a marketplace version that has
     # a recorded SHA-256.
     bundle_checksum: str | None = None
+    # True when the store's active theme has been SUSPENDED at the
+    # marketplace level (ADR-6). The bundle URLs and `external_theme` are
+    # stripped so the untrusted code cannot load, and the storefront falls
+    # back to the platform's built-in rendering rather than going dark —
+    # suspension must stop bad code without taking merchants offline.
+    theme_suspended: bool = False
 
 
 # ── Activation response ────────────────────────────────────────────────────────

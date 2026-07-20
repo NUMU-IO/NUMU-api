@@ -466,6 +466,23 @@ class MarketplaceRepository:
         await self._session.flush()
         return self._installation_to_entity(m)
 
+    async def list_installations_for_theme(
+        self, theme_id: UUID
+    ) -> list[MarketplaceThemeInstallation]:
+        """Every live installation of a theme, across all stores.
+
+        Used by the suspension kill switch to bust each affected store's
+        cached theme payload. Uninstalled rows are excluded — they aren't
+        serving anyone, so busting their cache would be wasted work.
+        """
+        result = await self._session.execute(
+            select(MarketplaceThemeInstallationModel).where(
+                MarketplaceThemeInstallationModel.marketplace_theme_id == theme_id,
+                MarketplaceThemeInstallationModel.uninstalled_at.is_(None),
+            )
+        )
+        return [self._installation_to_entity(m) for m in result.scalars().all()]
+
     async def set_active_installation(
         self, store_id: UUID, marketplace_theme_id: UUID | None
     ) -> None:
