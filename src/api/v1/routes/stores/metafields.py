@@ -180,6 +180,7 @@ async def update_metafield_definition(
     def_repo: Annotated[
         MetafieldDefinitionRepository, Depends(get_metafield_definition_repository)
     ],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
 ):
     """Update display metadata / type / visibility (address is immutable)."""
     definition = await def_repo.get_by_id(definition_id)
@@ -188,6 +189,9 @@ async def update_metafield_definition(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Metafield definition not found",
         )
+    visibility_changed = (
+        request.is_public is not None and request.is_public != definition.is_public
+    )
     if request.type is not None:
         definition.type = request.type
     if request.name is not None:
@@ -197,6 +201,18 @@ async def update_metafield_definition(
     if request.is_public is not None:
         definition.is_public = request.is_public
     updated = await def_repo.update(definition)
+
+    # Flipping is_public changes what the storefront payload may contain for
+    # EVERY owner of this definition, so the per-owner invalidation used on
+    # value writes isn't enough — sweep the store. Making a field public and
+    # having it not appear is confusing; making one private and having it keep
+    # rendering from cache is a data leak with a stale-cache excuse.
+    if visibility_changed:
+        try:
+            await product_cache.invalidate_store_products(store.id)
+            await product_cache.invalidate_categories(store.id)
+        except Exception:  # noqa: BLE001 — cache invalidation is best-effort
+            pass
     return SuccessResponse(
         data=_definition_response(updated),
         message="Metafield definition updated successfully",
@@ -356,37 +372,10 @@ async def unset_owner_metafield_value(
     return None
 
 
-@router.delete(
-    "/owners/{owner_type}/{owner_id}/{namespace}/{key}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a metafield value from an owner",
-    operation_id="delete_owner_metafield_value",
-)
-async def delete_owner_metafield_value(
-    owner_type: Annotated[MetafieldOwnerType, Path(description="Owner resource type")],
-    owner_id: Annotated[UUID, Path(description="Owner UUID")],
-    namespace: Annotated[str, Path(description="Definition namespace")],
-    key: Annotated[str, Path(description="Definition key")],
-    store: Annotated[Store, Depends(verify_store_ownership)],
-    def_repo: Annotated[
-        MetafieldDefinitionRepository, Depends(get_metafield_definition_repository)
-    ],
-    value_repo: Annotated[
-        MetafieldValueRepository, Depends(get_metafield_value_repository)
-    ],
-):
-    """Delete the value for a (definition, owner) pair."""
-    definition = await def_repo.get_by_key(store.id, owner_type, namespace, key)
-    if not definition:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Metafield definition not found",
-        )
-    value = await value_repo.get_by_definition_and_owner(definition.id, owner_id)
-    if not value:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Metafield value not found",
-        )
-    await value_repo.delete(value.id)
-    return None
+# NOTE: a second DELETE handler for this exact path used to live here
+# (`delete_owner_metafield_value`). FastAPI matches the first registration, so
+# it was unreachable — and it lacked the storefront cache invalidation above,
+# meaning if route order had ever flipped, deleting a value would have left the
+# old one rendering. Removed rather than left as a trap. The surviving handler
+# is also idempotent (204 whether or not a value existed), which is the correct
+# DELETE semantic; the dead one 404'd on an already-absent value.
