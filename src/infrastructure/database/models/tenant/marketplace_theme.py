@@ -240,6 +240,29 @@ class MarketplaceThemeInstallationModel(Base, UUIDMixin):
     uninstalled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # ── Developer preview window (ADR-6) ─────────────────────────────────
+    # The developer self-install path deliberately installs a version that
+    # has NOT been reviewed, so a theme author can iterate on their own
+    # store. Left unbounded that means unreviewed third-party JavaScript
+    # serving real shoppers forever, which is the bypass ADR-6 forbids.
+    #
+    # NULL = an ordinary install of a published version (no expiry).
+    # Set   = an unreviewed developer preview that stops resolving when the
+    #         window closes; the storefront then falls back to the last
+    #         published version rather than the store going dark.
+    preview_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    @property
+    def is_expired_preview(self) -> bool:
+        """True once an unreviewed developer preview has aged out."""
+        if self.preview_expires_at is None:
+            return False
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        return _dt.now(UTC) >= self.preview_expires_at
 
     def __repr__(self) -> str:
         return (

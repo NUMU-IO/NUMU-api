@@ -138,6 +138,9 @@ class MarketplaceThemeInstallation(BaseEntity):
     is_active: bool = False
     installed_at: datetime | None = None
     uninstalled_at: datetime | None = None
+    # Set only for an UNREVIEWED developer preview (ADR-6); None for an
+    # ordinary install of a published version, which never expires.
+    preview_expires_at: datetime | None = None
 
 
 class MarketplacePurchaseStatus(StrEnum):

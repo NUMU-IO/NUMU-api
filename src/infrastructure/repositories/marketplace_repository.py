@@ -148,6 +148,7 @@ class MarketplaceRepository:
             is_active=m.is_active,
             installed_at=m.installed_at,
             uninstalled_at=m.uninstalled_at,
+            preview_expires_at=m.preview_expires_at,
         )
 
     # ── Theme CRUD ────────────────────────────────────────────────────────────
@@ -427,9 +428,15 @@ class MarketplaceRepository:
         store_id: UUID,
         marketplace_theme_id: UUID,
         marketplace_version_id: UUID,
+        preview_expires_at: datetime | None = None,
     ) -> MarketplaceThemeInstallation:
         """Insert a new install row, or reactivate an existing one if the
-        store had uninstalled this theme before."""
+        store had uninstalled this theme before.
+
+        ``preview_expires_at`` marks an UNREVIEWED developer preview and is
+        always written, including ``None`` — installing a properly published
+        version over an expired preview must clear the window, not inherit it.
+        """
         existing = await self._session.execute(
             select(MarketplaceThemeInstallationModel).where(
                 MarketplaceThemeInstallationModel.store_id == store_id,
@@ -443,6 +450,9 @@ class MarketplaceRepository:
             m.marketplace_version_id = marketplace_version_id
             m.uninstalled_at = None
             m.installed_at = now
+            # Unconditional: a published install over a stale preview must
+            # clear the expiry, and a fresh preview must extend it.
+            m.preview_expires_at = preview_expires_at
         else:
             m = MarketplaceThemeInstallationModel(
                 store_id=store_id,
@@ -450,6 +460,7 @@ class MarketplaceRepository:
                 marketplace_version_id=marketplace_version_id,
                 is_active=False,
                 installed_at=now,
+                preview_expires_at=preview_expires_at,
             )
             self._session.add(m)
         await self._session.flush()

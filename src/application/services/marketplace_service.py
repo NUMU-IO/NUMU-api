@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +24,13 @@ from src.core.entities.marketplace_theme import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: How long a developer may run an UNREVIEWED build on a real store before it
+#: stops resolving (ADR-6). Long enough for a genuine iteration session, short
+#: enough that unreviewed third-party JavaScript can't quietly become the
+#: permanent state of a public storefront. Expiry falls back to the last
+#: published version rather than taking the store dark.
+DEVELOPER_PREVIEW_WINDOW = timedelta(hours=24)
 
 
 _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][\w\.\-]+)?$")
@@ -635,11 +642,35 @@ class MarketplaceService:
                 "submit a new version."
             )
 
+        # ADR-6: an unreviewed version installed this way is a PREVIEW and is
+        # time-boxed. Unbounded, this path put unreviewed third-party
+        # JavaScript in front of real shoppers permanently — the bypass ADR-6
+        # forbids. A version that IS published carries no window, so the
+        # ordinary case is unaffected.
+        is_unreviewed = version.status != MarketplaceVersionStatus.PUBLISHED
+        preview_expires_at = (
+            datetime.now(UTC) + DEVELOPER_PREVIEW_WINDOW if is_unreviewed else None
+        )
+
         installation = await self._marketplace_repo.create_or_reactivate_installation(
             store_id=store_id,
             marketplace_theme_id=marketplace_theme_id,
             marketplace_version_id=version.id,
+            preview_expires_at=preview_expires_at,
         )
+        if is_unreviewed:
+            logger.warning(
+                "marketplace_developer_preview_installed",
+                extra={
+                    "store_id": str(store_id),
+                    "marketplace_theme_id": str(marketplace_theme_id),
+                    "version_id": str(version.id),
+                    "version_status": version.status.value,
+                    "expires_at": preview_expires_at.isoformat()
+                    if preview_expires_at
+                    else None,
+                },
+            )
         # We deliberately DON'T bump the public install_count for
         # developer self-installs; they'd inflate marketplace metrics.
         return {
@@ -650,6 +681,10 @@ class MarketplaceService:
             "version_status": version.status.value,
             "is_active": installation.is_active,
             "is_developer_install": True,
+            "is_unreviewed_preview": is_unreviewed,
+            "preview_expires_at": preview_expires_at.isoformat()
+            if preview_expires_at
+            else None,
         }
 
     async def install_theme(
@@ -747,6 +782,18 @@ class MarketplaceService:
         )
         if not installation or installation.uninstalled_at is not None:
             raise ValueError("theme is not installed for this store")
+
+        # ADR-6: an unreviewed developer preview is time-boxed. Activation is
+        # the moment it would start serving real shoppers, so an expired one
+        # stops here. This closes the half of the self-install bypass that
+        # mattered: activate previously never re-checked review status at all,
+        # so an unreviewed build could be promoted to live indefinitely.
+        expires_at = getattr(installation, "preview_expires_at", None)
+        if expires_at is not None and datetime.now(UTC) >= expires_at:
+            raise ValueError(
+                "This developer preview has expired. Re-install to start a new "
+                "preview window, or submit the version for review and publish it."
+            )
 
         version = await self._marketplace_repo.get_version_by_id(
             installation.marketplace_version_id
