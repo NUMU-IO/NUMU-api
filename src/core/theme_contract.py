@@ -188,3 +188,66 @@ def validate_dist_bundle(
     return validate_built_manifest(
         manifest, import_map, host_contract_version=host_contract_version
     )
+
+
+# ── Navigability (guarantee G2) ──────────────────────────────────────────────
+# A theme must ship its own chrome — at least one header and one footer
+# section — or every shopper gets the host's generic `ByotChromeFallback`
+# strip (the "unnavigable theme" bug class). Detection mirrors the host's
+# `byotProvidesOwnChrome()` (numu-storefront resolve-theme.ts) and the CLI's
+# `navigability` lint rule: a schema `tag` of "header"/"footer" is the
+# declared signal; a chrome-looking section-type NAME is the legacy match.
+
+_HEADER_NAME_RE = re.compile(
+    r"(?:^|[-_])(?:header|navbar|topbar)(?:$|[-_])|header$", re.IGNORECASE
+)
+_FOOTER_NAME_RE = re.compile(r"(?:^|[-_])footer(?:$|[-_])|footer$", re.IGNORECASE)
+
+
+def _chrome_kinds_present(
+    section_schemas: dict[str, dict],
+) -> dict[str, bool]:
+    found = {"header": False, "footer": False}
+    for stype, schema in section_schemas.items():
+        tag = schema.get("tag") if _is_obj(schema) else None
+        tag = tag.lower() if isinstance(tag, str) else ""
+        if tag in found:
+            found[tag] = True
+            continue
+        if not tag:
+            if _HEADER_NAME_RE.search(stype):
+                found["header"] = True
+            if _FOOTER_NAME_RE.search(stype):
+                found["footer"] = True
+    return found
+
+
+def validate_navigability_source(theme_dir: str | Path) -> list[str]:
+    """Check an extracted SOURCE tree ships header + footer sections.
+
+    Reads ``schemas/sections/*.json`` — the same data the CLI rule uses —
+    so the guarantee holds even when the CLI linter is unavailable or
+    predates the rule. Returns human-readable error strings (empty = ok).
+    """
+    schemas_dir = Path(theme_dir) / "schemas" / "sections"
+    section_schemas: dict[str, dict] = {}
+    if schemas_dir.is_dir():
+        for schema_file in schemas_dir.glob("*.json"):
+            try:
+                parsed = json.loads(schema_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if _is_obj(parsed):
+                stype = parsed.get("type") or schema_file.stem
+                section_schemas[str(stype)] = parsed
+
+    found = _chrome_kinds_present(section_schemas)
+    errors: list[str] = []
+    for kind in ("header", "footer"):
+        if not found[kind]:
+            errors.append(
+                f"theme declares no {kind} section (no schemas/sections entry "
+                f'with "tag": "{kind}") — shoppers would get the host\'s '
+                "generic fallback strip instead of the theme's own chrome"
+            )
+    return errors

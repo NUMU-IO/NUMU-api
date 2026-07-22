@@ -15,6 +15,7 @@ from src.infrastructure.database.models.tenant.automation_log import AutomationL
 from src.infrastructure.database.models.tenant.automation_rule import (
     AutomationRuleModel,
 )
+from src.infrastructure.database.models.tenant.blog import ArticleModel, BlogModel
 from src.infrastructure.database.models.tenant.campaign_activity import (
     CampaignActivityModel,
 )
@@ -188,6 +189,8 @@ __all__ = [
     "InstapayIntentModel",
     "OrderModel",
     "OrderActivityModel",
+    "ArticleModel",
+    "BlogModel",
     "PageViewModel",
     "PaymentLinkSessionModel",
     "PaymentProofModel",

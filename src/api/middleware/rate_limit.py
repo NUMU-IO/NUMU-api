@@ -9,6 +9,7 @@ Tiers:
 - general:  100/min (authenticated) / 60/min (anonymous)
 """
 
+import hashlib
 import time
 
 from fastapi import Request, Response
@@ -36,18 +37,30 @@ def _get_cache() -> RedisCacheService:
 # Endpoint sets
 # ------------------------------------------------------------------ #
 
+# Exact-match auth endpoints (static paths only — every entry here MUST
+# correspond to a mounted route; tests/security/test_rate_limiting.py
+# asserts that against the app's route table). Dynamic store-scoped
+# customer auth routes cannot live in this set — see _is_auth_endpoint.
+# 2026-07-21: pruned 7 dead entries (/api/v1/public/auth/* and
+# /api/v1/storefront/{auth,customers}/* shapes) that matched no mounted
+# route, and added the admin login/refresh which were missing — both
+# verified against the live route table.
 AUTH_ENDPOINTS = {
     "/api/v1/auth/login",
     "/api/v1/auth/register",
     "/api/v1/auth/refresh",
-    "/api/v1/public/auth/login",
-    "/api/v1/public/auth/register",
-    "/api/v1/public/auth/refresh",
-    "/api/v1/storefront/auth/login",
-    "/api/v1/storefront/auth/register",
-    "/api/v1/storefront/customers/login",
-    "/api/v1/storefront/customers/register",
+    "/api/v1/admin/auth/login",
+    "/api/v1/admin/auth/refresh",
 }
+
+# Store-scoped customer auth routes (/api/v1/storefront/store/{store_id}/auth/…)
+# have a dynamic store id, so an exact-string set can never match them.
+# Mirrors the merchant surface above: login/register/refresh.
+CUSTOMER_AUTH_SUFFIXES = (
+    "/auth/login",
+    "/auth/register",
+    "/auth/refresh",
+)
 
 SKIP_RATE_LIMIT = {
     "/",
@@ -58,6 +71,22 @@ SKIP_RATE_LIMIT = {
     "/redoc",
     "/openapi.json",
 }
+
+
+def _is_auth_endpoint(path: str) -> bool:
+    """Check if the path gets the strict auth tier.
+
+    Exact merchant/admin endpoints plus the store-scoped customer auth
+    routes. The customer routes carry a dynamic store id, so before this
+    matcher existed they fell through to the general tier — giving
+    customer-credential brute force 12x the intended per-IP budget
+    (60/min anon vs 5/min auth).
+    """
+    if path in AUTH_ENDPOINTS:
+        return True
+    return path.startswith("/api/v1/storefront/store/") and path.endswith(
+        CUSTOMER_AUTH_SUFFIXES
+    )
 
 
 def _is_checkout(path: str) -> bool:
@@ -216,6 +245,20 @@ async def _check_per_user_limit(
         return True, 0, 0
 
 
+def _stable_digest(value: str) -> str:
+    """Process-stable digest for per-identifier bucket keys.
+
+    Built-in ``hash()`` is salted per process (PYTHONHASHSEED), so with N
+    workers the same identity would land in a different Redis bucket in
+    each worker — multiplying the per-user limit by N and resetting on
+    every restart, defeating the point of keeping these counters in
+    shared Redis. A truncated SHA-256 keeps one bucket per identity; 64
+    bits is ample for bucketing and the raw token is never recoverable
+    or logged in full.
+    """
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
 def _extract_user_identifier(request: Request) -> str | None:
     """Pull a stable identifier for the per-user check.
 
@@ -231,14 +274,15 @@ def _extract_user_identifier(request: Request) -> str | None:
     """
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
-        # We don't validate the token here — just hash it to get a
+        # We don't validate the token here — just digest it to get a
         # stable bucket key. The auth dependency on the route
         # validates as usual; this middleware just needs SOMETHING
-        # consistent across requests from the same identity.
-        return f"hbearer:{hash(auth_header[7:])}"
+        # consistent across requests from the same identity (and across
+        # workers — see _stable_digest).
+        return f"hbearer:{_stable_digest(auth_header[7:])}"
     cookie_token = request.cookies.get("customer_access_token")
     if cookie_token:
-        return f"hcookie:{hash(cookie_token)}"
+        return f"hcookie:{_stable_digest(cookie_token)}"
     return None
 
 
@@ -266,7 +310,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Determine tier and limit
-        if path in AUTH_ENDPOINTS:
+        if _is_auth_endpoint(path):
             tier = "auth"
             limit = settings.rate_limit_auth_requests_per_minute
         elif _is_checkout(path):

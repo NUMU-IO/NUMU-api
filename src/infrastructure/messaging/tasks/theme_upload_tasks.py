@@ -97,6 +97,33 @@ def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
         zf.extractall(dest)
 
 
+def theme_upload_root() -> Path:
+    """The one directory theme ZIPs are uploaded to and read back from.
+
+    Shared by the upload route (writes), the submit endpoint (validates)
+    and the build workers (read) so the containment rule can't drift.
+    """
+    default_dir = os.path.join(tempfile.gettempdir(), "numu-theme-uploads")
+    return Path(os.getenv("NUMU_THEME_UPLOAD_DIR", default_dir))
+
+
+def resolve_uploaded_zip(path_str: str) -> Path:
+    """Resolve a caller-supplied ZIP path, refusing anything outside the upload root.
+
+    `source_zip_path` is client-echoed (upload response → submit body), so it
+    is untrusted input: without containment it is an arbitrary local-file-read
+    for any authenticated developer — the worker opens whatever path the row
+    holds. Raises ValueError so API-layer callers surface it as a 400.
+    """
+    root = theme_upload_root().resolve()
+    candidate = Path(path_str).resolve()
+    if not candidate.is_relative_to(root):
+        raise ValueError("source_zip_path is outside the theme-upload directory")
+    if candidate.suffix.lower() != ".zip":
+        raise ValueError("source_zip_path must point to a .zip file")
+    return candidate
+
+
 # ── AST-based security scanning ───────────────────────────────────────────────
 
 

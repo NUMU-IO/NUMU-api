@@ -22,6 +22,34 @@ require_roles_view = require_permissions("staff.view")
 require_roles_edit = require_permissions("staff.roles.edit")
 
 
+async def _load_role_in_tenant(
+    repo: RoleRepository,
+    role_id: UUID,
+    membership_tenant_id: str,
+    *,
+    allow_system: bool,
+):
+    """Load a role and refuse one that belongs to a DIFFERENT tenant.
+
+    `repo.get_by_id(role_id)` is tenant-blind, so every `/roles/{role_id}`
+    handler was a cross-tenant vector: any authenticated staff member could
+    read or modify another tenant's roles by id (CL-1 cross-owner, verified
+    2026-07-21 — roles have a tenant_id but the handlers never checked it).
+
+    System templates (tenant_id NULL) are global; `allow_system` lets a READ
+    see them but a WRITE never mutates one (nor another tenant's role). A
+    foreign role is reported not-found, never forbidden, so ids can't be probed.
+    """
+    role = await repo.get_by_id(role_id)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Role not found")
+    is_system = role.tenant_id is None
+    same_tenant = str(role.tenant_id) == str(membership_tenant_id)
+    if same_tenant or (allow_system and is_system):
+        return role
+    raise HTTPException(status_code=404, detail="Role not found")
+
+
 @router.get("")
 async def list_roles(
     membership: Annotated[TenantMembershipModel, Depends(require_roles_view)],
@@ -110,10 +138,9 @@ async def get_role(
 ):
     """Get a specific role with its permissions."""
     repo = RoleRepository(db)
-    role = await repo.get_by_id(role_id)
-
-    if not role:
-        raise HTTPException(status_code=404, detail="Role not found")
+    role = await _load_role_in_tenant(
+        repo, role_id, membership.tenant_id, allow_system=True
+    )
 
     perms = await repo.get_permissions_for_role(role_id)
 
@@ -179,6 +206,11 @@ async def clone_role(
     """Clone a role."""
     from src.application.use_cases.roles.create_role import clone_role as uc_clone_role
 
+    # The source must be the caller's own role or a system template — never
+    # another tenant's role (which would copy its permission structure out).
+    repo = RoleRepository(db)
+    await _load_role_in_tenant(repo, source_role_id, tenant.id, allow_system=True)
+
     role = await uc_clone_role(
         db=db,
         source_role_id=source_role_id,
@@ -206,10 +238,9 @@ async def update_role(
 ):
     """Update a role."""
     repo = RoleRepository(db)
-    role = await repo.get_by_id(role_id)
-
-    if not role:
-        raise HTTPException(status_code=404, detail="Role not found")
+    role = await _load_role_in_tenant(
+        repo, role_id, membership.tenant_id, allow_system=False
+    )
 
     if role.is_locked:
         raise HTTPException(status_code=400, detail="Cannot modify locked role")
@@ -243,9 +274,9 @@ async def set_role_permissions(
     )
 
     repo = RoleRepository(db)
-    role = await repo.get_by_id(role_id)
-    if not role:
-        raise HTTPException(status_code=404, detail="Role not found")
+    role = await _load_role_in_tenant(
+        repo, role_id, membership.tenant_id, allow_system=False
+    )
     if role.is_locked:
         raise HTTPException(status_code=400, detail="Cannot modify locked role")
 
@@ -298,6 +329,12 @@ async def delete_role(
     from src.application.use_cases.roles.create_role import (
         delete_role as uc_delete_role,
     )
+
+    # Scope to the caller's tenant before deleting — the use case is
+    # tenant-blind (CL-1 cross-owner). System templates and other tenants'
+    # roles are refused as not-found.
+    repo = RoleRepository(db)
+    await _load_role_in_tenant(repo, role_id, membership.tenant_id, allow_system=False)
 
     await uc_delete_role(
         db=db,

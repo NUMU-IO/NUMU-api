@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.dependencies.permissions import require_staff_edit
+from src.api.v1.routes.staff._scope import assert_membership_in_tenant
 
 router = APIRouter(prefix="/staff/policies", tags=["Staff - Policies"])
 
@@ -26,6 +27,7 @@ async def list_policies(
         StaffAccessPolicyModel,
     )
 
+    await assert_membership_in_tenant(db, membership_id, membership)
     result = await db.execute(
         select(StaffAccessPolicyModel).where(
             StaffAccessPolicyModel.membership_id == membership_id,
@@ -67,6 +69,7 @@ async def set_policy(
         StaffAccessPolicyModel,
     )
 
+    await assert_membership_in_tenant(db, membership_id, membership)
     result = await db.execute(
         select(StaffAccessPolicyModel).where(
             StaffAccessPolicyModel.membership_id == membership_id,
@@ -110,6 +113,7 @@ async def clear_policy(
         StaffAccessPolicyModel,
     )
 
+    await assert_membership_in_tenant(db, membership_id, membership)
     await db.execute(
         delete(StaffAccessPolicyModel).where(
             StaffAccessPolicyModel.membership_id == membership_id,

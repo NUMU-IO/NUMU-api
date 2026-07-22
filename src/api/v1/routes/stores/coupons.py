@@ -162,7 +162,7 @@ async def get_coupon(
 ):
     """Get coupon details by ID."""
     use_case = GetCouponUseCase(coupon_repository=coupon_repo)
-    result = await use_case.execute(coupon_id=coupon_id)
+    result = await use_case.execute(coupon_id=coupon_id, store_id=store.id)
 
     return SuccessResponse(
         data=_coupon_response(result),
@@ -208,7 +208,7 @@ async def update_coupon(
     )
 
     result = await use_case.execute(
-        coupon_id=coupon_id, dto=dto, user_id=store.owner_id
+        coupon_id=coupon_id, dto=dto, user_id=store.owner_id, store_id=store.id
     )
 
     return SuccessResponse(
@@ -235,6 +235,8 @@ async def delete_coupon(
         store_repository=store_repo,
     )
 
-    await use_case.execute(coupon_id=coupon_id, user_id=store.owner_id)
+    await use_case.execute(
+        coupon_id=coupon_id, user_id=store.owner_id, store_id=store.id
+    )
 
     return None

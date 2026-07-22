@@ -153,12 +153,23 @@ class MarketplaceService:
         """Submit a new version for build.
 
         `source_zip_path` is the on-disk path of the ZIP uploaded via
-        /themes/upload — accepted because the upload path is already
-        authenticated. The Celery worker reads this path and runs the
-        sandboxed build pipeline; on success it stamps bundle_url, css_url,
-        checksum, etc. and moves the version into pending_review.
+        /themes/upload. It is client-echoed (upload response → submit body),
+        so it is UNTRUSTED input: it must resolve inside the theme-upload
+        directory, or any authenticated developer gets an arbitrary
+        local-file-read (the worker opens whatever path the row holds).
+        The Celery worker reads this path and runs the sandboxed build
+        pipeline; on success it stamps bundle_url, css_url, checksum, etc.
+        and moves the version into pending_review.
         """
         _validate_semver(version_string)
+
+        from src.infrastructure.messaging.tasks.theme_upload_tasks import (
+            resolve_uploaded_zip,
+        )
+
+        # Raises ValueError (→ 400) when outside the upload root; store the
+        # canonical resolved path, never the caller's raw string.
+        source_zip_path = str(resolve_uploaded_zip(source_zip_path))
 
         theme = await self._marketplace_repo.get_theme_by_id(theme_id)
         if not theme or theme.developer_id != developer_id:
@@ -554,6 +565,17 @@ class MarketplaceService:
         if version.status != MarketplaceVersionStatus.PENDING_REVIEW:
             raise ValueError(
                 f"version is not pending_review (status={version.status.value})"
+            )
+
+        # `-dev.` versions are developer self-install iterations: the build
+        # worker ships their locally-built bundle as-is (never rebuilt from
+        # source), so they must never reach public distribution. No override —
+        # the developer resubmits a clean release version instead.
+        if decision == "approve" and "-dev." in version.version_string:
+            raise ValueError(
+                "cannot publish: '-dev.' versions are developer self-install "
+                "builds (developer-machine bundle, not rebuilt from source). "
+                "Submit a release version for review instead."
             )
 
         # Approval used to be a bare human click with no automated signal

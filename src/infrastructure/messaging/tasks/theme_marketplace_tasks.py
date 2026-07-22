@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import random
+import shutil
 import subprocess
 import tempfile
 import time
@@ -33,6 +34,7 @@ from uuid import UUID
 
 from src.core.entities.marketplace_theme import MarketplaceVersionStatus
 from src.core.interfaces.services.storage_service import StorageBucket
+from src.core.theme_contract import validate_navigability_source
 from src.infrastructure.messaging.celery_app import celery_app
 from src.infrastructure.messaging.tasks.theme_upload_tasks import (
     MAX_BUNDLE_SIZE,
@@ -43,6 +45,7 @@ from src.infrastructure.messaging.tasks.theme_upload_tasks import (
     _run_local_build,
     _safe_extract_zip,
     _validate_theme_contract,
+    resolve_uploaded_zip,
 )
 
 T = TypeVar("T")
@@ -260,7 +263,13 @@ def build_marketplace_theme(self, version_id: str) -> dict:
         if not version.source_zip_path:
             raise ThemeBuildError("version has no source_zip_path")
 
-        zip_path = Path(version.source_zip_path)
+        # Containment re-check at read time (defense in depth — submit_version
+        # validates too, but rows written before that validation existed, or
+        # by any other writer, still get refused here).
+        try:
+            zip_path = resolve_uploaded_zip(version.source_zip_path)
+        except ValueError as exc:
+            raise ThemeBuildError(str(exc)) from exc
         if not zip_path.exists():
             raise ThemeBuildError(f"source ZIP missing: {zip_path}")
 
@@ -309,22 +318,27 @@ def build_marketplace_theme(self, version_id: str) -> dict:
             )
 
         # ── Build ─────────────────────────────────────────────────────────
-        # Pre-built path: if the developer's CLI shipped a usable
-        # dist/theme.js inside the ZIP, skip the worker's own build.
-        # The dev-install loop relies on this because their package.json
-        # uses `link:../numu-theme-sdk` (workspace-style references)
-        # that the worker's vanilla `npm install` can't resolve. They
-        # built locally where pnpm/links work; we trust that artifact
-        # for *developer-self-install* use.
+        # Pre-built path: `numu-theme install` (the developer self-install
+        # loop) ships a locally-built dist/theme.js because its package.json
+        # uses `link:../numu-theme-sdk` (workspace-style references) that
+        # the worker's vanilla `npm install` can't resolve. Those versions
+        # are identifiable by the `-dev.<tag>` suffix the CLI appends, stay
+        # scoped to the developer's own stores, and are refused marketplace
+        # approval outright (see review_version).
         #
-        # Production marketplace submissions (`numu-theme submit`)
-        # don't ship dist/, so this branch is bypassed and the worker
-        # rebuilds from clean source — preserving the security property
-        # that we never trust developer-machine-produced bundles for
-        # public distribution.
+        # Every OTHER submission — anything marketplace-shaped — is rebuilt
+        # from clean source even when the ZIP ships a dist/: developer-
+        # machine-produced bundles are never trusted for public
+        # distribution, whether or not the client was well-behaved.
         dist = theme_dir / "dist"
         prebuilt_bundle = dist / "theme.js"
-        if prebuilt_bundle.exists() and prebuilt_bundle.stat().st_size > 0:
+        is_dev_install = "-dev." in version.version_string
+        used_prebuilt = (
+            is_dev_install
+            and prebuilt_bundle.exists()
+            and prebuilt_bundle.stat().st_size > 0
+        )
+        if used_prebuilt:
             logger.info(
                 "marketplace_build_using_prebuilt",
                 extra={
@@ -333,6 +347,14 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 },
             )
         else:
+            if dist.exists():
+                # Discard any shipped dist/ wholesale before rebuilding so
+                # stale developer artifacts can't leak into the fresh build.
+                shutil.rmtree(dist)
+                logger.info(
+                    "marketplace_build_discarded_prebuilt",
+                    extra={"version_id": version_id},
+                )
             dist.mkdir(exist_ok=True)
             result = (
                 _run_in_docker(theme_dir) if USE_DOCKER else _run_local_build(theme_dir)
@@ -373,6 +395,28 @@ def build_marketplace_theme(self, version_id: str) -> dict:
             lint_status, lint_issues = "skipped", []
         else:
             lint_status, lint_issues = _lint_theme(theme_dir)
+
+            # Belt and braces for guarantee G2 (navigability): the CLI owns
+            # the rule, but an old or unavailable CLI must not let a
+            # chrome-less theme read as `passed` — re-derive it here from the
+            # same source schemas. A guarantee violation is a lint failure
+            # even when the linter itself couldn't run.
+            if not any(i.get("rule") == "navigability" for i in lint_issues):
+                nav_errors = validate_navigability_source(theme_dir)
+                if nav_errors:
+                    lint_issues = [
+                        *lint_issues,
+                        *(
+                            {
+                                "rule": "navigability",
+                                "severity": "error",
+                                "message": msg,
+                            }
+                            for msg in nav_errors
+                        ),
+                    ]
+                    if lint_status in ("passed", "unavailable"):
+                        lint_status = "failed"
 
         lint_errors = [i for i in lint_issues if i.get("severity") == "error"]
         if LINT_GATE_MODE == "enforce" and lint_status != "passed":
@@ -636,8 +680,6 @@ def build_marketplace_theme(self, version_id: str) -> dict:
         raise
     finally:
         if work_dir is not None:
-            import shutil
-
             shutil.rmtree(work_dir, ignore_errors=True)
 
 

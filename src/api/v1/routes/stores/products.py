@@ -675,7 +675,7 @@ async def get_product(
     """Get product details by ID."""
     use_case = GetProductUseCase(product_repository=product_repo)
 
-    result = await use_case.execute(product_id=product_id)
+    result = await use_case.execute(product_id=product_id, store_id=store.id)
 
     # Hydrate the canonical variant model so the hub's merged editor can
     # load axes + matrix in one fetch (the detail response used to omit
@@ -807,6 +807,7 @@ async def update_product(
         product_id=product_id,
         dto=dto,
         user_id=store.owner_id,
+        store_id=store.id,
     )
 
     # Step 12 — flush ISR cache for the updated product. If the slug
@@ -970,7 +971,9 @@ async def delete_product(
         event_bus=get_event_bus(),
     )
 
-    await use_case.execute(product_id=product_id, user_id=store.owner_id)
+    await use_case.execute(
+        product_id=product_id, user_id=store.owner_id, store_id=store.id
+    )
 
     if store.subdomain and pre_delete_slug:
         from src.infrastructure.external_services.nextjs_revalidation import (

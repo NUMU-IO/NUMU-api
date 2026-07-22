@@ -140,3 +140,79 @@ class TwoFactorRepository(ITwoFactorRepository):
             )
         )
         return result.scalar_one_or_none() is not None
+
+
+class InMemoryTwoFactorRepository(ITwoFactorRepository):
+    """Dict-backed in-memory 2FA repository (test double).
+
+    Implements the full :class:`ITwoFactorRepository` port without a
+    database, for unit-testing the 2FA use cases. Semantics deliberately
+    mirror :class:`TwoFactorRepository`:
+
+    - Reads return **detached copies** of the stored entity (the DB repo
+      maps ORM rows to fresh entities on every read), so a use case that
+      mutates an entity without calling ``update()`` does not silently
+      persist — the same bug a real repository would expose.
+    - ``update()`` raises ``ValueError`` when the entity does not exist,
+      matching the DB repo's behaviour.
+    - ``delete``/``delete_by_user_id`` return ``True`` only when a row
+      was actually removed.
+    """
+
+    def __init__(self) -> None:
+        self._items: dict[UUID, TwoFactorAuth] = {}
+
+    @staticmethod
+    def _clone(entity: TwoFactorAuth) -> TwoFactorAuth:
+        return entity.model_copy(deep=True)
+
+    # ------------------------------------------------------------------
+    # BaseRepository interface
+    # ------------------------------------------------------------------
+
+    async def get_by_id(self, entity_id: UUID) -> TwoFactorAuth | None:
+        entity = self._items.get(entity_id)
+        return self._clone(entity) if entity else None
+
+    async def get_all(self, skip: int = 0, limit: int = 100) -> list[TwoFactorAuth]:
+        items = list(self._items.values())[skip : skip + limit]
+        return [self._clone(entity) for entity in items]
+
+    async def create(self, entity: TwoFactorAuth) -> TwoFactorAuth:
+        self._items[entity.id] = self._clone(entity)
+        return self._clone(entity)
+
+    async def update(self, entity: TwoFactorAuth) -> TwoFactorAuth:
+        if entity.id not in self._items:
+            raise ValueError(f"TwoFactorAuth with id {entity.id} not found")
+        self._items[entity.id] = self._clone(entity)
+        return self._clone(entity)
+
+    async def delete(self, entity_id: UUID) -> bool:
+        return self._items.pop(entity_id, None) is not None
+
+    async def count(self) -> int:
+        return len(self._items)
+
+    # ------------------------------------------------------------------
+    # Domain-specific methods
+    # ------------------------------------------------------------------
+
+    async def get_by_user_id(self, user_id: UUID) -> TwoFactorAuth | None:
+        for entity in self._items.values():
+            if entity.user_id == user_id:
+                return self._clone(entity)
+        return None
+
+    async def delete_by_user_id(self, user_id: UUID) -> bool:
+        for entity_id, entity in list(self._items.items()):
+            if entity.user_id == user_id:
+                del self._items[entity_id]
+                return True
+        return False
+
+    async def user_has_2fa_enabled(self, user_id: UUID) -> bool:
+        return any(
+            entity.user_id == user_id and entity.status == TwoFactorStatus.ENABLED
+            for entity in self._items.values()
+        )

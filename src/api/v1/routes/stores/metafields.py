@@ -63,6 +63,27 @@ async def _invalidate_owner_cache(
         pass
 
 
+async def _revalidate_storefront(store: Store) -> None:
+    """Push the metafield change through to the Next.js storefront's ISR cache.
+
+    Busting the API's Redis cache only makes the *API* correct — the storefront
+    holds its own cached copy of the product payload in a different process, and
+    until it is told otherwise it keeps serving the pre-change metafields to
+    shoppers. For a field flipped public→private that is the difference between
+    "private" and "private in about a minute", which is not what the setting
+    promises. Best-effort: the helper logs and swallows its own failures.
+    """
+    if not store.subdomain:
+        return
+    from src.infrastructure.external_services.nextjs_revalidation import (
+        revalidate_on_metafield_change,
+    )
+
+    await revalidate_on_metafield_change(
+        subdomain=store.subdomain, store_id=str(store.id)
+    )
+
+
 def _definition_response(entity: MetafieldDefinition) -> MetafieldDefinitionResponse:
     return MetafieldDefinitionResponse(
         id=str(entity.id),
@@ -213,6 +234,7 @@ async def update_metafield_definition(
             await product_cache.invalidate_categories(store.id)
         except Exception:  # noqa: BLE001 — cache invalidation is best-effort
             pass
+        await _revalidate_storefront(store)
     return SuccessResponse(
         data=_definition_response(updated),
         message="Metafield definition updated successfully",
@@ -231,6 +253,7 @@ async def delete_metafield_definition(
     def_repo: Annotated[
         MetafieldDefinitionRepository, Depends(get_metafield_definition_repository)
     ],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
 ):
     """Delete a definition and (via FK cascade) all its values."""
     definition = await def_repo.get_by_id(definition_id)
@@ -240,6 +263,18 @@ async def delete_metafield_definition(
             detail="Metafield definition not found",
         )
     await def_repo.delete(definition_id)
+
+    # Deleting a definition removes the field from every owner at once — a
+    # strictly stronger removal than flipping is_public=false, so it must not
+    # have weaker invalidation than the branch above. Without this the values
+    # cascade out of the database instantly but keep being served from the
+    # cached product payload for the rest of its (30 minute) TTL.
+    try:
+        await product_cache.invalidate_store_products(store.id)
+        await product_cache.invalidate_categories(store.id)
+    except Exception:  # noqa: BLE001 — cache invalidation is best-effort
+        pass
+    await _revalidate_storefront(store)
     return None
 
 
@@ -330,6 +365,8 @@ async def set_owner_metafield_value(
             )
         )
     await _invalidate_owner_cache(product_cache, store.id, owner_type, owner_id)
+    if definition.is_public:
+        await _revalidate_storefront(store)
     return SuccessResponse(
         data=_value_response(saved, definition),
         message="Metafield value saved successfully",
@@ -369,6 +406,8 @@ async def unset_owner_metafield_value(
     if existing:
         await value_repo.delete(existing.id)
         await _invalidate_owner_cache(product_cache, store.id, owner_type, owner_id)
+        if definition.is_public:
+            await _revalidate_storefront(store)
     return None
 
 

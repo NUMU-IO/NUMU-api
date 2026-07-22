@@ -13,10 +13,26 @@ class GetProductUseCase:
     def __init__(self, product_repository: IProductRepository) -> None:
         self.product_repository = product_repository
 
-    async def execute(self, product_id: UUID) -> ProductDTO:
-        """Get a product by ID."""
+    async def execute(self, product_id: UUID, store_id: UUID) -> ProductDTO:
+        """Get a product by ID, scoped to the store that owns it.
+
+        `store_id` is REQUIRED and is the store the caller has already been
+        authorised for. Without it this was a cross-tenant read: the route
+        authenticates `/stores/{store_id}/products/{product_id}` via
+        `verify_store_ownership`, but the lookup ignored the path store, so
+        any authenticated merchant could read ANY product on the platform by
+        id — across owners and tenants (verified 2026-07-21, CL-1).
+
+        The repository's `_tenant_filter` does not save us here: tenant
+        context is derived from the request's Host subdomain, and merchant
+        traffic arrives on the apex host, so the filter is inert on this path.
+
+        A foreign product raises EntityNotFoundError, not a permission error —
+        the caller must not be able to distinguish "exists elsewhere" from
+        "does not exist", or this becomes an id-enumeration oracle.
+        """
         product = await self.product_repository.get_by_id(product_id)
-        if not product:
+        if not product or product.store_id != store_id:
             raise EntityNotFoundError("Product", str(product_id))
         return ProductDTO.from_entity(product)
 

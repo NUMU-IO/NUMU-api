@@ -73,6 +73,8 @@ celery_app.conf.update(
         # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
         "src.infrastructure.messaging.tasks.whatsapp_dead_letter_purge",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
+        # Blog/articles CMS — scheduled-article publisher (every 60s).
+        "src.infrastructure.messaging.tasks.blog_tasks",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
         "src.infrastructure.messaging.tasks.health_score_tasks",
         "src.infrastructure.messaging.tasks.analytics_rollup_tasks",
@@ -185,6 +187,12 @@ celery_app.conf.update(
 
 # Beat schedule for periodic tasks
 celery_app.conf.beat_schedule = {
+    "publish-scheduled-articles": {
+        # Blog CMS — promote due `scheduled` articles to `published`.
+        # Idempotent; a failed tick self-heals on the next one.
+        "task": "tasks.publish_due_articles",
+        "schedule": 60.0,
+    },
     "weekly-database-backup": {
         # Weekly (was daily) — a full pg_dump streams the entire DB out of
         # Supabase, which is billed egress and redundant with Supabase's own

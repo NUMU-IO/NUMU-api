@@ -30,6 +30,7 @@ class UpdateCouponUseCase:
         coupon_id: UUID,
         dto: UpdateCouponDTO,
         user_id: UUID,
+        store_id: UUID,
     ) -> CouponDTO:
         """Update a coupon.
 
@@ -47,8 +48,12 @@ class UpdateCouponUseCase:
             EntityAlreadyExistsError: If new code already exists.
             ValidationError: If updated data is invalid.
         """
+        # store_id REQUIRED: resolving the store from the row and comparing
+        # only owner_id let a two-store owner mutate store B's coupon via
+        # store A's path (CL-1 cross-store write, 2026-07-21). Foreign coupon
+        # -> not-found.
         coupon = await self.coupon_repository.get_by_id(coupon_id)
-        if not coupon:
+        if not coupon or coupon.store_id != store_id:
             raise EntityNotFoundError("Coupon", str(coupon_id))
 
         # Verify store ownership

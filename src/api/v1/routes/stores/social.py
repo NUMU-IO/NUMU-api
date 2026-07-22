@@ -38,6 +38,23 @@ from src.infrastructure.repositories.social_post_repository import (
 router = APIRouter(prefix="/{store_id}/social")
 
 
+async def _require_connection_in_store(conn_repo, connection_id, store) -> None:
+    """Refuse a connection that isn't the authorised store's.
+
+    The disconnect/posts/import use cases fetch by connection_id alone, so
+    without this a merchant could disconnect, read posts from, or import from
+    another store's social connection by id (CL-1 cross-owner, 2026-07-22).
+    Foreign connection -> not-found.
+    """
+    from fastapi import HTTPException, status
+
+    conn = await conn_repo.get_by_id(connection_id)
+    if conn is None or str(conn.store_id) != str(store.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
@@ -168,6 +185,7 @@ async def disconnect_account(
         DisconnectSocialAccountUseCase,
     )
 
+    await _require_connection_in_store(conn_repo, connection_id, store)
     use_case = DisconnectSocialAccountUseCase(conn_repo)
     try:
         await use_case.execute(connection_id)
@@ -202,6 +220,7 @@ async def fetch_posts(
     """Fetch recent posts from the connected social account."""
     from src.application.use_cases.social.fetch_posts import FetchSocialPostsUseCase
 
+    await _require_connection_in_store(conn_repo, connection_id, store)
     use_case = FetchSocialPostsUseCase(conn_repo, post_repo, meta_service)
 
     try:
@@ -260,6 +279,7 @@ async def import_posts(
         ImportSocialPostsUseCase,
     )
 
+    await _require_connection_in_store(conn_repo, connection_id, store)
     use_case = ImportSocialPostsUseCase(conn_repo, post_repo, product_repo)
 
     try:

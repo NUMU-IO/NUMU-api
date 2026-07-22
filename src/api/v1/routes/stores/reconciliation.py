@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,6 +157,23 @@ async def list_run_mismatches(
     resolved: bool | None = Query(None),
 ):
     """Get mismatches for a specific reconciliation run scoped to this store."""
+    # The docstring said "scoped to this store" but the query filtered only on
+    # run_id — a merchant could read another store's reconciliation mismatches
+    # by run id (CL-1 cross-owner, 2026-07-22). Verify the run belongs to the
+    # authorised store first; foreign run -> not-found.
+    run_owner = (
+        await db.execute(
+            select(PaymentReconciliationRunModel.store_id).where(
+                PaymentReconciliationRunModel.id == run_id
+            )
+        )
+    ).scalar_one_or_none()
+    if run_owner is None or str(run_owner) != str(store.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconciliation run not found",
+        )
+
     q = select(ReconciliationMismatchModel).where(
         ReconciliationMismatchModel.run_id == run_id
     )

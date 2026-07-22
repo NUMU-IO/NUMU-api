@@ -31,9 +31,13 @@ class UpdateCategoryUseCase:
         category_id: UUID,
         dto: UpdateCategoryDTO,
         user_id: UUID,
+        store_id: UUID,
     ) -> CategoryDTO:
+        # store_id REQUIRED: resolving the store from the row and comparing
+        # only owner_id let a two-store owner mutate store B's category through
+        # store A's path (CL-1, 2026-07-21). Foreign category -> not-found.
         category = await self.category_repository.get_by_id(category_id)
-        if not category:
+        if not category or category.store_id != store_id:
             raise EntityNotFoundError("Category", str(category_id))
 
         store = await self.store_repository.get_by_id(category.store_id)

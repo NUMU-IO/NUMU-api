@@ -71,10 +71,14 @@ async def approve_access_request(
         AccessRequestStatus,
     )
 
+    # Scope the update to the caller's tenant (CL-1 cross-owner): without the
+    # tenant_id predicate, a staff editor of one tenant could approve another
+    # tenant's pending access requests by id.
     result = await db.execute(
         update(AccessRequestModel)
         .where(
             AccessRequestModel.id == request_id,
+            AccessRequestModel.tenant_id == membership.tenant_id,
             AccessRequestModel.status == AccessRequestStatus.PENDING,
         )
         .values(
@@ -113,10 +117,12 @@ async def deny_access_request(
         AccessRequestStatus,
     )
 
+    # Tenant-scoped (CL-1 cross-owner) — see approve.
     result = await db.execute(
         update(AccessRequestModel)
         .where(
             AccessRequestModel.id == request_id,
+            AccessRequestModel.tenant_id == membership.tenant_id,
             AccessRequestModel.status == AccessRequestStatus.PENDING,
         )
         .values(

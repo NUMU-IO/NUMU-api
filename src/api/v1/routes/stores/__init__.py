@@ -30,6 +30,7 @@ from src.api.v1.routes.stores import analytics as analytics_module
 from src.api.v1.routes.stores import analytics_realtime as analytics_realtime_module
 from src.api.v1.routes.stores import apps as apps_module
 from src.api.v1.routes.stores import audit as audit_module
+from src.api.v1.routes.stores import blogs as blogs_module
 from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
@@ -172,6 +173,7 @@ router.include_router(categories_module.router, tags=["Store Categories"])
 router.include_router(coupons_module.router, tags=["Store Coupons"])
 router.include_router(menus_module.router, tags=["Store Menus"])
 router.include_router(pages_module.router, tags=["Store Pages"])
+router.include_router(blogs_module.router, tags=["Store Blogs"])
 router.include_router(metafields_module.router, tags=["Store Metafields"])
 router.include_router(theme_updates_module.router, tags=["Store Theme Updates"])
 router.include_router(promotions_module.router, tags=["Store Promotions"])
