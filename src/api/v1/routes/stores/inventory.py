@@ -176,6 +176,17 @@ async def adjust_stock(
     product.quantity = new_quantity
     await product_repo.update(product)
 
+    # Write the new count through to the default variant (the row cart
+    # availability and checkout debits read) — without this, MCP/hub
+    # inventory adjustments only moved the headline number and the
+    # sellable stock silently drifted. Multi-variant products are a safe
+    # no-op inside (adjust their stock per-variant instead).
+    from src.application.services.variant_sync_service import (
+        sync_simple_product_to_variant,
+    )
+
+    await sync_simple_product_to_variant(product_repo.session, product_id=product.id)
+
     return SuccessResponse(
         data=StockAdjustmentResponse(
             product_id=request.product_id,
@@ -209,6 +220,14 @@ async def bulk_adjust_stock(
         new_quantity = max(0, previous_quantity + adj.adjustment)
         product.quantity = new_quantity
         await product_repo.update(product)
+
+        from src.application.services.variant_sync_service import (
+            sync_simple_product_to_variant,
+        )
+
+        await sync_simple_product_to_variant(
+            product_repo.session, product_id=product.id
+        )
 
         results.append(
             StockAdjustmentResponse(

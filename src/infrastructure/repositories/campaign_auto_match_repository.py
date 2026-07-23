@@ -170,11 +170,21 @@ class CampaignAutoMatchRepository:
             created_by=created_by,
         )
 
-    async def delete_group(self, group_id: UUID) -> int:
-        """Delete all rows in a group. Returns rows-affected."""
+    async def delete_group(
+        self, group_id: UUID, campaign_id: UUID | None = None
+    ) -> int:
+        """Delete all rows in a group. Returns rows-affected.
+
+        `campaign_id` scopes the delete to one campaign — required to stop a
+        merchant deleting another store's rule group by group_id (the
+        `_tenant_filter` is inert on apex-host merchant traffic; CL-1
+        cross-owner, 2026-07-22). Callers pass the campaign they authorised.
+        """
         stmt = delete(CampaignAutoMatchRuleModel).where(
             CampaignAutoMatchRuleModel.group_id == group_id
         )
+        if campaign_id is not None:
+            stmt = stmt.where(CampaignAutoMatchRuleModel.campaign_id == campaign_id)
         result = await self.session.execute(self._tenant_filter(stmt))
         await self.session.flush()
         return result.rowcount or 0

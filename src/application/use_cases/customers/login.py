@@ -8,6 +8,7 @@ from src.application.dto.customer import (
     CustomerLoginDTO,
     CustomerTokenDTO,
 )
+from src.application.services.lockout_service import AccountLockoutService
 from src.core.exceptions import AuthenticationError
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.services.password_service import IPasswordService
@@ -23,29 +24,70 @@ class LoginCustomerUseCase:
         customer_repository: ICustomerRepository,
         password_service: IPasswordService,
         token_service: ITokenService,
+        lockout_service: AccountLockoutService | None = None,
     ) -> None:
         self.customer_repository = customer_repository
         self.password_service = password_service
         self.token_service = token_service
+        # Per-account lockout, as merchant and admin login already have.
+        # Without it, customer login was defended only by the per-IP rate
+        # limit, which an attacker rotating IPs bypasses entirely — the
+        # credential-stuffing gap (RL-3). Optional so existing callers and
+        # tests keep working unchanged; when absent, behaviour is as before.
+        self.lockout_service = lockout_service
+
+    @staticmethod
+    def _lockout_key(store_id: UUID, email: str) -> str:
+        """Lockout identity for a customer.
+
+        MUST be store-scoped. Customers are per-store, so a bare email would
+        let an attacker hammer store A's login to lock the same person out of
+        store B — turning a protection into a cross-tenant denial of service.
+        """
+        return f"customer:{store_id}:{email.lower()}"
 
     async def execute(self, dto: CustomerLoginDTO) -> CustomerAuthResponseDTO:
         """Authenticate customer and return auth response."""
         store_id = UUID(dto.store_id)
         email = Email(value=dto.email)
+        lockout_key = self._lockout_key(store_id, dto.email)
+
+        if self.lockout_service:
+            is_locked, retry_after = await self.lockout_service.check_locked(
+                lockout_key
+            )
+            if is_locked:
+                from src.core.exceptions import AccountLockedError
+
+                raise AccountLockedError(retry_after)
 
         # Get customer by email
         customer = await self.customer_repository.get_by_email(store_id, email)
         if not customer:
+            # Count misses too — otherwise an attacker enumerating addresses
+            # is never throttled, and the timing difference leaks which
+            # emails exist.
+            if self.lockout_service:
+                await self.lockout_service.record_failure(lockout_key)
             raise AuthenticationError("Invalid email or password")
 
         # Verify password
         if not customer.password_hash:
+            if self.lockout_service:
+                await self.lockout_service.record_failure(lockout_key)
             raise AuthenticationError("Invalid email or password")
 
         if not self.password_service.verify_password(
             dto.password, customer.password_hash
         ):
+            if self.lockout_service:
+                await self.lockout_service.record_failure(lockout_key)
             raise AuthenticationError("Invalid email or password")
+
+        # Authenticated — drop the failure counter so a legitimate user who
+        # mistyped a few times isn't carrying a grudge into their next login.
+        if self.lockout_service:
+            await self.lockout_service.clear(lockout_key)
 
         # Generate tokens
         access_token = self.token_service.create_customer_access_token(customer)

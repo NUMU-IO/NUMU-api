@@ -17,7 +17,6 @@ import hashlib
 import logging
 import os
 import secrets
-import tempfile
 from typing import Annotated
 from uuid import UUID
 
@@ -126,11 +125,16 @@ async def upload_theme_zip(
         )
 
     # Write to a temp location that the Celery worker can read.
-    # Use the platform-specific temp dir (e.g. /tmp on Linux, %TEMP% on Windows)
-    # so we don't hardcode a path. Override with NUMU_THEME_UPLOAD_DIR in prod
-    # to point at a shared volume between API and worker hosts.
-    default_upload_dir = os.path.join(tempfile.gettempdir(), "numu-theme-uploads")
-    upload_dir = os.getenv("NUMU_THEME_UPLOAD_DIR", default_upload_dir)
+    # `theme_upload_root()` is the single source of truth for this directory —
+    # submit_version and the build worker refuse any path outside it, so the
+    # write side and the containment check can never drift apart. Override
+    # with NUMU_THEME_UPLOAD_DIR in prod to point at a shared volume between
+    # API and worker hosts.
+    from src.infrastructure.messaging.tasks.theme_upload_tasks import (
+        theme_upload_root,
+    )
+
+    upload_dir = str(theme_upload_root())
     os.makedirs(upload_dir, exist_ok=True)
     sha = hashlib.sha256(contents).hexdigest()[:16]
     build_id = f"build_{sha}_{secrets.token_hex(4)}"

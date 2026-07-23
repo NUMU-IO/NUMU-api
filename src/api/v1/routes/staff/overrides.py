@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.dependencies.permissions import require_staff_edit
+from src.api.v1.routes.staff._scope import assert_membership_in_tenant
 from src.infrastructure.database.models.public.membership_override import (
     OverrideEffect,
 )
@@ -24,6 +25,7 @@ async def list_overrides(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """List all overrides for a membership."""
+    await assert_membership_in_tenant(db, membership_id, membership)
     repo = OverrideRepository(db)
     overrides = await repo.get_by_membership(membership_id)
 
@@ -68,6 +70,7 @@ async def set_override(
     if expires_at:
         expires_dt = datetime.fromisoformat(expires_at)
 
+    await assert_membership_in_tenant(db, membership_id, membership)
     repo = OverrideRepository(db)
     override = await repo.set_override(
         membership_id=membership_id,
@@ -92,6 +95,7 @@ async def clear_override(
     membership_id: UUID = Query(...),
 ):
     """Clear a permission override."""
+    await assert_membership_in_tenant(db, membership_id, membership)
     repo = OverrideRepository(db)
     deleted = await repo.clear_override(membership_id, permission_id)
 

@@ -177,6 +177,9 @@ async def fawaterak_callback(
         log.info("payment_expired")
         if order.can_be_cancelled:
             order.cancel(reason=f"Fawaterak payment expired - ref {reference_number}")
+            from src.application.services.stock_service import try_restock_order
+
+            await try_restock_order(db, order, reason="fawaterak_payment_expired")
             await order_repo.update(order)
 
     elif error_message:

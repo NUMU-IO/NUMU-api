@@ -394,8 +394,23 @@ async def revoke_invitation(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
 ):
     """Revoke a staff invitation."""
+    from src.api.v1.routes.staff._scope import assert_row_in_tenant
+    from src.infrastructure.database.models.public.staff_invitation import (
+        StaffInvitationModel,
+    )
     from src.infrastructure.repositories.invitation_repository import (
         InvitationRepository,
+    )
+
+    # Scope to the caller's tenant (CL-1 cross-owner) — repo.revoke is
+    # tenant-blind, so without this a staff inviter of one tenant could revoke
+    # another tenant's invitations by id.
+    await assert_row_in_tenant(
+        db,
+        StaffInvitationModel,
+        invitation_id,
+        membership,
+        not_found="Invitation not found",
     )
 
     repo = InvitationRepository(db)

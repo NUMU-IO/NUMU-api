@@ -200,6 +200,9 @@ async def paymob_callback(
         log.info("payment_voided")
         if order.can_be_cancelled:
             order.cancel(reason=f"Paymob void - transaction {transaction_id}")
+            from src.application.services.stock_service import try_restock_order
+
+            await try_restock_order(db, order, reason="paymob_void")
             await order_repo.update(order)
         else:
             log.warning("payment_void_cannot_cancel", current_status=order.status.value)

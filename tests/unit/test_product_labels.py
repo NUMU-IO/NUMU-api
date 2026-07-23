@@ -159,7 +159,9 @@ class TestLabelRoundTrip:
 
         # SET — hub sends full attributes including label.
         dto = UpdateProductDTO(attributes={"nameAr": "منتج", "label": dict(SALE_LABEL)})
-        result = await use_case.execute(product.id, dto, self.owner_id)
+        result = await use_case.execute(
+            product.id, dto, self.owner_id, store_id=product.store_id
+        )
         assert result.attributes["label"] == SALE_LABEL
 
         # GET — reading the entity back reflects the stored label.
@@ -168,7 +170,9 @@ class TestLabelRoundTrip:
         # CLEAR — hub resends full attributes WITHOUT the label key;
         # replace semantics must drop it.
         dto2 = UpdateProductDTO(attributes={"nameAr": "منتج"})
-        result2 = await use_case.execute(product.id, dto2, self.owner_id)
+        result2 = await use_case.execute(
+            product.id, dto2, self.owner_id, store_id=product.store_id
+        )
         assert "label" not in result2.attributes
         assert "label" not in product.attributes
 
@@ -177,7 +181,9 @@ class TestLabelRoundTrip:
         product = _make_product(attributes={"label": dict(SALE_LABEL)})
         use_case = self._use_case(product)
         dto = UpdateProductDTO(name="Renamed")  # attributes=None → no touch
-        result = await use_case.execute(product.id, dto, self.owner_id)
+        result = await use_case.execute(
+            product.id, dto, self.owner_id, store_id=product.store_id
+        )
         assert result.attributes["label"] == SALE_LABEL
 
 

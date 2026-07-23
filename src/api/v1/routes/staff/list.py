@@ -113,7 +113,10 @@ async def get_staff_member(
     repo = MembershipRepository(db)
     target = await repo.get_by_id(membership_id)
 
-    if not target:
+    # Scope to the caller's tenant: get_by_id is tenant-blind, so without this
+    # any staff member could read another tenant's memberships by id (CL-1
+    # cross-tenant, 2026-07-21). Foreign membership -> not-found.
+    if not target or str(target.tenant_id) != str(membership.tenant_id):
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="Staff member not found")
@@ -156,7 +159,8 @@ async def remove_staff(
     )
 
     target = await MembershipRepository(db).get_by_id(membership_id)
-    if not target:
+    # Scope to the caller's tenant (get_by_id is tenant-blind — CL-1).
+    if not target or str(target.tenant_id) != str(membership.tenant_id):
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="Staff member not found")
@@ -199,7 +203,10 @@ async def set_staff_roles(
     )
 
     target = await MembershipRepository(db).get_by_id(membership_id)
-    if not target:
+    # Scope to the caller's tenant (get_by_id is tenant-blind — CL-1). Without
+    # this, staff.roles.edit on one tenant could reassign another tenant's
+    # staff roles by membership id.
+    if not target or str(target.tenant_id) != str(membership.tenant_id):
         raise HTTPException(status_code=404, detail="Staff member not found")
 
     if target.is_owner:

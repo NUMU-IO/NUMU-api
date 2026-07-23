@@ -6,7 +6,6 @@ import {
   asImageTransform,
   asImageUrl,
   asString,
-  demoOrPlaceholder,
   localized,
   useDemo,
   type SectionRenderProps,
@@ -44,7 +43,7 @@ const BzImageWithText = ({ instance, sectionId }: SectionRenderProps) => {
   // Demo-mode fills in a real photo; outside demo an unset image collapses to
   // the branded "B" placeholder block (designed empty-state, below).
   const configuredImage = asImageUrl(s.image_url);
-  const imageUrl = configuredImage || demoOrPlaceholder(demo, [FALLBACK_IMAGE])[0].image;
+  const imageUrl = configuredImage || (demo ? FALLBACK_IMAGE.image : "");
   // Non-destructive focal/zoom/rotation the merchant set in the editor. When
   // absent, the image renders exactly as before (object-cover + hover-zoom).
   const imageTransform = asImageTransform(s.image_url);

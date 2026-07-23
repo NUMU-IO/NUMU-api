@@ -1460,6 +1460,7 @@ async def browse_categories(
     store_id: Annotated[UUID, Path(description="Store ID")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """List active categories for a store (public)."""
     from src.application.use_cases.categories import ListCategoriesUseCase
@@ -1471,23 +1472,28 @@ async def browse_categories(
     use_case = ListCategoriesUseCase(category_repository=category_repo)
     results = await use_case.execute(store_id=store_id, include_inactive=False)
 
-    return SuccessResponse(
-        data=[
-            {
-                "id": str(r.id),
-                "name": r.name,
-                "slug": r.slug,
-                "description": r.description,
-                "image_url": r.image_url,
-                "parent_id": str(r.parent_id) if r.parent_id else None,
-                "position": r.position,
-                "template_suffix": r.template_suffix,
-                "product_count": r.product_count,
-            }
-            for r in results
-        ],
-        message="Categories retrieved successfully",
-    )
+    # Public typed metafields per category (owner_type "collection" — NUMU
+    # categories ARE the storefront collections). Per-owner resolution is
+    # O(N) queries; catalogs are small (<50 typical) — batch when a store
+    # proves otherwise.
+    data = []
+    for r in results:
+        data.append({
+            "id": str(r.id),
+            "name": r.name,
+            "slug": r.slug,
+            "description": r.description,
+            "image_url": r.image_url,
+            "parent_id": str(r.parent_id) if r.parent_id else None,
+            "position": r.position,
+            "template_suffix": r.template_suffix,
+            "product_count": r.product_count,
+            "metafields": await _resolve_public_metafields(
+                session, store_id, "collection", r.id
+            ),
+        })
+
+    return SuccessResponse(data=data, message="Categories retrieved successfully")
 
 
 # ============================================================================
@@ -1671,10 +1677,18 @@ async def login_customer(
     response: Response,
 ):
     """Authenticate customer and return tokens."""
+    from src.application.services.lockout_service import AccountLockoutService
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
     use_case = LoginCustomerUseCase(
         customer_repository=customer_repo,
         password_service=password_service,
         token_service=token_service,
+        # Per-account lockout, matching merchant and admin login. The per-IP
+        # rate limit alone does not stop credential stuffing from rotating
+        # IPs. Fails OPEN if Redis is down — a cache outage must not lock
+        # every shopper out of their account.
+        lockout_service=AccountLockoutService(RedisCacheService()),
     )
 
     dto = CustomerLoginDTO(

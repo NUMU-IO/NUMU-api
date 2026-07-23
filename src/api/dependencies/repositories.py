@@ -158,6 +158,24 @@ def get_page_repository(
     return PageRepository(session)
 
 
+def get_blog_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get blog (article collection) repository dependency."""
+    from src.infrastructure.repositories.blog_repository import BlogRepository
+
+    return BlogRepository(session)
+
+
+def get_article_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get article repository dependency."""
+    from src.infrastructure.repositories.blog_repository import ArticleRepository
+
+    return ArticleRepository(session)
+
+
 def get_metafield_definition_repository(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):

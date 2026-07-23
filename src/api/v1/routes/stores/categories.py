@@ -146,7 +146,7 @@ async def get_category(
 ):
     """Get category details by ID."""
     use_case = GetCategoryUseCase(category_repository=category_repo)
-    result = await use_case.execute(category_id=category_id)
+    result = await use_case.execute(category_id=category_id, store_id=store.id)
 
     return SuccessResponse(
         data=_category_response(result),
@@ -189,7 +189,7 @@ async def update_category(
     )
 
     result = await use_case.execute(
-        category_id=category_id, dto=dto, user_id=store.owner_id
+        category_id=category_id, dto=dto, user_id=store.owner_id, store_id=store.id
     )
 
     # Step 12 — flush ISR cache after rename / image / parent change.
@@ -228,7 +228,9 @@ async def delete_category(
         store_repository=store_repo,
     )
 
-    await use_case.execute(category_id=category_id, user_id=store.owner_id)
+    await use_case.execute(
+        category_id=category_id, user_id=store.owner_id, store_id=store.id
+    )
 
     # Step 12 — flush ISR cache so the deleted category disappears from
     # the storefront without waiting out the 60s revalidate window.
@@ -288,7 +290,7 @@ async def upload_category_image(
     )
     dto = UpdateCategoryDTO(image_url=result.url)
     updated = await use_case.execute(
-        category_id=category_id, dto=dto, user_id=store.owner_id
+        category_id=category_id, dto=dto, user_id=store.owner_id, store_id=store.id
     )
 
     # Step 12 — flush ISR cache so the new image appears on home + PLP

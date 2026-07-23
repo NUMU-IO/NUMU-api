@@ -29,6 +29,9 @@ from src.api.v1.routes.admin.merchant_hub_nav import (
 )
 from src.api.v1.routes.admin.orders import router as orders_router
 from src.api.v1.routes.admin.plan_limits import router as plan_limits_router
+from src.api.v1.routes.admin.platform_capabilities import (
+    router as platform_capabilities_router,
+)
 from src.api.v1.routes.admin.platform_config import router as platform_config_router
 from src.api.v1.routes.admin.platform_settings import (
     router as platform_settings_router,
@@ -71,6 +74,11 @@ router.include_router(
     platform_config_router,
     prefix="/platform-config",
     tags=["Admin - Platform Config"],
+)
+router.include_router(
+    platform_capabilities_router,
+    prefix="/platform/capabilities",
+    tags=["Admin - Platform Capabilities"],
 )
 router.include_router(
     platform_settings_router,

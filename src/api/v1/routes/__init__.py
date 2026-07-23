@@ -98,6 +98,9 @@ from src.api.v1.routes.storefront import (
     apps_router as storefront_apps_router,
 )
 from src.api.v1.routes.storefront import (
+    blogs_router as storefront_blogs_router,
+)
+from src.api.v1.routes.storefront import (
     bundles_router as storefront_bundles_router,
 )
 from src.api.v1.routes.storefront import (
@@ -344,6 +347,13 @@ api_router.include_router(
     storefront_public_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Public"],
+)
+
+# Storefront - blogs/articles (public, published-only)
+api_router.include_router(
+    storefront_blogs_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Blogs"],
 )
 
 # Storefront - authenticated customer routes

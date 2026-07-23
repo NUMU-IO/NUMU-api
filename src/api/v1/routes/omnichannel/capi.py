@@ -1,47 +1,36 @@
-"""CAPI events routes."""
+"""Legacy omnichannel CAPI route — RETIRED (410 Gone).
 
-from uuid import UUID
+This predates the Settings → Tracking pipeline and was dangerous to keep
+callable:
 
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
+  * it read flat, UNENCRYPTED ``settings.meta_pixel_id`` /
+    ``meta_capi_token`` — a config shape the modern settings PUT no longer
+    writes (tokens now live encrypted in ``service_credentials``);
+  * it hashed only 5 user_data fields and passed no fbp/fbc/ip/ua, so any
+    event it sent had bottom-tier match quality;
+  * its purchase path put raw CENTS into ``value`` with no /100, so a
+    single call would report 100× revenue to Meta.
 
-from src.api.dependencies.database import get_db
-from src.api.dependencies.repositories import (
-    get_store_repository,
-)
-from src.api.responses import SuccessResponse
-from src.application.dto.omnichannel import SendCapiEventDTO
-from src.application.use_cases.omnichannel import SendCapiEventUseCase
-from src.infrastructure.repositories import StoreRepository
+Nothing has called it (grep across api/hub/storefront/SDK: zero callers);
+the modern path is the storefront ``/track`` relay + ``meta_capi`` Celery
+fanout. The route is kept mounted as an explicit 410 so any stale
+integration fails loudly instead of silently sending wrong-value events.
+"""
+
+from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(tags=["Omnichannel"])
 
 
-@router.post("/event", status_code=status.HTTP_200_OK)
-async def send_capi_event(
-    dto: SendCapiEventDTO,
-    store_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    store_repo: StoreRepository = Depends(get_store_repository),
-) -> SuccessResponse:
-    """Send a CAPI event to Meta.
-
-    PUT /stores/{store_id}/channels/meta/capi
-    Body: { "event_name", "event_id", "event_time", "user_data", "custom_data", "event_source_url" }
-    """
-    use_case = SendCapiEventUseCase(store_repository=store_repo)
-    result = await use_case.execute(
-        store_id=dto.store_id,
-        event_name=dto.event_name,
-        event_id=dto.event_id,
-        event_time=dto.event_time,
-        user_data=dto.user_data,
-        custom_data=dto.custom_data,
-        event_source_url=dto.event_source_url,
-    )
-    return SuccessResponse(
-        data=result,
-        message="CAPI event sent",
+@router.post("/event", status_code=status.HTTP_410_GONE, include_in_schema=False)
+async def send_capi_event() -> None:
+    """Retired. Use the storefront tracking pipeline (`/storefront/store/{id}/track`)."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "This endpoint has been retired. Conversion events are sent via "
+            "the storefront tracking pipeline (Settings → Tracking)."
+        ),
     )
 
 

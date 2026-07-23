@@ -174,11 +174,44 @@ class FawryWebhookService:
     # ------------------------------------------------------------------ #
 
     async def _release_inventory(self, order: OrderModel) -> None:
-        """Restore product quantities from order line items.
+        """Restore the stock this order debited at checkout.
 
-        The UPDATE is scoped to the order's tenant_id as a defense-in-depth
-        measure alongside RLS policies.
+        Orders placed since the unified stock path carry a debit manifest in
+        ``extra_data["stock_debited"]`` — replay it through the stock service
+        so the variant column, legacy combo JSONB, and inventory levels are
+        restored along with products.quantity (and stamp the idempotency flag
+        so a later cancel can't double-restock). Older orders fall back to the
+        original product-quantity-only restore.
+
+        The legacy UPDATE is scoped to the order's tenant_id as a
+        defense-in-depth measure alongside RLS policies.
         """
+        extra = dict(order.extra_data or {})
+        manifest = (extra.get("stock_debited") or {}).get("lines") or []
+        if manifest:
+            if extra.get("stock_restocked_at"):
+                logger.info(
+                    "inventory_release_skipped_idempotent",
+                    order_number=order.order_number,
+                )
+                return
+            from datetime import UTC, datetime
+
+            from src.application.services.stock_service import restock_lines
+
+            restored = await restock_lines(
+                self.db, tenant_id=order.tenant_id, lines=manifest
+            )
+            extra["stock_restocked_at"] = datetime.now(UTC).isoformat()
+            extra["stock_restock_reason"] = "fawry_payment_expired"
+            order.extra_data = extra
+            logger.info(
+                "inventory_released",
+                order_number=order.order_number,
+                line_item_count=restored,
+            )
+            return
+
         line_items: list[dict] = order.line_items or []
         for item in line_items:
             product_id = item.get("product_id")

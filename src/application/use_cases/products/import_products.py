@@ -13,7 +13,10 @@ from src.core.entities.product import Product, ProductStatus, ProductType
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.logging import get_logger
 from src.core.value_objects.money import Currency, Money
+
+logger = get_logger(__name__)
 
 CSV_COLUMNS = [
     "name",
@@ -257,6 +260,18 @@ class ImportProductsUseCase:
                     store_id, sku
                 )
 
+            # SKU policy: blank on a NEW product → auto-generate the same
+            # stable store-unique code the create route would (one policy
+            # everywhere). Update rows keep matching by the provided SKU.
+            if not existing_product and not sku:
+                session = getattr(self.product_repository, "session", None)
+                if session is not None:
+                    from src.application.services.sku_service import (
+                        generate_unique_sku,
+                    )
+
+                    sku = await generate_unique_sku(session, store_id)
+
             if existing_product:
                 # Update existing product
                 existing_product.name = name
@@ -285,6 +300,7 @@ class ImportProductsUseCase:
                     existing_product.images = images
 
                 await self.product_repository.update(existing_product)
+                await self._sync_variant_row(existing_product, quantity, sku)
                 result.updated += 1
             else:
                 # Create new product
@@ -309,6 +325,11 @@ class ImportProductsUseCase:
 
                 product = Product(
                     store_id=store_id,
+                    # RLS/NOT NULL: the products table requires tenant_id and
+                    # nothing downstream fills it in — creates without it die
+                    # on NotNullViolation (latent import bug, surfaced when
+                    # exercising the create path end-to-end).
+                    tenant_id=store.tenant_id,
                     name=name,
                     slug=slug,
                     sku=sku,
@@ -326,10 +347,44 @@ class ImportProductsUseCase:
                     tags=tags,
                 )
 
-                await self.product_repository.create(product)
+                created = await self.product_repository.create(product)
+                await self._sync_variant_row(created, quantity, sku)
                 result.created += 1
 
         return result
+
+    async def _sync_variant_row(self, product, quantity: int, sku: str | None) -> None:
+        """Give the imported product a sellable unit.
+
+        Imported products used to get NO variant row at all, so the cart's
+        variant-id resolution and checkout debits had nothing to read.
+        Creates the default variant when missing, then writes the imported
+        sku/quantity/price through to it. Fail-open: a variant-glue problem
+        must not fail the CSV row (the product itself imported fine).
+        """
+        session = getattr(self.product_repository, "session", None)
+        if session is None:
+            return
+        try:
+            from src.application.services.variant_sync_service import (
+                ensure_default_variant,
+                sync_simple_product_to_variant,
+            )
+
+            currency = product.price.currency
+            await ensure_default_variant(
+                session,
+                tenant_id=product.tenant_id,
+                store_id=product.store_id,
+                product_id=product.id,
+                price_cents=product.price.cents,
+                price_currency=getattr(currency, "value", str(currency)),
+                quantity=quantity,
+                sku=sku or None,
+            )
+            await sync_simple_product_to_variant(session, product_id=product.id)
+        except Exception:  # noqa: BLE001 — fail-open per docstring
+            logger.exception("import_variant_sync_failed", product_id=str(product.id))
 
     @staticmethod
     def _parse_optional_decimal(

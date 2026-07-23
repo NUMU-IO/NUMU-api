@@ -18,9 +18,11 @@ class DeleteCategoryUseCase:
         self.category_repository = category_repository
         self.store_repository = store_repository
 
-    async def execute(self, category_id: UUID, user_id: UUID) -> bool:
+    async def execute(self, category_id: UUID, user_id: UUID, store_id: UUID) -> bool:
+        # store_id REQUIRED — foreign category is not-found, never forbidden
+        # (CL-1 cross-store write, 2026-07-21).
         category = await self.category_repository.get_by_id(category_id)
-        if not category:
+        if not category or category.store_id != store_id:
             raise EntityNotFoundError("Category", str(category_id))
 
         store = await self.store_repository.get_by_id(category.store_id)

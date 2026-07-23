@@ -272,6 +272,9 @@ async def cancel_order_from_whatsapp(
         return False
 
     order.customer_confirmation_status = "cancelled"
+    from src.application.services.stock_service import try_restock_order
+
+    await try_restock_order(session, order, reason="cancelled_via_whatsapp")
     updated = await order_repo.update(order)
 
     # No further confirm reminders for a cancelled order. Fail-open.

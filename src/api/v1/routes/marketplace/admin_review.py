@@ -11,7 +11,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 
+from src.api.dependencies import get_storefront_cache_service
 from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.repositories import get_marketplace_repository
 from src.api.responses import SuccessResponse
@@ -26,6 +28,7 @@ from src.api.v1.schemas.tenant.marketplace import (
     ThemeFlagsPayload,
 )
 from src.application.services.marketplace_service import MarketplaceService
+from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.repositories.marketplace_repository import (
     MarketplaceRepository,
 )
@@ -74,6 +77,7 @@ async def submit_review(
             version_id=version_id,
             decision=body.decision,
             notes=body.notes,
+            override_certification=body.override_certification,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -262,3 +266,64 @@ async def update_theme_metadata(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     return SuccessResponse(data=AdminThemeMetadataResponse(**updated))
+
+
+class ThemeSuspensionRequest(BaseModel):
+    """Suspend or reinstate a marketplace theme."""
+
+    suspended: bool = Field(
+        description="True to suspend (stop the theme serving), False to reinstate."
+    )
+    reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Recorded with the action — why the theme was suspended.",
+    )
+
+
+class ThemeSuspensionResponse(BaseModel):
+    theme_id: str
+    slug: str
+    status: str
+    suspended: bool
+    #: How many live storefronts this took effect on.
+    affected_store_count: int
+
+
+@router.post(
+    "/themes/{theme_id}/suspension",
+    response_model=SuccessResponse[ThemeSuspensionResponse],
+    # Same step-up as approval, and for the mirror-image reason: approving
+    # publishes third-party JS platform-wide, suspending withdraws it from
+    # every storefront running it. Both are stale-session-hostile.
+    dependencies=[Depends(require_admin_2fa(max_age_seconds=300))],
+)
+async def set_theme_suspension(
+    theme_id: UUID,
+    body: ThemeSuspensionRequest,
+    svc: Annotated[MarketplaceService, Depends(_svc)],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """The theme kill switch (ADR-6).
+
+    `MarketplaceThemeStatus.SUSPENDED` existed as an enum value with no
+    endpoint that could set it and no code that read it — a lever connected
+    to nothing. This is the lever; `ThemeService._is_theme_suspended` is the
+    thing it pulls.
+
+    Suspension is non-destructive: installations and customization survive,
+    and affected stores fall back to the platform's built-in renderer rather
+    than going dark. Stopping untrusted code must not mean taking merchants
+    offline, or nobody would ever pull it.
+    """
+    try:
+        data = await svc.set_theme_suspension(
+            theme_id=theme_id,
+            suspended=body.suspended,
+            reason=body.reason,
+            storefront_cache=cache,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return SuccessResponse(data=ThemeSuspensionResponse(**data))
