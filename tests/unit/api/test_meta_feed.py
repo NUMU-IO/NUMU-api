@@ -51,26 +51,39 @@ def _row(**overrides) -> dict:
 
 class TestProductToFeedItem:
     def test_basic_active_product(self):
-        item = _product_to_feed_item(_row(), store_subdomain="testsub", currency="EGP")
+        item = _product_to_feed_item(
+            _row(), store_url="https://testsub.numueg.app", currency="EGP"
+        )
         assert item is not None
         assert item["id"] == "11111111-1111-1111-1111-111111111111"
         assert item["item_group_id"] == "11111111-1111-1111-1111-111111111111"
         assert item["title"] == "Test Product"
         assert item["availability"] == "in stock"
         assert item["price"] == "249.50 EGP"
+        # No slug on the row → UUID fallback (the PDP endpoint accepts both).
         assert (
             item["link"]
-            == "https://testsub.numu.store/product/11111111-1111-1111-1111-111111111111"
+            == "https://testsub.numueg.app/products/11111111-1111-1111-1111-111111111111"
         )
         assert item["image_link"] == "https://cdn.example.com/img1.jpg"
         assert item["brand"] == "TestBrand"
         assert item["product_type"] == "Apparel"
         assert item["sku"] == "SKU-001"
 
+    def test_link_prefers_slug_over_uuid(self):
+        # Slug-addressed links match the PDP's canonical `/products/<slug>`
+        # URL; the UUID is only a fallback for slug-less rows.
+        item = _product_to_feed_item(
+            _row(slug="test-product"),
+            store_url="https://testsub.numueg.app",
+            currency="EGP",
+        )
+        assert item["link"] == "https://testsub.numueg.app/products/test-product"
+
     def test_out_of_stock_when_quantity_zero_and_tracked(self):
         item = _product_to_feed_item(
             _row(quantity=0, track_inventory=True),
-            store_subdomain="t",
+            store_url="https://t.numueg.app",
             currency="EGP",
         )
         assert item["availability"] == "out of stock"
@@ -80,7 +93,7 @@ class TestProductToFeedItem:
         # zero quantity is meaningless and the item is always sellable.
         item = _product_to_feed_item(
             _row(quantity=0, track_inventory=False),
-            store_subdomain="t",
+            store_url="https://t.numueg.app",
             currency="EGP",
         )
         assert item["availability"] == "in stock"
@@ -90,7 +103,7 @@ class TestProductToFeedItem:
         # catalog would surface stale candidates in dynamic ads.
         assert (
             _product_to_feed_item(
-                _row(status="draft"), store_subdomain="t", currency="EGP"
+                _row(status="draft"), store_url="https://t.numueg.app", currency="EGP"
             )
             is None
         )
@@ -101,7 +114,7 @@ class TestProductToFeedItem:
         # g:id must match so the Pixel content_ids dedup works.
         item = _product_to_feed_item(
             _row(meta_catalog_id="MERCHANT-SKU-42"),
-            store_subdomain="t",
+            store_url="https://t.numueg.app",
             currency="EGP",
         )
         assert item["id"] == "MERCHANT-SKU-42"
@@ -111,13 +124,13 @@ class TestProductToFeedItem:
 
     def test_missing_images_yields_null_image_link(self):
         item = _product_to_feed_item(
-            _row(images=[]), store_subdomain="t", currency="EGP"
+            _row(images=[]), store_url="https://t.numueg.app", currency="EGP"
         )
         assert item["image_link"] is None
 
     def test_currency_uppercased_in_price(self):
         item = _product_to_feed_item(
-            _row(price_amount=10000), store_subdomain="t", currency="usd"
+            _row(price_amount=10000), store_url="https://t.numueg.app", currency="usd"
         )
         # Currency MUST land in the feed as ISO 4217 uppercase — Meta
         # rejects lowercase. The mapper enforces it defensively even
@@ -127,7 +140,7 @@ class TestProductToFeedItem:
     def test_title_truncated_to_150_chars(self):
         long_name = "x" * 500
         item = _product_to_feed_item(
-            _row(name=long_name), store_subdomain="t", currency="EGP"
+            _row(name=long_name), store_url="https://t.numueg.app", currency="EGP"
         )
         assert len(item["title"]) == 150
 
@@ -135,7 +148,7 @@ class TestProductToFeedItem:
         long_desc = "y" * 6000
         item = _product_to_feed_item(
             _row(description=long_desc),
-            store_subdomain="t",
+            store_url="https://t.numueg.app",
             currency="EGP",
         )
         assert len(item["description"]) == 5000
@@ -143,7 +156,7 @@ class TestProductToFeedItem:
     def test_description_falls_back_to_short_description(self):
         item = _product_to_feed_item(
             _row(description=None, short_description="Short version"),
-            store_subdomain="t",
+            store_url="https://t.numueg.app",
             currency="EGP",
         )
         assert item["description"] == "Short version"
@@ -152,7 +165,7 @@ class TestProductToFeedItem:
         # Defensive against half-saved data — older products might have
         # attributes stored as a list or None.
         item = _product_to_feed_item(
-            _row(attributes=None), store_subdomain="t", currency="EGP"
+            _row(attributes=None), store_url="https://t.numueg.app", currency="EGP"
         )
         assert item["brand"] is None
         assert item["product_type"] is None

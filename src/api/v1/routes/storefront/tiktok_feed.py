@@ -29,7 +29,7 @@ router = APIRouter()
 
 
 def _product_to_tiktok_feed_item(
-    product: dict, *, store_subdomain: str, currency: str
+    product: dict, *, store_url: str, currency: str
 ) -> dict | None:
     """Map one ``products`` row → TikTok feed entry (same shape as Meta's).
 
@@ -52,8 +52,10 @@ def _product_to_tiktok_feed_item(
     images = product.get("images") or []
     image_link = images[0] if images else None
 
-    base_url = f"https://{store_subdomain}.numu.store"
-    product_url = f"{base_url}/product/{product['id']}"
+    # Canonical PDP URL on the store's real public host (custom domain or
+    # `<subdomain>.numueg.app`). Slug-first; the backend PDP endpoint also
+    # accepts a UUID, so the id fallback still resolves.
+    product_url = f"{store_url}/products/{product.get('slug') or product['id']}"
 
     feed_id = product.get("tiktok_catalog_id") or str(product["id"])
     attrs = (
@@ -113,7 +115,7 @@ async def tiktok_catalog_feed(
     rows = await session.execute(
         text(
             """
-            SELECT id::text AS id, name, description, short_description, sku,
+            SELECT id::text AS id, slug, name, description, short_description, sku,
                    price_amount, status::text AS status, quantity,
                    images, attributes,
                    COALESCE((attributes->>'track_inventory')::boolean, true) AS track_inventory
@@ -124,22 +126,23 @@ async def tiktok_catalog_feed(
             LIMIT 5000
             """
         ),
-        {"sid": str(store.id), "active_status": ProductStatus.ACTIVE.value},
+        # productstatus PG enum stores member NAMES ("ACTIVE"), not values
+        # ("active") — binding .value 500'd every request (see meta_feed).
+        {"sid": str(store.id), "active_status": ProductStatus.ACTIVE.name},
     )
     products_raw = [dict(r._mapping) for r in rows.fetchall()]
 
     currency = (getattr(store, "default_currency", None) or "EGP").upper()
+    store_url = store.store_url
     items: list[dict] = []
     for p in products_raw:
-        entry = _product_to_tiktok_feed_item(
-            p, store_subdomain=normalized, currency=currency
-        )
+        entry = _product_to_tiktok_feed_item(p, store_url=store_url, currency=currency)
         if entry is not None:
             items.append(entry)
 
     xml = _build_feed_xml(
         store_name=store.name,
-        store_url=f"https://{normalized}.numu.store",
+        store_url=store_url,
         items=items,
     )
     return Response(
