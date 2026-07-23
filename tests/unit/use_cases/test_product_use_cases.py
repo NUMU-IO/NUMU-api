@@ -47,7 +47,9 @@ class TestGetProductUseCase:
         """Test successful product retrieval."""
         self.mock_product_repo.get_by_id.return_value = self.sample_product
 
-        result = await self.use_case.execute(product_id=self.product_id)
+        result = await self.use_case.execute(
+            product_id=self.product_id, store_id=self.store_id
+        )
 
         assert result is not None
         assert result.id == self.product_id
@@ -59,7 +61,7 @@ class TestGetProductUseCase:
         self.mock_product_repo.get_by_id.return_value = None
 
         with pytest.raises(EntityNotFoundError):
-            await self.use_case.execute(product_id=uuid4())
+            await self.use_case.execute(product_id=uuid4(), store_id=self.store_id)
 
     @pytest.mark.asyncio
     async def test_get_product_by_slug_success(self):
@@ -262,6 +264,7 @@ class TestUpdateProductUseCase:
 
         result = await self.use_case.execute(
             product_id=self.product_id,
+            store_id=self.store_id,
             dto=dto,
             user_id=self.user_id,
         )
@@ -279,6 +282,7 @@ class TestUpdateProductUseCase:
         with pytest.raises(EntityNotFoundError):
             await self.use_case.execute(
                 product_id=self.product_id,
+                store_id=self.store_id,
                 dto=dto,
                 user_id=self.user_id,
             )
@@ -295,6 +299,7 @@ class TestUpdateProductUseCase:
         with pytest.raises(AuthorizationError):
             await self.use_case.execute(
                 product_id=self.product_id,
+                store_id=self.store_id,
                 dto=dto,
                 user_id=other_user_id,  # Different user
             )
@@ -319,6 +324,7 @@ class TestUpdateProductUseCase:
 
         result = await self.use_case.execute(
             product_id=self.product_id,
+            store_id=self.store_id,
             dto=dto,
             user_id=self.user_id,
         )
@@ -338,6 +344,7 @@ class TestUpdateProductUseCase:
 
         result = await self.use_case.execute(
             product_id=self.product_id,
+            store_id=self.store_id,
             dto=dto,
             user_id=self.user_id,
         )
@@ -358,6 +365,7 @@ class TestUpdateProductUseCase:
 
         result = await self.use_case.execute(
             product_id=self.product_id,
+            store_id=self.store_id,
             dto=dto,
             user_id=self.user_id,
         )
@@ -379,6 +387,7 @@ class TestUpdateProductUseCase:
 
         await self.use_case.execute(
             product_id=self.product_id,
+            store_id=self.store_id,
             dto=dto,
             user_id=self.user_id,
         )
@@ -431,7 +440,9 @@ class TestDeleteProductUseCase:
         self.mock_product_repo.get_by_id.return_value = self.sample_product
         self.mock_store_repo.get_by_id.return_value = self.sample_store
 
-        await self.use_case.execute(product_id=self.product_id, user_id=self.user_id)
+        await self.use_case.execute(
+            product_id=self.product_id, user_id=self.user_id, store_id=self.store_id
+        )
 
         self.mock_product_repo.delete.assert_called_once_with(self.product_id)
 
@@ -444,6 +455,7 @@ class TestDeleteProductUseCase:
             await self.use_case.execute(
                 product_id=self.product_id,
                 user_id=self.user_id,
+                store_id=self.store_id,
             )
 
     @pytest.mark.asyncio
@@ -456,5 +468,6 @@ class TestDeleteProductUseCase:
         with pytest.raises(AuthorizationError):
             await self.use_case.execute(
                 product_id=self.product_id,
+                store_id=self.store_id,
                 user_id=other_user_id,  # Different user
             )

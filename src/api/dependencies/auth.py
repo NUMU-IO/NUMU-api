@@ -5,15 +5,21 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies.database import get_db
 from src.application.services.personal_access_token_service import looks_like_pat
 from src.application.services.token_revocation_service import TokenRevocationService
 from src.core.entities.user import UserRole
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
+from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
+from src.infrastructure.database.connection import set_tenant_id
 from src.infrastructure.external_services.token_service import token_service
 
 _revocation_service = TokenRevocationService(RedisCacheService())
+logger = get_logger(__name__)
 
 
 def _bearer_token(request: Request) -> str | None:
@@ -444,8 +450,23 @@ async def get_current_store(
     store_id: UUID,
     user_id: Annotated[UUID, Depends(require_store_owner)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Store:
-    """Get the current store, verifying ownership."""
+    """Get the current store, verifying ownership AND setting the RLS tenant.
+
+    Loading the store here is the one point on every store-scoped merchant
+    route where we know the authorised store — and therefore its tenant. We
+    set that tenant as the RLS context so Postgres row-level security can
+    enforce tenant isolation on this request. Merchant traffic arrives on the
+    apex host, so `TenantMiddleware` (which derives tenant from the Host
+    subdomain) never sets it; without this, RLS would filter every merchant
+    query to zero rows the moment the app connects as a non-superuser role.
+
+    This is inert while the API connects as the `postgres` superuser (which
+    bypasses RLS), so setting it now changes nothing observable — it is the
+    prerequisite that makes flipping to the enforcing app role safe. See
+    `docs/REports/RLS-enforcement.md`.
+    """
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise HTTPException(
@@ -457,6 +478,22 @@ async def get_current_store(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this store",
         )
+
+    # Set the tenant for RLS. `set_tenant_id` updates the contextvar (read by
+    # any session opened later in the request); we ALSO apply it to the
+    # already-open request session directly, because that session's GUC was
+    # set at creation time (before this dependency ran) when no tenant was
+    # known. Best-effort — a failure here must not break a legitimate request.
+    if store.tenant_id:
+        try:
+            set_tenant_id(store.tenant_id)
+            await db.execute(
+                text("SELECT set_config('app.current_tenant', :v, true)"),
+                {"v": str(store.tenant_id)},
+            )
+        except Exception:  # noqa: BLE001 — RLS wiring must never 500 a request
+            logger.warning("rls_tenant_context_set_failed", store_id=str(store_id))
+
     return store
 
 

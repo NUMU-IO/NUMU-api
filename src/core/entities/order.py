@@ -384,6 +384,22 @@ class Order(BaseEntity):
         return self.payment_status == PaymentStatus.PAID
 
     @property
+    def is_refundable(self) -> bool:
+        """Whether money can still be taken back off this order.
+
+        Deliberately wider than :attr:`is_paid`. Processing a partial refund
+        moves the order to ``PARTIALLY_REFUNDED``, so gating refund creation on
+        ``is_paid`` alone allowed exactly ONE partial refund per order and then
+        rejected every follow-up as "unpaid" — with the remaining balance still
+        sitting there. Whether there is anything *left* to refund is a separate
+        question, answered by the refundable-amount check at the call site.
+        """
+        return self.payment_status in (
+            PaymentStatus.PAID,
+            PaymentStatus.PARTIALLY_REFUNDED,
+        )
+
+    @property
     def is_fulfilled(self) -> bool:
         """Check if order is fully fulfilled."""
         return self.fulfillment_status == FulfillmentStatus.FULFILLED

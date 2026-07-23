@@ -1,3 +1,7 @@
+// Shared guards from @numueg/theme-kit (import+re-export: local binding + public export).
+import { asArray, asBool, asImageAlt, asImageUrl, asNumber, asString, localized, readBlocks } from "@numueg/theme-kit";
+export { asArray, asBool, asImageAlt, asImageUrl, asNumber, asString, localized, readBlocks };
+
 import { createContext, useContext } from "react";
 import type { SectionInstance } from "@numueg/theme-sdk";
 
@@ -46,32 +50,6 @@ export const PageDataContext = createContext<MountPageData | null>(null);
 export const usePageData = (): MountPageData | null =>
   useContext(PageDataContext);
 
-/**
- * ENG-3: pick the locale-appropriate default. Merchant-entered values still
- * win because callers do `asString(s.x) || localized(locale, en, ar)`.
- * Drives only the empty-state DEFAULT copy a section renders when the merchant
- * hasn't typed a value — under `?locale=ar` (RTL) Arabic shows, else English.
- */
-export function localized(locale: string | undefined, en: string, ar: string): string {
-  return (locale || "").toLowerCase().startsWith("ar") ? ar : en;
-}
-
-export function asString(v: unknown, fallback = ""): string {
-  return typeof v === "string" ? v : fallback;
-}
-
-export function asNumber(v: unknown, fallback = 0): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
-}
-
-export function asBool(v: unknown, fallback = false): boolean {
-  return typeof v === "boolean" ? v : fallback;
-}
-
-export function asArray<T = unknown>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
-}
-
 interface RawBlock {
   type?: string;
   disabled?: boolean;
@@ -90,35 +68,6 @@ export interface BlockNode {
   settings: Record<string, unknown>;
   blocks?: Record<string, RawBlock>;
   block_order?: string[];
-}
-
-/**
- * Read a section's blocks of a given type, in editor order, skipping
- * disabled ones. The customizer's block CRUD writes `instance.blocks` +
- * `instance.block_order`, so chrome components (header nav, footer columns)
- * MUST read from there — reading `instance.settings.<list>` silently ignores
- * everything the merchant adds in the editor. Returns each block's `settings`
- * bag (use asString / asImageUrl on the fields). Empty array when the section
- * has no blocks of that type → the caller falls back to its V2 defaults.
- * (Mirror of gilded / empire _shared.readBlocks.)
- */
-export function readBlocks(
-  instance: SectionInstance,
-  type: string,
-): Record<string, unknown>[] {
-  const inst = instance as unknown as {
-    blocks?: Record<string, RawBlock>;
-    block_order?: string[];
-  };
-  const blocks = inst.blocks ?? {};
-  const order =
-    inst.block_order && inst.block_order.length > 0
-      ? inst.block_order
-      : Object.keys(blocks);
-  return order
-    .map((id) => blocks[id])
-    .filter((b): b is RawBlock => !!b && b.type === type && !b.disabled)
-    .map((b) => b.settings ?? {});
 }
 
 /**
@@ -150,33 +99,6 @@ export function readBlockNodes(parent: unknown, type: string): BlockNode[] {
       block_order: b.block_order,
     }));
 }
-
-/**
- * Read an image-picker value. The editor stores image_picker settings as
- * either a plain URL string (legacy) or an `{ url, alt }` object (current).
- * Always returns a usable URL string — without this, sections that did
- * `src={s.image}` rendered `[object Object]` once a merchant uploaded an
- * image (the object shape), so the picture silently never appeared.
- */
-export function asImageUrl(v: unknown, fallback = ""): string {
-  if (typeof v === "string") return v;
-  if (v && typeof v === "object") {
-    const r = v as Record<string, unknown>;
-    if (typeof r.url === "string") return r.url;
-    if (typeof r.src === "string") return r.src;
-  }
-  return fallback;
-}
-
-/** Alt text for an image-picker value (only present on the object shape). */
-export function asImageAlt(v: unknown, fallback = ""): string {
-  if (v && typeof v === "object") {
-    const r = v as Record<string, unknown>;
-    if (typeof r.alt === "string") return r.alt;
-  }
-  return fallback;
-}
-
 
 // ── Non-destructive image transform (focal / zoom / rotation) ────────────────
 // Now provided by the SDK (@numueg/theme-sdk >= 0.11.0) instead of a local

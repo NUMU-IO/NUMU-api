@@ -63,8 +63,13 @@ class CreateRefundUseCase:
             log.warning("refund_create_failed", reason="order_not_in_store")
             raise EntityNotFoundError("Order", str(dto.order_id))
 
-        # Validate order is paid
-        if not order.is_paid:
+        # Validate the order has money on it that can be given back. Note
+        # `is_refundable`, not `is_paid`: a completed partial refund leaves the
+        # order PARTIALLY_REFUNDED, and gating on `is_paid` here meant a second
+        # partial refund was rejected as "unpaid" while the balance was still
+        # outstanding. The remaining-balance check below is what stops an
+        # over-refund.
+        if not order.is_refundable:
             log.warning("refund_create_failed", reason="order_not_paid")
             raise ValidationError("Cannot refund an unpaid order")
 

@@ -16,6 +16,7 @@ Authenticated customer routes:
 """
 
 from src.api.v1.routes.storefront.apps import router as apps_router
+from src.api.v1.routes.storefront.blogs import router as blogs_router
 from src.api.v1.routes.storefront.bundles import router as bundles_router
 from src.api.v1.routes.storefront.cart import router as cart_router
 from src.api.v1.routes.storefront.checkout import router as checkout_router
@@ -97,4 +98,5 @@ __all__ = [
     "whatsapp_optin_router",
     "bundles_router",
     "geocode_router",
+    "blogs_router",
 ]

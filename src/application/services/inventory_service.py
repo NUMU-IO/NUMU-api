@@ -28,6 +28,8 @@ from src.core.entities.inventory_transfer import (
     InventoryTransfer,
     TransferStatus,
 )
+from src.core.exceptions import EntityNotFoundError
+from src.infrastructure.database.models.tenant.location import LocationModel
 from src.infrastructure.database.models.tenant.variant import VariantModel
 from src.infrastructure.repositories.inventory_repository import (
     InventoryLevelRepository,
@@ -45,6 +47,44 @@ class InventoryService:
 
     # ── Levels ────────────────────────────────────────────────────
 
+    async def _assert_owned_by_store(
+        self, store_id: UUID, variant_id: UUID, location_id: UUID
+    ) -> None:
+        """Refuse a level write whose variant or location belongs to another store.
+
+        `set_level` used to take `variant_id`/`location_id` straight from the
+        request path and never check them against the authenticated store. The
+        `inventory_levels` unique key is (variant_id, location_id) with store_id
+        ABSENT, so an upsert would overwrite a FOREIGN store's stock row and the
+        rollup would rewrite that store's variant total — a cross-owner write
+        (CL-1 class, 2026-07-21). The route authorises the path store; this
+        makes the ids obey it.
+        """
+        await self.assert_variant_in_store(store_id, variant_id)
+        await self.assert_location_in_store(store_id, location_id)
+
+    async def assert_variant_in_store(self, store_id: UUID, variant_id: UUID) -> None:
+        """404 unless the variant belongs to this store. Public so the read
+        routes can apply the same rule the write path does — a foreign id
+        should look absent, not return an empty list."""
+        variant = (
+            await self._session.execute(
+                select(VariantModel.store_id).where(VariantModel.id == variant_id)
+            )
+        ).scalar_one_or_none()
+        if variant is None or str(variant) != str(store_id):
+            raise EntityNotFoundError("Variant", str(variant_id))
+
+    async def assert_location_in_store(self, store_id: UUID, location_id: UUID) -> None:
+        """404 unless the location belongs to this store."""
+        location = (
+            await self._session.execute(
+                select(LocationModel.store_id).where(LocationModel.id == location_id)
+            )
+        ).scalar_one_or_none()
+        if location is None or str(location) != str(store_id):
+            raise EntityNotFoundError("Location", str(location_id))
+
     async def set_level(
         self,
         *,
@@ -56,6 +96,7 @@ class InventoryService:
     ) -> int:
         """Set the level at one location, then refresh the variant's
         total inventory_quantity. Returns the new variant total."""
+        await self._assert_owned_by_store(store_id, variant_id, location_id)
         await self._levels.upsert(
             tenant_id=tenant_id,
             store_id=store_id,

@@ -428,6 +428,57 @@ async def revalidate_on_page_change(subdomain: str, store_id: str, handle: str) 
     )
 
 
+async def revalidate_on_blog_change(
+    subdomain: str,
+    store_id: str,
+    blog_handle: str,
+    article_handle: str | None = None,
+) -> None:
+    """Call when a blog or article is created/updated/deleted/published.
+
+    Busts the storefront's cached blog fetches (tagged ``blogs-{store_id}``)
+    plus the specific paths so scheduled publishes appear without waiting
+    out the ISR window.
+    """
+    paths = ["/blogs", f"/blogs/{blog_handle}"]
+    if article_handle:
+        paths.append(f"/blogs/{blog_handle}/{article_handle}")
+    await revalidate_store(
+        subdomain=subdomain,
+        paths=paths,
+        tags=[f"blogs-{store_id}"],
+    )
+
+
+async def revalidate_on_metafield_change(
+    subdomain: str,
+    store_id: str,
+    product_slugs: list[str] | None = None,
+) -> None:
+    """Call when a metafield definition's visibility changes, a definition is
+    deleted, or a value is set/unset.
+
+    Metafields ride on the *product detail* payload, which the storefront tags
+    both per-product (``product:{store_id}:{slug}``) and store-wide
+    (``products:{store_id}``) — so the store-wide tag alone reaches every PDP.
+    We post the per-product tags too when we know which owners changed, because
+    the store-wide tag is the newer of the two and an older storefront build may
+    not carry it yet.
+
+    This matters more than an ordinary cache miss: flipping a field to private
+    and having it keep rendering is a data leak with a stale-cache excuse. The
+    API-side Redis sweep is not enough — the shopper-facing surface is a
+    separate cache in a separate process.
+    """
+    tags: list[str] = [
+        f"products:{store_id}",
+        f"categories:{store_id}",
+    ]
+    for slug in product_slugs or []:
+        tags.append(f"product:{store_id}:{slug}")
+    await revalidate_store(subdomain=subdomain, paths=["/products"], tags=tags)
+
+
 async def revalidate_on_category_change(subdomain: str, store_id: str) -> None:
     """Call when a category is created/updated/deleted.
 

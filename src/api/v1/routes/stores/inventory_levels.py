@@ -81,9 +81,14 @@ async def list_levels(store_id: UUID):
 async def list_levels_for_variant(store_id: UUID, variant_id: UUID):
     async with AsyncSessionLocal() as session:
         svc = InventoryService(session)
+        # Same ownership rule the sibling PUT applies. Post-filtering alone
+        # never leaked (the rows are dropped below), but it answered a foreign
+        # variant id with `200 []` — "this variant has no stock here" — where
+        # the write path says 404. Two different answers to the same question
+        # about the same id is a contract merchants and integrations read as a
+        # real empty result.
+        await svc.assert_variant_in_store(store_id, variant_id)
         levels = await svc._levels.list_for_variant(variant_id)
-    # Filter to this store for safety even though variant FK already
-    # scopes it — the route's path scope is the store, not the variant.
     levels = [level for level in levels if level.store_id == store_id]
     return SuccessResponse(
         data=[_to_response(level) for level in levels],
@@ -100,6 +105,7 @@ async def list_levels_for_variant(store_id: UUID, variant_id: UUID):
 async def list_levels_for_location(store_id: UUID, location_id: UUID):
     async with AsyncSessionLocal() as session:
         svc = InventoryService(session)
+        await svc.assert_location_in_store(store_id, location_id)
         levels = await svc._levels.list_for_location(location_id)
     levels = [level for level in levels if level.store_id == store_id]
     return SuccessResponse(

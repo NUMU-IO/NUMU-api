@@ -30,11 +30,20 @@ class UpdateProductUseCase:
         product_id: UUID,
         dto: UpdateProductDTO,
         user_id: UUID,
+        store_id: UUID,
     ) -> ProductDTO:
-        """Update a product."""
+        """Update a product.
+
+        `store_id` is REQUIRED and is the store the caller was authorised for
+        on the request path. Without it this resolved the store FROM THE
+        PRODUCT ROW and checked only `owner_id`, so a merchant who owns two
+        stores could PATCH a product of store B via store A's authenticated
+        path (CL-1 cross-store write, 2026-07-21). A product outside the path
+        store is reported not-found, never forbidden, so ids can't be probed.
+        """
         # Get product
         product = await self.product_repository.get_by_id(product_id)
-        if not product:
+        if not product or product.store_id != store_id:
             raise EntityNotFoundError("Product", str(product_id))
 
         # Get store and verify ownership

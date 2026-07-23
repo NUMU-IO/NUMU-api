@@ -239,7 +239,8 @@ async def delete_auto_match_rule(
 
     async with AsyncSessionLocal() as session:
         repo = CampaignAutoMatchRepository(session)
-        affected = await repo.delete_group(group_id)
+        # Scope the delete to the authorised campaign, not group_id alone.
+        affected = await repo.delete_group(group_id, campaign_id=campaign_id)
         if affected == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

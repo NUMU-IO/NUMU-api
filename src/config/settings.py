@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     postgres_password: str = "postgres"
     postgres_db: str = "numu"
 
+    # RLS enforcement (gated). When set, the REQUEST engine connects as this
+    # NON-SUPERUSER role so Row-Level Security actually applies (a superuser
+    # bypasses every policy). Migrations still run as postgres_user (they need
+    # DDL). Unset by default → behaves exactly as before (superuser, RLS inert).
+    # ⚠️ Only set these AFTER validating every tenant-touching path sets tenant
+    # context or app.rls_bypass — see docs/REports/RLS-enforcement.md. Flipping
+    # blind blanks stores whose queries run without context.
+    db_app_user: str | None = None
+    db_app_password: str | None = None
+
     # Connection pool (total max = pool_size + max_overflow PER PROCESS)
     # API + Celery + admin each have their own pool — keep under Postgres max_connections
     # Bumped 2026-04-23 after /api/v1/stores/ started returning 500s under
@@ -139,13 +149,24 @@ class Settings(BaseSettings):
         return ctx
 
     @property
+    def rls_enforced(self) -> bool:
+        """True when the request engine connects as the non-superuser app role."""
+        return bool(self.db_app_user and self.db_app_password)
+
+    @property
     def database_url(self) -> str:
-        """Construct async PostgreSQL connection URL."""
+        """Async PostgreSQL URL for the REQUEST engine.
+
+        Uses the non-superuser app role when configured (RLS enforced), else
+        the default role (RLS inert — the superuser bypasses policies).
+        """
+        user = self.db_app_user or self.postgres_user
+        password = self.db_app_password or self.postgres_password
         return str(
             PostgresDsn.build(
                 scheme="postgresql+asyncpg",
-                username=self.postgres_user,
-                password=self.postgres_password,
+                username=user,
+                password=password,
                 host=self.postgres_host,
                 port=self.postgres_port,
                 path=self.postgres_db,

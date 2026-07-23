@@ -1677,10 +1677,18 @@ async def login_customer(
     response: Response,
 ):
     """Authenticate customer and return tokens."""
+    from src.application.services.lockout_service import AccountLockoutService
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
     use_case = LoginCustomerUseCase(
         customer_repository=customer_repo,
         password_service=password_service,
         token_service=token_service,
+        # Per-account lockout, matching merchant and admin login. The per-IP
+        # rate limit alone does not stop credential stuffing from rotating
+        # IPs. Fails OPEN if Redis is down — a cache outage must not lock
+        # every shopper out of their account.
+        lockout_service=AccountLockoutService(RedisCacheService()),
     )
 
     dto = CustomerLoginDTO(

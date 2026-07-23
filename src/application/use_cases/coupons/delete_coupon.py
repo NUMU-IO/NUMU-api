@@ -18,7 +18,7 @@ class DeleteCouponUseCase:
         self.coupon_repository = coupon_repository
         self.store_repository = store_repository
 
-    async def execute(self, coupon_id: UUID, user_id: UUID) -> bool:
+    async def execute(self, coupon_id: UUID, user_id: UUID, store_id: UUID) -> bool:
         """Delete a coupon.
 
         Args:
@@ -32,8 +32,10 @@ class DeleteCouponUseCase:
             EntityNotFoundError: If coupon not found.
             AuthorizationError: If user doesn't own the store.
         """
+        # store_id REQUIRED — foreign coupon is not-found, never forbidden
+        # (CL-1 cross-store write, 2026-07-21).
         coupon = await self.coupon_repository.get_by_id(coupon_id)
-        if not coupon:
+        if not coupon or coupon.store_id != store_id:
             raise EntityNotFoundError("Coupon", str(coupon_id))
 
         # Verify store ownership

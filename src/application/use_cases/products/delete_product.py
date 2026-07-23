@@ -22,19 +22,24 @@ class DeleteProductUseCase:
         self.store_repository = store_repository
         self.event_bus = event_bus
 
-    async def execute(self, product_id: UUID, user_id: UUID) -> bool:
-        """Delete a product."""
+    async def execute(self, product_id: UUID, user_id: UUID, store_id: UUID) -> bool:
+        """Delete a product.
+
+        `store_id` is REQUIRED — the authorised path store. Previously the
+        store was resolved from the product row and only `owner_id` compared,
+        so a merchant owning two stores could delete store B's product through
+        store A's path (CL-1 cross-store write, 2026-07-21). A product outside
+        the path store is not-found, never forbidden.
+        """
         # Get product
         product = await self.product_repository.get_by_id(product_id)
-        if not product:
+        if not product or product.store_id != store_id:
             raise EntityNotFoundError("Product", str(product_id))
 
         # Get store and verify ownership
         store = await self.store_repository.get_by_id(product.store_id)
         if not store or store.owner_id != user_id:
             raise AuthorizationError("You don't have permission to delete this product")
-
-        store_id = product.store_id
 
         # Delete product
         result = await self.product_repository.delete(product_id)
