@@ -277,6 +277,16 @@ async def _send_event(
         if not tiktok_cfg.get("api_enabled"):
             return {"status": "skipped", "reason": "api_disabled"}
 
+        # TikTok expects a page URL on web-sourced events (it lands as
+        # ``page.url`` below) and, like Meta, degrades attribution without
+        # it. Enqueue sites with no page context — the orphan sweep, the
+        # test-event endpoint — pass None, so default to the store's public
+        # origin here instead of at each call site. ``getattr`` because the
+        # signature only promises "the store object", not the entity that
+        # carries the ``store_url`` property.
+        if not event_source_url and action_source.lower() == "web":
+            event_source_url = getattr(store, "store_url", None)
+
         # Debug-mode auto-attaches the saved test_event_code until
         # debug_mode_expires_at passes. Caller's code (e.g. the test-event
         # endpoint) wins if set.

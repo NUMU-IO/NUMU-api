@@ -18,8 +18,10 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_store_repository
+from src.api.dependencies.database import get_db
 from src.api.v1.routes.storefront.meta_feed import _build_feed_xml
 from src.core.entities.product import ProductStatus
 from src.core.entities.store import StoreStatus
@@ -95,6 +97,7 @@ def _product_to_tiktok_feed_item(
 async def tiktok_catalog_feed(
     subdomain: Annotated[str, Path(description="Store subdomain")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Serve the product catalog as a TikTok-compatible RSS XML feed."""
     normalized = subdomain.lower()
@@ -105,9 +108,12 @@ async def tiktok_catalog_feed(
             detail="Store not found",
         )
 
+    # Session injected, not reached for: `store_repo._session` does not exist
+    # (StoreRepository assigns `self.session`), so this raised AttributeError
+    # before any query ran and the feed 500'd for every store. Same
+    # request-scoped session, via the public contract. See meta_feed.py.
     from sqlalchemy import text
 
-    session = store_repo._session  # noqa: SLF001 — internal but stable
     await session.execute(
         text("SELECT set_config('app.current_tenant', :t, true)"),
         {"t": str(store.tenant_id)},

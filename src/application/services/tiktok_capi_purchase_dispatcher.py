@@ -38,9 +38,13 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
 
     PII is SHA-256-hashed downstream (``tiktok/hashing.py``); we forward
     raw values here. ``ttclid`` / ``ttp`` are pulled from the order
-    metadata snapshot captured at checkout-create time (the storefront
-    stamps them from the ``ttclid`` cookie), so the server-side conversion
-    carries the click id even when the browser fire is blocked.
+    metadata snapshot captured at checkout-create time — the checkout
+    route (``storefront/checkout.py``) reads the ``ttclid`` / ``_ttp``
+    cookies off the buyer's request and stamps them onto the order, so
+    the server-side conversion carries the click id even when the browser
+    fire is blocked. They are absent on orders created before that
+    snapshot shipped, and on paths with no browser request at all
+    (merchant-created / imported orders) — TikTok drops null fields.
     """
     from src.infrastructure.external_services.meta.country_iso import (
         canonicalize_country,
@@ -143,6 +147,17 @@ async def enqueue_tiktok_capi_event_for_order(
     custom_data = _build_custom_data_from_order(order)
     event_time = int(paid_at.timestamp())
 
+    # TikTok reads this as ``page.url`` and attributes the conversion with
+    # it. The Celery task falls back to the store origin, but we have the
+    # store and the order here, so send the real confirmation page
+    # (numu-storefront: app/[domain]/checkout/[order_id]/thank-you). Guarded
+    # because an unresolvable store origin would yield a malformed URL,
+    # which is worse than sending none.
+    store_origin = getattr(store, "store_url", None)
+    event_source_url = (
+        f"{store_origin}/checkout/{order.id}/thank-you" if store_origin else None
+    )
+
     for pixel in pixels:
         tiktok_capi_send_event.delay(
             store_id=str(order.store_id),
@@ -150,7 +165,7 @@ async def enqueue_tiktok_capi_event_for_order(
             event_name=event_name,
             event_id=event_id,
             event_time=event_time,
-            event_source_url=None,
+            event_source_url=event_source_url,
             user_data=user_data,
             custom_data=custom_data,
             action_source="web",

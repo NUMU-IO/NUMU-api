@@ -3961,7 +3961,13 @@ async def send_meta_test_event(
         event_name="Purchase",
         event_id=event_id,
         event_time=int(datetime.now(UTC).timestamp()),
-        event_source_url=None,
+        # The test event is the FIRST thing a merchant validates in Events
+        # Manager — arriving without event_source_url on an
+        # ``action_source: website`` event shows up there as a "Missing
+        # event_source_url" warning and reads as a broken integration. The
+        # store's public origin is the honest source for a synthetic event
+        # (there is no real page behind it).
+        event_source_url=store.store_url,
         user_data=synthetic_user_data,
         custom_data={
             "value": 0.01,
@@ -4512,7 +4518,10 @@ async def send_tiktok_test_event(
         event_name="CompletePayment",
         event_id=event_id,
         event_time=int(datetime.now(UTC).timestamp()),
-        event_source_url=None,
+        # Same reasoning as the Meta test event: TikTok wants a page URL on
+        # web-sourced events, and the store origin is the honest source for
+        # a synthetic one. Lands as ``page.url`` in the Events API payload.
+        event_source_url=store.store_url,
         user_data=synthetic_user_data,
         custom_data={
             "value": 0.01,
