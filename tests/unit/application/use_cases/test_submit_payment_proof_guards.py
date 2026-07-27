@@ -287,6 +287,7 @@ class TestGuardsShortCircuitBeforeUpload:
         uc, storage = _build_use_case(order=order, intent=intent)
         with pytest.raises(HTTPException) as exc:
             await uc.execute(
+                store_id=order.store_id,
                 order_id=order.id,
                 customer_id=customer_id,
                 image_bytes=b"fake",

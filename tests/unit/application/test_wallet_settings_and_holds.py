@@ -167,6 +167,10 @@ async def test_golive_gate_blocks_new_trial_tenants_only(test_session, monkeypat
 
     monkeypatch.setattr(get_settings(), "ff_golive_gate", True)
     service = WalletService(test_session, cache=None)
+    # `cache=None` still attaches Redis when redis_host is configured, and the
+    # gate answer is cached for 60s — which would serve a stale "not_live"
+    # after the tenant's plan changes below. Read the live state instead.
+    service._cache = None
 
     # New trial tenant (no golive_exempt flag) -> not live.
     gated = await _mk_tenant(test_session, plan="trial")

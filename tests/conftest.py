@@ -141,6 +141,17 @@ def _patch_metadata_for_sqlite(metadata):
                     fk._colspec = f"{parts[1]}.{parts[2]}"
 
 
+# Patch at IMPORT time, not on first `test_engine` use. SQLAlchemy memoizes a
+# relationship's eager-loader statement the first time its mapper is configured,
+# so a test that only builds `select(UserModel)` against a mocked session (no
+# engine, no fixture) freezes `FROM public.users` into the selectin loader for
+# `TenantModel.owner`. The strip would then come too late and every later query
+# that loads a tenant dies with "no such table: public.users" — a pure
+# test-ordering artifact. `src.main` is imported above, so every model is
+# already registered on Base.metadata by the time this runs.
+_patch_metadata_for_sqlite(Base.metadata)
+
+
 @pytest_asyncio.fixture(scope="function")
 async def test_engine():
     """Create a test database engine."""
@@ -150,7 +161,8 @@ async def test_engine():
         poolclass=StaticPool,
     )
 
-    # Patch PostgreSQL-specific features for SQLite compatibility
+    # No-op after the import-time call above; kept so the fixture stays
+    # self-contained if the module-level call is ever moved.
     _patch_metadata_for_sqlite(Base.metadata)
 
     async with engine.begin() as conn:

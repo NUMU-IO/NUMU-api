@@ -16,7 +16,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from src.application.services.shipping_resolver import ShippingResolver
+from src.application.services.shipping_resolver import (
+    DEFAULT_SHIPPING_RATE_ID,
+    ShippingResolver,
+)
 from src.core.entities.shipping_rate import RateType, ShippingRate
 from src.core.entities.shipping_zone import ShippingZone
 from src.core.interfaces.repositories.shipping_zone_repository import (
@@ -454,7 +457,9 @@ async def test_cod_fee_adds_to_amount_when_requested():
 
 
 @pytest.mark.asyncio
-async def test_uncovered_governorate_returns_no_options():
+async def test_uncovered_governorate_falls_back_to_free_default():
+    """No zone reaches the destination → the free "ships everywhere"
+    default, never a dead-end — unless the merchant restricts to zones."""
     zone = _zone(governorate_codes=["EG-C"])  # only covers Cairo
     rate = _flat_rate(zone.id, amount=5000)
     resolver = _resolver_with(zone, [rate])
@@ -465,8 +470,21 @@ async def test_uncovered_governorate_returns_no_options():
         cart_subtotal_cents=10000,
         cart_weight_g=0,
     )
-    assert result.options == []
+    # The Cairo rate must NOT leak to an address it doesn't cover.
+    assert [o.rate_id for o in result.options] == [DEFAULT_SHIPPING_RATE_ID]
+    assert result.options[0].amount_cents == 0
     assert result.free_shipping_progress is None
+
+    # restrict_to_zones: ship ONLY where a zone is configured.
+    restricted = await resolver.resolve_options(
+        store_id=STORE_ID,
+        governorate_code="EG-ASN",
+        cart_subtotal_cents=10000,
+        cart_weight_g=0,
+        restrict_to_zones=True,
+    )
+    assert restricted.options == []
+    assert restricted.free_shipping_progress is None
 
 
 # ─── Multiple rates: sort order preserved ────────────────────────────

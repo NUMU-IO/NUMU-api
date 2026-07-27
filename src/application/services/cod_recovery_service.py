@@ -132,5 +132,18 @@ async def schedule_cod_recovery_offer(
         )
         return True
     except Exception as exc:  # noqa: BLE001 — never break the created order
-        logger.warning("cod_recovery_offer_failed: %s", exc)
+        # Keyword fields, NOT printf args: `get_logger` returns `Log`, whose
+        # `warning(self, event: str, **kwargs)` accepts no positional extras
+        # (src/core/logging.py). The old `logger.warning("...: %s", exc)` made
+        # this handler raise `TypeError` instead of swallowing — so the one
+        # function documented as "never raises" raised, and because
+        # `schedule_cod_recovery_offer` is awaited unguarded in the checkout
+        # flow AFTER the order row is committed, any hiccup here turned a
+        # successful order into a 500 for the shopper (and an invitation to
+        # order again). Introduced when logging moved to the keyword-only
+        # `Log`; the printf call site was not migrated with it.
+        logger.warning(
+            "cod_recovery_offer_failed",
+            extra={"order_id": str(order.id), "error": str(exc)},
+        )
         return False

@@ -25,7 +25,9 @@ class TestCreateStoreRequest:
         assert request.subdomain == "mystore"
         assert request.slug is None
         assert request.description is None
-        assert request.default_currency == "EGP"  # Default
+        # No hardcoded default: an omitted currency is resolved downstream from
+        # the store's market/country (EGP for EG, SAR for SA).
+        assert request.default_currency is None
 
     def test_valid_full_store(self):
         """Test creating store with all fields."""

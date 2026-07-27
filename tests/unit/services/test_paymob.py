@@ -1,13 +1,32 @@
-"""Unit tests for Paymob payment service."""
+"""Unit tests for Paymob payment service (Intention API)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.core.exceptions import PaymentError
 from src.core.interfaces.services.payment_service import PaymentProvider
 from src.infrastructure.external_services.paymob.payment_service import (
     PaymobPaymentService,
 )
+
+
+def _mock_client(*, response):
+    """Patch httpx.AsyncClient so no request ever leaves the machine."""
+    client = patch("httpx.AsyncClient")
+    mock = client.start()
+    ctx = mock.return_value.__aenter__.return_value
+    ctx.post = AsyncMock(return_value=response)
+    ctx.get = AsyncMock(return_value=response)
+    return client, ctx
+
+
+def _response(status_code: int, payload: dict | None = None, text: str = ""):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = payload if payload is not None else {}
+    resp.text = text
+    return resp
 
 
 class TestPaymobPaymentService:
@@ -16,138 +35,128 @@ class TestPaymobPaymentService:
     def setup_method(self):
         """Set up test fixtures."""
         self.service = PaymobPaymentService(
-            api_key="test_api_key",
-            integration_id="123456",
-            iframe_id="789012",
+            secret_key="test_secret_key",
+            public_key="test_public_key",
             hmac_secret="test_hmac_secret",
+            card_integration_id="123456",
+            wallet_integration_id="789012",
         )
 
     def test_provider_is_paymob(self):
         """Test provider property returns PAYMOB."""
         assert self.service.provider == PaymentProvider.PAYMOB
 
-    def test_get_iframe_url(self):
-        """Test getting iframe URL."""
-        url = self.service.get_iframe_url("payment_key_123")
-        assert "789012" in url  # iframe_id
-        assert "payment_key_123" in url
-        assert "accept.paymob.com" in url
-
-    def test_get_iframe_url_no_iframe_id(self):
-        """Test iframe URL raises when no iframe ID."""
-        service = PaymobPaymentService(
-            api_key="test",
-            integration_id="123",
-            iframe_id=None,
-            hmac_secret="test",
-        )
-        with pytest.raises(Exception):
-            service.get_iframe_url("key")
-
     @pytest.mark.asyncio
     async def test_create_payment_intent(self):
-        """Test creating a Paymob payment intent."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            with patch.object(
-                self.service, "_create_paymob_order", new_callable=AsyncMock
-            ) as mock_order:
-                with patch.object(
-                    self.service, "_create_payment_key", new_callable=AsyncMock
-                ) as mock_key:
-                    mock_auth.return_value = "auth_token_123"
-                    mock_order.return_value = "order_123"
-                    mock_key.return_value = "payment_key_456"
+        """Test creating a Paymob intention returns the client secret."""
+        response = _response(
+            201,
+            {
+                "client_secret": "client_secret_456",
+                "intention_detail": {"id": "intention_123"},
+            },
+        )
+        patcher, _ = _mock_client(response=response)
+        try:
+            intent = await self.service.create_payment_intent(
+                amount=10000,  # 100 EGP
+                currency="EGP",
+                customer_email="test@example.com",
+                metadata={"order_id": "order-123"},
+            )
+        finally:
+            patcher.stop()
 
-                    intent = await self.service.create_payment_intent(
-                        amount=10000,  # 100 EGP
-                        currency="EGP",
-                        customer_email="test@example.com",
-                        metadata={"order_id": "order-123"},
-                    )
-
-                    assert intent.id == "order_123"
-                    assert intent.amount == 10000
-                    assert intent.currency == "EGP"
-                    assert intent.status == "pending"
-                    assert intent.provider == PaymentProvider.PAYMOB
-                    assert intent.client_secret == "payment_key_456"
+        assert intent.id == "intention_123"
+        assert intent.amount == 10000
+        assert intent.currency == "EGP"
+        assert intent.status == "pending"
+        assert intent.provider == PaymentProvider.PAYMOB
+        assert intent.client_secret == "client_secret_456"
 
     @pytest.mark.asyncio
-    async def test_create_card_payment(self):
-        """Test creating a card payment with PaymobPaymentKey."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            with patch.object(
-                self.service, "_create_paymob_order", new_callable=AsyncMock
-            ) as mock_order:
-                with patch.object(
-                    self.service, "_create_payment_key", new_callable=AsyncMock
-                ) as mock_key:
-                    mock_auth.return_value = "auth_token_123"
-                    mock_order.return_value = "order_456"
-                    mock_key.return_value = "payment_key_789"
+    async def test_create_payment_intent_posts_expected_payload(self):
+        """Amount stays in cents, our order id is echoed, and both
+        configured integration IDs are offered as payment methods."""
+        response = _response(
+            201, {"client_secret": "cs", "intention_detail": {"id": "i1"}}
+        )
+        patcher, ctx = _mock_client(response=response)
+        try:
+            await self.service.create_payment_intent(
+                amount=50000,
+                currency="egp",
+                customer_email="buyer@example.com",
+                metadata={"order_id": "my-order-123"},
+            )
+        finally:
+            patcher.stop()
 
-                    result = await self.service.create_card_payment(
-                        amount=50000,
-                        currency="EGP",
-                        customer_email="test@example.com",
-                        order_id="my-order-123",
-                    )
+        payload = ctx.post.call_args.kwargs["json"]
+        assert payload["amount"] == 50000
+        assert payload["currency"] == "EGP"
+        assert payload["payment_methods"] == [123456, 789012]
+        assert payload["merchant_order_id"] == "my-order-123"
+        assert payload["special_reference"] == "my-order-123"
+        assert payload["billing_data"]["email"] == "buyer@example.com"
+        headers = ctx.post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Token test_secret_key"
 
-                    assert result.payment_key == "payment_key_789"
-                    assert result.order_id == "order_456"
-                    assert result.amount == 50000
-                    assert result.provider == PaymentProvider.PAYMOB
+    @pytest.mark.asyncio
+    async def test_create_payment_intent_without_secret_key_raises(self):
+        """No secret key configured → PaymentError before any HTTP call."""
+        service = PaymobPaymentService(card_integration_id="123")
+        with pytest.raises(PaymentError):
+            await service.create_payment_intent(amount=1000, currency="EGP")
+
+    @pytest.mark.asyncio
+    async def test_create_payment_intent_without_integration_id_raises(self):
+        """No card integration ID configured → PaymentError."""
+        service = PaymobPaymentService(secret_key="k")
+        with pytest.raises(PaymentError):
+            await service.create_payment_intent(amount=1000, currency="EGP")
+
+    @pytest.mark.asyncio
+    async def test_create_payment_intent_surfaces_paymob_detail(self):
+        """A rejection surfaces Paymob's own reason to the caller."""
+        response = _response(
+            400,
+            {"detail": "incorrect combination of Integration ID + Currency"},
+            text='{"detail": "..."}',
+        )
+        patcher, _ = _mock_client(response=response)
+        try:
+            with pytest.raises(PaymentError, match="incorrect combination"):
+                await self.service.create_payment_intent(
+                    amount=1000, currency="EGP", metadata={"order_id": "o1"}
+                )
+        finally:
+            patcher.stop()
 
     @pytest.mark.asyncio
     async def test_confirm_payment_success(self):
-        """Test confirming a paid Paymob payment."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            mock_auth.return_value = "auth_token"
+        """Test confirming a confirmed Paymob intention."""
+        response = _response(200, {"intention_detail": {"status": "confirmed"}})
+        patcher, _ = _mock_client(response=response)
+        try:
+            result = await self.service.confirm_payment("intention_123")
+        finally:
+            patcher.stop()
 
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.json.return_value = {
-                    "paid_amount_cents": 10000,
-                    "amount_cents": 10000,
-                }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                    return_value=mock_response
-                )
-
-                result = await self.service.confirm_payment("order_123")
-
-                assert result.success is True
-                assert result.payment_id == "order_123"
+        assert result.success is True
+        assert result.payment_id == "intention_123"
 
     @pytest.mark.asyncio
     async def test_confirm_payment_not_paid(self):
-        """Test confirming an unpaid payment."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            mock_auth.return_value = "auth_token"
+        """Test confirming an unpaid intention."""
+        response = _response(200, {"intention_detail": {"status": "pending"}})
+        patcher, _ = _mock_client(response=response)
+        try:
+            result = await self.service.confirm_payment("intention_123")
+        finally:
+            patcher.stop()
 
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.json.return_value = {
-                    "paid_amount_cents": 0,
-                    "amount_cents": 10000,
-                }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                    return_value=mock_response
-                )
-
-                result = await self.service.confirm_payment("order_123")
-
-                assert result.success is False
+        assert result.success is False
 
     def test_verify_webhook_signature_valid(self):
         """Test verifying valid webhook signature."""
@@ -228,9 +237,8 @@ class TestPaymobPaymentService:
     def test_verify_webhook_signature_no_secret(self):
         """Test webhook verification without secret configured."""
         service = PaymobPaymentService(
-            api_key="test",
-            integration_id="123",
-            iframe_id="456",
+            secret_key="test",
+            card_integration_id="123",
             hmac_secret=None,
         )
         result = service.verify_webhook_signature(b"{}", "sig")
@@ -239,85 +247,64 @@ class TestPaymobPaymentService:
     @pytest.mark.asyncio
     async def test_refund_payment(self):
         """Test refunding a Paymob payment."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            mock_auth.return_value = "auth_token"
+        response = _response(200, {"id": "refund_123"})
+        patcher, ctx = _mock_client(response=response)
+        try:
+            result = await self.service.refund_payment("txn_123", amount=5000)
+        finally:
+            patcher.stop()
 
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.json.return_value = {"id": "refund_123"}
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock(
-                    return_value=mock_response
-                )
-
-                result = await self.service.refund_payment("txn_123", amount=5000)
-
-                assert result.success is True
-                assert result.refund_id == "refund_123"
+        assert result.success is True
+        assert result.refund_id == "refund_123"
+        # The refund is scoped to the transaction and the requested amount.
+        body = ctx.post.call_args.kwargs["json"]
+        assert body["transaction_id"] == "txn_123"
+        assert body["amount_cents"] == 5000
 
     @pytest.mark.asyncio
     async def test_cancel_payment(self):
         """Test cancelling/voiding a Paymob payment."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            mock_auth.return_value = "auth_token"
+        response = _response(200, {})
+        patcher, _ = _mock_client(response=response)
+        try:
+            result = await self.service.cancel_payment("order_123")
+        finally:
+            patcher.stop()
 
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock(
-                    return_value=mock_response
-                )
-
-                result = await self.service.cancel_payment("order_123")
-
-                assert result.success is True
+        assert result.success is True
 
     @pytest.mark.asyncio
     async def test_get_payment_status_paid(self):
         """Test getting payment status - paid."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            mock_auth.return_value = "auth_token"
+        response = _response(200, {"intention_detail": {"status": "confirmed"}})
+        patcher, _ = _mock_client(response=response)
+        try:
+            status = await self.service.get_payment_status("intention_123")
+        finally:
+            patcher.stop()
 
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.json.return_value = {
-                    "paid_amount_cents": 10000,
-                    "amount_cents": 10000,
-                    "is_cancel": False,
-                }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                    return_value=mock_response
-                )
-
-                status = await self.service.get_payment_status("order_123")
-                assert status == "paid"
+        assert status == "paid"
 
     @pytest.mark.asyncio
     async def test_get_payment_status_pending(self):
         """Test getting payment status - pending."""
-        with patch.object(
-            self.service, "_get_auth_token", new_callable=AsyncMock
-        ) as mock_auth:
-            mock_auth.return_value = "auth_token"
+        response = _response(200, {"intention_detail": {"status": "pending"}})
+        patcher, _ = _mock_client(response=response)
+        try:
+            status = await self.service.get_payment_status("intention_123")
+        finally:
+            patcher.stop()
 
-            with patch("httpx.AsyncClient") as mock_client:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.json.return_value = {
-                    "paid_amount_cents": 0,
-                    "amount_cents": 10000,
-                    "is_cancel": False,
-                }
-                mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                    return_value=mock_response
-                )
+        assert status == "pending"
 
-                status = await self.service.get_payment_status("order_123")
-                assert status == "pending"
+    @pytest.mark.asyncio
+    async def test_get_payment_status_cancelled(self):
+        """Test getting payment status - voided/cancelled."""
+        response = _response(200, {"intention_detail": {"status": "voided"}})
+        patcher, _ = _mock_client(response=response)
+        try:
+            status = await self.service.get_payment_status("intention_123")
+        finally:
+            patcher.stop()
+
+        assert status == "cancelled"

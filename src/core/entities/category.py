@@ -19,6 +19,11 @@ class Category(BaseEntity):
     tenant_id: UUID | None = None
     name: str
     slug: str
+    # Every slug this category ever had — a renamed collection would
+    # otherwise 404 its indexed URL. The storefront resolves an old slug
+    # back to this category and 301s to the canonical URL. Capped on write
+    # — see core/utils/slug_history.py.
+    previous_slugs: list[str] = Field(default_factory=list)
     description: str | None = None
     image_url: str | None = None
     parent_id: UUID | None = None

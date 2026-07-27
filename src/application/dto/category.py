@@ -1,6 +1,6 @@
 """Category DTOs."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -27,6 +27,10 @@ class CategoryDTO(BaseDTO):
     product_count: int
     created_at: datetime
     updated_at: datetime
+    # Slugs this category has been renamed away from. Published so the
+    # storefront — which resolves a collection out of the full list rather
+    # than through a by-slug endpoint — can match an old URL and 301 it.
+    previous_slugs: list[str] = field(default_factory=list)
 
     @classmethod
     def from_entity(cls, entity: Category, product_count: int = 0) -> "CategoryDTO":
@@ -36,6 +40,7 @@ class CategoryDTO(BaseDTO):
             store_id=entity.store_id,
             name=entity.name,
             slug=entity.slug,
+            previous_slugs=list(entity.previous_slugs or []),
             description=entity.description,
             image_url=entity.image_url,
             parent_id=entity.parent_id,

@@ -88,7 +88,9 @@ class TestConfigureCredentialsSuccess:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             # Setup validator mock
             mock_validator = AsyncMock()
@@ -101,7 +103,8 @@ class TestConfigureCredentialsSuccess:
             mock_factory.get_validator.return_value = mock_validator
 
             # Setup secrets manager mock
-            mock_secrets.encrypt_credentials.return_value = b"encrypted_data"
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.return_value = b"encrypted_data"
 
             # Execute
             result = await use_case.execute(
@@ -124,8 +127,8 @@ class TestConfigureCredentialsSuccess:
             mock_validator.validate.assert_called_once_with(valid_fawry_credentials)
 
             # Verify encryption was called
-            mock_secrets.encrypt_credentials.assert_called_once_with(
-                valid_fawry_credentials
+            mock_secrets.encrypt.assert_called_once_with(
+                valid_fawry_credentials, "key-1"
             )
 
             # Verify database operations
@@ -157,7 +160,9 @@ class TestConfigureCredentialsSuccess:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             mock_validator = AsyncMock()
             mock_validator.validate = AsyncMock(
@@ -167,7 +172,8 @@ class TestConfigureCredentialsSuccess:
                 return_value={"merchant_code": "FWY***789"}
             )
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.return_value = b"encrypted_data"
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.return_value = b"encrypted_data"
 
             # Execute
             result = await use_case.execute(
@@ -207,7 +213,9 @@ class TestConfigureCredentialsSuccess:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             mock_validator = AsyncMock()
             mock_validator.validate = AsyncMock(
@@ -217,7 +225,8 @@ class TestConfigureCredentialsSuccess:
                 return_value={"merchant_code": "FWY***NEW"}
             )
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.return_value = b"new_encrypted_data"
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.return_value = b"new_encrypted_data"
 
             # Execute
             result = await use_case.execute(
@@ -331,7 +340,9 @@ class TestConfigureCredentialsAuditLog:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             mock_validator = AsyncMock()
             mock_validator.validate = AsyncMock(
@@ -339,7 +350,8 @@ class TestConfigureCredentialsAuditLog:
             )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.return_value = b"encrypted"
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.return_value = b"encrypted"
 
             await use_case.execute(
                 tenant_id=tenant_id,
@@ -386,7 +398,9 @@ class TestConfigureCredentialsAuditLog:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             mock_validator = AsyncMock()
             mock_validator.validate = AsyncMock(
@@ -394,7 +408,8 @@ class TestConfigureCredentialsAuditLog:
             )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.return_value = b"encrypted"
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.return_value = b"encrypted"
 
             await use_case.execute(
                 tenant_id=tenant_id,
@@ -491,7 +506,9 @@ class TestConfigureCredentialsEdgeCases:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             mock_validator = AsyncMock()
             mock_validator.validate = AsyncMock(
@@ -499,7 +516,8 @@ class TestConfigureCredentialsEdgeCases:
             )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.return_value = b"encrypted"
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.return_value = b"encrypted"
 
             with pytest.raises(Exception) as exc_info:
                 await use_case.execute(
@@ -529,7 +547,9 @@ class TestConfigureCredentialsEdgeCases:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             mock_validator = AsyncMock()
             mock_validator.validate = AsyncMock(
@@ -537,9 +557,8 @@ class TestConfigureCredentialsEdgeCases:
             )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.side_effect = Exception(
-                "Encryption failed"
-            )
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.side_effect = Exception("Encryption failed")
 
             with pytest.raises(Exception) as exc_info:
                 await use_case.execute(
@@ -598,7 +617,9 @@ class TestConfigureCredentialsEdgeCases:
 
         with (
             patch.object(use_case, "validator_factory") as mock_factory,
-            patch.object(use_case, "secrets_manager") as mock_secrets,
+            patch.object(
+                use_case, "secrets_manager", new_callable=AsyncMock
+            ) as mock_secrets,
         ):
             mock_validator = AsyncMock()
             mock_validator.validate = AsyncMock(
@@ -606,7 +627,8 @@ class TestConfigureCredentialsEdgeCases:
             )
             mock_validator.get_display_info = MagicMock(return_value={})
             mock_factory.get_validator.return_value = mock_validator
-            mock_secrets.encrypt_credentials.return_value = b"encrypted"
+            mock_secrets.get_current_key_id.return_value = "key-1"
+            mock_secrets.encrypt.return_value = b"encrypted"
 
             # Should still succeed, just not update any request
             result = await use_case.execute(

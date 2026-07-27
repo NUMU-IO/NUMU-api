@@ -42,6 +42,7 @@ class ProductRepository(IProductRepository):
             tenant_id=model.tenant_id,
             name=model.name,
             slug=model.slug,
+            previous_slugs=list(model.previous_slugs or []),
             sku=model.sku,
             description=model.description,
             short_description=model.short_description,
@@ -79,6 +80,7 @@ class ProductRepository(IProductRepository):
             tenant_id=entity.tenant_id,
             name=entity.name,
             slug=entity.slug,
+            previous_slugs=list(entity.previous_slugs or []),
             sku=entity.sku,
             description=entity.description,
             short_description=entity.short_description,
@@ -158,6 +160,7 @@ class ProductRepository(IProductRepository):
         if model:
             model.name = entity.name
             model.slug = entity.slug
+            model.previous_slugs = list(entity.previous_slugs or [])
             model.sku = entity.sku
             model.description = entity.description
             model.short_description = entity.short_description
@@ -227,6 +230,21 @@ class ProductRepository(IProductRepository):
             )
         )
         model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def find_by_previous_slug(self, store_id: UUID, slug: str) -> Product | None:
+        """Get the product that USED to live at ``slug`` (rename history).
+
+        Called only after ``get_by_slug`` misses, so the storefront can 301 an
+        old URL to the current one instead of 404ing it.
+        """
+        # JSONB containment: previous_slugs @> '["<slug>"]'
+        query = select(ProductModel).where(
+            ProductModel.store_id == store_id,
+            ProductModel.previous_slugs.contains([slug]),
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalars().first()
         return self._to_entity(model) if model else None
 
     async def get_by_sku(self, store_id: UUID, sku: str) -> Product | None:

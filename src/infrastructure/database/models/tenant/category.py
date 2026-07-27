@@ -26,6 +26,10 @@ class CategoryModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # Every slug this category ever had — see the twin column on products.
+    # The storefront resolves an old collection slug back to this row and
+    # 301s to the canonical URL instead of 404ing the indexed URL.
+    previous_slugs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     parent_id: Mapped[str | None] = mapped_column(

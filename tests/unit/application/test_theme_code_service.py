@@ -97,10 +97,14 @@ async def test_scaffold_seeds_then_guards_against_clobber() -> None:
     svc, _ = _svc()
     store_id, tenant_id = uuid4(), uuid4()
 
+    # Every file the v3_starter template renders must land in the workspace —
+    # derived rather than hardcoded so adding a section doesn't rot the test.
+    expected = len(ThemeCodeService.render_scaffold(theme_id="shop", theme_name="Shop"))
+
     count = await svc.scaffold(
         store_id=store_id, tenant_id=tenant_id, theme_name="Shop"
     )
-    assert count == 60
+    assert count == expected
 
     # Second scaffold without overwrite must 409 (protect merchant edits)
     with pytest.raises(HTTPException) as exc:
@@ -111,7 +115,7 @@ async def test_scaffold_seeds_then_guards_against_clobber() -> None:
     again = await svc.scaffold(
         store_id=store_id, tenant_id=tenant_id, theme_name="Shop", overwrite=True
     )
-    assert again == 60
+    assert again == expected
 
 
 @pytest.mark.asyncio

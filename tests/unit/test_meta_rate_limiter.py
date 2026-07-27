@@ -36,9 +36,12 @@ async def test_rate_limiter_acquire_first_call(mock_redis):
 @pytest.mark.asyncio
 async def test_rate_limiter_throttles_when_exhausted(mock_redis):
     """Test that the rate limiter throttles when tokens are exhausted."""
+    import time
 
-    # Simulate an empty bucket
-    mock_redis.get = AsyncMock(return_value="0:100.0")
+    # Simulate a bucket emptied JUST NOW. The refill timestamp must be current:
+    # a stale one (e.g. the literal 100.0 == 1970) would refill the bucket to
+    # max before the check and the throttle would never be exercised.
+    mock_redis.get = AsyncMock(return_value=f"0:{time.time()}")
 
     limiter = MetaRateLimiter(
         redis_client=mock_redis,
@@ -83,7 +86,10 @@ async def test_rate_limiter_refills_over_time(mock_redis):
 @pytest.mark.asyncio
 async def test_rate_limiter_get_remaining(mock_redis):
     """Test getting remaining tokens."""
-    mock_redis.get = AsyncMock(return_value="75:100.0")
+    import time
+
+    # Refilled just now, so no time-based top-up distorts the reading.
+    mock_redis.get = AsyncMock(return_value=f"75:{time.time()}")
 
     limiter = MetaRateLimiter(
         redis_client=mock_redis,
@@ -95,7 +101,7 @@ async def test_rate_limiter_get_remaining(mock_redis):
 
     remaining = await limiter.get_remaining()
 
-    # Should be capped at max_tokens
+    # Reports what is actually left in the bucket (capped at max_tokens).
     assert remaining == 75
 
 
