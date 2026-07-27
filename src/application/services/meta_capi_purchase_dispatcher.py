@@ -42,12 +42,17 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     ``meta/hashing.py``) — we forward raw values here so the
     dispatcher stays oblivious to that contract.
 
-    ``ip`` and ``user_agent`` come from the order metadata snapshot
-    captured at checkout-create time (storefront/checkout.py) — using
-    the webhook request's IP would attribute the conversion to
-    Paymob/Fawry's data centre, not the customer's device. Falling
-    back to None when the metadata snapshot is missing (legacy orders,
-    COD-via-courier paths) is fine — Meta drops null fields server-side.
+    ``ip``, ``user_agent``, ``fbp`` and ``fbc`` come from the order
+    metadata snapshot captured at checkout-create time
+    (storefront/checkout.py) — using the webhook request's IP would
+    attribute the conversion to Paymob/Fawry's data centre, not the
+    customer's device, and the ``_fbp``/``_fbc`` cookies simply don't
+    exist on a PSP-originated request. ``fbp``/``fbc`` are Meta's two
+    highest-coverage non-PII match keys, so omitting them was what left
+    the server Purchase matching on the IP alone for guest COD orders.
+    Falling back to None when the metadata snapshot is missing (legacy
+    orders, COD-via-courier paths) is fine — Meta drops null fields
+    server-side.
     """
     from src.infrastructure.external_services.meta.country_iso import (
         canonicalize_country,
@@ -72,6 +77,8 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
         "customer_id": str(order.customer_id) if order.customer_id else None,
         "ip": meta.get("ip_address"),
         "user_agent": meta.get("user_agent"),
+        "fbp": meta.get("fbp"),
+        "fbc": meta.get("fbc"),
     }
 
 
@@ -202,6 +209,19 @@ async def enqueue_meta_capi_event_for_order(
     custom_data = _build_custom_data_from_order(order)
     event_time = int(paid_at.timestamp())
 
+    # ``action_source: website`` events without an event_source_url are
+    # flagged "Missing event_source_url" in Events Manager and lose match
+    # quality. The Celery task defaults to the store origin, but we already
+    # have both the store and the order here, so send the REAL page the
+    # customer landed on — the storefront's order-confirmation route
+    # (numu-storefront: app/[domain]/checkout/[order_id]/thank-you). Guarded
+    # because a store with no domain/subdomain/slug resolution yields
+    # nothing usable, and a malformed URL is worse than none.
+    store_origin = getattr(store, "store_url", None)
+    event_source_url = (
+        f"{store_origin}/checkout/{order.id}/thank-you" if store_origin else None
+    )
+
     # Fan out: same event_id across pixels (each pixel is its own Meta
     # dedup namespace). Per-pixel tasks are independent Celery jobs so
     # one pixel's 4xx doesn't block the others.
@@ -212,7 +232,7 @@ async def enqueue_meta_capi_event_for_order(
             event_name=event_name,
             event_id=event_id,
             event_time=event_time,
-            event_source_url=None,
+            event_source_url=event_source_url,
             user_data=user_data,
             custom_data=custom_data,
             action_source="website",

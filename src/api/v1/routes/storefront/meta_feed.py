@@ -34,8 +34,10 @@ from html import escape
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_store_repository
+from src.api.dependencies.database import get_db
 from src.core.entities.product import ProductStatus
 from src.core.entities.store import StoreStatus
 from src.infrastructure.repositories import StoreRepository
@@ -174,6 +176,7 @@ def _product_to_feed_item(
 async def meta_catalog_feed(
     subdomain: Annotated[str, Path(description="Store subdomain")],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Serve the product catalog as a Meta-compatible RSS XML feed.
 
@@ -193,12 +196,18 @@ async def meta_catalog_feed(
             detail="Store not found",
         )
 
-    # Query products directly via the session that backs StoreRepository
-    # — keeps the imports minimal. We could use the ProductRepository
-    # but it returns entity objects and we just need the field bag.
+    # Query products with raw SQL — we could use the ProductRepository but it
+    # returns entity objects and we just need the field bag.
+    #
+    # The session is injected rather than reached for. This used to read
+    # `store_repo._session`, which does not exist: StoreRepository assigns
+    # `self.session`, and no class in its MRO defines the underscored name — so
+    # the line raised AttributeError before a single query ran and BOTH feeds
+    # returned HTTP 500 for every store, in production, since they shipped.
+    # `get_db` is what `get_store_repository` consumes, so this is the same
+    # request-scoped session, just obtained through the public contract.
     from sqlalchemy import text
 
-    session = store_repo._session  # noqa: SLF001 — internal but stable
     await session.execute(
         text("SELECT set_config('app.current_tenant', :t, true)"),
         {"t": str(store.tenant_id)},

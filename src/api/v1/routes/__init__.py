@@ -143,6 +143,9 @@ from src.api.v1.routes.storefront import (
     tiktok_feed_router,
 )
 from src.api.v1.routes.storefront import (
+    order_lookup_router as storefront_order_lookup_router,
+)
+from src.api.v1.routes.storefront import (
     order_tracking_router as storefront_order_tracking_router,
 )
 from src.api.v1.routes.storefront import (
@@ -339,6 +342,15 @@ api_router.include_router(
 api_router.include_router(
     storefront_order_tracking_router,
     prefix="/storefront",
+    tags=["Storefront - Tracking"],
+)
+
+# Storefront - guest order lookup (POST /track/lookup). Store-scoped because a
+# short order number is only unique within a store, unlike the order UUID the
+# route above resolves.
+api_router.include_router(
+    storefront_order_lookup_router,
+    prefix="/storefront/store/{store_id}",
     tags=["Storefront - Tracking"],
 )
 
