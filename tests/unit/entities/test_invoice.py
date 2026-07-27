@@ -155,7 +155,13 @@ class TestInvoiceEntity:
         item = invoice.line_items[0]
         assert item.sales_total == Decimal("300.00")  # 3 * 100
         assert item.net_total == Decimal("290.00")  # 300 - 10
-        assert item.taxes[0].amount == Decimal("40.60")  # 290 * 0.14
+        # VAT-inclusive pricing: the 14% VAT is EXTRACTED from the 290.00 the
+        # customer pays (290 * 14/114), never added on top of it.
+        assert item.taxes[0].amount == Decimal("290.00") * Decimal("14") / Decimal(
+            "114"
+        )
+        assert item.taxes[0].amount.quantize(Decimal("0.01")) == Decimal("35.61")
+        assert item.total == Decimal("290.00")  # total mirrors the inclusive net
 
     def test_invoice_status_draft(self):
         """Test invoice draft status is editable."""
@@ -353,10 +359,13 @@ class TestInvoiceEntity:
             unit_price=Decimal("50.00"),
         )
 
-        # Totals should be calculated
-        # Product 1: 200 net + 28 VAT = 228
-        # Product 2: 50 net + 7 VAT = 57
-        # Total: 250 net + 35 VAT = 285
-        assert invoice.subtotal == 25000  # 250 * 100 cents
-        assert invoice.total_taxes == 3500  # 35 * 100 cents
-        assert invoice.total == 28500  # 285 * 100 cents
+        # VAT-inclusive pricing (Egyptian retail standard): the unit prices
+        # already contain the 14% VAT, so the customer pays the subtotal and
+        # the VAT is extracted from it for reporting — never added on top.
+        # Product 1: 200.00 inclusive · Product 2: 50.00 inclusive
+        # Subtotal 250.00 → VAT 250 * 14/114 = 30.70 → total 250.00
+        assert invoice.subtotal == 25000  # 250 * 100 cents (VAT inside)
+        assert invoice.total_taxes == 3070  # VAT extracted from the subtotal
+        assert invoice.vat_amount == 3070
+        assert invoice.net_amount_before_vat == 21930  # 25000 - 3070
+        assert invoice.total == 25000  # no shipping, no extra discount

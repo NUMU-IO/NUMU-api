@@ -15,6 +15,7 @@ from src.application.services.fawry_webhook_service import (
     FawryWebhookService,
 )
 from src.core.entities.order import OrderStatus, PaymentStatus
+from src.infrastructure.database.models.audit import AuditLogModel
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -194,7 +195,13 @@ class TestHandlePaid:
         )
 
         db.add.assert_called()
-        audit_log = db.add.call_args[0][0]
+        # handle_paid also records a funnel event, so pick the audit row out of
+        # everything added to the session rather than assuming it was last.
+        audit_log = next(
+            call[0][0]
+            for call in db.add.call_args_list
+            if isinstance(call[0][0], AuditLogModel)
+        )
         assert audit_log.event_type == "payment.paid"
         assert audit_log.resource_type == "order"
         assert audit_log.details["fawry_reference"] == "FAWRY-REF-001"

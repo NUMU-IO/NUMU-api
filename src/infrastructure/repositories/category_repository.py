@@ -33,6 +33,7 @@ class CategoryRepository(ICategoryRepository):
             tenant_id=model.tenant_id,
             name=model.name,
             slug=model.slug,
+            previous_slugs=list(model.previous_slugs or []),
             description=model.description,
             image_url=model.image_url,
             parent_id=model.parent_id,
@@ -52,6 +53,7 @@ class CategoryRepository(ICategoryRepository):
             tenant_id=entity.tenant_id,
             name=entity.name,
             slug=entity.slug,
+            previous_slugs=list(entity.previous_slugs or []),
             description=entity.description,
             image_url=entity.image_url,
             parent_id=entity.parent_id,
@@ -93,6 +95,7 @@ class CategoryRepository(ICategoryRepository):
         if model:
             model.name = entity.name
             model.slug = entity.slug
+            model.previous_slugs = list(entity.previous_slugs or [])
             model.description = entity.description
             model.image_url = entity.image_url
             model.parent_id = entity.parent_id
@@ -144,6 +147,21 @@ class CategoryRepository(ICategoryRepository):
         )
         result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def find_by_previous_slug(self, store_id: UUID, slug: str) -> Category | None:
+        """Get the category that USED to live at ``slug`` (rename history).
+
+        Called only after ``get_by_slug`` misses, so the storefront can 301 an
+        old collection URL to the current one instead of 404ing it.
+        """
+        # JSONB containment: previous_slugs @> '["<slug>"]'
+        query = select(CategoryModel).where(
+            CategoryModel.store_id == store_id,
+            CategoryModel.previous_slugs.contains([slug]),
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalars().first()
         return self._to_entity(model) if model else None
 
     async def get_children(self, parent_id: UUID) -> list[Category]:

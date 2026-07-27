@@ -337,10 +337,14 @@ class TestOpenAPIMetadata:
         assert "email" in contact
 
     def test_servers(self, spec):
-        servers = spec.get("servers", [])
-        assert len(servers) >= 2
-        urls = [s["url"] for s in servers]
-        assert any("localhost" in u for u in urls), "Should have local dev server"
+        """No hardcoded server list — Swagger must target the serving host.
+
+        The hardcoded localhost/staging/production entries were removed
+        deliberately (fix(staging): "remove hardcoded Swagger servers"):
+        behind nginx they made "Try it out" fire at the wrong origin. This
+        guards against them being reintroduced.
+        """
+        assert spec.get("servers", []) == []
 
     def test_license(self, spec):
         license_info = spec["info"].get("license", {})

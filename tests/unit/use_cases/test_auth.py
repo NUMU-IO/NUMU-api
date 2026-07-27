@@ -130,10 +130,17 @@ class TestLoginUserUseCase:
             return_value="refresh_token"
         )
 
+        # Account lockout (C-2): not locked, so the credential path runs.
+        self.mock_lockout_service = MagicMock()
+        self.mock_lockout_service.check_locked = AsyncMock(return_value=(False, None))
+        self.mock_lockout_service.record_failure = AsyncMock()
+        self.mock_lockout_service.clear = AsyncMock()
+
         self.use_case = LoginUserUseCase(
             user_repository=self.mock_user_repo,
             password_service=self.mock_password_service,
             token_service=self.mock_token_service,
+            lockout_service=self.mock_lockout_service,
         )
 
     @pytest.mark.asyncio
@@ -201,6 +208,13 @@ class TestRefreshTokenUseCase:
         self.mock_payload = MagicMock()
         self.mock_payload.token_type = "refresh"
         self.mock_payload.user_id = self.user_id
+        self.mock_payload.jti = "jti-123"
+        self.mock_payload.exp = 9999999999
+
+        # Rotation blacklist: this jti has not been consumed yet.
+        self.mock_blacklist_service = MagicMock()
+        self.mock_blacklist_service.is_used = AsyncMock(return_value=False)
+        self.mock_blacklist_service.mark_used = AsyncMock()
 
         self.mock_token_service = MagicMock()
         self.mock_token_service.verify_token = MagicMock(return_value=self.mock_payload)
@@ -214,6 +228,7 @@ class TestRefreshTokenUseCase:
         self.use_case = RefreshTokenUseCase(
             user_repository=self.mock_user_repo,
             token_service=self.mock_token_service,
+            blacklist_service=self.mock_blacklist_service,
         )
 
     @pytest.mark.asyncio

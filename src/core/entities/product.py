@@ -39,6 +39,11 @@ class Product(BaseEntity):
     tenant_id: UUID | None = None
     name: str
     slug: str
+    # Every slug this product ever had. A rename otherwise 404s every
+    # indexed URL and inbound link that pointed at the old one; the
+    # storefront resolves an old slug back to this product and 301s to the
+    # canonical URL. Capped on write — see core/utils/slug_history.py.
+    previous_slugs: list[str] = Field(default_factory=list)
     price: Money
     sku: str | None = None
     description: str | None = None

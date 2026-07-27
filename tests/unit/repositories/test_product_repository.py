@@ -75,6 +75,7 @@ class TestProductRepository:
         mock_model.attributes = {}
         mock_model.seo_title = None
         mock_model.seo_description = None
+        mock_model.template_suffix = None
         mock_model.meta_catalog_id = None
         mock_model.extra_data = {}
         mock_model.created_at = datetime.utcnow()
@@ -207,6 +208,7 @@ class TestProductRepository:
             model.attributes = {}
             model.seo_title = None
             model.seo_description = None
+            model.template_suffix = None
             model.meta_catalog_id = None
             model.extra_data = {}
             model.created_at = datetime.utcnow()
@@ -252,6 +254,7 @@ class TestProductRepository:
         mock_model.attributes = {}
         mock_model.seo_title = None
         mock_model.seo_description = None
+        mock_model.template_suffix = None
         mock_model.meta_catalog_id = None
         mock_model.extra_data = {}
         mock_model.created_at = datetime.utcnow()
@@ -312,6 +315,7 @@ class TestProductRepository:
             model.attributes = {}
             model.seo_title = None
             model.seo_description = None
+            model.template_suffix = None
             model.meta_catalog_id = None
             model.extra_data = {}
             model.created_at = datetime.utcnow()

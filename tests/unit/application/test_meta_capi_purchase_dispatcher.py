@@ -248,7 +248,11 @@ class TestPayloadShape:
         assert ud["first_name"] == "Sara"
         assert ud["last_name"] == "Ali"
         assert ud["city"] == "Cairo"
-        assert ud["country_code"] == "EG"
+        # Lowercase, NOT the "EG" the address carries: Meta indexes the
+        # hash of the lowercase ISO-2 code, so `canonicalize_country`
+        # downcases before the hashing layer sees it. Asserting "EG"
+        # here would be asserting a hash Meta never matches.
+        assert ud["country_code"] == "eg"
         assert ud["zip"] == "11511"
 
     async def test_user_data_includes_ip_and_user_agent_from_metadata(
@@ -304,7 +308,9 @@ class TestPayloadShape:
         self, patched_collaborators
     ):
         # Some shipping providers store the field as `country_code`
-        # already. Both keys must work for the same outcome.
+        # already. Both keys must work for the same outcome — and both go
+        # through `canonicalize_country`, so the result is the lowercase
+        # ISO-2 code Meta indexes, never the raw address casing.
         store_repo_cls, send_event_task = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(
@@ -314,7 +320,7 @@ class TestPayloadShape:
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
         ud = send_event_task.delay.call_args.kwargs["user_data"]
-        assert ud["country_code"] == "EG"
+        assert ud["country_code"] == "eg"
 
     async def test_custom_data_uses_display_units_not_cents(
         self, patched_collaborators

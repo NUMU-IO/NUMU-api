@@ -29,6 +29,12 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # Every slug this product ever had — the storefront resolves an old slug
+    # back to this row and 301s to the canonical URL, so a rename never 404s
+    # an indexed URL. Deliberately no GIN index: the containment lookup runs
+    # ONLY on a slug miss and is already narrowed by the store_id index, and
+    # the largest catalog on the platform is in the hundreds of rows.
+    previous_slugs: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     sku: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
