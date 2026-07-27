@@ -9,6 +9,7 @@ from src.core.events.product_events import ProductUpdatedEvent
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.utils.slug_history import append_slug_history
 from src.core.value_objects.money import Money
 
 
@@ -54,7 +55,15 @@ class UpdateProductUseCase:
         # Update fields
         if dto.name is not None:
             product.name = dto.name
-        if dto.slug is not None:
+        if dto.slug is not None and dto.slug != product.slug:
+            # Remember the retired slug BEFORE overwriting it: the PDP URL is
+            # built from the slug, so without this every indexed URL and every
+            # inbound link to the old one 404s and the ranking it accumulated
+            # is thrown away. The storefront resolves the old slug back to this
+            # product and 301s to the canonical URL instead.
+            product.previous_slugs = append_slug_history(
+                product.previous_slugs, product.slug, dto.slug
+            )
             product.slug = dto.slug
         if dto.sku is not None:
             product.sku = dto.sku

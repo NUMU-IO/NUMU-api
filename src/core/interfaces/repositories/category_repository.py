@@ -27,6 +27,14 @@ class ICategoryRepository(BaseRepository[Category]):
         ...
 
     @abstractmethod
+    async def find_by_previous_slug(self, store_id: UUID, slug: str) -> Category | None:
+        """Get the category that used to live at `slug` (rename history).
+
+        Backs the storefront's 301 from a retired URL to the canonical one.
+        """
+        ...
+
+    @abstractmethod
     async def get_children(self, parent_id: UUID) -> list[Category]:
         """Get child categories of a parent."""
         ...

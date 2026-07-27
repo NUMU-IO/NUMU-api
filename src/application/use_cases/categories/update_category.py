@@ -5,6 +5,7 @@ from uuid import UUID
 from slugify import slugify
 
 from src.application.dto.category import CategoryDTO, UpdateCategoryDTO
+from src.core.entities.category import Category
 from src.core.exceptions import (
     AuthorizationError,
     EntityAlreadyExistsError,
@@ -13,6 +14,7 @@ from src.core.exceptions import (
 )
 from src.core.interfaces.repositories.category_repository import ICategoryRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.utils.slug_history import append_slug_history
 
 
 class UpdateCategoryUseCase:
@@ -49,6 +51,11 @@ class UpdateCategoryUseCase:
         if dto.name is not None:
             category.name = dto.name.strip()
 
+        # Both rename paths below go through `_rename` so the retired slug is
+        # always recorded: the collection URL is built from the slug, so a
+        # rename without history 404s every indexed URL and inbound link that
+        # pointed at the old one. The auto-rename branch is the one that bites
+        # — a merchant editing only the NAME silently changes the URL too.
         if dto.slug is not None:
             new_slug = dto.slug.strip()
             if new_slug != category.slug:
@@ -57,7 +64,7 @@ class UpdateCategoryUseCase:
                 )
                 if existing:
                     raise EntityAlreadyExistsError("Category", "slug", new_slug)
-                category.slug = new_slug
+                self._rename(category, new_slug)
         elif dto.name is not None:
             # Auto-update slug when name changes
             new_slug = slugify(
@@ -68,7 +75,7 @@ class UpdateCategoryUseCase:
                     category.store_id, new_slug
                 )
                 if not existing:
-                    category.slug = new_slug
+                    self._rename(category, new_slug)
 
         if dto.description is not None:
             category.description = dto.description
@@ -97,3 +104,11 @@ class UpdateCategoryUseCase:
         category.touch()
         updated = await self.category_repository.update(category)
         return CategoryDTO.from_entity(updated)
+
+    @staticmethod
+    def _rename(category: Category, new_slug: str) -> None:
+        """Move the category to `new_slug`, keeping the old one resolvable."""
+        category.previous_slugs = append_slug_history(
+            category.previous_slugs, category.slug, new_slug
+        )
+        category.slug = new_slug

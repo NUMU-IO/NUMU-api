@@ -369,13 +369,35 @@ NUMU-api/
 
 ## Testing
 
+**Always invoke pytest through the project venv's interpreter**, never a bare
+`pytest` off `PATH`. A globally-installed pytest imports whatever
+FastAPI/Starlette pair sits in the user site-packages, and an out-of-range pair
+kills `tests/conftest.py` at import time with
+`TypeError: Router.__init__() got an unexpected keyword argument 'on_startup'`
+(raised inside FastAPI's own `routing.py` when Starlette ≥1.0 is present). That
+looks like an unrunnable test suite but is only a wrong interpreter — the venv
+runs the same suite fine.
+
 ```bash
-pytest                                    # full suite
-pytest --cov=src --cov-report=html        # with coverage
-pytest tests/unit/                        # unit only
-pytest tests/integration/                 # integration only
-pytest tests/e2e/                         # end-to-end only
+# Windows
+.venv/Scripts/python.exe -m pytest                                   # full suite
+.venv/Scripts/python.exe -m pytest --cov=src --cov-report=html       # with coverage
+.venv/Scripts/python.exe -m pytest tests/unit/                       # unit only
+.venv/Scripts/python.exe -m pytest tests/integration/                # integration only
+.venv/Scripts/python.exe -m pytest tests/e2e/                        # end-to-end only
+
+# macOS / Linux — same commands via .venv/bin/python
+.venv/bin/python -m pytest tests/unit/
 ```
+
+`make test` / `make test-cov` call a bare `pytest`, so they resolve to the venv
+**only when it is already activated** (`.venv\Scripts\activate` /
+`source .venv/bin/activate`) — that is deliberate, so the same targets work
+inside the Docker image and CI, where there is no `.venv`. Activate first, or
+use the explicit interpreter above.
+
+Piping a full run through `tail`/`head` hides all progress until pytest exits
+(the pipe block-buffers); redirect to a file instead if you want to watch it.
 
 ---
 

@@ -1105,6 +1105,12 @@ async def get_product_by_slug(
     if product is None:
         product = await product_repo.get_by_slug(store_id, product_slug)
 
+    if product is None:
+        # Renamed? Resolve the retired slug so old links and indexed URLs
+        # keep working — the payload's `slug` is the CURRENT one, and the
+        # host 301s to it rather than 404ing away the page's ranking.
+        product = await product_repo.find_by_previous_slug(store_id, product_slug)
+
     if not product:
         raise EntityNotFoundError("Product", product_slug, identifier_name="slug")
 
@@ -1482,6 +1488,10 @@ async def browse_categories(
             "id": str(r.id),
             "name": r.name,
             "slug": r.slug,
+            # Retired slugs, so the host can match a renamed collection's old
+            # URL against this list and 301 it. There is no by-slug category
+            # endpoint — the storefront resolves collections out of THIS list.
+            "previous_slugs": list(r.previous_slugs or []),
             "description": r.description,
             "image_url": r.image_url,
             "parent_id": str(r.parent_id) if r.parent_id else None,

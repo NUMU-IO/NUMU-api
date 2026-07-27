@@ -212,6 +212,11 @@ async def test_checkout_gate(test_session, monkeypatch):
 
     tenant = await _mk_tenant(test_session, plan="payg")
     service = WalletService(test_session, cache=None)
+    # `cache=None` only means "no cache injected" — the constructor still
+    # attaches Redis whenever redis_host is configured, and the gate answer is
+    # cached for 60s. This test mutates balances directly (no apply_entry, so
+    # no invalidate_cache), so drop the cache to read the gate state itself.
+    service._cache = None
     wallet = await service.get_or_create_wallet(tenant.id)
     await test_session.commit()
 
@@ -239,6 +244,7 @@ async def test_checkout_gate_flag_off_never_blocks(test_session, monkeypatch):
 
     tenant = await _mk_tenant(test_session, plan="payg")
     service = WalletService(test_session, cache=None)
+    service._cache = None  # see test_checkout_gate — cache=None still uses Redis
     wallet = await service.get_or_create_wallet(tenant.id)
     wallet.balance_cents = -1_000_000
     await test_session.commit()

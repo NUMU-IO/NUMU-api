@@ -99,7 +99,8 @@ class TestStoreOnboardingEntity:
         onboarding.complete_step(OnboardingStepKey.CREATE_STORE)
         onboarding.skip_step(OnboardingStepKey.ADD_PRODUCT)
 
-        assert onboarding.current_step == OnboardingStepKey.CONFIGURE_PAYMENT.value
+        # SET_IDENTITY follows ADD_PRODUCT in the enum order.
+        assert onboarding.current_step == OnboardingStepKey.SET_IDENTITY.value
 
 
 class TestStoreOnboardingStepCompletion:
@@ -312,6 +313,8 @@ class TestStoreOnboardingStepKeys:
         expected_keys = {
             "create_store",
             "add_product",
+            "set_identity",
+            "confirm_support",
             "configure_payment",
             "add_shipping",
             "first_order",
@@ -322,7 +325,7 @@ class TestStoreOnboardingStepKeys:
     def test_total_steps_count(self):
         """Test that TOTAL_ONBOARDING_STEPS matches enum length."""
         assert TOTAL_ONBOARDING_STEPS == len(OnboardingStepKey)
-        assert TOTAL_ONBOARDING_STEPS == 5
+        assert TOTAL_ONBOARDING_STEPS == 7
 
 
 class TestAutoCompleteHelpers:

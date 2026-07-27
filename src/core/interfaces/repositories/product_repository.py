@@ -32,6 +32,14 @@ class IProductRepository(BaseRepository[Product]):
         ...
 
     @abstractmethod
+    async def find_by_previous_slug(self, store_id: UUID, slug: str) -> Product | None:
+        """Get the product that used to live at `slug` (rename history).
+
+        Backs the storefront's 301 from a retired URL to the canonical one.
+        """
+        ...
+
+    @abstractmethod
     async def get_by_sku(self, store_id: UUID, sku: str) -> Product | None:
         """Get product by SKU within a store."""
         ...
