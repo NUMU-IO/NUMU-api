@@ -321,6 +321,91 @@ async def revalidate_on_customization_publish_traced(
     )
 
 
+# ── IndexNow (proactive search-engine notification) ──────────────────────────
+
+
+def _storefront_url(subdomain: str, path: str) -> str:
+    """Absolute URL of a storefront endpoint for one store."""
+    if "{subdomain}" in STOREFRONT_BASE_URL:
+        base = STOREFRONT_BASE_URL.format(subdomain=subdomain)
+    else:
+        base = STOREFRONT_BASE_URL
+    return base.rstrip("/") + path
+
+
+async def ping_indexnow(subdomain: str, paths: list[str] | None = None) -> bool:
+    """Best-effort IndexNow submission for a store's changed URLs.
+
+    Cache busting only makes a change visible to someone who *visits*; nothing
+    tells a search engine the page moved. IndexNow is a single POST that Bing,
+    DuckDuckGo and Yandex act on within minutes — and Bing's index is what
+    feeds ChatGPT Search — so this is the shortest path from "merchant hit
+    Publish" to "an answer engine can cite the new page".
+
+    We post store-relative paths to the storefront's ``/api/indexnow``, which
+    carries the same ``x-revalidation-secret`` contract as ``/api/revalidate``.
+    The storefront resolves each path against the store's canonical origin and
+    rejects anything that isn't on it, so this side never has to know whether
+    the merchant is on a subdomain or a verified custom domain — and a bug here
+    can't submit URLs for a host we don't own.
+
+    ⚠️ Pass CANONICAL paths. The PDP path this module posts for cache busting is
+    the legacy singular ``/product/{slug}``; the URL that is actually indexed
+    (what ``sitemap.xml`` and ``rel=canonical`` emit) is the plural
+    ``/products/{slug}``. Announcing the other form asks an engine to index a
+    duplicate of a page it already has.
+
+    Returns True only when the storefront reported a submission. Never raises:
+    a marketing ping that fails is a missed opportunity, not a reason for a
+    merchant's publish to error.
+    """
+    if not REVALIDATION_SECRET:
+        # Quiet on purpose — revalidate_store already logs this loudly on the
+        # same publish, and two warnings for one missing var is just noise.
+        return False
+
+    urls = [p for p in (paths or []) if p and p.startswith("/")]
+    if not urls:
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                _storefront_url(subdomain, "/api/indexnow"),
+                headers={
+                    "x-revalidation-secret": REVALIDATION_SECRET,
+                    "Content-Type": "application/json",
+                },
+                json={"urls": urls},
+            )
+            if response.status_code != 200:
+                logger.warning(
+                    "IndexNow ping failed for %s: %s %s",
+                    subdomain,
+                    response.status_code,
+                    response.text[:200],
+                )
+                return False
+            body = response.json()
+            submitted = bool(body.get("submitted")) if isinstance(body, dict) else False
+            if not submitted:
+                # The storefront answers 200 with a reason for every soft skip
+                # (key not configured, store blocks indexing, dev host). Log it
+                # at INFO — these are expected states, not failures.
+                logger.info(
+                    "IndexNow ping skipped for %s: %s",
+                    subdomain,
+                    body.get("reason") if isinstance(body, dict) else "unknown",
+                )
+            return submitted
+    except Exception as e:  # noqa: BLE001 — must never surface to the merchant
+        # Broader than the httpx.HTTPError the revalidation calls catch: this
+        # one is pure marketing, so even a JSON-decode or URL-construction bug
+        # must not turn a successful publish into a 500.
+        logger.warning("IndexNow ping error for %s: %s", subdomain, e)
+        return False
+
+
 # ── High-level helpers ────────────────────────────────────────────────────────
 
 
@@ -360,6 +445,11 @@ async def revalidate_on_product_change(
         paths=paths,
         tags=tags,
     )
+    # Only the PDP, and only in its CANONICAL plural form — the `/product/…`
+    # and `/products` entries above exist to bust caches, not to be indexed,
+    # and re-announcing the home page on every price edit is exactly the
+    # unchanged-URL spam IndexNow asks callers not to send.
+    await ping_indexnow(subdomain, [f"/products/{product_slug}"])
 
 
 async def revalidate_on_theme_activate(
@@ -426,6 +516,7 @@ async def revalidate_on_page_change(subdomain: str, store_id: str, handle: str) 
         paths=[f"/pages/{handle}"],
         tags=[f"pages-{store_id}", theme_cache_tag(store_id)],
     )
+    await ping_indexnow(subdomain, [f"/pages/{handle}"])
 
 
 async def revalidate_on_blog_change(
@@ -448,6 +539,10 @@ async def revalidate_on_blog_change(
         paths=paths,
         tags=[f"blogs-{store_id}"],
     )
+    # Here the cache-bust paths ARE the canonical URLs, and all three genuinely
+    # changed (a new article changes the index and its blog listing too), so
+    # the same list is what we announce.
+    await ping_indexnow(subdomain, paths)
 
 
 async def revalidate_on_metafield_change(

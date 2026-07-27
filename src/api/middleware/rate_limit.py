@@ -10,7 +10,9 @@ Tiers:
 """
 
 import hashlib
+import ipaddress
 import time
+from uuid import UUID
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -112,6 +114,22 @@ def _is_track_beacon(path: str) -> bool:
     return path.startswith("/api/v1/storefront/store/") and path.endswith("/track")
 
 
+def _is_track_lookup(path: str) -> bool:
+    """Guest order lookup — the one brute-forceable tracking surface.
+
+    ``GET /storefront/track/{order_id}`` is protected by 128 bits of UUID,
+    but the lookup POST takes a short, sequential order number plus a
+    phone/email. An attacker holding a leaked phone list can walk the
+    number space, so it needs its own tight bucket — and specifically must
+    NOT inherit the sibling ``/track`` beacon's 600/min tier, which
+    ``_is_track_beacon`` would never grant it (that matcher needs an exact
+    ``/track`` suffix) but a future refactor easily could.
+    """
+    return path.startswith("/api/v1/storefront/store/") and path.endswith(
+        "/track/lookup"
+    )
+
+
 def _is_whatsapp_byo_connect(path: str) -> bool:
     """backend-030 / TASK-SEC-003 — BYO connect hits Meta with 3 reads
     per attempt. A merchant (or attacker with a leaked admin token)
@@ -146,20 +164,99 @@ def _is_whatsapp_dlq_replay(path: str) -> bool:
 # ------------------------------------------------------------------ #
 
 
+_IpNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+# Parsed form of settings.trusted_proxy_ips, cached against the raw value it
+# was built from so a test (or a settings reload) that changes the setting
+# doesn't get a stale answer.
+_TRUSTED_PROXY_CACHE: tuple[tuple[str, ...], list[_IpNetwork] | None] | None = None
+
+
+def _trusted_proxy_networks() -> list[_IpNetwork] | None:
+    """Parse ``settings.trusted_proxy_ips``; ``None`` means "unconfigured".
+
+    ``None`` is the signal to keep trusting ``X-Forwarded-For`` from anyone —
+    see ``_get_client_ip`` for why that stays the default.
+
+    A malformed entry is dropped with an error rather than raised: a typo in
+    an ops env var must not refuse to boot the API. If NOTHING in a non-empty
+    list parses we return ``None`` (i.e. fall back to the permissive default)
+    instead of an empty list, because an empty trusted set means "believe no
+    proxy", which in production buckets every request under the load
+    balancer's address — one shared bucket platform-wide. Failing back toward
+    availability is the right direction for a config typo; the content-keyed
+    budgets below are what hold the enumerable surface either way.
+    """
+    global _TRUSTED_PROXY_CACHE
+    configured = tuple(settings.trusted_proxy_ips or ())
+    if _TRUSTED_PROXY_CACHE is not None and _TRUSTED_PROXY_CACHE[0] == configured:
+        return _TRUSTED_PROXY_CACHE[1]
+
+    networks: list[_IpNetwork] = []
+    for entry in configured:
+        candidate = (entry or "").strip()
+        if not candidate:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(candidate, strict=False))
+        except ValueError:
+            logger.error("trusted_proxy_ip_unparseable", entry=candidate)
+
+    parsed = networks or None
+    if configured and parsed is None:
+        logger.error(
+            "trusted_proxy_ips_all_unparseable_falling_back_to_trusting_xff",
+            configured=list(configured),
+        )
+    _TRUSTED_PROXY_CACHE = (configured, parsed)
+    return parsed
+
+
+def _proxy_headers_trusted(peer_ip: str | None) -> bool:
+    """Whether the hop that sent us this request may set the client IP."""
+    networks = _trusted_proxy_networks()
+    if networks is None:
+        return True
+    if not peer_ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(peer_ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in networks)
+
+
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP, respecting proxy headers."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Extract the IP this request is rate-limited under, respecting proxies.
 
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip
+    ``X-Forwarded-For`` is caller-supplied, so it only means anything when the
+    hop that set it is one we control. With ``trusted_proxy_ips`` configured we
+    require the socket peer to be in it before believing the header; otherwise
+    a fresh ``X-Forwarded-For`` per request buys a fresh bucket every time and
+    the per-IP limits stop existing.
 
-    if request.client:
-        return request.client.host
+    While the setting is UNSET we keep believing the header unconditionally,
+    exactly as before. Flipping that default blind would collapse every
+    production request onto the load balancer's address — one bucket for the
+    whole platform — so switching it on is an ops decision that needs the real
+    edge topology. Nothing that must not be brute-forced should depend on this
+    alone: see ``enforce_track_lookup_budgets`` for the content-keyed buckets
+    that hold regardless of how the edge is wired.
+    """
+    peer = request.client.host if request.client else None
 
-    return "unknown"
+    if _proxy_headers_trusted(peer):
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            first = forwarded.split(",")[0].strip()
+            if first:
+                return first
+
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip
+
+    return peer or "unknown"
 
 
 async def _check_rate_limit(ip: str, tier: str, limit: int) -> tuple[bool, int, int]:
@@ -184,6 +281,32 @@ async def _check_rate_limit(ip: str, tier: str, limit: int) -> tuple[bool, int, 
         # Redis unavailable — degrade gracefully, allow the request
         logger.debug("redis_unavailable_rate_limit_skipped", tier=tier)
         return True, 0, 0
+
+
+def rate_limit_exceeded_response(
+    retry_after: int,
+    *,
+    error: str = "Too many requests. Please slow down.",
+    code: str = "RATE_LIMIT_EXCEEDED",
+) -> JSONResponse:
+    """The single 429 body every limiter in the app answers with.
+
+    Route-level limiters return this rather than raising ``HTTPException``:
+    the global exception handler renders ``error`` as an *object*
+    (``{"code": …, "message": …}``), so a raised 429 would reach the client in
+    a different shape from the middleware's and every caller would need two
+    parsers for the same condition.
+    """
+    return JSONResponse(
+        status_code=429,
+        content={
+            "success": False,
+            "error": error,
+            "code": code,
+            "details": {"retry_after": retry_after},
+        },
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 # ------------------------------------------------------------------ #
@@ -293,12 +416,130 @@ def _is_sensitive_per_user(path: str) -> bool:
 
 
 # ------------------------------------------------------------------ #
+# Content-keyed buckets — guest order lookup
+# ------------------------------------------------------------------ #
+#
+# Every bucket above is keyed on an IP, and the IP comes from a header we can
+# only conditionally believe (see _get_client_ip). For most endpoints that is
+# fine — the rate limit is a fairness measure and auth is the real control.
+# Guest order lookup has no auth: order numbers are short and sequential, so
+# the rate limit IS the brute-force defence, and it cannot be the kind that a
+# caller defeats by varying a header.
+#
+# These two buckets key on values taken from the request body and path, which
+# no header can rotate:
+#   * (store, order number) — stops grinding phone/email against one known order
+#   * store                 — caps total enumeration throughput against a store
+#
+# 5/min per order is several times what a customer re-typing their own details
+# needs. 60/min per store is above any plausible organic lookup volume for a
+# single storefront but far below a useful walk of the number space.
+TRACK_LOOKUP_PER_ORDER_PER_MINUTE = 5
+TRACK_LOOKUP_PER_STORE_PER_MINUTE = 60
+
+
+def _normalise_lookup_key(order_number: str) -> str:
+    """Collapse the ways one order number can be written into one bucket.
+
+    Mirrors ``_normalise_order_number`` in the tracking route (trim, drop a
+    leading ``#``) and additionally casefolds, so decorating the number cannot
+    buy a second budget for the same order. Deliberately a local copy rather
+    than an import — that route imports this module — and being *stricter*
+    than the route is always safe here: the worst case is two spellings that
+    couldn't both match a row sharing one budget.
+    """
+    return order_number.strip().removeprefix("#").strip().casefold()
+
+
+async def enforce_track_lookup_budgets(
+    store_id: UUID | str,
+    order_number: str,
+) -> JSONResponse | None:
+    """Spend the guest-lookup budgets; return the 429 when one is exhausted.
+
+    The caller must invoke this BEFORE reading anything, and both budgets are
+    spent on every attempt whether or not the order exists. That ordering is
+    the point: a 429 that only appeared for real order numbers would answer
+    "does this number exist?", recreating exactly the oracle the uniform 404
+    in ``order_tracking.py`` exists to prevent.
+
+    Consequence worth knowing: anyone can burn a specific order's budget by
+    replaying its number, locking that order out of the lookup *form* for the
+    rest of the minute. The customer's emailed ``/track/{uuid}`` link is
+    unaffected, and the alternative — a budget that only counts hits on real
+    orders — is the oracle.
+
+    Redis being down fails open, matching ``_check_rate_limit``.
+    """
+    if not settings.rate_limit_enabled:
+        return None
+
+    # Digest rather than interpolate the caller-supplied number: it is
+    # free-form text up to 50 chars, and one containing ':' would otherwise
+    # let a caller forge extra key segments and land in a bucket that isn't
+    # theirs.
+    order_key = _stable_digest(_normalise_lookup_key(order_number))
+
+    allowed, count, retry_after = await _check_rate_limit(
+        f"lookup:{store_id}:{order_key}",
+        "track_lookup_order",
+        TRACK_LOOKUP_PER_ORDER_PER_MINUTE,
+    )
+    if not allowed:
+        logger.warning(
+            "track_lookup_order_budget_exceeded",
+            store_id=str(store_id),
+            order_key=order_key,  # digest, never the number itself
+            count=count,
+            limit=TRACK_LOOKUP_PER_ORDER_PER_MINUTE,
+        )
+        return rate_limit_exceeded_response(retry_after)
+
+    # Only reached while the per-order budget still had room, so one grinder
+    # working a single number can't also drain the store-wide budget and take
+    # the form down for every other shopper of that store.
+    allowed, count, retry_after = await _check_rate_limit(
+        f"lookup:{store_id}",
+        "track_lookup_store",
+        TRACK_LOOKUP_PER_STORE_PER_MINUTE,
+    )
+    if not allowed:
+        logger.warning(
+            "track_lookup_store_budget_exceeded",
+            store_id=str(store_id),
+            count=count,
+            limit=TRACK_LOOKUP_PER_STORE_PER_MINUTE,
+        )
+        return rate_limit_exceeded_response(retry_after)
+
+    return None
+
+
+# ------------------------------------------------------------------ #
 # Middleware
 # ------------------------------------------------------------------ #
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Enforce per-IP rate limits using Redis counters."""
+
+    def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(*args, **kwargs)
+        # Built once, when the app assembles its middleware stack — so this is
+        # one line per process, not per request.
+        if _trusted_proxy_networks() is None:
+            logger.warning(
+                "rate_limit_trusting_forwarded_header_from_anyone",
+                setting="TRUSTED_PROXY_IPS",
+                risk=(
+                    "X-Forwarded-For is believed from every caller, so any "
+                    "client can choose its own per-IP bucket by varying the "
+                    "header and the per-IP limits are advisory only. Set "
+                    "TRUSTED_PROXY_IPS to the edge in front of this process "
+                    "to enforce them — but confirm the real topology first: "
+                    "naming the wrong hop buckets the whole platform together."
+                ),
+            )
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if not settings.rate_limit_enabled:
@@ -319,6 +560,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif _is_coupon_apply(path):
             tier = "coupon"
             limit = 10  # 10 coupon validations per minute per IP
+        elif _is_track_lookup(path):
+            # Same 10/IP/min as coupon-apply, and for the same reason: both
+            # probe a short caller-supplied code, so the bucket has to be
+            # tight enough that walking the code space isn't practical. A
+            # customer who lost their tracking link needs 1-2 attempts.
+            tier = "track_lookup"
+            limit = 10
         elif _is_track_beacon(path):
             tier = "tracking"
             limit = 600  # ~10/sec per IP — analytics beacons are noisy
@@ -378,16 +626,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 count=count,
                 limit=limit,
             )
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "success": False,
-                    "error": "Too many requests. Please slow down.",
-                    "code": "RATE_LIMIT_EXCEEDED",
-                    "details": {"retry_after": retry_after},
-                },
-                headers={"Retry-After": str(retry_after)},
-            )
+            return rate_limit_exceeded_response(retry_after)
 
         # Phase 5.2 — secondary per-user check for sensitive endpoints.
         # The per-IP guard above stops a single attacker IP; this
@@ -417,17 +656,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                         ],  # truncated; don't log full hash
                         count=user_count,
                     )
-                    return JSONResponse(
-                        status_code=429,
-                        content={
-                            "success": False,
-                            "error": (
-                                "Too many requests for this account. Try again later."
-                            ),
-                            "code": "RATE_LIMIT_EXCEEDED_PER_USER",
-                            "details": {"retry_after": user_retry},
-                        },
-                        headers={"Retry-After": str(user_retry)},
+                    return rate_limit_exceeded_response(
+                        user_retry,
+                        error="Too many requests for this account. Try again later.",
+                        code="RATE_LIMIT_EXCEEDED_PER_USER",
                     )
 
         response = await call_next(request)

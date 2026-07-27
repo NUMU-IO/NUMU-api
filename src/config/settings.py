@@ -463,6 +463,22 @@ class Settings(BaseSettings):
     # the bypass entirely (the default). Rotate the token regularly and
     # never commit it; set via env in CI only.
     load_test_bypass_token: str = ""
+    # Reverse proxies whose `X-Forwarded-For` / `X-Real-IP` we believe when
+    # deciding which bucket a request is rate-limited under. Bare addresses or
+    # CIDRs, as a JSON list in the environment:
+    #   TRUSTED_PROXY_IPS=["10.0.0.0/8","172.31.0.0/16"]
+    #
+    # EMPTY (the default) means the header is trusted from anyone, which is
+    # what this app has always done — so any caller can pick their own bucket
+    # by varying the header and the per-IP limits are advisory at best.
+    # Populating this closes that hole, but ONLY if the entries actually name
+    # the hop in front of this process. Name the wrong thing and every request
+    # buckets under the load balancer's address instead — a single shared
+    # bucket for the entire platform, which takes out every rate-limited
+    # endpoint at once. So: confirm the real edge topology (does Cloudflare /
+    # the ALB overwrite `X-Forwarded-For`, or append to it?) before setting
+    # this. `RateLimitMiddleware` logs a warning at startup while it is empty.
+    trusted_proxy_ips: list[str] = []
 
     # Stripe
     stripe_secret_key: str | None = None

@@ -257,6 +257,19 @@ async def _send_event(
         if not meta_cfg.get("capi_enabled"):
             return {"status": "skipped", "reason": "capi_disabled"}
 
+        # Meta REQUIRES event_source_url whenever action_source is
+        # "website" — without it Events Manager raises "Missing
+        # event_source_url" on every conversion and drops the event's
+        # match quality. Several enqueue sites have no page context at all
+        # (the orphan sweep, order-status triggers, the test-event
+        # endpoint) and pass None, so the fallback lives here rather than
+        # being repeated at each call site. ``getattr`` because the store
+        # object is whatever ``StoreRepository.get_by_id`` handed back —
+        # the entity carries ``store_url``, but nothing in this signature
+        # guarantees the property exists.
+        if not event_source_url and action_source.lower() == "website":
+            event_source_url = getattr(store, "store_url", None)
+
         # Debug-mode auto-attaches the saved test_event_code until
         # debug_mode_expires_at passes. Caller's test_event_code (e.g.
         # the test-event endpoint passing a one-off code) wins if set.

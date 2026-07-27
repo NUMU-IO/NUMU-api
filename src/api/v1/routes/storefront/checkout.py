@@ -12,7 +12,7 @@ import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from uuid import UUID
 
 from fastapi import (
@@ -532,6 +532,29 @@ async def checkout(
     # snapshot it at order-create time because the payment webhook fires
     # later from the PSP's server (not the customer's browser).
     client_user_agent: str | None = http_request.headers.get("user-agent") or None
+
+    # Ad-click / browser ids snapshotted for the same reason as the UA
+    # above: the server-authoritative conversion (Meta CAPI Purchase,
+    # TikTok Events API CompletePayment) fires later from the PSP's
+    # webhook, where the customer's cookies no longer exist. Without this
+    # snapshot both dispatchers read `metadata` and find nothing, which is
+    # why server events landed with no match key beyond the IP even for
+    # buyers who arrived straight off a TikTok/Meta ad.
+    #
+    # `ttclid` is written with encodeURIComponent by the storefront
+    # (numu-storefront/src/lib/tiktok-pixel.ts) and Starlette's cookie
+    # parser only strips RFC 6265 quoting — never percent-escapes — so
+    # decode it here or TikTok gets a mangled click id it can't match.
+    #
+    # All four are capped at 256 chars: this is attacker-controlled cookie
+    # input landing in unvalidated JSONB, and the cap mirrors the one on
+    # `TrackPageViewRequest.ttclid` (storefront/tracking.py).
+    _ttclid: str | None = (
+        unquote((http_request.cookies.get("ttclid") or "")[:256]) or None
+    )
+    _ttp: str | None = (http_request.cookies.get("_ttp") or "")[:256] or None
+    _fbp: str | None = (http_request.cookies.get("_fbp") or "")[:256] or None
+    _fbc: str | None = (http_request.cookies.get("_fbc") or "")[:256] or None
 
     # Require email verification for registered (non-guest) customers
     if (
@@ -1511,6 +1534,12 @@ async def checkout(
             ),
             **({"ip_address": client_ip} if client_ip else {}),
             **({"user_agent": client_user_agent} if client_user_agent else {}),
+            # Read back by the Meta / TikTok CAPI purchase dispatchers to
+            # attach Advanced Matching keys the webhook itself can't see.
+            **({"ttclid": _ttclid} if _ttclid else {}),
+            **({"ttp": _ttp} if _ttp else {}),
+            **({"fbp": _fbp} if _fbp else {}),
+            **({"fbc": _fbc} if _fbc else {}),
             **(
                 {"custom_fields": accepted_custom_fields}
                 if accepted_custom_fields

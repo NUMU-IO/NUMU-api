@@ -36,6 +36,9 @@ from src.api.v1.routes.storefront.locations import (
     router as pickup_locations_router,
 )
 from src.api.v1.routes.storefront.meta_feed import router as meta_feed_router
+from src.api.v1.routes.storefront.order_tracking import (
+    lookup_router as order_lookup_router,
+)
 from src.api.v1.routes.storefront.order_tracking import router as order_tracking_router
 from src.api.v1.routes.storefront.pay import router as pay_router
 from src.api.v1.routes.storefront.payment_proofs import (
@@ -89,6 +92,7 @@ __all__ = [
     "promotions_router",
     "tracking_router",
     "order_tracking_router",
+    "order_lookup_router",
     "theme_error_router",
     "theme_resolution_router",
     "shipping_quote_router",
