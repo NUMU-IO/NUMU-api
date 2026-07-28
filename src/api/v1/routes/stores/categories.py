@@ -100,6 +100,7 @@ async def create_category(
         await revalidate_on_category_change(
             subdomain=store.subdomain,
             store_id=str(store.id),
+            category_slug=getattr(result, "slug", None),
         )
 
     return SuccessResponse(
@@ -202,6 +203,7 @@ async def update_category(
         await revalidate_on_category_change(
             subdomain=store.subdomain,
             store_id=str(store.id),
+            category_slug=getattr(result, "slug", None),
         )
 
     return SuccessResponse(
@@ -303,6 +305,7 @@ async def upload_category_image(
         await revalidate_on_category_change(
             subdomain=store.subdomain,
             store_id=str(store.id),
+            category_slug=getattr(updated, "slug", None),
         )
 
     return SuccessResponse(
