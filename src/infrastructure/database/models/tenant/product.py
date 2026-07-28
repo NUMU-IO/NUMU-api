@@ -75,6 +75,10 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
 
     # SEO
+    # Manufacturer/brand. Distinct from the store: Product JSON-LD and the
+    # Meta feed both need the real brand, and without it every product
+    # claimed the store's own name as its house brand.
+    brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
     seo_title: Mapped[str | None] = mapped_column(String(60), nullable=True)
     seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
 

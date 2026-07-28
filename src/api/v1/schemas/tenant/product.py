@@ -203,6 +203,9 @@ class CreateProductRequest(BaseModel):
     status: str | None = Field(
         None, description="Product status: active, draft, or archived"
     )
+    brand: str | None = Field(
+        None, max_length=120, description="Manufacturer/brand name"
+    )
     seo_title: str | None = Field(None, max_length=70, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
@@ -333,6 +336,9 @@ class UpdateProductRequest(BaseModel):
     status: str | None = Field(
         None, description="Product status: active, draft, or archived"
     )
+    brand: str | None = Field(
+        None, max_length=120, description="Manufacturer/brand name"
+    )
     seo_title: str | None = Field(None, max_length=70, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
@@ -443,6 +449,14 @@ class ProductResponse(BaseModel):
     # Per-product SEO overrides. Optional on the response since legacy rows
     # may have been written before the columns existed; null means
     # "fall back to product name / short_description" on the storefront.
+    # Real manufacturer brand. Without it the storefront's Product JSON-LD
+    # fell back to the store name, i.e. every product claimed to be the
+    # store's own house brand.
+    brand: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Manufacturer/brand name (Product JSON-LD + Meta feed).",
+    )
     seo_title: str | None = Field(
         default=None,
         max_length=70,

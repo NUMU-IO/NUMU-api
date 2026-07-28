@@ -77,6 +77,12 @@ class StoreSeoSettings(BaseModel):
     # don't claim something Google might disprove with a test order.
     has_return_policy_30d: bool = False
 
+    # Gates the `ar` hreflang on the storefront. Bilingual chrome is not a
+    # bilingual catalogue: until product names/descriptions are actually
+    # translated, /ar serves English copy under an Arabic shell, and
+    # advertising ar-* for that is scaled-content territory. Opt-in.
+    arabic_content_ready: bool = False
+
     @field_validator(
         "seo_title",
         "seo_description",
