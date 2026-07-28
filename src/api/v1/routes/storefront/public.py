@@ -622,13 +622,13 @@ def _serialize_public_store(
     legacy readers keep working, but the storefront's generateMetadata
     helper consumes the normalized `seo` field exclusively.
     """
-    from src.api.v1.schemas.tenant.store_seo import StoreSeoSettings
+    from src.api.v1.schemas.tenant.store_seo import normalize_store_seo
 
     raw_settings = store.settings or {}
-    raw_seo = raw_settings.get("seo") if isinstance(raw_settings, dict) else None
-    seo_normalized = StoreSeoSettings.model_validate(
-        raw_seo if isinstance(raw_seo, dict) else {}
-    ).model_dump()
+    # Falls back to the legacy top-level seo_* keys when no typed block exists,
+    # so stores configured through the old Preferences form stop being silently
+    # discarded. See normalize_store_seo for the full rationale.
+    seo_normalized = normalize_store_seo(raw_settings)
 
     return {
         "id": str(store.id),
