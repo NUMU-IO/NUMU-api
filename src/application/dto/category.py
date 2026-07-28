@@ -22,6 +22,9 @@ class CategoryDTO(BaseDTO):
     parent_id: UUID | None
     position: int
     is_active: bool
+    seo_title: str | None
+    seo_description: str | None
+    social_image_url: str | None
     template_suffix: str | None
     metadata: dict[str, Any]
     product_count: int
@@ -46,6 +49,9 @@ class CategoryDTO(BaseDTO):
             parent_id=entity.parent_id,
             position=entity.position,
             is_active=entity.is_active,
+            seo_title=entity.seo_title,
+            seo_description=entity.seo_description,
+            social_image_url=entity.social_image_url,
             template_suffix=entity.template_suffix,
             metadata=entity.metadata,
             product_count=product_count,
@@ -65,6 +71,9 @@ class CreateCategoryDTO(BaseDTO):
     parent_id: UUID | None = None
     position: int = 0
     is_active: bool = True
+    seo_title: str | None = None
+    seo_description: str | None = None
+    social_image_url: str | None = None
     # Alternate template variant suffix (Shopify-style); null = base template.
     template_suffix: str | None = None
     extra_data: dict[str, Any] | None = None
@@ -85,6 +94,9 @@ class UpdateCategoryDTO(BaseDTO):
     # `template_suffix_provided` carries whether the client sent the key (route
     # derives it from the request's ``model_fields_set``) so a partial PATCH can
     # clear the override via an explicit null without wiping it when omitted.
+    seo_title: str | None = None
+    seo_description: str | None = None
+    social_image_url: str | None = None
     template_suffix: str | None = None
     template_suffix_provided: bool = False
     extra_data: dict[str, Any] | None = None

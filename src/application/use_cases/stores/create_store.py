@@ -198,6 +198,11 @@ class CreateStoreUseCase:
                 "delivery_confirmation": True,
                 "abandoned_cart": False,
             },
+            # title/description/business_type are NOT seeded — they're derived
+            # downstream so a later merchant edit wins cleanly.
+            "seo": {
+                "robots_indexing_enabled": True,
+            },
         }
 
         # tenant.is_active gates TenantMiddleware routing — never leave a

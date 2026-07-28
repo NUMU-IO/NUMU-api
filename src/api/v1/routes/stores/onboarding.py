@@ -21,7 +21,11 @@ from src.api.dependencies.repositories import (
     get_order_repository,
 )
 from src.api.responses import SuccessResponse
-from src.api.v1.routes.stores.niche_templates import COUNTRY_DEFAULTS, NICHE_TEMPLATES
+from src.api.v1.routes.stores.niche_templates import (
+    COUNTRY_DEFAULTS,
+    NICHE_SCHEMA_TYPE,
+    NICHE_TEMPLATES,
+)
 from src.api.v1.schemas.tenant.onboarding import (
     OnboardingResponse,
     OnboardingStepResponse,
@@ -448,6 +452,15 @@ async def configure_from_wizard(
     theme_settings["suggested_sections"] = niche["suggested_sections"]
     store.theme_settings = theme_settings
     settings_applied.append(f"theme:{niche['theme']}")
+
+    # ── 5b. Schema.org subtype from the same answer ──
+    # Derive-only: never overwrite a subtype set by hand in the SEO panel.
+    schema_type = NICHE_SCHEMA_TYPE.get(request.business_type)
+    if schema_type:
+        seo_block = settings.setdefault("seo", {})
+        if isinstance(seo_block, dict) and not seo_block.get("business_type"):
+            seo_block["business_type"] = schema_type
+            settings_applied.append(f"seo:business_type:{schema_type}")
 
     # ── 6. Persist ──
     store.settings = settings

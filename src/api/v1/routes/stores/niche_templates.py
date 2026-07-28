@@ -38,6 +38,18 @@ NICHE_TEMPLATES = {
     },
 }
 
+# Wizard niche → Schema.org subtype for the storefront's Organization JSON-LD.
+# Values MUST be members of BusinessTypeLiteral (schemas/tenant/store_seo.py).
+# "other" is absent on purpose — it falls back to plain "Organization".
+NICHE_SCHEMA_TYPE = {
+    "fashion": "ClothingStore",
+    "electronics": "ElectronicsStore",
+    "beauty": "HealthAndBeautyBusiness",
+    "home": "HomeGoodsStore",
+    "food": "GroceryStore",
+    "accessories": "JewelryStore",
+}
+
 COUNTRY_DEFAULTS = {
     "EG": {
         "currency": "EGP",
