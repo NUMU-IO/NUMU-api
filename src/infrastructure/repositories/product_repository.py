@@ -64,6 +64,7 @@ class ProductRepository(IProductRepository):
             tags=model.tags or [],
             attributes=model.attributes,
             metadata=model.extra_data or {},
+            brand=model.brand,
             seo_title=model.seo_title,
             seo_description=model.seo_description,
             template_suffix=model.template_suffix,
@@ -101,6 +102,7 @@ class ProductRepository(IProductRepository):
             tags=entity.tags,
             attributes=entity.attributes,
             extra_data=entity.metadata,
+            brand=entity.brand,
             seo_title=entity.seo_title,
             seo_description=entity.seo_description,
             template_suffix=entity.template_suffix,
@@ -181,6 +183,7 @@ class ProductRepository(IProductRepository):
             model.tags = entity.tags
             model.attributes = entity.attributes
             model.extra_data = entity.metadata
+            model.brand = entity.brand
             model.seo_title = entity.seo_title
             model.seo_description = entity.seo_description
             model.template_suffix = entity.template_suffix

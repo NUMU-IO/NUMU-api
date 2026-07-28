@@ -622,13 +622,13 @@ def _serialize_public_store(
     legacy readers keep working, but the storefront's generateMetadata
     helper consumes the normalized `seo` field exclusively.
     """
-    from src.api.v1.schemas.tenant.store_seo import StoreSeoSettings
+    from src.api.v1.schemas.tenant.store_seo import normalize_store_seo
 
     raw_settings = store.settings or {}
-    raw_seo = raw_settings.get("seo") if isinstance(raw_settings, dict) else None
-    seo_normalized = StoreSeoSettings.model_validate(
-        raw_seo if isinstance(raw_seo, dict) else {}
-    ).model_dump()
+    # Falls back to the legacy top-level seo_* keys when no typed block exists,
+    # so stores configured through the old Preferences form stop being silently
+    # discarded. See normalize_store_seo for the full rationale.
+    seo_normalized = normalize_store_seo(raw_settings)
 
     return {
         "id": str(store.id),
@@ -867,6 +867,7 @@ async def browse_products(
             # Meta Catalog product ID — when set, the storefront uses
             # it as `content_ids` on Pixel events. Null = use product.id.
             "meta_catalog_id": product.meta_catalog_id,
+            "brand": product.brand,
             "seo_title": product.seo_title,
             "seo_description": product.seo_description,
             "created_at": str(product.created_at),
@@ -1033,6 +1034,7 @@ async def browse_products_cursor(
             tags=product.tags,
             attributes=product.attributes,
             meta_catalog_id=product.meta_catalog_id,
+            brand=product.brand,
             seo_title=product.seo_title,
             seo_description=product.seo_description,
             created_at=str(product.created_at),
@@ -1144,6 +1146,7 @@ async def get_product_by_slug(
         images=product.images,
         tags=product.tags,
         attributes=product.attributes,
+        brand=product.brand,
         seo_title=product.seo_title,
         seo_description=product.seo_description,
         template_suffix=product.template_suffix,
@@ -1496,6 +1499,9 @@ async def browse_categories(
             "image_url": r.image_url,
             "parent_id": str(r.parent_id) if r.parent_id else None,
             "position": r.position,
+            "seo_title": r.seo_title,
+            "seo_description": r.seo_description,
+            "social_image_url": r.social_image_url,
             "template_suffix": r.template_suffix,
             "product_count": r.product_count,
             "metafields": await _resolve_public_metafields(

@@ -39,6 +39,7 @@ class ProductDTO(BaseDTO):
     # match conversions to a Catalog row). Optional; null falls back to
     # the product UUID in the storefront consumer.
     meta_catalog_id: str | None
+    brand: str | None
     seo_title: str | None
     seo_description: str | None
     # Alternate template variant suffix (Shopify-style); null = base template.
@@ -74,6 +75,7 @@ class ProductDTO(BaseDTO):
             tags=entity.tags,
             attributes=entity.attributes,
             meta_catalog_id=getattr(entity, "meta_catalog_id", None),
+            brand=getattr(entity, "brand", None),
             seo_title=getattr(entity, "seo_title", None),
             seo_description=getattr(entity, "seo_description", None),
             template_suffix=getattr(entity, "template_suffix", None),
@@ -104,6 +106,7 @@ class CreateProductDTO(BaseDTO):
     category_id: UUID | None = None
     tags: list[str] = field(default_factory=list)
     attributes: dict = field(default_factory=dict)
+    brand: str | None = None
     seo_title: str | None = None
     seo_description: str | None = None
     # Alternate template variant suffix (Shopify-style); null = base template.
@@ -129,6 +132,7 @@ class UpdateProductDTO(BaseDTO):
     tags: list[str] | None = None
     attributes: dict | None = None
     status: str | None = None
+    brand: str | None = None
     seo_title: str | None = None
     seo_description: str | None = None
     # Alternate template variant suffix (Shopify-style); null = base template.

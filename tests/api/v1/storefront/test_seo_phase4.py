@@ -224,3 +224,82 @@ def test_serialize_public_store_handles_none_settings() -> None:
     store.settings = None  # type: ignore[assignment]
     payload = _serialize_public_store(store)
     assert payload["seo"]["robots_indexing_enabled"] is True
+
+
+# ── legacy flat-key recovery (the dead-write-path fix) ───────────────────────
+
+
+def test_legacy_flat_keys_recovered_when_no_typed_block() -> None:
+    """The shape real stores are in: Preferences wrote flat keys, the SEO
+    panel was never opened, so `settings.seo` does not exist at all."""
+    store = _StubStore(
+        settings={
+            "seo_title": "Rabbit",
+            "seo_description": "RABBT started from a love of bold socks.",
+            "social_image_url": "https://cdn/og.png",
+        }
+    )
+    payload = _serialize_public_store(store)
+    assert payload["seo"]["seo_title"] == "Rabbit"
+    assert payload["seo"]["seo_description"].startswith("RABBT started")
+    assert payload["seo"]["social_image_url"] == "https://cdn/og.png"
+
+
+def test_typed_block_wins_over_legacy_flat_key() -> None:
+    store = _StubStore(
+        settings={
+            "seo_title": "Old flat title",
+            "seo": {"seo_title": "Typed title"},
+        }
+    )
+    payload = _serialize_public_store(store)
+    assert payload["seo"]["seo_title"] == "Typed title"
+
+
+def test_legacy_fills_only_the_null_typed_fields() -> None:
+    """Per-field fallback: a merchant who saved the SEO panel has a typed
+    block full of nulls, which must not shadow what they typed earlier."""
+    store = _StubStore(
+        settings={
+            "seo_title": "Flat title",
+            "seo_description": "Flat description",
+            "seo": {"seo_title": "Typed title", "seo_description": None},
+        }
+    )
+    payload = _serialize_public_store(store)
+    assert payload["seo"]["seo_title"] == "Typed title"
+    assert payload["seo"]["seo_description"] == "Flat description"
+
+
+def test_overlong_legacy_values_are_truncated_not_rejected() -> None:
+    """The legacy keys were never length-validated. A ValidationError here
+    would 500 the whole store payload, so the value must degrade instead."""
+    store = _StubStore(
+        settings={
+            "seo_title": "word " * 40,
+            "seo_description": "sentence " * 60,
+        }
+    )
+    payload = _serialize_public_store(store)
+    assert len(payload["seo"]["seo_title"]) <= 70
+    assert len(payload["seo"]["seo_description"]) <= 160
+    assert payload["seo"]["seo_title"].startswith("word")
+
+
+def test_unbroken_overlong_legacy_value_is_hard_cut() -> None:
+    store = _StubStore(settings={"seo_title": "x" * 200})
+    payload = _serialize_public_store(store)
+    assert len(payload["seo"]["seo_title"]) == 70
+
+
+def test_blank_legacy_values_are_ignored() -> None:
+    store = _StubStore(settings={"seo_title": "   ", "seo_description": ""})
+    payload = _serialize_public_store(store)
+    assert payload["seo"]["seo_title"] is None
+    assert payload["seo"]["seo_description"] is None
+
+
+def test_corrupt_typed_block_still_recovers_legacy_keys() -> None:
+    store = _StubStore(settings={"seo": "not a dict", "seo_title": "Recovered"})
+    payload = _serialize_public_store(store)
+    assert payload["seo"]["seo_title"] == "Recovered"

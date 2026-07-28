@@ -66,6 +66,7 @@ class Product(BaseEntity):
     metadata: dict[str, Any] = Field(default_factory=dict)
     compare_at_price: Money | None = None
     cost_price: Money | None = None
+    brand: str | None = None
     seo_title: str | None = None
     seo_description: str | None = None
     # Alternate template variant key suffix (Shopify-style); null = base template.

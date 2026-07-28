@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+from src.core.entities.onboarding import OnboardingStepKey
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -89,22 +90,26 @@ async def _async_nudges(batch_size: int) -> dict:
                     skipped += 1
                     continue
 
-                # Find next incomplete step
+                # Find next incomplete step.
+                #
+                # `steps` is keyed by OnboardingStepKey.VALUE (lowercase, e.g.
+                # "add_product") — see _ensure_steps_initialized. This loop used
+                # to compare against uppercase literals, so every lookup missed
+                # and next_step was ALWAYS the first entry: every merchant with
+                # incomplete onboarding got "Need help adding your first
+                # product?" forever, even after adding products, and the
+                # identity nudge was unreachable. Iterate the enum and look up
+                # by .value; STEP_NUDGES_* stay keyed by the member NAME.
                 steps = ob.steps or {}
                 next_step = None
-                for step_key in [
-                    "ADD_PRODUCT",
-                    "SET_IDENTITY",
-                    "CONFIRM_SUPPORT",
-                    "CONFIGURE_PAYMENT",
-                    "ADD_SHIPPING",
-                    "FIRST_ORDER",
-                ]:
-                    step_data = steps.get(step_key, {})
+                for key in OnboardingStepKey:
+                    if key.name not in STEP_NUDGES_EN:
+                        continue  # CREATE_STORE — always done, no nudge copy
+                    step_data = steps.get(key.value, {})
                     if not step_data.get("completed_at") and not step_data.get(
                         "skipped_at"
                     ):
-                        next_step = step_key
+                        next_step = key.name
                         break
 
                 if not next_step:

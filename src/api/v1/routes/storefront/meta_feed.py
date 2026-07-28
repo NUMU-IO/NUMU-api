@@ -89,18 +89,76 @@ def _item_xml(item: dict) -> str:
     parts.append(f"      <g:price>{escape(item['price'])}</g:price>")
     if item.get("brand"):
         parts.append(f"      <g:brand>{escape(item['brand'])}</g:brand>")
+    if item.get("sale_price"):
+        parts.append(f"      <g:sale_price>{escape(item['sale_price'])}</g:sale_price>")
     if item.get("product_type"):
         parts.append(
             f"      <g:product_type>{escape(item['product_type'])}</g:product_type>"
         )
-    if item.get("sku"):
-        parts.append(f"      <g:mpn>{escape(item['sku'])}</g:mpn>")
+    if item.get("google_product_category"):
+        parts.append(
+            "      <g:google_product_category>"
+            f"{escape(item['google_product_category'])}"
+            "</g:google_product_category>"
+        )
+    if item.get("gtin"):
+        parts.append(f"      <g:gtin>{escape(item['gtin'])}</g:gtin>")
+    # `mpn` is the MANUFACTURER's part number. A merchant SKU is our identifier,
+    # not the manufacturer's, so emitting it here asserted something false about
+    # every product; g:id already carries the merchant identifier.
+    if item.get("mpn"):
+        parts.append(f"      <g:mpn>{escape(item['mpn'])}</g:mpn>")
+    for url in item.get("additional_image_links") or []:
+        parts.append(
+            f"      <g:additional_image_link>{escape(url)}</g:additional_image_link>"
+        )
+    if item.get("shipping"):
+        ship = item["shipping"]
+        parts.append("      <g:shipping>")
+        parts.append(f"        <g:country>{escape(ship['country'])}</g:country>")
+        parts.append(f"        <g:price>{escape(ship['price'])}</g:price>")
+        parts.append("      </g:shipping>")
     parts.append("    </item>")
     return "\n".join(parts)
 
 
+def _store_shipping(store: object, currency: str) -> dict | None:
+    """One representative shipping rate for the feed.
+
+    Google lists shipping settings as a REQUIREMENT in 30+ countries, with the
+    ``shipping`` attribute as the alternative — so its absence can block free
+    listings rather than merely degrade them. We publish the store's cheapest
+    configured zone rate as the baseline; anything more precise needs per-region
+    rows Google would rather get from account-level settings anyway.
+
+    Returns None when the store has no usable rate, which is honest: a wrong
+    shipping price is worse than none.
+    """
+    settings = getattr(store, "settings", None)
+    if not isinstance(settings, dict):
+        return None
+    shipping = settings.get("shipping")
+    if not isinstance(shipping, dict):
+        return None
+    zones = shipping.get("zones")
+    if not isinstance(zones, list):
+        return None
+    rates: list[float] = []
+    for zone in zones:
+        if not isinstance(zone, dict):
+            continue
+        try:
+            rates.append(float(zone.get("rate")))
+        except (TypeError, ValueError):
+            continue
+    if not rates:
+        return None
+    country = (getattr(store, "country", None) or "EG").upper()
+    return {"country": country, "price": f"{min(rates):.2f} {currency.upper()}"}
+
+
 def _product_to_feed_item(
-    product: dict, *, store_url: str, currency: str
+    product: dict, *, store_url: str, currency: str, shipping: dict | None = None
 ) -> dict | None:
     """Map one row from ``products`` table → feed entry. Returns None
     when the product should be excluded (out of stock + tracked, etc.).
@@ -119,6 +177,23 @@ def _product_to_feed_item(
 
     price_cents = int(product.get("price_amount") or 0)
     price_decimal = f"{price_cents / 100:.2f}"
+
+    # compare_at_price is the "was" price, so when it is higher the CURRENT
+    # price is the sale. Meta/Google want g:price = original, g:sale_price =
+    # what the shopper pays; without this a discounted product advertised its
+    # full price and the strike-through never rendered.
+    compare_cents = int(product.get("compare_at_price") or 0)
+    if compare_cents > price_cents:
+        list_price = f"{compare_cents / 100:.2f} {currency.upper()}"
+        sale_price: str | None = f"{price_decimal} {currency.upper()}"
+    else:
+        list_price = f"{price_decimal} {currency.upper()}"
+        sale_price = None
+
+    attrs = (
+        product.get("attributes") if isinstance(product.get("attributes"), dict) else {}
+    )
+    attrs = attrs or {}
 
     images = product.get("images") or []
     image_link = images[0] if images else None
@@ -150,14 +225,21 @@ def _product_to_feed_item(
         "image_link": image_link,
         "availability": availability,
         "condition": "new",
-        "price": f"{price_decimal} {currency.upper()}",
-        "brand": (product.get("attributes") or {}).get("brand")
-        if isinstance(product.get("attributes"), dict)
-        else None,
-        "product_type": (product.get("attributes") or {}).get("product_type")
-        if isinstance(product.get("attributes"), dict)
-        else None,
-        "sku": product.get("sku"),
+        "price": list_price,
+        "sale_price": sale_price,
+        # Real column first; `attributes.brand` stays as the legacy fallback so
+        # merchants who set it through the API before the column existed don't
+        # lose it.
+        "brand": product.get("brand") or attrs.get("brand"),
+        "product_type": attrs.get("product_type"),
+        # Google's taxonomy — a required-ish quality signal for free listings.
+        "google_product_category": attrs.get("google_product_category"),
+        # Real barcodes only. A GTIN is issued by GS1; a merchant SKU is not
+        # one, and submitting a fabricated value gets items disapproved.
+        "gtin": attrs.get("gtin"),
+        "mpn": attrs.get("mpn"),
+        "additional_image_links": [str(u) for u in images[1:11] if u],
+        "shipping": shipping,
     }
 
 
@@ -216,7 +298,8 @@ async def meta_catalog_feed(
         text(
             """
             SELECT id::text AS id, slug, name, description, short_description, sku,
-                   price_amount, status::text AS status, quantity,
+                   price_amount, compare_at_price, brand,
+                   status::text AS status, quantity,
                    images, attributes, meta_catalog_id,
                    COALESCE((attributes->>'track_inventory')::boolean, true) AS track_inventory
             FROM public.products
@@ -236,9 +319,12 @@ async def meta_catalog_feed(
 
     currency = (getattr(store, "default_currency", None) or "EGP").upper()
     store_url = store.store_url
+    shipping = _store_shipping(store, currency)
     items: list[dict] = []
     for p in products_raw:
-        entry = _product_to_feed_item(p, store_url=store_url, currency=currency)
+        entry = _product_to_feed_item(
+            p, store_url=store_url, currency=currency, shipping=shipping
+        )
         if entry is not None:
             items.append(entry)
 

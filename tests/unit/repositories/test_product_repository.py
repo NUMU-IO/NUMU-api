@@ -73,7 +73,9 @@ class TestProductRepository:
         mock_model.category_id = None
         mock_model.tags = []
         mock_model.attributes = {}
+        mock_model.brand = None
         mock_model.seo_title = None
+        mock_model.template_suffix = None
         mock_model.seo_description = None
         mock_model.template_suffix = None
         mock_model.meta_catalog_id = None
@@ -206,7 +208,9 @@ class TestProductRepository:
             model.category_id = None
             model.tags = []
             model.attributes = {}
+            model.brand = None
             model.seo_title = None
+            model.template_suffix = None
             model.seo_description = None
             model.template_suffix = None
             model.meta_catalog_id = None
@@ -252,7 +256,9 @@ class TestProductRepository:
         mock_model.category_id = None
         mock_model.tags = []
         mock_model.attributes = {}
+        mock_model.brand = None
         mock_model.seo_title = None
+        mock_model.template_suffix = None
         mock_model.seo_description = None
         mock_model.template_suffix = None
         mock_model.meta_catalog_id = None
@@ -313,7 +319,9 @@ class TestProductRepository:
             model.category_id = None
             model.tags = []
             model.attributes = {}
+            model.brand = None
             model.seo_title = None
+            model.template_suffix = None
             model.seo_description = None
             model.template_suffix = None
             model.meta_catalog_id = None

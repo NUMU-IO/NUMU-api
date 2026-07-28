@@ -574,7 +574,9 @@ async def revalidate_on_metafield_change(
     await revalidate_store(subdomain=subdomain, paths=["/products"], tags=tags)
 
 
-async def revalidate_on_category_change(subdomain: str, store_id: str) -> None:
+async def revalidate_on_category_change(
+    subdomain: str, store_id: str, category_slug: str | None = None
+) -> None:
     """Call when a category is created/updated/deleted.
 
     Also busts the categories sitemap tag (Phase 2) so the new/changed
@@ -588,6 +590,12 @@ async def revalidate_on_category_change(subdomain: str, store_id: str) -> None:
             f"sitemap:categories:{store_id}",
         ],
     )
+    # Same discipline as the PDP above: announce the ONE canonical URL that
+    # changed, never "/" or "/products" — those are cache-bust paths, and
+    # re-announcing unchanged URLs is the spam IndexNow asks callers not to
+    # send. Omitted on delete, where there is no slug to announce.
+    if category_slug:
+        await ping_indexnow(subdomain, [f"/collections/{category_slug}"])
 
 
 async def revalidate_sitemaps(
