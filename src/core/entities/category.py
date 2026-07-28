@@ -25,6 +25,9 @@ class Category(BaseEntity):
     position: int = Field(default=0, ge=0)
     is_active: bool = True
     # Alternate template variant key suffix (Shopify-style); null = base template.
+    seo_title: str | None = None
+    seo_description: str | None = None
+    social_image_url: str | None = None
     template_suffix: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

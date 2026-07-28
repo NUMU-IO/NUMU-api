@@ -21,6 +21,21 @@ class CreateCategoryRequest(BaseModel):
     parent_id: str | None = Field(None, description="Parent category UUID for nesting")
     position: int = Field(0, ge=0, description="Sort position (lower = first)")
     is_active: bool = Field(True, description="Whether the category is visible")
+    seo_title: str | None = Field(
+        default=None,
+        max_length=70,
+        description="SEO page title for the collection page.",
+    )
+    seo_description: str | None = Field(
+        default=None,
+        max_length=160,
+        description="SEO meta description for the collection page.",
+    )
+    social_image_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="OG/Twitter card image for the collection page.",
+    )
     template_suffix: str | None = Field(
         default=None,
         max_length=32,
@@ -46,6 +61,21 @@ class UpdateCategoryRequest(BaseModel):
     parent_id: str | None = Field(None, description="Parent category UUID")
     position: int | None = Field(None, ge=0, description="Sort position")
     is_active: bool | None = Field(None, description="Whether the category is visible")
+    seo_title: str | None = Field(
+        default=None,
+        max_length=70,
+        description="SEO page title for the collection page.",
+    )
+    seo_description: str | None = Field(
+        default=None,
+        max_length=160,
+        description="SEO meta description for the collection page.",
+    )
+    social_image_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="OG/Twitter card image for the collection page.",
+    )
     template_suffix: str | None = Field(
         default=None,
         max_length=32,
@@ -71,6 +101,13 @@ class CategoryResponse(BaseModel):
     parent_id: str | None = Field(description="Parent category UUID")
     position: int = Field(description="Sort position")
     is_active: bool = Field(description="Whether the category is visible")
+    seo_title: str | None = Field(default=None, description="SEO page title override.")
+    seo_description: str | None = Field(
+        default=None, description="SEO meta description override."
+    )
+    social_image_url: str | None = Field(
+        default=None, description="OG/Twitter card image."
+    )
     template_suffix: str | None = Field(
         default=None,
         description="Alternate template variant suffix; null = base template.",

@@ -1489,6 +1489,9 @@ async def browse_categories(
             "image_url": r.image_url,
             "parent_id": str(r.parent_id) if r.parent_id else None,
             "position": r.position,
+            "seo_title": r.seo_title,
+            "seo_description": r.seo_description,
+            "social_image_url": r.social_image_url,
             "template_suffix": r.template_suffix,
             "product_count": r.product_count,
             "metafields": await _resolve_public_metafields(

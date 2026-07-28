@@ -68,7 +68,9 @@ class TestProductToFeedItem:
         assert item["image_link"] == "https://cdn.example.com/img1.jpg"
         assert item["brand"] == "TestBrand"
         assert item["product_type"] == "Apparel"
-        assert item["sku"] == "SKU-001"
+        # `sku` is deliberately no longer part of the feed item: it was only
+        # ever there to be emitted as g:mpn, which was wrong (see below).
+        assert "sku" not in item
 
     def test_link_prefers_slug_over_uuid(self):
         # Slug-addressed links match the PDP's canonical `/products/<slug>`
@@ -233,8 +235,10 @@ class TestItemXml:
         assert "<g:product_type>" not in xml
         assert "<g:mpn>" not in xml
 
-    def test_sku_renders_as_mpn(self):
-        # Meta accepts mpn as the manufacturer/SKU identifier.
+    def test_merchant_sku_is_not_published_as_mpn(self):
+        # g:mpn is the MANUFACTURER's part number. A store SKU is not one, so
+        # publishing it asserted something false about every product; g:id
+        # already carries the merchant identifier.
         xml = _item_xml({
             "id": "id-1",
             "item_group_id": "id-1",
@@ -244,7 +248,20 @@ class TestItemXml:
             "price": "10.00 EGP",
             "sku": "SKU-42",
         })
-        assert "<g:mpn>SKU-42</g:mpn>" in xml
+        assert "SKU-42" not in xml
+        assert "<g:mpn>" not in xml
+
+    def test_explicit_mpn_renders(self):
+        xml = _item_xml({
+            "id": "id-1",
+            "item_group_id": "id-1",
+            "title": "T",
+            "link": "https://x.com",
+            "availability": "in stock",
+            "price": "10.00 EGP",
+            "mpn": "MPN-9",
+        })
+        assert "<g:mpn>MPN-9</g:mpn>" in xml
 
 
 # ---------------------------------------------------------------------------
