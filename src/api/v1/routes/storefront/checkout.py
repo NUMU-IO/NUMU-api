@@ -281,6 +281,50 @@ _cache_service: RedisCacheService | None = (
 IDEMPOTENCY_TTL_SECONDS = 86_400  # 24 hours
 
 
+def _is_contactless_guest(customer) -> bool:
+    """No phone and no real email — the shopper we can't identify.
+
+    Such a guest is handed a BRAND-NEW customer row on every attempt (see the
+    guest branch in the checkout handler), so their id can never match across
+    retries. That is the whole reason the idempotency key is store-scoped.
+    """
+    metadata = getattr(customer, "metadata", None) or {}
+    return not getattr(customer, "phone", None) and not metadata.get("has_real_email")
+
+
+def _may_replay_checkout(
+    cached_customer_id: str | None,
+    cached_contactless: bool,
+    customer,
+) -> bool:
+    """May this requester replay the cached response?
+
+    * Entry predates customer binding (no id stored) — yes; it is still in
+      Redis under the 24h TTL from before this shipped.
+    * Same customer — yes, the ordinary retry.
+    * A contactless guest replaying a CONTACTLESS entry — yes. Their id
+      differs on every attempt, so this is the only way the de-dupe can work
+      for them at all.
+    * Anything else — no.
+
+    That last clause is load-bearing: an earlier version let ANY contactless
+    requester replay ANY entry, so presenting an identified shopper's key
+    with a contact-less address returned their `CheckoutResponse` — including
+    `payment_url` / `paymob_client_secret` on a prepaid order.
+    """
+    if cached_customer_id is None:
+        return True
+    if cached_customer_id == str(customer.id):
+        return True
+    return cached_contactless and _is_contactless_guest(customer)
+
+
+def _idempotency_cache_key(store_id: UUID, idempotency_key: str) -> str:
+    """Cache key for a checkout replay. Store-scoped — see the note at the
+    read site for why the customer id is deliberately NOT part of it."""
+    return f"checkout:idempotency:{store_id}:{idempotency_key}"
+
+
 def _generate_invoice_pdf(invoice, store_logo_url: str | None = None) -> bytes:
     """Generate invoice PDF (sync, meant to run in thread)."""
     from src.infrastructure.external_services.invoice import InvoicePDFGenerator
@@ -503,20 +547,57 @@ async def checkout(
             )
 
     # ── Idempotency check ──────────────────────────────────────────────
+    # Scoped to the STORE, not the customer. The customer id was part of the
+    # key, but a guest who supplies neither phone nor email gets a freshly
+    # minted customer row on every attempt (see the block just above), so the
+    # key could never collide and the retry created a DUPLICATE ORDER — the
+    # de-dupe silently did nothing for exactly the shoppers least able to
+    # notice. Not reachable from the built-in checkout (phone is required in
+    # its UI) but wide open to a theme-owned checkout, the mobile app, or any
+    # direct client, since `OrderAddressRequest.phone` is optional here.
+    # Dropping the customer from the KEY would also drop it as a boundary —
+    # and the cached body carries `payment_url` / `paymob_client_secret`. So
+    # the customer is stored WITH the entry instead: an identified shopper can
+    # only replay their own, while a contactless guest (whose id is newly
+    # minted each attempt, and who therefore has nothing stable to match on)
+    # still replays. That keeps the fix above without handing another
+    # shopper's payment credentials to anyone who presents their key.
+    idempotency_slot_taken = False
     if idempotency_key and _cache_service:
-        cache_key = (
-            f"checkout:idempotency:{store_id}:{current_customer.id}:{idempotency_key}"
-        )
+        cache_key = _idempotency_cache_key(store_id, idempotency_key)
         cached = await _cache_service.get(cache_key)
         if cached:
-            logger.info(
-                f"Idempotent checkout hit: key={idempotency_key}, "
-                f"customer={current_customer.id}"
-            )
-            response.status_code = status.HTTP_200_OK
-            return SuccessResponse(
-                data=CheckoutResponse(**json.loads(cached)),
-                message="Order already created",
+            envelope = json.loads(cached)
+            # Tolerate the pre-envelope flat shape still sitting in Redis
+            # from before this shipped (24h TTL).
+            cached_payload = envelope.get("response", envelope)
+            cached_customer = envelope.get("customer_id")
+            if _may_replay_checkout(
+                cached_customer,
+                bool(envelope.get("contactless")),
+                current_customer,
+            ):
+                logger.info(
+                    f"Idempotent checkout hit: key={idempotency_key}, "
+                    f"customer={current_customer.id}"
+                )
+                response.status_code = status.HTTP_200_OK
+                return SuccessResponse(
+                    data=CheckoutResponse(**cached_payload),
+                    message="Order already created",
+                )
+            # Refused: create this shopper's own order, but do NOT overwrite
+            # the slot on the way out. Stomping it would hand the ORIGINAL
+            # shopper's next retry a foreign customer_id, refuse them too, and
+            # create them a duplicate order — the exact bug this all exists to
+            # stop, aimed at the one person who did nothing wrong. No attacker
+            # needed: any key reuse (a theme deriving keys from a cart hash, a
+            # recycled mobile key) triggers it.
+            idempotency_slot_taken = True
+            logger.warning(
+                f"Idempotency key presented by a different customer; "
+                f"refusing replay and leaving the entry intact. "
+                f"key={idempotency_key}"
             )
 
     # Extract client IP (Nginx sets X-Real-IP; fall back to direct connection)
@@ -2647,13 +2728,15 @@ async def checkout(
     )
 
     # ── Cache response for idempotency ───────────────────────────────
-    if idempotency_key and _cache_service:
-        cache_key = (
-            f"checkout:idempotency:{store_id}:{current_customer.id}:{idempotency_key}"
-        )
+    if idempotency_key and _cache_service and not idempotency_slot_taken:
+        cache_key = _idempotency_cache_key(store_id, idempotency_key)
         await _cache_service.set(
             cache_key,
-            checkout_response.model_dump_json(),
+            json.dumps({
+                "customer_id": str(current_customer.id),
+                "contactless": _is_contactless_guest(current_customer),
+                "response": json.loads(checkout_response.model_dump_json()),
+            }),
             expire=IDEMPOTENCY_TTL_SECONDS,
         )
 
