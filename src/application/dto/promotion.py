@@ -12,6 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import Discriminator as PydanticDiscriminator
 
+from src.core.entities.promotion_target import TargetRole
 from src.core.enums.promotion_enums import (
     DisplayFrequency,
     DisplayTrigger,
@@ -66,13 +67,29 @@ class PromotionDisplayInput(BaseModel):
 
 
 class PromotionTargetInput(BaseModel):
-    """Audience / catalog / geo rule attached to a promotion."""
+    """Audience / catalog / geo rule attached to a promotion.
+
+    `role` decides which half of the engine reads this row:
+
+    * `None` (default) — an **eligibility** gate. Every inclusion rule
+      must match (and no exclusion rule may) for the promotion to run
+      at all; the discount then applies to the whole cart.
+    * `"buy_set"` / `"get_set"` — a **line filter**. Skipped by the
+      eligibility checker and read by the discount calculator instead,
+      to restrict which cart lines participate: BOGO's "customer buys X
+      / customer gets Y", and MULTIBUY's eligible set (`buy_set`).
+
+    Only catalog kinds (PRODUCT / CATEGORY) are meaningful as line
+    filters; a role on an audience/geo row is ignored rather than
+    failing the promotion.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     target_kind: TargetKind
     target_value: dict[str, Any] = Field(default_factory=dict)
     inclusion: bool = True
+    role: TargetRole | None = None
 
 
 class CreatePromotionInput(BaseModel):
@@ -153,6 +170,7 @@ class PromotionTargetOutput(BaseModel):
     target_kind: TargetKind
     target_value: dict[str, Any]
     inclusion: bool
+    role: TargetRole | None = None
 
 
 class PromotionMetricsBlock(BaseModel):

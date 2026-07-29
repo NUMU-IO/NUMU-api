@@ -345,11 +345,23 @@ class TestCheckoutPriceRecalculation:
         )
 
     def test_checkout_line_item_has_no_price_fields(self):
-        """CheckoutLineItem must only accept product_id, variant_id, quantity."""
+        """CheckoutLineItem may only carry identity/quantity — never money.
+
+        `selections` (the option values picked on the PDP, e.g.
+        {"Color": "Red"}) was added later; it names a variant combination
+        and carries no amounts, so it is allowed here. The point of this
+        guard is that the client cannot influence price — any NEW field on
+        this schema must be justified against that invariant.
+        """
         from src.api.v1.schemas.storefront.checkout import CheckoutLineItem
 
         field_names = set(CheckoutLineItem.model_fields.keys())
-        assert field_names == {"product_id", "variant_id", "quantity"}
+        assert field_names == {
+            "product_id",
+            "variant_id",
+            "quantity",
+            "selections",
+        }
 
     def test_extra_price_field_in_line_item_is_ignored(self):
         """Pydantic should silently drop unknown price fields."""

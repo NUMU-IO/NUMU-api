@@ -32,6 +32,10 @@ class DiscountRuleKind(StrEnum):
     FREE_SHIPPING = "free_shipping"
     BOGO = "bogo"
     TIERED = "tiered"
+    # "Buy N eligible items for a fixed total price P" — e.g. 3 for EGP 650.
+    # Groups repeat: 6 eligible units = two groups. Pure integer math over
+    # units, so it never drifts the way a percentage approximation does.
+    MULTIBUY = "multibuy"
 
 
 class DiscountTier(BaseModel):
@@ -95,6 +99,12 @@ class DiscountRule(BaseModel):
     get_quantity: int | None = Field(default=None, ge=1)
     get_discount_percent: int | None = Field(default=None, ge=0, le=100)
     tiers: list[DiscountTier] = Field(default_factory=list)
+    # MULTIBUY — "any N eligible items for a fixed total of P cents".
+    # `ge=2` because N=1 would be a per-unit fixed price, not a bundle;
+    # `gt=0` because a free bundle should be modelled as a 100% rule so
+    # the merchant sees it labelled as such.
+    multibuy_quantity: int | None = Field(default=None, ge=2)
+    multibuy_price_cents: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _validate_kind_fields(self) -> Self:
@@ -117,6 +127,12 @@ class DiscountRule(BaseModel):
             case DiscountRuleKind.TIERED:
                 if not self.tiers:
                     raise ValueError("tiered discount requires at least one tier")
+            case DiscountRuleKind.MULTIBUY:
+                if self.multibuy_quantity is None or self.multibuy_price_cents is None:
+                    raise ValueError(
+                        "multibuy discount requires multibuy_quantity and "
+                        "multibuy_price_cents"
+                    )
             case DiscountRuleKind.FREE_SHIPPING:
                 pass
         return self
@@ -138,12 +154,20 @@ class DiscountRule(BaseModel):
         handled here so callers can sum results without worrying about
         signs. The `max_discount_cents` cap is also applied.
 
-        `buy_filter` / `get_filter` only affect BOGO and only restrict
-        which cart lines participate in the "customer buys" / "customer
-        gets" sets. When omitted, BOGO falls back to the original
-        "any-product, cheapest-unit free" semantics so existing rules
-        without role-tagged targets keep their behavior. Both filters
-        are ignored for percentage / fixed / free_shipping / tiered.
+        `buy_filter` / `get_filter` restrict which cart lines
+        participate:
+
+        * BOGO — the "customer buys" / "customer gets" sets. When
+          omitted, BOGO falls back to the original "any-product,
+          cheapest-unit free" semantics so existing rules without
+          role-tagged targets keep their behavior.
+        * MULTIBUY — `buy_filter` alone is the *eligible set* (which
+          products/categories can form a group). `get_filter` is
+          ignored: a multibuy group has no separate give-away side.
+          Omitted ⇒ the whole cart is eligible.
+
+        Both filters are ignored for percentage / fixed /
+        free_shipping / tiered.
         """
         if self._below_minimum(context):
             return DiscountResult(
@@ -168,6 +192,8 @@ class DiscountRule(BaseModel):
                 return self._bogo(context, buy_filter, get_filter)
             case DiscountRuleKind.TIERED:
                 return self._tiered(context)
+            case DiscountRuleKind.MULTIBUY:
+                return self._multibuy(context, buy_filter)
 
         return DiscountResult(discount_cents=0, explanation="unknown rule kind")
 
@@ -289,6 +315,95 @@ class DiscountRule(BaseModel):
             explanation=(
                 f"buy {self.buy_quantity} get {self.get_quantity} "
                 f"@ {self.get_discount_percent}% off — {bundles} bundle(s) ({scope})"
+            ),
+        )
+
+    def _multibuy(
+        self,
+        context: DiscountContext,
+        line_filter: LineFilter | None,
+    ) -> DiscountResult:
+        """Any N eligible items for a fixed total P — e.g. 3 for EGP 650.
+
+        The math is deliberately unit-based rather than line-based: a
+        single line with quantity 3 is a valid trio ("Mix & Match"
+        allows repeats), so lines are expanded to individual units
+        first.
+
+        Units are grouped **most expensive first**, which is the
+        customer-optimal grouping: it maximises the saving and avoids
+        the "why did the deal use my cheapest items?" support ticket.
+        Because the ordering is descending, the first group whose units
+        already total <= P proves every later group does too — so we
+        stop there rather than ever charging more than regular price.
+        """
+        assert self.multibuy_quantity is not None  # validated
+        assert self.multibuy_price_cents is not None  # validated
+
+        group_size = self.multibuy_quantity
+        group_price = self.multibuy_price_cents
+
+        eligible_lines = (
+            [li for li in context.line_items if line_filter(li)]
+            if line_filter is not None
+            else list(context.line_items)
+        )
+
+        # Expand lines → units, carrying the product id so we can report
+        # which lines the discount touched (per-line allocation is still
+        # a follow-up; this is the raw material for it).
+        units: list[tuple[int, UUID]] = []
+        for li in eligible_lines:
+            units.extend(
+                (li.unit_price_cents, li.product_id) for _ in range(li.quantity)
+            )
+        units.sort(key=lambda u: u[0], reverse=True)
+
+        scope = "scoped" if line_filter is not None else "any-product"
+        groups = len(units) // group_size
+        if groups == 0:
+            return DiscountResult(
+                discount_cents=0,
+                explanation=(
+                    f"multibuy needs {group_size} eligible items, "
+                    f"cart has {len(units)} ({scope})"
+                ),
+            )
+
+        discount_total = 0
+        complete_groups = 0
+        affected: list[UUID] = []
+        seen: set[UUID] = set()
+        for g in range(groups):
+            chunk = units[g * group_size : (g + 1) * group_size]
+            group_sum = sum(price for price, _ in chunk)
+            if group_sum <= group_price:
+                # Descending order ⇒ all later groups are cheaper still.
+                # Never make the customer worse off than regular price.
+                break
+            discount_total += group_sum - group_price
+            complete_groups += 1
+            for _, pid in chunk:
+                if pid not in seen:
+                    seen.add(pid)
+                    affected.append(pid)
+
+        if discount_total <= 0:
+            return DiscountResult(
+                discount_cents=0,
+                explanation=(
+                    f"multibuy price ({group_price} cents) is not below the "
+                    f"regular price of {group_size} eligible items ({scope})"
+                ),
+            )
+
+        capped = self._cap(discount_total, context)
+        return DiscountResult(
+            discount_cents=capped,
+            affected_line_item_ids=affected,
+            explanation=(
+                f"{group_size} for {group_price} cents — "
+                f"{complete_groups} group(s) ({scope})"
             ),
         )
 

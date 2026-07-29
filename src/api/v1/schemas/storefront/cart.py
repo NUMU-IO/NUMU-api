@@ -53,6 +53,15 @@ class CartItemResponse(BaseModel):
         description="True iff `current_price` differs from the snapshotted `unit_price`.",
     )
     image_url: str | None = None
+    category_id: str | None = Field(
+        default=None,
+        description=(
+            "The product's category. Exposed so clients can echo it back to "
+            "`POST /cart/discounts` — category-scoped promotions match on it, "
+            "and a preview that omits it under-reports the discount the order "
+            "will actually get."
+        ),
+    )
     in_stock: bool = True
     available_now: int | None = Field(
         default=None,
@@ -75,14 +84,61 @@ class CartItemResponse(BaseModel):
         from_attributes = True
 
 
+class AppliedPromotionResponse(BaseModel):
+    """One automatic promotion that priced this cart.
+
+    Deliberately the SAME shape as the order's persisted
+    ``applied_promotions`` snapshot, so the cart, the checkout summary and
+    the order record all read identically and a theme can render one
+    component for all three.
+    """
+
+    id: str
+    title: str
+    title_ar: str | None = None
+    amount: int = Field(
+        description="This promotion's own contribution, in integer cents"
+    )
+
+
 class CartResponse(BaseModel):
-    """Full cart response schema."""
+    """Full cart response schema.
+
+    Discount fields (added for offers-v2 cart visibility): without them a
+    shopper whose cart qualified for an automatic promotion saw the full
+    price here while checkout charged the discounted total — the offer
+    fired invisibly and so could never motivate the extra unit that
+    unlocked it. All amounts are integer cents, like every other money
+    field on this response.
+    """
 
     items: list[CartItemResponse]
     item_count: int = Field(description="Total number of distinct line items")
     total_quantity: int = Field(description="Sum of all item quantities")
     subtotal: int = Field(description="Subtotal in cents")
     currency: str = "EGP"
+    automatic_discount_cents: int = Field(
+        default=0,
+        description=(
+            "Sum of automatic (no-code) promotions applied to this cart, in "
+            "cents. Computed by the same engine the checkout charges with."
+        ),
+    )
+    discount_amount: int = Field(
+        default=0,
+        description=(
+            "Total discount applied to this cart in cents — automatic "
+            "promotions plus any promotion-backed code pinned on the cart."
+        ),
+    )
+    total: int = Field(
+        default=0,
+        description="Post-discount cart total in cents (subtotal - discount_amount).",
+    )
+    applied_promotions: list[AppliedPromotionResponse] = Field(
+        default_factory=list,
+        description="Named breakdown of the automatic promotions that fired.",
+    )
 
     class Config:
         from_attributes = True

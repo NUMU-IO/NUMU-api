@@ -124,6 +124,130 @@ async def _get_or_create_guest_cart(session_id: UUID, store_id: UUID) -> Cart:
     return cart
 
 
+async def _compute_cart_discounts(
+    cart: Cart,
+    visible_items: list[CartItem],
+    products_by_id: dict,
+    product_repo: ProductRepository,
+) -> tuple[int, int, list[dict]]:
+    """Price the cart through the offers-v2 engine.
+
+    Returns ``(automatic_cents, total_discount_cents, applied_promotions)``.
+
+    ``visible_items`` is the set of lines that survived into the response —
+    NOT ``cart.items``. A line whose product was deleted or archived while
+    sitting in the cart is dropped from `items`/`subtotal`, and it must be
+    dropped from the pricing too. Pricing the raw cart instead would let an
+    invisible unit complete a group: the cart would promise a trio discount
+    the shopper can't see the third item for, then checkout — which only
+    submits visible lines — would find two units, apply nothing, and charge
+    more than the cart displayed.
+
+    This is the SAME `CalculateCartDiscountsUseCase` that
+    `POST /storefront/store/{id}/cart/discounts` previews with and that
+    checkout charges with, so the three can't disagree. Two details make
+    that guarantee real:
+
+    * Lines carry `category_id` (read off the products we already loaded —
+      no extra query), otherwise category-scoped rules silently match
+      nothing here while matching at checkout.
+    * Any code pinned on the cart is passed through, so a promotion-backed
+      code prices the same in the cart as it does at checkout. Plain legacy
+      coupons are NOT recomputed here — they have no promotion behind them,
+      so the engine returns 0 for them; the checkout summary keeps using
+      `/cart/discounts`, which carries the legacy-parity shim.
+
+    Best-effort by design: any failure returns zeroes and the cart renders
+    at full price. A promotions outage must never make the cart
+    unreachable — same contract as the checkout path, which wraps this use
+    case in the identical try/except.
+    """
+    if not visible_items:
+        return 0, 0, []
+
+    # Local imports mirror the checkout path: keeps the promotions engine
+    # out of the cart module's import graph for every request that never
+    # reaches this branch.
+    from src.application.dto.promotion_resolution import VisitorContextInput
+    from src.application.use_cases.promotions.calculate_cart_discounts import (
+        CalculateCartDiscountsUseCase,
+    )
+    from src.core.services.discount_calculator import DiscountCalculator
+    from src.core.services.promotion_eligibility_checker import (
+        PromotionEligibilityChecker,
+    )
+    from src.infrastructure.repositories.coupon_repository import CouponRepository
+    from src.infrastructure.repositories.promotion_event_repository import (
+        PromotionEventRepository,
+    )
+    from src.infrastructure.repositories.promotion_repository import (
+        PromotionRepository,
+        PromotionTargetRepository,
+    )
+
+    # Products are tenant-scoped, so the owning tenant comes free off one we
+    # already loaded — no store lookup needed.
+    _first = products_by_id.get(visible_items[0].product_id)
+    tenant_id = getattr(_first, "tenant_id", None) if _first else None
+
+    # Rebuild the visible lines with category ids attached. The products are
+    # already in memory from the response build above.
+    priced_cart = cart.model_copy(
+        update={
+            "items": [
+                ci.model_copy(
+                    update={
+                        "category_id": getattr(
+                            products_by_id.get(ci.product_id), "category_id", None
+                        )
+                    }
+                )
+                for ci in visible_items
+            ]
+        }
+    )
+
+    subtotal_cents = sum(ci.unit_price * ci.quantity for ci in priced_cart.items)
+    category_ids = [
+        cid for cid in {ci.category_id for ci in priced_cart.items} if cid is not None
+    ]
+    visitor = VisitorContextInput(
+        customer_id=cart.customer_id,
+        is_logged_in=cart.customer_id is not None,
+        cart_subtotal_cents=subtotal_cents,
+        cart_product_ids=[ci.product_id for ci in priced_cart.items],
+        cart_category_ids=category_ids,
+    )
+
+    session = product_repo.session
+    use_case = CalculateCartDiscountsUseCase(
+        promotion_repo=PromotionRepository(session),
+        target_repo=PromotionTargetRepository(session),
+        coupon_repo=CouponRepository(session),
+        eligibility_checker=PromotionEligibilityChecker(),
+        calculator=DiscountCalculator(),
+        event_repo=PromotionEventRepository(session),
+    )
+    # NOTE (verified 2026-07-28): `Cart` declares no `discount_code` field, and
+    # both `POST/DELETE /cart/discount` guard their writes with
+    # `hasattr(cart, "discount_code")` — which is always False. So no code is
+    # ever actually pinned to a cart today and this resolves to None. Reading
+    # it defensively means the cart starts pricing codes the moment that field
+    # is added, instead of silently continuing to ignore them.
+    pinned_code = getattr(cart, "discount_code", None)
+    out = await use_case.execute(
+        store_id=cart.store_id,
+        tenant_id=tenant_id,
+        cart=priced_cart,
+        applied_coupon_codes=[pinned_code] if pinned_code else [],
+        visitor=visitor,
+    )
+    total_discount = min(
+        out.automatic_discount_cents + out.code_discount_cents, subtotal_cents
+    )
+    return out.automatic_discount_cents, total_discount, list(out.applied_promotions)
+
+
 async def _build_cart_response(
     cart: Cart,
     product_repo: ProductRepository,
@@ -145,6 +269,10 @@ async def _build_cart_response(
     line.
     """
     items: list[CartItemResponse] = []
+    # The same lines, as domain value objects — the offers engine must price
+    # exactly what the shopper can see, not the raw cart (see
+    # `_compute_cart_discounts`).
+    visible_items: list[CartItem] = []
     subtotal = 0
 
     unique_product_ids = list({item.product_id for item in cart.items})
@@ -155,6 +283,7 @@ async def _build_cart_response(
         product = products_by_id.get(cart_item.product_id)
         if not product or product.status != ProductStatus.ACTIVE:
             continue
+        visible_items.append(cart_item)
 
         # Snapshot — what the customer agreed to pay when they added the
         # line. CartItem.unit_price is set at add-time in add_cart_item.
@@ -183,6 +312,7 @@ async def _build_cart_response(
                 current_price=current_price,
                 price_changed=price_changed,
                 image_url=product.images[0] if product.images else None,
+                category_id=(str(product.category_id) if product.category_id else None),
                 in_stock=product.is_in_stock,
                 available_now=available_now,
                 sold_out_now=sold_out_now,
@@ -195,6 +325,29 @@ async def _build_cart_response(
         if first_product:
             currency = first_product.price.currency.value
 
+    # Offers-v2: price the cart with the same engine checkout charges with, so
+    # the shopper sees the discount fire instead of discovering it one step
+    # later. Best-effort — a promotions failure must never break the cart.
+    automatic_cents = 0
+    discount_amount = 0
+    applied_promotions: list[dict] = []
+    try:
+        (
+            automatic_cents,
+            discount_amount,
+            applied_promotions,
+        ) = await _compute_cart_discounts(
+            cart, visible_items, products_by_id, product_repo
+        )
+        # The engine already caps at its own subtotal — which is this same
+        # visible set — so this only binds if the two ever drift apart again.
+        # Keeps `subtotal - discount_amount == total` true for any theme that
+        # renders all three.
+        discount_amount = min(discount_amount, subtotal)
+        automatic_cents = min(automatic_cents, discount_amount)
+    except Exception as exc:  # noqa: BLE001 — offers must never block the cart
+        logger.warning("cart_discounts_error store=%s err=%s", cart.store_id, exc)
+
     return SuccessResponse(
         data=CartResponse(
             items=items,
@@ -202,6 +355,10 @@ async def _build_cart_response(
             total_quantity=sum(i.quantity for i in items),
             subtotal=subtotal,
             currency=currency,
+            automatic_discount_cents=automatic_cents,
+            discount_amount=discount_amount,
+            total=max(0, subtotal - discount_amount),
+            applied_promotions=applied_promotions,
         ),
         message="Cart retrieved successfully",
     )
