@@ -65,6 +65,9 @@ class ProductRepository(IProductRepository):
             attributes=model.attributes,
             metadata=model.extra_data or {},
             brand=model.brand,
+            robots_noindex=model.robots_noindex,
+            canonical_url=model.canonical_url,
+            sitemap_exclude=model.sitemap_exclude,
             seo_title=model.seo_title,
             seo_description=model.seo_description,
             template_suffix=model.template_suffix,
@@ -103,6 +106,9 @@ class ProductRepository(IProductRepository):
             attributes=entity.attributes,
             extra_data=entity.metadata,
             brand=entity.brand,
+            robots_noindex=entity.robots_noindex,
+            canonical_url=entity.canonical_url,
+            sitemap_exclude=entity.sitemap_exclude,
             seo_title=entity.seo_title,
             seo_description=entity.seo_description,
             template_suffix=entity.template_suffix,
@@ -184,6 +190,9 @@ class ProductRepository(IProductRepository):
             model.attributes = entity.attributes
             model.extra_data = entity.metadata
             model.brand = entity.brand
+            model.robots_noindex = entity.robots_noindex
+            model.canonical_url = entity.canonical_url
+            model.sitemap_exclude = entity.sitemap_exclude
             model.seo_title = entity.seo_title
             model.seo_description = entity.seo_description
             model.template_suffix = entity.template_suffix
@@ -392,6 +401,11 @@ class ProductRepository(IProductRepository):
             .where(
                 ProductModel.store_id == store_id,
                 ProductModel.status == ProductStatus.ACTIVE.value,
+                # A sitemap that advertises a URL the page itself noindexes
+                # contradicts itself, so both merchant switches drop the row
+                # here rather than making every consumer re-filter.
+                ProductModel.sitemap_exclude.is_(False),
+                ProductModel.robots_noindex.is_(False),
             )
             .order_by(ProductModel.updated_at.desc().nulls_last())
             .offset(skip)

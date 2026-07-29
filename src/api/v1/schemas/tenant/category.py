@@ -26,6 +26,19 @@ class CreateCategoryRequest(BaseModel):
         max_length=70,
         description="SEO page title for the collection page.",
     )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
+    )
     seo_description: str | None = Field(
         default=None,
         max_length=160,
@@ -66,6 +79,19 @@ class UpdateCategoryRequest(BaseModel):
         max_length=70,
         description="SEO page title for the collection page.",
     )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
+    )
     seo_description: str | None = Field(
         default=None,
         max_length=160,
@@ -102,6 +128,19 @@ class CategoryResponse(BaseModel):
     position: int = Field(description="Sort position")
     is_active: bool = Field(description="Whether the category is visible")
     seo_title: str | None = Field(default=None, description="SEO page title override.")
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
+    )
     seo_description: str | None = Field(
         default=None, description="SEO meta description override."
     )

@@ -67,6 +67,9 @@ class Product(BaseEntity):
     compare_at_price: Money | None = None
     cost_price: Money | None = None
     brand: str | None = None
+    robots_noindex: bool = False
+    canonical_url: str | None = None
+    sitemap_exclude: bool = False
     seo_title: str | None = None
     seo_description: str | None = None
     # Alternate template variant key suffix (Shopify-style); null = base template.

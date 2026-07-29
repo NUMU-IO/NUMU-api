@@ -2,7 +2,16 @@
 
 from decimal import Decimal
 
-from sqlalchemy import Computed, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    Boolean,
+    Computed,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -85,6 +94,14 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # Meta feed both need the real brand, and without it every product
     # claimed the store's own name as its house brand.
     brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Per-entity SEO overrides. Null/False = inherit the storefront default.
+    robots_noindex: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    canonical_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    sitemap_exclude: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     seo_title: Mapped[str | None] = mapped_column(String(60), nullable=True)
     seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
 

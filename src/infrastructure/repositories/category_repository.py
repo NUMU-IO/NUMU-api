@@ -39,6 +39,9 @@ class CategoryRepository(ICategoryRepository):
             parent_id=model.parent_id,
             position=model.position,
             is_active=model.is_active,
+            robots_noindex=model.robots_noindex,
+            canonical_url=model.canonical_url,
+            sitemap_exclude=model.sitemap_exclude,
             seo_title=model.seo_title,
             seo_description=model.seo_description,
             social_image_url=model.social_image_url,
@@ -62,6 +65,9 @@ class CategoryRepository(ICategoryRepository):
             parent_id=entity.parent_id,
             position=entity.position,
             is_active=entity.is_active,
+            robots_noindex=entity.robots_noindex,
+            canonical_url=entity.canonical_url,
+            sitemap_exclude=entity.sitemap_exclude,
             seo_title=entity.seo_title,
             seo_description=entity.seo_description,
             social_image_url=entity.social_image_url,
@@ -107,6 +113,9 @@ class CategoryRepository(ICategoryRepository):
             model.parent_id = entity.parent_id
             model.position = entity.position
             model.is_active = entity.is_active
+            model.robots_noindex = entity.robots_noindex
+            model.canonical_url = entity.canonical_url
+            model.sitemap_exclude = entity.sitemap_exclude
             model.seo_title = entity.seo_title
             model.seo_description = entity.seo_description
             model.social_image_url = entity.social_image_url
