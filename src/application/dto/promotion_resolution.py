@@ -49,6 +49,17 @@ class ResolvedPromotionOutput(BaseModel):
     coupon_code: str | None = None
     display: PromotionDisplayOutput | None = None
     fingerprint: str
+    # Which catalog entries can take part in the rule, read off the promotion's
+    # `role="buy_set"` targets. BOTH EMPTY means the whole store qualifies.
+    #
+    # Themes need this to tell the truth: without it a "3 for EGP 650 on
+    # scarves" offer makes the cart nudge count every unit in the cart, so a
+    # shopper holding one ineligible item is told "add 2 more" and then doesn't
+    # get the discount. The rule's own scoping is server-side and unaffected —
+    # this is display truth only, and it exposes nothing the storefront can't
+    # already see by browsing the catalogue.
+    eligible_product_ids: list[str] = Field(default_factory=list)
+    eligible_category_ids: list[str] = Field(default_factory=list)
 
 
 class ActivePromotionsOutput(BaseModel):
@@ -76,9 +87,9 @@ class CartDiscountsOutput(BaseModel):
     # Named snapshot of the AUTOMATIC promotions that fired — mirrors the
     # order's persisted `applied_promotions` ({id, title, title_ar?, amount}),
     # so the storefront summary can show the real promo name (e.g. "Welcome
-    # 10 −EGP 30") instead of a generic "Offer" line. The whole automatic
-    # discount is attributed to the first applied promo (0 to the rest) so the
-    # amounts still sum to `automatic_discount_cents`.
+    # 10 −EGP 30") instead of a generic "Offer" line. `amount` is each
+    # promotion's own contribution (integer cents) as computed by the
+    # calculator; the entries sum to `automatic_discount_cents`.
     applied_promotions: list[dict] = Field(default_factory=list)
     rejected: list[dict[str, str]] = Field(default_factory=list)
 
