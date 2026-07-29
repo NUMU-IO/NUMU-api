@@ -169,6 +169,7 @@ class CreatePromotionUseCase:
                 target_kind=t.target_kind,
                 target_value=t.target_value,
                 inclusion=t.inclusion,
+                role=t.role,
             )
             for t in payload.targets
         ]

@@ -44,6 +44,14 @@ class DiscountTotalResult:
     free_shipping: bool = False
     applied_promotion_ids: list[UUID] = field(default_factory=list)
     rejected: list[tuple[UUID, str]] = field(default_factory=list)
+    # Per-promotion breakdown, promotion_id → cents it contributed. The
+    # calculator evaluates promotions sequentially so it knows each one's
+    # real amount; callers that snapshot "which promo saved how much"
+    # (cart preview, order record) read this instead of attributing the
+    # whole automatic total to whichever promo happened to be first.
+    # The automatic entries always sum to `automatic_discount_cents`,
+    # including after the subtotal-overflow trim.
+    discount_by_promotion: dict[UUID, int] = field(default_factory=dict)
 
     @property
     def total_discount_cents(self) -> int:
@@ -65,14 +73,28 @@ class DiscountCalculator:
 
         `targets_by_promotion` is the optional map of promotion_id →
         PromotionTarget rows. When provided, role-tagged targets
-        (`role="buy_set" | "get_set"`) feed BOGO line-set filters so
-        Shopify-style "customer buys X / customer gets Y" works. When
-        omitted, BOGO falls back to the legacy "any-product, cheapest-
-        unit free" semantics — every existing caller stays correct.
+        (`role="buy_set" | "get_set"`) feed line-set filters so
+        Shopify-style "customer buys X / customer gets Y" (BOGO) and
+        "any 3 from these collections for EGP 650" (MULTIBUY, which
+        reads `buy_set` as its eligible set) work. When omitted, BOGO
+        falls back to the legacy "any-product, cheapest-unit free"
+        semantics and MULTIBUY treats the whole cart as eligible —
+        every existing caller stays correct.
+
+        ⚠️ A catalog target with `role=None` is an *eligibility* gate,
+        not a line filter: it decides whether the promo runs at all,
+        then the rule applies to every line. Scoping a multibuy offer
+        therefore requires `role="buy_set"` targets — see
+        `_build_line_filters`.
         """
         applied_ids: list[UUID] = []
         rejected: list[tuple[UUID, str]] = []
         free_shipping = False
+        # promotion_id → cents contributed. Insertion order matters: the
+        # subtotal-overflow trim below unwinds the LAST applied automatic
+        # promotions first, so the earliest (highest-priority) promo keeps
+        # its full amount.
+        by_promotion: dict[UUID, int] = {}
 
         # Split by surface ----------------------------------------------------
         codes: list[Promotion] = []
@@ -95,7 +117,7 @@ class DiscountCalculator:
             best_result: DiscountResult | None = None
             for p in codes:
                 assert p.discount_rule is not None
-                buy_f, get_f = _build_bogo_filters(p, targets_by_promotion)
+                buy_f, get_f = _build_line_filters(p, targets_by_promotion)
                 result = p.discount_rule.calculate(
                     context, buy_filter=buy_f, get_filter=get_f
                 )
@@ -114,6 +136,7 @@ class DiscountCalculator:
                 else:
                     code_discount = best_result.discount_cents
                     applied_ids.append(best_promo.id)
+                    by_promotion[best_promo.id] = code_discount
                     if best_result.free_shipping:
                         free_shipping = True
                 # The other code promos are rejected — at-most-one rule.
@@ -126,6 +149,7 @@ class DiscountCalculator:
 
         # Automatic discounts — stack additively, capped at subtotal ----------
         auto_running = 0
+        auto_ids: list[UUID] = []
         for p in autos:
             assert p.discount_rule is not None
             # Pass remaining-subtotal context so each rule respects the cap.
@@ -138,7 +162,7 @@ class DiscountCalculator:
                 shipping_cents=context.shipping_cents,
                 customer_id=context.customer_id,
             )
-            buy_f, get_f = _build_bogo_filters(p, targets_by_promotion)
+            buy_f, get_f = _build_line_filters(p, targets_by_promotion)
             result = p.discount_rule.calculate(
                 sub_context, buy_filter=buy_f, get_filter=get_f
             )
@@ -149,6 +173,9 @@ class DiscountCalculator:
                 continue
             auto_running += result.discount_cents
             applied_ids.append(p.id)
+            if result.discount_cents > 0:
+                by_promotion[p.id] = result.discount_cents
+            auto_ids.append(p.id)
 
         # Floor non-shipping discount at the subtotal -------------------------
         non_shipping_total = code_discount + auto_running
@@ -156,6 +183,16 @@ class DiscountCalculator:
             overflow = non_shipping_total - context.subtotal_cents
             # Trim the automatic bucket first — code wins precedence.
             auto_running = max(0, auto_running - overflow)
+            # Keep the per-promotion breakdown reconciling with the trimmed
+            # total: unwind from the last-applied automatic promo backwards
+            # so the highest-priority promo keeps its full amount.
+            for pid in reversed(auto_ids):
+                if overflow <= 0:
+                    break
+                share = by_promotion.get(pid, 0)
+                taken = min(share, overflow)
+                by_promotion[pid] = share - taken
+                overflow -= taken
 
         return DiscountTotalResult(
             line_items=[],
@@ -164,6 +201,7 @@ class DiscountCalculator:
             free_shipping=free_shipping,
             applied_promotion_ids=applied_ids,
             rejected=rejected,
+            discount_by_promotion=by_promotion,
         )
 
     # ------------------------------------------------------------------ #
@@ -186,15 +224,21 @@ class DiscountCalculator:
 # --------------------------------------------------------------------------- #
 
 
-def _build_bogo_filters(
+def _build_line_filters(
     promo: Promotion,
     targets_by_promotion: dict[UUID, list[PromotionTarget]] | None,
 ) -> tuple[LineFilter | None, LineFilter | None]:
     """Build (buy_filter, get_filter) from this promo's role-tagged targets.
 
+    Shared by every rule kind that restricts which cart lines take part:
+
+      • BOGO     — buy_filter = "customer buys", get_filter = "customer gets".
+      • MULTIBUY — buy_filter alone is the eligible set; get_filter unused.
+
     Returns (None, None) when no map was provided OR the promo has no
     role-tagged targets — preserves the legacy "any-product, cheapest-
-    unit free" BOGO semantics. Filters look at `target_kind`:
+    unit free" BOGO semantics, and means an unscoped multibuy applies to
+    the whole cart. Filters look at `target_kind`:
 
       • PRODUCT   — `target_value["product_ids"]` against `line.product_id`
       • CATEGORY  — `target_value["category_ids"]` against `line.category_id`

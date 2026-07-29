@@ -173,19 +173,49 @@ async def _build_applied_promotions(
     store_id: UUID,
     promotion_ids: list,
     total_automatic_cents: int,
+    amounts_by_promotion: dict[str, int] | None = None,
 ) -> list[dict]:
     """Build the order's applied-promotions snapshot from the offers result.
 
-    Each entry is ``{id, title, title_ar?, amount(cents)}``. The offers-v2
-    calculator returns a single aggregate ``automatic_discount_cents`` rather
-    than a per-promotion breakdown, so we attribute the whole automatic
-    discount to the first applied promotion and 0 to any others — the sum of
-    ``amount`` across the list always reconciles to the discount applied on
-    the order. Titles are resolved from the promotion's ``name`` (and Arabic
-    headline when a translation exists). A promotion that can't be loaded
-    still produces an entry (id + generic title) rather than failing checkout.
+    Each entry is ``{id, title, title_ar?, amount(cents)}``. Titles are
+    resolved from the promotion's ``name`` (and Arabic headline when a
+    translation exists). A promotion that can't be loaded still produces an
+    entry (id + generic title) rather than failing checkout.
+
+    ``amounts_by_promotion`` (promotion_id string → cents) is the engine's
+    real per-promotion breakdown. When supplied, each promotion is recorded
+    with the amount it actually contributed — so an order that stacked a
+    trio offer and a welcome discount reads
+    ``[{"3 for 650", 10000}, {"Welcome 10", 3000}]`` rather than the whole
+    sum on whichever promo happened to be first. Amounts are scaled down
+    proportionally if checkout capped the automatic bucket (a coupon can eat
+    part of the subtotal first), and any rounding remainder lands on the
+    largest entry, so the list always sums to ``total_automatic_cents``.
+
+    Without the map we fall back to the legacy behavior: the whole automatic
+    discount on the first promotion, 0 on the rest. The sum reconciles either
+    way — that invariant is what returns and analytics rely on.
     """
     snapshot: list[dict] = []
+    scaled: dict[str, int] = {}
+    if amounts_by_promotion:
+        engine_total = sum(amounts_by_promotion.values())
+        if engine_total > 0:
+            if engine_total == total_automatic_cents:
+                scaled = dict(amounts_by_promotion)
+            else:
+                # Checkout trimmed the bucket — distribute the applied total
+                # in the same proportions, then push the rounding remainder
+                # onto the biggest contributor so the sum stays exact.
+                scaled = {
+                    k: (v * total_automatic_cents) // engine_total
+                    for k, v in amounts_by_promotion.items()
+                }
+                remainder = total_automatic_cents - sum(scaled.values())
+                if remainder and scaled:
+                    biggest = max(scaled, key=lambda k: scaled[k])
+                    scaled[biggest] += remainder
+
     for idx, pid in enumerate(promotion_ids):
         promo = None
         try:
@@ -205,7 +235,11 @@ async def _build_applied_promotions(
         entry: dict = {
             "id": str(pid),
             "title": title,
-            "amount": total_automatic_cents if idx == 0 else 0,
+            "amount": (
+                scaled.get(str(pid), 0)
+                if scaled
+                else (total_automatic_cents if idx == 0 else 0)
+            ),
         }
         if title_ar:
             entry["title_ar"] = title_ar
@@ -860,6 +894,15 @@ async def checkout(
     # line-item thumbnails can render the real product photo (line items don't
     # persist an image; we'd otherwise show the "no image" placeholder).
     product_image_map: dict = {}
+    # product_id → category_id, captured from the product we're already
+    # loading below (zero extra queries). The offers-v2 engine needs it to
+    # evaluate category-scoped rules — a "3 for EGP 650 on these collections"
+    # multibuy, or a scoped BOGO. Without it every line looks category-less,
+    # the line filter matches nothing, and the order is created at FULL price
+    # while POST /cart/discounts (which does send category_id) previewed the
+    # discount. That divergence is exactly the "promised 650, charged 750"
+    # failure mode, so keep this populated.
+    product_category_map: dict[UUID, UUID | None] = {}
     for item in request.line_items:
         product = await product_repo.get_by_id(item.product_id)
         if not product:
@@ -880,6 +923,7 @@ async def checkout(
         product_image_map[item.product_id] = (
             product.images[0] if getattr(product, "images", None) else None
         )
+        product_category_map[item.product_id] = getattr(product, "category_id", None)
 
         # ── Stock pre-check ──
         # Three modes:
@@ -1235,6 +1279,9 @@ async def checkout(
                     product_name=li.product_name,
                     quantity=li.quantity,
                     unit_price=li.unit_price,
+                    # Mirrors what POST /cart/discounts sends, so the price
+                    # the shopper previewed is the price we charge.
+                    category_id=product_category_map.get(li.product_id),
                 )
                 for li in line_items
             ],
@@ -1244,6 +1291,13 @@ async def checkout(
             is_logged_in=not is_guest,
             cart_subtotal_cents=subtotal,
             cart_product_ids=[li.product_id for li in line_items],
+            cart_category_ids=[
+                cid
+                for cid in {
+                    product_category_map.get(li.product_id) for li in line_items
+                }
+                if cid is not None
+            ],
         )
         _offers_use_case = CalculateCartDiscountsUseCase(
             promotion_repo=promotion_repo,
@@ -1283,6 +1337,13 @@ async def checkout(
                     store_id,
                     list(_offers_out.applied_promotion_ids),
                     _auto_cents,
+                    # Real per-promotion split from the engine, so a stacked
+                    # cart records what each offer actually saved.
+                    {
+                        str(e["id"]): int(e.get("amount") or 0)
+                        for e in _offers_out.applied_promotions
+                        if e.get("id") is not None
+                    },
                 )
             logger.info(
                 "offers_at_checkout_applied store=%s auto_cents=%s free_shipping=%s "

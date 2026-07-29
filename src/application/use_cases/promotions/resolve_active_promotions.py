@@ -106,6 +106,7 @@ class ResolveActivePromotionsUseCase:
     ) -> ResolvedPromotionOutput:
         promo: Promotion = item.promotion
         translated = self._pick_translation(promo, locale)
+        product_ids, category_ids = self._eligible_sets(item)
         return ResolvedPromotionOutput(
             promotion_id=promo.id,
             surface=promo.surface,
@@ -116,7 +117,29 @@ class ResolveActivePromotionsUseCase:
             coupon_code=await self._maybe_coupon_code(promo),
             display=self._display_out(item.display),
             fingerprint=_fingerprint(promo.id, promo.version),
+            eligible_product_ids=product_ids,
+            eligible_category_ids=category_ids,
         )
+
+    @staticmethod
+    def _eligible_sets(item: ResolvedPromotion) -> tuple[list[str], list[str]]:
+        """Catalog ids from the promotion's `buy_set` targets.
+
+        Only `role="buy_set"` rows are line filters — an untagged catalog
+        target is an eligibility gate, and reporting it here would tell a
+        theme the offer is scoped when in fact it applies to the whole cart.
+        Both lists empty ⇒ every product qualifies.
+        """
+        products: list[str] = []
+        categories: list[str] = []
+        for target in getattr(item, "targets", None) or []:
+            if getattr(target, "role", None) != "buy_set":
+                continue
+            value = getattr(target, "target_value", None) or {}
+            products.extend(str(pid) for pid in value.get("product_ids", []))
+            categories.extend(str(cid) for cid in value.get("category_ids", []))
+        # De-dupe, preserving order — several targets may name the same id.
+        return list(dict.fromkeys(products)), list(dict.fromkeys(categories))
 
     @staticmethod
     def _pick_translation(promo: Promotion, locale: str) -> dict[str, Any]:

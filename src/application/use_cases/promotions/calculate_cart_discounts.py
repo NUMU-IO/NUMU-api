@@ -183,14 +183,16 @@ class CalculateCartDiscountsUseCase:
 
         # Named snapshot of the AUTOMATIC promotions that fired, so the
         # storefront summary can show the real promo name. We have the
-        # Promotion entities already (`eligible`) — no repo round-trip. The
-        # calculator only returns an aggregate automatic discount, so (like the
-        # order snapshot) we attribute the whole amount to the first applied
-        # automatic promo and 0 to the rest; the sum reconciles to
-        # `automatic_discount_cents`.
+        # Promotion entities already (`eligible`) — no repo round-trip.
+        # `amount` is each promotion's OWN contribution as computed by the
+        # calculator (`discount_by_promotion`), already reconciled against
+        # the subtotal-overflow trim, so the entries sum to
+        # `automatic_discount_cents`. Previously the whole automatic total
+        # was attributed to the first applied promo and 0 to the rest,
+        # which rendered as "Trio offer — EGP 100 / Other promo — EGP 0"
+        # in the checkout summary.
         by_id = {p.id: p for p in eligible}
         applied_promotions: list[dict] = []
-        first_auto = True
         for pid in result.applied_promotion_ids:
             promo = by_id.get(pid)
             if promo is None or promo.surface != PromotionSurface.AUTOMATIC:
@@ -198,13 +200,12 @@ class CalculateCartDiscountsUseCase:
             entry: dict = {
                 "id": str(pid),
                 "title": getattr(promo, "name", None) or "Discount",
-                "amount": result.automatic_discount_cents if first_auto else 0,
+                "amount": result.discount_by_promotion.get(pid, 0),
             }
             title_ar = _promo_title_ar(promo)
             if title_ar:
                 entry["title_ar"] = title_ar
             applied_promotions.append(entry)
-            first_auto = False
 
         return CartDiscountsOutput(
             code_discount_cents=result.code_discount_cents,
