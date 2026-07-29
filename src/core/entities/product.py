@@ -282,3 +282,35 @@ class Product(BaseEntity):
         """
         self.attributes.pop(key, None)
         self.touch()
+
+    def image_alts(self) -> dict[str, str]:
+        """Alt text per image URL, from the ``media_urls`` sidecar.
+
+        Alt has nowhere else to live: ``images`` is a bare ``text[]`` of URLs.
+        ``metadata.media_urls`` is already keyed by URL (the image pipeline
+        writes variant URLs there), so alt rides alongside without touching the
+        images column or the wholesale-replaced ``attributes``.
+        """
+        media = (self.metadata or {}).get("media_urls")
+        if not isinstance(media, dict):
+            return {}
+        out: dict[str, str] = {}
+        for url, meta in media.items():
+            if not isinstance(meta, dict):
+                continue
+            alt = meta.get("alt")
+            if isinstance(alt, str) and alt.strip():
+                out[str(url)] = alt.strip()
+        return out
+
+    def set_image_alt(self, image_url: str, alt: str | None) -> None:
+        """Set (or clear) alt for one image, preserving the rest of its sidecar."""
+        media = dict((self.metadata or {}).get("media_urls") or {})
+        entry = dict(media.get(image_url) or {})
+        if alt and alt.strip():
+            entry["alt"] = alt.strip()
+        else:
+            entry.pop("alt", None)
+        media[image_url] = entry
+        self.metadata = {**(self.metadata or {}), "media_urls": media}
+        self.touch()

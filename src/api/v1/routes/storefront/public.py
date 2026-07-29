@@ -862,6 +862,7 @@ async def browse_products(
             "is_on_sale": product.is_on_sale,
             "category_id": str(product.category_id) if product.category_id else None,
             "images": product.images,
+            "image_alts": product.image_alts(),
             "tags": product.tags,
             "attributes": product.attributes,
             # Meta Catalog product ID — when set, the storefront uses
@@ -1031,6 +1032,7 @@ async def browse_products_cursor(
             is_on_sale=product.is_on_sale,
             category_id=str(product.category_id) if product.category_id else None,
             images=product.images,
+            image_alts=product.image_alts(),
             tags=product.tags,
             attributes=product.attributes,
             meta_catalog_id=product.meta_catalog_id,
@@ -1144,6 +1146,7 @@ async def get_product_by_slug(
         is_on_sale=product.is_on_sale,
         category_id=str(product.category_id) if product.category_id else None,
         images=product.images,
+        image_alts=product.image_alts(),
         tags=product.tags,
         attributes=product.attributes,
         brand=product.brand,
@@ -1445,6 +1448,7 @@ async def get_related_products(
             "is_on_sale": product.is_on_sale,
             "category_id": str(product.category_id) if product.category_id else None,
             "images": product.images,
+            "image_alts": product.image_alts(),
             "tags": product.tags,
         })
 
