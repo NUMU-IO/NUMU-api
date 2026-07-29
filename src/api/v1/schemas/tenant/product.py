@@ -206,6 +206,19 @@ class CreateProductRequest(BaseModel):
     brand: str | None = Field(
         None, max_length=120, description="Manufacturer/brand name"
     )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
+    )
     seo_title: str | None = Field(None, max_length=70, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
@@ -339,6 +352,19 @@ class UpdateProductRequest(BaseModel):
     brand: str | None = Field(
         None, max_length=120, description="Manufacturer/brand name"
     )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
+    )
     seo_title: str | None = Field(None, max_length=70, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
@@ -456,6 +482,19 @@ class ProductResponse(BaseModel):
         default=None,
         max_length=120,
         description="Manufacturer/brand name (Product JSON-LD + Meta feed).",
+    )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
     )
     seo_title: str | None = Field(
         default=None,

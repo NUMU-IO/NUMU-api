@@ -58,9 +58,13 @@ class TestProductFindByPreviousSlug:
         model.category_id = None
         model.tags = []
         model.attributes = {}
+        model.brand = None
         model.seo_title = None
         model.seo_description = None
         model.template_suffix = None
+        model.robots_noindex = False
+        model.canonical_url = None
+        model.sitemap_exclude = False
         model.meta_catalog_id = None
         model.extra_data = {}
         model.created_at = datetime.utcnow()
@@ -127,7 +131,13 @@ class TestCategoryFindByPreviousSlug:
         model.parent_id = None
         model.position = 0
         model.is_active = True
+        model.seo_title = None
+        model.seo_description = None
+        model.social_image_url = None
         model.template_suffix = None
+        model.robots_noindex = False
+        model.canonical_url = None
+        model.sitemap_exclude = False
         model.extra_data = {}
         model.created_at = datetime.utcnow()
         model.updated_at = datetime.utcnow()

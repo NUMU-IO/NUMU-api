@@ -22,6 +22,9 @@ class CategoryDTO(BaseDTO):
     parent_id: UUID | None
     position: int
     is_active: bool
+    robots_noindex: bool
+    canonical_url: str | None
+    sitemap_exclude: bool
     seo_title: str | None
     seo_description: str | None
     social_image_url: str | None
@@ -49,6 +52,9 @@ class CategoryDTO(BaseDTO):
             parent_id=entity.parent_id,
             position=entity.position,
             is_active=entity.is_active,
+            robots_noindex=getattr(entity, "robots_noindex", False),
+            canonical_url=getattr(entity, "canonical_url", None),
+            sitemap_exclude=getattr(entity, "sitemap_exclude", False),
             seo_title=entity.seo_title,
             seo_description=entity.seo_description,
             social_image_url=entity.social_image_url,
@@ -71,6 +77,9 @@ class CreateCategoryDTO(BaseDTO):
     parent_id: UUID | None = None
     position: int = 0
     is_active: bool = True
+    robots_noindex: bool = False
+    canonical_url: str | None = None
+    sitemap_exclude: bool = False
     seo_title: str | None = None
     seo_description: str | None = None
     social_image_url: str | None = None
@@ -94,6 +103,9 @@ class UpdateCategoryDTO(BaseDTO):
     # `template_suffix_provided` carries whether the client sent the key (route
     # derives it from the request's ``model_fields_set``) so a partial PATCH can
     # clear the override via an explicit null without wiping it when omitted.
+    robots_noindex: bool = False
+    canonical_url: str | None = None
+    sitemap_exclude: bool = False
     seo_title: str | None = None
     seo_description: str | None = None
     social_image_url: str | None = None

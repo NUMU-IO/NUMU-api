@@ -40,6 +40,9 @@ class ProductDTO(BaseDTO):
     # the product UUID in the storefront consumer.
     meta_catalog_id: str | None
     brand: str | None
+    robots_noindex: bool
+    canonical_url: str | None
+    sitemap_exclude: bool
     seo_title: str | None
     seo_description: str | None
     # Alternate template variant suffix (Shopify-style); null = base template.
@@ -76,6 +79,9 @@ class ProductDTO(BaseDTO):
             attributes=entity.attributes,
             meta_catalog_id=getattr(entity, "meta_catalog_id", None),
             brand=getattr(entity, "brand", None),
+            robots_noindex=getattr(entity, "robots_noindex", False),
+            canonical_url=getattr(entity, "canonical_url", None),
+            sitemap_exclude=getattr(entity, "sitemap_exclude", False),
             seo_title=getattr(entity, "seo_title", None),
             seo_description=getattr(entity, "seo_description", None),
             template_suffix=getattr(entity, "template_suffix", None),
@@ -107,6 +113,9 @@ class CreateProductDTO(BaseDTO):
     tags: list[str] = field(default_factory=list)
     attributes: dict = field(default_factory=dict)
     brand: str | None = None
+    robots_noindex: bool = False
+    canonical_url: str | None = None
+    sitemap_exclude: bool = False
     seo_title: str | None = None
     seo_description: str | None = None
     # Alternate template variant suffix (Shopify-style); null = base template.
@@ -133,6 +142,9 @@ class UpdateProductDTO(BaseDTO):
     attributes: dict | None = None
     status: str | None = None
     brand: str | None = None
+    robots_noindex: bool = False
+    canonical_url: str | None = None
+    sitemap_exclude: bool = False
     seo_title: str | None = None
     seo_description: str | None = None
     # Alternate template variant suffix (Shopify-style); null = base template.
