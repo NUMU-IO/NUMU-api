@@ -37,6 +37,7 @@ from src.api.v1.schemas import (
     ImportRowErrorResponse,
     PaginatedListResponse,
     ProductResponse,
+    SetImageAltRequest,
     UpdateProductRequest,
     UploadedImageResponse,
 )
@@ -1091,6 +1092,58 @@ async def upload_product_image(
             variant_urls=result.variant_urls,
         ),
         message="Image uploaded successfully",
+    )
+
+
+@router.patch(
+    "/{product_id}/images/alt",
+    response_model=SuccessResponse[dict],
+    summary="Set product image alt text",
+    operation_id="set_product_image_alt",
+)
+async def set_product_image_alt(
+    product_id: Annotated[UUID, Path(description="Product ID")],
+    request: SetImageAltRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
+):
+    """Describe one product image.
+
+    Alt is stored in the ``media_urls`` sidecar keyed by image URL, so it
+    survives the wholesale ``attributes`` replace an update performs and does
+    not change the shape of the ``images`` column.
+    """
+    product = await product_repo.get_by_id(product_id)
+    if product is None or product.store_id != store.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Product not found"
+        )
+    if request.image_url not in (product.images or []):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That image is not on this product",
+        )
+
+    product.set_image_alt(request.image_url, request.alt)
+    await product_repo.update(product)
+    await product_cache.invalidate_product(store.id, product_id)
+
+    if store.subdomain and product.slug:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_product_change,
+        )
+
+        await revalidate_on_product_change(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+            product_slug=product.slug,
+            product_id=str(product_id),
+        )
+
+    return SuccessResponse(
+        data={"image_alts": product.image_alts()},
+        message="Image alt text updated",
     )
 
 

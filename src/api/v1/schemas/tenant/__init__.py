@@ -63,6 +63,7 @@ from src.api.v1.schemas.tenant.product import (
     CreateProductRequest,
     DeleteImageRequest,
     ProductResponse,
+    SetImageAltRequest,
     UpdateProductRequest,
     UploadedImageResponse,
 )
@@ -126,6 +127,7 @@ __all__ = [
     # Product
     "CreateProductRequest",
     "DeleteImageRequest",
+    "SetImageAltRequest",
     "ProductResponse",
     "UpdateProductRequest",
     "UploadedImageResponse",
