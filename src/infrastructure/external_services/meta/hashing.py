@@ -387,5 +387,29 @@ def hash_user_data(raw: dict) -> dict:
         "fbc": raw.get("fbc"),
         "client_ip_address": raw.get("ip"),
         "client_user_agent": raw.get("user_agent"),
-        "external_id": [_h(raw["customer_id"])] if raw.get("customer_id") else None,
+        "external_id": _external_ids(raw),
     }
+
+
+def _external_ids(raw: dict) -> list[str] | None:
+    """Hashed ``external_id`` values — customer id first, session id second.
+
+    Meta accepts ``external_id`` as an ARRAY of alternatives and will match on
+    any element, so sending both costs one extra hash and can only help.
+
+    Why two: this used to read ``customer_id`` alone, which meant a guest
+    checkout — the majority of MENA orders — sent no ``external_id`` at all on
+    any mid-funnel event. The session fingerprint fills that gap with a
+    pseudonymous, already-hashed identifier, and because the SAME value is sent
+    across every event in a session, Meta can stitch a guest's
+    ViewContent → AddToCart → InitiateCheckout → Purchase into one person.
+
+    For a logged-in visitor both are present and the customer id leads, so
+    audiences built on customer ids keep matching exactly as before.
+    """
+    ids = [_h(str(raw[key])) for key in ("customer_id", "external_id") if raw.get(key)]
+    # De-dupe while preserving order: when the same value arrives under both
+    # keys, Meta should see one entry, not a repeat.
+    seen: set[str] = set()
+    unique = [i for i in ids if not (i in seen or seen.add(i))]
+    return unique or None

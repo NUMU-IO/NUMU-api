@@ -26,6 +26,12 @@ class MetaOAuthService:
         self.app_secret = app_secret or settings.meta_app_secret
         self.login_config_id = login_config_id or settings.meta_login_config_id
         self.redirect_uri = redirect_uri
+        # Every URL below reads this instead of hardcoding a version. Nine
+        # call sites here were pinned to a literal "v21.0" and never consulted
+        # the setting at all, so `META_GRAPH_API_VERSION` silently did not
+        # apply to the OAuth flow — a second copy of the same drift the
+        # `or "v21.0"` fallbacks caused elsewhere.
+        self.api_version = settings.meta_graph_api_version
         self._client = httpx.AsyncClient(timeout=30.0)
 
     async def close(self) -> None:
@@ -41,7 +47,7 @@ class MetaOAuthService:
         if not redirect:
             raise ValueError("Redirect URI not configured")
 
-        base_url = "https://www.facebook.com/v21.0/dialog/oauth"
+        base_url = f"https://www.facebook.com/{self.api_version}/dialog/oauth"
         params = {
             "client_id": self.app_id,
             "redirect_uri": redirect,
@@ -78,7 +84,7 @@ class MetaOAuthService:
         if not redirect:
             raise ValueError("Redirect URI not configured")
 
-        url = "https://graph.facebook.com/v21.0/oauth/access_token"
+        url = f"https://graph.facebook.com/{self.api_version}/oauth/access_token"
         params = {
             "client_id": self.app_id,
             "client_secret": self.app_secret,
@@ -111,7 +117,7 @@ class MetaOAuthService:
         short_lived_token: str,
     ) -> dict[str, Any]:
         """Exchange short-lived token for long-lived token (60 days)."""
-        url = "https://graph.facebook.com/v21.0/oauth/access_token"
+        url = f"https://graph.facebook.com/{self.api_version}/oauth/access_token"
         params = {
             "grant_type": "fb_exchange_token",
             "client_id": self.app_id,
@@ -138,7 +144,7 @@ class MetaOAuthService:
 
     async def get_pages(self, access_token: str) -> list[dict[str, Any]]:
         """Get Facebook Pages for the user."""
-        url = "https://graph.facebook.com/v21.0/me/accounts"
+        url = f"https://graph.facebook.com/{self.api_version}/me/accounts"
         params = {
             "access_token": access_token,
             "fields": "id,name,access_token,tasks,perms",
@@ -158,7 +164,7 @@ class MetaOAuthService:
         page_access_token: str,
     ) -> dict[str, Any] | None:
         """Get Instagram Business account linked to a Facebook Page."""
-        url = f"https://graph.facebook.com/v21.0/{page_id}"
+        url = f"https://graph.facebook.com/{self.api_version}/{page_id}"
         params = {
             "access_token": page_access_token,
             "fields": "instagram_business_account",
@@ -182,7 +188,7 @@ class MetaOAuthService:
         access_token: str,
     ) -> dict[str, Any]:
         """Get Instagram Business account profile."""
-        url = f"https://graph.facebook.com/v21.0/{ig_account_id}"
+        url = f"https://graph.facebook.com/{self.api_version}/{ig_account_id}"
         params = {
             "access_token": access_token,
             "fields": "id,username,name,profile_picture_url,biography",
@@ -200,7 +206,7 @@ class MetaOAuthService:
         access_token: str,
     ) -> list[dict[str, Any]]:
         """Get WhatsApp Business Accounts."""
-        url = "https://graph.facebook.com/v21.0/me/businesses"
+        url = f"https://graph.facebook.com/{self.api_version}/me/businesses"
         params = {
             "access_token": access_token,
             "fields": "id,name,whatsapp_business_accounts{id,phone_code_hash,verified_name,quality_score}",
@@ -227,7 +233,7 @@ class MetaOAuthService:
         access_token: str,
     ) -> list[dict[str, Any]]:
         """Get phone numbers for a WhatsApp Business Account."""
-        url = f"https://graph.facebook.com/v21.0/{waba_id}/phone_numbers"
+        url = f"https://graph.facebook.com/{self.api_version}/{waba_id}/phone_numbers"
         params = {
             "access_token": access_token,
             "fields": "id,display_name,verified,code_verification_status,quality_rating",
@@ -249,7 +255,7 @@ class MetaOAuthService:
         verify_token: str,
     ) -> bool:
         """Subscribe a Facebook Page to webhook callbacks."""
-        url = f"https://graph.facebook.com/v21.0/{page_id}/subscriptions"
+        url = f"https://graph.facebook.com/{self.api_version}/{page_id}/subscriptions"
         data = {
             "object": "page",
             "callback_url": callback_url,
@@ -277,7 +283,7 @@ class MetaOAuthService:
         verify_token: str,
     ) -> bool:
         """Subscribe a WhatsApp Business Account to webhook callbacks."""
-        url = f"https://graph.facebook.com/v21.0/{waba_id}/subscribed_apps"
+        url = f"https://graph.facebook.com/{self.api_version}/{waba_id}/subscribed_apps"
         data = {
             "access_token": access_token,
         }

@@ -143,6 +143,14 @@ async def lifespan(app: FastAPI):
         version=settings.app_version,
         environment=settings.environment,
         debug=settings.debug,
+        # Resolved external-API versions. These were invisible: the Graph
+        # version sat pinned to a deprecated "v19.0" for ~18 months without
+        # anyone noticing, because an expired Graph version doesn't fail —
+        # Meta silently routes to the next oldest usable one. Printing them
+        # at boot means the value actually on the wire is always one grep
+        # away, in every environment.
+        meta_graph_api_version=settings.meta_graph_api_version,
+        whatsapp_business_api_version=settings.whatsapp_business_api_version,
     )
 
     # backend-030 / US5 / T093 — subscribe the platform Meta app to the

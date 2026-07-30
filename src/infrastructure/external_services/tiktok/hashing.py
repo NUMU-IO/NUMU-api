@@ -47,6 +47,19 @@ def _first(values: list[str] | None) -> str | None:
     return values[0]
 
 
+def _first_external_id(raw: dict) -> str | None:
+    """Hashed ``external_id`` — customer id when known, else session id.
+
+    Mirrors Meta's ``_external_ids`` but collapsed to one value, because
+    TikTok's Events API user object takes a single hashed string here.
+    """
+    for key in ("customer_id", "external_id"):
+        value = raw.get(key)
+        if value:
+            return _h(str(value))
+    return None
+
+
 def hash_tiktok_user_data(raw: dict) -> dict[str, Any]:
     """Convert a raw user-data dict into TikTok's Events API ``user`` shape.
 
@@ -65,7 +78,12 @@ def hash_tiktok_user_data(raw: dict) -> dict[str, Any]:
         "phone": (
             _h(_normalize_mena_phone(raw["phone"])) if raw.get("phone") else None
         ),
-        "external_id": _h(raw["customer_id"]) if raw.get("customer_id") else None,
+        # Customer id when authenticated, else the pseudonymous session
+        # fingerprint. TikTok's `external_id` is a single string (unlike
+        # Meta's array), so this is a preference order, not both. Reading
+        # `customer_id` alone meant guest checkouts — most MENA orders —
+        # sent no external_id on any mid-funnel event.
+        "external_id": _first_external_id(raw),
         # Hashed location / name fields (TikTok supports these on the user
         # object for match-quality lift). Reuse Meta's Arabic-aware
         # normalizer, then collapse to the primary variant.

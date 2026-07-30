@@ -36,7 +36,8 @@ def resolve_mode(meta_cfg: dict | None, has_capi_token: bool) -> TrackingMode:
 
     The activation gates are intentionally double-conditioned on
     ``pixel_id`` because a Pixel ID is required for *any* mode
-    (CAPI POSTs go to ``/v21.0/{pixel_id}/events``). A merchant who
+    (CAPI POSTs go to ``/{graph_version}/{pixel_id}/events``, where the
+    version is ``settings.meta_graph_api_version``). A merchant who
     flips ``capi_enabled = true`` without saving a Pixel ID first is
     treated as "off" — the settings PUT route should reject this with
     422 before it ever lands in the DB, but the resolver is the
