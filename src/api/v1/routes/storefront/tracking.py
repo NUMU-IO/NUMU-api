@@ -88,6 +88,20 @@ _VALID_FUNNEL_STEPS = _NAVIGATION_STEPS | {
     "remove_from_cart",
 }
 
+# Steps for which we attempt session-based identity resolution (see
+# ``_enrich_user_data_from_session``). Deliberately NOT every step: the
+# lookup is one extra query, and running it on page_view/product_view would
+# put it on the hottest path in the platform for a marginal gain. These are
+# the steps where the visitor has demonstrably reached checkout, so the
+# chance a contact record exists is high and the volume is order-scale rather
+# than pageview-scale.
+_IDENTITY_RESOLUTION_STEPS = {
+    "checkout_started",
+    "add_shipping_info",
+    "add_payment_info",
+    "order_completed",
+}
+
 
 def resolve_funnel_step(body_step: str | None, path: str | None) -> str:
     """Resolve the funnel step for a /track call: explicit > path inference.
@@ -348,6 +362,15 @@ async def track_page_view(
 
     step = resolve_funnel_step(body.step, body.path)
 
+    # Resolved once, here, rather than inside the funnel try-block below:
+    # the Meta/TikTok CAPI fan-out further down needs the click ids too, and
+    # it runs OUTSIDE that block, so it cannot read a variable scoped into
+    # it. The helper is pure (body envelope or cookie, no DB) and never
+    # raises, so hoisting it costs nothing.
+    attribution = _read_attribution_envelope(body.attribution, request)
+    last_touch = attribution.last_touch if attribution else None
+    landing_fbclid = last_touch.fbclid if last_touch else None
+
     # Only persist a page_view row when this is actually a navigation event.
     # Pure funnel events (add_to_cart, search, add_payment_info, etc.) must
     # not pollute the page_views table — sessions, bounce rate, and landing
@@ -381,13 +404,11 @@ async def track_page_view(
                 funnel_event_id = UUID(body.event_id)
             except ValueError:
                 funnel_event_id = None
-        # Feature 001 — resolve attribution for the funnel row. Prefer the
-        # body envelope; fall back to the cookie. Then sanitize each UTM
-        # (SEC-005 — visitors can craft arbitrary URLs) and look up the
-        # campaign_id via the Crockford short_code (SEC-006 — scoped by
-        # store_id; cross-tenant resolution is impossible).
-        attribution = _read_attribution_envelope(body.attribution, request)
-        last_touch = attribution.last_touch if attribution else None
+        # Feature 001 — attribution for the funnel row (resolved above, so the
+        # CAPI fan-out can share it). Sanitize each UTM (SEC-005 — visitors can
+        # craft arbitrary URLs) and look up the campaign_id via the Crockford
+        # short_code (SEC-006 — scoped by store_id; cross-tenant resolution is
+        # impossible).
         f_utm_source = sanitize_utm(last_touch.utm_source if last_touch else None)
         f_utm_medium = sanitize_utm(last_touch.utm_medium if last_touch else None)
         f_utm_campaign = sanitize_utm(last_touch.utm_campaign if last_touch else None)
@@ -452,7 +473,7 @@ async def track_page_view(
             else body.path
         )
         f_gclid = last_touch.gclid if last_touch else None
-        f_fbclid = last_touch.fbclid if last_touch else None
+        f_fbclid = landing_fbclid
         # Pass-through customer_id when the storefront has flagged
         # the visitor as authenticated. Anonymous touches still get
         # backfilled at checkout for guests; this avoids an
@@ -493,6 +514,7 @@ async def track_page_view(
             ip=raw_ip,
             user_agent=ua,
             session=funnel_repo.session,
+            landing_fbclid=landing_fbclid,
         )
     except Exception:
         # Never let a CAPI enqueue error break the main tracking call.
@@ -803,6 +825,181 @@ async def _enrich_user_data_with_customer(
             user_data["country_code"] = iso2
 
 
+async def _enrich_user_data_from_session(
+    user_data: dict,
+    session_fingerprint: str | None,
+    store_id: UUID | str,
+    session,
+) -> None:
+    """Fill identity for a GUEST from the checkout contact details we already hold.
+
+    The gap this closes: mid-funnel enrichment used to require
+    ``body.customer_id``, which the storefront only sends for authenticated
+    visitors. In Egypt/MENA the overwhelming majority of orders are guest COD
+    checkouts, so for most sessions every mid-funnel event (ViewContent,
+    AddToCart, InitiateCheckout, AddPaymentInfo) carried no identity at all
+    beyond IP + UA + cookies — which is exactly what the merchant-visible
+    ``user_indicators: all false`` was showing.
+
+    Deliberately no new storage and no client-side PII. When a shopper types
+    their email/phone into the checkout contact step, the abandoned-checkout
+    capture already persists it against ``extra_data->>'session_fingerprint'``
+    — the same fingerprint every /track POST carries. So the identity is
+    already on our side of the wire; we just were not reading it. Stashing it
+    in the browser instead (localStorage/sessionStorage) was the alternative
+    and is worse here: BYOT theme bundles execute on the storefront's own
+    origin, so any theme could read a shopper's email out of storage.
+
+    In-place mutation, and never overwrites a field the storefront sent
+    explicitly. Falls open on every failure — CAPI must never block /track.
+
+    Tenant scoping (same class as ``_enrich_user_data_with_customer``):
+        /track is unauthenticated and ``fingerprint`` is client-supplied, so
+        the lookup is scoped to the ``store_id`` from the URL path. A forged
+        fingerprint can therefore only ever surface a contact record from the
+        SAME store, hashed, into that same store's own pixel — the value is
+        never returned to the caller. Fingerprints are random UUIDs, so
+        guessing one is infeasible regardless. This is the trust model the
+        existing ``customer_id`` passthrough already documents as
+        "soft-trusted".
+    """
+    if not session_fingerprint:
+        return
+    # Nothing to gain if the strongest keys are already present — skip the
+    # query entirely rather than confirm what we know.
+    if user_data.get("email") and user_data.get("phone"):
+        return
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import load_only, raiseload
+
+    from src.infrastructure.database.models.tenant.abandoned_checkout import (
+        AbandonedCheckoutModel,
+    )
+
+    try:
+        store_uuid = store_id if isinstance(store_id, UUID) else UUID(str(store_id))
+    except (ValueError, TypeError):
+        return
+
+    try:
+        record = (
+            await session.execute(
+                select(AbandonedCheckoutModel)
+                .where(
+                    AbandonedCheckoutModel.store_id == store_uuid,
+                    AbandonedCheckoutModel.extra_data["session_fingerprint"].astext
+                    == session_fingerprint,
+                )
+                .options(
+                    # AbandonedCheckoutModel has eager relationships; without
+                    # load_only + raiseload this would fan out extra SELECTs on
+                    # a checkout-path request. Same treatment as the customer
+                    # enrichment helper above.
+                    load_only(
+                        AbandonedCheckoutModel.id,
+                        AbandonedCheckoutModel.email,
+                        AbandonedCheckoutModel.phone,
+                        AbandonedCheckoutModel.shipping_address,
+                        AbandonedCheckoutModel.customer_id,
+                    ),
+                    raiseload("*"),
+                )
+                .order_by(AbandonedCheckoutModel.last_activity_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    except Exception:
+        return
+    if record is None:
+        return
+
+    if not user_data.get("email") and record.email:
+        user_data["email"] = record.email
+    if not user_data.get("phone") and record.phone:
+        user_data["phone"] = record.phone
+    if not user_data.get("customer_id") and record.customer_id:
+        user_data["customer_id"] = str(record.customer_id)
+
+    addr = record.shipping_address if isinstance(record.shipping_address, dict) else {}
+    if addr:
+        # Accept either the flat or nested key spellings the checkout has used
+        # over time — a missing field must degrade to "no value", never raise.
+        for target, candidates in (
+            ("first_name", ("first_name", "firstName")),
+            ("last_name", ("last_name", "lastName")),
+            ("city", ("city", "governorate")),
+            ("zip", ("zip", "postal_code", "postalCode")),
+        ):
+            if user_data.get(target):
+                continue
+            for key in candidates:
+                value = addr.get(key)
+                if isinstance(value, str) and value.strip():
+                    user_data[target] = value.strip()
+                    break
+
+        # Country goes through the same canonicalizer the customer-enrichment
+        # and Purchase paths use. The checkout form stores whatever the country
+        # selector produced ("Egypt", "EG", "eg"), and Meta/TikTok only match
+        # on lowercase ISO-3166-1 alpha-2 — an un-normalized value hashes to a
+        # digest that matches nothing, which is worse than sending no country.
+        if not user_data.get("country_code"):
+            from src.infrastructure.external_services.meta.country_iso import (
+                canonicalize_country,
+            )
+
+            raw_country = addr.get("country_code") or addr.get("country")
+            iso2 = (
+                canonicalize_country(raw_country)
+                if isinstance(raw_country, str)
+                else None
+            )
+            if iso2:
+                user_data["country_code"] = iso2
+
+
+def _synthesize_fbc(fbclid: str | None, event_time: datetime) -> str | None:
+    """Build Meta's ``fbc`` value from a raw ``fbclid``.
+
+    Meta's documented format is ``fb.{subdomain_index}.{creation_ms}.{fbclid}``
+    with subdomain_index 1 for a normal ``store.example.com`` host. The browser
+    Pixel writes this into the ``_fbc`` cookie itself — but only if it loaded.
+    Ad-blockers and DNS filtering are common in Egypt, and the cookie is also
+    absent whenever the visitor's first landing predates the Pixel being
+    configured. In every one of those cases we still hold the ``fbclid`` from
+    the attribution envelope, and Meta explicitly supports reconstructing the
+    value server-side.
+
+    Uses the event's own timestamp for ``creation_ms`` rather than "now": for a
+    replayed or retried event those differ, and drift there is what makes an
+    ``fbc`` fail to join to the click.
+    """
+    if not fbclid:
+        return None
+    return f"fb.1.{int(event_time.timestamp() * 1000)}.{fbclid}"
+
+
+def _apply_pseudonymous_external_id(user_data: dict, fingerprint: str | None) -> None:
+    """Give every event a stable ``external_id``, logged in or not.
+
+    Both Meta and TikTok treat ``external_id`` as a first-class match key and
+    accept a pseudonymous value. Before this, mid-funnel events for guests
+    carried no identity at all beyond IP/UA/cookies — and in MENA the large
+    majority of orders are guest COD checkouts, so "no identity" was the
+    normal case for ViewContent / AddToCart / InitiateCheckout.
+
+    The session fingerprint is not PII: it is a random per-session UUID we
+    minted, it is hashed before transmission like every other match key, and
+    it is the same value the funnel rows are already keyed on — so the
+    identifier the ad platforms cluster on lines up with the one our own
+    analytics use. ``customer_id`` still wins when the visitor is
+    authenticated; this only fills the blank.
+    """
+    if fingerprint and not user_data.get("external_id"):
+        user_data["external_id"] = fingerprint
+
+
 async def _maybe_enqueue_meta_capi(
     *,
     store: Store,
@@ -811,6 +1008,7 @@ async def _maybe_enqueue_meta_capi(
     ip: str | None,
     user_agent: str,
     session,
+    landing_fbclid: str | None = None,
 ) -> None:
     """Enqueue ``meta_capi_send_event`` when this store has CAPI configured.
 
@@ -864,10 +1062,18 @@ async def _maybe_enqueue_meta_capi(
         user_data["fbp"] = body.fbp
     if "fbc" not in user_data and body.fbc:
         user_data["fbc"] = body.fbc
+    # No `_fbc` cookie but the landing URL carried an `fbclid`? Rebuild it.
+    # Real `fbc` coverage measured only ~56%, and it is the strongest non-PII
+    # match key Meta has after hashed user data.
+    if not user_data.get("fbc"):
+        synthesized = _synthesize_fbc(landing_fbclid, event_time)
+        if synthesized:
+            user_data["fbc"] = synthesized
     if "ip" not in user_data and ip:
         user_data["ip"] = ip
     if "user_agent" not in user_data and user_agent:
         user_data["user_agent"] = user_agent
+    _apply_pseudonymous_external_id(user_data, body.fingerprint)
 
     # Server-side customer enrichment — see helper docstring. Catches
     # broadly so a missing customer / DB blip never breaks /track. The
@@ -881,6 +1087,18 @@ async def _maybe_enqueue_meta_capi(
         except Exception:
             logger.exception(
                 "meta_capi_enrich_user_data_failed",
+                extra={"store_id": str(store.id)},
+            )
+    elif step in _IDENTITY_RESOLUTION_STEPS:
+        # Guest: no customer record to read, but the checkout contact step may
+        # already have given us their email/phone. See the helper docstring.
+        try:
+            await _enrich_user_data_from_session(
+                user_data, body.fingerprint, store.id, session
+            )
+        except Exception:
+            logger.exception(
+                "meta_capi_session_identity_failed",
                 extra={"store_id": str(store.id)},
             )
 
@@ -958,6 +1176,7 @@ async def _maybe_enqueue_tiktok_capi(
         user_data["ip"] = ip
     if "user_agent" not in user_data and user_agent:
         user_data["user_agent"] = user_agent
+    _apply_pseudonymous_external_id(user_data, body.fingerprint)
 
     if body.customer_id:
         try:
@@ -967,6 +1186,18 @@ async def _maybe_enqueue_tiktok_capi(
         except Exception:
             logger.exception(
                 "tiktok_capi_enrich_user_data_failed",
+                extra={"store_id": str(store.id)},
+            )
+    elif step in _IDENTITY_RESOLUTION_STEPS:
+        # Guest identity from the checkout contact details — mirrors the Meta
+        # path above so both platforms see the same match keys.
+        try:
+            await _enrich_user_data_from_session(
+                user_data, body.fingerprint, store.id, session
+            )
+        except Exception:
+            logger.exception(
+                "tiktok_capi_session_identity_failed",
                 extra={"store_id": str(store.id)},
             )
 

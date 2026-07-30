@@ -2,8 +2,9 @@
 
 Covers the validation contract surfaced by Wave 1C:
 
-  * pixel_id regex (15-16 digits)
-  * test_event_code regex (^TEST\\d+$)
+  * pixel_id regex — numeric, up to 20 digits (NOT a length whitelist;
+    see ``schemas/tenant/tracking_validation.py`` for why 15-16 was wrong)
+  * test_event_code regex — alphanumeric plus dash/underscore
   * Funnel-step → Meta-event mapping (plan §5.3)
   * Debug-mode TTL helper logic (datetime math is server-side per scope §C)
 
@@ -23,6 +24,10 @@ from src.api.v1.schemas.tenant.tracking import (
     SaveMetaTrackingRequest,
     SendMetaTestEventRequest,
 )
+from src.api.v1.schemas.tenant.tracking_validation import (
+    is_valid_meta_pixel_id,
+    validation_contract,
+)
 from src.infrastructure.messaging.tasks.meta_capi import (
     FUNNEL_STEP_TO_META_EVENT,
     _funnel_step_to_meta_event,
@@ -33,48 +38,68 @@ from src.infrastructure.messaging.tasks.meta_capi import (
 # ---------------------------------------------------------------------------
 
 
+def _save_req(pixel_id: str) -> SaveMetaTrackingRequest:
+    return SaveMetaTrackingRequest(
+        pixel_id=pixel_id,
+        pixel_enabled=True,
+        capi_enabled=False,
+    )
+
+
 class TestPixelIdValidation:
-    """Pixel IDs are 15-16 numeric digits — the regex must reject anything else."""
+    """Pixel IDs are numeric with a 20-digit ceiling.
 
-    def test_valid_15_digits(self):
-        req = SaveMetaTrackingRequest(
-            pixel_id="123456789012345",
-            pixel_enabled=True,
-            capi_enabled=False,
-        )
-        assert req.pixel_id == "123456789012345"
+    This class used to assert "15-16 digits" and REJECTED a 17-digit id. That
+    assertion was itself the bug: Meta publishes no length for Pixel/Dataset
+    IDs and allocates them from a 64-bit space (unsigned max = 20 digits) that
+    grows over time, so a real 2026-minted 17-digit pixel could not be saved.
+    The bound is now the arithmetic ceiling, which cannot reject a valid ID.
+    """
 
-    def test_valid_16_digits(self):
-        req = SaveMetaTrackingRequest(
-            pixel_id="1234567890123456",
-            pixel_enabled=True,
-            capi_enabled=False,
-        )
-        assert req.pixel_id == "1234567890123456"
+    @pytest.mark.parametrize(
+        "pixel_id",
+        [
+            "123456",  # 6 — lower bound
+            "123456789012345",  # 15 — the old lower "valid" length
+            "1712515290084839",  # 16 — a real audited pixel
+            "12345678901234567",  # 17 — THE REGRESSION CASE
+            "12345678901234567890",  # 20 — 64-bit ceiling, upper bound
+        ],
+    )
+    def test_numeric_ids_accepted(self, pixel_id: str):
+        assert _save_req(pixel_id).pixel_id == pixel_id
 
-    def test_too_short_rejected(self):
+    @pytest.mark.parametrize(
+        "pixel_id",
+        [
+            "12345",  # 5 — below the lower bound
+            "123456789012345678901",  # 21 — past the 64-bit ceiling
+            "123456789012345a",  # letters
+            "act_1234567890123456",  # ad-account id pasted by mistake
+            "https://x/1234567890123456",  # a whole URL
+            "1234 567890123456",  # inner whitespace
+            "123456\n7890123456",  # inner newline
+        ],
+    )
+    def test_malformed_ids_rejected(self, pixel_id: str):
         with pytest.raises(ValidationError):
-            SaveMetaTrackingRequest(
-                pixel_id="12345",
-                pixel_enabled=True,
-                capi_enabled=False,
-            )
+            _save_req(pixel_id)
 
-    def test_too_long_rejected(self):
-        with pytest.raises(ValidationError):
-            SaveMetaTrackingRequest(
-                pixel_id="12345678901234567",
-                pixel_enabled=True,
-                capi_enabled=False,
-            )
+    def test_surrounding_whitespace_is_normalized_not_rejected(self):
+        # Merchants paste from Events Manager and bring whitespace with them.
+        # Stripping is kinder than a 422, and it keeps the stored value safe
+        # to interpolate into a Graph API path.
+        assert _save_req("  1234567890123456 \n").pixel_id == "1234567890123456"
 
-    def test_non_digit_rejected(self):
-        with pytest.raises(ValidationError):
-            SaveMetaTrackingRequest(
-                pixel_id="123456789012345a",
-                pixel_enabled=True,
-                capi_enabled=False,
-            )
+    def test_helper_rejects_trailing_newline_without_stripping(self):
+        # Pins the `fullmatch` (not `match`) choice in tracking_validation.py.
+        # Python's `$` also matches immediately BEFORE a trailing newline, so
+        # `re.match` would accept this — and the published contract pattern is
+        # handed to JS `new RegExp`, where `$` is strict. Keeping the Python
+        # check strict is what makes the two agree. The Pydantic validator
+        # strips first, so this only bites callers using the helper directly.
+        assert not is_valid_meta_pixel_id("1234567890123456\n")
+        assert is_valid_meta_pixel_id("1234567890123456")
 
 
 # ---------------------------------------------------------------------------
@@ -83,23 +108,40 @@ class TestPixelIdValidation:
 
 
 class TestTestEventCode:
-    """test_event_code must match ^TEST\\d+$ — anything else is a footgun."""
+    """test_event_code is alphanumeric with dash/underscore.
 
-    def test_valid_code(self):
-        req = SendMetaTestEventRequest(test_event_code="TEST12345")
-        assert req.test_event_code == "TEST12345"
+    Previously pinned to Meta's generator format. Events Manager usually
+    produces ``TEST12345``, but the field is a free-form string and merchants
+    paste codes from other tools — asserting the generator's shape is the same
+    mistake as the pixel-length whitelist. Now matches TikTok's rule, so both
+    platforms behave identically.
+    """
 
-    def test_lowercase_test_rejected(self):
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "TEST12345",  # what Events Manager generates
+            "test12345",  # lowercase — was rejected, is legitimate
+            "TEST",  # no digits — was rejected, is legitimate
+            "my-code_1",  # dash + underscore
+            "A" * 64,  # max length
+        ],
+    )
+    def test_valid_codes_accepted(self, code: str):
+        assert SendMetaTestEventRequest(test_event_code=code).test_event_code == code
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "",  # empty
+            "bad code",  # space
+            "code!",  # punctuation
+            "A" * 65,  # over max length
+        ],
+    )
+    def test_malformed_codes_rejected(self, code: str):
         with pytest.raises(ValidationError):
-            SendMetaTestEventRequest(test_event_code="test12345")
-
-    def test_no_digits_rejected(self):
-        with pytest.raises(ValidationError):
-            SendMetaTestEventRequest(test_event_code="TEST")
-
-    def test_empty_rejected(self):
-        with pytest.raises(ValidationError):
-            SendMetaTestEventRequest(test_event_code="")
+            SendMetaTestEventRequest(test_event_code=code)
 
     def test_save_request_accepts_none(self):
         # On the SaveMetaTrackingRequest, test_event_code is optional —
@@ -337,3 +379,62 @@ class TestConsentSettings:
         # match an "I want to opt out of sale" pre-check stance.
         cs = ConsentSettings(default_sale_of_data=True)
         assert cs.default_sale_of_data is True
+
+
+# ---------------------------------------------------------------------------
+# Validation contract — the anti-drift guard
+# ---------------------------------------------------------------------------
+
+
+class TestValidationContract:
+    """The contract served to the hub must be the rules we actually enforce.
+
+    This is the structural fix for the whole class of bug this pass addressed:
+    the same rules were retyped in three repos and drifted, so the hub rejected
+    a pixel the storefront happily rendered, and the hub demanded a 50-char
+    CAPI token while the API accepted 20. The hub now fetches these values, so
+    a test that the served patterns agree with the enforced validators is what
+    keeps them from separating again.
+    """
+
+    def test_served_pixel_pattern_matches_enforced_validator(self):
+        import re
+
+        pattern = validation_contract()["meta"]["pixel_id"]
+        compiled = re.compile(pattern)
+        for candidate in (
+            "123456",
+            "1712515290084839",
+            "12345678901234567",
+            "12345678901234567890",
+            "12345",
+            "act_1234567890123456",
+            "123456789012345a",
+        ):
+            assert bool(compiled.fullmatch(candidate)) is is_valid_meta_pixel_id(
+                candidate
+            ), f"served pattern disagrees with validator on {candidate!r}"
+
+    def test_served_token_length_is_not_stricter_than_the_api(self):
+        # The hub used to enforce 50 while SaveMetaTrackingRequest accepted 20,
+        # so a valid short token was blocked client-side with no server reason.
+        from src.api.v1.schemas.tenant.tracking import SaveMetaTrackingRequest
+
+        served = validation_contract()["meta"]["min_token_length"]
+        field = SaveMetaTrackingRequest.model_fields["capi_access_token"]
+        enforced = next(
+            c.min_length for c in field.metadata if hasattr(c, "min_length")
+        )
+        assert served == enforced
+
+    def test_contract_covers_both_platforms(self):
+        contract = validation_contract()
+        for platform in ("meta", "tiktok"):
+            rules = contract[platform]
+            assert rules["pixel_id"]
+            assert rules["test_event_code"]
+            assert rules["min_token_length"] > 0
+            # Error copy lives next to the rule so the message can't outlive
+            # the rule it describes — "must be 15-16 digits" did exactly that.
+            assert rules["pixel_id_error"]
+            assert rules["test_event_code_error"]

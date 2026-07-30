@@ -20,6 +20,19 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.api.v1.schemas.tenant.tracking_validation import (
+    META_MIN_TOKEN_LENGTH,
+    META_PIXEL_ID_ERROR,
+    META_TEST_EVENT_CODE_ERROR,
+    TIKTOK_MIN_TOKEN_LENGTH,
+    TIKTOK_PIXEL_ID_ERROR,
+    TIKTOK_TEST_EVENT_CODE_ERROR,
+    is_valid_meta_pixel_id,
+    is_valid_meta_test_event_code,
+    is_valid_tiktok_pixel_id,
+    is_valid_tiktok_test_event_code,
+)
+
 # Activation mode is derived from the two persisted booleans
 # (``pixel_enabled``, ``capi_enabled``) — see meta_tracking_resolver.py.
 TrackingMode = Literal["off", "pixel_only", "capi_only", "both"]
@@ -114,10 +127,13 @@ class PixelEntry(BaseModel):
     @field_validator("pixel_id")
     @classmethod
     def _validate_pixel_id(cls, v: str) -> str:
-        import re
-
-        if not re.match(r"^\d{15,16}$", v):
-            raise ValueError("pixel_id must be 15-16 digits (Meta Pixel ID format)")
+        # Strip first: merchants paste from Events Manager and bring
+        # surrounding whitespace/newlines with them. Normalising is kinder
+        # than a 422, and it keeps the stored value safe to interpolate
+        # into a Graph API path.
+        v = v.strip()
+        if not is_valid_meta_pixel_id(v):
+            raise ValueError(META_PIXEL_ID_ERROR)
         return v
 
 
@@ -130,7 +146,9 @@ class SaveMetaTrackingRequest(BaseModel):
     # Optional: only sent when (re)setting the token. When ``capi_enabled``
     # is true and no token is on file AND none is provided here, the route
     # rejects with 422.
-    capi_access_token: str | None = Field(default=None, min_length=20, max_length=512)
+    capi_access_token: str | None = Field(
+        default=None, min_length=META_MIN_TOKEN_LENGTH, max_length=512
+    )
     test_event_code: str | None = Field(default=None, max_length=64)
     consent_required: bool = False
     # Debug-mode UX contract (see plan §C in the implementation notes):
@@ -181,22 +199,23 @@ class SaveMetaTrackingRequest(BaseModel):
     @field_validator("pixel_id")
     @classmethod
     def _validate_pixel_id(cls, v: str) -> str:
-        # Meta Pixel IDs are 15-16 numeric digits.
-        import re
-
-        if not re.match(r"^\d{15,16}$", v):
-            raise ValueError("pixel_id must be 15-16 digits (Meta Pixel ID format)")
+        # Strip first: merchants paste from Events Manager and bring
+        # surrounding whitespace/newlines with them. Normalising is kinder
+        # than a 422, and it keeps the stored value safe to interpolate
+        # into a Graph API path.
+        v = v.strip()
+        if not is_valid_meta_pixel_id(v):
+            raise ValueError(META_PIXEL_ID_ERROR)
         return v
 
     @field_validator("test_event_code")
     @classmethod
     def _validate_test_event_code(cls, v: str | None) -> str | None:
-        if v is None or v == "":
+        v = (v or "").strip()
+        if not v:
             return None
-        import re
-
-        if not re.match(r"^TEST\d+$", v):
-            raise ValueError("test_event_code must match ^TEST\\d+$ (e.g. TEST12345)")
+        if not is_valid_meta_test_event_code(v):
+            raise ValueError(META_TEST_EVENT_CODE_ERROR)
         return v
 
 
@@ -258,14 +277,9 @@ class TikTokPixelEntry(BaseModel):
     @field_validator("pixel_id")
     @classmethod
     def _validate_pixel_id(cls, v: str) -> str:
-        import re
-
-        # TikTok Pixel / Events "Pixel Code" is alphanumeric (~20 chars),
-        # e.g. "C4A2B1D3E4F5G6H7I8J9". Deliberately NOT digits-only.
-        if not re.match(r"^[A-Za-z0-9]{6,40}$", v):
-            raise ValueError(
-                "pixel_id must be 6-40 alphanumeric chars (TikTok Pixel Code)"
-            )
+        v = v.strip()
+        if not is_valid_tiktok_pixel_id(v):
+            raise ValueError(TIKTOK_PIXEL_ID_ERROR)
         return v
 
 
@@ -278,7 +292,9 @@ class SaveTikTokTrackingRequest(BaseModel):
     # Optional: only sent when (re)setting the Events API token. When
     # ``api_enabled`` is true and no token is on file AND none is provided
     # here, the route rejects with 422.
-    api_access_token: str | None = Field(default=None, min_length=10, max_length=512)
+    api_access_token: str | None = Field(
+        default=None, min_length=TIKTOK_MIN_TOKEN_LENGTH, max_length=512
+    )
     test_event_code: str | None = Field(default=None, max_length=64)
     consent_required: bool = False
     debug_mode: bool = False
@@ -295,27 +311,19 @@ class SaveTikTokTrackingRequest(BaseModel):
     @field_validator("pixel_id")
     @classmethod
     def _validate_pixel_id(cls, v: str) -> str:
-        import re
-
-        if not re.match(r"^[A-Za-z0-9]{6,40}$", v):
-            raise ValueError(
-                "pixel_id must be 6-40 alphanumeric chars (TikTok Pixel Code)"
-            )
+        v = v.strip()
+        if not is_valid_tiktok_pixel_id(v):
+            raise ValueError(TIKTOK_PIXEL_ID_ERROR)
         return v
 
     @field_validator("test_event_code")
     @classmethod
     def _validate_test_event_code(cls, v: str | None) -> str | None:
-        if v is None or v == "":
+        v = (v or "").strip()
+        if not v:
             return None
-        import re
-
-        # TikTok test-event codes are alphanumeric (from Events Manager →
-        # Test Events). More permissive than Meta's ^TEST\d+$.
-        if not re.match(r"^[A-Za-z0-9_-]{1,64}$", v):
-            raise ValueError(
-                "test_event_code must be alphanumeric (dash/underscore ok)"
-            )
+        if not is_valid_tiktok_test_event_code(v):
+            raise ValueError(TIKTOK_TEST_EVENT_CODE_ERROR)
         return v
 
 
@@ -349,12 +357,9 @@ class SendTikTokTestEventRequest(BaseModel):
     @field_validator("test_event_code")
     @classmethod
     def _validate_code(cls, v: str) -> str:
-        import re
-
-        if not re.match(r"^[A-Za-z0-9_-]{1,64}$", v):
-            raise ValueError(
-                "test_event_code must be alphanumeric (dash/underscore ok)"
-            )
+        v = v.strip()
+        if not is_valid_tiktok_test_event_code(v):
+            raise ValueError(TIKTOK_TEST_EVENT_CODE_ERROR)
         return v
 
 
@@ -440,10 +445,9 @@ class SendMetaTestEventRequest(BaseModel):
     @field_validator("test_event_code")
     @classmethod
     def _validate_code(cls, v: str) -> str:
-        import re
-
-        if not re.match(r"^TEST\d+$", v):
-            raise ValueError("test_event_code must match ^TEST\\d+$ (e.g. TEST12345)")
+        v = v.strip()
+        if not is_valid_meta_test_event_code(v):
+            raise ValueError(META_TEST_EVENT_CODE_ERROR)
         return v
 
 
@@ -453,6 +457,36 @@ class SendMetaTestEventResponse(BaseModel):
     enqueued: bool
     test_event_code: str
     queued_event_id: str
+
+
+class VerifyConnectionResponse(BaseModel):
+    """Result of asking the provider whether a pixel is real and reachable.
+
+    This is the answer a regex can never give. Our validation rules only catch
+    paste errors; whether ``1712515290084839`` is a dataset that exists, is
+    active, and that this token may write to is a question only Meta / TikTok
+    can answer. A typo'd-but-well-formed ID used to validate fine and then
+    silently never deliver — that entire failure class disappears once the
+    merchant can press a button and see the dataset's real name.
+
+    ``verified=False`` with ``error`` set means the provider answered and said
+    no; ``verified=False`` with ``error`` describing a missing prerequisite
+    means we could not ask. The two are deliberately not conflated: "Meta says
+    this pixel doesn't exist" and "add a token so we can check" need different
+    actions from the merchant.
+    """
+
+    verified: bool
+    # The dataset / pixel name as the provider knows it — the single most
+    # convincing confirmation for a merchant ("✅ Connected to 'new 1'").
+    name: str | None = None
+    is_active: bool | None = None
+    # The provider's verbatim message when it refused. Forwarded rather than
+    # reworded: their error names the actual problem (expired token, wrong
+    # business, no permission) far better than any mapping we could invent.
+    error: str | None = None
+    # Which platform answered — lets one shared hub component render both.
+    platform: Literal["meta", "tiktok"]
 
 
 class MetaEventLogEntry(BaseModel):

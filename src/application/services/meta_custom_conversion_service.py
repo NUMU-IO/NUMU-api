@@ -60,7 +60,7 @@ async def create_meta_custom_conversion_for_campaign(
     string per Meta's API (the ``and``/``or`` envelope is required even
     for a single clause; we wrap once).
     """
-    api_version = getattr(_app_settings, "meta_graph_api_version", "v21.0")
+    api_version = _app_settings.meta_graph_api_version
     clean_act_id = ad_account_id.removeprefix("act_")
     url = (
         f"https://graph.facebook.com/{api_version}/act_{clean_act_id}/customconversions"

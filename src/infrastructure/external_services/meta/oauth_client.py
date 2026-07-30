@@ -94,9 +94,7 @@ class MetaOAuthClient:
     ) -> None:
         self.app_id = app_id or getattr(settings, "meta_app_id", None) or ""
         self.app_secret = app_secret or getattr(settings, "meta_app_secret", None) or ""
-        self.api_version = api_version or getattr(
-            settings, "meta_graph_api_version", "v21.0"
-        )
+        self.api_version = api_version or settings.meta_graph_api_version
         self._client = client
 
     @property

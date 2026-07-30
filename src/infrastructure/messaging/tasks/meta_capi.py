@@ -365,7 +365,7 @@ async def _send_event(
 
     # ── 4. POST to Meta — outside the DB session to avoid holding ────
     # ── connections during the network round trip.                    ──
-    api_version = settings.meta_graph_api_version or "v21.0"
+    api_version = settings.meta_graph_api_version
     url = f"https://graph.facebook.com/{api_version}/{pixel_id}/events"
 
     capi_payload: dict[str, Any] = {

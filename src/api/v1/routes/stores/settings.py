@@ -3432,6 +3432,7 @@ from src.api.v1.schemas.tenant.tracking import (  # noqa: E402
     TikTokTrackingResponse,
     TikTokTrackingStatusResponse,
     TrackingSettingsResponse,
+    VerifyConnectionResponse,
 )
 from src.application.services.meta_tracking_resolver import (  # noqa: E402
     resolve_mode,
@@ -3593,6 +3594,38 @@ async def get_tracking_settings(
     return SuccessResponse(
         data=TrackingSettingsResponse(meta=meta, tiktok=tiktok),
         message="Tracking settings retrieved",
+    )
+
+
+@router.get(
+    "/tracking/validation-contract",
+    response_model=SuccessResponse[dict],
+    summary="Get the tracking-credential validation contract",
+    operation_id="get_tracking_validation_contract",
+)
+async def get_tracking_validation_contract(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Serve the pixel-ID / token / test-code rules the API enforces.
+
+    The merchant hub drives its client-side validation from this instead of
+    retyping the regexes. That is the whole point: the same rules used to
+    live as literals in three repos and they drifted — a real 17-digit Meta
+    Pixel ID was rejected by a ``^\\d{15,16}$`` whitelist in the hub AND
+    here, while the storefront accepted it. With the API as the authority a
+    rule can be loosened without a frontend deploy, and the hub can never be
+    stricter than the endpoint it posts to.
+
+    Store-scoped only for auth symmetry with the rest of the tracking panel;
+    the payload is platform-wide and contains no store data. Patterns use
+    syntax that means the same thing in Python ``re`` and ECMAScript, so the
+    hub can hand them to ``new RegExp`` unchanged.
+    """
+    from src.api.v1.schemas.tenant.tracking_validation import validation_contract
+
+    return SuccessResponse(
+        data=validation_contract(),
+        message="Tracking validation contract retrieved",
     )
 
 
@@ -4036,6 +4069,13 @@ async def get_meta_events(
             "had_external_id": bool(ud.get("external_id")),
             "had_fbp": bool(ud.get("fbp")),
             "had_fbc": bool(ud.get("fbc")),
+            # IP + UA dominate Event Match Quality for anonymous traffic, so
+            # omitting them from this table meant a merchant asking "why is my
+            # match quality low?" could not get the answer without a code read
+            # — and could not see that the storefront proxy was forwarding the
+            # server's own IP instead of the shopper's.
+            "had_ip": bool(ud.get("client_ip_address")),
+            "had_user_agent": bool(ud.get("client_user_agent")),
         }
         out.append(
             MetaEventLogEntry(
@@ -4056,6 +4096,118 @@ async def get_meta_events(
         )
 
     return SuccessResponse(data=out, message="Recent Meta events retrieved")
+
+
+@router.post(
+    "/tracking/meta/verify",
+    response_model=SuccessResponse[VerifyConnectionResponse],
+    summary="Verify the Meta Pixel against Meta",
+    operation_id="verify_meta_tracking_connection",
+)
+async def verify_meta_tracking_connection(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Ask Meta whether this store's Pixel ID actually exists and is writable.
+
+    ``GET /{version}/{pixel_id}?fields=name,is_active`` with the merchant's own
+    CAPI token. A 200 proves three things at once that no local check can: the
+    dataset exists, the token has access to it, and the token is still valid.
+
+    Never raises for a "no" answer — a failed verification is a 200 with
+    ``verified: false`` and Meta's own message, because the merchant needs to
+    read that message. Only a missing store/config is a client error.
+    """
+    import httpx
+
+    from src.config import settings as _app_settings
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    cfg = _meta_cfg(store)
+    pixel_id = (cfg.get("pixel_id") or "").strip()
+    if not pixel_id:
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="meta",
+                error="Save a Pixel ID first.",
+            ),
+            message="Meta connection not verified",
+        )
+
+    cred = await _get_capi_credential(db, store.tenant_id)
+    token = ""
+    if cred and cred.is_active:
+        try:
+            sm = get_secrets_manager()
+            decrypted = await sm.decrypt(
+                cred.credentials_encrypted, cred.encryption_key_id
+            )
+            token = decrypted.get("access_token") or ""
+        except Exception:
+            logger.warning("meta_verify_token_decrypt_failed store_id=%s", store.id)
+    if not token:
+        # Honest distinction: we could not ASK, which is not the same as Meta
+        # saying no. The hub renders these differently.
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="meta",
+                error=(
+                    "Add a Conversions API access token so we can check this "
+                    "Pixel with Meta."
+                ),
+            ),
+            message="Meta connection not verified",
+        )
+
+    url = (
+        f"https://graph.facebook.com/{_app_settings.meta_graph_api_version}/{pixel_id}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                url,
+                params={"fields": "name,is_active", "access_token": token},
+            )
+        body = resp.json() if resp.content else {}
+    except Exception as exc:
+        logger.warning("meta_verify_request_failed store_id=%s", store.id)
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="meta",
+                error=f"Couldn't reach Meta: {type(exc).__name__}",
+            ),
+            message="Meta connection not verified",
+        )
+
+    if resp.status_code >= 400 or "error" in body:
+        err = body.get("error") or {}
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="meta",
+                # Meta's verbatim message — it names the real problem far
+                # better than anything we could map it to.
+                error=err.get("message") or f"Meta returned HTTP {resp.status_code}",
+            ),
+            message="Meta connection not verified",
+        )
+
+    return SuccessResponse(
+        data=VerifyConnectionResponse(
+            verified=True,
+            platform="meta",
+            name=body.get("name"),
+            # `is_active` is absent on some dataset types; absent ≠ inactive,
+            # so preserve None rather than coercing to False.
+            is_active=body.get("is_active"),
+        ),
+        message="Meta connection verified",
+    )
 
 
 @router.get(
@@ -4588,6 +4740,9 @@ async def get_tiktok_events(
             "had_external_id": bool(user.get("external_id")),
             "had_ttclid": bool(user.get("ttclid")),
             "had_ttp": bool(user.get("ttp")),
+            # See the Meta block above — same diagnostic gap.
+            "had_ip": bool(user.get("ip")),
+            "had_user_agent": bool(user.get("user_agent")),
         }
         out.append(
             TikTokEventLogEntry(
@@ -4609,6 +4764,148 @@ async def get_tiktok_events(
         )
 
     return SuccessResponse(data=out, message="Recent TikTok events retrieved")
+
+
+@router.post(
+    "/tracking/tiktok/verify",
+    response_model=SuccessResponse[VerifyConnectionResponse],
+    summary="Verify the TikTok Pixel against TikTok",
+    operation_id="verify_tiktok_tracking_connection",
+)
+async def verify_tiktok_tracking_connection(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Ask TikTok whether this store's Pixel Code exists on its advertiser.
+
+    ``GET /open_api/v1.3/pixel/list/?advertiser_id=…`` with the merchant's
+    Events API token, then look for the configured code in the response.
+
+    TikTok's quirk: HTTP 200 does NOT mean success — the real status is the
+    ``code`` field in the body, where 0 means OK. The Events API fanout already
+    treats ``code == 0`` as the success signal, and this follows the same rule
+    rather than trusting the HTTP status.
+
+    Requires ``advertiser_id``: unlike Meta, TikTok has no endpoint that reads
+    a pixel by code alone. Without it we say so instead of guessing.
+    """
+    import httpx
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
+
+    cfg = _tiktok_cfg(store)
+    pixel_id = (cfg.get("pixel_id") or "").strip()
+    advertiser_id = (cfg.get("advertiser_id") or "").strip()
+    if not pixel_id:
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="tiktok",
+                error="Save a Pixel Code first.",
+            ),
+            message="TikTok connection not verified",
+        )
+    if not advertiser_id:
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="tiktok",
+                error=(
+                    "Add your TikTok advertiser ID — TikTok can only look a "
+                    "Pixel up within an advertiser account."
+                ),
+            ),
+            message="TikTok connection not verified",
+        )
+
+    cred = await _get_tiktok_credential(db, store.tenant_id)
+    token = ""
+    if cred and cred.is_active:
+        try:
+            sm = get_secrets_manager()
+            decrypted = await sm.decrypt(
+                cred.credentials_encrypted, cred.encryption_key_id
+            )
+            token = decrypted.get("access_token") or ""
+        except Exception:
+            logger.warning("tiktok_verify_token_decrypt_failed store_id=%s", store.id)
+    if not token:
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="tiktok",
+                error=(
+                    "Add an Events API access token so we can check this "
+                    "Pixel with TikTok."
+                ),
+            ),
+            message="TikTok connection not verified",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://business-api.tiktok.com/open_api/v1.3/pixel/list/",
+                params={"advertiser_id": advertiser_id},
+                headers={"Access-Token": token},
+            )
+        body = resp.json() if resp.content else {}
+    except Exception as exc:
+        logger.warning("tiktok_verify_request_failed store_id=%s", store.id)
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="tiktok",
+                error=f"Couldn't reach TikTok: {type(exc).__name__}",
+            ),
+            message="TikTok connection not verified",
+        )
+
+    # code == 0 is TikTok's success signal; HTTP 200 alone means nothing.
+    if body.get("code") != 0:
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="tiktok",
+                error=body.get("message") or f"TikTok returned HTTP {resp.status_code}",
+            ),
+            message="TikTok connection not verified",
+        )
+
+    pixels = ((body.get("data") or {}).get("pixels")) or []
+    match = next(
+        (
+            p
+            for p in pixels
+            if isinstance(p, dict)
+            and str(p.get("pixel_code") or "").strip() == pixel_id
+        ),
+        None,
+    )
+    if match is None:
+        return SuccessResponse(
+            data=VerifyConnectionResponse(
+                verified=False,
+                platform="tiktok",
+                error=(
+                    "TikTok didn't return this Pixel Code for that advertiser "
+                    "— check the code, or that the advertiser ID is the one "
+                    "that owns it."
+                ),
+            ),
+            message="TikTok connection not verified",
+        )
+
+    return SuccessResponse(
+        data=VerifyConnectionResponse(
+            verified=True,
+            platform="tiktok",
+            name=match.get("pixel_name"),
+        ),
+        message="TikTok connection verified",
+    )
 
 
 @router.get(

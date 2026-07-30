@@ -500,7 +500,31 @@ class Settings(BaseSettings):
     meta_app_id: str | None = None
     meta_app_secret: str | None = None
     meta_config_id: str | None = None  # Embedded Signup configuration ID
-    meta_graph_api_version: str = "v19.0"
+    # The ONE Graph API version every Meta call uses — CAPI events, OAuth,
+    # Custom Audiences, EMQ, Custom Conversions, ad promote. There are no
+    # per-call-site fallbacks any more: they all read this, so the value in
+    # boot logs is the value on the wire.
+    #
+    # Why not just leave it: this was pinned to "v19.0", deprecated Feb 2025.
+    # Nothing visibly broke, because an expired Graph version does not fail —
+    # Meta silently routes the call to the next oldest usable version. So we
+    # had no control over which contract applied and no access to any CAPI
+    # parameter added since v19.
+    #
+    # Why v25.0 specifically (chosen 2026-07-30):
+    #   * v26.0 is the newest that resolves (probed: v27.0 does not exist yet).
+    #   * v23.0 is NOT a safe "conservative" pick despite being in Graph
+    #     support — MARKETING API v23.0 expired 9 Jun 2026, and this same
+    #     constant drives the Marketing calls (audiences, ad promote).
+    #     Marketing versions age out in ~1 year, Graph in ~2, so the
+    #     Marketing clock is the binding one.
+    #   * v25.0 (18 Feb 2026) is current-minus-one with Marketing runway to
+    #     roughly Feb 2027 — in support on both surfaces, and not the
+    #     freshest-possible release.
+    #
+    # Override per environment with META_GRAPH_API_VERSION. Review trigger and
+    # owner: docs/external-contracts.md.
+    meta_graph_api_version: str = "v25.0"
     meta_webhook_verify_token: str | None = None
     meta_login_config_id: str | None = None
 
