@@ -95,6 +95,32 @@ from src.infrastructure.repositories.page_repository import PageRepository
 router = APIRouter()
 
 
+def _image_alts(product: Any) -> dict[str, str]:
+    """Alt-text-per-image-URL for a product, whatever shape it arrived in.
+
+    The routes in this module are fed from two sources with the SAME attribute
+    name and DIFFERENT call conventions: a repository hands back a ``Product``
+    entity, where ``image_alts`` is a METHOD, while a use case hands back a
+    ``ProductDTO``, where it is a plain dict FIELD. `product.image_alts()` is
+    therefore correct in some of these handlers and a hard ``AttributeError`` —
+    a 500 — in the others.
+
+    That is not a hypothetical. It took down the entire storefront catalogue in
+    production: ``browse_products`` and ``get_related_products`` serialise
+    DTOs, so every collection page, product listing, search result and
+    featured-collection section 500'd and rendered as "0 products", while the
+    two entity-fed handlers next to them worked fine — which is exactly why it
+    survived review.
+
+    So no handler here decides. Both shapes go through this one accessor, and a
+    future route can be fed from either source without a way to get it wrong.
+    """
+    value = getattr(product, "image_alts", None)
+    if callable(value):
+        value = value()
+    return value if isinstance(value, dict) else {}
+
+
 def _customer_response(c) -> CustomerResponse:
     """Build a CustomerResponse, converting value objects to str."""
     return CustomerResponse(
@@ -862,7 +888,7 @@ async def browse_products(
             "is_on_sale": product.is_on_sale,
             "category_id": str(product.category_id) if product.category_id else None,
             "images": product.images,
-            "image_alts": product.image_alts(),
+            "image_alts": _image_alts(product),
             "tags": product.tags,
             "attributes": product.attributes,
             # Meta Catalog product ID — when set, the storefront uses
@@ -1035,7 +1061,7 @@ async def browse_products_cursor(
             is_on_sale=product.is_on_sale,
             category_id=str(product.category_id) if product.category_id else None,
             images=product.images,
-            image_alts=product.image_alts(),
+            image_alts=_image_alts(product),
             tags=product.tags,
             attributes=product.attributes,
             meta_catalog_id=product.meta_catalog_id,
@@ -1152,7 +1178,7 @@ async def get_product_by_slug(
         is_on_sale=product.is_on_sale,
         category_id=str(product.category_id) if product.category_id else None,
         images=product.images,
-        image_alts=product.image_alts(),
+        image_alts=_image_alts(product),
         tags=product.tags,
         attributes=product.attributes,
         brand=product.brand,
@@ -1457,7 +1483,7 @@ async def get_related_products(
             "is_on_sale": product.is_on_sale,
             "category_id": str(product.category_id) if product.category_id else None,
             "images": product.images,
-            "image_alts": product.image_alts(),
+            "image_alts": _image_alts(product),
             "tags": product.tags,
         })
 
