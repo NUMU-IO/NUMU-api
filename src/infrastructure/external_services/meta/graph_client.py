@@ -44,7 +44,7 @@ class MetaGraphClient:
     ):
         self.access_token = access_token
         self.app_secret = app_secret or settings.meta_app_secret
-        self.api_version = settings.meta_graph_api_version or "v21.0"
+        self.api_version = settings.meta_graph_api_version
         self.base_url = f"https://graph.facebook.com/{self.api_version}"
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, connect=10.0),

@@ -193,7 +193,7 @@ async def poll_match_quality(
 
     from src.config import settings
 
-    api_version = getattr(settings, "meta_graph_api_version", "v21.0")
+    api_version = settings.meta_graph_api_version
     url = f"https://graph.facebook.com/{api_version}/{pixel_id}/event_quality"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:

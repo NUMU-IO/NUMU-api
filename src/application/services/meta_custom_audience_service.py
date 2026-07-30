@@ -218,7 +218,7 @@ class MetaCustomAudienceService:
 
         from src.config import settings
 
-        api_version = getattr(settings, "meta_graph_api_version", "v21.0")
+        api_version = settings.meta_graph_api_version
         url = f"https://graph.facebook.com/{api_version}/{audience_id}/users"
 
         # Schema + data rows aligned. Each member contributes one row
@@ -294,7 +294,7 @@ class MetaCustomAudienceService:
 
         from src.config import settings as _app_settings
 
-        api_version = getattr(_app_settings, "meta_graph_api_version", "v21.0")
+        api_version = _app_settings.meta_graph_api_version
         # Strip any leading "act_" the caller might pass — Meta accepts
         # the bare ad account id on this path and rejects double prefixes.
         clean_act_id = ad_account_id.removeprefix("act_")
