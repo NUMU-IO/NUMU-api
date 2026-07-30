@@ -49,6 +49,14 @@ class ProductDTO(BaseDTO):
     template_suffix: str | None
     created_at: datetime
     updated_at: datetime
+    # Alt text per image URL, resolved from the entity's ``metadata.media_urls``
+    # sidecar. A FIELD here, not the entity's method: the DTO deliberately
+    # carries no ``metadata``, so a route holding a DTO has no way to derive
+    # this itself. Every storefront listing endpoint serialises DTOs, so
+    # without this the alt text the merchant typed would never reach a
+    # collection or search result — and calling the entity's method on a DTO
+    # is a 500 (see `_image_alts` in routes/storefront/public.py).
+    image_alts: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_entity(cls, entity: Product) -> "ProductDTO":
@@ -87,6 +95,7 @@ class ProductDTO(BaseDTO):
             template_suffix=getattr(entity, "template_suffix", None),
             created_at=entity.created_at,
             updated_at=entity.updated_at,
+            image_alts=entity.image_alts() if hasattr(entity, "image_alts") else {},
         )
 
 
