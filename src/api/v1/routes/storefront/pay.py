@@ -31,10 +31,11 @@ and is a documented follow-up.
 from __future__ import annotations
 
 import base64
+import json
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from pydantic import BaseModel
 
 from src.api.dependencies.repositories import (
@@ -42,10 +43,21 @@ from src.api.dependencies.repositories import (
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
+from src.config.settings import settings
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.logging import get_logger
+from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
+
+# Replay guard for payment initiation, mirroring the checkout route. The
+# storefront already forwards `Idempotency-Key`, but this route never declared
+# it, so FastAPI dropped it and two submits minted TWO gateway payment intents
+# for the same order. Same TTL as checkout.
+_cache_service: RedisCacheService | None = (
+    RedisCacheService() if settings.redis_host else None
+)
+PAY_IDEMPOTENCY_TTL_SECONDS = 86_400  # 24 hours
 
 logger = get_logger(__name__)
 
@@ -221,10 +233,30 @@ async def initiate_pay_order(
     request: PayOrderRequest,
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
     """Create a gateway payment session for the existing order and stamp the
     recovery marker. The COD → prepaid conversion + ``cod_recovered``
     attribution happen in the gateway callback once payment succeeds."""
+    # ── Idempotency check ──────────────────────────────────────────────
+    # A retry (the shopper pressing pay again after a slow response) must
+    # return the ORIGINAL payment session rather than opening a second one at
+    # the gateway. Keyed per order so paying two different orders with the
+    # same client key can't collide.
+    pay_cache_key = (
+        f"pay:idempotency:{store_id}:{order_id}:{idempotency_key}"
+        if idempotency_key
+        else None
+    )
+    if pay_cache_key and _cache_service:
+        cached = await _cache_service.get(pay_cache_key)
+        if cached:
+            logger.info(f"Idempotent pay hit: order={order_id} key={idempotency_key}")
+            return SuccessResponse(
+                data=json.loads(cached),
+                message="Payment already initiated",
+            )
+
     order, store = await _load_scoped_order(order_id, store_id, order_repo, store_repo)
 
     is_payable, reason = _payable_state(order)
@@ -245,18 +277,33 @@ async def initiate_pay_order(
     )
 
     if method.startswith("paymob"):
-        return await _initiate_paymob(
+        result = await _initiate_paymob(
             order, store, amount_due, currency, ship, customer_email, order_repo
         )
-    if method == "kashier":
-        return await _initiate_kashier(
+    elif method == "kashier":
+        result = await _initiate_kashier(
             order, store, amount_due, currency, customer_email, order_repo
         )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported payment method for online recovery.",
+        )
 
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Unsupported payment method for online recovery.",
-    )
+    # Remember the session so a retry replays it instead of opening a second
+    # one at the gateway. Best-effort: a cache failure must never fail a
+    # payment we've already successfully created.
+    if pay_cache_key and _cache_service:
+        try:
+            await _cache_service.set(
+                pay_cache_key,
+                json.dumps(result.data),
+                expire=PAY_IDEMPOTENCY_TTL_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"pay_idempotency_cache_failed order={order_id} err={exc}")
+
+    return result
 
 
 async def _stamp_recovery_initiated(order, order_repo, payment_id: str) -> None:

@@ -41,6 +41,14 @@ class CategoryModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Alternate template variant key suffix (Shopify-style); null = base template.
+    # Per-entity SEO overrides. Null/False = inherit the storefront default.
+    robots_noindex: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    canonical_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    sitemap_exclude: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     seo_title: Mapped[str | None] = mapped_column(String(70), nullable=True)
     seo_description: Mapped[str | None] = mapped_column(String(160), nullable=True)
     social_image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)

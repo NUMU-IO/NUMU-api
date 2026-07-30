@@ -46,6 +46,7 @@ from src.api.v1.schemas.tenant import (
     OrderListItemResponse,
     OrderResponse,
     ProductResponse,
+    SetImageAltRequest,
     StoreResponse,
     UpdateCategoryRequest,
     UpdateCouponRequest,
@@ -92,6 +93,7 @@ __all__ = [
     # Product (tenant)
     "CreateProductRequest",
     "DeleteImageRequest",
+    "SetImageAltRequest",
     "UpdateProductRequest",
     "ProductResponse",
     "UploadedImageResponse",

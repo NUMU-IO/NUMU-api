@@ -206,6 +206,19 @@ class CreateProductRequest(BaseModel):
     brand: str | None = Field(
         None, max_length=120, description="Manufacturer/brand name"
     )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
+    )
     seo_title: str | None = Field(None, max_length=70, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
@@ -339,6 +352,19 @@ class UpdateProductRequest(BaseModel):
     brand: str | None = Field(
         None, max_length=120, description="Manufacturer/brand name"
     )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
+    )
     seo_title: str | None = Field(None, max_length=70, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
@@ -449,6 +475,14 @@ class ProductResponse(BaseModel):
     # Per-product SEO overrides. Optional on the response since legacy rows
     # may have been written before the columns existed; null means
     # "fall back to product name / short_description" on the storefront.
+    # Alt text per image URL, from the media_urls sidecar. `images` is a bare
+    # list of URLs with nowhere for alt to live, so it rides alongside rather
+    # than changing that column's shape (themes and the SDK already read
+    # ProductImage.alt once the storefront folds this in).
+    image_alts: dict[str, str] = Field(
+        default_factory=dict,
+        description="Image URL -> alt text.",
+    )
     # Real manufacturer brand. Without it the storefront's Product JSON-LD
     # fell back to the store name, i.e. every product claimed to be the
     # store's own house brand.
@@ -456,6 +490,19 @@ class ProductResponse(BaseModel):
         default=None,
         max_length=120,
         description="Manufacturer/brand name (Product JSON-LD + Meta feed).",
+    )
+    robots_noindex: bool = Field(
+        default=False,
+        description="Keep this page out of search results.",
+    )
+    canonical_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Absolute URL this page should credit as the original.",
+    )
+    sitemap_exclude: bool = Field(
+        default=False,
+        description="Leave this page out of sitemap.xml.",
     )
     seo_title: str | None = Field(
         default=None,
@@ -566,6 +613,26 @@ class UploadedImageResponse(BaseModel):
     product_id: str = Field(description="Associated product UUID")
     variant_urls: dict[str, str] = Field(
         default_factory=dict, description="URLs for resized variants (thumbnail, etc.)"
+    )
+
+
+class SetImageAltRequest(BaseModel):
+    """Set alt text for one product image."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "image_url": "https://cdn.numu.com/products/img-001.jpg",
+                "alt": "Navy blue sponge hijab, folded",
+            }
+        }
+    )
+
+    image_url: str = Field(description="URL of the image to describe")
+    alt: str | None = Field(
+        default=None,
+        max_length=250,
+        description="Alt text. Null or empty clears it.",
     )
 
 

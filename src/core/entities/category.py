@@ -30,6 +30,9 @@ class Category(BaseEntity):
     position: int = Field(default=0, ge=0)
     is_active: bool = True
     # Alternate template variant key suffix (Shopify-style); null = base template.
+    robots_noindex: bool = False
+    canonical_url: str | None = None
+    sitemap_exclude: bool = False
     seo_title: str | None = None
     seo_description: str | None = None
     social_image_url: str | None = None

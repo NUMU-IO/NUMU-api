@@ -862,12 +862,16 @@ async def browse_products(
             "is_on_sale": product.is_on_sale,
             "category_id": str(product.category_id) if product.category_id else None,
             "images": product.images,
+            "image_alts": product.image_alts(),
             "tags": product.tags,
             "attributes": product.attributes,
             # Meta Catalog product ID — when set, the storefront uses
             # it as `content_ids` on Pixel events. Null = use product.id.
             "meta_catalog_id": product.meta_catalog_id,
             "brand": product.brand,
+            "robots_noindex": product.robots_noindex,
+            "canonical_url": product.canonical_url,
+            "sitemap_exclude": product.sitemap_exclude,
             "seo_title": product.seo_title,
             "seo_description": product.seo_description,
             "created_at": str(product.created_at),
@@ -1031,10 +1035,14 @@ async def browse_products_cursor(
             is_on_sale=product.is_on_sale,
             category_id=str(product.category_id) if product.category_id else None,
             images=product.images,
+            image_alts=product.image_alts(),
             tags=product.tags,
             attributes=product.attributes,
             meta_catalog_id=product.meta_catalog_id,
             brand=product.brand,
+            robots_noindex=product.robots_noindex,
+            canonical_url=product.canonical_url,
+            sitemap_exclude=product.sitemap_exclude,
             seo_title=product.seo_title,
             seo_description=product.seo_description,
             created_at=str(product.created_at),
@@ -1144,9 +1152,13 @@ async def get_product_by_slug(
         is_on_sale=product.is_on_sale,
         category_id=str(product.category_id) if product.category_id else None,
         images=product.images,
+        image_alts=product.image_alts(),
         tags=product.tags,
         attributes=product.attributes,
         brand=product.brand,
+        robots_noindex=product.robots_noindex,
+        canonical_url=product.canonical_url,
+        sitemap_exclude=product.sitemap_exclude,
         seo_title=product.seo_title,
         seo_description=product.seo_description,
         template_suffix=product.template_suffix,
@@ -1445,6 +1457,7 @@ async def get_related_products(
             "is_on_sale": product.is_on_sale,
             "category_id": str(product.category_id) if product.category_id else None,
             "images": product.images,
+            "image_alts": product.image_alts(),
             "tags": product.tags,
         })
 
@@ -1502,6 +1515,9 @@ async def browse_categories(
             "seo_title": r.seo_title,
             "seo_description": r.seo_description,
             "social_image_url": r.social_image_url,
+            "robots_noindex": r.robots_noindex,
+            "canonical_url": r.canonical_url,
+            "sitemap_exclude": r.sitemap_exclude,
             "template_suffix": r.template_suffix,
             "product_count": r.product_count,
             "metafields": await _resolve_public_metafields(
@@ -1583,6 +1599,8 @@ async def storefront_sitemap_feed(
         }
         for r in results
         if r.slug
+        and not getattr(r, "sitemap_exclude", False)
+        and not getattr(r, "robots_noindex", False)
     ]
     return SuccessResponse(
         data={
