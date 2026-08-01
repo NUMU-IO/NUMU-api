@@ -317,16 +317,63 @@ async def _send_event(
                 )
             )
             await session.commit()
+            log_id = log_entity.id
         except IntegrityError:
-            # Dedup primitive — someone else already sent this event_id.
+            # UNIQUE(store_id, event_id) hit — usually the dedup-skip
+            # signal. But a row whose prior attempt ended in a recorded
+            # 4xx/5xx must stay retryable (the orphan sweep re-enqueues
+            # failed Purchases with a rebuilt payload) — adopt that row
+            # and resend instead of skipping forever.
             await session.rollback()
+            # set_config(..., true) GUCs are transaction-local — the
+            # rollback dropped them; re-establish before touching the row.
+            await enable_rls_bypass(session)
+            await narrow_to_tenant(session, store.tenant_id)
+
+            from sqlalchemy import select as sa_select
+
+            from src.infrastructure.database.models.tenant.meta_event_log import (
+                MetaEventLogModel,
+            )
+
+            existing = (
+                await session.execute(
+                    sa_select(MetaEventLogModel).where(
+                        MetaEventLogModel.store_id == store_uuid,
+                        MetaEventLogModel.event_id == event_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if (
+                existing is None
+                or existing.response_status is None
+                or existing.response_status < 400
+            ):
+                # Sent (2xx) or still in-flight (NULL) — genuine duplicate.
+                logger.info(
+                    "meta_capi_dedup_skip",
+                    store_id=store_id,
+                    event_id=event_id,
+                    event_name=event_name,
+                )
+                return {"status": "duplicate", "fbtrace_id": None}
+
+            # Capture BEFORE commit — post-commit attribute access on an
+            # expired instance would trigger a sync lazy refresh and blow
+            # up under the async session.
+            log_id = existing.id
+            previous_status = existing.response_status
+            existing.request_payload = request_payload
+            existing.attempt_count = (existing.attempt_count or 0) + 1
+            existing.last_error = None
+            await session.commit()
             logger.info(
-                "meta_capi_dedup_skip",
+                "meta_capi_retry_failed_row",
                 store_id=store_id,
                 event_id=event_id,
                 event_name=event_name,
+                previous_status=previous_status,
             )
-            return {"status": "duplicate", "fbtrace_id": None}
 
         # ── 3. Decrypt the access token ───────────────────────────────
         from sqlalchemy import select
@@ -406,6 +453,14 @@ async def _send_event(
         try:
             response_body = resp.json()
             fbtrace_id = (response_body or {}).get("fbtrace_id")
+            if not fbtrace_id:
+                # Error responses nest it: {"error": {..., "fbtrace_id"}}.
+                # Without this fallback every failed row shows "—" in the
+                # hub's Recent-events table — exactly when support needs
+                # the trace id most.
+                error_obj = (response_body or {}).get("error")
+                if isinstance(error_obj, dict):
+                    fbtrace_id = error_obj.get("fbtrace_id")
         except Exception:  # noqa: BLE001
             response_body = {"raw": resp.text[:500]}
     except (httpx.NetworkError, httpx.TimeoutException) as exc:
@@ -417,7 +472,7 @@ async def _send_event(
             await narrow_to_tenant(session, store.tenant_id)
             log_repo = MetaEventLogRepository(session)
             await log_repo.update_error(
-                log_entity.id,
+                log_id,
                 error=last_error,
                 attempt_count=task.request.retries + 1,
             )
@@ -430,7 +485,7 @@ async def _send_event(
         await narrow_to_tenant(session, store.tenant_id)
         log_repo = MetaEventLogRepository(session)
         await log_repo.update_response(
-            log_entity.id,
+            log_id,
             status=response_status,
             body=_redact_response(response_body),
             fbtrace_id=fbtrace_id,
@@ -542,8 +597,15 @@ def meta_capi_sweep_orphaned_purchases(
 
 
 async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
-    from sqlalchemy import select
+    from types import SimpleNamespace
 
+    from sqlalchemy import or_, select
+
+    from src.application.services.meta_capi_purchase_dispatcher import (
+        _build_custom_data_from_order,
+        _build_user_data_from_order,
+    )
+    from src.application.services.meta_pixel_resolver import resolve_pixels
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.meta_event_log import (
         MetaEventLogModel,
@@ -596,6 +658,13 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
         existing_query = select(MetaEventLogModel.event_id).where(
             MetaEventLogModel.event_name == "Purchase",
             MetaEventLogModel.event_id.in_(order_ids),
+            # A recorded 4xx/5xx does NOT count as "sent" — the send task
+            # adopts + retries failed rows on re-enqueue. NULL status DOES
+            # count (in-flight or pending; Celery owns its own retries).
+            or_(
+                MetaEventLogModel.response_status.is_(None),
+                MetaEventLogModel.response_status < 400,
+            ),
         )
         existing = {row[0] for row in (await session.execute(existing_query)).all()}
 
@@ -603,18 +672,8 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             stats["scanned"] += 1
             if str(o.id) in existing:
                 continue
-            # Re-enqueue. We don't have full order context here — pull
-            # custom_data from the order at enqueue time would mean
-            # another query per row. The webhook path constructs the
-            # rich payload; the sweep just needs the event to land. Use
-            # a minimal payload — Meta will accept it; match quality is
-            # best-effort by definition for a recovery sweep.
-            from src.infrastructure.database.models.tenant.order import (
-                OrderModel as OM,
-            )
-
             order_full = (
-                await session.execute(select(OM).where(OM.id == o.id))
+                await session.execute(select(OrderModel).where(OrderModel.id == o.id))
             ).scalar_one_or_none()
             if order_full is None:
                 continue
@@ -628,25 +687,62 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             meta_cfg = ((store_full.settings or {}).get("tracking") or {}).get(
                 "meta"
             ) or {}
-            pixel_id = meta_cfg.get("pixel_id")
-            if not pixel_id:
+            pixels = resolve_pixels(meta_cfg, mode="capi")
+            if not pixels:
                 continue
 
-            meta_capi_send_event.delay(
-                store_id=str(order_full.store_id),
-                pixel_id=pixel_id,
-                event_name="Purchase",
-                event_id=str(order_full.id),
-                event_time=int((order_full.paid_at or datetime.now(UTC)).timestamp()),
-                event_source_url=None,
-                user_data={},
-                custom_data={
-                    "value": (order_full.total or 0) / 100,
-                    "currency": order_full.currency or "EGP",
-                    "order_id": str(order_full.id),
-                },
-                action_source="website",
+            # Build the SAME rich payload the webhook path sends. The
+            # sweep used to fire ``user_data={}`` as "best-effort" — but
+            # Meta hard-rejects events with zero customer information
+            # parameters (400, error_subcode 2804050), so a minimal
+            # payload isn't degraded match quality, it's a guaranteed
+            # failure. OrderModel stores the entity's ``metadata`` under
+            # ``extra_data`` — adapt before handing to the shared
+            # builders (their ``getattr(order, "metadata")`` on an ORM
+            # model would resolve to SQLAlchemy's MetaData registry).
+            order_view = SimpleNamespace(
+                id=order_full.id,
+                customer_id=order_full.customer_id,
+                shipping_address=order_full.shipping_address,
+                metadata=order_full.extra_data or {},
+                line_items=order_full.line_items,
+                total=order_full.total,
+                currency=order_full.currency,
+                utm_source=order_full.utm_source,
+                utm_medium=order_full.utm_medium,
+                utm_campaign=order_full.utm_campaign,
+                utm_term=order_full.utm_term,
+                utm_content=order_full.utm_content,
+                campaign_id=getattr(order_full, "campaign_id", None),
             )
+            user_data = _build_user_data_from_order(order_view)
+            custom_data = _build_custom_data_from_order(order_view)
+
+            if not any(user_data.values()):
+                # No match key at all (no phone/email/name/ip/fbp/…) —
+                # Meta will 400 it deterministically; skip instead of
+                # burning an attempt and poisoning the dedup row.
+                logger.warning(
+                    "meta_capi_sweep_no_match_keys",
+                    order_id=str(order_full.id),
+                    store_id=str(order_full.store_id),
+                )
+                continue
+
+            for pixel in pixels:
+                meta_capi_send_event.delay(
+                    store_id=str(order_full.store_id),
+                    pixel_id=pixel.pixel_id,
+                    event_name="Purchase",
+                    event_id=str(order_full.id),
+                    event_time=int(
+                        (order_full.paid_at or datetime.now(UTC)).timestamp()
+                    ),
+                    event_source_url=None,
+                    user_data=user_data,
+                    custom_data=custom_data,
+                    action_source="website",
+                )
             stats["enqueued"] += 1
 
     if stats["enqueued"]:
