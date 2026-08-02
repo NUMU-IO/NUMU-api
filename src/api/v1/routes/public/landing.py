@@ -220,8 +220,10 @@ DEFAULT_PRICING_PLANS = {
             "key": "starter",
             "name_en": "Starter",
             "name_ar": "ستارتر",
-            "price_monthly": 99,
-            "price_annual": 990,
+            # NOTE: display defaults only — the public endpoint always
+            # overwrites paid-plan prices from PLAN_LIMITS (live merge).
+            "price_monthly": 250,
+            "price_annual": 2500,
             "currency": "EGP",
             "cta": "subscribe",
             "popular": False,
@@ -238,8 +240,8 @@ DEFAULT_PRICING_PLANS = {
             "key": "pro",
             "name_en": "Pro",
             "name_ar": "برو",
-            "price_monthly": 299,
-            "price_annual": 2990,
+            "price_monthly": 499,
+            "price_annual": 4990,
             "currency": "EGP",
             "cta": "subscribe",
             "popular": True,
@@ -353,6 +355,20 @@ async def get_public_pricing_plans(
 
     stored = config.value if config else DEFAULT_PRICING_PLANS
     plans = [dict(p) for p in stored.get("plans", [])]
+
+    # LIVE-PRICE MERGE (same rule as the payg commission below): for
+    # paid plans that exist in the real catalog, the displayed price is
+    # ALWAYS what the platform actually charges — PLAN_LIMITS (piasters,
+    # incl. admin plan-limits overrides), the exact amount an InstaPay
+    # subscription payment is created with. Marketing copy stays
+    # admin-editable; the numbers cannot drift from the charge.
+    for p in plans:
+        if p.get("key") in ("starter", "pro"):
+            f = get_plan_features(p["key"])
+            if f.monthly_price_piasters > 0:
+                p["price_monthly"] = f.monthly_price_piasters // 100
+            if f.annual_price_piasters > 0:
+                p["price_annual"] = f.annual_price_piasters // 100
 
     signup = await get_signup_settings(db)
     wallet_admin = await get_wallet_settings(db)
