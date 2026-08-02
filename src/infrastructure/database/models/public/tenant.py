@@ -160,6 +160,12 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     renewal_retry_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0", default=0
     )
+    # Pre-expiry warning dedup: stamped when the warning sweep emailed
+    # for the CURRENT period's window (trial expires_at / next_renewal_at
+    # anchor). Re-arms automatically when the anchor advances.
+    renewal_warning_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     owner = relationship("UserModel", back_populates="owned_tenants", lazy="selectin")
