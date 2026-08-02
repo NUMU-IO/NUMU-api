@@ -131,6 +131,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.wallet_reconciliation_task",
         "src.infrastructure.messaging.tasks.wallet_notification_tasks",
         "src.infrastructure.messaging.tasks.wallet_topup_expiry_task",
+        # Subscription payments via InstaPay — intent expiry + dunning nudge.
+        "src.infrastructure.messaging.tasks.subscription_payment_tasks",
         # backend-017 — daily Shopify-side verification overage relay.
         "src.infrastructure.messaging.tasks.usage_overage_task",
         # backend-021 — RecoveryFlow cadence Celery worker + Shopify outbox.
@@ -468,6 +470,20 @@ celery_app.conf.beat_schedule = {
     "expire-wallet-topups": {
         "task": "tasks.expire_wallet_topups",
         "schedule": crontab(minute="*/15"),
+    },
+    # Offset 5 min from the wallet sweep so the two 15-min sweeps never
+    # contend for the same beat tick.
+    "expire-subscription-payments": {
+        "task": "tasks.expire_subscription_payment_intents",
+        "schedule": crontab(minute="5-59/15"),
+    },
+    # Pre-expiry warnings (trial ending / renewal upcoming) — hourly at
+    # :40, offset from expire-trials (:15) and process-due-renewals (:20)
+    # so a tenant is warned before the same hour's renewal attempt only
+    # by admin-configured days, never by beat-tick ordering luck.
+    "send-subscription-expiry-warnings": {
+        "task": "tasks.send_subscription_expiry_warnings",
+        "schedule": crontab(minute=40),
     },
     # ─── backend-017: Shopify verification-overage relay (daily) ─────
     # Daily at 04:00 UTC (~06:00 Cairo) — after the 03:30 reconciliation

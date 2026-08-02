@@ -36,6 +36,13 @@ class BillingInvoiceModel(Base, UUIDMixin, TimestampMixin):
     paymob_transaction_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )
+    # Manual-payment sibling of paymob_transaction_id: the InstaPay
+    # intent that funded this invoice (verified receipt flow).
+    subscription_payment_intent_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.subscription_payment_intents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     discount_code_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.discount_codes.id", ondelete="SET NULL"),

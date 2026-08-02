@@ -39,6 +39,9 @@ from src.api.v1.routes.admin.platform_settings import (
 from src.api.v1.routes.admin.products import router as products_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.stores import router as stores_router
+from src.api.v1.routes.admin.subscription_payments import (
+    router as subscription_payments_router,
+)
 from src.api.v1.routes.admin.users import router as admin_users_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
 from src.api.v1.routes.admin.wallets import router as wallets_router
@@ -64,6 +67,11 @@ router.include_router(
     plan_limits_router, prefix="/plan-limits", tags=["Admin - Plan Limits"]
 )
 router.include_router(wallets_router, prefix="/wallets", tags=["Admin - Wallets"])
+router.include_router(
+    subscription_payments_router,
+    prefix="/subscription-payments",
+    tags=["Admin - Subscription Payments"],
+)
 router.include_router(
     landing_page_router, prefix="/landing-config", tags=["Admin - Landing Page"]
 )

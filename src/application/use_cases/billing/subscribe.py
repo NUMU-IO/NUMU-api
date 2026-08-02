@@ -60,6 +60,8 @@ class SubscribeUseCase:
         billing_cycle: str = "monthly",
         discount_code: str | None = None,
         paymob_card_token: str | None = None,
+        payment_method: str = "paymob",
+        subscription_payment_intent_id: UUID | None = None,
     ) -> TenantModel:
         tenant = await self.tenant_repo.get_by_id(tenant_id)
         if not tenant:
@@ -97,10 +99,18 @@ class SubscribeUseCase:
         final_amount = max(0, amount - discount_amount)
 
         # Charge via Paymob (real call). Free first period via discount → skip.
+        # ``instapay_verified`` skips the charge entirely: the money was
+        # already received on NUMU's IPA and verified (OCR or admin) —
+        # the invoice links to the payment intent instead of a Paymob tx.
         paymob_tx_id: str | None = None
         encrypted_token: str | None = None
         now = datetime.now(UTC)
-        if final_amount > 0:
+        if payment_method == "instapay_verified":
+            if subscription_payment_intent_id is None:
+                raise ValueError(
+                    "instapay_verified requires subscription_payment_intent_id"
+                )
+        elif final_amount > 0:
             if not paymob_card_token:
                 raise ValueError("Payment method required for this plan.")
 
@@ -146,6 +156,7 @@ class SubscribeUseCase:
             currency="EGP",
             status="paid",
             paymob_transaction_id=paymob_tx_id,
+            subscription_payment_intent_id=subscription_payment_intent_id,
             discount_code_id=discount_code_id,
             discount_amount_cents=discount_amount,
             paid_at=now,
