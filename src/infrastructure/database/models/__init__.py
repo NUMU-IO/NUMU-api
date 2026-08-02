@@ -33,6 +33,8 @@ from src.infrastructure.database.models.public import (
     MerchantWalletModel,
     MessageThreadModel,
     StoreOnboardingModel,
+    SubscriptionPaymentIntentModel,
+    SubscriptionPaymentProofModel,
     TenantModel,
     UserModel,
     WaitlistModel,
@@ -121,6 +123,9 @@ __all__ = [
     "WalletTransactionModel",
     "WalletTopupIntentModel",
     "WalletTopupProofModel",
+    # Subscription payments (InstaPay)
+    "SubscriptionPaymentIntentModel",
+    "SubscriptionPaymentProofModel",
     "AuditLogModel",
     "TenantMembershipModel",
     "RoleModel",

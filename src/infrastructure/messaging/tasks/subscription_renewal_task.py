@@ -3,19 +3,27 @@
 Runs hourly. Walks ``public.tenants`` for rows where
 ``lifecycle_state ∈ {ACTIVE, PAST_DUE} AND next_renewal_at <= now()``
 and re-charges the merchant's stored card token via
-``PaymobRecurringBillingService``.
+``PaymobRecurringBillingService``. Tenants without a stored token
+(InstaPay-paid subscriptions) go straight to dunning: the nudge email
+and the hub's "renewal due" banner point them at the manual InstaPay
+re-pay flow on /billing (purpose=renewal extends the period on
+verification). Merchant wallets are deliberately NOT touched here —
+the wallet is the payg tier's funding instrument, not a subscription
+payment method.
 
 Outcomes per tenant:
   * Success: write paid invoice, advance ``next_renewal_at``,
     reset ``renewal_retry_count`` to 0, lifecycle back to ``ACTIVE``.
   * Failure (retry available): increment retry count, push
-    ``next_renewal_at`` +24h, set lifecycle to ``PAST_DUE``.
+    ``next_renewal_at`` +24h, set lifecycle to ``PAST_DUE``, and enqueue
+    a bilingual "renewal due — pay by card or InstaPay" email nudge.
   * Failure exhausted (>=3 retries AND ≥72h since
     ``subscription_started_at``): transition to ``READ_ONLY`` via
     the existing ``TenantService.transition_to_read_only`` path.
 
-Each tenant runs in its own try/except so a single failure cannot
-abort the batch. Errors are logged with structlog-friendly extras.
+The dunning trio (retries / backoff / window) is admin-tunable via
+``billing_lifecycle_settings``. Each tenant runs in its own try/except
+so a single failure cannot abort the batch.
 """
 
 from __future__ import annotations
@@ -28,7 +36,10 @@ from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-# Operational tunables
+# Operational tunables. The dunning trio (retries / backoff / window)
+# are DEFAULTS only — the sweep reads the effective values from the
+# admin-tunable ``billing_lifecycle_settings`` at the start of each run
+# (see src/application/services/billing_settings.py).
 MAX_BATCH_SIZE = 100
 MAX_RETRIES_BEFORE_READ_ONLY = 3
 DUNNING_WINDOW_HOURS = 72
@@ -84,6 +95,16 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
 
     async with async_session_factory() as session:
         now = datetime.now(UTC)
+
+        # Admin-tunable dunning ladder (falls back to the module defaults
+        # when no override is stored).
+        from src.application.services.billing_settings import get_billing_settings
+
+        lifecycle_cfg = await get_billing_settings(session, use_cache=False)
+        max_retries = lifecycle_cfg.dunning_max_retries
+        retry_backoff_hours = lifecycle_cfg.dunning_retry_backoff_hours
+        dunning_window_hours = lifecycle_cfg.dunning_window_hours
+
         q = (
             select(TenantModel)
             .where(
@@ -100,14 +121,6 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
 
         for tenant in due:
             try:
-                if not tenant.paymob_card_token_encrypted:
-                    skipped += 1
-                    logger.warning(
-                        "renewal_skipped_no_token",
-                        extra={"tenant_id": str(tenant.id)},
-                    )
-                    continue
-
                 features = get_plan_features(tenant.plan)
                 cycle = tenant.billing_cycle or "monthly"
                 amount = (
@@ -123,17 +136,30 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                     continue
 
                 period_start = tenant.next_renewal_at or now
-                idem_ref = f"renewal-{tenant.id}-{period_start.isoformat()}"
-                result = await recurring.charge_subscription(
-                    tenant_id=tenant.id,
-                    amount_cents=amount,
-                    currency="EGP",
-                    encrypted_card_token=tenant.paymob_card_token_encrypted,
-                    key_id=encryption_key_id,
-                    idempotency_ref=idem_ref,
-                )
 
-                if isinstance(result, RecurringChargeSuccess):
+                # Card charge — the ONLY automatic collection path.
+                # No stored token (InstaPay-paid subscription) → dunning,
+                # whose email/banner point at the manual InstaPay re-pay.
+                paymob_tx_id: str | None = None
+                charged = False
+                failure_reason = "no_card_token"
+                if tenant.paymob_card_token_encrypted:
+                    idem_ref = f"renewal-{tenant.id}-{period_start.isoformat()}"
+                    result = await recurring.charge_subscription(
+                        tenant_id=tenant.id,
+                        amount_cents=amount,
+                        currency="EGP",
+                        encrypted_card_token=tenant.paymob_card_token_encrypted,
+                        key_id=encryption_key_id,
+                        idempotency_ref=idem_ref,
+                    )
+                    if isinstance(result, RecurringChargeSuccess):
+                        charged = True
+                        paymob_tx_id = result.transaction_id
+                    elif isinstance(result, RecurringChargeFailure):
+                        failure_reason = result.reason
+
+                if charged:
                     period_end = period_start + _period_delta(cycle)
                     invoice = BillingInvoiceModel(
                         tenant_id=tenant.id,
@@ -142,7 +168,7 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                         amount_cents=amount,
                         currency="EGP",
                         status="paid",
-                        paymob_transaction_id=result.transaction_id,
+                        paymob_transaction_id=paymob_tx_id,
                         paid_at=now,
                     )
                     session.add(invoice)
@@ -155,19 +181,19 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                         extra={
                             "tenant_id": str(tenant.id),
                             "amount_cents": amount,
-                            "transaction_id": result.transaction_id,
+                            "transaction_id": paymob_tx_id,
                         },
                     )
-                elif isinstance(result, RecurringChargeFailure):
+                else:
                     tenant.renewal_retry_count = (tenant.renewal_retry_count or 0) + 1
                     tenant.lifecycle_state = "past_due"
-                    tenant.next_renewal_at = now + timedelta(hours=RETRY_BACKOFF_HOURS)
+                    tenant.next_renewal_at = now + timedelta(hours=retry_backoff_hours)
 
                     started = tenant.subscription_started_at or period_start
                     elapsed = now - started
                     exhausted = (
-                        tenant.renewal_retry_count >= MAX_RETRIES_BEFORE_READ_ONLY
-                        and elapsed >= timedelta(hours=DUNNING_WINDOW_HOURS)
+                        tenant.renewal_retry_count >= max_retries
+                        and elapsed >= timedelta(hours=dunning_window_hours)
                     )
                     if exhausted:
                         tenant_service = TenantService(session)
@@ -180,7 +206,7 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                             extra={
                                 "tenant_id": str(tenant.id),
                                 "retries": tenant.renewal_retry_count,
-                                "reason": result.reason,
+                                "reason": failure_reason,
                             },
                         )
                     else:
@@ -190,9 +216,27 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                             extra={
                                 "tenant_id": str(tenant.id),
                                 "retries": tenant.renewal_retry_count,
-                                "reason": result.reason,
+                                "reason": failure_reason,
                             },
                         )
+                        # Best-effort nudge: how to pay (card / wallet
+                        # top-up / InstaPay on /billing). Broker failure
+                        # must never fail the sweep.
+                        try:
+                            from src.infrastructure.messaging.tasks.subscription_payment_tasks import (  # noqa: E501
+                                send_renewal_payment_due_task,
+                            )
+
+                            send_renewal_payment_due_task.delay(
+                                tenant_id=str(tenant.id),
+                                amount_cents=amount,
+                                retry_count=tenant.renewal_retry_count,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "renewal_nudge_enqueue_failed",
+                                extra={"tenant_id": str(tenant.id)},
+                            )
             except Exception:
                 logger.exception(
                     "renewal_unhandled_error",

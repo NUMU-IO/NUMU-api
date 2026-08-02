@@ -36,6 +36,10 @@ from src.infrastructure.database.models.public.reconciliation import (
     PaymentReconciliationRunModel,
     ReconciliationMismatchModel,
 )
+from src.infrastructure.database.models.public.subscription_payment import (
+    SubscriptionPaymentIntentModel,
+    SubscriptionPaymentProofModel,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.theme_admin_config import (
     ThemeAdminConfigModel,
@@ -75,6 +79,9 @@ __all__ = [
     "WalletTransactionModel",
     "WalletTopupIntentModel",
     "WalletTopupProofModel",
+    # Subscription payments (InstaPay)
+    "SubscriptionPaymentIntentModel",
+    "SubscriptionPaymentProofModel",
     "WhatsAppAccessRequestModel",
     "WhatsAppAccessStatus",
     # Omnichannel
