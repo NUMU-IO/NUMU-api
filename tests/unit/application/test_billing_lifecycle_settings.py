@@ -197,6 +197,36 @@ async def test_collect_warning_targets_respects_admin_window(test_session):
 
 
 @pytest.mark.asyncio
+async def test_merchant_reminder_prefs_override_and_optout(test_session):
+    """Per-tenant reminder prefs: a wider merchant window beats the
+    platform default, and optout silences the reminder entirely."""
+    now = datetime.now(UTC)
+    cfg = await get_billing_settings(test_session, use_cache=False)
+    assert cfg.renewal_warning_days == 7
+
+    # 10 days out — outside the 7-day platform window, inside the
+    # merchant's own 14-day preference.
+    early_bird = await _mk_tenant(
+        test_session,
+        next_renewal_at=now + timedelta(days=10),
+        paymob_card_token_encrypted="tok",
+        renewal_reminder_days=14,
+    )
+    # 3 days out but opted out — never selected.
+    opted_out = await _mk_tenant(
+        test_session,
+        next_renewal_at=now + timedelta(days=3),
+        paymob_card_token_encrypted="tok",
+        renewal_reminder_optout=True,
+    )
+
+    targets = await _collect_warning_targets(test_session, cfg, now)
+    ids = {str(t.id) for t, _k, _a in targets}
+    assert str(early_bird.id) in ids
+    assert str(opted_out.id) not in ids
+
+
+@pytest.mark.asyncio
 async def test_grandfather_guard_instapay_opt_in_signal(test_session):
     """The renewal sweep's skip-vs-dun signal: a succeeded InstaPay
     intent opts a token-less tenant into the new lifecycle; anything

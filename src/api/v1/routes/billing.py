@@ -304,12 +304,16 @@ async def get_billing_plans(
     current: dict | None = None
     if tenant is not None:
         now = datetime.now(UTC)
-        # Same admin-tunable window the warning emails use — the hub's
-        # "renewal due — pay now" banner and the email always agree.
+        # Merchant override else the admin-tunable window — the hub's
+        # "renewal due — pay now" banner and the reminder email agree.
+        effective_days = (
+            tenant.renewal_reminder_days
+            if tenant.renewal_reminder_days
+            else lifecycle_cfg.renewal_warning_days
+        )
         renewal_due = tenant.lifecycle_state == "past_due" or (
             tenant.next_renewal_at is not None
-            and tenant.next_renewal_at
-            <= now + timedelta(days=lifecycle_cfg.renewal_warning_days)
+            and tenant.next_renewal_at <= now + timedelta(days=effective_days)
         )
         current = {
             "plan": tenant.plan,
@@ -319,6 +323,11 @@ async def get_billing_plans(
                 tenant.next_renewal_at.isoformat() if tenant.next_renewal_at else None
             ),
             "renewal_due": renewal_due,
+            "reminder": {
+                "days": tenant.renewal_reminder_days,
+                "emails_enabled": not tenant.renewal_reminder_optout,
+                "platform_default_days": lifecycle_cfg.renewal_warning_days,
+            },
         }
 
     # Signup plan intent (starter/pro chosen on the landing page) — lets
@@ -337,6 +346,36 @@ async def get_billing_plans(
             "plan_intent": plan_intent,
         },
         message="Plans",
+    )
+
+
+class ReminderSettingsRequest(BaseModel):
+    """Merchant renewal-reminder prefs. days=null → platform default."""
+
+    days: int | None = Field(default=None, ge=1, le=30)
+    emails_enabled: bool = True
+
+
+@router.put(
+    "/billing/reminder-settings",
+    response_model=SuccessResponse[dict],
+    summary="Set renewal reminder preferences",
+    operation_id="update_reminder_settings",
+)
+async def update_reminder_settings(
+    request: ReminderSettingsRequest,
+    tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    tenant.renewal_reminder_days = request.days
+    tenant.renewal_reminder_optout = not request.emails_enabled
+    await db.commit()
+    return SuccessResponse(
+        data={
+            "days": tenant.renewal_reminder_days,
+            "emails_enabled": not tenant.renewal_reminder_optout,
+        },
+        message="Reminder settings saved",
     )
 
 

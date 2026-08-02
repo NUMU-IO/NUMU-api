@@ -91,3 +91,62 @@ async def test_public_pricing_hides_trial_when_disabled(test_session):
     assert all(p["key"] != "trial" for p in resp.data["plans"])
     assert resp.data["trial"]["enabled"] is False
     assert resp.data["trial"]["visible"] is False
+
+
+@pytest.mark.asyncio
+async def test_public_pricing_paid_prices_always_match_plan_catalog(test_session):
+    """End-to-end price integrity: the landing can NEVER display a
+    starter/pro price different from what an InstaPay subscription
+    payment is actually created with (PLAN_LIMITS), even when the
+    stored marketing config has drifted (e.g. the legacy 99/299)."""
+    from src.core.entities.plan import get_plan_features
+    from src.infrastructure.database.models.public.platform_config import (
+        PlatformConfigModel,
+    )
+
+    # Simulate drifted admin-stored display prices.
+    test_session.add(
+        PlatformConfigModel(
+            key="pricing_plans",
+            value={
+                "plans": [
+                    {
+                        "key": "starter",
+                        "name_en": "Starter",
+                        "name_ar": "ستارتر",
+                        "price_monthly": 99,
+                        "price_annual": 990,
+                        "currency": "EGP",
+                        "cta": "subscribe",
+                        "popular": False,
+                        "features": [],
+                    },
+                    {
+                        "key": "pro",
+                        "name_en": "Pro",
+                        "name_ar": "برو",
+                        "price_monthly": 299,
+                        "price_annual": 2990,
+                        "currency": "EGP",
+                        "cta": "subscribe",
+                        "popular": True,
+                        "features": [],
+                    },
+                ]
+            },
+            description="test",
+        )
+    )
+    await test_session.commit()
+
+    resp = await get_public_pricing_plans(test_session)
+    by_key = {p["key"]: p for p in resp.data["plans"]}
+
+    starter = get_plan_features("starter")
+    pro = get_plan_features("pro")
+    assert by_key["starter"]["price_monthly"] == starter.monthly_price_piasters // 100
+    assert by_key["starter"]["price_annual"] == starter.annual_price_piasters // 100
+    assert by_key["pro"]["price_monthly"] == pro.monthly_price_piasters // 100
+    assert by_key["pro"]["price_annual"] == pro.annual_price_piasters // 100
+    # Marketing copy from the stored config is preserved.
+    assert by_key["pro"]["popular"] is True
