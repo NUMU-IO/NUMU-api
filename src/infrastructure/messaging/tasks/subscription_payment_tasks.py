@@ -132,10 +132,33 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
         .scalars()
         .all()
     )
+    # GRANDFATHER GUARD (mirrors the renewal sweep): tenants with no
+    # card token AND no completed InstaPay payment were never charged
+    # before this rollout and won't be now — don't suddenly email
+    # existing merchants about renewals that will never be collected.
+    no_token_ids = [t.id for t in renewal_rows if not t.paymob_card_token_encrypted]
+    instapay_payers: set = set()
+    if no_token_ids:
+        from src.infrastructure.database.models.public.subscription_payment import (
+            SubscriptionPaymentIntentModel,
+        )
+
+        rows = (
+            await session.execute(
+                select(SubscriptionPaymentIntentModel.tenant_id)
+                .where(
+                    SubscriptionPaymentIntentModel.tenant_id.in_(no_token_ids),
+                    SubscriptionPaymentIntentModel.status == "succeeded",
+                )
+                .distinct()
+            )
+        ).all()
+        instapay_payers = {r[0] for r in rows}
     targets.extend(
         (t, "renewal", t.next_renewal_at)
         for t in renewal_rows
-        if _armed(t.renewal_warning_sent_at, t.next_renewal_at, renewal_window)
+        if (t.paymob_card_token_encrypted or t.id in instapay_payers)
+        and _armed(t.renewal_warning_sent_at, t.next_renewal_at, renewal_window)
     )
 
     trial_window = timedelta(days=cfg.trial_warning_days)

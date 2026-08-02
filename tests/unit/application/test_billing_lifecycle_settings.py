@@ -12,6 +12,9 @@ from src.application.services.billing_settings import (
     invalidate_billing_settings_cache,
     update_billing_settings,
 )
+from src.infrastructure.database.models.public.subscription_payment import (
+    SubscriptionPaymentIntentModel,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.messaging.tasks.subscription_payment_tasks import (
     _collect_warning_targets,
@@ -80,28 +83,63 @@ async def test_collect_warning_targets_windows_and_dedup(test_session):
     now = datetime.now(UTC)
     cfg = await get_billing_settings(test_session, use_cache=False)
 
+    # Renewal-warning candidates carry a card token — tenants with no
+    # funding source are grandfathered out (see below).
     due_renewal = await _mk_tenant(
-        test_session, next_renewal_at=now + timedelta(days=3)
+        test_session,
+        next_renewal_at=now + timedelta(days=3),
+        paymob_card_token_encrypted="tok",
     )
     far_renewal = await _mk_tenant(
-        test_session, next_renewal_at=now + timedelta(days=20)
+        test_session,
+        next_renewal_at=now + timedelta(days=20),
+        paymob_card_token_encrypted="tok",
     )
     already_due = await _mk_tenant(
-        test_session, next_renewal_at=now - timedelta(hours=1)
+        test_session,
+        next_renewal_at=now - timedelta(hours=1),
+        paymob_card_token_encrypted="tok",
     )
     internal = await _mk_tenant(
-        test_session, next_renewal_at=now + timedelta(days=3), is_internal=True
+        test_session,
+        next_renewal_at=now + timedelta(days=3),
+        is_internal=True,
+        paymob_card_token_encrypted="tok",
     )
     warned_this_period = await _mk_tenant(
         test_session,
         next_renewal_at=now + timedelta(days=3),
         renewal_warning_sent_at=now - timedelta(hours=2),
+        paymob_card_token_encrypted="tok",
     )
     warned_last_period = await _mk_tenant(
         test_session,
         next_renewal_at=now + timedelta(days=3),
         renewal_warning_sent_at=now - timedelta(days=40),
+        paymob_card_token_encrypted="tok",
     )
+    # GRANDFATHER: legacy tenant, no token, never paid via InstaPay —
+    # must NOT suddenly get renewal emails after the rollout.
+    legacy_no_token = await _mk_tenant(
+        test_session, next_renewal_at=now + timedelta(days=3)
+    )
+    # Opt-in: no token but a succeeded InstaPay payment → warned.
+    instapay_payer = await _mk_tenant(
+        test_session, next_renewal_at=now + timedelta(days=3)
+    )
+    test_session.add(
+        SubscriptionPaymentIntentModel(
+            tenant_id=instapay_payer.id,
+            plan_key="starter",
+            billing_cycle="monthly",
+            purpose="new_subscription",
+            amount_cents=25_000,
+            currency="EGP",
+            status="succeeded",
+            special_reference=f"SUB-{uuid4().hex[:6].upper()}",
+        )
+    )
+    await test_session.commit()
     due_trial = await _mk_tenant(
         test_session,
         plan="trial",
@@ -120,11 +158,13 @@ async def test_collect_warning_targets_windows_and_dedup(test_session):
 
     assert by_id.get(str(due_renewal.id)) == "renewal"
     assert by_id.get(str(warned_last_period.id)) == "renewal"  # re-armed
+    assert by_id.get(str(instapay_payer.id)) == "renewal"  # opted in by paying
     assert by_id.get(str(due_trial.id)) == "trial"
     assert str(far_renewal.id) not in by_id
     assert str(already_due.id) not in by_id  # past anchor → renewal task owns it
     assert str(internal.id) not in by_id
     assert str(warned_this_period.id) not in by_id
+    assert str(legacy_no_token.id) not in by_id  # grandfathered
     assert str(far_trial.id) not in by_id
 
     # Stamping re-runs to empty for those tenants (per-period dedup).
@@ -138,7 +178,11 @@ async def test_collect_warning_targets_windows_and_dedup(test_session):
 @pytest.mark.asyncio
 async def test_collect_warning_targets_respects_admin_window(test_session):
     now = datetime.now(UTC)
-    tenant = await _mk_tenant(test_session, next_renewal_at=now + timedelta(days=10))
+    tenant = await _mk_tenant(
+        test_session,
+        next_renewal_at=now + timedelta(days=10),
+        paymob_card_token_encrypted="tok",
+    )
 
     cfg = await get_billing_settings(test_session, use_cache=False)
     targets = await _collect_warning_targets(test_session, cfg, now)
@@ -150,3 +194,34 @@ async def test_collect_warning_targets_respects_admin_window(test_session):
     cfg = await get_billing_settings(test_session, use_cache=False)
     targets = await _collect_warning_targets(test_session, cfg, now)
     assert str(tenant.id) in {str(t.id) for t, _k, _a in targets}
+
+
+@pytest.mark.asyncio
+async def test_grandfather_guard_instapay_opt_in_signal(test_session):
+    """The renewal sweep's skip-vs-dun signal: a succeeded InstaPay
+    intent opts a token-less tenant into the new lifecycle; anything
+    less keeps the historical skip."""
+    from src.infrastructure.messaging.tasks.subscription_renewal_task import (
+        _has_succeeded_instapay_payment,
+    )
+
+    tenant = await _mk_tenant(test_session)
+    assert await _has_succeeded_instapay_payment(test_session, tenant.id) is False
+
+    pending = SubscriptionPaymentIntentModel(
+        tenant_id=tenant.id,
+        plan_key="starter",
+        billing_cycle="monthly",
+        purpose="new_subscription",
+        amount_cents=25_000,
+        currency="EGP",
+        status="under_review",
+        special_reference=f"SUB-{uuid4().hex[:6].upper()}",
+    )
+    test_session.add(pending)
+    await test_session.commit()
+    assert await _has_succeeded_instapay_payment(test_session, tenant.id) is False
+
+    pending.status = "succeeded"
+    await test_session.commit()
+    assert await _has_succeeded_instapay_payment(test_session, tenant.id) is True

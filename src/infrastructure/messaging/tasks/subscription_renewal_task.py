@@ -137,6 +137,24 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
 
                 period_start = tenant.next_renewal_at or now
 
+                # GRANDFATHER GUARD — existing merchants must not be
+                # affected by the InstaPay-subscriptions rollout. Before
+                # it, tenants without a stored card token were SKIPPED
+                # here (renewal_skipped_no_token), never dunned. Keep
+                # exactly that for tenants who never went through the
+                # InstaPay payment flow; only tenants who actually paid
+                # via InstaPay (a succeeded intent exists) opt in to
+                # dunning-by-InstaPay when their period lapses.
+                if not tenant.paymob_card_token_encrypted and not (
+                    await _has_succeeded_instapay_payment(session, tenant.id)
+                ):
+                    skipped += 1
+                    logger.warning(
+                        "renewal_skipped_no_token",
+                        extra={"tenant_id": str(tenant.id)},
+                    )
+                    continue
+
                 # Card charge — the ONLY automatic collection path.
                 # No stored token (InstaPay-paid subscription) → dunning,
                 # whose email/banner point at the manual InstaPay re-pay.
@@ -256,6 +274,32 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
 
 def _period_delta(cycle: str) -> timedelta:
     return timedelta(days=365) if cycle == "annual" else timedelta(days=30)
+
+
+async def _has_succeeded_instapay_payment(session, tenant_id) -> bool:  # noqa: ANN001
+    """True if the tenant ever completed an InstaPay subscription payment.
+
+    The opt-in signal for the new renewal lifecycle: legacy tenants
+    (admin-activated, discount-code activations, pre-rollout states)
+    have no such intent and keep the historical skip behavior.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.public.subscription_payment import (
+        SubscriptionPaymentIntentModel,
+    )
+
+    row = (
+        await session.execute(
+            select(SubscriptionPaymentIntentModel.id)
+            .where(
+                SubscriptionPaymentIntentModel.tenant_id == tenant_id,
+                SubscriptionPaymentIntentModel.status == "succeeded",
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return row is not None
 
 
 @celery_app.task(
