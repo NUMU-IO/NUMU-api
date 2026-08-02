@@ -114,7 +114,10 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
 
     targets = []
 
-    renewal_window = timedelta(days=cfg.renewal_warning_days)
+    # SQL pre-filter uses the WIDEST possible window (per-tenant
+    # overrides are capped at 30 days); the exact per-tenant window is
+    # applied in Python below.
+    max_renewal_window = timedelta(days=max(cfg.renewal_warning_days, 30))
     renewal_rows = (
         (
             await session.execute(
@@ -122,9 +125,10 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
                 .where(
                     TenantModel.lifecycle_state == "active",
                     TenantModel.is_internal.is_(False),
+                    TenantModel.renewal_reminder_optout.is_(False),
                     TenantModel.next_renewal_at.isnot(None),
                     TenantModel.next_renewal_at > now,
-                    TenantModel.next_renewal_at <= now + renewal_window,
+                    TenantModel.next_renewal_at <= now + max_renewal_window,
                 )
                 .limit(200)
             )
@@ -154,11 +158,29 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
             )
         ).all()
         instapay_payers = {r[0] for r in rows}
+
+    def _tenant_window(t) -> timedelta:  # noqa: ANN001
+        """Merchant override (1-30, clamped) else the platform default."""
+        days = t.renewal_reminder_days
+        if isinstance(days, int) and days > 0:
+            return timedelta(days=min(days, 30))
+        return timedelta(days=cfg.renewal_warning_days)
+
+    def _in_window(t) -> bool:  # noqa: ANN001
+        anchor = t.next_renewal_at
+        start = anchor - _tenant_window(t)
+        # SQLite naive-datetime normalization (mirrors _armed).
+        probe = now
+        if anchor.tzinfo is None and probe.tzinfo is not None:
+            probe = probe.replace(tzinfo=None)
+        return probe >= start
+
     targets.extend(
         (t, "renewal", t.next_renewal_at)
         for t in renewal_rows
         if (t.paymob_card_token_encrypted or t.id in instapay_payers)
-        and _armed(t.renewal_warning_sent_at, t.next_renewal_at, renewal_window)
+        and _in_window(t)
+        and _armed(t.renewal_warning_sent_at, t.next_renewal_at, _tenant_window(t))
     )
 
     trial_window = timedelta(days=cfg.trial_warning_days)

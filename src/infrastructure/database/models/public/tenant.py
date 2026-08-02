@@ -166,6 +166,13 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     renewal_warning_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Merchant-controlled reminder prefs (hub Billing page). NULL days =
+    # platform default window (billing_lifecycle_settings); optout kills
+    # the courtesy reminder only — dunning emails still fire.
+    renewal_reminder_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    renewal_reminder_optout: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
 
     # Relationships
     owner = relationship("UserModel", back_populates="owned_tenants", lazy="selectin")

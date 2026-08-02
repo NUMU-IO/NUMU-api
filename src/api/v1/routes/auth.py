@@ -772,6 +772,7 @@ async def reset_password(
     operation_id="get_current_user",
 )
 async def get_current_user(
+    http_request: Request,
     user_id: Annotated[str, Depends(get_current_user_id)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -785,13 +786,21 @@ async def get_current_user(
     # Resolve tenant owned by this user (if any)
     tenant_info = None
     try:
-        from sqlalchemy import select
+        from sqlalchemy import select  # noqa: F401 — used below
 
+        from src.api.dependencies.tenant_context import resolve_owner_tenant
         from src.api.v1.schemas.public.auth import TenantInfoResponse
-        from src.infrastructure.database.models.public.tenant import TenantModel
 
-        tenant_q = select(TenantModel).where(TenantModel.owner_id == user.id)
-        tenant = (await db.execute(tenant_q)).scalar_one_or_none()
+        # CURRENT-STORE tenant first (X-Tenant-Id via middleware), then
+        # the owner's most relevant tenant. A bare owner_id
+        # scalar_one_or_none here raised MultipleResultsFound for
+        # multi-store merchants (one tenant per store) — and even when
+        # it didn't raise, the hub sidebar/billing showed an arbitrary
+        # tenant's plan instead of the selected store's.
+        try:
+            tenant = await resolve_owner_tenant(http_request, db, user.id)
+        except HTTPException:
+            tenant = None  # user has no tenant yet (registered, no store)
 
         # Phase 5.2 — platform-wide App-embeds tab toggle. Super-admin
         # controls it via /admin/platform-config (key "theme_engine"); we
