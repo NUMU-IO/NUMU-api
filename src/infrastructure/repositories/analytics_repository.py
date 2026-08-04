@@ -39,25 +39,21 @@ from src.infrastructure.database.models.tenant.funnel_event import (
 )
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.product import ProductModel
+from src.infrastructure.database.order_status_filters import (
+    NON_REVENUE_STATUSES_LC,
+    status_lc,
+)
 
-# Statuses that never represent demand: killed (cancelled), returned money
-# (refunded), never billable (draft — merchant-only, invisible to the
-# customer), never paid (payment_failed). RETURNED stays IN booked revenue
-# deliberately: it was real demand; the collected/COD views subtract it.
-#
-# ⚠️ Compared as lowercased TEXT, not enum binds: the PG ``orderstatus``
-# enum carries a historical mix of label cases (UPPERCASE names for most
-# members, lowercase for ``payment_failed``/``pending_deposit``/
-# ``returned``). Binding ``OrderStatus.PAYMENT_FAILED`` raises
-# ``invalid input value for enum`` (no uppercase label exists), and a
-# single-case text comparison silently misses rows stored in the other
-# case. ``lower(status::text)`` matches every label spelling.
-_NON_REVENUE_STATUSES_LC = ("cancelled", "refunded", "draft", "payment_failed")
+# The revenue-status definition now lives in ONE place so the rollup task,
+# the order repository and these live queries cannot drift apart again.
+# See src/infrastructure/database/order_status_filters.py for the full
+# rationale (including the mixed-case enum-label trap).
+_NON_REVENUE_STATUSES_LC = NON_REVENUE_STATUSES_LC
 
 
 def _status_lc(col=None):
     """``lower(status::text)`` — case-proof orderstatus comparisons."""
-    return func.lower(cast(OrderModel.status if col is None else col, String))
+    return status_lc(OrderModel.status if col is None else col)
 
 
 class AnalyticsRepository:
@@ -347,11 +343,23 @@ class AnalyticsRepository:
 
         ``paid`` means ``payment_status IN (PAID, PARTIALLY_REFUNDED)`` —
         the same definition the in-memory loop used. All values in cents.
+
+        ``gross_cents`` is SUM(subtotal) — merchandise only, BEFORE
+        shipping and tax. ``total_cents`` is SUM(total), i.e. what the
+        customer was actually charged. Callers computing "collected
+        revenue" must use ``total_cents``: ``/overview`` used to subtract
+        refunds from ``gross_cents`` and compare the result against
+        ``total_sales`` (which is SUM(total)), so collected revenue was
+        understated by shipping + tax on every single order — on a store
+        charging EGP 50 delivery that is EGP 50 missing per order, every
+        day, with no way for the merchant to see why the two figures
+        disagreed.
         """
         from src.core.entities.order import PaymentStatus  # avoid module cycle
 
         query = select(
             func.coalesce(func.sum(OrderModel.subtotal), 0).label("gross"),
+            func.coalesce(func.sum(OrderModel.total), 0).label("total"),
             func.coalesce(func.sum(OrderModel.discount_amount), 0).label("discounts"),
             func.coalesce(func.sum(OrderModel.shipping_cost), 0).label("shipping"),
             func.coalesce(func.sum(OrderModel.tax_amount), 0).label("tax"),
@@ -369,10 +377,39 @@ class AnalyticsRepository:
         row = result.one()
         return {
             "gross_cents": int(row.gross or 0),
+            "total_cents": int(row.total or 0),
             "discounts_cents": int(row.discounts or 0),
             "shipping_cents": int(row.shipping or 0),
             "tax_cents": int(row.tax or 0),
         }
+
+    async def refunds_total(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> int:
+        """Completed refund amount (cents) over an INSTANT window.
+
+        ``/overview`` used to take this figure from the daily rollup while
+        taking the paid figure from a live instant query — subtracting a
+        calendar-day number from an instant-window number, with the rollup
+        side additionally missing today entirely. Sourcing both from the
+        same window removes that mismatch.
+        """
+        from src.infrastructure.database.models.tenant.refund import RefundModel
+
+        query = select(func.coalesce(func.sum(RefundModel.amount), 0)).where(
+            RefundModel.store_id == store_id,
+            RefundModel.created_at >= date_from,
+            RefundModel.created_at <= date_to,
+            RefundModel.status == "completed",
+        )
+        tid = get_tenant_id()
+        if tid:
+            query = query.where(RefundModel.tenant_id == tid)
+        result = await self.session.execute(query)
+        return int(result.scalar() or 0)
 
     async def tax_by_rate(
         self,

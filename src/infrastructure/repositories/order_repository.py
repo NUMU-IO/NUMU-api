@@ -18,6 +18,7 @@ from src.core.entities.order import (
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models import OrderModel
+from src.infrastructure.database.order_status_filters import exclude_non_revenue
 
 
 class OrderRepository(IOrderRepository):
@@ -513,17 +514,19 @@ class OrderRepository(IOrderRepository):
     ) -> int:
         """Get total revenue for a date range (in cents).
 
-        Includes all orders except cancelled and refunded, so COD orders
-        (payment still pending) are counted toward revenue.
+        Counts every order that represents real demand — including COD
+        orders whose payment is still pending, which is the dominant case
+        in Egypt. Excludes cancelled / refunded / draft / payment_failed
+        via the shared platform definition; this used to exclude only
+        CANCELLED and REFUNDED, so draft and failed-payment orders were
+        counted as revenue here while the analytics breakdowns excluded
+        them, and the two disagreed.
         """
         query = select(func.coalesce(func.sum(OrderModel.total), 0)).where(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= start_date,
             OrderModel.created_at <= end_date,
-            OrderModel.status.notin_([
-                OrderStatus.CANCELLED,
-                OrderStatus.REFUNDED,
-            ]),
+            exclude_non_revenue(OrderModel.status),
         )
         result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
@@ -539,11 +542,13 @@ class OrderRepository(IOrderRepository):
         """Daily ``(day, revenue_cents, order_count)`` tuples, one SQL round-trip.
 
         Replaces the sales-chart fallback that used to issue two queries per
-        day (60 queries for a 30-day window). Cancelled/refunded orders are
-        excluded, matching ``get_revenue_by_date_range``. Days are bucketed
-        on the store's wall clock (``timezone``) — same convention as
-        ``get_order_day_set`` and the rollup task — so the chart's days
-        match what the merchant experienced.
+        day (60 queries for a 30-day window). Non-revenue orders are excluded
+        via the shared platform definition, so this agrees exactly with
+        ``get_revenue_by_date_range``, the analytics repository and the
+        nightly rollup. Days are bucketed on the store's wall clock
+        (``timezone``) — same convention as ``get_order_day_set`` and the
+        rollup task — so the chart's days match what the merchant
+        experienced.
         """
         day = cast(func.timezone(timezone, OrderModel.created_at), SqlDate).label("day")
         query = (
@@ -556,10 +561,7 @@ class OrderRepository(IOrderRepository):
                 OrderModel.store_id == store_id,
                 OrderModel.created_at >= start_date,
                 OrderModel.created_at <= end_date,
-                OrderModel.status.notin_([
-                    OrderStatus.CANCELLED,
-                    OrderStatus.REFUNDED,
-                ]),
+                exclude_non_revenue(OrderModel.status),
             )
             .group_by(day)
             .order_by(day)
@@ -567,6 +569,49 @@ class OrderRepository(IOrderRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return [
             (row.day, int(row.revenue or 0), int(row.orders or 0)) for row in result
+        ]
+
+    async def get_hourly_aggregates(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        *,
+        timezone: str = "Africa/Cairo",
+    ) -> list[tuple[datetime, int, int]]:
+        """Hourly ``(bucket_start, revenue_cents, order_count)`` tuples.
+
+        Buckets are ``date_trunc('hour', …)`` on the store's wall clock,
+        so a merchant's 9 PM rush appears at 21:00 rather than shifted by
+        the UTC offset. Returns naive local datetimes — they are labels
+        for a chart axis, not instants to compute with.
+
+        Added because ``/analytics/sales-chart?granularity=hour`` silently
+        returned DAILY buckets formatted with an hourly label. The
+        date-range dependency permits hourly windows up to 7 days, so the
+        UI could ask for something the backend never actually computed.
+        """
+        bucket = func.date_trunc(
+            "hour", func.timezone(timezone, OrderModel.created_at)
+        ).label("bucket")
+        query = (
+            select(
+                bucket,
+                func.coalesce(func.sum(OrderModel.total), 0).label("revenue"),
+                func.count(OrderModel.id).label("orders"),
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+                exclude_non_revenue(OrderModel.status),
+            )
+            .group_by(bucket)
+            .order_by(bucket)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            (row.bucket, int(row.revenue or 0), int(row.orders or 0)) for row in result
         ]
 
     async def get_order_day_set(

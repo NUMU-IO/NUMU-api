@@ -181,7 +181,8 @@ async def _emit_funnel_event(
         return
 
     effective_event_id = event_id or uuid4()
-    if not await idempotency.claim(f"funnel_event:{effective_event_id}"):
+    claim_key = f"funnel_event:{effective_event_id}"
+    if not await idempotency.claim(claim_key):
         # Already claimed by an earlier request — skip the redundant push.
         return
 
@@ -189,28 +190,72 @@ async def _emit_funnel_event(
         ingest_funnel_event,
     )
 
-    ingest_funnel_event.apply_async(
-        kwargs={
-            "event": {
-                "event_id": str(effective_event_id),
-                "tenant_id": str(tenant_id),
-                "store_id": str(store_id),
-                "customer_id": str(customer_id) if customer_id else None,
-                "session_fingerprint": session_fingerprint,
-                "step": step,
-                "step_data": step_data,
-                "utm_source": utm_source,
-                "utm_medium": utm_medium,
-                "utm_campaign": utm_campaign,
-                "utm_term": utm_term,
-                "utm_content": utm_content,
-                "campaign_id": str(campaign_id) if campaign_id else None,
-                "referrer": referrer,
-                "device": device,
-            }
-        },
-        queue="analytics",
-    )
+    try:
+        ingest_funnel_event.apply_async(
+            kwargs={
+                "event": {
+                    "event_id": str(effective_event_id),
+                    "tenant_id": str(tenant_id),
+                    "store_id": str(store_id),
+                    "customer_id": str(customer_id) if customer_id else None,
+                    "session_fingerprint": session_fingerprint,
+                    "step": step,
+                    "step_data": step_data,
+                    "utm_source": utm_source,
+                    "utm_medium": utm_medium,
+                    "utm_campaign": utm_campaign,
+                    "utm_term": utm_term,
+                    "utm_content": utm_content,
+                    "campaign_id": str(campaign_id) if campaign_id else None,
+                    "referrer": referrer,
+                    "device": device,
+                }
+            },
+            queue="analytics",
+        )
+    except Exception:
+        # The claim is taken BEFORE the enqueue (it has to be — two
+        # concurrent requests carrying the same client event_id must not
+        # both publish). But if the enqueue itself fails, holding the claim
+        # would make the event permanently unrecoverable: every retry from
+        # the browser would see the key already claimed and silently return,
+        # and the row would never be written by anyone.
+        #
+        # Releasing it restores the retry path. Also fall back to a direct
+        # synchronous write so a broker outage degrades to "slower" rather
+        # than "the funnel quietly flatlines" — which is exactly what an
+        # unnoticed analytics gap looks like from the merchant's side.
+        try:
+            await idempotency.release(claim_key)
+        except Exception:
+            pass
+        logger.warning(
+            "funnel_event_enqueue_failed_falling_back_sync",
+            store_id=str(store_id),
+            step=step,
+        )
+        await funnel_repo.create(
+            tenant_id=tenant_id,
+            store_id=store_id,
+            step=step,
+            session_fingerprint=session_fingerprint,
+            customer_id=customer_id,
+            step_data=step_data,
+            # `effective_event_id`, NOT the possibly-None client `event_id`:
+            # the partial unique index `ux_funnel_events_event_id` does not
+            # constrain NULLs, so writing NULL here would leave this row
+            # unprotected and let a browser retry duplicate it — exactly the
+            # failure mode the async path takes care to avoid.
+            event_id=effective_event_id,
+            utm_source=utm_source,
+            utm_medium=utm_medium,
+            utm_campaign=utm_campaign,
+            utm_term=utm_term,
+            utm_content=utm_content,
+            campaign_id=campaign_id,
+            referrer=referrer,
+            device=device,
+        )
 
 
 def _read_attribution_envelope(
@@ -388,9 +433,15 @@ async def track_page_view(
 
         # Update real-time counters
         try:
+            from src.core.utils.store_timezone import resolve_store_timezone_name
             from src.infrastructure.cache.realtime_counters import record_page_view
 
-            await record_page_view(store.id, body.fingerprint, body.path)
+            await record_page_view(
+                store.id,
+                body.fingerprint,
+                body.path,
+                tz_name=resolve_store_timezone_name(store.settings),
+            )
         except Exception:
             pass
 

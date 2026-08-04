@@ -63,6 +63,26 @@ class IdempotencyKeys:
         # set. Some clients return False instead of None.
         return result is True or result == b"OK" or result == "OK"
 
+    async def release(self, key: str) -> None:
+        """Drop a previously-claimed ``key`` so the operation can be retried.
+
+        The claim has to be taken BEFORE the work is published (otherwise two
+        concurrent requests carrying the same client event id would both
+        publish). That ordering means a failure *between* the claim and a
+        successful publish would otherwise strand the key: every retry sees
+        it already claimed, returns early, and the event is lost for good
+        with nothing logged. Callers must release on the failure path.
+
+        Best-effort — a Redis error here just means the key lives out its
+        TTL, which is the pre-existing behaviour.
+        """
+        try:
+            await self._redis.delete(self._key(key))
+        except RedisError as exc:
+            logger.warning(
+                "idempotency_keys.release redis error (key=%s): %s", key, exc
+            )
+
 
 # ----------------------------------------------------------------------
 # Singleton + factory
