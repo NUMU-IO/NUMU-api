@@ -380,8 +380,19 @@ def hash_user_data(raw: dict) -> dict:
         "fn": _h_each(_normalize_name(raw.get("first_name"), field="fn")),
         "ln": _h_each(_normalize_name(raw.get("last_name"), field="ln")),
         "ct": _h_each(_normalize_name(raw.get("city"), field="ct")),
-        "country": [_h(raw["country_code"])] if raw.get("country_code") else None,
-        "zp": [_h(raw["zip"])] if raw.get("zip") else None,
+        # Country is canonicalized HERE as well as by the callers. Meta only
+        # indexes the hash of the lowercase ISO-2 code, so a free-form
+        # "Egypt" would hash to something that matches nothing — and the
+        # failure is invisible (no error, just a permanently unmatched
+        # field). Every current caller canonicalizes first; this makes the
+        # contract explicit instead of implicit, so a future caller passing
+        # a raw address value cannot silently degrade match quality.
+        "country": _country_hash(raw.get("country_code")),
+        # Zip: strip ALL whitespace, not just the ends. Meta's spec is
+        # lowercase with no spaces, so "SW1A 1AA" and "sw1a1aa" must not
+        # produce two different digests. Egyptian postal codes are numeric
+        # so this is mostly future-proofing for the Saudi/Gulf expansion.
+        "zp": _zip_hash(raw.get("zip")),
         # NOT hashed — Meta wants these raw:
         "fbp": raw.get("fbp"),
         "fbc": raw.get("fbc"),
@@ -389,6 +400,35 @@ def hash_user_data(raw: dict) -> dict:
         "client_user_agent": raw.get("user_agent"),
         "external_id": _external_ids(raw),
     }
+
+
+def _country_hash(raw_country: str | None) -> list[str] | None:
+    """Hash a country value, canonicalizing to lowercase ISO-3166-1 alpha-2.
+
+    Unmappable values are DROPPED rather than hashed as-is: a digest of
+    "united arab emirates" matches nothing in Meta's index, and sending a
+    field that can never match is worse than sending no field — it counts
+    against the event's customer-information completeness without ever
+    contributing a match.
+    """
+    if not raw_country:
+        return None
+    from src.infrastructure.external_services.meta.country_iso import (
+        canonicalize_country,
+    )
+
+    iso2 = canonicalize_country(raw_country)
+    digest = _h(iso2) if iso2 else None
+    return [digest] if digest else None
+
+
+def _zip_hash(raw_zip: str | None) -> list[str] | None:
+    """Hash a postal code with ALL whitespace removed."""
+    if not raw_zip:
+        return None
+    compact = re.sub(r"\s+", "", str(raw_zip))
+    digest = _h(compact)
+    return [digest] if digest else None
 
 
 def _external_ids(raw: dict) -> list[str] | None:

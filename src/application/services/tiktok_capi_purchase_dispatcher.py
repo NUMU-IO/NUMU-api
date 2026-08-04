@@ -69,16 +69,30 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     }
 
 
-def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
+def _build_custom_data_from_order(
+    order: Any, catalog_ids: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Build the Meta-shaped ``custom_data`` for an Order.
 
     The Celery task transforms this into TikTok's ``properties`` shape (see
     ``_to_tiktok_properties``), so call sites stay provider-agnostic.
+
+    ``catalog_ids`` maps product_id → the merchant's catalog id; see
+    ``meta_capi_purchase_dispatcher.resolve_catalog_ids``. TikTok's
+    catalogue is fed from the same product feed, so a content id that does
+    not exist in the feed breaks TikTok's video shopping ads the same way
+    it breaks Meta's dynamic ads.
     """
     line_items = order.line_items or []
+    catalog = catalog_ids or {}
+
+    def _content_id(li: dict) -> str:
+        pid = str(li.get("product_id", ""))
+        return catalog.get(pid, pid)
+
     contents = [
         {
-            "id": str(li.get("product_id", "")),
+            "id": _content_id(li),
             "quantity": int(li.get("quantity", 1)),
             "item_price": int(li.get("unit_price", 0)) / 100,
         }
@@ -88,9 +102,7 @@ def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
     data: dict[str, Any] = {
         "value": (order.total or 0) / 100,
         "currency": order.currency or "EGP",
-        "content_ids": [
-            str(li.get("product_id")) for li in line_items if li.get("product_id")
-        ],
+        "content_ids": [_content_id(li) for li in line_items if li.get("product_id")],
         "content_type": "product",
         "contents": contents,
         "num_items": sum(int(li.get("quantity", 1)) for li in line_items),
@@ -142,9 +154,15 @@ async def enqueue_tiktok_capi_event_for_order(
             else f"{event_name.lower()}-{order.id}"
         )
 
+    from src.application.services.meta_capi_purchase_dispatcher import (
+        resolve_catalog_ids,
+    )
+
     paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
     user_data = _build_user_data_from_order(order)
-    custom_data = _build_custom_data_from_order(order)
+    custom_data = _build_custom_data_from_order(
+        order, await resolve_catalog_ids(db, order)
+    )
     event_time = int(paid_at.timestamp())
 
     # TikTok reads this as ``page.url`` and attributes the conversion with

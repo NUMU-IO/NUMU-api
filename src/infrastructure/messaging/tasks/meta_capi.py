@@ -604,6 +604,7 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
     from src.application.services.meta_capi_purchase_dispatcher import (
         _build_custom_data_from_order,
         _build_user_data_from_order,
+        resolve_catalog_ids,
     )
     from src.application.services.meta_pixel_resolver import resolve_pixels
     from src.infrastructure.database.connection import AsyncSessionLocal
@@ -716,7 +717,12 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
                 campaign_id=getattr(order_full, "campaign_id", None),
             )
             user_data = _build_user_data_from_order(order_view)
-            custom_data = _build_custom_data_from_order(order_view)
+            # Same catalog-id resolution as the webhook path — otherwise a
+            # swept Purchase would carry different content_ids from the one
+            # the browser/webhook sent for the same order.
+            custom_data = _build_custom_data_from_order(
+                order_view, await resolve_catalog_ids(session, order_view)
+            )
 
             if not any(user_data.values()):
                 # No match key at all (no phone/email/name/ip/fbp/…) —
