@@ -1895,6 +1895,7 @@ async def checkout(
 
     # Update real-time counters
     try:
+        from src.core.utils.store_timezone import resolve_store_timezone_name
         from src.infrastructure.cache.realtime_counters import record_order_created
 
         await record_order_created(
@@ -1907,6 +1908,7 @@ async def checkout(
                 "item_count": len(created_order.line_items),
                 "payment_method": request.payment_method,
             },
+            tz_name=resolve_store_timezone_name(store.settings),
         )
     except Exception:
         pass

@@ -41,7 +41,7 @@ def calculate_health_scores_task(self):
 
 async def _calculate_all_scores() -> dict:
     """Calculate and persist health scores for all active stores."""
-    from sqlalchemy import select, update
+    from sqlalchemy import select
 
     from src.application.services.health_score_service import (
         HEALTH_SCORE_WINDOW_DAYS,
@@ -51,6 +51,22 @@ async def _calculate_all_scores() -> dict:
     from src.infrastructure.database.models.tenant.store import StoreModel
 
     stats = {"processed": 0, "updated": 0, "errors": 0}
+
+    # The score is derived, regenerable, TTL'd data — it belongs in the cache,
+    # not in the store's configuration record. This task used to read-modify-
+    # write `store.settings`, a JSON blob that also holds tracking config,
+    # theme settings and payment configuration: any concurrent writer touching
+    # a different key would be clobbered by whichever UPDATE landed last.
+    # `/analytics/health-score` was moved to Redis; leaving the nightly task
+    # writing the blob would have kept the clobber (and left two caches of the
+    # same value with different writers).
+    from src.api.v1.routes.stores.analytics import (
+        HEALTH_SCORE_CACHE_TTL_HOURS,
+        _health_score_cache_key,
+    )
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    cache = RedisCacheService()
 
     async with AsyncSessionLocal() as session:
         # Get all active stores
@@ -63,7 +79,6 @@ async def _calculate_all_scores() -> dict:
 
         for store_row in stores:
             store_id = store_row.id
-            current_settings = dict(store_row.settings) if store_row.settings else {}
             stats["processed"] += 1
 
             try:
@@ -73,20 +88,15 @@ async def _calculate_all_scores() -> dict:
                     days=HEALTH_SCORE_WINDOW_DAYS,
                 )
 
-                # Persist in store.settings["health_score"]
-                current_settings["health_score"] = score_data
-
-                await session.execute(
-                    update(StoreModel)
-                    .where(StoreModel.id == store_id)
-                    .values(settings=current_settings)
+                await cache.set(
+                    _health_score_cache_key(store_id),
+                    score_data,
+                    expire=HEALTH_SCORE_CACHE_TTL_HOURS * 3600,
                 )
                 stats["updated"] += 1
 
             except Exception as e:
                 logger.warning(f"Health score failed for store {store_id}: {e}")
                 stats["errors"] += 1
-
-        await session.commit()
 
     return stats

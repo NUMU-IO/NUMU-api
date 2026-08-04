@@ -144,10 +144,108 @@ class CustomerAnalyticsResponse(BaseModel):
 class ConversionStatsResponse(BaseModel):
     """Conversion statistics."""
 
-    total_visitors: int  # Placeholder - would need analytics integration
+    total_visitors: int
     total_orders: int
     conversion_rate: float
-    cart_abandonment_rate: float  # Placeholder
+    cart_abandonment_rate: float
+
+
+def _local_window_instants(
+    start_d: date, end_d: date, tz_name: str
+) -> tuple[datetime, datetime]:
+    """Inclusive UTC instant bounds covering the local days ``[start_d, end_d]``.
+
+    ``local_day_bounds`` returns a half-open ``[start, end)``; the repo
+    queries here are inclusive on both ends, so the upper bound is pulled
+    back by a microsecond rather than letting an order stamped exactly at
+    the next local midnight leak into the window.
+    """
+    start_dt, _ = local_day_bounds(start_d, tz_name)
+    _, end_excl = local_day_bounds(end_d, tz_name)
+    return start_dt, end_excl - timedelta(microseconds=1)
+
+
+def _contiguous_runs(dates: list[date]) -> list[tuple[date, date]]:
+    """Collapse a sorted date list into ``[(run_start, run_end), …]``.
+
+    Needed wherever a live top-up is MERGED into rollup data rather than
+    assigned per day: querying ``min(missing) … max(missing)`` in one shot
+    would re-count any covered day sitting between two gaps.
+    """
+    if not dates:
+        return []
+    # De-duplicated as well as sorted: a repeated date walks the "gap"
+    # branch (delta 0, not 1) and would close the current run and open a
+    # new one starting on the SAME day, emitting overlapping ranges. Since
+    # `/top-products` SUMS each run's live rows into one merged ranking,
+    # an overlap double-counts that day's units and revenue — the exact
+    # failure this helper exists to prevent.
+    ordered = sorted(set(dates))
+    runs: list[tuple[date, date]] = []
+    run_start = prev = ordered[0]
+    for d in ordered[1:]:
+        if (d - prev).days == 1:
+            prev = d
+            continue
+        runs.append((run_start, prev))
+        run_start = prev = d
+    runs.append((run_start, prev))
+    return runs
+
+
+async def _daily_revenue_series(
+    *,
+    store_id: UUID,
+    tz_name: str,
+    rollup_repo: AnalyticsRollupRepository,
+    order_repo: OrderRepository,
+    start_d: date,
+    end_d: date,
+) -> dict[date, tuple[int, int]]:
+    """``{local_date: (revenue_cents, order_count)}`` for a closed date range.
+
+    Rollup rows are used only for days that are already COMPLETE. Today —
+    and any future date inside the window — is always computed live, and
+    so is any day the nightly task never wrote.
+
+    Why today can never come from the rollup: the task runs once at
+    03:30 and writes a row for the day it runs in. Serving that row for
+    the rest of the day freezes the number at whatever had happened by
+    03:30. The previous code did not even have that problem to solve — it
+    skipped today entirely (``range(1, …)``), so consumers read a missing
+    row as a hard zero and every sales chart ended in a cliff.
+
+    Also repairs gaps: any date in the window with no rollup row falls
+    through to the same live query, so a beat outage degrades to "slightly
+    slower" instead of "silently zero". The live query is a single indexed
+    GROUP BY over the missing span only, not the whole window.
+    """
+    today_local = local_date(datetime.now(UTC), tz_name)
+    n = (end_d - start_d).days + 1
+    if n <= 0:
+        return {}
+    all_dates = [start_d + timedelta(days=i) for i in range(n)]
+
+    rollups = await rollup_repo.get_range(store_id, start_d, end_d)
+    by_date: dict[date, tuple[int, int]] = {
+        r.rollup_date: (r.total_revenue_cents or 0, r.total_orders or 0)
+        for r in rollups
+        if r.rollup_date < today_local
+    }
+
+    missing = [d for d in all_dates if d not in by_date]
+    if missing:
+        live_start, live_end = _local_window_instants(
+            min(missing), max(missing), tz_name
+        )
+        rows = await order_repo.get_daily_aggregates(
+            store_id, live_start, live_end, timezone=tz_name
+        )
+        live = {d: (rev, cnt) for d, rev, cnt in rows}
+        for d in missing:
+            by_date[d] = live.get(d, (0, 0))
+
+    return {d: by_date.get(d, (0, 0)) for d in all_dates}
 
 
 @router.get(
@@ -165,9 +263,22 @@ async def get_sales_overview(
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
-    """Get sales overview for the store (uses pre-aggregated rollup data)."""
-    today = window.end_date
-    period_start = window.start_date
+    """Get sales overview for the store.
+
+    Rollup-backed for completed days, live for today. See
+    ``_daily_revenue_series`` for why today can never be served from the
+    rollup table.
+    """
+    # ONE clock for the whole calculation. `window.start_date` /
+    # `window.end_date` are projected with `window.tz` — the CLIENT-supplied
+    # ?tz= param, defaulting to Africa/Cairo — while rollup rows are keyed on
+    # the STORE's wall clock and the live SQL buckets on whatever we pass it.
+    # Mixing them means the window boundaries and the buckets inside it use
+    # different definitions of a day, which is the exact bug class this batch
+    # exists to remove. Re-project the calendar dates from the store zone.
+    tz_name = resolve_store_timezone_name(store.settings)
+    today = local_date(window.end, tz_name)
+    period_start = local_date(window.start, tz_name)
 
     # Comparison window: same number of calendar days, ending the day
     # BEFORE the current window starts. `get_aggregated` is inclusive on
@@ -180,55 +291,60 @@ async def get_sales_overview(
     previous_period_start = period_start - span
     previous_period_end = period_start - timedelta(days=1)
 
-    # Try rollup table first
-    current = await rollup_repo.get_aggregated(store.id, period_start, today)
-    previous = await rollup_repo.get_aggregated(
-        store.id, previous_period_start, previous_period_end
+    current_series = await _daily_revenue_series(
+        store_id=store.id,
+        tz_name=tz_name,
+        rollup_repo=rollup_repo,
+        order_repo=order_repo,
+        start_d=period_start,
+        end_d=today,
     )
-
-    current_revenue = current["total_revenue_cents"]
-    current_orders = current["total_orders"]
-    previous_revenue = previous["total_revenue_cents"]
-    previous_orders = previous["total_orders"]
-
-    # If rollup is empty, fall back to raw query (first run / no rollup yet)
-    if current_revenue == 0 and current_orders == 0:
-        now = window.end
-        ps = window.start
-        # Instant math for the fallback: previous window has the exact
-        # duration of the current one and ends just before it starts
-        # (the repo range is inclusive on both ends).
-        instant_span = now - ps
-        prev_end = ps - timedelta(microseconds=1)
-        pps = ps - instant_span
-        current_revenue = await order_repo.get_revenue_by_date_range(store.id, ps, now)
-        current_orders = await order_repo.count_by_store(
-            store.id, date_from=ps, date_to=now
-        )
-        previous_revenue = await order_repo.get_revenue_by_date_range(
-            store.id, pps, prev_end
-        )
-        previous_orders = await order_repo.count_by_store(
-            store.id, date_from=pps, date_to=prev_end
-        )
+    previous_series = await _daily_revenue_series(
+        store_id=store.id,
+        tz_name=tz_name,
+        rollup_repo=rollup_repo,
+        order_repo=order_repo,
+        start_d=previous_period_start,
+        end_d=previous_period_end,
+    )
+    current_revenue = sum(rev for rev, _ in current_series.values())
+    current_orders = sum(cnt for _, cnt in current_series.values())
+    previous_revenue = sum(rev for rev, _ in previous_series.values())
+    previous_orders = sum(cnt for _, cnt in previous_series.values())
 
     # Collected revenue — money actually received: paid orders minus
-    # completed refunds. Same sources /revenue-breakdown uses; refunds
-    # ride on the rollup aggregates fetched above (0 when the rollup is
-    # empty — a brand-new store has no refunds to subtract anyway).
-    # Negative values are possible and honest (a refund landing in a
-    # window with little new payment).
-    instant_span = window.end - window.start
-    prev_instant_start = window.start - instant_span
-    prev_instant_end = window.start - timedelta(microseconds=1)
+    # completed refunds. Negative values are possible and honest (a refund
+    # landing in a window with little new payment).
+    #
+    # Both halves are now measured over the SAME window. Previously the
+    # paid side came from a live INSTANT query while the refund side came
+    # from the daily rollup (store-local CALENDAR days, and missing today
+    # entirely) — two different windows subtracted from one another, with
+    # the subtrahend systematically short by a day.
+    #
+    # The paid side also switched from `gross_cents` (SUM of subtotal) to
+    # `total_cents` (SUM of total). `total_sales` above is SUM(total), so
+    # comparing it against a subtotal-based "collected" understated
+    # collected revenue by shipping + tax on every order — on a store
+    # charging EGP 50 delivery, EGP 50 per order, permanently.
+    cur_start_dt, cur_end_dt = _local_window_instants(period_start, today, tz_name)
+    prev_start_dt, prev_end_dt = _local_window_instants(
+        previous_period_start, previous_period_end, tz_name
+    )
     paid_current = await analytics_repo.revenue_summary_paid(
-        store.id, window.start, window.end
+        store.id, cur_start_dt, cur_end_dt
     )
     paid_previous = await analytics_repo.revenue_summary_paid(
-        store.id, prev_instant_start, prev_instant_end
+        store.id, prev_start_dt, prev_end_dt
     )
-    collected_current = paid_current["gross_cents"] - current["refund_amount_cents"]
-    collected_previous = paid_previous["gross_cents"] - previous["refund_amount_cents"]
+    refunds_current = await analytics_repo.refunds_total(
+        store.id, cur_start_dt, cur_end_dt
+    )
+    refunds_previous = await analytics_repo.refunds_total(
+        store.id, prev_start_dt, prev_end_dt
+    )
+    collected_current = paid_current["total_cents"] - refunds_current
+    collected_previous = paid_previous["total_cents"] - refunds_previous
 
     # Calculate changes
     if previous_revenue > 0:
@@ -291,35 +407,37 @@ async def get_sales_chart(
         ),
     ] = None,
 ):
-    """Get sales data for chart visualization (single query via rollup).
+    """Get sales data for chart visualization.
 
-    Bucket size follows ``window.granularity``: rollups are always daily
-    in the source table, so we group on the fly for ``week``/``month``
-    and synthesize hourly buckets from raw orders when ``hour`` is
-    requested.
+    Bucket size follows ``window.granularity``: the rollup table is
+    day-grained, so ``week``/``month`` group on the fly, and ``hour``
+    aggregates raw orders directly.
     """
-    today = window.end_date
-    date_from = window.start_date
+    # Store wall clock for BOTH the window bounds and the SQL buckets — see
+    # the note in get_sales_overview.
+    tz_name = resolve_store_timezone_name(store.settings)
+    today = local_date(window.end, tz_name)
+    date_from = local_date(window.start, tz_name)
     days = (today - date_from).days + 1
 
     # Hourly bucketing for short ranges (≤ 7 days enforced by the
     # dependency). Bypasses the rollup table since it's day-grained.
+    #
+    # This used to call `get_daily_aggregates` and format the DAILY rows
+    # with an "%H:00" label — the endpoint advertised hourly granularity
+    # and returned daily buckets wearing hourly clothing. Now it really
+    # buckets by hour on the store's wall clock.
     if window.granularity == "hour":
-        rows = await order_repo.get_daily_aggregates(
-            store.id, window.start, window.end, timezone=window.tz
+        rows = await order_repo.get_hourly_aggregates(
+            store.id, window.start, window.end, timezone=tz_name
         )
-        # `get_daily_aggregates` returns daily rows; for hourly precision
-        # we just emit a day per bucket — finer aggregation is a
-        # follow-up that needs a new repo method.
         data_points = [
             SalesDataPointResponse(
-                date=row[0].strftime("%b %d %H:00")
-                if hasattr(row[0], "hour")
-                else row[0].strftime("%b %d"),
-                sales=row[1],
-                orders=row[2],
+                date=bucket.strftime("%b %d %H:00"),
+                sales=sales,
+                orders=orders,
             )
-            for row in rows
+            for bucket, sales, orders in rows
         ]
         return SuccessResponse(
             data=data_points,
@@ -341,39 +459,26 @@ async def get_sales_chart(
         return d.strftime("%b %d")
 
     async def _bucketed_series(from_d: date, to_d: date) -> list[tuple[date, int, int]]:
-        """Zero-filled, bucketed ``(bucket_key, sales, orders)`` for a
-        window. Rollup-first with the live-SQL fallback — each window
-        decides independently (the previous window often has rollups
-        even when the current day doesn't yet)."""
-        n = (to_d - from_d).days + 1
-        daily: list[tuple[date, int, int]]
-        rollups = await rollup_repo.get_range(store.id, from_d, to_d)
-        if rollups:
-            rollup_map = {r.rollup_date: r for r in rollups}
-            daily = []
-            for i in range(n):
-                d = from_d + timedelta(days=i)
-                r = rollup_map.get(d)
-                daily.append((
-                    d,
-                    r.total_revenue_cents if r else 0,
-                    r.total_orders if r else 0,
-                ))
-        else:
-            # Rollup table empty (first run of the day, brand-new
-            # install). Single GROUP-BY-day query; `from_d`/`to_d` are
-            # store-local calendar dates — expand to UTC instants.
-            start_dt, _ = local_day_bounds(from_d, window.tz)
-            _, end_dt = local_day_bounds(to_d, window.tz)
-            rows = await order_repo.get_daily_aggregates(
-                store.id, start_dt, end_dt, timezone=window.tz
-            )
-            by_day = {row[0]: row for row in rows}
-            daily = []
-            for i in range(n):
-                d = from_d + timedelta(days=i)
-                row = by_day.get(d)
-                daily.append((d, row[1] if row else 0, row[2] if row else 0))
+        """Zero-filled, bucketed ``(bucket_key, sales, orders)`` for a window.
+
+        Backed by ``_daily_revenue_series``, which serves completed days
+        from the rollup and today (plus any gap) live.
+
+        The previous implementation branched on ``if rollups:`` and then
+        rendered every date with no rollup row as a literal ``0``. Since
+        the nightly task never wrote a row for the current day, the last
+        bucket of every chart was always zero — a visible cliff on the
+        right edge of every sales graph, on every store, every day.
+        """
+        series = await _daily_revenue_series(
+            store_id=store.id,
+            tz_name=tz_name,
+            rollup_repo=rollup_repo,
+            order_repo=order_repo,
+            start_d=from_d,
+            end_d=to_d,
+        )
+        daily = [(d, rev, cnt) for d, (rev, cnt) in series.items()]
 
         agg: dict[date, tuple[int, int]] = {}
         order_lookup: list[date] = []
@@ -437,34 +542,75 @@ async def get_analytics_top_products(
 ):
     """Get top selling products.
 
-    Preferred path: merge ``top_products_json`` across daily rollup rows
-    (cheap — at most ``days`` rows × ~50 products each). Fallback when
-    no products are present in the rollup window — either because the
-    nightly task hasn't run yet OR because every rollup row's
-    ``top_products_json`` is empty (legacy data, before the COD-pending
-    fix) — falls through to a live SQL aggregation on the orders table.
+    Merges ``top_products_json`` across daily rollup rows for COMPLETED
+    days (cheap — at most ``days`` rows × ~20 products each) and adds a
+    live SQL aggregation for today plus any day the nightly task missed.
+
+    Today is never read from the rollup: the task writes that row at
+    03:30 and it would otherwise stay frozen for the rest of the day.
+    Before this, today had no row at all, so the day's sales contributed
+    nothing to the product ranking until the following morning.
     """
-    today = window.end_date
-    date_from = window.start_date
+    tz_name = resolve_store_timezone_name(store.settings)
+    today = local_date(window.end, tz_name)
+    date_from = local_date(window.start, tz_name)
+    today_local = local_date(datetime.now(UTC), tz_name)
 
     rollups = await rollup_repo.get_range(store.id, date_from, today)
 
     merged: dict[str, dict] = {}
+
+    def _merge(pid: str, name: str, sku, quantity: int, revenue: int) -> None:
+        if not pid:
+            return
+        entry = merged.get(pid)
+        if entry is None:
+            entry = {
+                "id": pid,
+                "name": name or "",
+                "sku": sku,
+                "quantity": 0,
+                "revenue": 0,
+            }
+            merged[pid] = entry
+        elif not entry["name"] and name:
+            entry["name"] = name
+        entry["quantity"] += quantity or 0
+        entry["revenue"] += revenue or 0
+
+    covered: set[date] = set()
     for r in rollups or []:
+        if r.rollup_date >= today_local:
+            continue
+        covered.add(r.rollup_date)
         for item in r.top_products_json or []:
-            pid = str(item.get("product_id", ""))
-            if not pid:
-                continue
-            if pid not in merged:
-                merged[pid] = {
-                    "id": pid,
-                    "name": item.get("name", ""),
-                    "sku": item.get("sku"),
-                    "quantity": 0,
-                    "revenue": 0,
-                }
-            merged[pid]["quantity"] += item.get("quantity", 0)
-            merged[pid]["revenue"] += item.get("revenue", 0)
+            _merge(
+                str(item.get("product_id", "")),
+                item.get("name", ""),
+                item.get("sku"),
+                item.get("quantity", 0),
+                item.get("revenue", 0),
+            )
+
+    n_days = (today - date_from).days + 1
+    missing = [date_from + timedelta(days=i) for i in range(max(n_days, 0))]
+    missing = [d for d in missing if d not in covered]
+    for run_start, run_end in _contiguous_runs(missing):
+        run_from, run_to = _local_window_instants(run_start, run_end, tz_name)
+        # Generous cap: this is merged into a ranking, so truncating at
+        # the display `limit` here would bias the result toward whatever
+        # the rollup already had.
+        live_rows = await analytics_repo.top_products(
+            store.id, run_from, run_to, limit=200
+        )
+        for lr in live_rows:
+            _merge(
+                str(lr["product_id"]),
+                lr["product_name"] or "",
+                None,
+                lr["units_sold"],
+                lr["revenue_cents"],
+            )
 
     if merged:
         sorted_products = sorted(
@@ -627,16 +773,20 @@ async def get_conversion_stats(
     total_visitors = await pv_repo.count_unique_visitors(store.id, period_start, now)
     conversion_rate = (total_orders / total_visitors * 100) if total_visitors > 0 else 0
 
-    # Cart abandonment: sessions that fired add_to_cart minus sessions that
-    # completed an order, divided by add_to_cart sessions. Funnel event
-    # counts are unique session_fingerprint counts so the math is in the
-    # same unit on both sides.
-    funnel_counts = await funnel_repo.get_funnel_counts(store.id, period_start, now)
-    add_to_cart_sessions = funnel_counts.get("add_to_cart", 0)
-    completed_sessions = funnel_counts.get("order_completed", 0)
-    if add_to_cart_sessions > 0:
-        abandoned = max(0, add_to_cart_sessions - completed_sessions)
-        cart_abandonment_rate = round(abandoned / add_to_cart_sessions * 100, 2)
+    # Cart abandonment: of the sessions that added to cart, the share that
+    # never completed an order — measured as an intersection over ONE
+    # session set rather than by subtracting two independently-computed
+    # per-step totals (which could exceed one another and drive the rate
+    # negative; see the note in get_funnel).
+    steps_by_fp = await funnel_repo.get_steps_per_session(store.id, period_start, now)
+    cart_sessions = {
+        fp for fp, fp_steps in steps_by_fp.items() if "add_to_cart" in fp_steps
+    }
+    converted = {fp for fp in cart_sessions if "order_completed" in steps_by_fp[fp]}
+    if cart_sessions:
+        cart_abandonment_rate = round(
+            (1 - len(converted) / len(cart_sessions)) * 100, 2
+        )
     else:
         cart_abandonment_rate = 0.0
 
@@ -803,6 +953,10 @@ class HealthScoreResponse(BaseModel):
 HEALTH_SCORE_CACHE_TTL_HOURS = 26
 
 
+def _health_score_cache_key(store_id: UUID) -> str:
+    return f"analytics:health_score:{store_id}"
+
+
 def _cache_is_fresh(cached: dict) -> bool:
     """Return True if the cached score was computed within the TTL window."""
     raw = cached.get("calculated_at")
@@ -833,17 +987,29 @@ async def get_health_score(
 ):
     """Get the merchant health score (cached daily or live calculation).
 
-    On first call (no cache), calculates live and persists in store.settings
-    so subsequent calls are instant. Celery refreshes the cache daily.
+    On first call (no cache), calculates live and caches the result in Redis
+    so subsequent calls are instant. Celery refreshes it daily.
     Recommendations are regenerated per-request so they always match the
     user's current language.
     """
     normalized_lang = lang if lang in ("ar", "en") else "ar"
 
-    # Try cached score first (from daily Celery task) — but only if fresh.
-    if not live and store.settings:
-        cached = store.settings.get("health_score")
-        if cached and _cache_is_fresh(cached):
+    # Try cached score first — Redis, then the legacy store.settings copy so
+    # scores written before the cache moved are still honoured until they
+    # age out.
+    cached = None
+    if not live:
+        try:
+            from src.infrastructure.cache.redis_cache import RedisCacheService
+
+            cached = await RedisCacheService().get(_health_score_cache_key(store.id))
+        except Exception:
+            cached = None
+        if not cached and store.settings:
+            cached = store.settings.get("health_score")
+
+    if cached and isinstance(cached, dict):
+        if _cache_is_fresh(cached):
             # Backfill flags for caches written before this field existed.
             cached.setdefault("insufficient_data", False)
             cached.setdefault("insufficient_metrics", [])
@@ -879,17 +1045,27 @@ async def get_health_score(
         lang=normalized_lang,
     )
 
-    # Cache the result in store.settings for next time. We don't cache
-    # "insufficient_data" snapshots — a brand-new store could get its
-    # first orders in minutes, and we don't want to serve a stale empty
-    # state for 24h until Celery overwrites it.
+    # Cache the result for next time. We don't cache "insufficient_data"
+    # snapshots — a brand-new store could get its first orders in minutes,
+    # and we don't want to serve a stale empty state for 24h until Celery
+    # overwrites it.
+    #
+    # This used to write into `store.settings` from inside a GET. Beyond the
+    # REST-semantics smell, it was a read-modify-write over a JSON blob that
+    # also holds tracking config, theme settings and payment configuration:
+    # two concurrent requests touching different keys would clobber each
+    # other, and `/insights` did the same thing to the same blob. The score
+    # is derived, regenerable data with a TTL — it belongs in the cache, not
+    # in the store's configuration record.
     if not score_data.get("insufficient_data"):
         try:
-            store_repo = StoreRepository(order_repo.session)
-            current_settings = dict(store.settings) if store.settings else {}
-            current_settings["health_score"] = score_data
-            store.settings = current_settings
-            await store_repo.update(store)
+            from src.infrastructure.cache.redis_cache import RedisCacheService
+
+            await RedisCacheService().set(
+                _health_score_cache_key(store.id),
+                score_data,
+                expire=HEALTH_SCORE_CACHE_TTL_HOURS * 3600,
+            )
         except Exception:
             pass  # Non-critical — score still returned even if caching fails
 
@@ -1086,21 +1262,28 @@ async def get_revenue_breakdown(
     """Get revenue breakdown: gross, discounts, shipping, refunds, net.
 
     Two SQL aggregates (totals + coupon usage) replace the previous
-    truncated 5000-order Python loop. Refunds still come from the daily
-    rollup since refunds are tracked there with their own currency
-    conversion logic.
+    truncated 5000-order Python loop. Every figure — including refunds —
+    is measured over the same live instant window, so this screen and
+    /overview cannot report different totals for the same range.
+
+    ``gross_revenue`` is deliberately SUM(subtotal): this endpoint
+    DECOMPOSES revenue, listing shipping and tax as their own lines.
+    /overview's ``collected_revenue`` uses SUM(total) because it is a
+    single headline figure that must be comparable with ``total_sales``.
     """
     period_start = window.start
     now = window.end
-    today = window.end_date
-    date_from_d = window.start_date
 
     summary = await analytics_repo.revenue_summary_paid(store.id, period_start, now)
     coupons = await analytics_repo.coupon_usage(store.id, period_start, now)
     tax = await analytics_repo.tax_by_rate(store.id, period_start, now)
 
-    agg = await rollup_repo.get_aggregated(store.id, date_from_d, today)
-    refunds = agg["refund_amount_cents"]
+    # Refunds come from the SAME live instant window as `summary`, matching
+    # what /overview's `collected_revenue` now does. Reading them from the
+    # daily rollup here meant this screen and /overview reported different
+    # refund totals for the same range — the rollup side is keyed on
+    # store-local calendar days and carries no row for today at all.
+    refunds = await analytics_repo.refunds_total(store.id, period_start, now)
     net_revenue = summary["gross_cents"] - refunds
 
     return SuccessResponse(
@@ -3237,17 +3420,38 @@ async def get_funnel(
         if i == 0:
             drop_off = 0.0
         else:
+            # Clamped to [0, 100]. Each step's count is computed
+            # INDEPENDENTLY over the window, so a later step can legitimately
+            # exceed an earlier one (a cart added Monday and a checkout
+            # Wednesday fall in different windows; a returning shopper with a
+            # server-persisted cart reaches checkout with no add_to_cart at
+            # all). Unclamped, `1 - count/prev` then went negative — a real
+            # store reported -175%. The hub happens to hide negatives, but
+            # this field is in the public API contract that the mobile app
+            # and partners read, so it cannot be allowed to emit a
+            # nonsensical value and rely on one client to filter it.
             drop_off = (
-                round((1 - count / prev_count) * 100, 1) if prev_count > 0 else 0.0
+                max(0.0, min(100.0, round((1 - count / prev_count) * 100, 1)))
+                if prev_count > 0
+                else 0.0
             )
         steps.append(
             FunnelStepResponse(step=step_name, count=count, drop_off_pct=drop_off)
         )
         prev_count = count if count > 0 else prev_count
 
-    first_count = steps[0].count if steps else 0
-    last_count = steps[-1].count if steps else 0
-    overall = round(last_count / first_count * 100, 2) if first_count > 0 else 0.0
+    # Overall conversion = page_view → order_completed.
+    #
+    # This used to be `steps[-1] / steps[0]`, and `steps[-1]` is
+    # `order_delivered` — a step emitted only when a courier webhook (or a
+    # manual merchant action) flips the order to DELIVERED. So a store
+    # with real purchases but no courier integration, or with everything
+    # still in transit, showed "Overall Conversion 0%" directly above a
+    # funnel that said "Completed: 1". The hub labels this KPI "View to
+    # purchase", so measuring deliveries here was wrong twice over.
+    first_count = counts.get("page_view", 0)
+    purchase_count = counts.get("order_completed", 0)
+    overall = round(purchase_count / first_count * 100, 2) if first_count > 0 else 0.0
 
     # Daily conversion trend
     daily_data = await funnel_repo.get_daily_funnel_counts(
@@ -3294,9 +3498,31 @@ async def get_funnel(
                 )
             )
 
-    # Cart abandonment (real calculation)
-    carts_created = counts.get("add_to_cart", 0)
-    checkouts_started = counts.get("checkout_started", 0)
+    # Cart abandonment — measured on the SAME sessions, not on two
+    # independent per-step totals.
+    #
+    # `counts` holds each step's distinct-session count computed
+    # independently over the window, so `checkout_started` could legitimately
+    # exceed `add_to_cart` (a shopper who added on Monday and checked out on
+    # Wednesday appears in only one of them for a Tuesday–Thursday range; a
+    # returning shopper with a server-persisted cart reaches checkout with no
+    # add_to_cart at all). Feeding those two totals into `1 - b/a` produced
+    # negative abandonment — a real store reported -175%, which the hub then
+    # rendered in green because its colour ladder only tests > 60 / > 40.
+    #
+    # The honest question is "of the sessions that added to cart, how many
+    # went on to start checkout" — an intersection over one session set. It
+    # is bounded to [0, 100] by construction, so no clamp can hide a
+    # regression here later.
+    steps_by_fp = await funnel_repo.get_steps_per_session(store.id, period_start, now)
+    cart_sessions = {
+        fp for fp, fp_steps in steps_by_fp.items() if "add_to_cart" in fp_steps
+    }
+    checkout_from_cart = {
+        fp for fp in cart_sessions if "checkout_started" in steps_by_fp[fp]
+    }
+    carts_created = len(cart_sessions)
+    checkouts_started = len(checkout_from_cart)
     abandonment_rate = (
         round((1 - checkouts_started / carts_created) * 100, 1)
         if carts_created > 0

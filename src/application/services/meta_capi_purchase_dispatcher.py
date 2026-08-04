@@ -82,8 +82,61 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     }
 
 
-def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
+async def resolve_catalog_ids(db: AsyncSession, order: Any) -> dict[str, str]:
+    """``{product_id: meta_catalog_id}`` for the products on this order.
+
+    ``content_ids`` on a conversion event MUST match ``g:id`` in the
+    product feed or Meta cannot join the conversion to a catalog row —
+    dynamic ads stop attributing revenue, and "viewed but didn't buy"
+    retargeting audiences never get cleared by the purchase.
+
+    The feed emits ``meta_catalog_id or product.id``
+    (``meta_feed.py:212``) — merchants who already run a Meta catalog
+    keyed on their own SKUs set that field. But the conversion events
+    were sending the internal UUID unconditionally, so for exactly those
+    merchants every AddToCart / InitiateCheckout / Purchase pointed at an
+    id the catalog does not contain. Only the PDP's ViewContent honoured
+    it (``products/[slug]/page.tsx:319``), which made the mismatch harder
+    to spot: the funnel's first event matched and the rest silently did
+    not.
+
+    Returns only the products that actually have an override, so callers
+    can `.get(pid, pid)` and pay nothing when nobody uses the feature.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.product import ProductModel
+
+    ids = {
+        str(li.get("product_id"))
+        for li in (order.line_items or [])
+        if li.get("product_id")
+    }
+    if not ids:
+        return {}
+    try:
+        rows = await db.execute(
+            select(ProductModel.id, ProductModel.meta_catalog_id).where(
+                ProductModel.id.in_(ids),
+                ProductModel.meta_catalog_id.isnot(None),
+            )
+        )
+        return {str(pid): cat for pid, cat in rows.all() if cat}
+    except Exception:
+        # Never let a catalog-id lookup break a conversion fire — sending
+        # the internal UUID is the pre-existing behaviour, not a new risk.
+        return {}
+
+
+def _build_custom_data_from_order(
+    order: Any, catalog_ids: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Build the Meta CAPI custom_data dict for an Order.
+
+    ``catalog_ids`` maps product_id → the merchant's Meta catalog id (see
+    ``resolve_catalog_ids``). Omitted / empty means every content id falls
+    back to the internal UUID, which is what the feed emits for products
+    with no override — so the two still agree.
 
     Forwards the order's UTM attribution (captured by feature 001 at
     checkout-create time from the storefront's ``numu_attribution``
@@ -100,9 +153,15 @@ def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
     signal for cross-channel reconciliation).
     """
     line_items = order.line_items or []
+    catalog = catalog_ids or {}
+
+    def _content_id(li: dict) -> str:
+        pid = str(li.get("product_id", ""))
+        return catalog.get(pid, pid)
+
     contents = [
         {
-            "id": str(li.get("product_id", "")),
+            "id": _content_id(li),
             "quantity": int(li.get("quantity", 1)),
             "item_price": int(li.get("unit_price", 0)) / 100,
         }
@@ -112,9 +171,7 @@ def _build_custom_data_from_order(order: Any) -> dict[str, Any]:
     data: dict[str, Any] = {
         "value": (order.total or 0) / 100,
         "currency": order.currency or "EGP",
-        "content_ids": [
-            str(li.get("product_id")) for li in line_items if li.get("product_id")
-        ],
+        "content_ids": [_content_id(li) for li in line_items if li.get("product_id")],
         "content_type": "product",
         "contents": contents,
         "num_items": sum(int(li.get("quantity", 1)) for li in line_items),
@@ -206,7 +263,9 @@ async def enqueue_meta_capi_event_for_order(
 
     paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
     user_data = _build_user_data_from_order(order)
-    custom_data = _build_custom_data_from_order(order)
+    custom_data = _build_custom_data_from_order(
+        order, await resolve_catalog_ids(db, order)
+    )
     event_time = int(paid_at.timestamp())
 
     # ``action_source: website`` events without an event_source_url are
@@ -283,7 +342,9 @@ async def enqueue_meta_capi_refund(db: AsyncSession, order: Any) -> None:
     if not pixels:
         return
 
-    custom_data = _build_custom_data_from_order(order)
+    custom_data = _build_custom_data_from_order(
+        order, await resolve_catalog_ids(db, order)
+    )
     # Override the value to be negative — this is the contract Meta
     # custom-event-based refund reports key on. The absolute value is
     # the same as the original Purchase, so the merchant's "Net Meta

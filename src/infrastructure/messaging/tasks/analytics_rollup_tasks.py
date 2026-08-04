@@ -13,7 +13,7 @@ on every later store. Now isolated rollbacks contain the blast radius.
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from src.infrastructure.messaging.celery_app import celery_app
 
@@ -107,12 +107,9 @@ async def _backfill_single_store(store_id, days: int) -> dict:
     """Run the standard backfill path for one store across ``days`` days."""
     from sqlalchemy import select
 
-    from src.core.utils.store_timezone import resolve_store_timezone_name
+    from src.core.utils.store_timezone import local_date, resolve_store_timezone_name
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.store import StoreModel
-
-    today = date.today()
-    dates_to_process = [today - timedelta(days=i) for i in range(0, days + 1)]
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -126,6 +123,11 @@ async def _backfill_single_store(store_id, days: int) -> dict:
         return {"processed": 0, "days_written": 0, "errors": 0}
 
     tz_name = resolve_store_timezone_name(row.settings)
+    # Store-local "today", not the server's date — the rollup day key is
+    # the store's wall-clock day. Today itself is excluded for the same
+    # reason as the nightly path: a rollup row asserts a COMPLETE day.
+    store_today = local_date(datetime.now(UTC), tz_name)
+    dates_to_process = [store_today - timedelta(days=i) for i in range(1, days + 1)]
     out = await _backfill_store(row.tenant_id, row.id, dates_to_process, tz_name)
     return {
         "processed": 1,
@@ -138,12 +140,22 @@ async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> 
     """Calculate and persist daily rollups for all active stores."""
     from sqlalchemy import select
 
-    from src.core.utils.store_timezone import resolve_store_timezone_name
+    from src.core.utils.store_timezone import local_date, resolve_store_timezone_name
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.store import StoreModel
 
-    today = date.today()
-    dates_to_process = [today - timedelta(days=i) for i in range(1, backfill_days + 1)]
+    # NOTE: the date list is computed PER STORE below, not once here.
+    # Two bugs lived in the old single global list:
+    #   1. It started at `range(1, ...)` — i.e. yesterday — so no rollup
+    #      row was ever written for the current day. `/overview`,
+    #      `/sales-chart` and `/top-products` read rollups first, so
+    #      today's sales silently vanished from all three and the sales
+    #      chart rendered its last bucket as a hard zero.
+    #   2. It used `date.today()` — the SERVER's date (UTC in prod) — for
+    #      stores whose rollup rows are keyed on their own wall clock. At
+    #      22:00 UTC a Cairo store is already on the next local date, so
+    #      the global list was off by one for exactly the hours when the
+    #      task's own late runs happen.
 
     # Pull active stores in one short-lived session so the listing isn't
     # held open across the full backfill loop.
@@ -165,11 +177,31 @@ async def _calculate_all_rollups(backfill_days: int = DEFAULT_BACKFILL_DAYS) -> 
     }
 
     for store_row in stores:
+        tz_name = resolve_store_timezone_name(store_row.settings)
+        # Today is deliberately NOT persisted (`range(1, …)` — yesterday
+        # backwards). A rollup row is a claim that a day is COMPLETE, and
+        # eight endpoints read this table. Five of them — /forecast,
+        # /revenue-breakdown, /metric-targets, /insights and the weekly
+        # digest — consume rows verbatim as finished days; /forecast in
+        # particular uses them as its training samples, so a partial row
+        # written at 03:30 would drag every forecast down every single day.
+        # The three endpoints that genuinely need today (/overview,
+        # /sales-chart, /top-products) compute it live instead — see
+        # `_daily_revenue_series` in routes/stores/analytics.py.
+        #
+        # `store_today` is the STORE's wall-clock date, not the server's:
+        # this used `date.today()` (UTC in prod) while the rollup day key
+        # is store-local, so at 22:00 UTC a Cairo store was already on the
+        # next local date and the window was off by one.
+        store_today = local_date(datetime.now(UTC), tz_name)
+        dates_to_process = [
+            store_today - timedelta(days=i) for i in range(1, backfill_days + 1)
+        ]
         store_stats = await _backfill_store(
             store_row.tenant_id,
             store_row.id,
             dates_to_process,
-            resolve_store_timezone_name(store_row.settings),
+            tz_name,
         )
         stats["days_written"] += store_stats["days_written"]
         stats["errors"] += store_stats["errors"]
@@ -296,16 +328,38 @@ async def _aggregate_day(
     from src.infrastructure.database.models.tenant.page_view import PageViewModel
     from src.infrastructure.database.models.tenant.refund import RefundModel
     from src.infrastructure.database.models.tenant.shipment import ShipmentModel
+    from src.infrastructure.database.order_status_filters import exclude_non_revenue
 
     day_start, day_end = local_day_bounds(rollup_date, tz_name)
 
     # ── Orders ──
+    # The revenue aggregates are filtered at the AGGREGATE level rather
+    # than in the WHERE clause, because `cancelled_orders` has to keep
+    # counting the very rows revenue must exclude.
+    #
+    # Before this, `total_revenue`/`total_orders` had no revenue filter at
+    # all — the WHERE dropped only payment_failed and draft, so CANCELLED
+    # AND REFUNDED ORDERS WERE COUNTED AS REVENUE. That contradicted
+    # /overview's own docstring ("every order except cancelled/refunded")
+    # and made the row internally inconsistent: the product / location /
+    # source JSON below already excluded those statuses, so the breakdowns
+    # could never sum to the total the merchant saw.
+    is_revenue = exclude_non_revenue(OrderModel.status)
     order_query = select(
-        func.count().label("total_orders"),
-        func.coalesce(func.sum(OrderModel.total), 0).label("total_revenue"),
+        func.count().filter(is_revenue).label("total_orders"),
+        func.coalesce(func.sum(OrderModel.total).filter(is_revenue), 0).label(
+            "total_revenue"
+        ),
         func.count()
-        .filter(OrderModel.payment_status.in_(["paid", "partially_refunded"]))
+        .filter(
+            and_(
+                is_revenue,
+                OrderModel.payment_status.in_(["paid", "partially_refunded"]),
+            )
+        )
         .label("paid_orders"),
+        # Deliberately NOT gated on `is_revenue` — this metric is *about*
+        # the excluded rows.
         func.count()
         .filter(func.lower(cast(OrderModel.status, String)) == "cancelled")
         .label("cancelled_orders"),
@@ -314,11 +368,8 @@ async def _aggregate_day(
             OrderModel.store_id == store_id,
             OrderModel.created_at >= day_start,
             OrderModel.created_at < day_end,
-            # The orderstatus enum carries MIXED-case labels: uppercase
-            # member names for most values but only lowercase
-            # `payment_failed` (binding the enum member raises), while
-            # ORM-written rows store the UPPERCASE names. lower(::text)
-            # matches every label spelling.
+            # Draft and failed-payment orders are invisible to every view,
+            # including the cancelled counter.
             func.lower(cast(OrderModel.status, String)).notin_((
                 "payment_failed",
                 "draft",

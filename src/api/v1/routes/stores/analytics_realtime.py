@@ -51,6 +51,10 @@ class RealtimeSnapshotResponse(BaseModel):
     hourly_orders: list[int]  # 24 values, index = hour
     hourly_revenue: list[int]  # 24 values, index = hour (cents)
     top_pages: list[TopPageItem]
+    # False when the counter store could not be read. Every field above is
+    # then a placeholder zero, NOT a measurement — the UI must say
+    # "unavailable" rather than confidently reporting no traffic.
+    available: bool = True
 
 
 @router.get(
@@ -63,7 +67,9 @@ async def get_realtime_snapshot(
     store: Annotated[Store, Depends(verify_store_ownership)],
 ):
     """One-time fetch of real-time analytics counters."""
-    data = await get_snapshot(store.id)
+    data = await get_snapshot(
+        store.id, tz_name=resolve_store_timezone_name(store.settings)
+    )
 
     recent = []
     for o in data["recent_orders"]:
@@ -96,6 +102,7 @@ async def get_realtime_snapshot(
             hourly_orders=data.get("hourly_orders", [0] * 24),
             hourly_revenue=data.get("hourly_revenue", [0] * 24),
             top_pages=top_pages,
+            available=bool(data.get("available", True)),
         ),
         message="Realtime snapshot retrieved",
     )
@@ -159,10 +166,12 @@ async def get_realtime_stream(
 ):
     """Server-Sent Events stream pushing analytics every 5 seconds."""
 
+    tz_name = resolve_store_timezone_name(store.settings)
+
     async def event_generator():
         try:
             while True:
-                data = await get_snapshot(store.id)
+                data = await get_snapshot(store.id, tz_name=tz_name)
                 payload = json.dumps(data)
                 yield f"data: {payload}\n\n"
                 await asyncio.sleep(5)
