@@ -22,24 +22,42 @@ What is deliberately excluded
   manufacture 404s, which is worse for the domain than no link at all.
 * Seeded fake brands (``settings->>'demo_seed'``) — they are not real
   businesses and must never be presented publicly as merchants.
-* Stores that opted out via ``settings.hide_from_directory = true``. A merchant
-  running a private or wholesale-only storefront gets to say no.
+* Everything that has not explicitly opted in via
+  ``settings.list_in_directory = true``.
+
+Why opt-in
+----------
+A denylist was tried first and does not work. Load-test stores are seeded to
+look exactly like small real ones, so no content signal separates them:
+``load-store-1..3`` are noindex but ``4..10`` are ``index, follow``, and
+``load-store-5..10`` each carry five products — more than real stores ``arika``
+and ``loura``, which have none. Filtering on indexability published seven load
+stores; filtering on product count published six.
+
+Approving a store is therefore a deliberate act by someone who looked at it:
+
+    UPDATE public.stores
+       SET settings = jsonb_set(
+             COALESCE(settings, '{}'::jsonb), '{list_in_directory}', 'true')
+     WHERE subdomain IN ('vionne', ...);
 """
 
 import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.core.entities.product import ProductStatus
 from src.core.entities.store import StoreStatus
 from src.infrastructure.database.models.public.tenant import (
     TenantLifecycleState,
     TenantModel,
 )
+from src.infrastructure.database.models.tenant.product import ProductModel
 from src.infrastructure.database.models.tenant.store import StoreModel
 
 logger = logging.getLogger(__name__)
@@ -49,6 +67,11 @@ router = APIRouter()
 # Generous, but bounded: the directory is a crawl surface, not a catalogue, and
 # an unbounded page would degrade as the merchant count grows.
 MAX_STORES = 500
+
+# Minimum ACTIVE products before a store is worth linking to publicly.
+# Low on purpose: the goal is to exclude empty scratch stores, not to gate real
+# merchants who are still uploading their catalogue.
+MIN_PRODUCTS = 3
 
 
 @router.get(
@@ -84,7 +107,53 @@ async def get_public_store_directory(
             # keeps those rows (a plain `!=` would drop every store that has never
             # set the key — i.e. almost all of them).
             settings_col["demo_seed"].astext.is_(None),
-            settings_col["hide_from_directory"].astext.is_distinct_from("true"),
+            # OPT-IN, not opt-out. This is the filter that actually decides the
+            # list; everything around it is defence in depth.
+            #
+            # A denylist was tried first and cannot work. Load-test stores are
+            # seeded to look exactly like small real ones, so no content signal
+            # separates them: load-store-1..3 are noindex but 4..10 are
+            # `index, follow`; load-store-5..10 each carry 5 products, more than
+            # real stores arika and loura (0 each). Filtering on indexability
+            # published seven load stores; filtering on product count published
+            # six. Name patterns are not patterns — "testingprod" and "mmmyyy"
+            # are accidents.
+            #
+            # A public marketing surface should be an allowlist. Flipping this
+            # per store is a deliberate act by someone who looked at the store,
+            # which is the only check that holds. The cost is that the directory
+            # is empty until stores are approved — the /stores prerender warns
+            # loudly when it renders with zero links, so that cannot pass
+            # unnoticed.
+            settings_col["list_in_directory"].astext == "true",
+            # Mirrors the storefront's own storeBlocksIndexing() rule
+            # (numu-storefront src/lib/seo.ts): a store that tells search
+            # engines not to index it must not be linked from a public
+            # directory either. Linking to a noindex page passes authority
+            # nowhere and advertises the page to humans regardless.
+            #
+            # Without this the directory listed every load-test and scratch
+            # store on the platform — load-store-1..10, testingprod,
+            # testyousef, mmmyyy, demo, zid — all of which are ACTIVE tenants
+            # and so passed every other filter here, and all of which serve
+            # `noindex, nofollow, nocache`. The daily healthcheck caught it.
+            settings_col["seo"]["robots_indexing_enabled"].astext.is_distinct_from(
+                "false"
+            ),
+            # A quality floor beneath the opt-in, not a substitute for it.
+            #
+            # Catches the case where a store is approved and later emptied —
+            # catalogue cleared, products archived — so an approval granted once
+            # cannot go on advertising a page with nothing on it. An empty store
+            # is a thin page, and thin pages linked from the marketing site cost
+            # us rather than help.
+            select(func.count(ProductModel.id))
+            .where(
+                ProductModel.store_id == StoreModel.id,
+                ProductModel.status == ProductStatus.ACTIVE,
+            )
+            .scalar_subquery()
+            >= MIN_PRODUCTS,
         )
         .order_by(StoreModel.created_at.desc())
         .limit(MAX_STORES)
