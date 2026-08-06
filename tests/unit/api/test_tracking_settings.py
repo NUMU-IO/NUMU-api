@@ -438,3 +438,85 @@ class TestValidationContract:
             # the rule it describes — "must be 15-16 digits" did exactly that.
             assert rules["pixel_id_error"]
             assert rules["test_event_code_error"]
+
+
+# ---------------------------------------------------------------------------
+# domain_verification_token
+# ---------------------------------------------------------------------------
+
+
+class TestDomainVerificationToken:
+    """The token Meta mints for Business Manager domain verification.
+
+    This field did not exist until a merchant could not verify their domain:
+    the PUT route minted a random ``token_urlsafe`` and had no way to accept
+    Meta's real value, so the ``<meta name="facebook-domain-verification">``
+    tag on every storefront held a string Meta had never issued. Verification
+    could not succeed for anyone. These tests pin the two properties that fix
+    depends on — the value round-trips, and omitting it stays a no-op.
+    """
+
+    @staticmethod
+    def _req(token):
+        return SaveMetaTrackingRequest(
+            pixel_id="1737914750690516",
+            pixel_enabled=True,
+            capi_enabled=False,
+            domain_verification_token=token,
+        )
+
+    def test_defaults_to_none_so_existing_callers_are_unaffected(self):
+        # Every caller that predates this field omits it; None is the signal
+        # the route reads as "leave the stored token alone".
+        req = SaveMetaTrackingRequest(
+            pixel_id="1737914750690516",
+            pixel_enabled=True,
+            capi_enabled=False,
+        )
+        assert req.domain_verification_token is None
+
+    def test_accepts_a_plain_token(self):
+        assert (
+            self._req("5qemfdk7xjz4x4n055s9hsntki0jmx").domain_verification_token
+            == "5qemfdk7xjz4x4n055s9hsntki0jmx"
+        )
+
+    def test_strips_surrounding_whitespace(self):
+        assert self._req("  abc123  ").domain_verification_token == "abc123"
+
+    @pytest.mark.parametrize(
+        "pasted",
+        [
+            '<meta name="facebook-domain-verification" content="abc123" />',
+            "<meta name='facebook-domain-verification' content='abc123'>",
+            '  <meta name="facebook-domain-verification" content="abc123"/>  ',
+        ],
+    )
+    def test_extracts_the_token_from_a_pasted_meta_tag(self, pasted):
+        # Business Manager renders the token inside a ready-to-copy tag, so
+        # the whole tag is what lands on the clipboard. Accepting it is
+        # kinder than a 422 the merchant cannot act on.
+        assert self._req(pasted).domain_verification_token == "abc123"
+
+    @pytest.mark.parametrize("blank", ["", "   ", None])
+    def test_blank_becomes_none(self, blank):
+        assert self._req(blank).domain_verification_token is None
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "abc 123",
+            "abc<123",
+            'abc"123',
+            "x" * 129,
+        ],
+    )
+    def test_rejects_paste_errors(self, bad):
+        with pytest.raises(ValidationError):
+            self._req(bad)
+
+    def test_does_not_encode_a_format_meta_owns(self):
+        # Per docs/external-contracts.md the bound is loose on purpose: any
+        # printable token Meta might mint has to survive, whatever its shape.
+        for shape in ("ABC-def_123", "0123456789", "aB3" * 10, "z"):
+            assert self._req(shape).domain_verification_token == shape

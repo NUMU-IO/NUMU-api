@@ -15,6 +15,7 @@ new token is supplied. This lets the merchant tweak ``debug_mode`` or
 ``test_event_code`` without re-pasting their bearer token.
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -196,6 +197,17 @@ class SaveMetaTrackingRequest(BaseModel):
     ad_account_id: str | None = Field(default=None, max_length=64)
     page_id: str | None = Field(default=None, max_length=64)
 
+    # Domain verification. Meta MINTS this value (Business Manager → Brand
+    # Safety → Domains → "Add a meta-tag to your website"); the storefront
+    # emits it as <meta name="facebook-domain-verification">. It is Meta's
+    # value, not ours — before this field existed the route minted a random
+    # ``token_urlsafe`` and had no way to accept the real one, so the tag on
+    # the storefront never matched what Meta looked for and verification
+    # could not succeed for any merchant.
+    # Omitted (None) means "leave whatever is stored alone", matching how
+    # ``capi_access_token`` and the business IDs above behave.
+    domain_verification_token: str | None = Field(default=None, max_length=512)
+
     @field_validator("pixel_id")
     @classmethod
     def _validate_pixel_id(cls, v: str) -> str:
@@ -206,6 +218,31 @@ class SaveMetaTrackingRequest(BaseModel):
         v = v.strip()
         if not is_valid_meta_pixel_id(v):
             raise ValueError(META_PIXEL_ID_ERROR)
+        return v
+
+    @field_validator("domain_verification_token")
+    @classmethod
+    def _validate_domain_verification_token(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        if not v:
+            return None
+        # Business Manager shows the token inside a ready-to-copy <meta> tag,
+        # so that whole tag is what actually lands on the clipboard. Pull the
+        # token out rather than 422-ing the merchant for following the UI.
+        tag = re.search(r"content=[\"']([^\"']+)[\"']", v)
+        if tag:
+            v = tag.group(1).strip()
+        if not v:
+            return None
+        # Loosely bounded on purpose — see docs/external-contracts.md. Meta
+        # publishes no format for this token, so we only catch paste errors
+        # (leftover markup, embedded whitespace) and let Meta's own verify
+        # step judge the value.
+        if len(v) > 128 or any(ch.isspace() or ch in "<>\"'" for ch in v):
+            raise ValueError(
+                "domain_verification_token must be the token itself "
+                "(no <meta> wrapper, no spaces)"
+            )
         return v
 
     @field_validator("test_event_code")
