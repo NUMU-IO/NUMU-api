@@ -3703,9 +3703,17 @@ async def save_meta_tracking(
         await db.flush()
 
     # ── Update store.settings.tracking.meta in place ──────────────────
-    domain_token = meta_cfg.get(
-        "domain_verification_token"
-    ) or _stdlib_secrets.token_urlsafe(24)
+    # Precedence: what the merchant just pasted from Business Manager wins,
+    # then whatever is already stored (so a save that omits the field is a
+    # no-op for it), and only a store that has never had one falls back to a
+    # generated placeholder. The generated value cannot verify anything —
+    # Meta looks for the token IT issued — it only keeps the storefront's
+    # <meta> tag non-empty for stores predating this field.
+    domain_token = (
+        request.domain_verification_token
+        or meta_cfg.get("domain_verification_token")
+        or _stdlib_secrets.token_urlsafe(24)
+    )
 
     # Debug-mode expiry math lives server-side (per scope §C).
     debug_expires_iso: str | None = None
