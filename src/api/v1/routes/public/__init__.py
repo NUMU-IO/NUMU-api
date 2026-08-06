@@ -8,6 +8,7 @@ URL: /api/v1/public/
 - GET  /features             — Feature list for marketing
 - POST /demo/start           — Try-a-Demo: provision a 7-day demo tenant
 - POST /contact              — Contact form submission
+- GET  /stores               — Public directory of live merchant storefronts
 """
 
 from fastapi import APIRouter
@@ -15,6 +16,7 @@ from fastapi import APIRouter
 from src.api.v1.routes.public.beta import router as beta_router
 from src.api.v1.routes.public.contact import router as contact_router
 from src.api.v1.routes.public.demo import router as demo_router
+from src.api.v1.routes.public.directory import router as directory_router
 from src.api.v1.routes.public.landing import router as landing_router
 from src.api.v1.routes.public.reference import router as reference_router
 from src.api.v1.routes.public.waitlist import router as waitlist_router
@@ -27,5 +29,6 @@ router.include_router(landing_router, tags=["Public - Landing"])
 router.include_router(demo_router, tags=["Public - Demo"])
 router.include_router(contact_router, tags=["Public - Contact"])
 router.include_router(reference_router, tags=["Public - Reference"])
+router.include_router(directory_router, tags=["Public - Directory"])
 
 __all__ = ["router"]
