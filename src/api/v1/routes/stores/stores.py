@@ -48,6 +48,7 @@ from src.core.entities.store import Store
 logger = logging.getLogger(__name__)
 from src.core.value_objects.money import Currency
 from src.infrastructure.cache import StorefrontCache
+from src.infrastructure.external_services import google_search_console
 from src.infrastructure.external_services.cloudflare import (
     CloudflareCustomHostnameError,
     cloudflare_custom_hostname_service,
@@ -221,6 +222,17 @@ async def create_store(
 
     if result.subdomain:
         await cloudflare_dns_service.ensure_store_subdomain(result.subdomain)
+
+        # Hand Google the new host's sitemap. Without this a storefront can be
+        # flawless on-page — 200, SSR'd, self-canonical, index/follow, listed in
+        # its own sitemap — and still sit at "URL is unknown to Google" forever,
+        # because nothing ever told Google the host exists. Inert unless
+        # GOOGLE_SEARCH_CONSOLE_CREDENTIALS_JSON is set, and never fatal: a
+        # marketing ping must not roll back a store the merchant just created.
+        try:
+            await google_search_console.submit_store_sitemap(result.subdomain)
+        except Exception:  # noqa: BLE001
+            logger.warning("search_console_submit_failed", exc_info=True)
 
     # Seed the platform default theme for the brand-new store (file 04 §5.2).
     # Best-effort — a failure here doesn't roll back store creation; the
