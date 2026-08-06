@@ -57,6 +57,31 @@ if hasattr(sys.stdout, "reconfigure"):
 
 APEX = "https://numueg.app"
 DIRECTORY_ENDPOINT = f"{APEX}/api/v1/public/stores"
+
+# Non-brand queries we are deliberately going after. Reported even at zero,
+# because a term we have never appeared for shows up in no top-N listing and
+# that silence is the finding.
+#
+# The first four are what the /tools/* pages target directly; the rest are the
+# category terms someone types when they do not yet know NUMU exists. Growth
+# here is the only growth that does not require having heard the name first.
+DEFAULT_TARGETS = ",".join([
+    "مولد اسم متجر",
+    "حاسبة هامش الربح",
+    "مولد فاتورة",
+    "وصف منتج",
+    "منصة متاجر الكترونية",
+    "انشاء متجر الكتروني",
+    "بديل شوبيفاي",
+    "فاتورة الكترونية مصر",
+    # Transliterated English, which is how a large share of Egyptian merchants
+    # actually type these — searching the Arabic spelling alone would miss them.
+    "اونلاين ستور",
+    "اونلاين بيزنيس",
+    # Competitor name: tracked because ranking for it means reaching people who
+    # are already shopping the category and have never heard of us.
+    "فونديرا",
+])
 UA = "NUMU-SEO-Healthcheck/1.0 (+https://numueg.app)"
 
 CANONICAL_RE = re.compile(
@@ -193,7 +218,9 @@ async def check_sitemap(
     print(f"  {label}: {len(urls)}/{total} URLs checked")
 
 
-async def search_console_section(client: httpx.AsyncClient, brands: list[str]) -> None:
+async def search_console_section(
+    client: httpx.AsyncClient, brands: list[str], targets: list[str]
+) -> None:
     """Sitemap health + brand-query position. Skipped silently without creds."""
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     try:
@@ -254,6 +281,12 @@ async def search_console_section(client: httpx.AsyncClient, brands: list[str]) -
         print("  (no data yet — expected until pages have been indexed a while)")
         return
 
+    def _fmt(row: dict) -> str:
+        return (
+            f"pos {row['position']:.1f}, "
+            f"{int(row['impressions'])} impr, {int(row['clicks'])} clicks"
+        )
+
     for brand in brands:
         hits = [r_ for r_ in rows if brand.lower() in r_["keys"][0].lower()]
         if not hits:
@@ -261,10 +294,51 @@ async def search_console_section(client: httpx.AsyncClient, brands: list[str]) -
             continue
         hits.sort(key=lambda x: -x["impressions"])
         for h in hits[:3]:
-            print(
-                f"  {brand:<12} {h['keys'][0]!r} — pos {h['position']:.1f}, "
-                f"{int(h['impressions'])} impr, {int(h['clicks'])} clicks"
-            )
+            print(f"  {brand:<12} {h['keys'][0]!r} — {_fmt(h)}")
+
+    # ── Non-brand demand ──────────────────────────────────────────────────
+    #
+    # Brand position is the vanity number and it is nearly meaningless on its
+    # own: ranking #1 for a term one person searches a month is worth less than
+    # ranking #8 for one that five hundred do. Branded volume also cannot be
+    # engineered — people search a name only after encountering it elsewhere.
+    #
+    # These are the queries that grow without anyone knowing the name first, so
+    # they are the honest measure of whether /tools/* and the content work are
+    # earning anything.
+    brand_terms = [b.lower() for b in brands]
+
+    def _is_brand(q: str) -> bool:
+        ql = q.lower()
+        return any(b in ql for b in brand_terms) or ql.startswith("site:")
+
+    non_brand = [r_ for r_ in rows if not _is_brand(r_["keys"][0])]
+
+    print(f"\n=== Non-brand queries, {start} -> {end} ===")
+    if not non_brand:
+        print("  none yet — every impression so far comes from someone who")
+        print("  already knew the name. This is the number to grow.")
+    else:
+        total_i = sum(int(r_["impressions"]) for r_ in non_brand)
+        total_c = sum(int(r_["clicks"]) for r_ in non_brand)
+        print(
+            f"  {len(non_brand)} distinct queries, {total_i} impressions, {total_c} clicks"
+        )
+        for h in sorted(non_brand, key=lambda x: -x["impressions"])[:10]:
+            print(f"    {h['keys'][0]!r} — {_fmt(h)}")
+
+    # Explicit targets, reported even at zero. A term we are deliberately going
+    # after and have never appeared for will not show up in any top-N listing,
+    # and that silence is the finding.
+    if targets:
+        print("\n=== Target queries ===")
+        for t in targets:
+            hits = [r_ for r_ in rows if t.lower() in r_["keys"][0].lower()]
+            if not hits:
+                print(f"  {t!r} — no impressions")
+                continue
+            best = max(hits, key=lambda x: x["impressions"])
+            print(f"  {t!r} — {_fmt(best)}")
 
 
 async def main() -> int:
@@ -274,6 +348,11 @@ async def main() -> int:
     )
     p.add_argument("--skip-stores", action="store_true")
     p.add_argument("--brands", default="numu,vionne")
+    p.add_argument(
+        "--targets",
+        default=DEFAULT_TARGETS,
+        help="Comma-separated non-brand queries to report on even at zero impressions",
+    )
     args = p.parse_args()
 
     report = Report()
@@ -304,7 +383,9 @@ async def main() -> int:
                 await check_sitemap(client, f"{s['url']}/sitemap.xml", report, sample)
 
         await search_console_section(
-            client, [b.strip() for b in args.brands.split(",") if b.strip()]
+            client,
+            [b.strip() for b in args.brands.split(",") if b.strip()],
+            [t.strip() for t in args.targets.split(",") if t.strip()],
         )
 
     print(f"\n=== Result — {report.checked} URLs checked ===")
