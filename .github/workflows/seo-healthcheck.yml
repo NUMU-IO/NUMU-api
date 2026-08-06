@@ -1,0 +1,70 @@
+name: SEO healthcheck
+
+# Runs daily against production. It cannot improve rankings — nothing on a timer
+# can — but it catches the class of failure that silently destroyed them once
+# already: between the Vercel migration and 2026-08-06, every page on numueg.app
+# served the homepage's rel=canonical, Google read 15 URLs as one, and 14 pages
+# fell out of the index for three months. Nothing alerted, because the site
+# looked perfect to anyone who opened it.
+#
+# It also prints position/impressions for the brand queries, so "are we winning
+# our own name yet" is a tracked number rather than a periodic gut check.
+
+on:
+  schedule:
+    # 06:00 UTC ~ 08:00 Cairo, so a regression is waiting at the start of the day
+    # rather than being found by a customer.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: "Max URLs to check per sitemap (0 = all)"
+        default: "40"
+      brands:
+        description: "Comma-separated brand terms to report on"
+        default: "numu,vionne"
+
+concurrency:
+  group: seo-healthcheck
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check indexing health
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The script talks HTTP to production and to the Search Console API only —
+      # no database, no app config — so the full dependency set is unnecessary.
+      - name: Install dependencies
+        run: pip install httpx google-auth
+
+      - name: Run healthcheck
+        env:
+          GOOGLE_SEARCH_CONSOLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SEARCH_CONSOLE_CREDENTIALS_JSON }}
+          GOOGLE_SEARCH_CONSOLE_SITE_URL: sc-domain:numueg.app
+        # Actions' default shell is `bash -e`, which does NOT set pipefail — so
+        # piping into tee would hand the step tee's exit code and every run would
+        # be green regardless of what the check found. A monitor that cannot go
+        # red is decoration.
+        run: |
+          set -o pipefail
+          python scripts/seo_healthcheck.py \
+            --sample "${{ inputs.sample || '40' }}" \
+            --brands "${{ inputs.brands || 'numu,vionne' }}" \
+            | tee healthcheck.log
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '## SEO healthcheck'
+            echo '```'
+            cat healthcheck.log 2>/dev/null || echo '(no output — the run died early)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
