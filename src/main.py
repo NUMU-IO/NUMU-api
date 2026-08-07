@@ -1,5 +1,6 @@
 """Main FastAPI application entry point."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -111,7 +112,7 @@ async def lifespan(app: FastAPI):
     validate_registry()
 
     # Load plan-limit overrides from DB so admin changes survive restarts.
-    try:
+    async def _load_plan_limits() -> None:
         from sqlalchemy import select as sa_select
 
         from src.api.v1.routes.admin.plan_limits import (
@@ -131,11 +132,40 @@ async def lifespan(app: FastAPI):
             row = result.scalar_one_or_none()
             if row and isinstance(row.value, dict):
                 _apply_overrides(row.value)
-                logger.info("plan_limits_loaded_from_db", plans=list(row.value.keys()))
+                return list(row.value.keys())
+        return []
+
+    try:
+        loaded = await _load_plan_limits()
+        if loaded:
+            logger.info("plan_limits_loaded_from_db", plans=loaded)
     except Exception:
         logger.warning(
             "plan_limits_db_load_failed — using code defaults", exc_info=True
         )
+
+    # Re-read periodically so an admin edit reaches every process.
+    #
+    # PUT /admin/plan-limits hot-patches PLAN_LIMITS in the worker that served
+    # the request and nowhere else, so with 2 API workers a change was live for
+    # roughly half of traffic and stale for the rest until the next deploy —
+    # the kind of split-brain that looks like a flaky limit rather than a bug.
+    # Startup already reloads from the DB; this just does it again on a timer.
+    #
+    # Five minutes because plan limits change a handful of times a year: the
+    # cost of staleness is one admin waiting, the cost of a tight loop is a
+    # query per worker forever.
+    async def _plan_limits_refresh_loop() -> None:
+        while True:
+            await asyncio.sleep(300)
+            try:
+                await _load_plan_limits()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("plan_limits_refresh_failed", exc_info=True)
+
+    plan_limits_task = asyncio.create_task(_plan_limits_refresh_loop())
 
     logger.info(
         "app_startup",
@@ -190,6 +220,15 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("app_shutdown", msg="Shutting down NUMU API")
+
+    # Stop the plan-limits refresher before the engine goes away, or its next
+    # tick opens a session on a disposed engine and shutdown hangs on it.
+    plan_limits_task.cancel()
+    try:
+        await plan_limits_task
+    except asyncio.CancelledError:
+        pass
+
     await engine.dispose()
     logger.info("database_closed", msg="Database connection closed")
 
