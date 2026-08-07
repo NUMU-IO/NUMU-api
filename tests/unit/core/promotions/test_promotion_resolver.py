@@ -13,6 +13,7 @@ from src.core.enums.promotion_enums import (
     DisplayTrigger,
     PromotionStatus,
     PromotionSurface,
+    TargetKind,
 )
 from src.core.services.promotion_eligibility_checker import (
     EligibilityContext,
@@ -21,6 +22,7 @@ from src.core.services.promotion_eligibility_checker import (
 from src.core.services.promotion_resolver import PromotionResolver
 from src.core.value_objects.promotion_content import (
     AnnouncementBarContent,
+    AutomaticContent,
     PopupContent,
 )
 
@@ -227,3 +229,103 @@ async def test_dismissed_promo_excluded():
         store_id=store, context=EligibilityContext(), page_path="/"
     )
     assert out.announcement_bars == []
+
+
+# ---- Catalog-scoped promotions need cart context ----------------------------
+#
+# Regression cover for the storefront proxy bug: `/api/storefront/promotions`
+# forwarded only `page`, `device` and `locale`, so every request reached the
+# resolver with an EMPTY cart. An untagged (`role=None`) CATEGORY/PRODUCT
+# inclusion target can never match an empty cart, so the checker rejected the
+# promotion and it was filtered out of the response entirely — the storefront
+# never learned the offer existed, while checkout still applied it correctly.
+#
+# These two tests pin both directions, so the proxy can't silently regress to
+# sending no cart context without a red test.
+
+
+def _auto(name: str, store_id: UUID) -> Promotion:
+    """An AUTOMATIC-surface promotion (no display rule required)."""
+    return Promotion(
+        tenant_id=uuid4(),
+        store_id=store_id,
+        name=name,
+        surface=PromotionSurface.AUTOMATIC,
+        status=PromotionStatus.ACTIVE,
+        content=AutomaticContent(),
+        priority=0,
+    )
+
+
+def _category_target(promo: Promotion, category_id: UUID) -> PromotionTarget:
+    """An eligibility-gating category filter (role=None, inclusion=True)."""
+    return PromotionTarget(
+        tenant_id=promo.tenant_id,
+        promotion_id=promo.id,
+        target_kind=TargetKind.CATEGORY,
+        target_value={"category_ids": [str(category_id)]},
+        inclusion=True,
+    )
+
+
+def _scoped_resolver(promo: Promotion, category_id: UUID) -> PromotionResolver:
+    return PromotionResolver(
+        _FakePromotionRepo([promo]),
+        _FakeDisplayRepo({}),
+        _FakeTargetRepo({promo.id: [_category_target(promo, category_id)]}),
+        _FakeDismissalRepo(),
+        PromotionEligibilityChecker(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_category_scoped_promo_dropped_without_cart_context():
+    """No cart ids in context ⇒ the include-target can't match ⇒ filtered out."""
+    store, category = uuid4(), uuid4()
+    promo = _auto("category scoped", store)
+
+    out = await _scoped_resolver(promo, category).resolve_active_for_visitor(
+        store_id=store,
+        context=EligibilityContext(),  # exactly what the old proxy produced
+        page_path="/cart",
+    )
+
+    assert out.auto_discounts == []
+
+
+@pytest.mark.asyncio
+async def test_category_scoped_promo_resolves_with_cart_context():
+    """The same promotion resolves once the cart's category ids are passed."""
+    store, category = uuid4(), uuid4()
+    promo = _auto("category scoped", store)
+
+    out = await _scoped_resolver(promo, category).resolve_active_for_visitor(
+        store_id=store,
+        context=EligibilityContext(
+            cart_category_ids=[category],
+            cart_subtotal_cents=75000,
+        ),
+        page_path="/cart",
+    )
+
+    assert [r.promotion.name for r in out.auto_discounts] == ["category scoped"]
+
+
+@pytest.mark.asyncio
+async def test_unscoped_promo_resolves_either_way():
+    """A store-wide offer must not need cart context — no behaviour change."""
+    store = uuid4()
+    promo = _auto("store wide", store)
+    resolver = PromotionResolver(
+        _FakePromotionRepo([promo]),
+        _FakeDisplayRepo({}),
+        _FakeTargetRepo({}),  # no targets at all
+        _FakeDismissalRepo(),
+        PromotionEligibilityChecker(),
+    )
+
+    for context in (EligibilityContext(), EligibilityContext(cart_subtotal_cents=1)):
+        out = await resolver.resolve_active_for_visitor(
+            store_id=store, context=context, page_path="/cart"
+        )
+        assert [r.promotion.name for r in out.auto_discounts] == ["store wide"]

@@ -22,7 +22,7 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.api.dependencies.auth import get_optional_customer
@@ -125,7 +125,23 @@ async def get_active_promotions(
     page: Annotated[str, str] = "/",
     device: Annotated[Literal["desktop", "mobile", "tablet"], str] = "desktop",
     locale: Annotated[Literal["en", "ar"], str] = "ar",
+    cart_product_ids: Annotated[list[UUID] | None, Query()] = None,
+    cart_category_ids: Annotated[list[UUID] | None, Query()] = None,
+    cart_subtotal_cents: Annotated[int, Query(ge=0)] = 0,
 ) -> SuccessResponse[ActivePromotionsOutput]:
+    """Active promotions for the current visitor, grouped by surface.
+
+    The cart params are OPTIONAL but load-bearing for catalog-scoped
+    promotions. `PromotionEligibilityChecker._target_matches` resolves
+    PRODUCT / CATEGORY targets against `cart_product_ids` /
+    `cart_category_ids`; a caller that omits them makes every untagged
+    inclusion target fail to match, so the promotion is filtered out of the
+    response entirely and the storefront never learns it exists. The
+    storefront proxy sent none of them, which is precisely how a merchant's
+    category-scoped offer could be applied correctly at checkout while being
+    invisible in the cart. Defaults keep every existing caller working: with
+    no cart context the behaviour is byte-identical to before.
+    """
     store = await store_repo.get_by_id(store_id)
     if store is None:
         raise EntityNotFoundError("Store", str(store_id))
@@ -137,6 +153,9 @@ async def get_active_promotions(
         device=device,
         page_path=page,
         locale=locale,
+        cart_subtotal_cents=cart_subtotal_cents,
+        cart_product_ids=cart_product_ids or [],
+        cart_category_ids=cart_category_ids or [],
     )
 
     resolver = PromotionResolver(
