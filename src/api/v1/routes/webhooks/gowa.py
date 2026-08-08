@@ -45,18 +45,32 @@ _verifier = GowaProvider(device_id="")
 
 _OK = JSONResponse({"status": "ok"}, status_code=status.HTTP_200_OK)
 
-# A reply is treated as a numbered choice only if it is essentially just the
-# digit. "1" and "1." count; "1 more thing" does not — acting on that would
-# confirm an order the customer never meant to confirm.
-_MAX_DIGIT_REPLY_LEN = 3
+# A reply counts as a choice only when it is essentially JUST the answer — a
+# digit ("1", "1.") or the button's own wording ("تأكيد الأوردر", "confirm").
+# People answer with words at least as often as numbers, and a reply we cannot
+# read leaves a COD order stuck; but "1 more thing please" must never be taken
+# as a confirmation, so anything sentence-length is ignored.
+_MAX_CHOICE_WORDS = 4
+_MAX_CHOICE_CHARS = 40
 
 
-def _extract_digit(text: str) -> str | None:
-    """The digit a customer meant, or None when the message isn't a choice."""
-    stripped = (text or "").strip().rstrip(".)-")
-    if not stripped or len(stripped) > _MAX_DIGIT_REPLY_LEN:
+def _extract_choice(text: str) -> str | None:
+    """Normalised choice key for a reply, or None when it isn't an answer.
+
+    Returns something to look up in the pending prompt's payload map, which is
+    keyed by BOTH digits and normalised labels (see whatsapp_plain_render).
+    """
+    from src.core.whatsapp_plain_render import normalise_reply
+
+    raw = (text or "").strip().rstrip(".)-")
+    if not raw or len(raw) > _MAX_CHOICE_CHARS:
         return None
-    return stripped if stripped.isdigit() else None
+    if raw.isdigit():
+        return raw
+    key = normalise_reply(raw)
+    if not key or len(key.split(" ")) > _MAX_CHOICE_WORDS:
+        return None
+    return key
 
 
 @router.post("/callback", operation_id="gowa_webhook")
@@ -357,14 +371,14 @@ async def _process_inbound(db: AsyncSession, device_jid: str, body: dict) -> Non
             logger.exception("gowa_stop_opt_out_failed")
         return
 
-    digit = _extract_digit(text)
-    if not digit:
+    choice = _extract_choice(text)
+    if not choice:
         return
 
     repo = WhatsAppGowaPendingReplyRepository(db)
-    resolved = await repo.resolve(from_phone, digit)
+    resolved = await repo.resolve(from_phone, choice)
     if not resolved:
-        logger.info("gowa_reply_no_pending_prompt", extra={"digit": digit})
+        logger.info("gowa_reply_no_pending_prompt", extra={"choice": choice})
         return
     row, reply_payload = resolved
 
@@ -387,7 +401,7 @@ async def _process_inbound(db: AsyncSession, device_jid: str, body: dict) -> Non
         await repo.mark_consumed(row.id)
         logger.info(
             "gowa_reply_applied",
-            extra={"digit": digit, "action": parse_quick_reply_action(reply_payload)},
+            extra={"choice": choice, "action": parse_quick_reply_action(reply_payload)},
         )
     except Exception:
         logger.exception("gowa_reply_handler_failed")
