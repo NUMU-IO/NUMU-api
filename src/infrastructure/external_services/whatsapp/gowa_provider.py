@@ -176,6 +176,19 @@ class GowaProvider:
     async def _post(self, path: str, payload: dict[str, Any]) -> MessageResult:
         """POST to GOWA and normalise the reply into a MessageResult."""
         if not self.enabled:
+            # Distinguish the two ways this happens, because they need
+            # completely different fixes: nobody has paired a number for this
+            # store, versus the environment has no GOWA server configured.
+            if not self.device_id:
+                return MessageResult(
+                    success=False,
+                    error_message=(
+                        "This store is set to send via GOWA but no WhatsApp "
+                        "number is paired — pair one, or assign it the platform "
+                        "number, in Admin → WhatsApp."
+                    ),
+                    error_code="gowa_no_device_paired",
+                )
             return MessageResult(
                 success=False,
                 error_message="GOWA transport is not configured for this store.",

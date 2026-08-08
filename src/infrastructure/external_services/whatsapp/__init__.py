@@ -160,9 +160,24 @@ async def get_whatsapp_service(
                 store_settings=store_settings,
                 is_platform=device.is_platform,
             )
+        # No device, so there is no WhatsApp account to send as.
+        #
+        # Falling through to Meta here was a real bug: a store deliberately
+        # switched to GOWA would silently attempt a Meta send, and the operator
+        # saw whatever Meta happened to say — in practice a Graph API error
+        # about a phone_number_id — instead of the actual problem, which is
+        # that nothing is paired. Returning a disabled GowaProvider keeps the
+        # failure honest and self-describing.
         logger.warning(
             "whatsapp_gowa_selected_but_unpaired",
             extra={"store_id": str(store_id)},
+        )
+        return GowaProvider(
+            device_id="",
+            db_session=db_session,
+            store_id=store_id,
+            tenant_id=tenant_id,
+            store_settings=store_settings,
         )
 
     if tenant_id:
