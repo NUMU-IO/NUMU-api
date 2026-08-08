@@ -144,6 +144,19 @@ async def _resolve_recover_line_items(
             )
         )
     ).scalar_one_or_none()
+    if row is not None and row.recovered_at is not None:
+        # Already converted into an order. Restoring it would put items the
+        # shopper has just paid for back in their cart, and a second checkout
+        # from the same link is a duplicate order waiting to happen. An empty
+        # restore is the safe answer — they keep whatever is in their cart now.
+        logger.info(
+            "recover_link_already_recovered",
+            extra={
+                "checkout_id": str(recover_id),
+                "order_id": str(row.recovered_order_id or ""),
+            },
+        )
+        return []
     if row and row.line_items:
         return list(row.line_items)
 

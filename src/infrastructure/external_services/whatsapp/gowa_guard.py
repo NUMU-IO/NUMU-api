@@ -246,14 +246,21 @@ class GowaSendGuard:
             per_day = await self.cache.increment(day_key)
             # Expire slightly beyond the window so a counter can never outlive
             # its bucket and permanently block a device.
-            await self.cache.set(minute_key, per_minute, ttl=120)
-            await self.cache.set(hour_key, per_hour, ttl=7200)
-            await self.cache.set(day_key, per_day, ttl=172800)
+            await self.cache.set(minute_key, per_minute, expire=120)
+            await self.cache.set(hour_key, per_hour, expire=7200)
+            await self.cache.set(day_key, per_day, expire=172800)
         except Exception:
             # Redis being down must not stop a merchant's order notifications.
             # Pacing is a risk control, not a correctness one — log loudly and
             # let the send through with jitter still applied.
-            logger.exception("gowa_guard_counter_unavailable")
+            # Reaching here means the rate limits, the warm-up cap and the
+            # failure-streak pause are ALL inert for this send. Jitter still
+            # applies, but the ceilings do not — so this is an error, not a
+            # warning: the protection is off and nobody would otherwise know.
+            logger.exception(
+                "gowa_guard_counters_unavailable_limits_not_enforced",
+                extra={"device_id": device_id},
+            )
             return GuardDecision(allowed=True, delay_seconds=self._jitter())
 
         # The shared platform device carries the whole fleet, so per-merchant
@@ -301,7 +308,7 @@ class GowaSendGuard:
         """Count a consecutive failure; trips the pause at the threshold."""
         try:
             streak = await self.cache.increment(f"gowa:fail:{device_id}")
-            await self.cache.set(f"gowa:fail:{device_id}", streak, ttl=3600)
+            await self.cache.set(f"gowa:fail:{device_id}", streak, expire=3600)
             return int(streak)
         except Exception:
             logger.exception("gowa_guard_failure_record_unavailable")
