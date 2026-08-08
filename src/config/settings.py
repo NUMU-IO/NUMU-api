@@ -777,6 +777,25 @@ class Settings(BaseSettings):
     whatsapp_enabled: bool = False
     whatsapp_business_api_version: str = "v21.0"
 
+    # GOWA (go-whatsapp-web-multidevice) — the second WhatsApp transport.
+    #
+    # UNOFFICIAL: it drives the WhatsApp Web multi-device protocol as a logged-in
+    # account rather than the Business API, so the number in use carries a real
+    # ban risk. Which merchants use it is an explicit per-store choice made in
+    # the admin backoffice; these settings only describe how to reach the
+    # self-hosted instance.
+    #
+    # `gowa_base_url` points at the TLS front door, never at the container: the
+    # instance can send messages as ANY paired merchant, so it is bound to
+    # loopback on its host and reachable only through an authenticated proxy.
+    # `gowa_basic_auth` is "user:password" matching the instance's
+    # APP_BASIC_AUTH; `gowa_webhook_secret` must equal its
+    # WHATSAPP_WEBHOOK_SECRET or every inbound webhook fails verification.
+    gowa_base_url: str | None = None
+    gowa_basic_auth: str | None = None
+    gowa_webhook_secret: str | None = None
+    gowa_enabled: bool = False
+
     # Egyptian Tax Authority (ETA) E-Invoicing
     eta_client_id: str | None = None
     eta_client_secret: str | None = None
