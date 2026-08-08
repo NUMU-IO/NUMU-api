@@ -67,12 +67,18 @@ WARMUP_LADDER: tuple[tuple[int, int], ...] = (
 
 # Message types allowed over GOWA unless a store says otherwise.
 #
-# Transactional only, by default. Each of these goes to someone who transacted
-# with that merchant minutes-to-days earlier, so they are expected and almost
-# never reported. ABANDONED_CART and COD_RECOVERY_OFFER are deliberately absent:
-# they are marketing-shaped, they are precisely what Meta's frequency cap exists
-# to limit, and sending them at volume from a merchant's personal number is the
-# fastest route to a ban. A store can opt them in explicitly, with intent.
+# This is FULL PARITY with what the platform already sends over Meta, because
+# GOWA is a transport swap: a merchant moved onto it should keep the behaviour
+# they had, not silently lose their recovery nudges. Excluding a type here does
+# not merely skip it — the send fails, and the merchant sees an error on a
+# button that used to work.
+#
+# ABANDONED_CART and COD_RECOVERY_OFFER carry materially more risk than the
+# rest: they are marketing-shaped, they go to people who did NOT complete a
+# purchase, and they are exactly what Meta's 131049 frequency cap exists to
+# limit. They are included for parity, but they are the first thing to remove
+# via `whatsapp.gowa_allowed_types` if a number starts attracting reports —
+# report rate is what gets a number banned, and these generate it fastest.
 DEFAULT_ALLOWED_TYPES: frozenset[str] = frozenset({
     str(MessageType.ORDER_CONFIRMATION),
     str(MessageType.ORDER_CONFIRMATION_REQUEST),
@@ -82,6 +88,9 @@ DEFAULT_ALLOWED_TYPES: frozenset[str] = frozenset({
     str(MessageType.PAYMENT_RECEIVED),
     str(MessageType.DELIVERY_CHECK),
     str(MessageType.SHIP_DIGEST),
+    # Higher risk than the rest — see the note above.
+    str(MessageType.ABANDONED_CART),
+    str(MessageType.COD_RECOVERY_OFFER),
 })
 
 # Consecutive failures before the device is treated as unhealthy.
