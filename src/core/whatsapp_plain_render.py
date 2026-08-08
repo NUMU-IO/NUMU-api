@@ -100,6 +100,38 @@ _REPLY_PROMPT = {
     "ar": "رد برقم:",
 }
 
+# Meta's approved copy tells the customer to TAP A BUTTON, because on Meta there
+# is one. On this transport there isn't — the message ends in a numbered list —
+# so that wording reads as a broken app: "tap Confirm Order" with nothing to
+# tap. Verified live: the first real send said "tap a button below" above a
+# numbered list.
+#
+# These rewrites apply ONLY when the template actually has quick-reply buttons
+# that we degraded to numbers, so a template with no buttons is never touched.
+# The Meta path keeps its original copy — its buttons are real.
+_BUTTON_PHRASE_REWRITES: dict[str, tuple[tuple[str, str], ...]] = {
+    "en": (
+        ("and tap a button below", "and reply with a number below"),
+        ("and tap a button", "and reply with a number"),
+        ("tap a button below", "reply with a number below"),
+        ("Tap *Confirm Order*", "Reply *1*"),
+        ("Tap *Track order*", "Open the link"),
+        ("tap the button below", "reply with a number below"),
+    ),
+    "ar": (
+        ("واضغط أحد الأزرار", "ورد برقم"),
+        ("اضغط أحد الأزرار", "رد برقم"),
+        ("اضغط *تأكيد الطلب*", "رد بـ *1*"),
+    ),
+}
+
+
+def _degrade_button_phrases(body: str, language: str) -> str:
+    """Rewrite 'tap a button' wording for a transport that has no buttons."""
+    for needle, replacement in _BUTTON_PHRASE_REWRITES.get(language, ()):
+        body = body.replace(needle, replacement)
+    return body
+
 
 class PlainMessage:
     """A rendered message plus the reply mapping it expects back.
@@ -279,6 +311,8 @@ def render_plain_template(
                 parts.append(f"{label}: {url}" if label else url)
 
     if numbered:
+        # Only now do we know the body promised buttons we cannot deliver.
+        parts[0] = _degrade_button_phrases(parts[0], lang)
         prompt = _REPLY_PROMPT.get(lang, _REPLY_PROMPT["en"])
         parts.append(prompt + "\n" + "\n".join(numbered))
 

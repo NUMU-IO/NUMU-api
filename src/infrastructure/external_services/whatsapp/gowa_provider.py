@@ -42,6 +42,7 @@ merchant's message from another merchant's number.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -61,6 +62,11 @@ from src.core.interfaces.services.messaging_service import (
     MessageType,
 )
 from src.core.whatsapp_plain_render import render_plain_template
+from src.infrastructure.external_services.whatsapp.gowa_guard import (
+    FAILURE_STREAK_PAUSE,
+    GowaSendGuard,
+    GuardDecision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +97,10 @@ class GowaProvider:
         db_session: Any = None,
         store_id: Any = None,
         tenant_id: Any = None,
+        paired_at: Any = None,
+        device_status: str | None = None,
+        store_settings: dict | None = None,
+        guard: GowaSendGuard | None = None,
     ) -> None:
         self.device_id = device_id
         self.base_url = (base_url or settings.gowa_base_url or "").rstrip("/")
@@ -105,6 +115,15 @@ class GowaProvider:
         self.db_session = db_session
         self.store_id = store_id
         self.tenant_id = tenant_id
+        # Guard inputs. `paired_at` drives the warm-up ramp, `device_status`
+        # the health gate, `store_settings` the message-type allowlist — all
+        # already on the device row the resolver just read.
+        self.paired_at = paired_at
+        self.device_status = device_status
+        self.store_settings = store_settings
+        # Only guard real sends. A bare instance (webhook signature checks)
+        # has no device to pace.
+        self._guard = guard or (GowaSendGuard() if device_id else None)
 
     # ── identity ────────────────────────────────────────────────────────────
 
@@ -215,15 +234,77 @@ class GowaProvider:
         self,
         recipient: MessageRecipient,
         text: str,
+        *,
+        message_type: str | None = None,
     ) -> MessageResult:
         """Send free-form text.
 
         The whole reason this transport exists: no template, no approval, no
         24-hour session window.
+
+        Every send passes the guard first. Meta polices its own traffic; here
+        the only thing between a notification loop and a banned merchant number
+        is that check, so it is applied on the single path all sends funnel
+        through rather than at each call site.
         """
-        return await self._post(
+        decision = await self._guard_check(message_type)
+        if not decision.allowed:
+            logger.warning(
+                "gowa_send_blocked",
+                extra={
+                    "device_id": self.device_id,
+                    "reason": decision.reason,
+                    "message_type": message_type,
+                },
+            )
+            return MessageResult(
+                success=False,
+                error_message=decision.detail or "Blocked by GOWA send guard.",
+                error_code=decision.reason or "gowa_guard_blocked",
+            )
+
+        # Randomised spacing. Perfectly-timed sends are the cheapest automation
+        # fingerprint there is, and the cost of a few seconds' delay on an order
+        # notification is nil next to losing the merchant's number.
+        if decision.delay_seconds:
+            await asyncio.sleep(decision.delay_seconds)
+
+        result = await self._post(
             "/send/message",
             {"phone": self._to_jid(recipient.phone), "message": text},
+        )
+
+        # Feed the health signal. A sustained run of failures means something is
+        # wrong with the session; pushing harder into that is how a shaky
+        # device becomes a dead one.
+        if self._guard is not None:
+            if result.success:
+                await self._guard.record_success(self.device_id)
+            else:
+                streak = await self._guard.record_failure(self.device_id)
+                if streak >= FAILURE_STREAK_PAUSE:
+                    logger.error(
+                        "gowa_device_paused_failure_streak",
+                        extra={"device_id": self.device_id, "streak": streak},
+                    )
+        return result
+
+    async def _guard_check(self, message_type: str | None) -> GuardDecision:
+        """Run the send guard, defaulting to allow-with-jitter if unavailable.
+
+        The guard is a risk control, not a correctness one. If it cannot run
+        (no store context, Redis down), the merchant's order notifications must
+        still go out — but the jitter is applied regardless, because that costs
+        nothing and is the part that matters most.
+        """
+        if self._guard is None:
+            return GuardDecision(allowed=True, delay_seconds=GowaSendGuard._jitter())
+        return await self._guard.check(
+            device_id=self.device_id,
+            message_type=message_type,
+            paired_at=self.paired_at,
+            device_status=self.device_status,
+            store_settings=self.store_settings,
         )
 
     async def send_media_message(
@@ -315,6 +396,111 @@ class GowaProvider:
         except Exception:
             logger.exception("gowa_pending_reply_write_failed")
             return False
+
+    async def send_and_log(
+        self,
+        content: MessageContent,
+        repo: Any,
+        store_id: Any,
+        tenant_id: Any = None,
+    ) -> MessageResult:
+        """Send and persist an OUTBOUND MessageLog. Mirrors the Meta transport.
+
+        Signature-identical on purpose. The merchant hub's WhatsApp dashboard
+        (sent / delivered / read counters, the daily chart, the recent-messages
+        list) and the conversation inbox are all built on MessageLog and
+        WhatsAppConversation. A transport that sends without writing those rows
+        works perfectly and looks completely broken to the merchant: an empty
+        inbox and zeroed stats on a store that is actively messaging customers.
+
+        So callers keep calling `send_and_log` and neither they nor the hub
+        need to know which transport is underneath.
+        """
+        result = await self.send_message(content)
+
+        if result.success and result.message_id:
+            templates = EGYPTIAN_TEMPLATES.get(content.type, {})
+            template = templates.get(content.recipient.language) or templates.get("en")
+            template_name = template.name if template else str(content.type)
+            await self._log_outbound(
+                repo,
+                store_id=store_id,
+                tenant_id=tenant_id,
+                phone=content.recipient.phone,
+                message_id=result.message_id,
+                template_name=template_name,
+                content=str(content.template_params),
+            )
+            # Keep the inbox in step with the dashboard: an outbound message
+            # should surface a thread even before the customer replies.
+            await self._upsert_conversation(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                phone=content.recipient.phone,
+                name=content.recipient.name,
+                preview=template_name,
+            )
+
+        return result
+
+    async def _log_outbound(
+        self,
+        repo: Any,
+        *,
+        store_id: Any,
+        tenant_id: Any,
+        phone: str,
+        message_id: str,
+        template_name: str,
+        content: str,
+    ) -> None:
+        """Persist an outbound log entry. Never breaks the send."""
+        from src.core.entities.message_log import MessageDirection, MessageLog
+        from src.core.entities.message_log import MessageStatus as LogStatus
+
+        try:
+            await repo.create(
+                MessageLog(
+                    tenant_id=tenant_id,
+                    store_id=store_id,
+                    phone=phone,
+                    message_id=message_id,
+                    direction=MessageDirection.OUTBOUND,
+                    template_name=template_name,
+                    content=content,
+                    status=LogStatus.SENT,
+                )
+            )
+        except Exception:
+            logger.exception("gowa_outbound_log_failed")
+
+    async def _upsert_conversation(
+        self,
+        *,
+        store_id: Any,
+        tenant_id: Any,
+        phone: str,
+        name: str | None,
+        preview: str | None,
+    ) -> None:
+        """Touch the conversation thread. Best-effort — never breaks the send."""
+        if self.db_session is None or store_id is None or tenant_id is None:
+            return
+        try:
+            from src.infrastructure.repositories.whatsapp_conversation_repository import (  # noqa: E501
+                WhatsAppConversationRepository,
+            )
+
+            await WhatsAppConversationRepository(self.db_session).upsert_on_message(
+                store_id=store_id,
+                tenant_id=tenant_id,
+                phone=phone,
+                name=name,
+                message_preview=preview,
+                direction="outbound",
+            )
+        except Exception:
+            logger.exception("gowa_conversation_upsert_failed")
 
     # ── convenience wrappers (parity with the Meta transport) ───────────────
 

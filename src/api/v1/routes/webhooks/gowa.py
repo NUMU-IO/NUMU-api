@@ -166,6 +166,61 @@ async def _record_ack(db: AsyncSession, payload: dict) -> None:
         logger.exception("gowa_ack_update_failed", extra={"message_id": message_id})
 
 
+async def _record_inbound(
+    db: AsyncSession,
+    *,
+    store_id,
+    tenant_id,
+    phone: str,
+    text: str,
+    message_id: str,
+) -> None:
+    """Persist an inbound message to the log and the conversation inbox.
+
+    Both are what the merchant hub renders: the WhatsApp dashboard counts from
+    MessageLog, and the inbox lists WhatsAppConversation. Best-effort — a
+    logging failure must not stop the reply being acted on, because acting on
+    it is the part the customer is waiting for.
+    """
+    from src.core.entities.message_log import MessageDirection, MessageLog
+    from src.core.entities.message_log import MessageStatus as LogStatus
+    from src.infrastructure.repositories.message_log_repository import (
+        MessageLogRepository,
+    )
+    from src.infrastructure.repositories.whatsapp_conversation_repository import (
+        WhatsAppConversationRepository,
+    )
+
+    preview = (text or "").strip()[:255] or "[message]"
+    try:
+        await MessageLogRepository(db).create(
+            MessageLog(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                phone=phone,
+                message_id=message_id or f"gowa-in-{phone}",
+                direction=MessageDirection.INBOUND,
+                template_name=None,
+                content=preview,
+                status=LogStatus.DELIVERED,
+            )
+        )
+    except Exception:
+        logger.exception("gowa_inbound_log_failed")
+
+    try:
+        await WhatsAppConversationRepository(db).upsert_on_message(
+            store_id=store_id,
+            tenant_id=tenant_id,
+            phone=phone,
+            name=None,
+            message_preview=preview,
+            direction="inbound",
+        )
+    except Exception:
+        logger.exception("gowa_inbound_conversation_failed")
+
+
 async def _process_inbound(db: AsyncSession, payload: dict) -> None:
     """Handle an inbound message — principally a numbered reply.
 
@@ -205,8 +260,66 @@ async def _process_inbound(db: AsyncSession, payload: dict) -> None:
     if from_phone and not from_phone.startswith("+"):
         from_phone = f"+{from_phone}"
 
+    if not from_phone:
+        return
+
+    # Resolve the store from the DEVICE, not from prior message logs. The Meta
+    # webhook has to guess via `get_latest_by_phone` because a Meta payload
+    # carries no store; here the device IS the store, which is both cheaper and
+    # correct for a customer who has never been messaged before.
+    device_id = str(payload.get("device_id") or payload.get("deviceId") or "")
+    store_id = tenant_id = None
+    if device_id:
+        from src.infrastructure.repositories.whatsapp_gowa_device_repository import (
+            WhatsAppGowaDeviceRepository,
+        )
+
+        device = await WhatsAppGowaDeviceRepository(db).get_by_device_id(device_id)
+        if device:
+            store_id, tenant_id = device.store_id, device.tenant_id
+
+    # Surface the thread in the merchant hub inbox and the message log. Without
+    # this a GOWA store shows an empty inbox while customers are actively
+    # replying — the transport works and the product looks broken.
+    if store_id and tenant_id:
+        await _record_inbound(
+            db,
+            store_id=store_id,
+            tenant_id=tenant_id,
+            phone=from_phone,
+            text=text,
+            message_id=str(message.get("id") or payload.get("id") or ""),
+        )
+
+    # ── STOP / opt-out ─────────────────────────────────────────────────────
+    #
+    # Runs BEFORE the digit parser and wins outright. An unhonoured opt-out is
+    # the single most direct route to a report, and a report is what actually
+    # gets a merchant's number banned on this transport. A customer typing STOP
+    # must never be reinterpreted as anything else.
+    from src.core.services.whatsapp_stop_keyword_detector import is_stop_keyword
+
+    if text and is_stop_keyword(text) and store_id:
+        try:
+            from src.application.use_cases.whatsapp.opt_out_customer import (
+                OptOutCustomerUseCase,
+            )
+
+            await OptOutCustomerUseCase(db).execute(
+                store_id=store_id,
+                phone=from_phone,
+                reason="inbound_stop_keyword",
+            )
+            logger.info(
+                "gowa_stop_keyword_opt_out",
+                extra={"store_id": str(store_id), "phone_tail": from_phone[-4:]},
+            )
+        except Exception:
+            logger.exception("gowa_stop_opt_out_failed")
+        return
+
     digit = _extract_digit(text)
-    if not digit or not from_phone:
+    if not digit:
         return
 
     repo = WhatsAppGowaPendingReplyRepository(db)
