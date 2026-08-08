@@ -67,6 +67,9 @@ from src.infrastructure.external_services.whatsapp.gowa_guard import (
     GowaSendGuard,
     GuardDecision,
 )
+from src.infrastructure.external_services.whatsapp.messaging_service import (
+    WhatsAppMessagingService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +81,24 @@ _USER_JID_SUFFIX = "@s.whatsapp.net"
 _TIMEOUT_SECONDS = 20.0
 
 
-class GowaProvider:
+class GowaProvider(WhatsAppMessagingService):
     """WhatsApp transport backed by a self-hosted GOWA instance.
 
-    Structurally compatible with :class:`WhatsAppMessagingService` for the
-    methods the notification layer calls, so ``get_whatsapp_service`` can
-    return either one without the callers knowing which.
+    SUBCLASSES the Meta transport rather than reimplementing it, and that is a
+    correctness decision, not a shortcut.
+
+    Every convenience wrapper on the parent — send_order_confirmation,
+    send_abandoned_cart, send_ship_digest, send_delivery_check, and the rest —
+    funnels through ``send_message``. Overriding that one method (plus the
+    transport primitives below) therefore redirects ALL of them to GOWA, and
+    any wrapper added to the parent later works here automatically.
+
+    Duplicating them by hand is what broke this before: the class advertised
+    itself as "structurally compatible" while implementing only three of the
+    nine, so a store on GOWA hit
+    ``AttributeError: 'GowaProvider' object has no attribute
+    'send_abandoned_cart'`` — a 500 on the merchant's recovery button. Parity
+    is now enforced by the type system instead of by memory.
     """
 
     def __init__(
@@ -176,6 +191,19 @@ class GowaProvider:
     async def _post(self, path: str, payload: dict[str, Any]) -> MessageResult:
         """POST to GOWA and normalise the reply into a MessageResult."""
         if not self.enabled:
+            # Distinguish the two ways this happens, because they need
+            # completely different fixes: nobody has paired a number for this
+            # store, versus the environment has no GOWA server configured.
+            if not self.device_id:
+                return MessageResult(
+                    success=False,
+                    error_message=(
+                        "This store is set to send via GOWA but no WhatsApp "
+                        "number is paired — pair one, or assign it the platform "
+                        "number, in Admin → WhatsApp."
+                    ),
+                    error_code="gowa_no_device_paired",
+                )
             return MessageResult(
                 success=False,
                 error_message="GOWA transport is not configured for this store.",
@@ -507,65 +535,12 @@ class GowaProvider:
         except Exception:
             logger.exception("gowa_conversation_upsert_failed")
 
-    # ── convenience wrappers (parity with the Meta transport) ───────────────
-
-    async def send_order_confirmation(
-        self,
-        recipient: MessageRecipient,
-        order_number: str,
-        total: str,
-        store_name: str,
-    ) -> MessageResult:
-        return await self.send_message(
-            MessageContent(
-                type=MessageType.ORDER_CONFIRMATION,
-                recipient=recipient,
-                template_params={
-                    "customer_name": recipient.name or "",
-                    "store_name": store_name,
-                    "order_number": order_number,
-                    "total": total,
-                },
-            )
-        )
-
-    async def send_shipping_notification(
-        self,
-        recipient: MessageRecipient,
-        order_number: str,
-        tracking_number: str,
-        carrier: str = "Bosta",
-    ) -> MessageResult:
-        return await self.send_message(
-            MessageContent(
-                type=MessageType.ORDER_SHIPPED,
-                recipient=recipient,
-                template_params={
-                    "customer_name": recipient.name or "",
-                    "order_number": order_number,
-                    "tracking_number": tracking_number,
-                    "carrier": carrier,
-                },
-            )
-        )
-
-    async def send_delivery_notification(
-        self,
-        recipient: MessageRecipient,
-        order_number: str,
-        store_name: str,
-    ) -> MessageResult:
-        return await self.send_message(
-            MessageContent(
-                type=MessageType.ORDER_DELIVERED,
-                recipient=recipient,
-                template_params={
-                    "customer_name": recipient.name or "",
-                    "order_number": order_number,
-                    "store_name": store_name,
-                },
-            )
-        )
+    # Convenience wrappers (send_order_confirmation, send_abandoned_cart,
+    # send_ship_digest, send_delivery_check, send_out_for_delivery,
+    # send_payment_received, send_order_confirmation_request,
+    # send_shipping_notification, send_delivery_notification) are INHERITED.
+    # They all build a MessageContent and call `send_message`, which is
+    # overridden above, so they route to GOWA unchanged.
 
     # ── status ──────────────────────────────────────────────────────────────
 
