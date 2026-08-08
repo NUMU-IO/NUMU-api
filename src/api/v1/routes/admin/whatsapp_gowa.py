@@ -161,6 +161,53 @@ async def _load_store(db: AsyncSession, store_id: UUID) -> StoreModel:
 # ── routes ─────────────────────────────────────────────────────────────────
 
 
+class GowaDeviceListItem(BaseModel):
+    device_id: str
+    state: str | None = None
+    jid: str | None = None
+    phone: str | None = None
+    is_platform: bool = False
+    claimed_by_store_id: str | None = None
+
+
+@router.get("/devices", operation_id="admin_list_gowa_devices")
+async def list_devices(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[list[GowaDeviceListItem]]:
+    """Every session the GOWA instance is holding, and how each is claimed here.
+
+    Exists so the platform number can be adopted by CLICKING it. A number is
+    often linked directly against GOWA during setup or recovery, before any row
+    exists on our side; without this the operator would have to find a UUID in
+    a server log to claim it.
+    """
+    listing = (await _gowa("GET", "/devices")).get("results") or []
+    repo = WhatsAppGowaDeviceRepository(db)
+
+    items: list[GowaDeviceListItem] = []
+    for entry in listing:
+        device_id = str(entry.get("id") or "")
+        if not device_id:
+            continue
+        jid = str(entry.get("jid") or "")
+        # "201002599455@s.whatsapp.net" -> "+201002599455"
+        phone = f"+{jid.split('@', 1)[0]}" if "@" in jid else None
+        known = await repo.get_by_device_id(device_id)
+        items.append(
+            GowaDeviceListItem(
+                device_id=device_id,
+                state=str(entry.get("state") or ""),
+                jid=jid or None,
+                phone=phone,
+                is_platform=bool(known.is_platform) if known else False,
+                claimed_by_store_id=str(known.store_id)
+                if known and known.store_id
+                else None,
+            )
+        )
+    return SuccessResponse(data=items)
+
+
 @router.post("/platform/pair", operation_id="admin_pair_gowa_platform_device")
 async def pair_platform_device(
     body: PairRequest,
@@ -278,6 +325,37 @@ async def platform_status(
             else None,
             last_error=device.last_error,
         )
+    )
+
+
+@router.post("/platform/unpair", operation_id="admin_unpair_gowa_platform_device")
+async def unpair_platform_device(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[dict]:
+    """Retire the shared platform device.
+
+    Deliberately does NOT delete the session on GOWA: the number may still be
+    wanted for manual use, and with GOWA_PLATFORM_DEFAULT on this immediately
+    stops every store on the shared path from sending. Cutting the fleet off is
+    already the significant action; destroying a working WhatsApp session on top
+    of it should be a separate, explicit decision.
+    """
+    repo = WhatsAppGowaDeviceRepository(db)
+    device = await repo.get_platform_device()
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No platform device is registered.",
+        )
+    device.is_active = False
+    device.status = "logged_out"
+    await db.commit()
+    return SuccessResponse(
+        data={"device_id": device.device_id},
+        message=(
+            "Platform device retired. Stores on the shared path can no longer "
+            "send over GOWA."
+        ),
     )
 
 
