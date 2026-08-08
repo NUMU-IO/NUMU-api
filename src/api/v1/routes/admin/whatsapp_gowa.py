@@ -170,6 +170,76 @@ class GowaDeviceListItem(BaseModel):
     claimed_by_store_id: str | None = None
 
 
+class MessageLogItem(BaseModel):
+    created_at: str
+    store_id: str | None = None
+    store_name: str | None = None
+    phone: str
+    direction: str
+    template_name: str | None = None
+    content: str | None = None
+    status: str
+    error_code: str | None = None
+    message_id: str | None = None
+
+
+@router.get("/messages", operation_id="admin_list_whatsapp_messages")
+async def list_messages(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: UUID | None = None,
+    direction: str | None = None,
+    limit: int = 50,
+) -> SuccessResponse[list[MessageLogItem]]:
+    """Recent WhatsApp traffic across stores, newest first.
+
+    Deliberately transport-agnostic: it reads `message_logs`, which BOTH the
+    Meta and GOWA paths write to. An operator debugging "did this merchant's
+    message go out" should not first have to work out which transport the store
+    was on.
+
+    Store names are resolved in one pass rather than per row — this is an
+    operations screen and it should stay cheap enough to poll.
+    """
+    from src.infrastructure.database.models.tenant.message_log import MessageLogModel
+
+    query = select(MessageLogModel).order_by(MessageLogModel.created_at.desc())
+    if store_id:
+        query = query.where(MessageLogModel.store_id == store_id)
+    if direction in {"inbound", "outbound"}:
+        query = query.where(MessageLogModel.direction == direction)
+    rows = (await db.execute(query.limit(min(max(limit, 1), 200)))).scalars().all()
+
+    store_ids = {r.store_id for r in rows if r.store_id}
+    names: dict = {}
+    if store_ids:
+        name_rows = (
+            await db.execute(
+                select(StoreModel.id, StoreModel.name).where(
+                    StoreModel.id.in_(store_ids)
+                )
+            )
+        ).all()
+        names = dict(name_rows)
+
+    return SuccessResponse(
+        data=[
+            MessageLogItem(
+                created_at=r.created_at.isoformat() if r.created_at else "",
+                store_id=str(r.store_id) if r.store_id else None,
+                store_name=names.get(r.store_id),
+                phone=r.phone,
+                direction=str(getattr(r.direction, "value", r.direction)),
+                template_name=r.template_name,
+                content=(r.content or "")[:200] or None,
+                status=str(getattr(r.status, "value", r.status)),
+                error_code=r.error_code,
+                message_id=r.message_id,
+            )
+            for r in rows
+        ]
+    )
+
+
 @router.get("/devices", operation_id="admin_list_gowa_devices")
 async def list_devices(
     db: Annotated[AsyncSession, Depends(get_db)],

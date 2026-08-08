@@ -79,22 +79,65 @@ async def gowa_webhook(
             {"status": "invalid signature"}, status_code=status.HTTP_401_UNAUTHORIZED
         )
 
+    # GOWA's envelope is {event, device_id, payload:{...}}. `device_id` is the
+    # device's own JID ("201002599455@s.whatsapp.net"), NOT the UUID we store —
+    # reading either of those wrongly makes every inbound message fall through
+    # in silence, which is exactly what happened.
     event = str(payload.get("event") or payload.get("type") or "")
-    device_id = str(payload.get("device_id") or payload.get("deviceId") or "")
+    device_jid = str(payload.get("device_id") or "")
+    body = payload.get("payload")
+    if not isinstance(body, dict):
+        body = {}
 
     try:
-        if device_id:
-            await _touch_device(db, device_id, event, payload)
+        if device_jid:
+            await _touch_device(db, device_jid, event, body)
         if event.startswith("message.ack"):
-            await _record_ack(db, payload)
-        elif event == "message" or "message" in payload:
-            await _process_inbound(db, payload)
+            await _record_ack(db, body)
+        elif event == "message":
+            await _process_inbound(db, device_jid, body)
         await db.commit()
     except Exception:
         # Never let a handler failure turn into a retry storm.
         logger.exception("gowa_webhook_processing_failed", extra={"event": event})
 
     return _OK
+
+
+async def _resolve_device(db: AsyncSession, device_jid: str):
+    """Find our device row from GOWA's device JID.
+
+    The webhook identifies the device by its WhatsApp JID, while we key rows by
+    GOWA's UUID. The stored `phone` is the bridge.
+    """
+    from src.infrastructure.repositories.whatsapp_gowa_device_repository import (
+        WhatsAppGowaDeviceRepository,
+    )
+
+    digits = device_jid.split("@", 1)[0]
+    if not digits:
+        return None
+    repo = WhatsAppGowaDeviceRepository(db)
+    # Try the UUID form too — harmless, and keeps this working if GOWA ever
+    # sends the id instead.
+    device = await repo.get_by_device_id(device_jid)
+    if device:
+        return device
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.whatsapp_gowa_device import (
+        WhatsAppGowaDeviceModel,
+    )
+
+    result = await db.execute(
+        select(WhatsAppGowaDeviceModel)
+        .where(
+            WhatsAppGowaDeviceModel.phone == f"+{digits}",
+            WhatsAppGowaDeviceModel.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def _touch_device(
@@ -140,13 +183,20 @@ async def _record_ack(db: AsyncSession, payload: dict) -> None:
         MessageLogRepository,
     )
 
-    message_id = str(
-        payload.get("message_id") or payload.get("id") or payload.get("ids") or ""
-    )
-    if not message_id:
+    # `ids` is an ARRAY of affected message ids, and the level is
+    # `receipt_type` ("delivered" / "read").
+    ids = payload.get("ids")
+    if isinstance(ids, list):
+        message_ids = [str(i) for i in ids if i]
+    else:
+        single = payload.get("message_id") or payload.get("id")
+        message_ids = [str(single)] if single else []
+    if not message_ids:
         return
 
-    raw_status = str(payload.get("ack") or payload.get("status") or "").lower()
+    raw_status = str(
+        payload.get("receipt_type") or payload.get("ack") or payload.get("status") or ""
+    ).lower()
     mapping = {
         "delivered": LogStatus.DELIVERED,
         "device": LogStatus.DELIVERED,
@@ -160,10 +210,12 @@ async def _record_ack(db: AsyncSession, payload: dict) -> None:
     if mapped is None:
         return
 
-    try:
-        await MessageLogRepository(db).update_status(message_id, mapped)
-    except Exception:
-        logger.exception("gowa_ack_update_failed", extra={"message_id": message_id})
+    repo = MessageLogRepository(db)
+    for message_id in message_ids:
+        try:
+            await repo.update_status(message_id, mapped)
+        except Exception:
+            logger.exception("gowa_ack_update_failed", extra={"message_id": message_id})
 
 
 async def _record_inbound(
@@ -221,11 +273,12 @@ async def _record_inbound(
         logger.exception("gowa_inbound_conversation_failed")
 
 
-async def _process_inbound(db: AsyncSession, payload: dict) -> None:
+async def _process_inbound(db: AsyncSession, device_jid: str, body: dict) -> None:
     """Handle an inbound message — principally a numbered reply.
 
     Resolves the digit to the payload recorded when the prompt was sent, then
-    dispatches through the SAME action handlers the Meta webhook uses.
+    dispatches through the SAME action handlers the Meta webhook uses, so the
+    two transports cannot diverge on how a COD order gets confirmed.
     """
     from functools import partial
 
@@ -239,48 +292,37 @@ async def _process_inbound(db: AsyncSession, payload: dict) -> None:
         parse_quick_reply_action,
         postpone_order_from_whatsapp,
     )
+    from src.infrastructure.repositories.message_log_repository import (
+        MessageLogRepository,
+    )
     from src.infrastructure.repositories.whatsapp_gowa_pending_reply_repository import (
         WhatsAppGowaPendingReplyRepository,
     )
 
-    message = (
-        payload.get("message") if isinstance(payload.get("message"), dict) else payload
-    )
-    text = str(
-        message.get("text") or message.get("body") or message.get("conversation") or ""
-    )
-    from_phone = str(
-        payload.get("from") or message.get("from") or payload.get("sender") or ""
-    )
-    # GOWA reports the sender as a JID ("201001234567@s.whatsapp.net"); the
-    # pending rows are keyed by canonical E.164, matching how the rest of the
-    # platform stores phones.
-    if "@" in from_phone:
-        from_phone = from_phone.split("@", 1)[0]
-    if from_phone and not from_phone.startswith("+"):
-        from_phone = f"+{from_phone}"
-
-    if not from_phone:
+    text = str(body.get("body") or body.get("text") or "")
+    from_jid = str(body.get("from") or body.get("chat_id") or "")
+    # JIDs look like "201060082542@s.whatsapp.net"; the platform stores phones
+    # as canonical E.164.
+    digits = from_jid.split("@", 1)[0].split(":", 1)[0]
+    if not digits:
         return
+    from_phone = f"+{digits}"
 
-    # Resolve the store from the DEVICE, not from prior message logs. The Meta
-    # webhook has to guess via `get_latest_by_phone` because a Meta payload
-    # carries no store; here the device IS the store, which is both cheaper and
-    # correct for a customer who has never been messaged before.
-    device_id = str(payload.get("device_id") or payload.get("deviceId") or "")
+    # Which store does this belong to?
+    #
+    # The device is the obvious answer for a merchant's OWN number, but the
+    # shared platform device has no store_id — it sends for the whole fleet —
+    # so it cannot answer this. Fall back the way the Meta webhook does: the
+    # most recent message we sent this person tells us whose customer they are.
     store_id = tenant_id = None
-    if device_id:
-        from src.infrastructure.repositories.whatsapp_gowa_device_repository import (
-            WhatsAppGowaDeviceRepository,
-        )
+    device = await _resolve_device(db, device_jid)
+    if device and device.store_id:
+        store_id, tenant_id = device.store_id, device.tenant_id
+    else:
+        prior = await MessageLogRepository(db).get_latest_by_phone(from_phone)
+        if prior:
+            store_id, tenant_id = prior.store_id, prior.tenant_id
 
-        device = await WhatsAppGowaDeviceRepository(db).get_by_device_id(device_id)
-        if device:
-            store_id, tenant_id = device.store_id, device.tenant_id
-
-    # Surface the thread in the merchant hub inbox and the message log. Without
-    # this a GOWA store shows an empty inbox while customers are actively
-    # replying — the transport works and the product looks broken.
     if store_id and tenant_id:
         await _record_inbound(
             db,
@@ -288,15 +330,14 @@ async def _process_inbound(db: AsyncSession, payload: dict) -> None:
             tenant_id=tenant_id,
             phone=from_phone,
             text=text,
-            message_id=str(message.get("id") or payload.get("id") or ""),
+            message_id=str(body.get("id") or ""),
         )
 
     # ── STOP / opt-out ─────────────────────────────────────────────────────
     #
     # Runs BEFORE the digit parser and wins outright. An unhonoured opt-out is
-    # the single most direct route to a report, and a report is what actually
-    # gets a merchant's number banned on this transport. A customer typing STOP
-    # must never be reinterpreted as anything else.
+    # the most direct route to a report, and reports are what get a number
+    # banned on this transport.
     from src.core.services.whatsapp_stop_keyword_detector import is_stop_keyword
 
     if text and is_stop_keyword(text) and store_id:
@@ -306,9 +347,7 @@ async def _process_inbound(db: AsyncSession, payload: dict) -> None:
             )
 
             await OptOutCustomerUseCase(db).execute(
-                store_id=store_id,
-                phone=from_phone,
-                reason="inbound_stop_keyword",
+                store_id=store_id, phone=from_phone, reason="inbound_stop_keyword"
             )
             logger.info(
                 "gowa_stop_keyword_opt_out",
@@ -325,10 +364,7 @@ async def _process_inbound(db: AsyncSession, payload: dict) -> None:
     repo = WhatsAppGowaPendingReplyRepository(db)
     resolved = await repo.resolve(from_phone, digit)
     if not resolved:
-        logger.info(
-            "gowa_reply_no_pending_prompt",
-            extra={"digit": digit},
-        )
+        logger.info("gowa_reply_no_pending_prompt", extra={"digit": digit})
         return
     row, reply_payload = resolved
 
@@ -347,7 +383,11 @@ async def _process_inbound(db: AsyncSession, payload: dict) -> None:
     try:
         await handler(db, payload=reply_payload, from_phone=from_phone)
         # Consume only after the action succeeded, so a transient failure
-        # leaves the prompt answerable rather than burning the customer's reply.
+        # leaves the prompt answerable rather than burning the reply.
         await repo.mark_consumed(row.id)
+        logger.info(
+            "gowa_reply_applied",
+            extra={"digit": digit, "action": parse_quick_reply_action(reply_payload)},
+        )
     except Exception:
         logger.exception("gowa_reply_handler_failed")
