@@ -10,6 +10,7 @@ here we only expose merchant-facing read + recovery actions.
 """
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -191,6 +192,21 @@ async def get_abandoned_checkout(
     )
 
 
+# Deliberately permissive: this only needs to catch the values that are clearly
+# NOT addresses (phone numbers, names, placeholders) before we hand them to the
+# provider. Real address validation belongs to the provider, not a regex.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Resend documents two acceptable shapes: "email@example.com" and
+# "Name <email@example.com>". Accept both, so a stored display-name form is not
+# rejected by us and then happily accepted by the provider.
+_NAMED_EMAIL_RE = re.compile(r"^.*<\s*[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+\s*>$")
+
+
+def _looks_like_email(value: str | None) -> bool:
+    v = (value or "").strip()
+    return bool(_EMAIL_RE.match(v) or _NAMED_EMAIL_RE.match(v))
+
+
 @router.post(
     "/{checkout_id}/send-recovery-email",
     response_model=SuccessResponse[SendRecoveryEmailResponse],
@@ -223,6 +239,19 @@ async def send_recovery_email(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This checkout has no email address — recovery email cannot be sent",
+        )
+
+    # Guest checkouts do not always put an EMAIL in the email column — a phone
+    # number or a placeholder shows up often enough. Resend rejects those, and
+    # the merchant saw an opaque 502 from the provider on a button they pressed.
+    # Checking the shape here turns that into an answerable message.
+    if not _looks_like_email(checkout.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"'{checkout.email}' is not a valid email address, so no "
+                "recovery email can be sent. Try the WhatsApp nudge instead."
+            ),
         )
 
     if checkout.recovered_at is not None:
