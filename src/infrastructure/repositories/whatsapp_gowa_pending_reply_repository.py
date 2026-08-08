@@ -51,9 +51,13 @@ class WhatsAppGowaPendingReplyRepository:
         return row
 
     async def resolve(
-        self, phone: str, digit: str
+        self, phone: str, choice: str
     ) -> tuple[WhatsAppGowaPendingReplyModel, str] | None:
-        """Newest live prompt for ``phone`` that defines ``digit``.
+        """Newest live prompt for ``phone`` that defines ``choice``.
+
+        ``choice`` is either a digit ("1") or a normalised button label
+        ("تاكيد", "confirm order") — the stored map is keyed by both, so a
+        customer who types the word is treated exactly like one who taps.
 
         Walks candidates newest-first rather than taking only the single most
         recent row: a customer may have been sent a delivery check after a
@@ -75,7 +79,7 @@ class WhatsAppGowaPendingReplyRepository:
             .limit(10)
         )
         for row in result.scalars():
-            payload = (row.payloads or {}).get(digit)
+            payload = (row.payloads or {}).get(choice)
             if payload:
                 return row, str(payload)
         return None

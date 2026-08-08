@@ -92,12 +92,38 @@ _RICH_BY_KEY: dict[tuple[str, str], dict[str, Any]] = {
 
 _PLACEHOLDER = re.compile(r"\{\{(\d+)\}\}")
 
+# Arabic diacritics + tatweel, stripped when matching a typed word. A customer
+# typing "تأكيد" should match the button labelled "تأكيد الأوردر" regardless of
+# how they vowelise it.
+_AR_DIACRITICS = re.compile(r"[ً-ْـ]")
+
+
+def normalise_reply(text: str) -> str:
+    """Fold a typed reply for comparison against a button label.
+
+    Case, surrounding punctuation, Arabic diacritics and alef/ya/ta-marbuta
+    variants all differ between what a template prints and what a person types,
+    so none of them may decide whether an order gets confirmed.
+    """
+    t = (text or "").strip().lower()
+    t = _AR_DIACRITICS.sub("", t)
+    t = (
+        t.replace("أ", "ا")
+        .replace("إ", "ا")
+        .replace("آ", "ا")
+        .replace("ى", "ي")
+        .replace("ة", "ه")
+    )
+    t = t.strip(" .!,؟?*_-()[]")
+    return " ".join(t.split())
+
+
 # Prompt that introduces the numbered options, per language. Kept here rather
 # than in the template copy because the buttons only exist as a numbered list on
 # this transport — the Meta rendering of the same template must not show it.
 _REPLY_PROMPT = {
-    "en": "Reply with a number:",
-    "ar": "رد برقم:",
+    "en": "Reply with the number or the word:",
+    "ar": "رد بالرقم أو بالكلمة:",
 }
 
 # Meta's approved copy tells the customer to TAP A BUTTON, because on Meta there
@@ -304,6 +330,17 @@ def render_plain_template(
             payload = _quick_reply_payload(components, parameters, idx)
             if payload is not None:
                 quick_reply_payloads[digit] = payload
+                # Also key by the LABEL, so "تأكيد الأوردر" / "Confirm Order"
+                # resolves to exactly the same action as "1". People reply with
+                # words at least as often as digits, and a reply we cannot read
+                # leaves a COD order stuck.
+                label_key = normalise_reply(label)
+                if label_key:
+                    quick_reply_payloads[label_key] = payload
+                    # First word too ("تأكيد", "confirm") — the common shorthand.
+                    first = label_key.split(" ")[0]
+                    if first and first != label_key:
+                        quick_reply_payloads.setdefault(first, payload)
             numbered.append(f"{digit}) {label}")
         elif btype == "URL":
             url = _url_for_button(button, components, parameters, idx)

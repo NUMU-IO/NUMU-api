@@ -1,5 +1,6 @@
 """MessageLog repository implementation."""
 
+import logging
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -24,6 +25,9 @@ _STATUS_ORDER: dict[MessageStatus, int] = {
     MessageStatus.DELIVERED: 2,
     MessageStatus.READ: 3,
 }
+
+
+logger = logging.getLogger(__name__)
 
 
 class MessageLogRepository(IMessageLogRepository):
@@ -106,12 +110,50 @@ class MessageLogRepository(IMessageLogRepository):
         return [self._to_entity(m) for m in result.scalars().all()]
 
     async def create(self, entity: MessageLog) -> MessageLog:
-        """Create a new message log entry."""
+        """Create a message log entry and surface it in the conversation inbox.
+
+        The inbox (``whatsapp_conversations``) was previously only ever written
+        from the INBOUND webhook path, so a store could send hundreds of order
+        notifications and the merchant's inbox stayed empty — five logged
+        messages, zero threads. From the merchant's point of view the product
+        looked broken while working perfectly.
+
+        Threading it here rather than at each call site is deliberate: every
+        transport and every notification route already funnels through this
+        method, so one place catches all of them and none can forget. Best
+        effort — a thread is a convenience, and failing to write one must never
+        fail the message it describes.
+        """
         model = self._to_model(entity)
         self.session.add(model)
         await self.session.flush()
         await self.session.refresh(model)
+        await self._touch_conversation(entity)
         return self._to_entity(model)
+
+    async def _touch_conversation(self, entity: MessageLog) -> None:
+        """Create/update the inbox thread for this message. Never raises."""
+        if not entity.store_id or not entity.tenant_id or not entity.phone:
+            return
+        try:
+            from src.infrastructure.repositories.whatsapp_conversation_repository import (  # noqa: E501
+                WhatsAppConversationRepository,
+            )
+
+            direction = str(getattr(entity.direction, "value", entity.direction))
+            # Prefer the human-readable body; fall back to the template name so
+            # a thread never previews as an empty line.
+            preview = (entity.content or "").strip() or entity.template_name or ""
+            await WhatsAppConversationRepository(self.session).upsert_on_message(
+                store_id=entity.store_id,
+                tenant_id=entity.tenant_id,
+                phone=entity.phone,
+                name=None,
+                message_preview=preview,
+                direction=direction,
+            )
+        except Exception:
+            logger.warning("conversation_touch_failed", exc_info=True)
 
     async def update(self, entity: MessageLog) -> MessageLog:
         """Update an existing message log entry."""
