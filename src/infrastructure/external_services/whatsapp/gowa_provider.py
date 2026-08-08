@@ -76,6 +76,20 @@ logger = logging.getLogger(__name__)
 # GOWA addresses chats by JID. For a 1:1 chat that is "<digits>@s.whatsapp.net".
 _USER_JID_SUFFIX = "@s.whatsapp.net"
 
+
+def _phone_of(target: str | MessageRecipient) -> str:
+    """Accept either a bare phone or a MessageRecipient.
+
+    The parent's `send_text_message(phone: str, text: str)` is called with a
+    PLAIN STRING from several places — the COD acknowledgement reply among them.
+    Overriding it with a `MessageRecipient` parameter broke those callers with
+    `'str' object has no attribute 'phone'`: the order was confirmed, then the
+    customer never got the confirmation back. Matching the parent's signature is
+    the contract; accepting a recipient too keeps our own call sites readable.
+    """
+    return getattr(target, "phone", target)  # type: ignore[return-value]
+
+
 # A send that hangs is worse than one that fails: the caller is usually a Celery
 # task holding a DB session, and the notification is time-sensitive anyway.
 _TIMEOUT_SECONDS = 20.0
@@ -264,7 +278,7 @@ class GowaProvider(WhatsAppMessagingService):
 
     async def send_text_message(
         self,
-        recipient: MessageRecipient,
+        phone: str | MessageRecipient,
         text: str,
         *,
         message_type: str | None = None,
@@ -303,7 +317,7 @@ class GowaProvider(WhatsAppMessagingService):
 
         result = await self._post(
             "/send/message",
-            {"phone": self._to_jid(recipient.phone), "message": text},
+            {"phone": self._to_jid(_phone_of(phone)), "message": text},
         )
 
         # Feed the health signal. A sustained run of failures means something is
@@ -342,17 +356,21 @@ class GowaProvider(WhatsAppMessagingService):
 
     async def send_media_message(
         self,
-        recipient: MessageRecipient,
+        phone: str | MessageRecipient,
         media_url: str,
-        caption: str = "",
+        caption: str | None = None,
+        media_type: str = "image",
     ) -> MessageResult:
-        """Send an image by URL, with an optional caption."""
+        """Send an image by URL, with an optional caption.
+
+        Signature MIRRORS the parent exactly — see `_phone_of`.
+        """
         return await self._post(
             "/send/image",
             {
-                "phone": self._to_jid(recipient.phone),
+                "phone": self._to_jid(_phone_of(phone)),
                 "image_url": media_url,
-                "caption": caption,
+                "caption": caption or "",
             },
         )
 
@@ -401,7 +419,9 @@ class GowaProvider(WhatsAppMessagingService):
                     error_code="gowa_reply_correlation_unavailable",
                 )
 
-        return await self.send_text_message(content.recipient, rendered.text)
+        return await self.send_text_message(
+            content.recipient, rendered.text, message_type=str(content.type)
+        )
 
     async def _record_pending_reply(
         self, content: MessageContent, rendered: Any
