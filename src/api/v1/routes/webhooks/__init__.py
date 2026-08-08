@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from src.api.v1.routes.webhooks.bosta import router as bosta_router
 from src.api.v1.routes.webhooks.fawaterak import router as fawaterak_router
 from src.api.v1.routes.webhooks.fawry import router as fawry_router
+from src.api.v1.routes.webhooks.gowa import router as gowa_router
 from src.api.v1.routes.webhooks.instapay import router as instapay_router
 from src.api.v1.routes.webhooks.jt import router as jt_router
 from src.api.v1.routes.webhooks.kashier import router as kashier_router
@@ -38,6 +39,12 @@ router.include_router(bosta_router, prefix="/bosta", tags=["Webhooks - Bosta"])
 router.include_router(mylerz_router, prefix="/mylerz", tags=["Webhooks - Mylerz"])
 router.include_router(jt_router, prefix="/jt", tags=["Webhooks - J&T"])
 router.include_router(whatsapp_router, prefix="/whatsapp", tags=["Webhooks - WhatsApp"])
+# GOWA (unofficial WhatsApp Web transport). Separate handler from the Meta
+# callback: different signature scheme, and inbound replies are numbered text
+# rather than button payloads.
+router.include_router(
+    gowa_router, prefix="/whatsapp/gowa", tags=["Webhooks - WhatsApp"]
+)
 router.include_router(kashier_router, prefix="/kashier", tags=["Webhooks - Kashier"])
 # Platform-directed Kashier payments (wallet card top-ups) — NUMU's own
 # account, hard-enforced platform signature. Separate from the merchant route.
