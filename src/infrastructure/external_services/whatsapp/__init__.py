@@ -4,6 +4,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from src.config.settings import settings
 from src.infrastructure.external_services.whatsapp.gowa_provider import GowaProvider
 from src.infrastructure.external_services.whatsapp.messaging_service import (
     WhatsAppMessagingService,
@@ -30,15 +31,35 @@ _PROVIDER_GOWA = "gowa"
 def resolve_provider_name(store_settings: dict | None) -> str:
     """Read the configured transport out of a store's settings JSON.
 
-    Anything unrecognised resolves to Meta. A typo in the settings blob must
-    not silently route a merchant's messages over the unofficial transport.
+    Precedence: an explicit per-store setting always wins. Only when a store
+    has said nothing does the platform default apply — so a merchant
+    deliberately pinned to Meta stays on Meta even after the fleet default
+    flips, and vice versa.
+
+    An unrecognised value is treated as "unset" and falls through to the
+    platform default — so while that default is Meta (the shipped state), a typo
+    can never silently route a merchant onto the unofficial transport. Once an
+    operator has deliberately moved the fleet default to GOWA, a typo landing on
+    GOWA is simply the fleet default applying, which is the intended behaviour.
     """
     node: Any = store_settings or {}
     for key in _PROVIDER_SETTING_PATH:
         if not isinstance(node, dict):
-            return _PROVIDER_META
+            node = None
+            break
         node = node.get(key)
-    return _PROVIDER_GOWA if node == _PROVIDER_GOWA else _PROVIDER_META
+
+    if node in (_PROVIDER_GOWA, _PROVIDER_META):
+        return str(node)
+
+    # No explicit choice. `GOWA_PLATFORM_DEFAULT=true` moves every store that
+    # sends on the SHARED NUMU number over to GOWA, keeping the behaviour
+    # identical — same templates, same triggers, same hub — and changing only
+    # the wire underneath. Stores with their own Meta credentials are handled
+    # by the caller and never reach this default.
+    if settings.gowa_platform_default and settings.gowa_enabled:
+        return _PROVIDER_GOWA
+    return _PROVIDER_META
 
 
 async def get_whatsapp_service(
@@ -105,9 +126,14 @@ async def get_whatsapp_service(
             WhatsAppGowaDeviceRepository,
         )
 
-        device = await WhatsAppGowaDeviceRepository(db_session).get_active_for_store(
-            store_id
-        )
+        gowa_repo = WhatsAppGowaDeviceRepository(db_session)
+        # Store's own paired number first; the shared platform number is the
+        # fallback, mirroring how Meta resolves BYO credentials before the
+        # platform token. A store on the shared path therefore keeps behaving
+        # exactly as it does today — only the wire changes.
+        device = await gowa_repo.get_active_for_store(store_id)
+        if device is None:
+            device = await gowa_repo.get_platform_device()
         if device:
             logger.info(
                 "whatsapp_service_using_gowa",
@@ -121,12 +147,18 @@ async def get_whatsapp_service(
             # "own", the platform's shared number is not.
             return GowaProvider(
                 device_id=device.device_id,
-                is_own=device.phone is not None,
+                # "own" means the merchant's own number, so the shared platform
+                # device is NOT own — same vocabulary the Meta path reports.
+                is_own=not device.is_platform,
                 # Numbered prompts must record what each digit means before
                 # they go out; the transport needs a session to do that.
                 db_session=db_session,
                 store_id=store_id,
                 tenant_id=tenant_id,
+                paired_at=device.paired_at,
+                device_status=device.status,
+                store_settings=store_settings,
+                is_platform=device.is_platform,
             )
         logger.warning(
             "whatsapp_gowa_selected_but_unpaired",

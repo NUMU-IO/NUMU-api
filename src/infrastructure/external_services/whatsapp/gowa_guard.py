@@ -87,6 +87,25 @@ DEFAULT_ALLOWED_TYPES: frozenset[str] = frozenset({
 # Consecutive failures before the device is treated as unhealthy.
 FAILURE_STREAK_PAUSE = 5
 
+# ── platform-device ceilings ───────────────────────────────────────────────
+#
+# The shared NUMU number carries traffic for EVERY store on the shared path, so
+# the per-merchant numbers above are wrong twice over.
+#
+# Too low: a fleet-wide 50/day warm-up would strand every store's order
+# notifications for the first three days. The platform number is also an
+# established account with real history, not a cold one, so the warm-up
+# reasoning that protects a freshly linked merchant number doesn't apply.
+#
+# Too high is the real danger, and it is worth being blunt about: on the BYO
+# path a ban costs one merchant. Here it takes WhatsApp away from every store at
+# once. These ceilings are therefore generous enough to carry the fleet and
+# still far below anything that reads as bulk, and the jitter still applies —
+# volume is not what gets numbers banned, unsolicited volume is.
+PLATFORM_MAX_PER_MINUTE = 20
+PLATFORM_MAX_PER_HOUR = 600
+PLATFORM_MAX_PER_DAY = 4000
+
 
 @dataclass(frozen=True)
 class GuardDecision:
@@ -159,6 +178,7 @@ class GowaSendGuard:
         paired_at: datetime | None,
         device_status: str | None,
         store_settings: dict | None = None,
+        is_platform: bool = False,
     ) -> GuardDecision:
         """Decide whether this send may proceed.
 
@@ -227,20 +247,30 @@ class GowaSendGuard:
             logger.exception("gowa_guard_counter_unavailable")
             return GuardDecision(allowed=True, delay_seconds=self._jitter())
 
-        if per_minute > MAX_PER_MINUTE:
+        # The shared platform device carries the whole fleet, so per-merchant
+        # ceilings would throttle every store at once; see PLATFORM_MAX_*.
+        max_minute = PLATFORM_MAX_PER_MINUTE if is_platform else MAX_PER_MINUTE
+        max_hour = PLATFORM_MAX_PER_HOUR if is_platform else MAX_PER_HOUR
+
+        if per_minute > max_minute:
             return GuardDecision(
                 allowed=False,
                 reason="rate_limited_minute",
-                detail=f"{per_minute - 1}/{MAX_PER_MINUTE} sent this minute.",
+                detail=f"{per_minute - 1}/{max_minute} sent this minute.",
             )
-        if per_hour > MAX_PER_HOUR:
+        if per_hour > max_hour:
             return GuardDecision(
                 allowed=False,
                 reason="rate_limited_hour",
-                detail=f"{per_hour - 1}/{MAX_PER_HOUR} sent this hour.",
+                detail=f"{per_hour - 1}/{max_hour} sent this hour.",
             )
 
-        daily_cap = warmup_daily_cap(paired_at, now)
+        # No warm-up ramp on the platform number: it is an established account
+        # with real history, and ramping it would strand every store's order
+        # notifications for days.
+        daily_cap = (
+            PLATFORM_MAX_PER_DAY if is_platform else warmup_daily_cap(paired_at, now)
+        )
         if per_day > daily_cap:
             return GuardDecision(
                 allowed=False,

@@ -37,6 +37,45 @@ class WhatsAppGowaDeviceRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_platform_device(self) -> WhatsAppGowaDeviceModel | None:
+        """The shared NUMU number, used by every store without its own.
+
+        The GOWA equivalent of the platform Meta credentials: one account
+        sending for the whole fleet, belonging to no single store.
+        """
+        result = await self.session.execute(
+            select(WhatsAppGowaDeviceModel)
+            .where(
+                WhatsAppGowaDeviceModel.is_platform.is_(True),
+                WhatsAppGowaDeviceModel.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_platform_device(
+        self, device_id: str, acknowledged_by: UUID | None = None
+    ) -> WhatsAppGowaDeviceModel:
+        """Register (or re-register) the shared platform device."""
+        existing = await self.get_platform_device()
+        if existing:
+            existing.is_active = False
+            existing.status = "logged_out"
+            await self.session.flush()
+        device = WhatsAppGowaDeviceModel(
+            tenant_id=None,
+            store_id=None,
+            is_platform=True,
+            device_id=device_id,
+            status="pending",
+            is_active=True,
+            consent_acknowledged_at=datetime.now(UTC) if acknowledged_by else None,
+            consent_acknowledged_by=acknowledged_by,
+        )
+        self.session.add(device)
+        await self.session.flush()
+        return device
+
     async def get_by_device_id(self, device_id: str) -> WhatsAppGowaDeviceModel | None:
         """Reverse lookup for inbound webhooks, which are keyed by device."""
         result = await self.session.execute(

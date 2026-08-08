@@ -100,6 +100,7 @@ class GowaProvider:
         paired_at: Any = None,
         device_status: str | None = None,
         store_settings: dict | None = None,
+        is_platform: bool = False,
         guard: GowaSendGuard | None = None,
     ) -> None:
         self.device_id = device_id
@@ -121,6 +122,9 @@ class GowaProvider:
         self.paired_at = paired_at
         self.device_status = device_status
         self.store_settings = store_settings
+        # The shared NUMU number carries every store on the shared path, so it
+        # gets fleet-scale ceilings and no warm-up ramp.
+        self.is_platform = is_platform
         # Only guard real sends. A bare instance (webhook signature checks)
         # has no device to pace.
         self._guard = guard or (GowaSendGuard() if device_id else None)
@@ -305,6 +309,7 @@ class GowaProvider:
             paired_at=self.paired_at,
             device_status=self.device_status,
             store_settings=self.store_settings,
+            is_platform=self.is_platform,
         )
 
     async def send_media_message(

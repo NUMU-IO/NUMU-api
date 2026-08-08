@@ -44,10 +44,19 @@ class WhatsAppGowaDeviceModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         {"schema": "public"},
     )
 
-    store_id: Mapped[PyUUID] = mapped_column(
+    # NULL on the PLATFORM device: the shared NUMU number belongs to no single
+    # store, exactly as the shared Meta credentials don't.
+    store_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.stores.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+
+    # The shared platform number. Any store without its own paired device falls
+    # back to this one, which is how existing shared-number behaviour is kept
+    # intact while the transport underneath changes from Meta to GOWA.
+    is_platform: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )
 
     # GOWA's own identifier, passed back as the X-Device-Id header.

@@ -796,6 +796,20 @@ class Settings(BaseSettings):
     gowa_webhook_secret: str | None = None
     gowa_enabled: bool = False
 
+    # Route the SHARED platform number through GOWA instead of Meta Cloud.
+    #
+    # When true, every store that has not explicitly chosen a transport and does
+    # not have its own Meta credentials sends via the paired platform device.
+    # Behaviour is otherwise unchanged — same templates, same triggers, same
+    # merchant hub — only the wire underneath differs.
+    #
+    # CONCENTRATION RISK, deliberately called out: on the BYO path a ban costs
+    # one merchant their number. On the shared path every store sends from the
+    # SAME account, so a ban is a fleet-wide WhatsApp outage. The per-device
+    # caps in `gowa_guard` are the mitigation, and they apply to the whole fleet
+    # combined — see GOWA_PLATFORM_* there.
+    gowa_platform_default: bool = False
+
     # Egyptian Tax Authority (ETA) E-Invoicing
     eta_client_id: str | None = None
     eta_client_secret: str | None = None

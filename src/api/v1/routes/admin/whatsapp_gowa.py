@@ -161,6 +161,126 @@ async def _load_store(db: AsyncSession, store_id: UUID) -> StoreModel:
 # ── routes ─────────────────────────────────────────────────────────────────
 
 
+@router.post("/platform/pair", operation_id="admin_pair_gowa_platform_device")
+async def pair_platform_device(
+    body: PairRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin: Annotated[UserModel, Depends(require_admin)],
+) -> SuccessResponse[PairResponse]:
+    """Pair the SHARED NUMU number that every store on the shared path sends from.
+
+    The GOWA counterpart of the platform Meta credentials. With
+    ``GOWA_PLATFORM_DEFAULT=true`` this one account carries every store that
+    hasn't brought its own number — so existing behaviour is preserved exactly
+    and only the wire changes.
+
+    Worth stating plainly: a ban here is not one merchant's problem, it is a
+    fleet-wide WhatsApp outage. That is why the platform ceilings in
+    ``gowa_guard`` are separate from the per-merchant ones.
+    """
+    if not body.acknowledge_risk:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Pairing the platform number requires acknowledge_risk=true: a "
+                "ban on this account takes WhatsApp away from every store on "
+                "the shared number."
+            ),
+        )
+
+    repo = WhatsAppGowaDeviceRepository(db)
+    created = await _gowa("POST", "/devices", json={"name": "numu-platform"})
+    device_id = str((created.get("results") or {}).get("id") or "")
+    if not device_id:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="GOWA did not return a device id.",
+        )
+
+    await repo.create_platform_device(device_id, acknowledged_by=admin.id)
+    await db.commit()
+
+    digits = "".join(ch for ch in body.phone if ch.isdigit())
+    result = (
+        await _gowa("GET", f"/app/login-with-code?phone={digits}", device_id=device_id)
+    ).get("results") or {}
+    return SuccessResponse(
+        data=PairResponse(
+            device_id=device_id, method="code", pair_code=result.get("pair_code")
+        ),
+        message="Enter this code on the NUMU platform handset now — it expires quickly.",
+    )
+
+
+@router.post("/platform/adopt", operation_id="admin_adopt_gowa_platform_device")
+async def adopt_platform_device(
+    device_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin: Annotated[UserModel, Depends(require_admin)],
+) -> SuccessResponse[dict]:
+    """Register an ALREADY-LINKED GOWA device as the platform device.
+
+    Exists because the platform number may have been paired directly against
+    GOWA (during setup or recovery) before the platform row existed. Re-pairing
+    purely to create that row would unlink a working session for no reason.
+    """
+    live = (await _gowa("GET", f"/devices/{device_id}/status")).get("results") or {}
+    if not live.get("is_logged_in"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Device {device_id} is not logged in; pair it before adopting "
+                "it as the platform device."
+            ),
+        )
+
+    repo = WhatsAppGowaDeviceRepository(db)
+    device = await repo.create_platform_device(device_id, acknowledged_by=admin.id)
+    # It is already live, so record that rather than leaving it "pending".
+    await repo.mark_connected(device_id)
+    await db.commit()
+    return SuccessResponse(
+        data={"device_id": device.device_id},
+        message="Adopted as the platform device.",
+    )
+
+
+@router.get("/platform/status", operation_id="admin_gowa_platform_status")
+async def platform_status(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[DeviceStatus]:
+    """Health of the shared platform device."""
+    device = await WhatsAppGowaDeviceRepository(db).get_platform_device()
+    if not device:
+        return SuccessResponse(data=DeviceStatus(provider="gowa", paired=False))
+
+    is_connected = is_logged_in = None
+    try:
+        live = (await _gowa("GET", f"/devices/{device.device_id}/status")).get(
+            "results"
+        ) or {}
+        is_connected = live.get("is_connected")
+        is_logged_in = live.get("is_logged_in")
+    except HTTPException:
+        pass
+
+    return SuccessResponse(
+        data=DeviceStatus(
+            provider="gowa",
+            paired=True,
+            device_id=device.device_id,
+            phone=device.phone,
+            status=device.status,
+            is_connected=is_connected,
+            is_logged_in=is_logged_in,
+            last_seen_at=device.last_seen_at.isoformat()
+            if device.last_seen_at
+            else None,
+            last_error=device.last_error,
+        )
+    )
+
+
 @router.put("/{store_id}/provider", operation_id="admin_set_whatsapp_provider")
 async def set_provider(
     store_id: UUID,
