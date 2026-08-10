@@ -628,10 +628,94 @@ async def get_theme_schemas(
 # ============================================================================
 
 
+async def platform_indexing_block_reason(session, store) -> str | None:
+    """Why the PLATFORM refuses to let this storefront be indexed, or None.
+
+    Separate from the merchant's own ``seo.robots_indexing_enabled`` switch:
+    this is NUMU protecting its own domain reputation. Every store lives on
+    ``*.numueg.app``, so Google judges them as one property — synthetic and
+    empty storefronts spend the crawl budget real merchants need and drag the
+    whole domain's quality signal down.
+
+    Live evidence (2026-08-07 Search Console): of 343 discovered pages only 39
+    were indexed, and 248 sat in "Discovered – currently not indexed". 20 of
+    the 36 live storefronts were synthetic (8 seeded fake brands, 10
+    load-test stores, 2 try-a-demo tenants) carrying 139 products + 38
+    categories — roughly the entire not-indexed bucket.
+
+    Reasons, in order of cost to evaluate:
+
+    * ``demo_seed``   — seeded showcase data (``scripts/seed_fake_brands.py``).
+    * ``load_test``   — ``load-store-*`` fixtures from the k6 suite.
+    * ``demo_tenant`` — try-a-demo throwaway tenants (auto-purged).
+    * ``no_products`` — nothing to show. A catalogue-less storefront renders an
+      empty grid, which is a soft 404; volunteering those is how a domain
+      stops being trusted. **Self-correcting**: publish one product and the
+      store becomes indexable again on the next payload fetch (60s cache), so
+      no flag has to be flipped by hand.
+
+    Fails OPEN: any error here returns None (indexable). A transient database
+    hiccup must never de-index a live merchant's store.
+    """
+    try:
+        from sqlalchemy import exists, select
+
+        from src.infrastructure.database.models.public.tenant import TenantModel
+        from src.infrastructure.database.models.tenant.product import (
+            ProductModel,
+            ProductStatus,
+        )
+
+        settings = store.settings or {}
+        if isinstance(settings, dict) and settings.get("demo_seed"):
+            return "demo_seed"
+        if (store.subdomain or "").startswith("load-store-"):
+            return "load_test"
+
+        # One round trip for both remaining signals — this runs on the hot
+        # store-payload path (cached 60s by the storefront, but still).
+        #
+        # ORM constructs, not text(): a hand-written "FROM public.products"
+        # renders a schema that does not exist under the SQLite test engine
+        # (conftest strips schemas), the query raises, and the fail-open
+        # handler below turns the whole gate into a silent no-op — green in
+        # prod-shaped manual checks, dead in tests. Caught by
+        # test_platform_indexing_gate.
+        has_active_product = exists().where(
+            ProductModel.store_id == store.id,
+            ProductModel.status == ProductStatus.ACTIVE,
+        )
+        row = (
+            await session.execute(
+                select(TenantModel.plan, has_active_product).where(
+                    TenantModel.id == store.tenant_id
+                )
+            )
+        ).first()
+        if row is None:
+            return None
+        plan, has_active_product = row[0], row[1]
+        if (plan or "").lower() == "demo":
+            return "demo_tenant"
+        if not has_active_product:
+            return "no_products"
+        return None
+    except Exception:  # noqa: BLE001 — never de-index on an internal error
+        from src.core.logging import get_logger
+
+        get_logger(__name__).warning(
+            "platform_indexing_gate_failed",
+            store_id=str(getattr(store, "id", None)),
+            exc_info=True,
+        )
+        return None
+
+
 def _serialize_public_store(
     store,
     *,
     tenant_feature_flags: dict[str, bool] | None = None,
+    indexing_block_reason: str | None = None,
 ) -> dict:
     """Common payload returned by `/store-by-subdomain` and `/store-by-domain`.
 
@@ -655,6 +739,16 @@ def _serialize_public_store(
     # so stores configured through the old Preferences form stop being silently
     # discarded. See normalize_store_seo for the full rationale.
     seo_normalized = normalize_store_seo(raw_settings)
+
+    # Platform gate beats the merchant switch: the storefront already honors
+    # `seo.robots_indexing_enabled === false` everywhere that matters (robots
+    # .txt -> `Disallow: /`, empty sitemap, `noindex` metadata), so forcing it
+    # here de-indexes a synthetic store through the existing machinery instead
+    # of adding a parallel concept the storefront would have to learn.
+    # `seo_blocked_reason` is advisory only — for the hub/admin to explain WHY.
+    if indexing_block_reason:
+        seo_normalized["robots_indexing_enabled"] = False
+        seo_normalized["blocked_reason"] = indexing_block_reason
 
     return {
         "id": str(store.id),
@@ -721,7 +815,10 @@ async def get_store_by_subdomain(
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
-    payload = _serialize_public_store(store, tenant_feature_flags=flags)
+    block_reason = await platform_indexing_block_reason(session, store)
+    payload = _serialize_public_store(
+        store, tenant_feature_flags=flags, indexing_block_reason=block_reason
+    )
     await cache.set_store(payload)
     return SuccessResponse(
         data=payload,
@@ -766,7 +863,10 @@ async def get_store_by_domain(
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
-    payload = _serialize_public_store(store, tenant_feature_flags=flags)
+    block_reason = await platform_indexing_block_reason(session, store)
+    payload = _serialize_public_store(
+        store, tenant_feature_flags=flags, indexing_block_reason=block_reason
+    )
     await cache.set_store(payload)
     return SuccessResponse(
         data=payload,
