@@ -5,7 +5,7 @@ Tokens are set via httpOnly cookies — never exposed in JSON response body.
 """
 
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -85,7 +85,7 @@ from src.application.use_cases.auth.two_factor import (
     Verify2FAUseCase,
 )
 from src.config import settings
-from src.core.exceptions import EntityNotFoundError
+from src.core.exceptions import EntityNotFoundError, ValidationError
 from src.core.interfaces.services.token_service import TokenPayload
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services import (
@@ -890,6 +890,168 @@ class ApiKeyInfoResponse(BaseModel):
     currency: str | None
     default_language: str | None
     tenant_id: str
+
+
+# ---------------------------------------------------------------------------
+# Push device registration
+# ---------------------------------------------------------------------------
+#
+# ONE endpoint, TWO clients:
+#
+#   * the merchant-hub PWA sends provider="webpush" with RFC 8291 keys
+#   * numu-merchant-app sends provider="expo" with an Expo push token
+#
+# The mobile app has been calling POST /auth/me/push-token since before this
+# existed — it 404'd and the app swallowed the error. The request shape below
+# is therefore NOT a new design; it matches numu-merchant-app/lib/push.ts
+# exactly ({token, platform, provider, sound}) so the app starts working with
+# no mobile-side change. `endpoint` is accepted as an alias for `token` because
+# that is the web vocabulary.
+
+
+class PushTokenRegisterRequest(BaseModel):
+    """Register (or refresh) one device for push."""
+
+    # Web sends `endpoint`; Expo sends `token`. Accept either.
+    token: str | None = None
+    endpoint: str | None = None
+    provider: Literal["webpush", "expo"] = "webpush"
+    platform: Literal["web", "ios", "android"] = "web"
+    # RFC 8291 encryption material — web only.
+    p256dh: str | None = None
+    auth: str | None = None
+    locale: str | None = None
+    # Expo-only: custom sound registered by the mobile app. Ignored for web.
+    sound: str | None = None
+
+    @property
+    def resolved_endpoint(self) -> str | None:
+        return self.endpoint or self.token
+
+
+class PushKeyResponse(BaseModel):
+    """The VAPID public key a browser needs in order to subscribe."""
+
+    public_key: str | None
+    enabled: bool
+
+
+@router.get(
+    "/me/push-key",
+    response_model=SuccessResponse[PushKeyResponse],
+    summary="VAPID public key for Web Push subscription",
+    operation_id="get_push_public_key",
+)
+async def get_push_public_key(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Return the VAPID public key, or `enabled: false` if push isn't configured.
+
+    Deliberately not a 404 when unconfigured: the client uses `enabled` to hide
+    its push UI entirely, and an error would look like a bug to the merchant.
+    """
+    return SuccessResponse(
+        data=PushKeyResponse(
+            public_key=settings.VAPID_PUBLIC_KEY,
+            enabled=settings.web_push_enabled,
+        )
+    )
+
+
+@router.post(
+    "/me/push-token",
+    response_model=SuccessResponse[dict],
+    summary="Register this device for push notifications",
+    operation_id="register_push_token",
+)
+async def register_push_token(
+    payload: PushTokenRegisterRequest,
+    http_request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Upsert the caller's device registration.
+
+    Idempotent on `endpoint`: browsers re-issue the same endpoint on every
+    `subscribe()` call, so without an upsert a merchant would accumulate one
+    row per page load.
+    """
+    from src.api.dependencies.tenant_context import resolve_owner_tenant
+    from src.infrastructure.repositories.device_registration_repository import (
+        DeviceRegistrationRepository,
+    )
+
+    endpoint = payload.resolved_endpoint
+    if not endpoint:
+        raise ValidationError("Either `token` or `endpoint` is required")
+
+    # SECURITY: never accept user_id or tenant_id from the body. An attacker
+    # could otherwise subscribe their own device to someone else's store.
+    tenant = await resolve_owner_tenant(http_request, db, UUID(str(user_id)))
+    if tenant is None:
+        raise ValidationError("No tenant context for this user")
+
+    # SECURITY: an admin impersonating a merchant must not register THEIR OWN
+    # device for that merchant's push — they would keep receiving the store's
+    # orders long after the impersonation session ended.
+    #
+    # ⚠️ This CANNOT be detected server-side. Verified 2026-08-08: the handoff
+    # token minted by `admin/stores.py::impersonate` is an ordinary access token
+    # for the store owner, with a longer TTL and no distinguishing claim. By the
+    # time it reaches here it is indistinguishable from the merchant's own
+    # session. So the real enforcement lives in the hub, which knows it is
+    # impersonating (sessionStorage "numu.impersonation_token") and refuses to
+    # subscribe at all.
+    #
+    # The header below is cooperative defence-in-depth, not a security boundary:
+    # the client that would set it is the same client that already declines to
+    # call this endpoint. If impersonation ever needs a real server-side gate,
+    # the token must carry an explicit claim — that is a separate change.
+    if http_request.headers.get("x-numu-impersonating") == "1":
+        return SuccessResponse(data={"registered": False, "reason": "impersonating"})
+
+    repo = DeviceRegistrationRepository(db)
+    await repo.upsert(
+        tenant_id=tenant.id,
+        user_id=UUID(str(user_id)),
+        endpoint=endpoint,
+        provider=payload.provider,
+        platform=payload.platform,
+        p256dh=payload.p256dh,
+        auth=payload.auth,
+        locale=payload.locale,
+        sound=payload.sound,
+        user_agent=http_request.headers.get("user-agent"),
+    )
+    await db.commit()
+    return SuccessResponse(data={"registered": True})
+
+
+@router.delete(
+    "/me/push-token",
+    response_model=SuccessResponse[dict],
+    summary="Revoke a device's push registration",
+    operation_id="revoke_push_token",
+)
+async def revoke_push_token(
+    http_request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    endpoint: str | None = None,
+):
+    """Revoke one endpoint, or every device for this user when none is given.
+
+    Called on logout. A signed-out device must stop receiving a store's orders
+    — shared phones are common among merchant staff.
+    """
+    from src.infrastructure.repositories.device_registration_repository import (
+        DeviceRegistrationRepository,
+    )
+
+    repo = DeviceRegistrationRepository(db)
+    revoked = await repo.revoke(user_id=UUID(str(user_id)), endpoint=endpoint)
+    await db.commit()
+    return SuccessResponse(data={"revoked": revoked})
 
 
 @router.get(
