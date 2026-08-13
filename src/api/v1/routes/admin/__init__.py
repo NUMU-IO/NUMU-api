@@ -48,6 +48,7 @@ from src.api.v1.routes.admin.wallets import router as wallets_router
 from src.api.v1.routes.admin.whatsapp_access import (
     router as whatsapp_access_router,
 )
+from src.api.v1.routes.admin.whatsapp_gowa import router as whatsapp_gowa_router
 from src.api.v1.routes.tenant.configuration.admin_routes import (
     router as credentials_router,
 )
@@ -66,6 +67,9 @@ router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
 router.include_router(
     plan_limits_router, prefix="/plan-limits", tags=["Admin - Plan Limits"]
 )
+# GOWA transport: per-merchant provider choice + device pairing. Staff-only
+# by design — it links a real WhatsApp account that can be banned.
+router.include_router(whatsapp_gowa_router, tags=["Admin - WhatsApp GOWA"])
 router.include_router(wallets_router, prefix="/wallets", tags=["Admin - Wallets"])
 router.include_router(
     subscription_payments_router,

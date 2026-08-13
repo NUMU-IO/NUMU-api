@@ -46,6 +46,9 @@ from src.core.events.staff_events import (
     TemporaryAccessGrantedEvent,
     TemporaryAccessRevokedEvent,
 )
+from src.infrastructure.events.handlers.abandoned_recovery_handler import (
+    handle_order_created_recovery,
+)
 from src.infrastructure.events.handlers.activity_log_handler import handle_activity_log
 from src.infrastructure.events.handlers.email_notification_handler import (
     handle_email_notification,
@@ -190,6 +193,10 @@ def create_event_bus() -> EventBus:
     # emails must not silently stop the merchant's phone from buzzing. Opt-out
     # per store via store.settings.push_notifications.new_order.
     bus.subscribe(OrderCreatedEvent, handle_merchant_order_push)
+    # Attribute the order back to the abandoned cart it came from, so the
+    # merchant's list stops showing carts that were already bought and the
+    # recovery link stops resurrecting them.
+    bus.subscribe(OrderCreatedEvent, handle_order_created_recovery)
     # backend-030 / US1 — WhatsApp order-confirmation on order creation
     bus.subscribe(OrderCreatedEvent, handle_order_created_whatsapp)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)

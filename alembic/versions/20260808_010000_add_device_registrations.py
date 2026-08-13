@@ -17,7 +17,7 @@ places to prune dead endpoints for one product behaviour.
 load. RLS mirrors every other tenant-scoped table.
 
 Revision ID: device_registrations_20260808
-Revises: sub_reminder_20260802
+Revises: wa_gowa_plat_20260808
 Create Date: 2026-08-08
 """
 
@@ -29,7 +29,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "device_registrations_20260808"
-down_revision: str | Sequence[str] | None = "sub_reminder_20260802"
+down_revision: str | Sequence[str] | None = "wa_gowa_plat_20260808"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -800,6 +800,39 @@ class Settings(BaseSettings):
     whatsapp_enabled: bool = False
     whatsapp_business_api_version: str = "v21.0"
 
+    # GOWA (go-whatsapp-web-multidevice) — the second WhatsApp transport.
+    #
+    # UNOFFICIAL: it drives the WhatsApp Web multi-device protocol as a logged-in
+    # account rather than the Business API, so the number in use carries a real
+    # ban risk. Which merchants use it is an explicit per-store choice made in
+    # the admin backoffice; these settings only describe how to reach the
+    # self-hosted instance.
+    #
+    # `gowa_base_url` points at the TLS front door, never at the container: the
+    # instance can send messages as ANY paired merchant, so it is bound to
+    # loopback on its host and reachable only through an authenticated proxy.
+    # `gowa_basic_auth` is "user:password" matching the instance's
+    # APP_BASIC_AUTH; `gowa_webhook_secret` must equal its
+    # WHATSAPP_WEBHOOK_SECRET or every inbound webhook fails verification.
+    gowa_base_url: str | None = None
+    gowa_basic_auth: str | None = None
+    gowa_webhook_secret: str | None = None
+    gowa_enabled: bool = False
+
+    # Route the SHARED platform number through GOWA instead of Meta Cloud.
+    #
+    # When true, every store that has not explicitly chosen a transport and does
+    # not have its own Meta credentials sends via the paired platform device.
+    # Behaviour is otherwise unchanged — same templates, same triggers, same
+    # merchant hub — only the wire underneath differs.
+    #
+    # CONCENTRATION RISK, deliberately called out: on the BYO path a ban costs
+    # one merchant their number. On the shared path every store sends from the
+    # SAME account, so a ban is a fleet-wide WhatsApp outage. The per-device
+    # caps in `gowa_guard` are the mitigation, and they apply to the whole fleet
+    # combined — see GOWA_PLATFORM_* there.
+    gowa_platform_default: bool = False
+
     # Egyptian Tax Authority (ETA) E-Invoicing
     eta_client_id: str | None = None
     eta_client_secret: str | None = None
