@@ -333,6 +333,29 @@ class Settings(BaseSettings):
         None  # Set to your domain in production (e.g., "numu.com")
     )
 
+    # ─── Web Push (VAPID / RFC 8292) ──────────────────────────────────
+    # Vendor-free push for the merchant-hub PWA. Generate the keypair ONCE;
+    # rotating the public key invalidates every existing browser subscription,
+    # so merchants would silently stop receiving notifications until they
+    # re-subscribe.
+    #
+    # The private key belongs in the production env ONLY (/opt/numu-api/.env).
+    # Never commit it, never log it.
+    #
+    # When these are unset, push degrades silently: the endpoints report
+    # "unavailable" and nothing raises. That is intentional so a deploy without
+    # the keys cannot take the API down.
+    VAPID_PUBLIC_KEY: str | None = None
+    VAPID_PRIVATE_KEY: str | None = None
+    # RFC 8292 requires a contact URI so a push service can reach the sender
+    # about a misbehaving deployment.
+    VAPID_SUBJECT: str = "mailto:support@numueg.app"
+
+    @property
+    def web_push_enabled(self) -> bool:
+        """True when both VAPID keys are configured."""
+        return bool(self.VAPID_PUBLIC_KEY and self.VAPID_PRIVATE_KEY)
+
     # ─── Try-a-Demo flow (Stream 1 of NUMU plan) ──────────────────────
     # Cloudflare Turnstile bot protection. Get keys from
     # https://dash.cloudflare.com/?to=/:account/turnstile

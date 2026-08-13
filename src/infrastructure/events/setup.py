@@ -67,6 +67,9 @@ from src.infrastructure.events.handlers.invoice_on_paid_handler import (
 from src.infrastructure.events.handlers.merchant_notification_handler import (
     handle_merchant_order_notification,
 )
+from src.infrastructure.events.handlers.merchant_push_handler import (
+    handle_merchant_order_push,
+)
 from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
     handle_order_status_changed_for_meta_capi,
 )
@@ -182,6 +185,11 @@ def create_event_bus() -> EventBus:
     # Email the store owner ("you got a new order") on every new order.
     # Opt-out per store via store.settings.email_notifications.new_order.
     bus.subscribe(OrderCreatedEvent, handle_merchant_order_notification)
+    # PWA Phase 2 — push the same event to the merchant's registered devices.
+    # A SEPARATE subscriber from the email handler on purpose: turning off order
+    # emails must not silently stop the merchant's phone from buzzing. Opt-out
+    # per store via store.settings.push_notifications.new_order.
+    bus.subscribe(OrderCreatedEvent, handle_merchant_order_push)
     # backend-030 / US1 — WhatsApp order-confirmation on order creation
     bus.subscribe(OrderCreatedEvent, handle_order_created_whatsapp)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)

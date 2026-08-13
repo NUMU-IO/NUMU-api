@@ -36,6 +36,10 @@ dependencies = [
     "resend>=0.7.0",
     "httpx>=0.26.0",
     "boto3>=1.34.0",  # For Cloudflare R2 (S3-compatible)
+    # Web Push (VAPID / RFC 8291) for the merchant-hub PWA. Vendor-free on
+    # purpose: the same device_registrations table also serves the Expo mobile
+    # client, so a push SaaS would fragment delivery and add a per-message cost.
+    "pywebpush>=2.4.0",
 
     # Caching & Messaging
     "redis>=5.0.1",
