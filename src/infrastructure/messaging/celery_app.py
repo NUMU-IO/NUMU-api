@@ -131,6 +131,9 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.wallet_reconciliation_task",
         "src.infrastructure.messaging.tasks.wallet_notification_tasks",
         "src.infrastructure.messaging.tasks.wallet_topup_expiry_task",
+        # PWA Phase 2 — Web Push / Expo fan-out. Always async: a slow push
+        # service must never be able to delay an order webhook.
+        "src.infrastructure.messaging.tasks.push_tasks",
         # Subscription payments via InstaPay — intent expiry + dunning nudge.
         "src.infrastructure.messaging.tasks.subscription_payment_tasks",
         # backend-017 — daily Shopify-side verification overage relay.
