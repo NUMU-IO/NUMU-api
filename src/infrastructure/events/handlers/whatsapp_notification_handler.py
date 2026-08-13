@@ -426,6 +426,15 @@ async def _resolve_send_context(
             already_sent = True
             break
 
+    # Which transport this store will actually send on. The guard runs BEFORE
+    # `get_whatsapp_service`, so without this it judges every store by Meta's
+    # rules — including the ones deliberately moved onto GOWA, whose whole
+    # purpose is to send without waiting on Meta's template review. Read from
+    # the settings blob already in hand, so it costs no extra query.
+    from src.infrastructure.external_services.whatsapp import (
+        requires_template_approval,
+    )
+
     ctx = GuardContext(
         phone=customer_phone,
         template_name=template_name,
@@ -438,6 +447,7 @@ async def _resolve_send_context(
         has_opt_out=has_opt_out,
         window_is_open=True,  # template sends ignore the 24h window (FR-037 (f))
         already_sent=already_sent,
+        requires_template_approval=requires_template_approval(store_settings),
     )
 
     extras = {

@@ -16,6 +16,7 @@ __all__ = [
     "GowaProvider",
     "WhatsAppMessagingService",
     "get_whatsapp_service",
+    "requires_template_approval",
     "resolve_provider_name",
 ]
 
@@ -60,6 +61,29 @@ def resolve_provider_name(store_settings: dict | None) -> str:
     if settings.gowa_platform_default and settings.gowa_enabled:
         return _PROVIDER_GOWA
     return _PROVIDER_META
+
+
+def requires_template_approval(store_settings: dict | None) -> bool:
+    """Whether this store's sends must wait for Meta to approve the template.
+
+    The send-guard runs BEFORE the transport is resolved, so it needs to know
+    which wire the message will take. Only the Meta Cloud transport sends a
+    template *reference* — an unapproved name there is a hard Graph API 400,
+    which is what the guard's approval gate protects against.
+
+    GOWA sends the finished text (rendered by ``core.whatsapp_plain_render``)
+    and never names a template, so Meta's review verdict has no bearing on
+    whether the send works. Enforcing it anyway is what silently dropped GOWA
+    stores' order notifications: every rich system template is seeded
+    ``PENDING`` and only flips to ``APPROVED`` when Meta reviews it, so stores
+    moved onto GOWA specifically to stop waiting on Meta were still gated on
+    exactly that.
+
+    Mirrors ``get_whatsapp_service``'s own transport choice — the same
+    ``resolve_provider_name`` call on the same settings blob — so the guard can
+    never judge a store by rules the resolver won't apply.
+    """
+    return resolve_provider_name(store_settings) != _PROVIDER_GOWA
 
 
 async def get_whatsapp_service(
