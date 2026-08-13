@@ -360,7 +360,10 @@ async def notify_whatsapp(
     from src.infrastructure.database.models.tenant.whatsapp_template import (
         WhatsAppTemplateModel,
     )
-    from src.infrastructure.external_services.whatsapp import get_whatsapp_service
+    from src.infrastructure.external_services.whatsapp import (
+        get_whatsapp_service,
+        requires_template_approval,
+    )
 
     checkout = await repo.get_by_id(checkout_id)
     if not checkout or checkout.store_id != store.id:
@@ -468,6 +471,11 @@ async def notify_whatsapp(
         has_opt_out=False,
         window_is_open=True,  # template send ignores the 24h window
         already_sent=False,  # merchant may deliberately re-notify
+        # A store on GOWA sends the rendered text, not a template reference,
+        # so Meta's review state cannot block this send — and abandoned_cart
+        # is precisely the message merchants move to GOWA to escape (Meta's
+        # 131049 marketing cap delivers only the first nudge).
+        requires_template_approval=requires_template_approval(store_settings),
     )
     decision = check(ctx)
     if not decision.allowed:

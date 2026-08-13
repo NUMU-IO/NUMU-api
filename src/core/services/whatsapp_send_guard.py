@@ -49,7 +49,8 @@ class GuardContext:
     template_status: str | None
     """The local ``whatsapp_templates.status`` for ``template_name``.
     Required when ``template_name`` is set. Anything other than ``APPROVED``
-    rejects the send (FR-029)."""
+    rejects the send (FR-029) — unless ``requires_template_approval`` is
+    False, see below."""
 
     # Store-side state
     store_has_credentials: bool
@@ -83,6 +84,28 @@ class GuardContext:
     """``True`` if ``message_log`` already has a successful send for the
     same idempotency key (e.g., ``order_id + event_type``). Drives the
     ``already_sent`` skip reason for replay-safety (FR-005)."""
+
+    # Transport
+    requires_template_approval: bool = True
+    """Whether ``template_status`` must be ``APPROVED`` for this send.
+
+    True for the Meta Cloud transport, where an unapproved template is a
+    hard 400 from the Graph API — that is what FR-029 protects against.
+
+    False for transports that hold the copy themselves, i.e. GOWA, which
+    sends the finished text rendered by ``core.whatsapp_plain_render`` and
+    never names a Meta template on the wire. Meta's review state says
+    nothing about whether such a send can succeed, and enforcing it there
+    defeats the entire reason that transport exists: every rich system
+    template is seeded ``PENDING`` (see the seed_rich_wa_templates
+    migration) and only flips to ``APPROVED`` once Meta reviews it, so a
+    GOWA store's order notifications were being skipped for a verdict that
+    is irrelevant to them.
+
+    Defaults to True so a caller that has not thought about transport keeps
+    the strict Meta behaviour. Every other gate — opt-out, merchant toggle,
+    idempotency — still applies to both transports.
+    """
 
 
 @dataclass(frozen=True)
@@ -136,7 +159,16 @@ def check(ctx: GuardContext) -> GuardDecision:
     # Applies to every category; the bypass allowlist is checked first so
     # the STOP-ack templates (which are seeded as APPROVED system rows in
     # the migration) pass this check naturally.
-    if ctx.template_name is not None and ctx.template_status != "APPROVED":
+    #
+    # Skipped when the transport does not send template REFERENCES — see
+    # `requires_template_approval`. This is the one gate that is about
+    # Meta's opinion rather than the merchant's or the customer's, so it is
+    # the one gate a non-Meta transport may skip.
+    if (
+        ctx.requires_template_approval
+        and ctx.template_name is not None
+        and ctx.template_status != "APPROVED"
+    ):
         return GuardDecision(False, SendSkipReason.TEMPLATE_NOT_APPROVED)
 
     # Idempotency last — cheapest to check after structural guards pass.
