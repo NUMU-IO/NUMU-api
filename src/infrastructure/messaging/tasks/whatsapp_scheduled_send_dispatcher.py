@@ -271,6 +271,14 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
     ) is not None
     has_opt_out = await optin_repo.has_opt_out(row.store_id, row.phone)
 
+    # Same reasoning as _resolve_send_context: Meta's template-review verdict
+    # only gates a transport that sends template references. The delayed COD
+    # confirm-request lands here, so without this a GOWA store's confirm
+    # prompt is dropped at fire-time exactly as the immediate one was.
+    from src.infrastructure.external_services.whatsapp import (
+        requires_template_approval,
+    )
+
     ctx = GuardContext(
         phone=row.phone,
         template_name=template_name,
@@ -285,6 +293,7 @@ async def _evaluate_guard(session, optin_repo, row, *, now: datetime):
         has_opt_out=has_opt_out,
         window_is_open=True,
         already_sent=False,  # scheduled-send is its own idempotency unit
+        requires_template_approval=requires_template_approval(store_settings),
     )
     language = _resolve_language(
         store_settings, store_row.default_language if store_row else None

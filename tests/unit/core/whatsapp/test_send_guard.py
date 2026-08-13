@@ -189,6 +189,61 @@ def test_non_approved_template_rejected(status: str | None) -> None:
     assert decision.reason == SendSkipReason.TEMPLATE_NOT_APPROVED
 
 
+@pytest.mark.parametrize(
+    "status",
+    ["PENDING", "REJECTED", "FLAGGED", "PAUSED", "DISABLED", None],
+)
+def test_non_approved_template_allowed_when_approval_not_required(
+    status: str | None,
+) -> None:
+    """A transport that holds its own copy is not bound by Meta's verdict.
+
+    GOWA renders the finished text locally and never names a template on the
+    wire, so ``PENDING`` — the state every rich system template is SEEDED in
+    until Meta reviews it — must not silence a GOWA store's order
+    notifications.
+    """
+    decision = check(_ctx(template_status=status, requires_template_approval=False))
+    assert decision.allowed
+    assert decision.reason is None
+
+
+def test_approval_is_required_by_default() -> None:
+    """The relaxation must be opt-in: a caller that says nothing about its
+    transport keeps the strict Meta behaviour."""
+    ctx = _ctx()
+    assert ctx.requires_template_approval is True
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"phone": None}, SendSkipReason.NO_PHONE),
+        ({"has_opt_out": True}, SendSkipReason.OPT_OUT),
+        ({"notification_setting_enabled": False}, SendSkipReason.MERCHANT_SETTING_OFF),
+        ({"already_sent": True}, SendSkipReason.ALREADY_SENT),
+        (
+            {"store_credentials_marked_invalid": True},
+            SendSkipReason.CREDENTIALS_INVALID,
+        ),
+    ],
+)
+def test_other_gates_still_apply_without_template_approval(
+    overrides: dict, expected: SendSkipReason
+) -> None:
+    """Only gate (g) is transport-dependent.
+
+    Skipping Meta's review state must not turn into a blanket bypass: the
+    merchant's own toggle, the customer's opt-out and replay-safety are
+    properties of the message, not of the wire it travels on.
+    """
+    decision = check(
+        _ctx(template_status="PENDING", requires_template_approval=False, **overrides)
+    )
+    assert not decision.allowed
+    assert decision.reason == expected
+
+
 # ── Idempotency ─────────────────────────────────────────────────────
 
 
