@@ -344,7 +344,9 @@ class GowaProvider(WhatsAppMessagingService):
         nothing and is the part that matters most.
         """
         if self._guard is None:
-            return GuardDecision(allowed=True, delay_seconds=GowaSendGuard._jitter())
+            return GuardDecision(
+                allowed=True, delay_seconds=GowaSendGuard._jitter(message_type)
+            )
         return await self._guard.check(
             device_id=self.device_id,
             message_type=message_type,

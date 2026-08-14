@@ -77,6 +77,25 @@ MAX_OPTIONS = 20
 MAX_VALUE_LEN = 500
 
 
+def default_identity_config() -> dict[str, Any]:
+    """Built-in defaults for the phone-first identity layer.
+
+    ``require_verification`` defaults ON — the product decision is that once
+    the platform gate (``settings.checkout_identity_enabled``) is flipped,
+    every store gets the checkout OTP gate unless the merchant opts out.
+    While the gate is off, or while the store's transport cannot deliver an
+    OTP (``otp_available`` is computed at read time, never stored), the whole
+    block is inert regardless of these values.
+    """
+    return {
+        "require_verification": True,
+        "nudge_enabled": True,
+        "nudge_min_items": 1,
+        "nudge_min_value_cents": 0,
+        "nudge_delay_seconds": 45,
+    }
+
+
 def default_config() -> dict[str, Any]:
     """Return the built-in default checkout config."""
     return {
@@ -92,6 +111,7 @@ def default_config() -> dict[str, Any]:
             "notes": {"enabled": False, "required": False},
         },
         "custom_fields": [],
+        "identity": default_identity_config(),
     }
 
 
@@ -112,6 +132,19 @@ def resolve_config(store_settings: dict | None) -> dict[str, Any]:
     raw_custom = stored.get("custom_fields") or []
     if isinstance(raw_custom, list):
         cfg["custom_fields"] = raw_custom[:MAX_CUSTOM_FIELDS]
+    stored_identity = stored.get("identity")
+    if isinstance(stored_identity, dict):
+        for key, default in cfg["identity"].items():
+            value = stored_identity.get(key, default)
+            # Coerce to the default's type so a hand-edited settings blob
+            # can't leak a string where the storefront expects a number;
+            # anything uncoercible falls back to the default.
+            try:
+                cfg["identity"][key] = (
+                    bool(value) if isinstance(default, bool) else max(0, int(value))
+                )
+            except (TypeError, ValueError):
+                cfg["identity"][key] = default
     return cfg
 
 
@@ -151,9 +184,24 @@ class CustomFieldSetting(BaseModel):
         return cleaned or None
 
 
+class IdentityConfig(BaseModel):
+    """Phone-first identification layer (checkout OTP gate + save-cart nudge).
+
+    Bounds keep a typo from becoming a footgun: a 10-hour nudge delay or a
+    million-pound threshold is a config mistake, not a strategy.
+    """
+
+    require_verification: bool = True
+    nudge_enabled: bool = True
+    nudge_min_items: int = Field(1, ge=0, le=50)
+    nudge_min_value_cents: int = Field(0, ge=0, le=100_000_000)
+    nudge_delay_seconds: int = Field(45, ge=0, le=3600)
+
+
 class CheckoutFieldsConfig(BaseModel):
     standard_fields: dict[str, StandardFieldSetting] = Field(default_factory=dict)
     custom_fields: list[CustomFieldSetting] = Field(default_factory=list)
+    identity: IdentityConfig = Field(default_factory=IdentityConfig)
 
     def to_storage(self) -> dict[str, Any]:
         """Serialize for persistence — applies locks, trims, assigns IDs, sorts."""
@@ -185,7 +233,11 @@ class CheckoutFieldsConfig(BaseModel):
             }
             custom.append(entry)
 
-        return {"standard_fields": std, "custom_fields": custom}
+        return {
+            "standard_fields": std,
+            "custom_fields": custom,
+            "identity": self.identity.model_dump(),
+        }
 
 
 def validate_custom_field_values(

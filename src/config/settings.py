@@ -833,6 +833,17 @@ class Settings(BaseSettings):
     # combined — see GOWA_PLATFORM_* there.
     gowa_platform_default: bool = False
 
+    # Phone-first checkout identity (WhatsApp-OTP gate + save-cart nudge).
+    #
+    # Platform-wide rollout gate: while False the entire feature is inert —
+    # no gate at checkout, no nudge, `identity.otp_available` reads false —
+    # regardless of per-store settings. Once flipped, stores default to
+    # require_verification=True (see core.checkout_fields.IdentityConfig)
+    # unless the merchant opts out, and stores whose transport cannot
+    # deliver an OTP (Meta without an approved AUTH template) self-degrade
+    # to today's behaviour via the otp_available capability.
+    checkout_identity_enabled: bool = False
+
     # Egyptian Tax Authority (ETA) E-Invoicing
     eta_client_id: str | None = None
     eta_client_secret: str | None = None

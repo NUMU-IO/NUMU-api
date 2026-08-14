@@ -55,6 +55,14 @@ MAX_PER_HOUR = 250
 JITTER_MIN_SECONDS = 1.5
 JITTER_MAX_SECONDS = 6.0
 
+# OTP sends get their own, much tighter band. A customer is sitting on the
+# checkout with a code input open — six seconds of deliberate delay reads as
+# "broken", and the anti-automation rationale barely applies: the recipient
+# just ASKED for this exact message, so report risk is nil. Still randomised
+# (never zero, never a fixed gap) and still counted in every rate ceiling.
+OTP_JITTER_MIN_SECONDS = 0.3
+OTP_JITTER_MAX_SECONDS = 1.0
+
 # Warm-up ladder: (minimum session age in days, messages/day).
 # A number that has been sending steadily for a fortnight is an established
 # sender; one linked an hour ago is not, and WhatsApp treats them differently.
@@ -88,6 +96,10 @@ DEFAULT_ALLOWED_TYPES: frozenset[str] = frozenset({
     str(MessageType.PAYMENT_RECEIVED),
     str(MessageType.DELIVERY_CHECK),
     str(MessageType.SHIP_DIGEST),
+    # Customer-initiated checkout verification code (checkout-identity).
+    # Lowest report risk of anything here: the recipient literally just
+    # clicked "send me a code". Gets the reduced OTP jitter below.
+    str(MessageType.OTP_VERIFICATION),
     # Higher risk than the rest — see the note above.
     str(MessageType.ABANDONED_CART),
     str(MessageType.COD_RECOVERY_OFFER),
@@ -261,7 +273,7 @@ class GowaSendGuard:
                 "gowa_guard_counters_unavailable_limits_not_enforced",
                 extra={"device_id": device_id},
             )
-            return GuardDecision(allowed=True, delay_seconds=self._jitter())
+            return GuardDecision(allowed=True, delay_seconds=self._jitter(message_type))
 
         # The shared platform device carries the whole fleet, so per-merchant
         # ceilings would throttle every store at once; see PLATFORM_MAX_*.
@@ -297,11 +309,17 @@ class GowaSendGuard:
                 ),
             )
 
-        return GuardDecision(allowed=True, delay_seconds=self._jitter())
+        return GuardDecision(allowed=True, delay_seconds=self._jitter(message_type))
 
     @staticmethod
-    def _jitter() -> float:
-        """A randomised gap. Never zero — instant sends are the tell."""
+    def _jitter(message_type: str | None = None) -> float:
+        """A randomised gap. Never zero — instant sends are the tell.
+
+        OTPs use the tight band: someone is waiting at a code input, and the
+        message is one they explicitly requested — see OTP_JITTER_*.
+        """
+        if message_type == str(MessageType.OTP_VERIFICATION):
+            return random.uniform(OTP_JITTER_MIN_SECONDS, OTP_JITTER_MAX_SECONDS)
         return random.uniform(JITTER_MIN_SECONDS, JITTER_MAX_SECONDS)
 
     async def record_failure(self, device_id: str) -> int:

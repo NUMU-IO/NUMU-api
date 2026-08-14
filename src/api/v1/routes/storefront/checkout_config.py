@@ -181,6 +181,16 @@ async def get_public_checkout_config(
         p in _CARD_TOKEN_PROVIDERS for p in enabled_methods
     )
 
+    # ── Phone-first identity (checkout OTP gate + save-cart nudge) ─────
+    # `identity` already carries the merchant's config via resolve_config;
+    # add the computed capability so the storefront never renders a gate
+    # the store's transport can't pass. otp_available is fail-closed.
+    from src.application.services.checkout_identity import otp_available
+
+    config["identity"]["otp_available"] = await otp_available(
+        store_id, store.settings, db
+    )
+
     # When the merchant has cod_trust enabled, phone becomes non-optional
     # at COD checkout — surface this so the storefront form can mark the
     # field required up-front instead of letting the user discover it via

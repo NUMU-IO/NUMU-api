@@ -40,6 +40,12 @@ class MessageType(StrEnum):
     SHIP_DIGEST = "ship_digest"
     # COD Autopilot: post-shipped delivery check to the CUSTOMER.
     DELIVERY_CHECK = "delivery_check"
+    # Phone-first checkout identity: the verification code itself.
+    # Customer-initiated (they clicked "send code"), AUTHENTICATION-tier —
+    # delivered over GOWA as locally-rendered plain text; the Meta path
+    # needs an approved AUTH template (special OTP component) and is not
+    # wired yet — see application/services/checkout_identity.otp_available.
+    OTP_VERIFICATION = "otp_verification"
 
 
 class MessageStatus(StrEnum):
@@ -574,6 +580,32 @@ EGYPTIAN_TEMPLATES = {
                     "index": "2",
                     "parameters": ["refused_payload"],
                 },
+            ],
+        ),
+    },
+    MessageType.OTP_VERIFICATION: {
+        # No Meta template submitted — Meta AUTHENTICATION templates use a
+        # special OTP component (copy-code / one-tap) that the payload
+        # builder cannot emit yet, so a Meta-transport send of this type
+        # fails and the feature's `otp_available` capability keeps such
+        # stores gated off. GOWA renders the body locally from
+        # _PLAIN_ONLY_TEMPLATES (whatsapp_plain_render) and sends it as
+        # free text — the only live path in v1.
+        "en": MessageTemplate(
+            type=MessageType.OTP_VERIFICATION,
+            name="otp_verification_v1",
+            language="en",
+            components=[
+                # Body: {{1}} code, {{2}} store name.
+                {"type": "body", "parameters": ["code", "store_name"]},
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.OTP_VERIFICATION,
+            name="otp_verification_v1",
+            language="ar",
+            components=[
+                {"type": "body", "parameters": ["code", "store_name"]},
             ],
         ),
     },
