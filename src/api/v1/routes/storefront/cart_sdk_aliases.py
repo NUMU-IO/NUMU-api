@@ -26,7 +26,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,7 @@ from src.api.v1.routes.storefront.cart import (
     _cart_repo,
     _get_or_create_cart,
     _get_or_create_guest_cart,
+    client_session_fingerprint,
     emit_add_to_cart_event,
 )
 from src.api.v1.schemas.storefront.cart import CartResponse
@@ -202,6 +203,7 @@ async def sdk_get_cart(
 )
 async def sdk_add_cart_item(
     request: SdkAddItemRequest,
+    http_request: Request,
     owner: Annotated[CartOwner, Depends(get_cart_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
@@ -315,6 +317,7 @@ async def sdk_add_cart_item(
         store_repo,
         store_id=owner.store_id,
         customer_id=owner.customer_id,
+        session_fingerprint=client_session_fingerprint(http_request),
         step_data={
             "product_id": str(request.product_id),
             "product_name": product.name,

@@ -405,6 +405,19 @@ async def track_page_view(
     ip = _anonymize_ip(raw_ip)
     ua = request.headers.get("user-agent", "")[:500]
 
+    # Analytics hygiene: drop bot + internal traffic at INGEST. Crawlers
+    # keep no cookies, so every crawled page minted a fresh fingerprint —
+    # one bot walking the catalog registered as hundreds of "unique
+    # visitors" and crushed the conversion rate (vionne read 0.28% while
+    # converting ~2% of actual humans). Theme-editor previews counted too.
+    from src.application.services.device_classifier import (
+        is_bot_user_agent,
+        is_internal_traffic,
+    )
+
+    if is_bot_user_agent(ua) or is_internal_traffic(body.referrer, body.path):
+        return Response(status_code=204)
+
     step = resolve_funnel_step(body.step, body.path)
 
     # Resolved once, here, rather than inside the funnel try-block below:
@@ -669,6 +682,12 @@ async def track_analytics_event(
     )
     ip = _anonymize_ip(raw_ip)
     ua = request.headers.get("user-agent", "")[:500]
+
+    # Same ingest hygiene gate as track_page_view — see the comment there.
+    from src.application.services.device_classifier import is_bot_user_agent
+
+    if is_bot_user_agent(ua):
+        return Response(status_code=204)
 
     # Funnel row: keeps a per-store audit log of every event the
     # storefront fired, queryable by step name. Useful for "how many

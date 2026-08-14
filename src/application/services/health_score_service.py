@@ -52,6 +52,37 @@ MIN_ORDERS_FOR_COMPLETION = 5
 MIN_ORDERS_FOR_RETURN_RATE = 5
 MIN_ORDERS_FOR_RESPONSE_TIME = 3
 
+# A grade is only published when at least this much of the total weight is
+# backed by real data. Renormalising whatever survives looked fine on paper
+# but graded real stores on a sliver of the picture: a store with only
+# completion (20%) + speed (10%) usable got a confident-looking "F" computed
+# from 30% of the model. Below this floor the score is withheld ("not enough
+# settled data yet") rather than published as if it were the full verdict.
+#
+# 0.45 exactly, not 0.5: the order-based core (completion 0.20 + returns
+# 0.15 + speed 0.10) sums to 0.45, and manual-fulfillment stores — no
+# carrier integration, so shipment rows never exist — can never exceed it.
+# A higher floor would leave every manual store permanently ungraded.
+MIN_USABLE_WEIGHT = 0.45
+
+# Order statuses that count as SETTLED for the completion metric. The
+# denominator previously included every order older than 24h regardless of
+# status, so a COD order in transit for its normal 2-7 days counted as
+# "not completed" and dragged the rate down — a store with 4 delivered and
+# 3 still shipping read as 57% completion. Terminal-only matches what the
+# hub's copy always claimed ("excluding pending").
+_TERMINAL_DELIVERED = ["DELIVERED", "delivered"]
+_TERMINAL_NEGATIVE = [
+    "CANCELLED",
+    "cancelled",
+    "FAILED",
+    "failed",
+    "RETURNED",
+    "returned",
+    "REFUNDED",
+    "refunded",
+]
+
 
 def _rate_to_score(rate: float, thresholds: list[tuple[float, int]]) -> int:
     """Convert a rate to a 0-100 score using linear interpolation between thresholds.
@@ -84,29 +115,39 @@ def _rate_to_score(rate: float, thresholds: list[tuple[float, int]]) -> int:
     return 50
 
 
-# Higher rate = better score
+# Higher rate = better score.
+#
+# The original curves were cliffs — everything below the top band scored
+# near-zero (57% completion → 9/100, 35h fulfillment → 15/100), which made
+# the grade read as "broken store" for merchants doing tolerably. These
+# grade on a gradient calibrated to EG COD reality: the top band still
+# demands excellence, but the middle of the market lands in the middle of
+# the scale instead of at the floor.
 DELIVERY_SUCCESS_THRESHOLDS = [
     (0.0, 0),
-    (0.6, 10),
-    (0.8, 50),
-    (0.9, 75),
+    (0.5, 20),
+    (0.7, 45),
+    (0.8, 60),
+    (0.9, 80),
     (0.95, 90),
     (1.0, 100),
 ]
 COD_ACCEPTANCE_THRESHOLDS = [
     (0.0, 0),
-    (0.5, 10),
-    (0.7, 50),
+    (0.4, 15),
+    (0.6, 40),
+    (0.75, 60),
     (0.85, 75),
-    (0.9, 90),
+    (0.95, 92),
     (1.0, 100),
 ]
 ORDER_COMPLETION_THRESHOLDS = [
     (0.0, 0),
-    (0.6, 10),
-    (0.8, 50),
-    (0.9, 75),
-    (0.95, 90),
+    (0.4, 20),
+    (0.6, 45),
+    (0.75, 65),
+    (0.85, 80),
+    (0.95, 95),
     (1.0, 100),
 ]
 
@@ -115,17 +156,19 @@ RETURN_RATE_THRESHOLDS = [
     (0.0, 100),
     (0.03, 85),
     (0.05, 70),
-    (0.10, 40),
-    (0.15, 20),
-    (0.20, 0),
+    (0.10, 45),
+    (0.15, 25),
+    (0.25, 0),
 ]
 RESPONSE_TIME_THRESHOLDS = [
     (0.0, 100),
-    (2.0, 90),
-    (6.0, 75),
-    (12.0, 50),
-    (24.0, 30),
-    (48.0, 0),
+    (6.0, 95),
+    (12.0, 85),
+    (24.0, 70),
+    (36.0, 55),
+    (48.0, 40),
+    (72.0, 20),
+    (96.0, 0),
 ]
 
 
@@ -197,12 +240,29 @@ def build_recommendations(
     return recs
 
 
-def build_empty_state_message(lang: str, days: int = HEALTH_SCORE_WINDOW_DAYS) -> str:
-    """Copy shown when there's no order/shipment data in the window.
+def build_empty_state_message(
+    lang: str,
+    days: int = HEALTH_SCORE_WINDOW_DAYS,
+    has_activity: bool = False,
+) -> str:
+    """Copy shown when no score is published.
 
-    Localised (ar default, en) and references the window length so the empty
-    state reads as intentional ("no recent activity") rather than broken.
+    Two distinct situations need two distinct sentences: a store with NO
+    activity in the window ("no orders yet"), and a store with orders that
+    simply haven't SETTLED enough to grade ("still settling") — telling the
+    second store it has no orders reads as a bug.
     """
+    if has_activity:
+        if lang == "en":
+            return (
+                "Your recent orders are still in progress — a reliable score "
+                "appears once enough of them reach a final status "
+                "(delivered, cancelled or returned)."
+            )
+        return (
+            "طلباتك الأخيرة لا تزال قيد التنفيذ — ستظهر درجة موثوقة بمجرد "
+            "وصول عدد كافٍ منها لحالة نهائية (تم التوصيل أو الإلغاء أو الإرجاع)."
+        )
     if lang == "en":
         return (
             f"No orders in the last {days} days yet — your health score will "
@@ -303,24 +363,31 @@ async def calculate_store_health_score(
     cod_acceptance_rate = (cod_collected / total_cod) if total_cod > 0 else 0.0
 
     # === 3. Order Completion Rate ===
-    # Orders that reached DELIVERED / total orders (excluding very recent
-    # in-flight orders that haven't had a chance to reach delivery yet).
+    # Delivered / SETTLED orders. Only terminal states enter the
+    # denominator — an in-flight COD order (pending/confirmed/processing/
+    # shipped) hasn't succeeded or failed yet, and counting it as "not
+    # completed" (as the old ">24h old" rule did) graded merchants down for
+    # simply having orders on the road. `total_orders` (all statuses) is
+    # still reported separately as orders_analyzed for the header count.
     status_text = cast(OrderModel.status, SAString)
     order_stats = await session.execute(
         select(
             func.count().label("total"),
-            func.sum(
-                case((status_text.in_(["DELIVERED", "delivered"]), 1), else_=0)
-            ).label("completed"),
+            func.sum(case((status_text.in_(_TERMINAL_DELIVERED), 1), else_=0)).label(
+                "completed"
+            ),
             func.sum(
                 case(
                     (
-                        status_text.in_([
-                            "RETURNED",
-                            "returned",
-                        ]),
+                        status_text.in_(_TERMINAL_DELIVERED + _TERMINAL_NEGATIVE),
                         1,
                     ),
+                    else_=0,
+                )
+            ).label("settled"),
+            func.sum(
+                case(
+                    (status_text.in_(["RETURNED", "returned"]), 1),
                     else_=0,
                 )
             ).label("returned"),
@@ -328,17 +395,16 @@ async def calculate_store_health_score(
             and_(
                 OrderModel.store_id == store_id,
                 OrderModel.created_at >= period_start,
-                OrderModel.created_at
-                <= now - timedelta(days=1),  # Exclude last day (still in progress)
             )
         )
     )
     order_row = order_stats.one()
     total_orders = order_row.total or 0
     completed_orders = order_row.completed or 0
+    settled_orders = order_row.settled or 0
     returned_orders = order_row.returned or 0
     order_completion_rate = (
-        (completed_orders / total_orders) if total_orders > 0 else 0.0
+        (completed_orders / settled_orders) if settled_orders > 0 else 0.0
     )
 
     # === 4. Return Rate ===
@@ -401,7 +467,7 @@ async def calculate_store_health_score(
         insufficient_metrics.add("delivery_success")
     if total_cod < MIN_COD_SHIPMENTS:
         insufficient_metrics.add("cod_acceptance")
-    if total_orders < MIN_ORDERS_FOR_COMPLETION:
+    if settled_orders < MIN_ORDERS_FOR_COMPLETION:
         insufficient_metrics.add("order_completion")
     if return_denominator < MIN_ORDERS_FOR_RETURN_RATE:
         insufficient_metrics.add("low_return")
@@ -426,31 +492,38 @@ async def calculate_store_health_score(
     }
 
     # === Weighted final score over metrics that have enough data ===
+    usable = {k: v for k, v in WEIGHTS.items() if k not in insufficient_metrics}
+
+    # Publish a grade only when it stands on enough of the model. A score
+    # renormalised from a sliver (e.g. completion 20% + speed 10% usable)
+    # used to render as a confident "F 11/100" for a store the model had
+    # barely measured — worse than showing nothing.
+    # Strict inequality: the manual-fulfillment core sums to exactly 0.45
+    # and must publish.
+    if not insufficient_data and sum(usable.values()) < MIN_USABLE_WEIGHT - 1e-9:
+        insufficient_data = True
+
     if insufficient_data:
         final_score: int | None = None
         grade = "—"
     else:
-        usable = {k: v for k, v in WEIGHTS.items() if k not in insufficient_metrics}
-        if not usable:
-            # Some samples exist, but none reach the per-metric threshold.
-            # Fall back to a flat average so the merchant still sees a number.
-            usable = WEIGHTS
-            insufficient_metrics.clear()
-
         total_weight = sum(usable.values())
         final_score = int(
             sum(sub_scores[k] * (usable[k] / total_weight) for k in usable)
         )
         final_score = max(0, min(100, final_score))
 
-        # === Grade ===
+        # === Grade — MUST match the scale printed in the hub UI
+        # (A 90-100, B 75-89, C 50-74, D 30-49, F 0-29). The service used
+        # C>=60 / D>=40 while the page showed C 50-74 / D 30-49, so the
+        # same number graded differently depending on where you looked.
         if final_score >= 90:
             grade = "A"
         elif final_score >= 75:
             grade = "B"
-        elif final_score >= 60:
+        elif final_score >= 50:
             grade = "C"
-        elif final_score >= 40:
+        elif final_score >= 30:
             grade = "D"
         else:
             grade = "F"
@@ -480,7 +553,13 @@ async def calculate_store_health_score(
         "shipments_analyzed": total_shipments,
         "window_days": days,
         "empty_state_message": (
-            build_empty_state_message(lang, days) if insufficient_data else None
+            build_empty_state_message(
+                lang,
+                days,
+                has_activity=(total_orders > 0 or total_shipments > 0),
+            )
+            if insufficient_data
+            else None
         ),
         "calculated_at": now.isoformat(),
     }

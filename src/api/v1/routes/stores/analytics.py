@@ -1027,6 +1027,10 @@ async def get_health_score(
                 build_empty_state_message(
                     normalized_lang,
                     cached.get("window_days", HEALTH_SCORE_WINDOW_DAYS),
+                    has_activity=bool(
+                        (cached.get("orders_analyzed") or 0)
+                        or (cached.get("shipments_analyzed") or 0)
+                    ),
                 )
                 if cached.get("insufficient_data")
                 else None
