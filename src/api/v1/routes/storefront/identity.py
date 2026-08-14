@@ -77,6 +77,13 @@ router = APIRouter()
 # — must not leak into a "your account" prefill as if the customer typed it.
 _GUEST_EMAIL_DOMAIN = "@noemail.numueg.app"
 
+# How long an OTP login keeps the shopper signed in on this device. Proving
+# phone ownership is a stronger signal than a password, and shoppers expect
+# their own phone to stay signed in — the default short access-token session
+# would silently log them out within the hour and force a re-verify on the
+# next visit. 30 days matches the cart cookie's lifetime.
+IDENTITY_SESSION_DAYS = 30
+
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -495,11 +502,19 @@ async def identity_otp_verify(
                 TokenService,
             )
 
-            token_service = TokenService()
+            # Long-lived device session — token expiry and cookie Max-Age
+            # stretched together (a cookie outliving its JWT presents a dead
+            # token; a JWT outliving its cookie logs the shopper out early).
+            token_service = TokenService(
+                access_token_expire_minutes=IDENTITY_SESSION_DAYS * 24 * 60,
+                refresh_token_expire_days=IDENTITY_SESSION_DAYS,
+            )
             set_customer_auth_cookies(
                 response,
                 token_service.create_customer_access_token(customer),
                 token_service.create_customer_refresh_token(customer),
+                access_max_age_seconds=IDENTITY_SESSION_DAYS * 86400,
+                refresh_max_age_seconds=IDENTITY_SESSION_DAYS * 86400,
             )
         except Exception:
             # Cookies are a convenience (prefill via /me); the verify proof
