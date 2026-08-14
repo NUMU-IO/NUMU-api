@@ -2830,10 +2830,17 @@ async def checkout(
         candidate_email = (
             current_customer.email if current_customer else request.guest_email
         )
+        # Phone joins the match so a recovery-link visitor (fresh
+        # fingerprint, no email) completing the order marks the ORIGINAL
+        # phone-bearing row recovered — previously the ghost row got
+        # marked and the real one sat "abandoned" forever.
         active_cart = await abandoned_repo.find_active_for_session(
             store_id=store_id,
             session_fingerprint=request.session_fingerprint,
             email=candidate_email,
+            phone=(request.shipping_address.phone or None)
+            if request.shipping_address
+            else None,
         )
         if active_cart is not None:
             await abandoned_repo.mark_recovered(
@@ -2960,6 +2967,11 @@ class CartTrackRequest(BaseModel):
     line_items: list[CartTrackLineItem] = Field(default_factory=list)
     email: str | None = Field(None, max_length=254)
     phone: str | None = Field(None, max_length=32)
+    # The abandoned_checkouts row a recovery link restored (set by the
+    # storefront from the recover redirect's cookie). Lets the recovered
+    # visitor's activity UPDATE the original row instead of minting a
+    # duplicate contactless one under their fresh fingerprint.
+    recovered_from_id: UUID | None = None
     shipping_address: dict | None = None
     subtotal: int = 0
     shipping_cost: int = 0
@@ -3017,6 +3029,8 @@ async def cart_track(
             store_id=store_id,
             session_fingerprint=request.session_fingerprint,
             email=candidate_email,
+            phone=request.phone,
+            checkout_id=request.recovered_from_id,
         )
 
         now = datetime.now(UTC)

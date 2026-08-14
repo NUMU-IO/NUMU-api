@@ -262,15 +262,43 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
         store_id: UUID,
         session_fingerprint: str | None,
         email: str | None,
+        phone: str | None = None,
+        checkout_id: UUID | None = None,
     ) -> AbandonedCheckout | None:
-        """Find the most recent un-recovered cart matching the session and/or email.
+        """Find the most recent un-recovered cart for this shopper.
 
-        Matches on `extra_data->>'session_fingerprint'` (a stable client-side
-        token sent by the storefront on every cart event) and/or the email
-        the customer typed into the checkout form. Falls back gracefully:
-        if only one of the two is provided, only that field is matched.
+        Match keys, strongest first:
+
+        * ``checkout_id`` — the recovery-link case. A shopper who opens the
+          WhatsApp/email link usually lands with a BRAND-NEW fingerprint
+          (other device, other browser), so without this key every recovery
+          click minted a duplicate contactless row while the original —
+          the one carrying the phone/email — sat "abandoned" forever, and
+          order-time reconciliation then marked the ghost instead of it.
+          The storefront carries the id from the recover redirect into its
+          cart-track payload. Store-scoped and only ever an un-recovered
+          row, so a stale/foreign id degrades to the weaker keys.
+        * ``session_fingerprint`` / ``email`` / ``phone`` — OR-matched.
+          Phone joins the set because the identity layer now captures it
+          long before email exists; it is what stitches a returning
+          shopper's new session onto the cart we can actually recover.
         """
-        if not session_fingerprint and not email:
+        if checkout_id is not None:
+            query = (
+                select(AbandonedCheckoutModel)
+                .where(
+                    AbandonedCheckoutModel.id == checkout_id,
+                    AbandonedCheckoutModel.store_id == store_id,
+                    AbandonedCheckoutModel.recovered_at.is_(None),
+                )
+                .limit(1)
+            )
+            result = await self.session.execute(self._tenant_filter(query))
+            model = result.scalar_one_or_none()
+            if model is not None:
+                return self._to_entity(model)
+
+        if not session_fingerprint and not email and not phone:
             return None
 
         clauses = []
@@ -281,6 +309,8 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
             )
         if email:
             clauses.append(AbandonedCheckoutModel.email == email)
+        if phone:
+            clauses.append(AbandonedCheckoutModel.phone == phone)
 
         query = (
             select(AbandonedCheckoutModel)
