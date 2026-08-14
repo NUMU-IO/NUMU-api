@@ -54,6 +54,14 @@ class CustomerModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # When this customer last proved ownership of `phone` via WhatsApp OTP
+    # (checkout-identity). NULL = never verified. A timestamp rather than a
+    # boolean so a phone CHANGE naturally invalidates the proof (the stamp
+    # is re-written on each successful verify, and consumers can age it out).
+    # NOTE: `is_verified` below is EMAIL verification — unrelated.
+    phone_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     accepts_marketing: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

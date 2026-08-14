@@ -28,9 +28,12 @@ from src.application.services.platform_default_theme_service import (
     PlatformDefaultThemeService,
 )
 from src.application.services.platform_flags import (
+    CHECKOUT_KEY,
     PAYMENTS_KEY,
+    get_checkout_platform_config,
     get_payments_config,
 )
+from src.config.settings import settings as app_settings
 from src.core.exceptions import ValidationError as DomainValidationError
 from src.infrastructure.database.models.public.platform_config import (
     PlatformConfigModel,
@@ -89,6 +92,34 @@ async def _set_apple_pay_platform_enabled(db: AsyncSession, enabled: bool) -> No
     )
     await db.execute(stmt)
     await db.commit()
+
+
+async def _set_checkout_identity_enabled(db: AsyncSession, enabled: bool) -> None:
+    """Upsert checkout.identity_enabled — the phone-first identity rollout
+    gate (race-safe). Once written, this value WINS over the
+    CHECKOUT_IDENTITY_ENABLED env default everywhere
+    (platform_flags.is_checkout_identity_platform_enabled)."""
+    existing = await get_checkout_platform_config(db)
+    merged = {**existing, "identity_enabled": bool(enabled)}
+    stmt = (
+        pg_insert(PlatformConfigModel)
+        .values(
+            key=CHECKOUT_KEY,
+            value=merged,
+            description="Checkout platform flags (phone-first identity gate, …)",
+        )
+        .on_conflict_do_update(index_elements=["key"], set_={"value": merged})
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+def _resolve_checkout_identity_enabled(checkout_cfg: dict) -> bool:
+    """Effective gate value for the snapshot: stored flag, else env default."""
+    value = checkout_cfg.get("identity_enabled")
+    if value is None:
+        return app_settings.checkout_identity_enabled
+    return bool(value)
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +206,12 @@ class UpdatePlatformConfigPayload(BaseModel):
     app_embeds_tab_enabled: bool | None = None
     # Apple Pay master switch. Omitted = leave untouched; explicit bool = set.
     apple_pay_enabled: bool | None = None
+    # Phone-first checkout identity rollout gate (WhatsApp OTP at checkout +
+    # save-cart nudge). Omitted = leave untouched; explicit bool = set.
+    # NOTE: flipping this ON turns the gate on for every GOWA-transport
+    # store whose merchant hasn't opted out (require_verification defaults
+    # true) — the admin UI carries the same warning.
+    checkout_identity_enabled: bool | None = None
 
 
 class PlatformConfigSnapshot(BaseModel):
@@ -190,6 +227,9 @@ class PlatformConfigSnapshot(BaseModel):
     app_embeds_tab_enabled: bool = False
     # Apple Pay master switch (default True → available; admin can disable).
     apple_pay_enabled: bool = True
+    # Phone-first checkout identity gate (default off; env is the
+    # unset-default, the stored flag wins once set).
+    checkout_identity_enabled: bool = False
 
 
 @router.get(
@@ -214,6 +254,7 @@ async def get_platform_config(
     summary = await svc.get_default_theme_summary() if default_id else None
     theme_engine = await _get_theme_engine_config(db)
     payments = await get_payments_config(db)
+    checkout_cfg = await get_checkout_platform_config(db)
 
     return SuccessResponse(
         data=PlatformConfigSnapshot(
@@ -223,6 +264,7 @@ async def get_platform_config(
                 theme_engine.get("app_embeds_tab_enabled", False)
             ),
             apple_pay_enabled=bool(payments.get("apple_pay_enabled", True)),
+            checkout_identity_enabled=_resolve_checkout_identity_enabled(checkout_cfg),
         ),
         message="Platform config retrieved",
     )
@@ -292,10 +334,23 @@ async def update_platform_config(
             },
         )
 
+    if "checkout_identity_enabled" in fields_set:
+        await _set_checkout_identity_enabled(
+            db, bool(payload.checkout_identity_enabled)
+        )
+        logger.info(
+            "platform_checkout_identity_toggled",
+            extra={
+                "admin_id": str(admin),
+                "new_value": bool(payload.checkout_identity_enabled),
+            },
+        )
+
     default_id = await svc.get_default_theme_id()
     summary = await svc.get_default_theme_summary() if default_id else None
     theme_engine = await _get_theme_engine_config(db)
     payments = await get_payments_config(db)
+    checkout_cfg = await get_checkout_platform_config(db)
 
     return SuccessResponse(
         data=PlatformConfigSnapshot(
@@ -305,6 +360,7 @@ async def update_platform_config(
                 theme_engine.get("app_embeds_tab_enabled", False)
             ),
             apple_pay_enabled=bool(payments.get("apple_pay_enabled", True)),
+            checkout_identity_enabled=_resolve_checkout_identity_enabled(checkout_cfg),
         ),
         message="Platform config updated",
     )

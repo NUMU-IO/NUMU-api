@@ -130,6 +130,20 @@ def _is_track_lookup(path: str) -> bool:
     )
 
 
+def _is_otp(path: str) -> bool:
+    """Checkout-identity OTP issue/verify (checkout-identity feature).
+
+    Issue sends a real WhatsApp message (cost + the merchant's number's
+    reputation); verify is a 6-digit-code oracle. Both need a bucket far
+    tighter than the anonymous general tier. The per-phone ceilings live in
+    the route (Redis, 5/hr + 45s cooldown) — this per-IP tier is the layer
+    an attacker rotating phones can't sidestep.
+    """
+    return path.startswith("/api/v1/storefront/store/") and (
+        path.endswith("/identity/otp/issue") or path.endswith("/identity/otp/verify")
+    )
+
+
 def _is_whatsapp_byo_connect(path: str) -> bool:
     """backend-030 / TASK-SEC-003 — BYO connect hits Meta with 3 reads
     per attempt. A merchant (or attacker with a leaked admin token)
@@ -570,6 +584,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif _is_track_beacon(path):
             tier = "tracking"
             limit = 600  # ~10/sec per IP — analytics beacons are noisy
+        elif _is_otp(path):
+            # 10/IP/min: a real customer needs 1 issue + a couple of verify
+            # attempts, maybe one resend. Tight enough that brute-forcing a
+            # 6-digit code (1M space, 3 attempts/row anyway) or bulk-issuing
+            # codes from one IP is pointless.
+            tier = "otp"
+            limit = 10
         elif _is_whatsapp_byo_connect(path):
             # backend-030 / TASK-SEC-003 — each BYO connect attempt hits
             # Meta with 3 read calls; a burst would chew through NUMU's
