@@ -1,6 +1,7 @@
 """OpenAI service implementation."""
 
 import json
+import re
 
 from openai import AsyncOpenAI
 
@@ -13,6 +14,31 @@ from src.core.interfaces.services.ai_service import (
     IAIService,
     ProductDescription,
 )
+
+# Prices must NEVER survive into stored copy: they go stale the moment the
+# merchant edits the price, and a share link/search snippet promising the
+# old price reads as bait-and-switch on the product page (found live:
+# every vionne product advertised "EGP 230" while selling at 250).
+# Defence-in-depth behind the prompt rule — models ignore instructions
+# sometimes; this strip never does.
+_PRICE_RE = re.compile(
+    r"\s*(?:EGP|USD|SAR|AED|\$|جنيه|ريال|درهم)\s*[0-9][0-9,.]*\s*\.?",
+    re.IGNORECASE,
+)
+
+
+def _strip_prices(text: str) -> str:
+    if not text:
+        return text
+    # Replace with a space (not empty) so words on either side of the
+    # removed amount never fuse ("Only $19.99 today" -> "Only today").
+    cleaned = _PRICE_RE.sub(" ", text)
+    # Restore the space a swallowed sentence boundary leaves behind
+    # ("scarf.Fast delivery" -> "scarf. Fast delivery"); ؀-ۿ
+    # covers Arabic sentence starts.
+    cleaned = re.sub(r"\.(?=[A-Za-z؀-ۿ])", ". ", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).replace(" .", ".")
+    return cleaned.strip()
 
 
 class OpenAIService(IAIService):
@@ -52,7 +78,11 @@ Please provide:
 4. An SEO meta description (max 160 characters)
 5. 5-10 relevant tags
 
-Format your response as JSON with keys: short_description, long_description, seo_title, seo_description, tags (array)"""
+Format your response as JSON with keys: short_description, long_description, seo_title, seo_description, tags (array)
+
+CRITICAL RULES:
+- NEVER include a price, currency amount, or discount figure anywhere (prices change; baked prices go stale in search results and shared links and read as bait-and-switch at the product page).
+- Do not repeat the category word if it already ends the product name."""
 
         try:
             response = await self.client.chat.completions.create(
@@ -64,10 +94,10 @@ Format your response as JSON with keys: short_description, long_description, seo
             data = json.loads(response.choices[0].message.content)
 
             return ProductDescription(
-                short_description=data.get("short_description", ""),
-                long_description=data.get("long_description", ""),
-                seo_title=data.get("seo_title", product_name),
-                seo_description=data.get("seo_description", ""),
+                short_description=_strip_prices(data.get("short_description", "")),
+                long_description=_strip_prices(data.get("long_description", "")),
+                seo_title=_strip_prices(data.get("seo_title", product_name)),
+                seo_description=_strip_prices(data.get("seo_description", "")),
                 tags=data.get("tags", []),
             )
         except Exception as e:
@@ -199,7 +229,11 @@ Return a JSON object with these exact keys:
 - seo_description_ar: max 160 chars (Arabic)
 - tags: array of 5-10 bilingual tags (mix of English and Arabic)
 
-Make the Arabic content natural and culturally appropriate for the Egyptian market, not a literal translation."""
+Make the Arabic content natural and culturally appropriate for the Egyptian market, not a literal translation.
+
+CRITICAL RULES:
+- NEVER include a price, currency amount, or discount figure anywhere (prices change; baked prices go stale in search results and shared links and read as bait-and-switch at the product page).
+- Do not repeat the category word if it already ends the product name."""
 
         try:
             messages: list[dict] = []
@@ -226,14 +260,20 @@ Make the Arabic content natural and culturally appropriate for the Egyptian mark
             data = json.loads(response.choices[0].message.content)
 
             return BilingualProductDescription(
-                short_description_en=data.get("short_description_en", ""),
-                long_description_en=data.get("long_description_en", ""),
-                short_description_ar=data.get("short_description_ar", ""),
-                long_description_ar=data.get("long_description_ar", ""),
-                seo_title_en=data.get("seo_title_en", product_name),
-                seo_title_ar=data.get("seo_title_ar", product_name_ar or product_name),
-                seo_description_en=data.get("seo_description_en", ""),
-                seo_description_ar=data.get("seo_description_ar", ""),
+                short_description_en=_strip_prices(
+                    data.get("short_description_en", "")
+                ),
+                long_description_en=_strip_prices(data.get("long_description_en", "")),
+                short_description_ar=_strip_prices(
+                    data.get("short_description_ar", "")
+                ),
+                long_description_ar=_strip_prices(data.get("long_description_ar", "")),
+                seo_title_en=_strip_prices(data.get("seo_title_en", product_name)),
+                seo_title_ar=_strip_prices(
+                    data.get("seo_title_ar", product_name_ar or product_name)
+                ),
+                seo_description_en=_strip_prices(data.get("seo_description_en", "")),
+                seo_description_ar=_strip_prices(data.get("seo_description_ar", "")),
                 tags=data.get("tags", []),
             )
         except ExternalServiceError:
