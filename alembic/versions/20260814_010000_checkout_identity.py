@@ -37,14 +37,21 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "customers",
-        sa.Column("phone_verified_at", sa.DateTime(timezone=True), nullable=True),
+    # Everything here is IF NOT EXISTS: prod's Supabase already carried an
+    # `ix_customers_store_phone` (hand-created before this migration
+    # existed), which hard-failed the first deploy of this revision — and
+    # because the failure rolled the transaction back, the revision was
+    # never recorded and every retry hit the same wall. Idempotent DDL
+    # makes the migration converge on the intended state regardless of
+    # what was already there.
+    op.execute(
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ"
     )
     op.create_index(
         "ix_customers_store_phone",
         "customers",
         ["store_id", "phone"],
+        if_not_exists=True,
     )
     op.create_index(
         "ix_abandoned_checkouts_phone_sweep",
@@ -53,12 +60,15 @@ def upgrade() -> None:
         postgresql_where=sa.text(
             "phone IS NOT NULL AND customer_id IS NULL AND recovered_at IS NULL"
         ),
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
     op.drop_index(
-        "ix_abandoned_checkouts_phone_sweep", table_name="abandoned_checkouts"
+        "ix_abandoned_checkouts_phone_sweep",
+        table_name="abandoned_checkouts",
+        if_exists=True,
     )
-    op.drop_index("ix_customers_store_phone", table_name="customers")
-    op.drop_column("customers", "phone_verified_at")
+    op.drop_index("ix_customers_store_phone", table_name="customers", if_exists=True)
+    op.execute("ALTER TABLE customers DROP COLUMN IF EXISTS phone_verified_at")
