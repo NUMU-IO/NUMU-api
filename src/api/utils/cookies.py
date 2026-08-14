@@ -71,10 +71,22 @@ def clear_auth_cookies(response: Response) -> None:
 
 
 def set_customer_auth_cookies(
-    response: Response, access_token: str, refresh_token: str
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+    *,
+    access_max_age_seconds: int | None = None,
+    refresh_max_age_seconds: int | None = None,
 ) -> None:
     """Set httpOnly auth cookies for storefront customers. See
-    `set_auth_cookies` for why we pre-clear host-only ghosts."""
+    `set_auth_cookies` for why we pre-clear host-only ghosts.
+
+    ``*_max_age_seconds`` override the settings-derived lifetimes for flows
+    that mint tokens with a non-default expiry (the phone-OTP identity
+    login mints a long-lived device session) — the cookie's Max-Age must
+    match the JWT's exp or the browser keeps presenting a dead token (or
+    drops a live one early).
+    """
     response.delete_cookie(key="customer_access_token", path="/")
     response.delete_cookie(key="customer_refresh_token", path="/api/v1/storefront/")
     response.set_cookie(
@@ -85,7 +97,9 @@ def set_customer_auth_cookies(
         samesite=settings.SAMESITE_COOKIES,
         domain=settings.COOKIE_DOMAIN,
         path="/",
-        max_age=settings.access_token_expire_minutes * 60,
+        max_age=access_max_age_seconds
+        if access_max_age_seconds is not None
+        else settings.access_token_expire_minutes * 60,
     )
     response.set_cookie(
         key="customer_refresh_token",
@@ -95,7 +109,9 @@ def set_customer_auth_cookies(
         samesite=settings.SAMESITE_COOKIES,
         domain=settings.COOKIE_DOMAIN,
         path="/api/v1/storefront/",
-        max_age=settings.refresh_token_expire_days * 86400,
+        max_age=refresh_max_age_seconds
+        if refresh_max_age_seconds is not None
+        else settings.refresh_token_expire_days * 86400,
     )
 
 
