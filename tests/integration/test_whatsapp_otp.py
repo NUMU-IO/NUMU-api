@@ -24,24 +24,27 @@ from src.application.services.otp_service import (
 )
 
 # ---------------------------------------------------------------------------
-# generate_code — CSPRNG-based 6-digit numeric
+# generate_code — CSPRNG-based numeric, OTP_CODE_LENGTH digits
 # ---------------------------------------------------------------------------
 
 
 class TestGenerateCode:
-    def test_returns_six_digit_string(self):
+    def test_returns_code_of_configured_length(self):
+        lo = 10 ** (OTP_CODE_LENGTH - 1)
+        hi = 10**OTP_CODE_LENGTH - 1
         for _ in range(50):
             code = generate_code()
             assert len(code) == OTP_CODE_LENGTH
             assert code.isdigit()
-            assert 100_000 <= int(code) <= 999_999
+            assert lo <= int(code) <= hi
 
     def test_distribution_appears_random(self):
         # Smoke test for non-determinism — same seed never produces same
         # output twice across 100 generations (CSPRNG, not Mersenne).
         codes = {generate_code() for _ in range(100)}
-        # Cardinality should be ≥ 95 in 100 draws from 900k possibilities.
-        assert len(codes) >= 95
+        # 100 draws from 9k possibilities: expected collisions ~0.5, so a
+        # cardinality ≥ 90 still comfortably proves non-determinism.
+        assert len(codes) >= 90
 
 
 # ---------------------------------------------------------------------------
@@ -174,8 +177,10 @@ class TestConstants:
     def test_max_issues_per_hour_is_5(self):
         assert OTP_MAX_ISSUES_PER_HOUR == 5
 
-    def test_code_length_is_6(self):
-        assert OTP_CODE_LENGTH == 6
+    def test_code_length_is_4(self):
+        # Product decision 2026-08-14 — four boxes in the checkout-identity
+        # dialog; see the rationale comment on the constant.
+        assert OTP_CODE_LENGTH == 4
 
     def test_expires_at_for_now_is_5_min_ahead(self):
         now = datetime.now(UTC)

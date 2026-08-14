@@ -24,7 +24,12 @@ from uuid import UUID
 OTP_TTL_SECONDS = 5 * 60  # 5 minutes
 OTP_MAX_ATTEMPTS = 3
 OTP_MAX_ISSUES_PER_HOUR = 5
-OTP_CODE_LENGTH = 6
+# 4 digits (product decision 2026-08-14: faster to read + type on mobile,
+# matches the checkout-identity dialog's four boxes). The smaller space is
+# still safe: 10,000 codes × 3 attempts per row × 5-minute TTL, behind
+# per-phone issue caps and the per-IP "otp" rate tier — a guess succeeds
+# 0.03% of the time and costs the attacker an SMS-visible WhatsApp trail.
+OTP_CODE_LENGTH = 4
 
 
 # ---------------------------------------------------------------------------
@@ -33,11 +38,12 @@ OTP_CODE_LENGTH = 6
 
 
 def generate_code() -> str:
-    """Generate a cryptographically-random 6-digit numeric code as string.
+    """Generate a cryptographically-random OTP_CODE_LENGTH-digit code.
 
     Uses ``secrets`` (CSPRNG) — the LSB of a hash is NOT a code source.
     """
-    n = secrets.randbelow(900_000) + 100_000  # 100000..999999 inclusive
+    span = 10**OTP_CODE_LENGTH - 10 ** (OTP_CODE_LENGTH - 1)
+    n = secrets.randbelow(span) + 10 ** (OTP_CODE_LENGTH - 1)
     return str(n)
 
 
