@@ -32,6 +32,7 @@ from src.api.v1.routes.storefront.customer import router as customer_router
 from src.api.v1.routes.storefront.data_rights import router as data_rights_router
 from src.api.v1.routes.storefront.geocode import router as geocode_router
 from src.api.v1.routes.storefront.gift_cards import router as gift_cards_router
+from src.api.v1.routes.storefront.identity import router as identity_router
 from src.api.v1.routes.storefront.locations import (
     router as pickup_locations_router,
 )
@@ -99,6 +100,7 @@ __all__ = [
     "shipping_router",
     "checkout_config_router",
     "checkout_session_router",
+    "identity_router",
     "whatsapp_optin_router",
     "bundles_router",
     "geocode_router",

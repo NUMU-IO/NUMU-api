@@ -82,6 +82,31 @@ _PLAIN_ONLY_TEMPLATES: list[dict[str, Any]] = [
         "footer": "شكراً لتسوقك معنا.",
         "buttons": [],
     },
+    # Checkout-identity OTP. GOWA-only in v1 (Meta needs an approved AUTH
+    # template with the special OTP component). {{1}} code, {{2}} store name —
+    # order must match EGYPTIAN_TEMPLATES[OTP_VERIFICATION]. The code leads so
+    # it shows in the notification preview; the don't-share line is standard
+    # anti-phishing copy for authentication messages.
+    {
+        "name": "otp_verification_v1",
+        "language": "en",
+        "body": (
+            "{{1}} is your verification code for *{{2}}*.\n\n"
+            "The code is valid for 5 minutes. Never share it with anyone."
+        ),
+        "footer": None,
+        "buttons": [],
+    },
+    {
+        "name": "otp_verification_v1",
+        "language": "ar",
+        "body": (
+            "{{1}} هو رمز التحقق الخاص بك في *{{2}}*.\n\n"
+            "الرمز صالح لمدة ٥ دقائق. لا تشاركه مع أي شخص."
+        ),
+        "footer": None,
+        "buttons": [],
+    },
 ]
 
 # (name, language) -> definition. Built once; both sources are module-level

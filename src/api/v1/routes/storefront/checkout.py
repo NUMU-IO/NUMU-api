@@ -478,6 +478,103 @@ async def checkout(
             detail={"code": "custom_field_errors", "errors": custom_field_errors},
         )
 
+    # ── Phone-first identity enforcement (checkout-identity) ────────────
+    # The storefront modal is UX; THIS is the guard. When the store requires
+    # verification (and its transport can actually deliver an OTP), the
+    # shipping phone must be one this session has proven via WhatsApp OTP:
+    # either the authenticated customer's already-verified phone, or the
+    # Redis proof written by /identity/otp/verify for this cart session.
+    # `identity_phone_just_verified` marks a guest order whose customer row
+    # should be stamped phone_verified_at once it exists (below).
+    identity_phone_just_verified = False
+    _identity_cfg = checkout_config.get("identity") or {}
+    if bool(_identity_cfg.get("require_verification")):
+        from src.application.services.checkout_identity import (
+            otp_available as _otp_available,
+        )
+        from src.application.services.checkout_identity import (
+            read_identity_flag as _read_identity_flag,
+        )
+
+        if await _otp_available(store_id, store.settings, store_repo.session):
+            _addr_phone = (request.shipping_address.phone or "").strip()
+            _canonical: str | None = None
+            if _addr_phone:
+                try:
+                    _canonical = PhoneNumber.parse(
+                        _addr_phone, default_region="EG"
+                    ).e164
+                except Exception:
+                    _canonical = None
+
+            _verified_here = False
+            # Authenticated customer with an OTP-proven phone: no flag needed.
+            if optional_customer is not None and _canonical:
+                from sqlalchemy import select as _select_ident
+
+                from src.infrastructure.database.models.tenant.customer import (
+                    CustomerModel as _CustomerModel,
+                )
+
+                _row = (
+                    await store_repo.session.execute(
+                        _select_ident(
+                            _CustomerModel.phone,
+                            _CustomerModel.phone_verified_at,
+                        ).where(_CustomerModel.id == optional_customer.id)
+                    )
+                ).first()
+                if _row and _row[1] is not None and _row[0] == _canonical:
+                    _verified_here = True
+
+            if not _verified_here and _canonical:
+                # The proof lives under the cart key the verify wrote it to:
+                # customer id for authenticated sessions, else the
+                # numu_cart_session cookie.
+                _candidate_keys = []
+                if optional_customer is not None:
+                    _candidate_keys.append(str(optional_customer.id))
+                _cookie_session = http_request.cookies.get("numu_cart_session")
+                if _cookie_session:
+                    _candidate_keys.append(_cookie_session)
+
+                from src.infrastructure.cache.redis_cache import (
+                    RedisCacheService as _RedisCacheService,
+                )
+
+                _cache = _RedisCacheService()
+                try:
+                    for _key in _candidate_keys:
+                        _flag = await _read_identity_flag(_cache, store_id, _key)
+                        if _flag and _flag.get("phone") == _canonical:
+                            _verified_here = True
+                            identity_phone_just_verified = True
+                            break
+                except Exception:
+                    # Redis outage: fail OPEN. Verification is a fraud
+                    # control, not a correctness one — a blip must never
+                    # take every checkout on the store down with it.
+                    logger.error(
+                        "identity_enforcement_unavailable_failing_open",
+                        exc_info=True,
+                    )
+                    _verified_here = True
+                finally:
+                    await _cache.close()
+
+            if not _verified_here:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": "phone_verification_required",
+                        "message": (
+                            "Please verify your phone number via WhatsApp "
+                            "before placing this order. | "
+                            "يرجى تأكيد رقم هاتفك عبر واتساب قبل إتمام الطلب."
+                        ),
+                    },
+                )
+
     # ── Resolve or create customer ──────────────────────────────────────
     current_customer = optional_customer
     is_guest = current_customer is None
@@ -579,6 +676,29 @@ async def checkout(
             current_customer = await customer_repo.create(
                 current_customer, tenant_id=store.tenant_id
             )
+
+    # The shipping phone was OTP-proven by this session (enforcement block
+    # above) — stamp the proof on whichever customer row checkout resolved
+    # or created, so their NEXT session skips the gate entirely.
+    if identity_phone_just_verified and current_customer is not None:
+        try:
+            from datetime import UTC as _UTC
+            from datetime import datetime as _datetime
+
+            from sqlalchemy import update as _update_ident
+
+            from src.infrastructure.database.models.tenant.customer import (
+                CustomerModel as _CustomerModelStamp,
+            )
+
+            await customer_repo.session.execute(
+                _update_ident(_CustomerModelStamp)
+                .where(_CustomerModelStamp.id == current_customer.id)
+                .values(phone_verified_at=_datetime.now(_UTC))
+            )
+        except Exception:
+            # Best-effort: the order must not fail over a bookkeeping stamp.
+            logger.exception("identity_phone_verified_stamp_failed")
 
     # ── Idempotency check ──────────────────────────────────────────────
     # Scoped to the STORE, not the customer. The customer id was part of the

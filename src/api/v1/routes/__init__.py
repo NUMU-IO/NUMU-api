@@ -133,6 +133,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     gift_cards_router as storefront_gift_cards_router,
 )
+from src.api.v1.routes.storefront import (
+    identity_router as storefront_identity_router,
+)
 
 # Storefront theme resolution (internal — Next.js SSR → FastAPI)
 # Wave 3 Phase 16 — meta_feed_router serves the public catalog XML
@@ -418,6 +421,14 @@ api_router.include_router(
     storefront_checkout_config_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Checkout"],
+)
+
+# Storefront - phone-first identity (anonymous; gated by the cart-session
+# cookie via get_cart_owner + per-IP "otp" rate tier + per-phone Redis caps).
+api_router.include_router(
+    storefront_identity_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Identity"],
 )
 
 # Storefront - recovery payment page (no auth, scoped to store + order UUID)

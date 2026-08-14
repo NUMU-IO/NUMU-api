@@ -70,6 +70,13 @@ async def _detect_and_notify() -> dict:
 
     stats = {"scanned": 0, "abandoned": 0, "notified": 0, "skipped": 0, "errors": 0}
 
+    # ── Pass 2 setup: anonymous phone-bearing checkouts (checkout-identity) ──
+    # The Redis scan below only sees `cart:customer:*`, so every anonymous
+    # cart was invisible to recovery. The identity layer now attaches a phone
+    # to abandoned_checkouts rows BEFORE any customer exists (typed at the
+    # OTP prompt or the save-cart nudge), which makes those rows recoverable
+    # — swept after the customer-cart scan.
+
     # Scan all customer cart keys
     async for key in client.scan_iter(match="cart:customer:*"):
         stats["scanned"] += 1
@@ -134,9 +141,177 @@ async def _detect_and_notify() -> dict:
             logger.warning(f"Error processing cart key {key}: {e}")
             stats["errors"] += 1
 
+    # ── Pass 2: anonymous abandoned checkouts that carry a phone ────────
+    try:
+        anon_stats = await _sweep_anonymous_phone_checkouts(
+            cache, threshold=threshold, max_age=max_age
+        )
+        stats["anon_candidates"] = anon_stats["candidates"]
+        stats["anon_notified"] = anon_stats["notified"]
+        stats["anon_skipped"] = anon_stats["skipped"]
+        stats["errors"] += anon_stats["errors"]
+    except Exception:
+        logger.exception("anonymous_abandoned_checkout_sweep_failed")
+        stats["errors"] += 1
+
     if cache:
         await cache.close()
     await cart_repo.close()
+
+    return stats
+
+
+async def _sweep_anonymous_phone_checkouts(
+    cache,
+    *,
+    threshold: datetime,
+    max_age: datetime,
+) -> dict:
+    """Nudge anonymous abandoned checkouts whose phone we captured.
+
+    These rows have ``customer_id IS NULL`` — no Redis customer cart exists,
+    so the scan above can never find them. The phone arrived via the
+    checkout-identity layer (typed at the OTP prompt / save-cart nudge, or
+    at the checkout contact form) and the pre-OTP-attach decision means even
+    a customer who typed a phone and bailed is reachable.
+
+    Recovery link: ``/cart/<subdomain>/<checkout_id>`` — the recover
+    endpoint's FIRST resolution branch is exactly an abandoned_checkouts id
+    (cart_sdk_aliases._resolve_recover_line_items), so no new plumbing.
+
+    Consent posture mirrors the merchant-triggered notify_whatsapp route:
+    entering a phone at checkout is treated as implied consent for cart
+    recovery, explicit opt-out is honoured, and the SAME cooldown key is
+    shared with the manual button so auto + manual can never double-send
+    within 24h. Merchant toggle (whatsapp_notifications.abandoned_cart,
+    default OFF) gates the whole pass per store.
+    """
+    from sqlalchemy import select
+
+    from src.core.interfaces.services.messaging_service import MessageRecipient
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.abandoned_checkout import (
+        AbandonedCheckoutModel,
+    )
+    from src.infrastructure.database.models.tenant.store import StoreModel
+    from src.infrastructure.external_services.whatsapp import get_whatsapp_service
+    from src.infrastructure.repositories.whatsapp_opt_in_repository import (
+        WhatsAppOptInRepository,
+    )
+
+    stats = {"candidates": 0, "notified": 0, "skipped": 0, "errors": 0}
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(AbandonedCheckoutModel)
+                    .where(
+                        AbandonedCheckoutModel.phone.isnot(None),
+                        AbandonedCheckoutModel.customer_id.is_(None),
+                        AbandonedCheckoutModel.recovered_at.is_(None),
+                        AbandonedCheckoutModel.last_activity_at <= threshold,
+                        AbandonedCheckoutModel.last_activity_at >= max_age,
+                    )
+                    .order_by(AbandonedCheckoutModel.last_activity_at.desc())
+                    # Bounded per run; the 30-min beat catches the rest next
+                    # cycle, and the cooldown makes re-selection harmless.
+                    .limit(500)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        stats["candidates"] = len(rows)
+        if not rows:
+            return stats
+
+        # One store fetch per distinct store, not per row.
+        store_ids = {row.store_id for row in rows}
+        stores = (
+            (
+                await session.execute(
+                    select(StoreModel).where(StoreModel.id.in_(store_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        stores_by_id = {s.id: s for s in stores}
+        optin_repo = WhatsAppOptInRepository(session)
+
+        for row in rows:
+            try:
+                store = stores_by_id.get(row.store_id)
+                if store is None or not store.subdomain:
+                    stats["skipped"] += 1
+                    continue
+                store_settings = store.settings or {}
+                wa_notifs = store_settings.get("whatsapp_notifications", {}) or {}
+                # Same default-OFF marketing gate as the customer-cart pass.
+                if not bool(wa_notifs.get("abandoned_cart", False)):
+                    stats["skipped"] += 1
+                    continue
+
+                phone = str(row.phone)
+
+                # Shared cooldown with stores/abandoned_checkouts.notify_whatsapp
+                # — the merchant's manual nudge and this auto one are one
+                # budget, not two.
+                cooldown_key = f"abandoned_cart_notified:{row.store_id}:phone:{phone}"
+                if cache and await cache.exists(cooldown_key):
+                    stats["skipped"] += 1
+                    continue
+
+                if await optin_repo.has_opt_out(row.store_id, phone):
+                    stats["skipped"] += 1
+                    continue
+
+                # Transport nuance: GOWA renders the nudge locally; the Meta
+                # path uses the approved abandoned_cart_v2 template and a
+                # failed send (e.g. not approved for this store) is simply
+                # logged below — mirroring the legacy customer-cart pass,
+                # which does no pre-check either.
+                service = await get_whatsapp_service(
+                    row.store_id, session, store.tenant_id
+                )
+                language = (
+                    "en"
+                    if (store.default_language or "ar").lower().startswith("en")
+                    else "ar"
+                )
+                result = await service.send_abandoned_cart(
+                    MessageRecipient(phone=phone, language=language),
+                    store.name,
+                    cart_token=f"{store.subdomain}/{row.id}",
+                )
+                if result.success:
+                    stats["notified"] += 1
+                    if cache:
+                        await cache.set(
+                            cooldown_key, "1", expire=NOTIFICATION_COOLDOWN_SECONDS
+                        )
+                    # Merchant-visible marker on the row itself.
+                    extra = dict(row.extra_data or {})
+                    extra["wa_auto_nudge_at"] = datetime.now(UTC).isoformat()
+                    row.extra_data = extra
+                    await session.commit()
+                else:
+                    stats["skipped"] += 1
+                    logger.info(
+                        "anon_abandoned_nudge_send_failed",
+                        extra={
+                            "checkout_id": str(row.id),
+                            "store_id": str(row.store_id),
+                            "error_code": result.error_code,
+                        },
+                    )
+            except Exception:
+                stats["errors"] += 1
+                logger.exception(
+                    "anon_abandoned_nudge_row_failed",
+                    extra={"checkout_id": str(getattr(row, "id", None))},
+                )
 
     return stats
 
