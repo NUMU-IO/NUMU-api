@@ -164,6 +164,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.marketing_campaign_tasks",
         # Feature 002 — marketing campaign attribution backfill.
         "src.infrastructure.messaging.tasks.marketing_tasks",
+        # GOWA device-health reconciliation (GOWA won't webhook logouts).
+        "src.infrastructure.messaging.tasks.gowa_health_tasks",
     ],
     # Queue definitions
     task_queues=(
@@ -192,6 +194,14 @@ celery_app.conf.update(
 
 # Beat schedule for periodic tasks
 celery_app.conf.beat_schedule = {
+    "sync-gowa-device-health": {
+        # GOWA forwards message events to its webhook but NOT connection
+        # state — a phone-side logout leaves our device row 'connected'
+        # while every send fails (2026-08-14 incident). Poll /app/devices
+        # and reconcile; also self-heals 'connected' after a re-pair.
+        "task": "tasks.sync_gowa_device_health",
+        "schedule": 300.0,
+    },
     "publish-scheduled-articles": {
         # Blog CMS — promote due `scheduled` articles to `published`.
         # Idempotent; a failed tick self-heals on the next one.
