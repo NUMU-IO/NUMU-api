@@ -520,9 +520,13 @@ jobs:
             docker compose up -d api celery-worker celery-beat
 
             echo "==> Running database migrations (Supabase)..."
-            # `heads` (plural), NOT `head`: apply ALL heads so a transient branch
+            # 'heads' (plural), NOT 'head': apply ALL heads so a transient branch
             # point (two migrations off one parent before a merge migration
             # lands) can't hard-fail the deploy with "Multiple head revisions".
+            # (Plain quotes on purpose — this heredoc is UNQUOTED so env vars
+            # expand on the runner, which means backticks here are COMMAND
+            # SUBSTITUTION: the old backticked comment executed 'heads' on the
+            # runner and spat "heads: command not found" into every deploy log.)
             docker compose exec -T api alembic upgrade heads
 
             echo "==> Verifying health..."
