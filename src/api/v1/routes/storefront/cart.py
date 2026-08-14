@@ -10,7 +10,7 @@ import logging
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 
 from src.api.dependencies.auth import get_current_customer
 from src.api.dependencies.repositories import (
@@ -40,6 +40,31 @@ from src.infrastructure.repositories.store_repository import StoreRepository
 logger = logging.getLogger(__name__)
 
 
+def client_session_fingerprint(http_request) -> str | None:
+    """The storefront's client-side session fingerprint, from cookies.
+
+    Mirrors the top of lib/meta-pixel.getSessionFingerprint's resolution
+    chain (numu_attribution.session_id, then the numu_session cookie).
+    Server-emitted funnel rows previously stored NULL here, which made
+    every session-level funnel query undercount add_to_cart sessions —
+    the events existed but belonged to nobody.
+    """
+    import json as _json
+    from urllib.parse import unquote as _unquote
+
+    try:
+        raw = http_request.cookies.get("numu_attribution")
+        if raw:
+            parsed = _json.loads(_unquote(raw))
+            sid = parsed.get("session_id") if isinstance(parsed, dict) else None
+            if isinstance(sid, str) and sid:
+                return sid[:64]
+    except (ValueError, TypeError):
+        pass
+    sid = http_request.cookies.get("numu_session")
+    return sid[:64] if sid else None
+
+
 async def emit_add_to_cart_event(
     funnel_repo: FunnelEventRepository,
     store_repo: StoreRepository,
@@ -47,6 +72,7 @@ async def emit_add_to_cart_event(
     store_id: UUID,
     customer_id: UUID | None,
     step_data: dict,
+    session_fingerprint: str | None = None,
 ) -> None:
     """Best-effort ``add_to_cart`` funnel event — MUST NEVER break the cart.
 
@@ -76,6 +102,7 @@ async def emit_add_to_cart_event(
                 tenant_id=tenant_id,
                 store_id=store_id,
                 step="add_to_cart",
+                session_fingerprint=session_fingerprint,
                 customer_id=customer_id,
                 step_data=step_data,
             )
@@ -393,6 +420,7 @@ async def get_cart(
 )
 async def add_cart_item(
     request: AddCartItemRequest,
+    http_request: Request,
     current_customer: Annotated[Customer, Depends(get_current_customer)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     funnel_repo: Annotated[FunnelEventRepository, Depends(get_funnel_event_repository)],
@@ -512,6 +540,7 @@ async def add_cart_item(
         store_repo,
         store_id=current_customer.store_id,
         customer_id=current_customer.id,
+        session_fingerprint=client_session_fingerprint(http_request),
         step_data={
             "product_id": str(request.product_id),
             "product_name": product.name,
