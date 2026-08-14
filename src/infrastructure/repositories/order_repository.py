@@ -699,20 +699,28 @@ class OrderRepository(IOrderRepository):
         return result.first() is not None
 
     async def get_next_order_number(self, store_id: UUID) -> str:
-        """Generate the next order number for a store.
+        """Generate a RANDOM order number for a store (``ORD-######``).
 
-        Derived from the highest existing number (``MAX``), not ``count(*)``:
-        count-based numbering reuses a number whenever an order is deleted (the
-        count drops back), which produced real duplicate ``ORD-000033`` rows.
-        Order numbers are fixed-width zero-padded (``ORD-000033``) so a lexical
-        MAX equals the numeric MAX.
+        Random, not sequential, on purpose: sequential numbers publish the
+        merchant's order volume to anyone who places two orders — the delta
+        between ``ORD-000007`` and ``ORD-000009`` a week apart is a
+        competitor's sales report. Six random digits keep the exact same
+        shape every consumer already parses (receipts, WhatsApp templates,
+        the ``#ORD-…`` tracking-form normaliser, admin search), so existing
+        sequential numbers coexist untouched — and a non-guessable number
+        also hardens the guest order-lookup form the ``track_lookup`` rate
+        tier exists to protect.
 
-        On Postgres, a per-store transaction-scoped advisory lock serialises
-        concurrent checkouts so two simultaneous orders can't read the same
-        MAX and collide; the lock releases automatically at commit/rollback.
-        The lock is skipped on other dialects (SQLite test runs are
-        single-threaded and have no advisory-lock support).
+        Uniqueness is per store. The per-store advisory lock serialises
+        concurrent checkouts (two simultaneous orders can't both pass the
+        existence check with the same draw), and the retry loop handles
+        draws that hit an existing number — at 50k orders/store that's a
+        ~5% retry chance per draw, vanishing across attempts. The final
+        draw is returned unchecked rather than raising: a duplicate number
+        on a saturated store is survivable; a checkout that 500s is not.
         """
+        import secrets
+
         dialect = ""
         try:
             bind = self.session.get_bind()
@@ -726,26 +734,17 @@ class OrderRepository(IOrderRepository):
                 {"k": f"order_number:{store_id}"},
             )
 
-        query = select(func.max(OrderModel.order_number)).where(
-            OrderModel.store_id == store_id
-        )
-        result = await self.session.execute(self._tenant_filter(query))
-        highest = result.scalar()
-
-        next_num = 1
-        if highest:
-            try:
-                next_num = int(str(highest).rsplit("-", 1)[-1]) + 1
-            except (ValueError, IndexError):
-                # Unexpected legacy format — fall back to count-based so we
-                # still return *something* monotonic-ish rather than crash.
-                count_q = select(func.count(OrderModel.id)).where(
-                    OrderModel.store_id == store_id
-                )
-                count_r = await self.session.execute(self._tenant_filter(count_q))
-                next_num = (count_r.scalar() or 0) + 1
-
-        return f"ORD-{next_num:06d}"
+        candidate = ""
+        for _ in range(8):
+            candidate = f"ORD-{secrets.randbelow(900_000) + 100_000}"
+            exists_q = select(OrderModel.id).where(
+                OrderModel.store_id == store_id,
+                OrderModel.order_number == candidate,
+            )
+            result = await self.session.execute(self._tenant_filter(exists_q))
+            if result.scalar_one_or_none() is None:
+                return candidate
+        return candidate
 
     async def search(
         self,
