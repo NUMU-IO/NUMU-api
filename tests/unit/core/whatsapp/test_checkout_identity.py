@@ -162,6 +162,40 @@ async def test_otp_available_false_for_meta_store(
     )
 
 
+@pytest.mark.asyncio
+async def test_platform_flag_env_is_only_the_unset_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No DB session → the env var decides; a stored admin flag (exercised
+    at the route layer) wins whenever set. Both directions of the env
+    fallback covered here."""
+    from src.application.services.platform_flags import (
+        is_checkout_identity_platform_enabled,
+    )
+
+    monkeypatch.setattr(settings, "checkout_identity_enabled", False)
+    assert await is_checkout_identity_platform_enabled(None) is False
+    monkeypatch.setattr(settings, "checkout_identity_enabled", True)
+    assert await is_checkout_identity_platform_enabled(None) is True
+
+
+def test_admin_snapshot_resolves_stored_flag_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.v1.routes.admin.platform_config import (
+        _resolve_checkout_identity_enabled,
+    )
+
+    monkeypatch.setattr(settings, "checkout_identity_enabled", True)
+    # Stored value wins in BOTH directions…
+    assert _resolve_checkout_identity_enabled({"identity_enabled": False}) is False
+    assert _resolve_checkout_identity_enabled({"identity_enabled": True}) is True
+    # …and absence falls back to the env default.
+    assert _resolve_checkout_identity_enabled({}) is True
+    monkeypatch.setattr(settings, "checkout_identity_enabled", False)
+    assert _resolve_checkout_identity_enabled({}) is False
+
+
 # ── Flag helpers ────────────────────────────────────────────────────
 
 

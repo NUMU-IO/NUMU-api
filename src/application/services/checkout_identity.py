@@ -36,8 +36,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from src.config.settings import settings
-
 logger = logging.getLogger(__name__)
 
 # How long a successful verify keeps this cart session verified.
@@ -110,11 +108,24 @@ async def otp_available(
     checkout, rather than showing a gate whose "send code" button 503s.
     (When the Meta AUTH path lands, this is the one function to widen.)
 
+    The platform gate is the super-admin toggle in the backoffice
+    (platform_config ``checkout.identity_enabled``), with the
+    ``CHECKOUT_IDENTITY_ENABLED`` env var as the unset-default — see
+    ``platform_flags.is_checkout_identity_platform_enabled``.
+
     Fail-closed: any resolution error means "no gate" — the failure mode of
     a wrong False is the feature quietly staying off for one store; a wrong
     True is a checkout customers cannot pass.
     """
-    if not settings.checkout_identity_enabled:
+    from src.application.services.platform_flags import (
+        is_checkout_identity_platform_enabled,
+    )
+
+    try:
+        if not await is_checkout_identity_platform_enabled(db_session):
+            return False
+    except Exception:
+        logger.exception("checkout_identity_platform_flag_read_failed")
         return False
 
     try:
