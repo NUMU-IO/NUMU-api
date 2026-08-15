@@ -102,6 +102,45 @@ _IDENTITY_RESOLUTION_STEPS = {
     "order_completed",
 }
 
+# Vendor-documented ``custom_data`` parameters — the ONLY keys forwarded to
+# Meta / TikTok.
+#
+# ``step_data`` arrives from the browser on an unauthenticated endpoint, and
+# under V3 BYOT the page is running a third-party theme bundle: anything that
+# bundle passes to ``useAnalytics().track()`` lands here. Forwarding the dict
+# verbatim made the parameter surface unbounded, so a theme could put arbitrary
+# keys — and whatever they happened to contain about the shopper — into a
+# vendor payload. Event *names* were already constrained to a fixed map; this
+# applies the same rule to parameters.
+#
+# Unknown keys are dropped, not rejected: a theme sending an extra field should
+# lose that field, not lose its conversion. Keep this a UNION of both vendors —
+# ``search_string`` is Meta's search term and ``query`` is TikTok's, and
+# ``toTikTokProps`` reads ``query``/``num_items``/``order_id`` off this dict.
+_ALLOWED_CUSTOM_DATA_KEYS = frozenset({
+    "value",
+    "currency",
+    "content_ids",
+    "content_name",
+    "content_type",
+    "content_category",
+    "contents",
+    "num_items",
+    "search_string",
+    "order_id",
+    "predicted_ltv",
+    "status",
+    "delivery_category",
+    "query",
+})
+
+
+def sanitize_custom_data(step_data: dict | None) -> dict:
+    """Keep only the vendor-standard parameters from a browser ``step_data``."""
+    if not step_data:
+        return {}
+    return {k: v for k, v in step_data.items() if k in _ALLOWED_CUSTOM_DATA_KEYS}
+
 
 def resolve_funnel_step(body_step: str | None, path: str | None) -> str:
     """Resolve the funnel step for a /track call: explicit > path inference.
@@ -1172,7 +1211,7 @@ async def _maybe_enqueue_meta_capi(
                 extra={"store_id": str(store.id)},
             )
 
-    custom_data = dict(body.step_data or {})
+    custom_data = sanitize_custom_data(body.step_data)
     event_time_int = int(event_time.timestamp())
 
     # Fan out — one task per capi-enabled pixel.
@@ -1271,7 +1310,7 @@ async def _maybe_enqueue_tiktok_capi(
                 extra={"store_id": str(store.id)},
             )
 
-    custom_data = dict(body.step_data or {})
+    custom_data = sanitize_custom_data(body.step_data)
     event_time_int = int(event_time.timestamp())
 
     for pixel in pixels:
