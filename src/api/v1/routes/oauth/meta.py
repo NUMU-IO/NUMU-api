@@ -212,15 +212,98 @@ async def meta_oauth_callback(
     #   4. Writes service_credentials + updates store.settings.tracking.meta
     # See Phase 17 v1.1: ``POST /stores/{id}/settings/tracking/meta/connect``.
     #
-    # Returning the resources + token here lets the picker UI render
-    # without a second OAuth roundtrip. Token is short-lived in the
-    # browser (the user sees it for ~60s while picking; if they
-    # abandon, nothing is persisted server-side).
+    # (helper defined below — see `_stash_pending_oauth_token`)
+    # The access token is NOT returned.
+    #
+    # It used to be, so the picker UI could render without a second roundtrip,
+    # justified as "short-lived in the browser (~60s)". It is not short-lived:
+    # `long_lived.access_token` is Meta's ~60-DAY token with whatever scopes
+    # the merchant granted — `ads_management` among them. Putting that in a
+    # JSON response body puts it in browser history, any logging proxy, the
+    # devtools network pane and every extension on the page, for a value that
+    # can spend the merchant's ad budget.
+    #
+    # Instead it is held server-side under a single-use handle with a short
+    # TTL. The picker sends the handle back to the connect endpoint, which
+    # redeems it and encrypts the token into `service_credentials` — the
+    # browser never sees the secret.
+    handle = await _stash_pending_oauth_token(
+        store_id=store_uuid,
+        access_token=long_lived.access_token,
+    )
+
     return {
         "store_id": str(store_uuid),
-        "access_token": long_lived.access_token,
+        "connect_handle": handle,
         "pixels": resources.pixels,
         "pages": resources.pages,
         "catalogs": resources.catalogs,
         "business_id": resources.business_id,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Pending-token handoff
+# ──────────────────────────────────────────────────────────────────────
+
+# How long the merchant has to finish picking a pixel before the stashed
+# token expires. Long enough to read a picker, short enough that an
+# abandoned flow leaves nothing usable behind.
+_PENDING_TOKEN_TTL_SECONDS = 15 * 60
+
+_PENDING_TOKEN_PREFIX = "meta_oauth_pending:"
+
+
+async def _stash_pending_oauth_token(*, store_id: UUID, access_token: str) -> str:
+    """Hold the OAuth token server-side and return a single-use handle.
+
+    The callback used to return Meta's long-lived (~60 day) token straight to
+    the browser so the pixel picker could render without a second roundtrip.
+    That token carries whatever scopes the merchant granted — `ads_management`
+    included — so it can spend their ad budget, and a JSON response body puts
+    it in browser history, any logging proxy, the devtools network pane and
+    every extension running on the page.
+
+    The handle is opaque, random, scoped to one store, and redeemed exactly
+    once by the connect endpoint.
+    """
+    import secrets as _secrets
+
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    handle = _secrets.token_urlsafe(32)
+    await RedisCacheService().set(
+        f"{_PENDING_TOKEN_PREFIX}{handle}",
+        {"store_id": str(store_id), "access_token": access_token},
+        expire=_PENDING_TOKEN_TTL_SECONDS,
+    )
+    return handle
+
+
+async def redeem_pending_oauth_token(handle: str, store_id: UUID) -> str | None:
+    """Exchange a handle for its token, once.
+
+    Returns None when the handle is unknown, expired, already redeemed, or
+    belongs to a different store — the last of which is the check that stops
+    one merchant redeeming another's token by guessing a handle.
+    """
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    if not handle:
+        return None
+    cache = RedisCacheService()
+    key = f"{_PENDING_TOKEN_PREFIX}{handle}"
+    payload = await cache.get(key)
+    # Single use: burn it whether or not the store matches, so a wrong guess
+    # cannot be retried against a different store.
+    await cache.delete(key)
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("store_id")) != str(store_id):
+        logger.warning(
+            "meta_oauth_handle_store_mismatch",
+            extra={"store_id": str(store_id)},
+        )
+        return None
+    token = payload.get("access_token")
+    return str(token) if token else None

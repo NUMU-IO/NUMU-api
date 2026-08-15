@@ -26,10 +26,12 @@ from typing import Any
 # future refactor extracts them into ``external_services/_shared``, update
 # this import — the public ``hash_tiktok_user_data`` contract stays stable.
 from src.infrastructure.external_services.meta.hashing import (
+    _country_hash,
     _h,
     _h_each,
     _normalize_mena_phone,
     _normalize_name,
+    _zip_hash,
 )
 
 
@@ -91,9 +93,21 @@ def hash_tiktok_user_data(raw: dict) -> dict[str, Any]:
             _h_each(_normalize_name(raw.get("first_name"), field="fn"))
         ),
         "last_name": _first(_h_each(_normalize_name(raw.get("last_name"), field="ln"))),
-        "city": _first(_h_each(_normalize_name(raw.get("city"), field="ct"))),
-        "zip_code": _h(raw["zip"]) if raw.get("zip") else None,
-        "country": _h(raw["country_code"]) if raw.get("country_code") else None,
+        # `strip_spaces=True` keeps this byte-identical to Meta's `ct`. Both
+        # vendors index the space-free lowercase form, and when only Meta's
+        # side was corrected the two silently diverged — "New Cairo" hashing
+        # as `newcairo` for Meta and `new cairo` for TikTok, with TikTok left
+        # holding the form that matches nothing.
+        "city": _first(
+            _h_each(_normalize_name(raw.get("city"), field="ct", strip_spaces=True))
+        ),
+        # Same whitespace/dash rule as Meta's `_zip_hash` — a code entered as
+        # "12345-678" must not hash differently from "12345678".
+        "zip_code": _first(_zip_hash(raw.get("zip"))),
+        # Canonicalize to lowercase ISO-3166-1 alpha-2 before hashing, and
+        # DROP anything unmappable: a digest of "Egypt" matches nothing, and
+        # a field that can never match is worse than an absent one.
+        "country": _first(_country_hash(raw.get("country_code"))),
         # Raw context/click signals — NOT hashed.
         "ttclid": raw.get("ttclid"),
         "ttp": raw.get("ttp"),

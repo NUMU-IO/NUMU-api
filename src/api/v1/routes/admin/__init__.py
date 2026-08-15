@@ -10,6 +10,7 @@ URL: /api/v1/admin/
 - /stores          — Store lifecycle management
 - /landing-config  — Landing page section visibility
 - /reconciliation  — Payment reconciliation runs and mismatches
+- /tracking        — Platform-wide Meta pixel/CAPI health + match quality
 """
 
 from fastapi import APIRouter
@@ -42,6 +43,7 @@ from src.api.v1.routes.admin.stores import router as stores_router
 from src.api.v1.routes.admin.subscription_payments import (
     router as subscription_payments_router,
 )
+from src.api.v1.routes.admin.tracking import router as tracking_router
 from src.api.v1.routes.admin.users import router as admin_users_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
 from src.api.v1.routes.admin.wallets import router as wallets_router
@@ -82,6 +84,7 @@ router.include_router(
 router.include_router(
     reconciliation_router, prefix="/reconciliation", tags=["Admin - Reconciliation"]
 )
+router.include_router(tracking_router, prefix="/tracking", tags=["Admin - Tracking"])
 router.include_router(
     platform_config_router,
     prefix="/platform-config",

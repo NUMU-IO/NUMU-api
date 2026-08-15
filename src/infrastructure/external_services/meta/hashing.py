@@ -128,6 +128,50 @@ _DIGIT_TRANSLATE = str.maketrans(
 
 _TRANSLITERATION_MAP_PATH = Path(__file__).parent / "transliteration_map_ar_eg.json"
 
+# Meta's field normalization (verified against the Customer Information
+# Parameters doc, 2026-08-17):
+#   fn / ln  "Lowercase only with no punctuation."
+#   ct       "Lowercase only with no punctuation, no special characters,
+#             and no spaces."
+#   st       "…normalize states outside the U.S. in lowercase with no
+#             punctuation, no special characters, and no spaces."
+#   zp       "Use lowercase with no spaces and no dash."
+#
+# Before this, every one of these fields was hashed by `_h()`, which only
+# trims and lowercases. So "New Cairo" hashed as `new cairo` while Meta
+# indexes `newcairo`, and "Al-Sayed" hashed as `al-sayed` against Meta's
+# `alsayed`. The field was present, the hash was well-formed, and it could
+# never match — the most expensive kind of bug, because every diagnostic
+# reports the parameter as covered.
+#
+# `[^\w\s]` is Unicode-aware in Python 3, so Arabic letters survive and
+# Arabic combining marks (category Mn, which are not alnum) are removed —
+# the same normalization `_strip_diacritics` already applies.
+_PUNCT_RE = re.compile(r"[^\w\s]|_", re.UNICODE)
+_WHITESPACE_RE = re.compile(r"\s+", re.UNICODE)
+
+
+def _normalize_meta_text(s: str | None, *, strip_spaces: bool) -> str | None:
+    """Normalize a text match key to the exact shape Meta indexes.
+
+    Lowercases, removes punctuation and underscores, then either collapses
+    internal whitespace to single spaces (``fn``/``ln``) or removes it
+    entirely (``ct``/``st``). Returns None for anything that normalizes to
+    empty, so the caller drops the field rather than hashing "".
+
+    NOT used for ``em`` — an email must keep its ``@`` and ``.``, and Meta
+    asks only for trim + lowercase there.
+    """
+    if not s:
+        return None
+    out = _PUNCT_RE.sub("", s)
+    out = (
+        _WHITESPACE_RE.sub("", out)
+        if strip_spaces
+        else _WHITESPACE_RE.sub(" ", out).strip()
+    )
+    return out.lower() or None
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers — character class detection + transliteration
@@ -215,8 +259,10 @@ def _transliterate_arabic_to_latin(s: str, *, field: str | None = None) -> str:
     return "".join(out_chars)
 
 
-def _normalize_name(s: str | None, *, field: str) -> list[str] | None:
-    """Return the list of normalized variants to hash for a name field.
+def _normalize_name(
+    s: str | None, *, field: str, strip_spaces: bool = False
+) -> list[str] | None:
+    """Return the list of normalized variants to hash for a name-like field.
 
     Outputs:
       * ``None`` if input is empty / None — caller drops the field.
@@ -227,6 +273,11 @@ def _normalize_name(s: str | None, *, field: str) -> list[str] | None:
         alternatives, so whichever form the merchant's audience holds
         matches the conversion.
 
+    Every variant is put through ``_normalize_meta_text`` before it is
+    returned, so the digest matches the form Meta actually indexes.
+    ``strip_spaces=True`` for ``ct``/``st``, False for ``fn``/``ln`` —
+    Meta specifies "no spaces" only for the former pair.
+
     The returned strings are NOT hashed yet — caller pipes each through
     ``_h`` to produce the SHA-256 digests.
     """
@@ -235,19 +286,23 @@ def _normalize_name(s: str | None, *, field: str) -> list[str] | None:
     s = s.strip()
     if not s:
         return None
+
     if not _is_arabic_script(s):
-        return [s]
+        normalized = _normalize_meta_text(s, strip_spaces=strip_spaces)
+        return [normalized] if normalized else None
+
     # Arabic-only or mixed-script input: emit both transliterations.
     latin = _transliterate_arabic_to_latin(s, field=field)
     arabic_clean = _strip_diacritics(s).lower()
     # Dedup: a name that's already in the static map and matches its
     # canonical Latin form on letter-by-letter shouldn't produce two
-    # identical hashes.
-    variants = [v for v in (latin, arabic_clean) if v]
+    # identical hashes. Normalize FIRST so two spellings that differ only
+    # by punctuation collapse to one digest instead of two.
     seen: set[str] = set()
     deduped: list[str] = []
-    for v in variants:
-        if v not in seen:
+    for raw in (latin, arabic_clean):
+        v = _normalize_meta_text(raw, strip_spaces=strip_spaces)
+        if v and v not in seen:
             seen.add(v)
             deduped.append(v)
     return deduped or None
@@ -379,7 +434,18 @@ def hash_user_data(raw: dict) -> dict:
         "ph": [_h(_normalize_mena_phone(raw["phone"]))] if raw.get("phone") else None,
         "fn": _h_each(_normalize_name(raw.get("first_name"), field="fn")),
         "ln": _h_each(_normalize_name(raw.get("last_name"), field="ln")),
-        "ct": _h_each(_normalize_name(raw.get("city"), field="ct")),
+        # ct/st strip spaces as well as punctuation — Meta's spec differs
+        # from fn/ln here, and "New Cairo" vs "newcairo" is the difference
+        # between a match and a wasted parameter.
+        "ct": _h_each(_normalize_name(raw.get("city"), field="ct", strip_spaces=True)),
+        # State / governorate. Present on every Egyptian address we collect
+        # and on OrderShippingAddress, and the transliteration map's `cities`
+        # section already carries the governorate spellings — but until now
+        # `st` was not even a key in this dict, so the data was collected
+        # everywhere and sent nowhere. Reuses field="ct" deliberately: in
+        # Egypt the governorate and the city share a vocabulary (Cairo,
+        # Alexandria, Giza…), so the same static map resolves both.
+        "st": _h_each(_normalize_name(raw.get("state"), field="ct", strip_spaces=True)),
         # Country is canonicalized HERE as well as by the callers. Meta only
         # indexes the hash of the lowercase ISO-2 code, so a free-form
         # "Egypt" would hash to something that matches nothing — and the
@@ -423,10 +489,15 @@ def _country_hash(raw_country: str | None) -> list[str] | None:
 
 
 def _zip_hash(raw_zip: str | None) -> list[str] | None:
-    """Hash a postal code with ALL whitespace removed."""
+    """Hash a postal code — Meta: "lowercase with no spaces and no dash".
+
+    The dash mattered and was missing: a Saudi/Gulf code entered as
+    "12345-6789" hashed differently from "123456789". Egyptian codes are
+    plain numerics so this was latent, but the Gulf expansion makes it live.
+    """
     if not raw_zip:
         return None
-    compact = re.sub(r"\s+", "", str(raw_zip))
+    compact = re.sub(r"[\s\-‐-―]+", "", str(raw_zip))
     digest = _h(compact)
     return [digest] if digest else None
 
