@@ -168,7 +168,13 @@ class SaveMetaTrackingRequest(BaseModel):
     # outcome="confirmed"). Off by default — opt-in. Bridges WhatsApp
     # commerce into Meta's ad-attribution loop for merchants who drive
     # Meta ads → WhatsApp chat → manual confirmation.
-    whatsapp_lead_enabled: bool = False
+    #
+    # Tri-state on the wire (True / False / omitted). A plain `bool = False`
+    # could not distinguish "the merchant turned this off" from "this client
+    # did not render the control", so any partial save silently disabled it —
+    # along with the rest of the fields now on the no-clobber contract in
+    # `save_meta_tracking`. Omitting the field preserves the stored value.
+    whatsapp_lead_enabled: bool | None = None
 
     # Wave 2 Phase 13 — Optional multi-pixel list. When set, every CAPI
     # fire fans out to each capi_enabled entry; the storefront's
@@ -567,3 +573,50 @@ class MetaTrackingStatusResponse(BaseModel):
     recent_failure_rate: float = 0.0
     # Total recent events considered when computing the failure rate.
     recent_event_count: int = 0
+
+
+class MetaMatchKeyCoverage(BaseModel):
+    """One match key and how many of this event's instances carried it."""
+
+    identifier: str
+    coverage_percentage: float
+
+
+class MetaMatchQualityEvent(BaseModel):
+    """EMQ for one event name, as Meta last reported it."""
+
+    event_name: str
+    pixel_id: str
+    emq_score: float = Field(..., description="Meta's composite_score, 0.0-10.0")
+    total_events: int = 0
+    dedup_rate: float | None = None
+    event_coverage: float | None = Field(
+        default=None,
+        description=(
+            "7-day average % of browser Pixel events also covered by CAPI — "
+            "Meta measuring the browser-vs-server gap directly."
+        ),
+    )
+    data_freshness: str | None = None
+    match_keys: list[MetaMatchKeyCoverage] = Field(default_factory=list)
+    diagnostics: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Meta's own diagnostics — each names a problem AND states the "
+            "solution. Rendered verbatim; their copy is better than ours."
+        ),
+    )
+    captured_at: datetime
+
+
+class MetaMatchQualityResponse(BaseModel):
+    """Latest EMQ snapshot per event for a store.
+
+    ``events`` empty with ``last_polled_at`` null means no poll has landed
+    yet — distinct from "this store has no Meta connection", which the caller
+    already knows from the tracking config.
+    """
+
+    events: list[MetaMatchQualityEvent] = Field(default_factory=list)
+    last_polled_at: datetime | None = None
+    low_score_threshold: float = 6.5

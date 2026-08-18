@@ -28,11 +28,22 @@ Failures must NEVER fail the webhook. The hourly orphan-purchase sweep
 
 from __future__ import annotations
 
+import contextlib
+import math
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+# ISO-4217 alphabetic code. Meta rejects anything else, and a composite string
+# like "EGP 250" is a real shape merchants' data has produced.
+_ISO_4217_RE = re.compile(r"[A-Za-z]{3}")
 
 
 def _build_user_data_from_order(order: Any) -> dict[str, Any]:
@@ -66,20 +77,168 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     # anything unrecognized. ``country_code`` (if explicitly set) takes
     # precedence over the free-form ``country``.
     raw_country = shipping.get("country_code") or shipping.get("country")
+
+    # `_fbc` cookie missing (Pixel blocked, or the landing predated the Pixel
+    # being configured) but we still hold the raw click id on the order's own
+    # attribution snapshot. /track has rebuilt `fbc` from this for a while;
+    # the CONVERSION event — the one Meta optimizes spend against — did not,
+    # which is exactly backwards.
+    fbc = meta.get("fbc") or _fbc_from_attribution(order)
+
     return {
-        "email": shipping.get("email"),
+        # `email` is deliberately NOT read from `shipping` — OrderShippingAddress
+        # has no email field and never has, so `shipping.get("email")` was a
+        # permanent None and every server-authoritative Purchase, Lead and
+        # Refund reached Meta with `em: null`. The real value is resolved from
+        # the customer record by `fill_identity_from_customer` below.
+        "email": None,
         "phone": shipping.get("phone"),
         "first_name": shipping.get("first_name"),
         "last_name": shipping.get("last_name"),
         "city": shipping.get("city"),
+        # Governorate / state. Collected at checkout, persisted on the address,
+        # and until now dropped on the floor — `st` was not even a key in
+        # `hash_user_data`. Free match key on every order.
+        "state": shipping.get("state"),
         "country_code": canonicalize_country(raw_country),
         "zip": shipping.get("postal_code") or shipping.get("zip"),
         "customer_id": str(order.customer_id) if order.customer_id else None,
+        # The session fingerprint every mid-funnel event already sent as
+        # `external_id`. Without it here, Meta saw an anonymous browsing
+        # session and an unrelated conversion — the guest journey broke at
+        # precisely the event that pays for it. `_external_ids` emits both as
+        # an array (customer_id first), so this is purely additive.
+        "external_id": getattr(order, "session_fingerprint", None),
         "ip": meta.get("ip_address"),
         "user_agent": meta.get("user_agent"),
         "fbp": meta.get("fbp"),
-        "fbc": meta.get("fbc"),
+        "fbc": fbc,
     }
+
+
+def _fbc_from_attribution(order: Any) -> str | None:
+    """Rebuild ``fbc`` from the order's stored attribution envelope.
+
+    Uses the LANDING timestamp, not "now" and not the payment time — Meta
+    wants the moment the ``fbclid`` was first observed.
+    """
+    from src.infrastructure.external_services.meta.click_id import synthesize_fbc
+
+    attribution = getattr(order, "attribution", None) or {}
+    if not isinstance(attribution, dict):
+        return None
+    last_touch = attribution.get("last_touch") or attribution.get("first_touch") or {}
+    if not isinstance(last_touch, dict):
+        return None
+    return synthesize_fbc(last_touch.get("fbclid"), last_touch.get("ts"))
+
+
+async def fill_identity_from_customer(
+    db: AsyncSession, user_data: dict[str, Any], order: Any
+) -> None:
+    """Fill email / phone / name from the customer record, in place.
+
+    ``OrderShippingAddress`` carries no email — it is not in the value object
+    (``core/entities/order.py``) and not in ``_address_to_dict``. So the only
+    place an order's email exists is the customer row it points at. Adding a
+    field to the address VO would change the persisted order JSON shape
+    platform-wide; resolving it here does not.
+
+    Never overwrites a value the address already supplied (what the buyer typed
+    for *this* order wins over a stale profile), and never raises — a Purchase
+    that reaches Meta with a weaker identity beats one that never fires.
+
+    Placeholder addresses are rejected rather than hashed: guest checkout mints
+    synthetic values like ``…@noemail.numueg.app``, and a digest of one can
+    never match anything in Meta's index. Sending it would count against the
+    event's customer-information completeness while contributing no match —
+    the same reasoning ``_country_hash`` already applies to unmappable
+    countries.
+    """
+    customer_id = getattr(order, "customer_id", None)
+    if not customer_id:
+        return
+    if user_data.get("email") and user_data.get("phone"):
+        return
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import load_only, raiseload
+
+    from src.infrastructure.database.models.tenant.customer import CustomerModel
+
+    try:
+        store_id = (
+            order.store_id
+            if isinstance(order.store_id, UUID)
+            else UUID(str(order.store_id))
+        )
+        cust_id = (
+            customer_id if isinstance(customer_id, UUID) else UUID(str(customer_id))
+        )
+    except (TypeError, ValueError):
+        return
+
+    try:
+        customer = (
+            await db.execute(
+                select(CustomerModel)
+                .where(
+                    CustomerModel.id == cust_id,
+                    CustomerModel.store_id == store_id,
+                )
+                .options(
+                    load_only(
+                        CustomerModel.id,
+                        CustomerModel.email,
+                        CustomerModel.phone,
+                        CustomerModel.first_name,
+                        CustomerModel.last_name,
+                    ),
+                    raiseload("*"),
+                )
+            )
+        ).scalar_one_or_none()
+        if customer is None:
+            return
+        # Read the attributes INSIDE the guard. This is not defensive noise:
+        # `raiseload("*")` turns any unloaded attribute into an exception, and
+        # an instance already sitting EXPIRED in this session's identity map
+        # (any prior `commit()` expires everything) refreshes itself on first
+        # attribute access — which under the async session raises
+        # `MissingGreenlet`. Both escape a `try` that only wraps `execute()`,
+        # and this function is called from inside payment webhooks, so the
+        # escape would fail the webhook rather than just the tracking event.
+        email = customer.email
+        phone = customer.phone
+        first_name = customer.first_name
+        last_name = customer.last_name
+    except Exception:  # noqa: BLE001 — CAPI must never break a webhook
+        return
+
+    if not user_data.get("email") and is_real_email(email):
+        user_data["email"] = email
+    for key, value in (
+        ("phone", phone),
+        ("first_name", first_name),
+        ("last_name", last_name),
+    ):
+        if not user_data.get(key) and isinstance(value, str) and value.strip():
+            user_data[key] = value
+
+
+# Domains NUMU itself mints for guests that never supplied an address. A hash
+# of one of these matches nothing and dilutes the event.
+_PLACEHOLDER_EMAIL_MARKERS = ("@noemail.", "@guest.", "@placeholder.", "@example.com")
+
+
+def is_real_email(email: str | None) -> bool:
+    """True when ``email`` is a genuine address worth hashing for Meta."""
+    if not email:
+        return False
+    value = email.strip().lower()
+    if "@" not in value or value.startswith("@") or value.endswith("@"):
+        return False
+    return not any(marker in value for marker in _PLACEHOLDER_EMAIL_MARKERS)
 
 
 async def resolve_catalog_ids(db: AsyncSession, order: Any) -> dict[str, str]:
@@ -126,6 +285,141 @@ async def resolve_catalog_ids(db: AsyncSession, order: Any) -> dict[str, str]:
         # Never let a catalog-id lookup break a conversion fire — sending
         # the internal UUID is the pre-existing behaviour, not a new risk.
         return {}
+
+
+async def resolve_catalog_ids_for(
+    db: AsyncSession, product_ids: set[str]
+) -> dict[str, str]:
+    """``{product_id: meta_catalog_id}`` for an arbitrary set of product ids.
+
+    Same contract as ``resolve_catalog_ids`` but decoupled from an Order, so
+    the ``/track`` path can apply the identical remap to AddToCart,
+    InitiateCheckout, ViewContent and the rest.
+
+    Without this, only the PDP's ViewContent and the server-side Purchase
+    honoured the merchant's ``meta_catalog_id``; every other event sent the
+    internal UUID. For a merchant whose Meta catalog is keyed on their own
+    SKUs that means dynamic ads cannot join the event to a catalog row —
+    the highest-ROAS format silently stops attributing, and the mismatch is
+    invisible because the funnel's first event matches and the rest don't.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.product import ProductModel
+
+    clean = {str(pid) for pid in product_ids if pid}
+    if not clean:
+        return {}
+    try:
+        rows = await db.execute(
+            select(ProductModel.id, ProductModel.meta_catalog_id).where(
+                ProductModel.id.in_(clean),
+                ProductModel.meta_catalog_id.isnot(None),
+            )
+        )
+        return {str(pid): cat for pid, cat in rows.all() if cat}
+    except Exception:  # noqa: BLE001 — never break a fire over a lookup
+        return {}
+
+
+def apply_catalog_ids(custom_data: dict[str, Any], catalog: dict[str, str]) -> None:
+    """Rewrite ``content_ids`` and ``contents[].id`` in place, if we have a map.
+
+    No-op when the store uses no catalog overrides, which is the common case —
+    the feed emits the internal id for those products too, so the two already
+    agree.
+    """
+    if not catalog or not isinstance(custom_data, dict):
+        return
+
+    ids = custom_data.get("content_ids")
+    if isinstance(ids, list):
+        custom_data["content_ids"] = [
+            catalog.get(str(i), i) if isinstance(i, str | int) else i for i in ids
+        ]
+
+    contents = custom_data.get("contents")
+    if isinstance(contents, list):
+        for entry in contents:
+            if isinstance(entry, dict) and entry.get("id") is not None:
+                entry["id"] = catalog.get(str(entry["id"]), entry["id"])
+
+
+def validate_conversion_value(
+    custom_data: dict[str, Any], event_name: str
+) -> str | None:
+    """Return a reason string when this payload must NOT be sent, else None.
+
+    Meta reported **0% valid value on website Purchase** for a live NUMU store.
+    The cause was browser-side (a guest Purchase fired with no ``value`` at
+    all), and this builder was never at fault — it divides integer cents by 100
+    exactly once and defaults the currency. This guard exists so that stays
+    true: a conversion Meta will reject is not worth sending, and a silent
+    ``None`` is exactly how the original defect stayed invisible for months.
+
+    Deliberately permissive in one place: a **zero** value is warned about but
+    still sent. A 100%-discounted or fully-gift-carded order is a real
+    conversion, and dropping it would trade a reporting blemish for a missing
+    sale. Everything genuinely unusable — NaN, infinity, non-numeric, a
+    negative on a non-Refund event, a currency that is not three letters — is
+    refused, because those can only ever corrupt revenue reporting.
+    """
+    currency = custom_data.get("currency")
+    if not isinstance(currency, str) or not _ISO_4217_RE.fullmatch(currency.strip()):
+        return f"invalid_currency:{currency!r}"
+
+    raw_value = custom_data.get("value")
+    if isinstance(raw_value, bool) or raw_value is None:
+        return f"invalid_value:{raw_value!r}"
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return f"invalid_value:{raw_value!r}"
+    if not math.isfinite(value):
+        return f"invalid_value:{raw_value!r}"
+
+    # Refund carries a deliberate negative so net revenue reconciles.
+    if event_name == "Refund":
+        return None if value <= 0 else f"refund_value_not_negative:{value}"
+    if value < 0:
+        return f"negative_value:{value}"
+    return None
+
+
+def _guard_conversion_payload(
+    custom_data: dict[str, Any], event_name: str, order: Any
+) -> bool:
+    """Normalize currency, alert on anything wrong, and say whether to send."""
+    currency = custom_data.get("currency")
+    if isinstance(currency, str):
+        custom_data["currency"] = currency.strip().upper()
+
+    reason = validate_conversion_value(custom_data, event_name)
+    if reason is None:
+        if custom_data.get("value") == 0:
+            logger.warning(
+                "meta_capi_zero_value_conversion",
+                extra={"order_id": str(getattr(order, "id", "")), "event": event_name},
+            )
+        return True
+
+    logger.error(
+        "meta_capi_invalid_conversion_payload",
+        extra={
+            "order_id": str(getattr(order, "id", "")),
+            "event": event_name,
+            "reason": reason,
+        },
+    )
+    with contextlib.suppress(Exception):
+        import sentry_sdk
+
+        sentry_sdk.set_tag("meta_capi.reject_reason", reason.split(":", 1)[0])
+        sentry_sdk.capture_message(
+            f"meta_capi.invalid_conversion_payload {event_name} {reason}",
+            level="error",
+        )
+    return False
 
 
 def _build_custom_data_from_order(
@@ -263,9 +557,12 @@ async def enqueue_meta_capi_event_for_order(
 
     paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
     user_data = _build_user_data_from_order(order)
+    await fill_identity_from_customer(db, user_data, order)
     custom_data = _build_custom_data_from_order(
         order, await resolve_catalog_ids(db, order)
     )
+    if not _guard_conversion_payload(custom_data, event_name, order):
+        return
     event_time = int(paid_at.timestamp())
 
     # ``action_source: website`` events without an event_source_url are
@@ -353,6 +650,9 @@ async def enqueue_meta_capi_refund(db: AsyncSession, order: Any) -> None:
     custom_data["refund_for_order_id"] = str(order.id)
 
     user_data = _build_user_data_from_order(order)
+    await fill_identity_from_customer(db, user_data, order)
+    if not _guard_conversion_payload(custom_data, "Refund", order):
+        return
     event_time = int(datetime.now(UTC).timestamp())
     event_id = f"refund-{order.id}"
 

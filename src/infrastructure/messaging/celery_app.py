@@ -515,6 +515,22 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.meta_capi_sweep_orphaned_purchases",
         "schedule": crontab(minute=10),  # hourly at :10
     },
+    # ─── Meta Event Match Quality: the measurement loop ────────────────
+    # Snapshots every active store's EMQ from Meta's Dataset Quality API
+    # into meta_match_quality_snapshot, which is what the hub reads. Until
+    # this existed the service returned a hardcoded empty list and NUMU
+    # could not report match quality for any store — making every other
+    # signal-quality change unfalsifiable.
+    #
+    # Every 6 hours, not hourly: Marketing API rate-limits per app, this
+    # runs once per capi-enabled store per pixel, and EMQ moves on a
+    # rolling multi-day window so hourly polls would spend quota re-reading
+    # a number that has barely changed. Offset to :40 so it never contends
+    # with the two hourly orphan sweeps at :10 and :25.
+    "meta-match-quality-poll": {
+        "task": "tasks.meta_match_quality_poll",
+        "schedule": crontab(minute=40, hour="*/6"),
+    },
     # ─── TikTok Events API: catch orphaned CompletePayment events ──────
     # Hourly sweep finds paid orders without a CompletePayment row in the
     # TikTok event log and re-enqueues them. Offset from the Meta sweep

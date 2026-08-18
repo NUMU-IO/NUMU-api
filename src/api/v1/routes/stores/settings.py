@@ -1,6 +1,7 @@
 """Store settings routes."""
 
 import base64
+import contextlib
 import hashlib
 import logging
 import re
@@ -3419,6 +3420,9 @@ from src.api.v1.schemas.tenant.channels import (  # noqa: E402
 )
 from src.api.v1.schemas.tenant.tracking import (  # noqa: E402
     MetaEventLogEntry,
+    MetaMatchKeyCoverage,
+    MetaMatchQualityEvent,
+    MetaMatchQualityResponse,
     MetaTrackingResponse,
     MetaTrackingStatusResponse,
     SaveMetaTrackingRequest,
@@ -3687,7 +3691,34 @@ async def save_meta_tracking(
             existing_cred.encryption_key_id = key_id
             existing_cred.is_active = True
             existing_cred.is_validated = False
-            existing_cred.extra_metadata = {"pixel_id": request.pixel_id}
+            # ⚠️ Meta CAPI credentials are keyed on TENANT, not store —
+            # `idx_service_credentials_tenant_service` is UNIQUE on
+            # (tenant_id, service_type, service_name). A tenant with two
+            # stores under different Meta Business Managers therefore has
+            # exactly ONE token slot, and saving on store B silently replaces
+            # store A's token; A's events then 4xx against a pixel that token
+            # cannot write to, with nothing surfaced to either merchant.
+            #
+            # Fixing that properly means adding `store_id` to the shared
+            # credential table and its unique index, then backfilling — a
+            # change that touches every integration (WhatsApp, payments,
+            # shipping), so it is deliberately NOT bundled into a tracking
+            # fix. What is safe here is making the collision VISIBLE rather
+            # than silent: stamp the owning store, and log when it changes.
+            _prior_store = (existing_cred.extra_metadata or {}).get("store_id")
+            if _prior_store and str(_prior_store) != str(store.id):
+                logger.warning(
+                    "meta_capi_credential_reassigned tenant=%s from_store=%s "
+                    "to_store=%s - this tenant has ONE Meta token slot; the "
+                    "previous store's events will now fail",
+                    store.tenant_id,
+                    _prior_store,
+                    store.id,
+                )
+            existing_cred.extra_metadata = {
+                "pixel_id": request.pixel_id,
+                "store_id": str(store.id),
+            }
         else:
             new_cred = ServiceCredential(
                 tenant_id=store.tenant_id,
@@ -3738,23 +3769,48 @@ async def save_meta_tracking(
         "consent_required": bool(request.consent_required),
         "domain_verification_token": domain_token,
         "debug_mode_expires_at": debug_expires_iso,
+        # ── No-clobber contract ───────────────────────────────────────
+        # Everything below follows the same rule the Meta Business IDs
+        # already documented: a field the request did not supply keeps the
+        # value already on record. It previously did NOT, so any client that
+        # posted a partial panel — an older hub build, the mobile app, a
+        # merchant saving from a screen that doesn't render these controls —
+        # silently erased the store's multi-pixel list, its COD Purchase
+        # trigger, its Lead trigger, its WhatsApp-lead opt-in and its granular
+        # consent policy. Nothing surfaced the loss; the save returned 200 and
+        # the next event simply behaved differently.
+        #
         # Wave 2 Phase 12 — COD-aware Purchase / Lead firing config.
         # None preserves legacy behavior (paymob/fawry webhooks remain
         # the sole Purchase source).
-        "purchase_trigger": request.purchase_trigger,
-        "lead_trigger": request.lead_trigger,
+        "purchase_trigger": (
+            request.purchase_trigger
+            if request.purchase_trigger is not None
+            else meta_cfg.get("purchase_trigger")
+        ),
+        "lead_trigger": (
+            request.lead_trigger
+            if request.lead_trigger is not None
+            else meta_cfg.get("lead_trigger")
+        ),
         # Wave 2 Phase 15 — fire Lead when COD customer confirms via
-        # WhatsApp reply. Off by default — opt-in.
-        "whatsapp_lead_enabled": bool(request.whatsapp_lead_enabled),
+        # WhatsApp reply. Off by default — opt-in. Tri-state on the wire
+        # (True / False / omitted) so "off" stays distinguishable from
+        # "not sent"; a plain bool default could only ever mean "off".
+        "whatsapp_lead_enabled": (
+            bool(request.whatsapp_lead_enabled)
+            if request.whatsapp_lead_enabled is not None
+            else bool(meta_cfg.get("whatsapp_lead_enabled"))
+        ),
         # Wave 2 Phase 13 — store-level multi-pixel list. None when
         # the merchant is still on the legacy single-pixel path.
-        "pixels": new_pixels,
+        "pixels": new_pixels if new_pixels is not None else meta_cfg.get("pixels"),
         # Wave 3 Phase 18 — granular consent policy. None preserves
         # the legacy single-toggle behavior gated on consent_required.
         "consent_settings": (
             request.consent_settings.model_dump()
             if request.consent_settings is not None
-            else None
+            else meta_cfg.get("consent_settings")
         ),
         # Meta Business connection IDs — only overwrite when the request
         # supplies a value. Sending the panel without re-entering them
@@ -3879,7 +3935,20 @@ async def delete_meta_tracking(
     meta_cfg["pixel_enabled"] = False
     meta_cfg["capi_enabled"] = False
     meta_cfg["debug_mode_expires_at"] = None
+    # Disable every entry in the multi-pixel array too, and clear the legacy
+    # flat id. Only the top-level flags were being cleared — but the
+    # storefront resolves `pixels[]` FIRST and ignores those flags, so a
+    # multi-pixel store that hit "Disconnect" kept firing the browser Pixel
+    # on every page. A disconnect that does not disconnect is worse than no
+    # button: the merchant believes they have stopped sending data to Meta.
+    if isinstance(meta_cfg.get("pixels"), list):
+        for entry in meta_cfg["pixels"]:
+            if isinstance(entry, dict):
+                entry["pixel_enabled"] = False
+                entry["capi_enabled"] = False
     tracking["meta"] = meta_cfg
+    # Legacy flat field, read by older storefront bundles still in ISR cache.
+    settings_dict.pop("meta_pixel_id", None)
     settings_dict["tracking"] = tracking
     store.settings = settings_dict
     try:
@@ -4205,6 +4274,33 @@ async def verify_meta_tracking_connection(
             message="Meta connection not verified",
         )
 
+    # Record that the credential actually works.
+    #
+    # Nothing in the Meta path ever set this: `is_validated` was written False
+    # on save and never flipped back, and `last_validated_at` stayed NULL
+    # forever — verified in production, where a live store with a working
+    # token reported `last_validated_at: null`. The consequence is that token
+    # expiry is completely silent: events simply start failing and the panel
+    # keeps saying "connected". Stamping it here gives the status badge, the
+    # merchant-facing panel and any future re-validation sweep something real
+    # to read.
+    #
+    # Best-effort: a bookkeeping failure must never turn a successful
+    # verification into a reported failure.
+    try:
+        cred = await _get_capi_credential(db, store.tenant_id)
+        if cred is not None:
+            cred.is_validated = True
+            cred.last_validated_at = datetime.now(UTC)
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        with contextlib.suppress(Exception):
+            await db.rollback()
+        logger.warning(
+            "meta_verify_stamp_failed",
+            extra={"store_id": str(store.id)},
+        )
+
     return SuccessResponse(
         data=VerifyConnectionResponse(
             verified=True,
@@ -4215,6 +4311,69 @@ async def verify_meta_tracking_connection(
             is_active=body.get("is_active"),
         ),
         message="Meta connection verified",
+    )
+
+
+@router.get(
+    "/tracking/meta/match-quality",
+    response_model=SuccessResponse[MetaMatchQualityResponse],
+    summary="Get Meta Event Match Quality",
+    operation_id="get_meta_match_quality",
+)
+async def get_meta_match_quality(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+):
+    """Latest EMQ snapshot per event, from Meta's Dataset Quality API.
+
+    Reads cached rows written by the ``meta_match_quality_poll`` beat task —
+    never calls Meta inline, because the Marketing API rate-limits per app and
+    a dashboard must not fail when a third party is slow.
+
+    Empty ``events`` means no poll has landed yet (the store may have just
+    connected, or its token may lack the ``ads_read`` scope the Dataset
+    Quality API requires — which is a different problem from having no data).
+    """
+    from src.application.services.meta_match_quality_service import (
+        MetaMatchQualityService,
+    )
+
+    meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
+    pixel_id = meta_cfg.get("pixel_id")
+
+    service = MetaMatchQualityService()
+    snapshots = await service.get_snapshots(store.id, pixel_id, session=db)
+
+    events = [
+        MetaMatchQualityEvent(
+            event_name=snap.event_name,
+            pixel_id=snap.pixel_id,
+            emq_score=snap.emq_score,
+            total_events=snap.total_events,
+            dedup_rate=snap.dedup_rate,
+            event_coverage=snap.event_coverage,
+            data_freshness=snap.data_freshness,
+            match_keys=[
+                MetaMatchKeyCoverage(identifier=key, coverage_percentage=pct)
+                for key, pct in sorted(
+                    (snap.match_key_coverage or {}).items(),
+                    key=lambda kv: kv[1],
+                    reverse=True,
+                )
+            ],
+            diagnostics=snap.diagnostics or [],
+            captured_at=snap.captured_at,
+        )
+        for snap in snapshots
+    ]
+
+    return SuccessResponse(
+        data=MetaMatchQualityResponse(
+            events=events,
+            last_polled_at=max((e.captured_at for e in events), default=None),
+            low_score_threshold=MetaMatchQualityService.LOW_EMQ_THRESHOLD,
+        ),
+        message="Meta match quality retrieved",
     )
 
 

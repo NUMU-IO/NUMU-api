@@ -38,11 +38,102 @@ logger = get_logger(__name__)
 # Funnel-step → Meta-event mapping (plan §5.3)
 # ──────────────────────────────────────────────────────────────────────
 # Public so settings.test-event endpoint and tests can import it.
+# Meta deduplicates a repeated (pixel_id, event_name, event_id) for 48 hours.
+# A resend INSIDE that window is merged and contributes its extra match keys;
+# a resend outside it is a brand-new event and double-counts the conversion.
+_META_DEDUP_WINDOW_SECONDS = 48 * 60 * 60
+
+# Hard ceiling on identity-enrichment resends per logged event. Without it a
+# misbehaving client could turn `refireFunnelWithIdentity` into an outbound
+# traffic amplifier against Meta's API.
+_MAX_ENRICHMENT_RESENDS = 3
+
+# The hashed match keys worth a resend. `fbp`/`fbc`/ip/ua are excluded on
+# purpose: they are present from the first fire, so a change there is churn
+# rather than enrichment.
+_MATCH_KEY_FIELDS: tuple[str, ...] = (
+    "em",
+    "ph",
+    "fn",
+    "ln",
+    "ct",
+    "st",
+    "zp",
+    "country",
+    "external_id",
+)
+
+
+def _sweep_order_filter(cutoff: datetime) -> Any:
+    """Orders the orphan sweep should consider: paid, OR cash-on-delivery.
+
+    COD never stamps ``paid_at`` (it is set on collection, if at all) and has no
+    payment webhook, so a ``paid_at IS NOT NULL`` filter excluded COD orders
+    from the recovery path entirely. In a COD-majority market that left the
+    browser thank-you page as the ONLY source of a Purchase event — so any
+    buyer who closed the tab on redirect, or ran an ad blocker, produced no
+    conversion at all. That is a missing sale, not merely weak matching.
+
+    ``payment_method IS NULL`` counts as COD to match checkout's own rule
+    (``not request.payment_method or request.payment_method == "cod"``).
+
+    Timing stays the merchant's decision: the per-order loop skips COD orders
+    for stores that configured an explicit ``purchase_trigger``, because there
+    the order-status handler owns when Purchase fires.
+    """
+    from sqlalchemy import and_, or_
+
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    return or_(
+        and_(OrderModel.paid_at.isnot(None), OrderModel.paid_at >= cutoff),
+        and_(
+            OrderModel.paid_at.is_(None),
+            or_(
+                OrderModel.payment_method == "cod",
+                OrderModel.payment_method.is_(None),
+            ),
+            OrderModel.created_at >= cutoff,
+        ),
+    )
+
+
+def _adds_match_keys(new_user_data: dict, stored_user_data: dict) -> bool:
+    """True when ``new_user_data`` carries a match key the stored copy lacks.
+
+    Strictly additive: a value that merely *changed* does not qualify, only one
+    that goes from absent to present. That keeps the resend path tied to real
+    identity discovery (the shopper typed their email) rather than to noise.
+    """
+    if not isinstance(stored_user_data, dict) or not isinstance(new_user_data, dict):
+        return False
+    return any(
+        new_user_data.get(field) and not stored_user_data.get(field)
+        for field in _MATCH_KEY_FIELDS
+    )
+
+
 FUNNEL_STEP_TO_META_EVENT: dict[str, str] = {
     "page_view": "PageView",
+    # `collection_view` is what PageViewTracker emits for every
+    # /collections/* route. It had no entry here, so `.get(step)` returned
+    # None and the CAPI enqueue silently returned — collection pages were
+    # browser-pixel-only. Measured on a live store: the server leg carried
+    # only ~57% of browser PageViews while every other event paired 1:1.
+    # Mapping to PageView is safe because the browser leg already fires
+    # PageView for these routes under the SAME `pageViewEventId`, so the
+    # pair dedupes cleanly rather than double-counting.
+    "collection_view": "PageView",
     "product_view": "ViewContent",
     "add_to_cart": "AddToCart",
     "checkout_started": "InitiateCheckout",
+    # The shipping step is where the address (city + governorate + postal
+    # code + country) is finally complete. It is already a valid funnel step
+    # and is already in `_IDENTITY_RESOLUTION_STEPS`, but had no Meta
+    # mapping — so the richest identity moment in the whole funnel produced
+    # no event. AddShippingInfo is not a Meta *standard* event; a custom one
+    # still carries full `user_data` and still counts toward match quality.
+    "add_shipping_info": "AddShippingInfo",
     # NB: order_completed is normally fired from the payment webhook,
     # NOT /track — but if the storefront posts it (browser confirmation
     # page), we still enqueue Purchase. The UNIQUE constraint dedupes
@@ -340,16 +431,77 @@ async def _send_event(
                 await session.execute(
                     sa_select(MetaEventLogModel).where(
                         MetaEventLogModel.store_id == store_uuid,
+                        # Must match the UNIQUE key exactly. Without pixel_id
+                        # this adopts whichever pixel logged first, so an
+                        # enrichment resend for pixel B could overwrite
+                        # pixel A's row and then skip B entirely.
+                        MetaEventLogModel.pixel_id == pixel_id,
                         MetaEventLogModel.event_id == event_id,
                     )
                 )
             ).scalar_one_or_none()
-            if (
-                existing is None
-                or existing.response_status is None
-                or existing.response_status < 400
-            ):
-                # Sent (2xx) or still in-flight (NULL) — genuine duplicate.
+
+            completed = existing is not None and existing.response_status is not None
+            prior_failed = completed and existing.response_status >= 400
+
+            # ── Identity enrichment resend ───────────────────────────────
+            # The storefront deliberately re-POSTs an earlier event under its
+            # ORIGINAL event_id once the shopper types their contact details
+            # (`refireFunnelWithIdentity`), so the event Meta already holds
+            # picks up em/ph/fn/ln/ct/st/zp. Meta supports exactly this: the
+            # same event_id inside the 48h window is deduplicated per Pixel,
+            # and the later copy contributes its extra match keys.
+            #
+            # This branch used to return "duplicate" before any HTTP call, so
+            # the entire feature was inert and InitiateCheckout permanently
+            # carried zero PII for guests — measurable on the live dataset as
+            # 100% fbp/fbc/external_id coverage alongside 0% em/ph.
+            enrich = False
+            if completed and not prior_failed:
+                stored_user_data = (existing.request_payload or {}).get(
+                    "user_data"
+                ) or {}
+                if _adds_match_keys(request_payload["user_data"], stored_user_data):
+                    # Age of the event META ALREADY HOLDS — read off the stored
+                    # row, NOT off the incoming `event_time`.
+                    #
+                    # `refireFunnelWithIdentity` re-POSTs the original event_id
+                    # with no `event_time`, so `/track` stamps it `now()`. Using
+                    # the incoming value made `age_seconds` ~0 on every resend,
+                    # so `within_window` was permanently True and this guard
+                    # never fired once — the exact case it exists to stop
+                    # (a resend outside 48h is a NEW conversion to Meta, not a
+                    # merge) was fully open.
+                    original_ts = getattr(existing, "event_time", None)
+                    if isinstance(original_ts, datetime):
+                        if original_ts.tzinfo is None:
+                            original_ts = original_ts.replace(tzinfo=UTC)
+                        reference_ts = original_ts.timestamp()
+                    else:
+                        reference_ts = float(event_time)
+                    age_seconds = int(datetime.now(UTC).timestamp() - reference_ts)
+                    within_window = age_seconds <= _META_DEDUP_WINDOW_SECONDS
+                    under_cap = (existing.attempt_count or 0) < _MAX_ENRICHMENT_RESENDS
+                    enrich = within_window and under_cap
+                    if not enrich:
+                        # Outside the window a resend is NOT deduplicated —
+                        # it double-counts the conversion. Never send it.
+                        logger.info(
+                            "meta_capi_enrichment_skipped",
+                            store_id=store_id,
+                            event_id=event_id,
+                            event_name=event_name,
+                            reason=(
+                                "outside_dedup_window"
+                                if not within_window
+                                else "resend_cap_reached"
+                            ),
+                            age_seconds=age_seconds,
+                        )
+
+            if existing is None or (not prior_failed and not enrich):
+                # Sent (2xx) with nothing new to add, or still in-flight
+                # (NULL) — genuine duplicate.
                 logger.info(
                     "meta_capi_dedup_skip",
                     store_id=store_id,
@@ -357,6 +509,15 @@ async def _send_event(
                     event_name=event_name,
                 )
                 return {"status": "duplicate", "fbtrace_id": None}
+
+            if enrich:
+                logger.info(
+                    "meta_capi_enrichment_resend",
+                    store_id=store_id,
+                    event_id=event_id,
+                    event_name=event_name,
+                    attempt=(existing.attempt_count or 0) + 1,
+                )
 
             # Capture BEFORE commit — post-commit attribute access on an
             # expired instance would trigger a sync lazy refresh and blow
@@ -368,7 +529,9 @@ async def _send_event(
             existing.last_error = None
             await session.commit()
             logger.info(
-                "meta_capi_retry_failed_row",
+                "meta_capi_enrichment_resend_committed"
+                if enrich
+                else "meta_capi_retry_failed_row",
                 store_id=store_id,
                 event_id=event_id,
                 event_name=event_name,
@@ -604,6 +767,8 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
     from src.application.services.meta_capi_purchase_dispatcher import (
         _build_custom_data_from_order,
         _build_user_data_from_order,
+        _guard_conversion_payload,
+        fill_identity_from_customer,
         resolve_catalog_ids,
     )
     from src.application.services.meta_pixel_resolver import resolve_pixels
@@ -634,8 +799,7 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
                 StoreModel,
                 StoreModel.id == OrderModel.store_id,
             )
-            .where(OrderModel.paid_at.isnot(None))
-            .where(OrderModel.paid_at >= cutoff)
+            .where(_sweep_order_filter(cutoff))
             # Filter to stores that have CAPI enabled — settings is JSONB.
             .where(
                 StoreModel.settings["tracking"]["meta"]["capi_enabled"].as_string()
@@ -656,7 +820,9 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             return stats
 
         order_ids = [str(o.id) for o in orders]
-        existing_query = select(MetaEventLogModel.event_id).where(
+        existing_query = select(
+            MetaEventLogModel.event_id, MetaEventLogModel.pixel_id
+        ).where(
             MetaEventLogModel.event_name == "Purchase",
             MetaEventLogModel.event_id.in_(order_ids),
             # A recorded 4xx/5xx does NOT count as "sent" — the send task
@@ -667,12 +833,17 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
                 MetaEventLogModel.response_status < 400,
             ),
         )
-        existing = {row[0] for row in (await session.execute(existing_query)).all()}
+        # (event_id, pixel_id) pairs — NOT event_id alone. The log is keyed
+        # per pixel now, so an order fanned out to three pixels has three
+        # rows. Collapsing to event_id would let ONE pixel's success mask the
+        # other two failing, and the sweep would skip the order forever —
+        # exactly the orphan it exists to recover.
+        existing = {
+            (row[0], row[1]) for row in (await session.execute(existing_query)).all()
+        }
 
         for o in orders:
             stats["scanned"] += 1
-            if str(o.id) in existing:
-                continue
             order_full = (
                 await session.execute(select(OrderModel).where(OrderModel.id == o.id))
             ).scalar_one_or_none()
@@ -692,6 +863,41 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             if not pixels:
                 continue
 
+            # Recover only the pixels that are actually missing this Purchase.
+            #
+            # This check moved AFTER the store load, because which pixels an
+            # order owes can only be known once the store's config is
+            # resolved. The cost is an order+store fetch for orders that turn
+            # out to be fully sent; acceptable at 500 rows/hour, and worth
+            # revisiting with a batched store load if the sweep ever widens.
+            pixels = [
+                p for p in pixels if (str(order_full.id), p.pixel_id) not in existing
+            ]
+            if not pixels:
+                continue
+
+            # COD orders are now in scope (see `_sweep_order_filter`), but only
+            # as the backstop for stores that have NOT chosen a Purchase
+            # trigger. When `purchase_trigger` is configured the merchant has
+            # said when a COD sale counts — on confirmation, on delivery — and
+            # `meta_capi_status_event_handler` owns that moment. Firing here
+            # too would report unpaid orders as revenue and pre-empt their
+            # choice.
+            # Gate on a trigger the status handler can ACTUALLY act on, not on
+            # truthiness. `meta_capi_status_event_handler` only fires when the
+            # trigger is in `_VALID_TRIGGER_STATUSES`; a value outside that set
+            # — `store.settings` is JSONB and is also written by SQLAdmin, the
+            # MCP and seed scripts, none of which go through the hub's Literal
+            # type — would make the sweep stand down for a handler that never
+            # fires, and the COD Purchase would be lost entirely.
+            if getattr(order_full, "paid_at", None) is None:
+                from src.infrastructure.events.handlers.meta_capi_status_event_handler import (  # noqa: E501
+                    _VALID_TRIGGER_STATUSES,
+                )
+
+                if meta_cfg.get("purchase_trigger") in _VALID_TRIGGER_STATUSES:
+                    continue
+
             # Build the SAME rich payload the webhook path sends. The
             # sweep used to fire ``user_data={}`` as "best-effort" — but
             # Meta hard-rejects events with zero customer information
@@ -703,6 +909,7 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             # model would resolve to SQLAlchemy's MetaData registry).
             order_view = SimpleNamespace(
                 id=order_full.id,
+                store_id=order_full.store_id,
                 customer_id=order_full.customer_id,
                 shipping_address=order_full.shipping_address,
                 metadata=order_full.extra_data or {},
@@ -715,14 +922,29 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
                 utm_term=order_full.utm_term,
                 utm_content=order_full.utm_content,
                 campaign_id=getattr(order_full, "campaign_id", None),
+                # A swept Purchase must be identical to the one the webhook
+                # would have sent — same match keys, same catalog ids. These
+                # three were missing, so recovered conversions silently
+                # carried a weaker identity than the ones that worked:
+                #   session_fingerprint → external_id (guest session stitch)
+                #   attribution         → fbc rebuilt from the stored fbclid
+                #   store_id            → scopes the customer/email lookup
+                session_fingerprint=getattr(order_full, "session_fingerprint", None),
+                attribution=getattr(order_full, "attribution", None),
             )
             user_data = _build_user_data_from_order(order_view)
+            await fill_identity_from_customer(session, user_data, order_view)
             # Same catalog-id resolution as the webhook path — otherwise a
             # swept Purchase would carry different content_ids from the one
             # the browser/webhook sent for the same order.
             custom_data = _build_custom_data_from_order(
                 order_view, await resolve_catalog_ids(session, order_view)
             )
+
+            # Same value/currency contract as the webhook path — a recovered
+            # conversion Meta cannot value is not worth recovering.
+            if not _guard_conversion_payload(custom_data, "Purchase", order_view):
+                continue
 
             if not any(user_data.values()):
                 # No match key at all (no phone/email/name/ip/fbp/…) —
@@ -766,8 +988,7 @@ async def _orders_paid_since_python_filter(session: Any, cutoff: datetime) -> li
     rows = (
         await session.execute(
             select(OrderModel.id, OrderModel.store_id, OrderModel.tenant_id)
-            .where(OrderModel.paid_at.isnot(None))
-            .where(OrderModel.paid_at >= cutoff)
+            .where(_sweep_order_filter(cutoff))
             .limit(500)
         )
     ).all()
@@ -794,3 +1015,173 @@ async def _orders_paid_since_python_filter(session: Any, cutoff: datetime) -> li
         if meta_cfg.get("capi_enabled"):
             out.append(r)
     return out
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Event Match Quality poll — the measurement loop
+# ──────────────────────────────────────────────────────────────────────
+
+
+@celery_app.task(
+    name="tasks.meta_match_quality_poll",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=600,
+)
+def meta_match_quality_poll(self: Any, lookback_hours: int = 24) -> dict[str, int]:
+    """Snapshot every connected store's EMQ from Meta's Dataset Quality API.
+
+    This is the measurement loop the platform never had. Without it
+    ``MetaMatchQualityService.get_snapshots`` has nothing to read, the hub
+    renders an empty state, and no signal-quality change can be shown to have
+    worked — Meta scores over a rolling window, so proving an improvement
+    means comparing the same event across polls.
+
+    **Every 6 hours, not hourly.** The Marketing API rate-limits per app, and
+    this runs once per capi-enabled store per pixel; EMQ moves on a rolling
+    multi-day window, so hourly polling would spend quota to re-read a number
+    that has barely changed.
+
+    Only polls stores that actually fired an event recently — a dormant store
+    has no new data and would burn quota for a repeated snapshot.
+
+    Never raises per-store: one store's expired token must not stop the sweep.
+    """
+    try:
+        result: dict[str, int] = _run_async(_poll_match_quality(lookback_hours))
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("meta_match_quality_poll_failed")
+        raise self.retry(exc=exc) from exc
+
+
+async def _poll_match_quality(lookback_hours: int) -> dict[str, int]:
+    from sqlalchemy import select
+
+    from src.application.services.meta_match_quality_service import (
+        poll_match_quality,
+    )
+    from src.application.services.meta_pixel_resolver import resolve_pixels
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.meta_event_log import (
+        MetaEventLogModel,
+    )
+    from src.infrastructure.database.models.tenant.store import StoreModel
+    from src.infrastructure.repositories.meta_match_quality_repository import (
+        MetaMatchQualityRepository,
+    )
+    from src.infrastructure.tenancy.rls import enable_rls_bypass, narrow_to_tenant
+
+    stats = {"stores": 0, "polled": 0, "snapshots": 0, "skipped": 0}
+    cutoff = datetime.now(UTC) - timedelta(hours=lookback_hours)
+
+    async with AsyncSessionLocal() as session:
+        await enable_rls_bypass(session)
+
+        # Stores that sent Meta an event inside the window — a store with no
+        # recent traffic has no new score to read.
+        active_store_ids = (
+            (
+                await session.execute(
+                    select(MetaEventLogModel.store_id)
+                    .where(MetaEventLogModel.created_at >= cutoff)
+                    .distinct()
+                    .limit(500)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not active_store_ids:
+            return stats
+
+        stores = (
+            (
+                await session.execute(
+                    select(StoreModel).where(StoreModel.id.in_(active_store_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        for store in stores:
+            stats["stores"] += 1
+            meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
+            pixels = resolve_pixels(meta_cfg, mode="capi")
+            if not pixels:
+                stats["skipped"] += 1
+                continue
+
+            access_token = await _decrypt_capi_token(session, store)
+            if not access_token:
+                stats["skipped"] += 1
+                continue
+
+            repo = MetaMatchQualityRepository(session)
+            for pixel in pixels:
+                snapshots = await poll_match_quality(
+                    store_id=store.id,
+                    pixel_id=pixel.pixel_id,
+                    access_token=access_token,
+                )
+                if not snapshots:
+                    continue
+                stats["polled"] += 1
+                try:
+                    await narrow_to_tenant(session, store.tenant_id)
+                    stats["snapshots"] += await repo.record(
+                        tenant_id=store.tenant_id,
+                        store_id=store.id,
+                        snapshots=snapshots,
+                    )
+                    await session.commit()
+                except Exception:  # noqa: BLE001 — one store must not stop the sweep
+                    await session.rollback()
+                    logger.exception(
+                        "meta_match_quality_record_failed",
+                        store_id=str(store.id),
+                        pixel_id=pixel.pixel_id,
+                    )
+                await enable_rls_bypass(session)
+
+    logger.info("meta_match_quality_poll_done", **stats)
+    return stats
+
+
+async def _decrypt_capi_token(session: Any, store: Any) -> str | None:
+    """Fetch + decrypt this store's CAPI access token, or None."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceCredential,
+        ServiceName,
+        ServiceType,
+    )
+    from src.infrastructure.external_services.secrets import get_secrets_manager
+
+    try:
+        cred = (
+            await session.execute(
+                select(ServiceCredential)
+                .where(
+                    ServiceCredential.tenant_id == store.tenant_id,
+                    ServiceCredential.service_type == ServiceType.TRACKING,
+                    ServiceCredential.service_name == ServiceName.META_CAPI,
+                    ServiceCredential.is_active.is_(True),
+                )
+                .order_by(ServiceCredential.updated_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if cred is None:
+            return None
+        secrets = get_secrets_manager()
+        decrypted = await secrets.decrypt(
+            cred.credentials_encrypted, cred.encryption_key_id
+        )
+        token = decrypted.get("access_token")
+        return str(token) if token else None
+    except Exception:  # noqa: BLE001
+        logger.warning("meta_match_quality_token_unavailable", store_id=str(store.id))
+        return None

@@ -209,14 +209,20 @@ class TestFunnelStepMapping:
         assert _funnel_step_to_meta_event("") is None
 
     def test_full_mapping_keys_match_funnel_vocab(self):
-        # Sanity: every Meta event name in the mapping must be one of
-        # Meta's supported standard events. The set grows over time:
+        # Sanity: every Meta event name in the mapping is either one of Meta's
+        # supported STANDARD events, or a CUSTOM name we have deliberately
+        # decided to send. The split matters — a custom name still carries full
+        # user_data but cannot be used for standard-event optimisation, so
+        # adding one is a product decision and must be spelled out here rather
+        # than slipping in as "just another entry".
+        #
+        # Standard set grows over time:
         #   - Wave 1: 5 conversion-funnel events
         #   - Phase 2 (within Wave 1): +Search, Lead, CompleteRegistration,
         #     AddPaymentInfo
         #   - Wave 4 Phase 22: +Subscribe, Contact, AddToWishlist,
         #     CustomizeProduct
-        assert set(FUNNEL_STEP_TO_META_EVENT.values()) == {
+        standard = {
             # Conversion funnel
             "PageView",
             "ViewContent",
@@ -234,6 +240,10 @@ class TestFunnelStepMapping:
             "AddToWishlist",
             "CustomizeProduct",
         }
+        # Meta has no standard event for the shipping step. Sent as a custom
+        # event so the address-complete moment still contributes match keys.
+        custom = {"AddShippingInfo"}
+        assert set(FUNNEL_STEP_TO_META_EVENT.values()) == standard | custom
 
     # Phase 22 — pin per-event mappings so a future rename can't silently
     # break a single one without the test summary calling it out.
