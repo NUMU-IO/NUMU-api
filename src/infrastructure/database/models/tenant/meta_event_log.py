@@ -42,8 +42,17 @@ class MetaEventLogModel(Base, UUIDMixin, TenantMixin):
 
     __tablename__ = "meta_event_log"
     __table_args__ = (
+        # (store, PIXEL, event) — not (store, event). Meta scopes its own
+        # deduplication to a single Pixel ID, so the same event_id fanned out
+        # to a store's second and third pixels is CORRECT. Keying without
+        # pixel_id meant this constraint rejected pixels 2..N as duplicates
+        # before they ever reached Meta: a multi-pixel store was silently a
+        # single-pixel store.
         UniqueConstraint(
-            "store_id", "event_id", name="uq_meta_event_log_store_event_id"
+            "store_id",
+            "pixel_id",
+            "event_id",
+            name="uq_meta_event_log_store_pixel_event_id",
         ),
         # Dashboard "recent events" query — covers store + event_name +
         # newest-first ordering in a single index seek.

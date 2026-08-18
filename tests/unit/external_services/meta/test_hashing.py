@@ -156,6 +156,40 @@ class TestHashUserData:
         assert out["country"][0] == _sha256("eg")
         assert out["zp"][0] == _sha256("11511")
 
+    def test_state_is_emitted(self):
+        # `st` was collected on every Egyptian address, persisted on the order,
+        # and never sent — it was not even a key in the output dict. It is one
+        # of the nine fields Meta counts toward customer-information
+        # completeness, so its absence capped match quality platform-wide.
+        out = hash_user_data({"state": "Cairo"})
+        assert out["st"] == [_sha256("cairo")]
+
+    def test_state_normalized_like_city(self):
+        # Meta: states outside the U.S. are "lowercase with no punctuation, no
+        # special characters, and no spaces".
+        out = hash_user_data({"state": "Kafr El-Sheikh"})
+        assert out["st"] == [_sha256("kafrelsheikh")]
+
+    def test_state_absent_when_not_supplied(self):
+        assert hash_user_data({"city": "Cairo"})["st"] is None
+
+    def test_city_with_spaces_is_compacted(self):
+        # Regression for the defect this suite never caught: "New Cairo" used
+        # to hash as "new cairo", which matches nothing in Meta's index.
+        out = hash_user_data({"city": "New Cairo"})
+        assert out["ct"] == [_sha256("newcairo")]
+
+    def test_zip_strips_dash(self):
+        # Meta: "lowercase with no spaces and no dash". Latent for Egypt's
+        # numeric codes, live for the Gulf.
+        assert hash_user_data({"zip": "12345-678"})["zp"] == [_sha256("12345678")]
+
+    def test_email_keeps_at_and_dot(self):
+        # The punctuation stripping applied to names/cities must NEVER reach
+        # `em` — an email without its @ and . matches nothing.
+        out = hash_user_data({"email": "  Yousef.Ali@Example.COM "})
+        assert out["em"] == [_sha256("yousef.ali@example.com")]
+
     def test_external_id_uses_customer_id_key(self):
         # The plan maps `customer_id` (NUMU-internal) → `external_id`
         # (Meta-spec). Regressing this breaks logged-in customer match.
@@ -362,8 +396,38 @@ class TestNormalizeName:
         assert _normalize_name("   ", field="fn") is None
 
     def test_pure_latin_returns_single_variant(self):
-        # Backward-compatible: pre-Phase-14 callers see no change.
-        assert _normalize_name("Mohamed", field="fn") == ["Mohamed"]
+        # One variant for Latin input, now returned in Meta's normalized form
+        # (lowercase, no punctuation) rather than raw. The resulting DIGEST is
+        # unchanged for a plain name like this — `_h` lowercased anyway — but
+        # normalizing here is what makes "Al-Sayed" and "New Cairo" hash to the
+        # forms Meta actually indexes.
+        assert _normalize_name("Mohamed", field="fn") == ["mohamed"]
+
+    def test_latin_punctuation_stripped_for_names(self):
+        # Meta: fn/ln are "lowercase only with no punctuation".
+        assert _normalize_name("Al-Sayed", field="ln") == ["alsayed"]
+        assert _normalize_name("O'Brien", field="ln") == ["obrien"]
+        # Spaces are NOT stripped for names — Meta specifies "no spaces" only
+        # for ct/st.
+        assert _normalize_name("El  Masry", field="ln") == ["el masry"]
+
+    def test_city_strips_spaces_when_requested(self):
+        # Meta: ct is "lowercase only with no punctuation, no special
+        # characters, and no spaces". Before this, "New Cairo" hashed as
+        # "new cairo" and could never match Meta's "newcairo".
+        assert _normalize_name("New Cairo", field="ct", strip_spaces=True) == [
+            "newcairo"
+        ]
+        assert _normalize_name("6th of October", field="ct", strip_spaces=True) == [
+            "6thofoctober"
+        ]
+
+    def test_arabic_city_strips_spaces_in_both_variants(self):
+        # Dual-hash survives the stricter normalization.
+        assert _normalize_name("مدينة نصر", field="ct", strip_spaces=True) == [
+            "nasrcity",
+            "مدينةنصر",
+        ]
 
     def test_arabic_returns_two_variants(self):
         # Latin first (canonical Meta audience key), Arabic second.

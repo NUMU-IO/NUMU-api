@@ -243,7 +243,17 @@ class TestPayloadShape:
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
         ud = send_event_task.delay.call_args.kwargs["user_data"]
-        assert ud["email"] == "buyer@example.com"
+        # `email` is NOT read from the address. `OrderShippingAddress` has no
+        # email field (core/entities/order.py) and `_address_to_dict` never
+        # writes one, so `shipping.get("email")` was a permanent None in
+        # production — every server-authoritative Purchase reached Meta with
+        # `em: null`. This test used to pass only because the fixture invented
+        # an `email` key that real orders never carry.
+        #
+        # The real value now comes from the customer record via
+        # `fill_identity_from_customer`, which is covered separately in
+        # TestIdentityFromCustomer.
+        assert ud["email"] is None
         assert ud["phone"] == "+201234567890"
         assert ud["first_name"] == "Sara"
         assert ud["last_name"] == "Ali"
@@ -485,3 +495,141 @@ class TestEdgeCases:
 
         ud = send_event_task.delay.call_args.kwargs["user_data"]
         assert ud["customer_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Signal-quality repairs (META-SIGNAL-QUALITY-PLAN W1.1 / W2.2 / W2.5 / W-0.1)
+# ---------------------------------------------------------------------------
+
+
+class TestGuestSessionStitch:
+    """`external_id` must be the SAME value mid-funnel and on the conversion.
+
+    Mid-funnel events send the session fingerprint as `external_id`; the order
+    path used to send only `customer_id`, which is None for a guest. Meta
+    therefore saw an anonymous browsing session and an unrelated purchase and
+    could not join them — on a COD store, for almost every order.
+    """
+
+    async def test_session_fingerprint_becomes_external_id(self, patched_collaborators):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+        order = _make_order(customer_id=None)
+        order.session_fingerprint = "sess-abc-123"
+
+        await enqueue_meta_capi_purchase(MagicMock(), order)
+
+        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        assert ud["external_id"] == "sess-abc-123"
+
+    async def test_absent_fingerprint_is_not_fatal(self, patched_collaborators):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+
+        await enqueue_meta_capi_purchase(MagicMock(), _make_order())
+
+        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        assert ud["external_id"] is None
+
+
+class TestStateIsSent:
+    """`st` is on the address, on the order, and was never sent to Meta."""
+
+    async def test_state_forwarded_from_shipping_address(self, patched_collaborators):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+        order = _make_order(
+            shipping_address={
+                "phone": "+201234567890",
+                "first_name": "Sara",
+                "city": "Cairo",
+                "state": "Cairo",
+                "country": "EG",
+            }
+        )
+
+        await enqueue_meta_capi_purchase(MagicMock(), order)
+
+        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        assert ud["state"] == "Cairo"
+
+
+class TestOrderPathFbcSynthesis:
+    """The conversion event must rebuild `fbc` the way /track already does.
+
+    If the Pixel was blocked there is no `_fbc` cookie — but the raw click id
+    is on the order's own attribution snapshot, and it is the CONVERSION that
+    Meta optimizes spend against.
+    """
+
+    async def test_fbc_rebuilt_from_attribution_when_cookie_missing(
+        self, patched_collaborators
+    ):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+        order = _make_order(metadata={"ip_address": "192.0.2.42"})
+        order.attribution = {"last_touch": {"fbclid": "AbC_Click123", "ts": 1786838400}}
+
+        await enqueue_meta_capi_purchase(MagicMock(), order)
+
+        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        # Click-observation time, not payment time. Click id verbatim — Meta's
+        # spec says it is case sensitive and must not be modified.
+        assert ud["fbc"] == "fb.1.1786838400000.AbC_Click123"
+
+    async def test_cookie_fbc_wins_over_synthesis(self, patched_collaborators):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+        order = _make_order(
+            metadata={"ip_address": "192.0.2.42", "fbc": "fb.1.111.REAL"}
+        )
+        order.attribution = {"last_touch": {"fbclid": "OTHER", "ts": 1786838400}}
+
+        await enqueue_meta_capi_purchase(MagicMock(), order)
+
+        assert (
+            send_event_task.delay.call_args.kwargs["user_data"]["fbc"]
+            == "fb.1.111.REAL"
+        )
+
+
+class TestConversionValueGuard:
+    """A conversion Meta cannot value must not be sent at all.
+
+    Meta reported 0% valid value on website Purchase for a live store. That
+    defect was browser-side, but nothing anywhere asserted the invariant.
+    """
+
+    async def test_zero_value_still_sends(self, patched_collaborators):
+        # A fully discounted / gift-carded order is a real conversion.
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+
+        await enqueue_meta_capi_purchase(MagicMock(), _make_order(total=0))
+
+        assert send_event_task.delay.called
+
+    async def test_malformed_currency_is_refused(self, patched_collaborators):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+
+        await enqueue_meta_capi_purchase(MagicMock(), _make_order(currency="EGP 250"))
+
+        assert not send_event_task.delay.called
+
+    async def test_negative_purchase_value_is_refused(self, patched_collaborators):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+
+        await enqueue_meta_capi_purchase(MagicMock(), _make_order(total=-500))
+
+        assert not send_event_task.delay.called
+
+    async def test_currency_is_upcased(self, patched_collaborators):
+        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+
+        await enqueue_meta_capi_purchase(MagicMock(), _make_order(currency="egp"))
+
+        cd = send_event_task.delay.call_args.kwargs["custom_data"]
+        assert cd["currency"] == "EGP"

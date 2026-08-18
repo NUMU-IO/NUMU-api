@@ -77,6 +77,15 @@ class TrackingLineItem(BaseModel):
     unit_price: int  # cents
     total: int  # cents
     product_image_url: str | None = None
+    # Catalog identifier for the browser Purchase event's `content_ids`.
+    #
+    # Not PII: it is the same id already embedded in every product URL and in
+    # `product_image_url` above. Exposing it lets a GUEST thank-you page send
+    # `content_ids` — without it, guests (most COD buyers) fired Purchase with
+    # no product attribution at all, so Meta could not clear them from
+    # "viewed but didn't buy" retargeting audiences or credit the catalog.
+    # Prefers the merchant's Meta catalog id so the event joins the feed.
+    product_id: str | None = None
 
 
 class TrackingShippingAddress(BaseModel):
@@ -276,10 +285,17 @@ async def _build_tracking_response(
             pids.append(UUID(str(raw_pid)))
         except (ValueError, TypeError):
             continue
+    # Same batch resolves the merchant's Meta catalog id, so the Purchase
+    # event's `content_ids` join to their product feed rather than to an
+    # internal UUID the catalog does not contain.
+    catalog_by_pid: dict[str, str] = {}
     if pids:
         for product in await product_repo.get_by_ids(pids):
             if product.images:
                 image_by_pid[str(product.id)] = product.images[0]
+            catalog_id = getattr(product, "meta_catalog_id", None)
+            if catalog_id:
+                catalog_by_pid[str(product.id)] = str(catalog_id)
 
     items = [
         TrackingLineItem(
@@ -289,6 +305,10 @@ async def _build_tracking_response(
             total=li.quantity * li.unit_price,
             product_image_url=image_by_pid.get(
                 str(getattr(li, "product_id", "") or "")
+            ),
+            product_id=(
+                catalog_by_pid.get(str(getattr(li, "product_id", "") or ""))
+                or (str(getattr(li, "product_id", "")) or None)
             ),
         )
         for li in order.line_items

@@ -67,3 +67,75 @@ class TestEmptyHandling:
         assert "phone" not in out
         assert "ttclid" not in out
         assert out["external_id"] == _sha("c1")
+
+
+# ---------------------------------------------------------------------------
+# Cross-vendor coupling with meta/hashing.py
+#
+# `hash_tiktok_user_data` imports `_normalize_name` from Meta's module. The
+# Meta signal-quality change (2026-08-17) altered that function's output, so
+# TikTok's name digests changed too — a cross-vendor behaviour change that was
+# not part of the stated scope and had no test either side of it.
+#
+# These tests exist so the coupling is VISIBLE: any future edit to Meta's
+# normalizer that moves TikTok's wire format will now fail here first.
+# ---------------------------------------------------------------------------
+
+
+class TestSharedNormalizerCoupling:
+    def test_name_punctuation_is_stripped(self):
+        """Changed 2026-08-17 via Meta's `_normalize_name`.
+
+        Was `al-sayed`; is now `alsayed`. Both TikTok and Meta specify
+        "lowercase, no punctuation" for name fields, so the new form is the
+        correct one — but every TikTok event for a punctuated name now carries
+        a different digest than it did before.
+        """
+        out = hash_tiktok_user_data({"first_name": "Al-Sayed", "last_name": "O'Brien"})
+        assert out["first_name"] == _sha("alsayed")
+        assert out["last_name"] == _sha("obrien")
+
+    def test_name_internal_spaces_are_preserved(self):
+        out = hash_tiktok_user_data({"last_name": "El  Masry"})
+        assert out["last_name"] == _sha("el masry")
+
+
+class TestVendorParityGaps:
+    """TikTok and Meta must normalize the shared fields IDENTICALLY.
+
+    These began as xfail(strict) pins: the Meta normalization fix (strip spaces
+    from ct/st, strip dashes from zp, canonicalize country) was applied only to
+    Meta's call sites, so for a few hours TikTok was the vendor left holding the
+    unmatchable form — and `tiktok/hashing.py` imports Meta's helpers, which is
+    exactly why a one-sided fix could drift silently.
+
+    The gaps are now closed and these assert parity directly. Keep them: they
+    are the tripwire for the next time one vendor's normalization is corrected
+    without the other's.
+    """
+
+    def test_city_should_match_metas_normalization(self):
+        from src.infrastructure.external_services.meta.hashing import hash_user_data
+
+        raw = {"city": "New Cairo"}
+        assert hash_tiktok_user_data(raw)["city"] == hash_user_data(raw)["ct"][0]
+
+    def test_zip_should_match_metas_normalization(self):
+        from src.infrastructure.external_services.meta.hashing import hash_user_data
+
+        raw = {"zip": "12345-678"}
+        assert hash_tiktok_user_data(raw)["zip_code"] == hash_user_data(raw)["zp"][0]
+
+    def test_country_should_be_canonicalized_like_meta(self):
+        from src.infrastructure.external_services.meta.hashing import hash_user_data
+
+        raw = {"country_code": "Egypt"}
+        assert (
+            hash_tiktok_user_data(raw)["country"] == hash_user_data(raw)["country"][0]
+        )
+
+    def test_tiktok_sends_no_state_at_all(self):
+        """Meta gained `st` in this change; TikTok's user object has no state
+        key and did not get one. Recorded so the asymmetry is deliberate."""
+        out = hash_tiktok_user_data({"state": "Cairo"})
+        assert "state" not in out

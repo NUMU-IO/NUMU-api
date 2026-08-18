@@ -248,7 +248,21 @@ class TestPaymobWebhookEnqueue:
         assert kwargs["event_name"] == "Purchase"
         assert kwargs["custom_data"]["value"] == 1250.0
         assert kwargs["custom_data"]["currency"] == "EGP"
-        assert kwargs["user_data"]["email"] == "shopper@example.com"
+        # `email` is NOT read from `shipping_address`, and this assertion used
+        # to pass only because the fixture above invents a key real orders
+        # never carry. `OrderShippingAddress` (core/entities/order.py) has no
+        # email field and `OrderRepository._address_to_dict` never writes one —
+        # confirmed against the local sandbox DB: of 81 stored orders, ZERO
+        # have an `email` key in `shipping_address`.
+        #
+        # The real value is resolved from the customer row by
+        # `fill_identity_from_customer`; this test's fake order carries a
+        # random `customer_id` with no matching row, so None is correct here.
+        # Coverage for the resolution itself lives in
+        # tests/unit/application/test_meta_capi_identity_fill.py.
+        assert kwargs["user_data"]["email"] is None
+        # Phone still comes off the address, which DOES persist it.
+        assert kwargs["user_data"]["phone"] == "+201001234567"
 
     @pytest.mark.asyncio
     async def test_enqueue_meta_purchase_skips_when_capi_disabled(

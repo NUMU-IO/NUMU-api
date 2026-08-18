@@ -10,11 +10,12 @@ so a merchant flipping ``capi_enabled = false`` mid-session doesn't
 trigger stale fan-outs from queued jobs.
 """
 
+import contextlib
 import ipaddress
 import json
 from datetime import UTC, datetime
 from typing import Annotated
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Path, Request, Response
@@ -467,6 +468,9 @@ async def track_page_view(
     attribution = _read_attribution_envelope(body.attribution, request)
     last_touch = attribution.last_touch if attribution else None
     landing_fbclid = last_touch.fbclid if last_touch else None
+    # The moment the click id was OBSERVED — Meta's `fbc` creationTime. Was
+    # being discarded here while the event's own timestamp was used instead.
+    landing_click_ts = last_touch.ts if last_touch else None
 
     # Only persist a page_view row when this is actually a navigation event.
     # Pure funnel events (add_to_cart, search, add_payment_info, etc.) must
@@ -618,6 +622,7 @@ async def track_page_view(
             user_agent=ua,
             session=funnel_repo.session,
             landing_fbclid=landing_fbclid,
+            landing_click_ts=landing_click_ts,
         )
     except Exception:
         # Never let a CAPI enqueue error break the main tracking call.
@@ -1068,25 +1073,29 @@ async def _enrich_user_data_from_session(
                 user_data["country_code"] = iso2
 
 
-def _synthesize_fbc(fbclid: str | None, event_time: datetime) -> str | None:
-    """Build Meta's ``fbc`` value from a raw ``fbclid``.
+def _synthesize_fbc(
+    fbclid: str | None,
+    click_ts: datetime | None,
+    *,
+    host: str | None = None,
+) -> str | None:
+    """Build Meta's ``fbc`` from a raw ``fbclid`` — see ``meta/click_id.py``.
 
-    Meta's documented format is ``fb.{subdomain_index}.{creation_ms}.{fbclid}``
-    with subdomain_index 1 for a normal ``store.example.com`` host. The browser
-    Pixel writes this into the ``_fbc`` cookie itself — but only if it loaded.
-    Ad-blockers and DNS filtering are common in Egypt, and the cookie is also
-    absent whenever the visitor's first landing predates the Pixel being
-    configured. In every one of those cases we still hold the ``fbclid`` from
-    the attribution envelope, and Meta explicitly supports reconstructing the
-    value server-side.
+    Thin delegate kept at this name because ``docs/external-contracts.md`` #7
+    points here. The implementation moved so the order-path Purchase
+    (``meta_capi_purchase_dispatcher``) shares exactly one copy of the format
+    rule instead of growing a second.
 
-    Uses the event's own timestamp for ``creation_ms`` rather than "now": for a
-    replayed or retried event those differ, and drift there is what makes an
-    ``fbc`` fail to join to the click.
+    ⚠️ ``click_ts`` is the time the ``fbclid`` was **first observed** — i.e.
+    ``attribution.last_touch.ts`` — not the event's own timestamp. This
+    previously passed event time, which meant a Purchase days after the click
+    claimed the click happened at purchase time (risking a join outside Meta's
+    attribution window) and made every event in a session synthesize a
+    *different* ``fbc`` for the same click.
     """
-    if not fbclid:
-        return None
-    return f"fb.1.{int(event_time.timestamp() * 1000)}.{fbclid}"
+    from src.infrastructure.external_services.meta.click_id import synthesize_fbc
+
+    return synthesize_fbc(fbclid, click_ts, host=host)
 
 
 def _apply_pseudonymous_external_id(user_data: dict, fingerprint: str | None) -> None:
@@ -1109,6 +1118,185 @@ def _apply_pseudonymous_external_id(user_data: dict, fingerprint: str | None) ->
         user_data["external_id"] = fingerprint
 
 
+# PII fields a page script may legitimately contribute. Everything else in
+# `user_data` — ip, user_agent, fbp, fbc, external_id, customer_id — is either
+# derived from the request itself or resolved server-side, and is NOT
+# overridable by the payload.
+_CLIENT_USER_DATA_ALLOWLIST: frozenset[str] = frozenset({
+    "email",
+    "phone",
+    "first_name",
+    "last_name",
+    "city",
+    "state",
+    "zip",
+    "country_code",
+})
+
+# Generous per-value cap. Long enough for any real name/address, short enough
+# that a hostile payload cannot use `user_data` as free storage.
+_CLIENT_USER_DATA_MAX_LEN = 256
+
+
+def _client_supplied_user_data(raw: dict | None) -> dict:
+    """Project the untrusted ``body.user_data`` down to an allowlist.
+
+    ``/track`` is unauthenticated and same-origin with BYOT theme bundles, so
+    this dict is attacker-controlled in the practical sense: any script on the
+    storefront can POST it. Previously it was merged FIRST and server-derived
+    values only filled blanks, which meant a page script could set
+    ``user_data.ip`` / ``user_data.user_agent`` and replace the two match keys
+    that carry anonymous traffic — a real value that is uniformly wrong is
+    worse than no value at all.
+
+    Same discipline as the ``custom_data`` allowlist (api#466): name the keys
+    that are allowed through, coerce them to bounded strings, drop everything
+    else silently.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in _CLIENT_USER_DATA_ALLOWLIST:
+        value = raw.get(key)
+        if value is None or isinstance(value, bool | dict | list):
+            continue
+        text = str(value).strip()
+        if text and len(text) <= _CLIENT_USER_DATA_MAX_LEN:
+            out[key] = text
+    return out
+
+
+# How long a resolved guest identity stays usable for later events in the
+# same visit. Long enough to cover a shopper who fills contact details, keeps
+# browsing, and comes back; short enough that a shared device does not inherit
+# a stranger's identity.
+_IDENTITY_CACHE_TTL_SECONDS = 2 * 60 * 60
+_IDENTITY_CACHE_PREFIX = "capi_identity:"
+
+# The fields worth caching — exactly what `_enrich_user_data_from_session`
+# can produce. Cookies and request signals are never cached; they are
+# per-request truth.
+_IDENTITY_CACHE_FIELDS = (
+    "email",
+    "phone",
+    "first_name",
+    "last_name",
+    "city",
+    "state",
+    "zip",
+    "country_code",
+)
+
+
+async def _resolve_session_identity(
+    user_data: dict,
+    fingerprint: str | None,
+    store_id: UUID,
+    session,
+    step: str,
+) -> None:
+    """Fill guest identity for ANY funnel step, paying for the query once.
+
+    The DB lookup still runs only on the checkout steps — the original cost
+    argument for `_IDENTITY_RESOLUTION_STEPS` was sound. What changed is that
+    its result is cached, so every other step in the session (ViewContent,
+    AddToCart, PageView …) can reuse it for the price of one Redis GET.
+
+    That matters because those are precisely the events Meta builds
+    product-level retargeting audiences from. Restricting enrichment to
+    checkout meant a shopper who typed their email and then kept browsing
+    generated a long tail of unmatchable events, and the audience filled with
+    people Meta could not resolve.
+
+    Falls open on every failure: a cache outage costs match quality, never a
+    conversion.
+    """
+    if not fingerprint:
+        return
+    if user_data.get("email") and user_data.get("phone"):
+        return
+
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    cache = RedisCacheService()
+    key = f"{_IDENTITY_CACHE_PREFIX}{store_id}:{fingerprint}"
+
+    cached = None
+    with contextlib.suppress(Exception):
+        cached = await cache.get(key)
+    if isinstance(cached, dict):
+        for field in _IDENTITY_CACHE_FIELDS:
+            value = cached.get(field)
+            if value and not user_data.get(field):
+                user_data[field] = value
+        # A cache hit means the checkout lookup already ran for this session;
+        # re-querying would just confirm it.
+        if user_data.get("email") or user_data.get("phone"):
+            return
+
+    # Cache miss. Only the checkout steps pay for the DB lookup — a page view
+    # from a shopper who has never reached checkout has nothing to find.
+    if step not in _IDENTITY_RESOLUTION_STEPS:
+        return
+
+    before = {f: user_data.get(f) for f in _IDENTITY_CACHE_FIELDS}
+    await _enrich_user_data_from_session(user_data, fingerprint, store_id, session)
+
+    resolved = {
+        f: user_data.get(f)
+        for f in _IDENTITY_CACHE_FIELDS
+        if user_data.get(f) and user_data.get(f) != before.get(f)
+    }
+    if resolved:
+        with contextlib.suppress(Exception):
+            await cache.set(key, resolved, expire=_IDENTITY_CACHE_TTL_SECONDS)
+
+
+async def _apply_catalog_ids_to_custom_data(custom_data: dict, session) -> None:
+    """Rewrite ``content_ids``/``contents[].id`` to the merchant's catalog ids.
+
+    Costs one indexed `IN` query, and only when the payload actually carries
+    product ids. Returns silently when the store uses no catalog overrides —
+    the feed emits the internal id for those products too, so the two already
+    agree and there is nothing to remap.
+    """
+    if not isinstance(custom_data, dict):
+        return
+
+    candidates: set[str] = set()
+    ids = custom_data.get("content_ids")
+    if isinstance(ids, list):
+        candidates.update(str(i) for i in ids if isinstance(i, str | int))
+    contents = custom_data.get("contents")
+    if isinstance(contents, list):
+        candidates.update(
+            str(e["id"])
+            for e in contents
+            if isinstance(e, dict) and isinstance(e.get("id"), str | int)
+        )
+    if not candidates:
+        return
+
+    from src.application.services.meta_capi_purchase_dispatcher import (
+        apply_catalog_ids,
+        resolve_catalog_ids_for,
+    )
+
+    apply_catalog_ids(custom_data, await resolve_catalog_ids_for(session, candidates))
+
+
+def _request_host(body: TrackPageViewRequest) -> str | None:
+    """Host of the page the event fired on — drives Meta's ``fbc`` subdomain
+    index. Returns None when the URL is absent or unparseable, in which case
+    the click-id builder falls back to its default index."""
+    page_url = getattr(body, "page_url", None)
+    if not page_url:
+        return None
+    with contextlib.suppress(Exception):
+        return urlparse(str(page_url)).hostname or None
+    return None
+
+
 async def _maybe_enqueue_meta_capi(
     *,
     store: Store,
@@ -1118,6 +1306,7 @@ async def _maybe_enqueue_meta_capi(
     user_agent: str,
     session,
     landing_fbclid: str | None = None,
+    landing_click_ts: datetime | None = None,
 ) -> None:
     """Enqueue ``meta_capi_send_event`` when this store has CAPI configured.
 
@@ -1165,22 +1354,32 @@ async def _maybe_enqueue_meta_capi(
     event_time = body.event_time or datetime.now(UTC)
     page_url = body.page_url
 
-    # Compose user_data from request signals + explicit body.user_data.
-    user_data = dict(body.user_data or {})
-    if "fbp" not in user_data and body.fbp:
+    # Compose user_data. SERVER-DERIVED SIGNALS WIN — see
+    # `_client_supplied_user_data`. This used to start from the client dict and
+    # only fill blanks, which let any script on the storefront origin (BYOT
+    # theme bundles run there) overwrite the IP and User-Agent that dominate
+    # matching for anonymous traffic.
+    user_data = _client_supplied_user_data(body.user_data)
+    if body.fbp:
         user_data["fbp"] = body.fbp
-    if "fbc" not in user_data and body.fbc:
+    if body.fbc:
         user_data["fbc"] = body.fbc
     # No `_fbc` cookie but the landing URL carried an `fbclid`? Rebuild it.
     # Real `fbc` coverage measured only ~56%, and it is the strongest non-PII
-    # match key Meta has after hashed user data.
+    # match key Meta has after hashed user data. `landing_click_ts` is when the
+    # click was OBSERVED — using the event time here made every event in a
+    # session emit a different `fbc` for the same click.
     if not user_data.get("fbc"):
-        synthesized = _synthesize_fbc(landing_fbclid, event_time)
+        synthesized = _synthesize_fbc(
+            landing_fbclid, landing_click_ts or event_time, host=_request_host(body)
+        )
         if synthesized:
             user_data["fbc"] = synthesized
-    if "ip" not in user_data and ip:
+    # Unconditional: the request's own IP/UA are ground truth and are never
+    # overridable by the payload.
+    if ip:
         user_data["ip"] = ip
-    if "user_agent" not in user_data and user_agent:
+    if user_agent:
         user_data["user_agent"] = user_agent
     _apply_pseudonymous_external_id(user_data, body.fingerprint)
 
@@ -1198,12 +1397,23 @@ async def _maybe_enqueue_meta_capi(
                 "meta_capi_enrich_user_data_failed",
                 extra={"store_id": str(store.id)},
             )
-    elif step in _IDENTITY_RESOLUTION_STEPS:
+    else:
         # Guest: no customer record to read, but the checkout contact step may
         # already have given us their email/phone. See the helper docstring.
+        #
+        # This used to run ONLY for the four checkout steps, on cost grounds —
+        # so a shopper who filled the contact form and then went back to
+        # browsing produced a long tail of zero-PII ViewContent/AddToCart
+        # events, which are exactly the events Meta builds product-level
+        # retargeting audiences from. The audience filled with unmatchable
+        # people.
+        #
+        # `_resolve_session_identity` keeps the cost argument honest: the DB
+        # lookup still runs only for the checkout steps; every other step
+        # reads the Redis entry that lookup wrote. Hot paths pay one cache GET.
         try:
-            await _enrich_user_data_from_session(
-                user_data, body.fingerprint, store.id, session
+            await _resolve_session_identity(
+                user_data, body.fingerprint, store.id, session, step
             )
         except Exception:
             logger.exception(
@@ -1212,6 +1422,25 @@ async def _maybe_enqueue_meta_capi(
             )
 
     custom_data = sanitize_custom_data(body.step_data)
+
+    # Remap internal product UUIDs → the merchant's Meta catalog ids.
+    #
+    # The feed emits `meta_catalog_id or product.id`, but only the PDP's
+    # ViewContent and the server-side Purchase honoured that — every event
+    # arriving here sent the raw UUID. For a merchant whose catalog is keyed
+    # on their own SKUs, dynamic ads then cannot join the event to a catalog
+    # row: the highest-ROAS format stops attributing, and the failure is
+    # invisible because the funnel's FIRST event matches and the rest don't.
+    # Doing it here rather than in the storefront covers every current and
+    # future event with one lookup, and needs no new field on the cart or
+    # product payloads.
+    try:
+        await _apply_catalog_ids_to_custom_data(custom_data, session)
+    except Exception:  # noqa: BLE001 — a lookup must never break a fire
+        logger.exception(
+            "meta_capi_catalog_remap_failed", extra={"store_id": str(store.id)}
+        )
+
     event_time_int = int(event_time.timestamp())
 
     # Fan out — one task per capi-enabled pixel.
@@ -1297,12 +1526,13 @@ async def _maybe_enqueue_tiktok_capi(
                 "tiktok_capi_enrich_user_data_failed",
                 extra={"store_id": str(store.id)},
             )
-    elif step in _IDENTITY_RESOLUTION_STEPS:
+    else:
         # Guest identity from the checkout contact details — mirrors the Meta
-        # path above so both platforms see the same match keys.
+        # path above so both platforms see the same match keys, including the
+        # cache-backed widening to every funnel step.
         try:
-            await _enrich_user_data_from_session(
-                user_data, body.fingerprint, store.id, session
+            await _resolve_session_identity(
+                user_data, body.fingerprint, store.id, session, step
             )
         except Exception:
             logger.exception(
