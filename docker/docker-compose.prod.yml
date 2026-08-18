@@ -201,12 +201,26 @@ services:
         awslogs-stream: redis-master
         mode: non-blocking
         max-buffer-size: 4m
+    # `volatile-lru`, NOT `allkeys-lru`. This instance is the Celery broker as
+    # well as the application cache, and `allkeys-lru` lets Redis evict ANY key
+    # under memory pressure — including the queue lists, `unacked`, and the
+    # `_kombu.binding.*` registry. That is silent, platform-wide task loss: the
+    # message disappears and nothing anywhere records that it existed.
+    #
+    # `volatile-lru` only considers keys that carry a TTL. Every application
+    # write in the codebase sets one (audited: `RedisCacheService.set/…`,
+    # `ThemeBuildStore.set` at 24h, Celery results via `result_expires=3600`),
+    # while Celery's broker structures carry none — so the split falls exactly
+    # where it should, with no new instance and nothing to re-point.
+    #
+    # If memory does fill, writes now fail loudly with OOM instead of quietly
+    # dropping a queued job. That is the better failure: it pages someone.
     command: >
       redis-server
       --appendonly yes
       --appendfsync everysec
       --maxmemory 1gb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_master_data:/data
