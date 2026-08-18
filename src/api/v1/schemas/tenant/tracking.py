@@ -577,6 +577,32 @@ class MetaEventLogEntry(BaseModel):
     request_payload_redacted: dict
 
 
+class MetaDeliveryHealth(BaseModel):
+    """What the outbox still owes Meta, and what it gave up on.
+
+    The failure rate above is computed over the last 20 rows, so it answers
+    "is this store healthy right now". These counters answer the question it
+    cannot: "is anything stuck". A store can show a perfectly clean recent
+    window while a hundred conversions sit in the retry ladder behind it.
+    """
+
+    # Persisted, delivery not yet acknowledged.
+    pending: int = 0
+    # Failed retryably; waiting on the backoff ladder.
+    retrying: int = 0
+    # Retryable, but the attempt budget ran out. Meta or the network was
+    # down — not a merchant misconfiguration.
+    dead_letter: int = 0
+    # Past the point where sending would merge rather than double-count, so
+    # deliberately never sent. Not an error.
+    expired: int = 0
+    # Permanently rejected: bad payload, dead token, unknown pixel. The only
+    # bucket here that a merchant can act on.
+    failed: int = 0
+    # Window the counts cover.
+    window_hours: int = 24
+
+
 class MetaTrackingStatusResponse(BaseModel):
     """Live status badge for the dashboard header (plan §7.5)."""
 
@@ -587,6 +613,7 @@ class MetaTrackingStatusResponse(BaseModel):
     recent_failure_rate: float = 0.0
     # Total recent events considered when computing the failure rate.
     recent_event_count: int = 0
+    delivery: MetaDeliveryHealth = Field(default_factory=MetaDeliveryHealth)
 
 
 class MetaMatchKeyCoverage(BaseModel):

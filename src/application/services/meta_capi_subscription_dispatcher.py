@@ -95,7 +95,7 @@ async def enqueue_meta_capi_subscribe(db: AsyncSession, subscription: Any) -> No
     if store is None or not pixels:
         return
 
-    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+    from src.infrastructure.messaging.tasks.meta_capi import enqueue_capi_event
 
     event_time = int(datetime.now(UTC).timestamp())
     user_data = _subscription_user_data(subscription)
@@ -103,7 +103,10 @@ async def enqueue_meta_capi_subscribe(db: AsyncSession, subscription: Any) -> No
     event_id = f"subscribe-{subscription.id}"
 
     for pixel in pixels:
-        meta_capi_send_event.delay(
+        await enqueue_capi_event(
+            session=db,
+            store=store,
+            tenant_id=getattr(store, "tenant_id", None),
             store_id=str(subscription.store_id),
             pixel_id=pixel.pixel_id,
             event_name="Subscribe",
@@ -133,7 +136,7 @@ async def enqueue_meta_capi_recurring_purchase(
     if store is None or not pixels:
         return
 
-    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+    from src.infrastructure.messaging.tasks.meta_capi import enqueue_capi_event
 
     event_time = int(datetime.now(UTC).timestamp())
     user_data = _subscription_user_data(subscription)
@@ -142,7 +145,10 @@ async def enqueue_meta_capi_recurring_purchase(
     event_id = f"sub-charge-{charge_id}"
 
     for pixel in pixels:
-        meta_capi_send_event.delay(
+        await enqueue_capi_event(
+            session=db,
+            store=store,
+            tenant_id=getattr(store, "tenant_id", None),
             store_id=str(subscription.store_id),
             pixel_id=pixel.pixel_id,
             event_name="Purchase",
@@ -163,7 +169,7 @@ async def enqueue_meta_capi_cancel_subscription(
     if store is None or not pixels:
         return
 
-    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+    from src.infrastructure.messaging.tasks.meta_capi import enqueue_capi_event
 
     event_time = int(datetime.now(UTC).timestamp())
     user_data = _subscription_user_data(subscription)
@@ -173,7 +179,10 @@ async def enqueue_meta_capi_cancel_subscription(
     event_id = f"cancel-{subscription.id}"
 
     for pixel in pixels:
-        meta_capi_send_event.delay(
+        await enqueue_capi_event(
+            session=db,
+            store=store,
+            tenant_id=getattr(store, "tenant_id", None),
             store_id=str(subscription.store_id),
             pixel_id=pixel.pixel_id,
             event_name="CancelSubscription",

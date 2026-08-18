@@ -3409,6 +3409,11 @@ async def delete_instapay_qr_image(
 import secrets as _stdlib_secrets  # noqa: E402 — alias avoids name clash
 from datetime import timedelta  # noqa: E402
 
+# Window the delivery counters cover. Matches the recent-failure window the
+# admin fleet view already uses, so "failing in the last day" and "stuck in
+# the last day" are the same day.
+_DELIVERY_WINDOW_HOURS = 24
+
 from sqlalchemy import select as _select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: E402
 from sqlalchemy.orm.attributes import flag_modified as _flag_modified  # noqa: E402
@@ -3419,6 +3424,7 @@ from src.api.v1.schemas.tenant.channels import (  # noqa: E402
     TikTokShopStatusResponse,
 )
 from src.api.v1.schemas.tenant.tracking import (  # noqa: E402
+    MetaDeliveryHealth,
     MetaEventLogEntry,
     MetaMatchKeyCoverage,
     MetaMatchQualityEvent,
@@ -4029,7 +4035,7 @@ async def send_meta_test_event(
     (no CAPI to test). This is intentional — the test-event flow only
     makes sense for modes that have a CAPI fan-out path.
     """
-    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+    from src.infrastructure.messaging.tasks.meta_capi import enqueue_capi_event
 
     cfg = _meta_cfg(store)
     has_token = await _has_active_capi_credential(db, store.tenant_id)
@@ -4079,7 +4085,14 @@ async def send_meta_test_event(
         "user_agent": "NUMU-Test-Event/1.0",
     }
 
-    meta_capi_send_event.delay(
+    # `session=None`: a synthetic diagnostic must not be written to the
+    # outbox. Persisting it would put a fake Purchase into the retry ladder
+    # and into the merchant's delivery counts, where it would read as a real
+    # owed conversion.
+    await enqueue_capi_event(
+        session=None,
+        store=store,
+        tenant_id=getattr(store, "tenant_id", None),
         store_id=str(store.id),
         pixel_id=pixel_id,
         event_name="Purchase",
@@ -4413,6 +4426,15 @@ async def get_meta_tracking_status(
 
     repo = MetaEventLogRepository(db)
     recent = await repo.recent_for_store(store.id, limit=20)
+    # Outbox state over a fixed window, alongside the recent-rows rate. The
+    # two answer different questions: the rate says whether sends are working
+    # now, the counters say whether anything is stuck. A store can look
+    # perfectly healthy on its last 20 rows while a backlog of conversions
+    # sits behind it on the retry ladder.
+    counts = await repo.delivery_counts(
+        since=datetime.now(UTC) - timedelta(hours=_DELIVERY_WINDOW_HOURS),
+        store_id=store.id,
+    )
     # Only SETTLED rows count toward the failure rate. An in-flight row
     # (response_status IS NULL) is pending, not failed — counting it as a
     # failure made the rate spike on every burst of traffic.
@@ -4452,6 +4474,14 @@ async def get_meta_tracking_status(
             last_validated_at=cred.last_validated_at if cred else None,
             recent_failure_rate=round(failure_rate, 4),
             recent_event_count=len(recent),
+            delivery=MetaDeliveryHealth(
+                pending=counts.get("pending", 0),
+                retrying=counts.get("retrying", 0),
+                dead_letter=counts.get("dead_letter", 0),
+                expired=counts.get("expired", 0),
+                failed=counts.get("failed", 0),
+                window_hours=_DELIVERY_WINDOW_HOURS,
+            ),
         ),
         message="Meta tracking status retrieved",
     )

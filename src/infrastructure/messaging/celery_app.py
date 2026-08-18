@@ -177,6 +177,18 @@ celery_app.conf.update(
         # queue so a worker pool can be scaled independently and a
         # backlog here doesn't starve transactional tasks.
         Queue("analytics"),
+        # Meta CAPI delivery, split by what the event is worth.
+        #
+        # Everything used to share `default`, which is FIFO — so a burst of
+        # PageViews sat in front of the Purchase behind them, and the one
+        # event a merchant optimises ad spend against was the one made to
+        # wait. Kombu's Redis transport round-robins across the queues a
+        # worker consumes, so splitting them means a deep bulk backlog
+        # cannot starve a conversion even on the single worker pool we run
+        # today. Scaling out later is then just `-Q capi_priority` on a
+        # dedicated worker, with no code change.
+        Queue("capi_priority"),
+        Queue("capi"),
     ),
     task_default_queue="default",
     # Route image tasks to dedicated queue
@@ -530,6 +542,23 @@ celery_app.conf.beat_schedule = {
     "meta-match-quality-poll": {
         "task": "tasks.meta_match_quality_poll",
         "schedule": crontab(minute=40, hour="*/6"),
+    },
+    # ─── Meta CAPI delivery sweep ──────────────────────────────────────
+    # The outbox's own retry loop: expires events that may no longer be sent,
+    # then re-delivers those whose next attempt is due.
+    #
+    # This is the half of the retry story Celery cannot cover. Celery's
+    # retries live in the broker and last minutes; a Meta outage lasts hours,
+    # and every event that fell out of that budget used to be swallowed by
+    # the task's catch-all handler with nothing but a log line. Rows now
+    # carry their own schedule and this walks it.
+    #
+    # Every 2 minutes. Not a latency target — the live path delivers in
+    # seconds — but a recovery cadence: the first ladder rung is 5 minutes,
+    # so polling faster would only spend queries to find nothing due.
+    "meta-capi-deliver-due": {
+        "task": "tasks.meta_capi_deliver_due",
+        "schedule": crontab(minute="*/2"),
     },
     # ─── Meta tracking retention ───────────────────────────────────────
     # `meta_event_log` had NO retention policy: one row per event per pixel,

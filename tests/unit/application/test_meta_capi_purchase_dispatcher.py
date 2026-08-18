@@ -118,24 +118,28 @@ def _make_order(
 
 @pytest.fixture
 def patched_collaborators(monkeypatch):
-    """Patch ``StoreRepository`` + ``meta_capi_send_event`` at their
-    source modules so the lazy imports inside the dispatcher pick up
-    our mocks. Returns ``(store_repo_cls, send_event_task)`` so each
-    test can configure return values + assert call args.
+    """Patch ``StoreRepository`` + ``enqueue_capi_event`` at their source
+    modules so the lazy imports inside the dispatcher pick up our mocks.
+    Returns ``(store_repo_cls, enqueue_event)`` so each test can configure
+    return values + assert call args.
+
+    ``enqueue_capi_event`` rather than the Celery task: every dispatcher now
+    goes through that one door, which is what decides queue, priority and
+    whether the event is persisted before it is enqueued. Asserting on the
+    task would test a layer the dispatcher no longer talks to.
     """
     store_repo_cls = MagicMock()
     store_repo_cls.return_value.get_by_id = AsyncMock(return_value=None)
 
-    send_event_task = MagicMock()
-    send_event_task.delay = MagicMock()
+    enqueue_event = AsyncMock()
 
     import src.infrastructure.messaging.tasks.meta_capi as meta_capi_module
     import src.infrastructure.repositories.store_repository as store_repo_module
 
     monkeypatch.setattr(store_repo_module, "StoreRepository", store_repo_cls)
-    monkeypatch.setattr(meta_capi_module, "meta_capi_send_event", send_event_task)
+    monkeypatch.setattr(meta_capi_module, "enqueue_capi_event", enqueue_event)
 
-    return store_repo_cls, send_event_task
+    return store_repo_cls, enqueue_event
 
 
 # ---------------------------------------------------------------------------
@@ -147,45 +151,45 @@ class TestActivationGate:
     """Truth table covering when the dispatcher fires vs no-ops."""
 
     async def test_no_op_when_store_not_found(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=None)
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        send_event_task.delay.assert_not_called()
+        enqueue_event.assert_not_called()
 
     async def test_no_op_when_capi_disabled(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(
             return_value=_make_store(capi_enabled=False)
         )
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        send_event_task.delay.assert_not_called()
+        enqueue_event.assert_not_called()
 
     async def test_no_op_when_pixel_id_missing(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(
             return_value=_make_store(pixel_id=None)
         )
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        send_event_task.delay.assert_not_called()
+        enqueue_event.assert_not_called()
 
     async def test_no_op_when_settings_completely_missing(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(
             return_value=SimpleNamespace(id=uuid4(), settings=None)
         )
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        send_event_task.delay.assert_not_called()
+        enqueue_event.assert_not_called()
 
     async def test_no_op_when_tracking_namespace_missing(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         # Legacy store with only the flat meta_pixel_id field — namespaced
         # tracking config absent. Dispatcher must NOT try to fall back to
         # the legacy field for CAPI (CAPI requires explicit opt-in via
@@ -199,19 +203,19 @@ class TestActivationGate:
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        send_event_task.delay.assert_not_called()
+        enqueue_event.assert_not_called()
 
     async def test_fires_when_capi_enabled_and_pixel_present(
         self, patched_collaborators
     ):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(
             return_value=_make_store(capi_enabled=True)
         )
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        send_event_task.delay.assert_called_once()
+        enqueue_event.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -224,25 +228,25 @@ class TestPayloadShape:
     order.id is the dedup key against the storefront's Pixel-side fire."""
 
     async def test_event_id_is_order_id(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order()
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        kwargs = send_event_task.delay.call_args.kwargs
+        kwargs = enqueue_event.call_args.kwargs
         assert kwargs["event_id"] == str(order.id)
         assert kwargs["event_name"] == "Purchase"
         assert kwargs["pixel_id"] == PIXEL_ID
         assert kwargs["action_source"] == "website"
 
     async def test_user_data_carries_match_quality_pii(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         # `email` is NOT read from the address. `OrderShippingAddress` has no
         # email field (core/entities/order.py) and `_address_to_dict` never
         # writes one, so `shipping.get("email")` was a permanent None in
@@ -273,12 +277,12 @@ class TestPayloadShape:
         # dispatcher reads it from order.metadata and forwards to CAPI
         # so Meta can use the two highest-signal match keys (per plan
         # §1.1) even when PII isn't available.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["ip"] == "192.0.2.42"
         assert ud["user_agent"].startswith("Mozilla/5.0 (iPhone")
 
@@ -288,12 +292,12 @@ class TestPayloadShape:
         # Legacy orders (created before this PR) won't have ip_address
         # or user_agent in metadata. Dispatcher must degrade gracefully
         # — Meta drops None fields, no exception.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(metadata={}))
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["ip"] is None
         assert ud["user_agent"] is None
 
@@ -303,14 +307,14 @@ class TestPayloadShape:
         # Some entity flavors don't carry a `metadata` attribute at all
         # (older domain dataclasses). getattr(order, "metadata", None)
         # must not raise.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order()
         del order.metadata  # simulate missing attribute
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["ip"] is None
         assert ud["user_agent"] is None
 
@@ -321,7 +325,7 @@ class TestPayloadShape:
         # already. Both keys must work for the same outcome — and both go
         # through `canonicalize_country`, so the result is the lowercase
         # ISO-2 code Meta indexes, never the raw address casing.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(
             shipping_address={"country_code": "EG"},
@@ -329,7 +333,7 @@ class TestPayloadShape:
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["country_code"] == "eg"
 
     async def test_custom_data_uses_display_units_not_cents(
@@ -337,23 +341,23 @@ class TestPayloadShape:
     ):
         # Meta expects `value` in display units (EGP, not piasters).
         # Backend stores cents — dispatcher must divide by 100.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(total=33_000)  # 330.00 EGP
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        cd = send_event_task.delay.call_args.kwargs["custom_data"]
+        cd = enqueue_event.call_args.kwargs["custom_data"]
         assert cd["value"] == 330.0
         assert cd["currency"] == "EGP"
 
     async def test_contents_array_carries_line_items(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        cd = send_event_task.delay.call_args.kwargs["custom_data"]
+        cd = enqueue_event.call_args.kwargs["custom_data"]
         assert cd["content_ids"] == ["prod-1", "prod-2"]
         assert cd["content_type"] == "product"
         assert cd["num_items"] == 3  # 2 + 1
@@ -370,7 +374,7 @@ class TestPayloadShape:
         # A malformed line item (gift wrap, manual fee, etc.) without a
         # product_id must not poison the `contents` array — Meta requires
         # every entry to have a non-empty id.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(
             line_items=[
@@ -382,7 +386,7 @@ class TestPayloadShape:
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        cd = send_event_task.delay.call_args.kwargs["custom_data"]
+        cd = enqueue_event.call_args.kwargs["custom_data"]
         assert cd["content_ids"] == ["prod-1"]
         assert len(cd["contents"]) == 1
 
@@ -398,13 +402,13 @@ class TestEdgeCases:
     async def test_empty_line_items(self, patched_collaborators):
         # Possible for orders that are pure shipping refunds / gift cards —
         # dispatcher should still fire (just with empty contents).
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(line_items=[]))
 
-        send_event_task.delay.assert_called_once()
-        cd = send_event_task.delay.call_args.kwargs["custom_data"]
+        enqueue_event.assert_called_once()
+        cd = enqueue_event.call_args.kwargs["custom_data"]
         assert cd["contents"] == []
         assert cd["num_items"] == 0
 
@@ -412,13 +416,13 @@ class TestEdgeCases:
         # COD orders sometimes land here before the address is finalized —
         # we still want the Purchase event to fire (Meta will downgrade
         # match quality but the conversion is real).
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(shipping_address={}))
 
-        send_event_task.delay.assert_called_once()
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        enqueue_event.assert_called_once()
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["email"] is None
         assert ud["phone"] is None
 
@@ -427,7 +431,7 @@ class TestEdgeCases:
     ):
         # If paid_at is None (legacy row, retroactive sweep), dispatcher
         # uses datetime.now(UTC) so the event still has a timestamp.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         # Build the order directly — the _make_order helper's
         # "None means use default" sentinel logic shadows our explicit None.
@@ -448,17 +452,17 @@ class TestEdgeCases:
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        kwargs = send_event_task.delay.call_args.kwargs
+        kwargs = enqueue_event.call_args.kwargs
         assert kwargs["event_time"] == int(frozen.timestamp())
 
     async def test_currency_falls_back_to_egp(self, patched_collaborators):
         # Egyptian merchants who never set a currency get EGP — never None.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(currency=None))
 
-        cd = send_event_task.delay.call_args.kwargs["custom_data"]
+        cd = enqueue_event.call_args.kwargs["custom_data"]
         assert cd["currency"] == "EGP"
 
     async def test_string_store_id_normalizes_to_uuid(self, patched_collaborators):
@@ -478,22 +482,22 @@ class TestEdgeCases:
         assert isinstance(called_arg, UUID)
 
     async def test_customer_id_propagates_when_present(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         cust_id = uuid4()
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(customer_id=cust_id))
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["customer_id"] == str(cust_id)
 
     async def test_customer_id_is_none_for_guest_orders(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(customer_id=None))
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["customer_id"] is None
 
 
@@ -512,23 +516,23 @@ class TestGuestSessionStitch:
     """
 
     async def test_session_fingerprint_becomes_external_id(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(customer_id=None)
         order.session_fingerprint = "sess-abc-123"
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["external_id"] == "sess-abc-123"
 
     async def test_absent_fingerprint_is_not_fatal(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order())
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["external_id"] is None
 
 
@@ -536,7 +540,7 @@ class TestStateIsSent:
     """`st` is on the address, on the order, and was never sent to Meta."""
 
     async def test_state_forwarded_from_shipping_address(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(
             shipping_address={
@@ -550,7 +554,7 @@ class TestStateIsSent:
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         assert ud["state"] == "Cairo"
 
 
@@ -565,20 +569,20 @@ class TestOrderPathFbcSynthesis:
     async def test_fbc_rebuilt_from_attribution_when_cookie_missing(
         self, patched_collaborators
     ):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(metadata={"ip_address": "192.0.2.42"})
         order.attribution = {"last_touch": {"fbclid": "AbC_Click123", "ts": 1786838400}}
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        ud = send_event_task.delay.call_args.kwargs["user_data"]
+        ud = enqueue_event.call_args.kwargs["user_data"]
         # Click-observation time, not payment time. Click id verbatim — Meta's
         # spec says it is case sensitive and must not be modified.
         assert ud["fbc"] == "fb.1.1786838400000.AbC_Click123"
 
     async def test_cookie_fbc_wins_over_synthesis(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
         order = _make_order(
             metadata={"ip_address": "192.0.2.42", "fbc": "fb.1.111.REAL"}
@@ -587,10 +591,7 @@ class TestOrderPathFbcSynthesis:
 
         await enqueue_meta_capi_purchase(MagicMock(), order)
 
-        assert (
-            send_event_task.delay.call_args.kwargs["user_data"]["fbc"]
-            == "fb.1.111.REAL"
-        )
+        assert enqueue_event.call_args.kwargs["user_data"]["fbc"] == "fb.1.111.REAL"
 
 
 class TestConversionValueGuard:
@@ -602,34 +603,34 @@ class TestConversionValueGuard:
 
     async def test_zero_value_still_sends(self, patched_collaborators):
         # A fully discounted / gift-carded order is a real conversion.
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(total=0))
 
-        assert send_event_task.delay.called
+        assert enqueue_event.called
 
     async def test_malformed_currency_is_refused(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(currency="EGP 250"))
 
-        assert not send_event_task.delay.called
+        assert not enqueue_event.called
 
     async def test_negative_purchase_value_is_refused(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(total=-500))
 
-        assert not send_event_task.delay.called
+        assert not enqueue_event.called
 
     async def test_currency_is_upcased(self, patched_collaborators):
-        store_repo_cls, send_event_task = patched_collaborators
+        store_repo_cls, enqueue_event = patched_collaborators
         store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
 
         await enqueue_meta_capi_purchase(MagicMock(), _make_order(currency="egp"))
 
-        cd = send_event_task.delay.call_args.kwargs["custom_data"]
+        cd = enqueue_event.call_args.kwargs["custom_data"]
         assert cd["currency"] == "EGP"

@@ -530,7 +530,7 @@ async def enqueue_meta_capi_event_for_order(
     # tenant model. Keeping them lazy means webhook handlers without
     # CAPI configured pay zero import cost on cold start.
     from src.application.services.meta_pixel_resolver import resolve_pixels
-    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+    from src.infrastructure.messaging.tasks.meta_capi import enqueue_capi_event
     from src.infrastructure.repositories.store_repository import StoreRepository
 
     sr = StoreRepository(db)
@@ -582,7 +582,16 @@ async def enqueue_meta_capi_event_for_order(
     # dedup namespace). Per-pixel tasks are independent Celery jobs so
     # one pixel's 4xx doesn't block the others.
     for pixel in pixels:
-        meta_capi_send_event.delay(
+        # Through the shared door, which persists a conversion before it
+        # touches the broker. Production Redis evicts under memory pressure
+        # (`maxmemory-policy allkeys-lru`), and an evicted Purchase left no
+        # trace anywhere — the row now exists before the message does.
+        # `db` is the webhook's own session, so an order that rolls back
+        # takes the outbox row with it.
+        await enqueue_capi_event(
+            session=db,
+            store=store,
+            tenant_id=getattr(store, "tenant_id", None),
             store_id=str(order.store_id),
             pixel_id=pixel.pixel_id,
             event_name=event_name,
@@ -622,7 +631,7 @@ async def enqueue_meta_capi_refund(db: AsyncSession, order: Any) -> None:
     Fans out to every capi-enabled pixel (Phase 13 multi-pixel parity).
     """
     from src.application.services.meta_pixel_resolver import resolve_pixels
-    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+    from src.infrastructure.messaging.tasks.meta_capi import enqueue_capi_event
     from src.infrastructure.repositories.store_repository import StoreRepository
 
     sr = StoreRepository(db)
@@ -657,7 +666,10 @@ async def enqueue_meta_capi_refund(db: AsyncSession, order: Any) -> None:
     event_id = f"refund-{order.id}"
 
     for pixel in pixels:
-        meta_capi_send_event.delay(
+        await enqueue_capi_event(
+            session=db,
+            store=store,
+            tenant_id=getattr(store, "tenant_id", None),
             store_id=str(order.store_id),
             pixel_id=pixel.pixel_id,
             event_name="Refund",

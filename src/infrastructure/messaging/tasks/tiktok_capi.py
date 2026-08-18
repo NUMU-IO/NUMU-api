@@ -216,7 +216,7 @@ def tiktok_capi_send_event(
         sentry_sdk.capture_message(
             f"tiktok_capi.network_error for store {store_id}: {type(exc).__name__}",
             level="warning",
-            fingerprints=["tiktok_capi", "network", store_id, type(exc).__name__],
+            fingerprint=["tiktok_capi", "network", store_id, type(exc).__name__],
         )
         raise
     except Exception:  # noqa: BLE001 — last-ditch: log + bury
@@ -375,7 +375,7 @@ async def _send_event(
             sentry_sdk.capture_message(
                 f"tiktok_capi.decrypt_failed for store {store_id}",
                 level="error",
-                fingerprints=["tiktok_capi", "decrypt", store_id],
+                fingerprint=["tiktok_capi", "decrypt", store_id],
             )
             return {"status": "failed", "reason": "decrypt_error"}
 
@@ -498,7 +498,7 @@ async def _send_event(
         f"tiktok_capi.{status_class} for store {store_id}: "
         f"http={response_status} code={response_code}",
         level="warning",
-        fingerprints=["tiktok_capi", status_class, store_id, str(response_code)],
+        fingerprint=["tiktok_capi", status_class, store_id, str(response_code)],
     )
     return {"status": "failed", "request_id": request_id}
 
