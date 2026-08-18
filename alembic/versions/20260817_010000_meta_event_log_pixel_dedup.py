@@ -34,31 +34,81 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _OLD = "uq_meta_event_log_store_event_id"
+# `ADD CONSTRAINT … USING INDEX` renames the index to the constraint name, so
+# this is only the transient name during the concurrent build.
+_INDEX = "uq_meta_event_log_store_pixel_event_id_idx"
 _NEW = "uq_meta_event_log_store_pixel_event_id"
 _TABLE = "meta_event_log"
 _SCHEMA = "public"
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
+    # Build the index CONCURRENTLY, then adopt it as the constraint.
+    #
+    # `ADD CONSTRAINT … UNIQUE` builds its index while holding ACCESS
+    # EXCLUSIVE, which blocks every INSERT into `meta_event_log` for the
+    # duration — and this table has no retention policy, so it only ever
+    # grows. On a small table that is a blink; on a large one it is a window
+    # where the CAPI worker cannot record events. The size is not knowable
+    # from here, so the migration is written to be safe at any size rather
+    # than to bet on a number.
+    #
+    # `CREATE UNIQUE INDEX CONCURRENTLY` takes only SHARE UPDATE EXCLUSIVE
+    # (writes continue), and `ADD CONSTRAINT … USING INDEX` then adopts it
+    # with a momentary catalog lock instead of a full rebuild.
+    #
+    # CONCURRENTLY cannot run inside a transaction, hence the autocommit
+    # block. That means this migration is not atomic: if it fails midway an
+    # INVALID index can be left behind, which the pre-flight below cleans up
+    # so a re-run converges instead of erroring.
+    with op.get_context().autocommit_block():
+        conn = op.get_bind()
 
-    # Duplicate (store_id, pixel_id, event_id) triples cannot exist yet — the
-    # old, narrower constraint made them impossible — so the new index can be
-    # built without a dedupe pass.
-    op.execute(f'ALTER TABLE {_SCHEMA}.{_TABLE} DROP CONSTRAINT IF EXISTS "{_OLD}"')
+        # A previous failed attempt leaves an INVALID index that would make
+        # the CREATE below fail with "already exists". Drop it first.
+        invalid = conn.execute(
+            sa.text("""
+                SELECT 1
+                FROM pg_class c
+                JOIN pg_index i ON i.indexrelid = c.oid
+                WHERE c.relname = :name AND NOT i.indisvalid
+            """),
+            {"name": _INDEX},
+        ).scalar()
+        if invalid:
+            conn.execute(sa.text(f'DROP INDEX IF EXISTS {_SCHEMA}."{_INDEX}"'))
 
-    # `sa.text()` with a `:name` bind, NOT `exec_driver_sql` with `%(name)s`.
-    # `exec_driver_sql` passes the string to the DBAPI verbatim, so psycopg2
-    # paramstyle reaches asyncpg — which uses `$1` — and Postgres rejects it
-    # with `syntax error at or near "%"`. Migrations here run under asyncpg,
-    # so the driver-agnostic form is the only correct one.
-    exists = conn.execute(
-        sa.text("SELECT 1 FROM pg_constraint WHERE conname = :name"),
-        {"name": _NEW},
-    ).scalar()
-    if not exists:
-        op.create_unique_constraint(
-            _NEW, _TABLE, ["store_id", "pixel_id", "event_id"], schema=_SCHEMA
+        # `sa.text()` with a `:name` bind, NOT `exec_driver_sql` with
+        # `%(name)s`. `exec_driver_sql` passes the string to the DBAPI
+        # verbatim, so psycopg2 paramstyle reaches asyncpg — which uses `$1`
+        # — and Postgres rejects it with `syntax error at or near "%"`.
+        already = conn.execute(
+            sa.text("SELECT 1 FROM pg_constraint WHERE conname = :name"),
+            {"name": _NEW},
+        ).scalar()
+        if already:
+            return
+
+        conn.execute(
+            sa.text(f"""
+                CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "{_INDEX}"
+                ON {_SCHEMA}.{_TABLE} (store_id, pixel_id, event_id)
+            """)
+        )
+        conn.execute(
+            sa.text(f"""
+                ALTER TABLE {_SCHEMA}.{_TABLE}
+                ADD CONSTRAINT "{_NEW}" UNIQUE USING INDEX "{_INDEX}"
+            """)
+        )
+
+        # Drop the old, narrower constraint only AFTER the new one is live,
+        # so there is never a window with no uniqueness guarantee at all —
+        # the guarantee is what stops the CAPI worker double-sending.
+        conn.execute(
+            sa.text(
+                f'ALTER TABLE {_SCHEMA}.{_TABLE} DROP CONSTRAINT IF EXISTS "{_OLD}"'
+            )
         )
 
 
