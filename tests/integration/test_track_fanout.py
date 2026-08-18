@@ -25,14 +25,31 @@ from uuid import uuid4
 import pytest
 from httpx import AsyncClient
 
-# We rely on the existing /track route handler's lazy import of
-# meta_capi_send_event — patching at the import-site (``src.api.v1.routes.
-# storefront.tracking._maybe_enqueue_meta_capi`` would over-mock; we want
-# the real helper to run and only stub the actual ``.delay``) means we
-# must patch the symbol the helper actually resolves at call time.
+# We rely on the existing /track route handler's lazy import of the CAPI
+# task — patching at the import-site (``src.api.v1.routes.storefront.
+# tracking._maybe_enqueue_meta_capi``) would over-mock; we want the real
+# helpers to run and stub only the broker hop, so we patch the symbol they
+# actually resolve at call time.
+#
+# ``apply_async`` rather than ``delay``: every enqueue site now goes through
+# ``enqueue_capi_event``, which needs to pass a queue and so cannot use
+# ``delay``. Stubbing here still exercises the routing decision — the call's
+# ``queue`` kwarg is asserted below.
 META_CAPI_TASK_PATH = (
     "src.infrastructure.messaging.tasks.meta_capi.meta_capi_send_event"
 )
+
+# /track drops bot traffic at ingest (`is_bot_user_agent`), and httpx's
+# default `python-httpx/x.y` User-Agent matches that filter — so a request
+# without an explicit UA is silently 204'd before the Meta block is ever
+# reached, and every assertion below would pass vacuously against a route
+# that did nothing. These two tests were failing for exactly that reason.
+BROWSER_HEADERS = {
+    "user-agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile Safari/604.1"
+    )
+}
 
 
 @pytest.fixture
@@ -120,7 +137,7 @@ class TestTrackFanoutEnqueue:
         self, client: AsyncClient, store_with_capi
     ):
         # Patch the .delay of the symbol the route resolves at call time.
-        with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
+        with patch(f"{META_CAPI_TASK_PATH}.apply_async") as mock_delay:
             resp = await client.post(
                 f"/api/v1/storefront/store/{store_with_capi.id}/track",
                 json={
@@ -129,20 +146,24 @@ class TestTrackFanoutEnqueue:
                     "event_id": "view-abc-123",
                     "fbp": "fb.1.x.y",
                 },
+                headers=BROWSER_HEADERS,
             )
         assert resp.status_code == 204
         assert mock_delay.call_count == 1
-        kwargs = mock_delay.call_args.kwargs
+        kwargs = mock_delay.call_args.kwargs["kwargs"]
         assert kwargs["pixel_id"] == "123456789012345"
         assert kwargs["event_name"] == "ViewContent"
         assert kwargs["event_id"] == "view-abc-123"
         assert kwargs["user_data"]["fbp"] == "fb.1.x.y"
+        # ViewContent is a standard funnel event, so it shares the general
+        # CAPI queue. Only conversions get the priority one.
+        assert mock_delay.call_args.kwargs["queue"] == "capi"
 
     @pytest.mark.asyncio
     async def test_track_skips_when_no_meta_config(
         self, client: AsyncClient, store_without_capi
     ):
-        with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
+        with patch(f"{META_CAPI_TASK_PATH}.apply_async") as mock_delay:
             resp = await client.post(
                 f"/api/v1/storefront/store/{store_without_capi.id}/track",
                 json={"path": "/product/abc", "step": "product_view"},
@@ -158,7 +179,7 @@ class TestTrackFanoutEnqueue:
         # `view_cart` isn't in the FUNNEL_STEP_TO_META_EVENT table.
         # (`order_delivered` used to be the example here; it now maps to
         # DeliveredOrder, the true COD conversion moment.)
-        with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
+        with patch(f"{META_CAPI_TASK_PATH}.apply_async") as mock_delay:
             resp = await client.post(
                 f"/api/v1/storefront/store/{store_with_capi.id}/track",
                 json={"path": "/profile", "step": "view_cart"},
@@ -173,21 +194,22 @@ class TestTrackFanoutEnqueue:
         # When the browser doesn't send event_id, the server fabricates
         # one — CAPI dedup against the (absent) browser fire is then
         # per-attempt only, but the event still goes out.
-        with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
+        with patch(f"{META_CAPI_TASK_PATH}.apply_async") as mock_delay:
             resp = await client.post(
                 f"/api/v1/storefront/store/{store_with_capi.id}/track",
                 json={"path": "/", "step": "page_view"},
+                headers=BROWSER_HEADERS,
             )
         assert resp.status_code == 204
         assert mock_delay.call_count == 1
         # event_id must be a non-empty string.
-        assert mock_delay.call_args.kwargs["event_id"]
+        assert mock_delay.call_args.kwargs["kwargs"]["event_id"]
 
     @pytest.mark.asyncio
     async def test_track_forwards_ip_and_user_agent(
         self, client: AsyncClient, store_with_capi
     ):
-        with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
+        with patch(f"{META_CAPI_TASK_PATH}.apply_async") as mock_delay:
             resp = await client.post(
                 f"/api/v1/storefront/store/{store_with_capi.id}/track",
                 json={"path": "/", "step": "page_view"},
@@ -197,7 +219,7 @@ class TestTrackFanoutEnqueue:
                 },
             )
         assert resp.status_code == 204
-        ud = mock_delay.call_args.kwargs["user_data"]
+        ud = mock_delay.call_args.kwargs["kwargs"]["user_data"]
         assert ud["ip"] == "197.45.123.45"
         assert ud["user_agent"] == "Mozilla/5.0 (TestUA)"
 
@@ -240,11 +262,18 @@ class TestPaymobWebhookEnqueue:
             },
         )()
 
-        with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
+        with patch(f"{META_CAPI_TASK_PATH}.apply_async") as mock_delay:
             await _enqueue_meta_purchase(test_session, order)
 
         assert mock_delay.call_count == 1
-        kwargs = mock_delay.call_args.kwargs
+        kwargs = mock_delay.call_args.kwargs["kwargs"]
+        # A Purchase is a conversion, so it is written to the outbox BEFORE it
+        # reaches the broker and the task is handed the row to adopt. That row
+        # id is the durability guarantee: if Redis drops the message (prod runs
+        # `maxmemory-policy allkeys-lru`, so queued messages are evictable) the
+        # delivery sweep still finds the event and re-sends it.
+        assert kwargs["log_id"]
+        assert mock_delay.call_args.kwargs["queue"] == "capi_priority"
         # event_id MUST equal order.id verbatim — that's the dedup key.
         assert kwargs["event_id"] == str(order.id)
         assert kwargs["event_name"] == "Purchase"
@@ -291,7 +320,7 @@ class TestPaymobWebhookEnqueue:
             },
         )()
 
-        with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
+        with patch(f"{META_CAPI_TASK_PATH}.apply_async") as mock_delay:
             await _enqueue_meta_purchase(test_session, order)
 
         mock_delay.assert_not_called()

@@ -58,15 +58,16 @@ class TestWhatsappLeadGating:
         session.execute = AsyncMock(return_value=result)
 
         with patch(
-            "src.infrastructure.messaging.tasks.meta_capi.meta_capi_send_event"
-        ) as mock_task:
+            "src.infrastructure.messaging.tasks.meta_capi.enqueue_capi_event",
+            new_callable=AsyncMock,
+        ) as mock_enqueue:
             await _maybe_enqueue_meta_capi_whatsapp_lead(
                 session=session,
                 store_id=uuid4(),
                 risk_assessment_id=uuid4(),
                 phone="01001234567",
             )
-        mock_task.delay.assert_not_called()
+        mock_enqueue.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_capi_disabled_skips(self):
@@ -84,15 +85,16 @@ class TestWhatsappLeadGating:
         session = _fake_session_returning_store(store)
 
         with patch(
-            "src.infrastructure.messaging.tasks.meta_capi.meta_capi_send_event"
-        ) as mock_task:
+            "src.infrastructure.messaging.tasks.meta_capi.enqueue_capi_event",
+            new_callable=AsyncMock,
+        ) as mock_enqueue:
             await _maybe_enqueue_meta_capi_whatsapp_lead(
                 session=session,
                 store_id=store.id,
                 risk_assessment_id=uuid4(),
                 phone="01001234567",
             )
-        mock_task.delay.assert_not_called()
+        mock_enqueue.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_pixel_id_skips(self):
@@ -110,15 +112,16 @@ class TestWhatsappLeadGating:
         session = _fake_session_returning_store(store)
 
         with patch(
-            "src.infrastructure.messaging.tasks.meta_capi.meta_capi_send_event"
-        ) as mock_task:
+            "src.infrastructure.messaging.tasks.meta_capi.enqueue_capi_event",
+            new_callable=AsyncMock,
+        ) as mock_enqueue:
             await _maybe_enqueue_meta_capi_whatsapp_lead(
                 session=session,
                 store_id=store.id,
                 risk_assessment_id=uuid4(),
                 phone="01001234567",
             )
-        mock_task.delay.assert_not_called()
+        mock_enqueue.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_whatsapp_lead_disabled_skips(self):
@@ -139,15 +142,16 @@ class TestWhatsappLeadGating:
         session = _fake_session_returning_store(store)
 
         with patch(
-            "src.infrastructure.messaging.tasks.meta_capi.meta_capi_send_event"
-        ) as mock_task:
+            "src.infrastructure.messaging.tasks.meta_capi.enqueue_capi_event",
+            new_callable=AsyncMock,
+        ) as mock_enqueue:
             await _maybe_enqueue_meta_capi_whatsapp_lead(
                 session=session,
                 store_id=store.id,
                 risk_assessment_id=uuid4(),
                 phone="01001234567",
             )
-        mock_task.delay.assert_not_called()
+        mock_enqueue.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_all_flags_aligned_enqueues_with_correct_payload(self):
@@ -167,8 +171,9 @@ class TestWhatsappLeadGating:
         risk_id = uuid4()
 
         with patch(
-            "src.infrastructure.messaging.tasks.meta_capi.meta_capi_send_event"
-        ) as mock_task:
+            "src.infrastructure.messaging.tasks.meta_capi.enqueue_capi_event",
+            new_callable=AsyncMock,
+        ) as mock_enqueue:
             await _maybe_enqueue_meta_capi_whatsapp_lead(
                 session=session,
                 store_id=store.id,
@@ -176,8 +181,8 @@ class TestWhatsappLeadGating:
                 phone="01001234567",
             )
 
-        mock_task.delay.assert_called_once()
-        kwargs = mock_task.delay.call_args.kwargs
+        mock_enqueue.assert_called_once()
+        kwargs = mock_enqueue.call_args.kwargs
         assert kwargs["pixel_id"] == "111111111111111"
         assert kwargs["event_name"] == "Lead"
         # event_id namespacing — Lead dedupes per-risk-assessment, not
@@ -212,9 +217,10 @@ class TestWhatsappLeadGating:
         session = _fake_session_returning_store(store)
 
         with patch(
-            "src.infrastructure.messaging.tasks.meta_capi.meta_capi_send_event"
-        ) as mock_task:
-            mock_task.delay.side_effect = RuntimeError("redis is down")
+            "src.infrastructure.messaging.tasks.meta_capi.enqueue_capi_event",
+            new_callable=AsyncMock,
+        ) as mock_enqueue:
+            mock_enqueue.side_effect = RuntimeError("redis is down")
             # MUST NOT RAISE — the test fails if an exception escapes.
             await _maybe_enqueue_meta_capi_whatsapp_lead(
                 session=session,

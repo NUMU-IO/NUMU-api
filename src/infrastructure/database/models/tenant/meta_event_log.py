@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
@@ -68,6 +69,23 @@ class MetaEventLogModel(Base, UUIDMixin, TenantMixin):
             "store_id",
             postgresql_where="response_status >= 400 OR response_status IS NULL",
         ),
+        # The outbox claim query: ORDER BY (priority, next_retry_at) with a
+        # range filter on next_retry_at. Partial on the two open states, which
+        # are a tiny fraction of the table — nearly every row reaches a
+        # terminal status within seconds of being written.
+        Index(
+            "idx_meta_event_log_delivery_due",
+            "priority",
+            "next_retry_at",
+            postgresql_where="status IN ('pending', 'retrying')",
+        ),
+        # "What does this store still owe Meta?" for the hub + admin views.
+        Index(
+            "idx_meta_event_log_store_open",
+            "store_id",
+            "status",
+            postgresql_where="status IN ('pending', 'retrying')",
+        ),
         {"schema": "public"},
     )
 
@@ -93,6 +111,43 @@ class MetaEventLogModel(Base, UUIDMixin, TenantMixin):
     response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_body: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     fbtrace_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Outbox lifecycle ─────────────────────────────────────────────
+    # This table is the CAPI outbox, not merely its audit log: the row is
+    # the durable record of an owed delivery, and these five columns are
+    # what make "owed" a thing the platform can see and act on.
+    #
+    # `status` is TEXT, not a PG enum — adding a value to a native enum
+    # takes a DDL lock, and this vocabulary will grow. Values come from
+    # `core.services.meta_delivery_policy.DeliveryStatus`.
+    #
+    # The server default is `legacy` (rows written before the lifecycle
+    # existed); the application always stamps an explicit status, so the
+    # default only ever applies to history.
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="legacy", default="pending"
+    )
+    # Doubles as the retry schedule and the claim lease: a claimed row has
+    # it pushed into the future, so a worker that dies mid-send releases the
+    # row by simply letting the lease lapse.
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The instant after which sending this event would DOUBLE-COUNT the
+    # conversion rather than merge with it — event_time + Meta's 48h dedup
+    # window. Not a retention field.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 0 conversion, 1 standard, 2 bulk. Orders the claim query so a Purchase
+    # never waits behind a PageView backlog.
+    priority: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default="1", default=1
+    )
+    # Why the last attempt failed, at the granularity the retry decision
+    # uses (`meta_delivery_policy.FailureKind`). A dead token and a
+    # malformed payload are both "4xx" and need very different responses.
+    failure_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="1", default=1
