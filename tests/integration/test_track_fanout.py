@@ -155,11 +155,13 @@ class TestTrackFanoutEnqueue:
     async def test_track_skips_unmapped_funnel_step(
         self, client: AsyncClient, store_with_capi
     ):
-        # `order_delivered` isn't in the FUNNEL_STEP_TO_META_EVENT table.
+        # `view_cart` isn't in the FUNNEL_STEP_TO_META_EVENT table.
+        # (`order_delivered` used to be the example here; it now maps to
+        # DeliveredOrder, the true COD conversion moment.)
         with patch(f"{META_CAPI_TASK_PATH}.delay") as mock_delay:
             resp = await client.post(
                 f"/api/v1/storefront/store/{store_with_capi.id}/track",
-                json={"path": "/profile", "step": "order_delivered"},
+                json={"path": "/profile", "step": "view_cart"},
             )
         assert resp.status_code == 204
         mock_delay.assert_not_called()

@@ -139,6 +139,12 @@ FUNNEL_STEP_TO_META_EVENT: dict[str, str] = {
     # page), we still enqueue Purchase. The UNIQUE constraint dedupes
     # against the webhook fire.
     "order_completed": "Purchase",
+    # The true COD conversion moment. `order_delivered` is already a valid
+    # funnel step but had no Meta mapping, so a delivery confirmation was
+    # invisible unless the merchant happened to set purchase_trigger
+    # ="delivered". A custom event still carries full user_data, so the
+    # signal exists regardless of how they configured Purchase timing.
+    "order_delivered": "DeliveredOrder",
     # Phase 2 standard events — storefront fires these via fireMetaEvent
     # for search box submissions, newsletter signups, customer registration,
     # and payment-method selection. Meta uses them for audience building
@@ -167,6 +173,26 @@ FUNNEL_STEP_TO_META_EVENT: dict[str, str] = {
     # color + engraving). Meta uses it as a checkout-intent signal.
     "customize_product": "CustomizeProduct",
 }
+
+
+def _with_store_phone_cc(user_data: dict, store: Any) -> dict:
+    """Tag the payload with the store's dial code for national-format phones.
+
+    A number typed as "0501234567" carries no country, and assuming Egypt
+    unconditionally produced a well-formed, present, permanently unmatchable
+    `ph` for every non-Egyptian store. The store's own country is the right
+    signal — a store sells into its market.
+    """
+    from src.infrastructure.external_services.meta.hashing import (
+        dial_code_for_country,
+    )
+
+    if user_data.get("default_phone_cc"):
+        return user_data
+    country = getattr(store, "country", None)
+    if not country:
+        return user_data
+    return {**user_data, "default_phone_cc": dial_code_for_country(country)}
 
 
 def _funnel_step_to_meta_event(step: str) -> str | None:
@@ -386,7 +412,7 @@ async def _send_event(
             "event_source_url": event_source_url,
             "action_source": action_source,
             "custom_data": custom_data,
-            "user_data": hash_user_data(user_data),
+            "user_data": hash_user_data(_with_store_phone_cc(user_data, store)),
             "test_event_code": test_event_code,
         }
         # Wave 3 Phase 18 — opt_out at the event level (Meta's spec).
@@ -585,7 +611,7 @@ async def _send_event(
                 "event_time": event_time,
                 "event_id": event_id,
                 "action_source": action_source,
-                "user_data": hash_user_data(user_data),
+                "user_data": hash_user_data(_with_store_phone_cc(user_data, store)),
                 "custom_data": custom_data,
             }
         ]
@@ -1185,3 +1211,105 @@ async def _decrypt_capi_token(session: Any, store: Any) -> str | None:
     except Exception:  # noqa: BLE001
         logger.warning("meta_match_quality_token_unavailable", store_id=str(store.id))
         return None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Retention
+# ──────────────────────────────────────────────────────────────────────
+
+# `meta_event_log` is append-mostly and had NO retention policy: one row per
+# event per pixel, kept forever. It is a delivery/debug log, not a business
+# record — the conversions themselves live in `orders` — so an unbounded
+# table only makes the dedup lookups and the failure sweeps slower over time.
+#
+# 90 days keeps a full quarter for support and for the orphan sweep (which
+# only looks back 24h anyway), while bounding growth.
+_EVENT_LOG_RETENTION_DAYS = 90
+
+# EMQ snapshots are much smaller (a handful of rows per store per poll) and
+# their value IS the history — proving a change moved the score needs a long
+# baseline. 180 days keeps a season-over-season comparison.
+_MATCH_QUALITY_RETENTION_DAYS = 180
+
+
+@celery_app.task(
+    name="tasks.meta_tracking_prune",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=600,
+)
+def meta_tracking_prune(self: Any) -> dict[str, int]:
+    """Delete Meta tracking rows past their retention window.
+
+    Deletes in bounded batches rather than one statement: a single unbounded
+    DELETE on a table this size takes a long-held lock and a large WAL burst,
+    and this is housekeeping — it can take as long as it likes.
+    """
+    try:
+        result: dict[str, int] = _run_async(_prune_tracking_rows())
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("meta_tracking_prune_failed")
+        raise self.retry(exc=exc) from exc
+
+
+async def _prune_tracking_rows() -> dict[str, int]:
+    from sqlalchemy import delete, select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.meta_event_log import (
+        MetaEventLogModel,
+    )
+    from src.infrastructure.database.models.tenant.meta_match_quality_snapshot import (
+        MetaMatchQualitySnapshotModel,
+    )
+    from src.infrastructure.tenancy.rls import enable_rls_bypass
+
+    stats = {"event_log_deleted": 0, "match_quality_deleted": 0}
+    batch = 5_000
+
+    async with AsyncSessionLocal() as session:
+        await enable_rls_bypass(session)
+
+        # SQLAlchemy Core rather than an f-string DELETE. Every value here is
+        # a module constant, so string interpolation would have been safe in
+        # fact — but it reads as dynamic SQL to a scanner and to the next
+        # person, and expressing it through the ORM costs nothing and makes
+        # the bound parameters real.
+        for model, days, key in (
+            (MetaEventLogModel, _EVENT_LOG_RETENTION_DAYS, "event_log_deleted"),
+            (
+                MetaMatchQualitySnapshotModel,
+                _MATCH_QUALITY_RETENTION_DAYS,
+                "match_quality_deleted",
+            ),
+        ):
+            cutoff = datetime.now(UTC) - timedelta(days=days)
+            # Bounded loop, not `while True` — a runaway here would hold the
+            # worker forever. 200 batches x 5k = 1M rows per run, and the
+            # next scheduled run picks up any remainder.
+            for _ in range(200):
+                try:
+                    # Delete by PK from a LIMITed subquery: one bounded lock
+                    # per batch instead of one long lock over the whole scan.
+                    doomed = (
+                        select(model.id).where(model.created_at < cutoff).limit(batch)
+                    )
+                    result = await session.execute(
+                        delete(model).where(model.id.in_(doomed))
+                    )
+                    await session.commit()
+                except Exception:  # noqa: BLE001 — housekeeping must not page
+                    await session.rollback()
+                    logger.exception(
+                        "meta_tracking_prune_batch_failed",
+                        table=model.__tablename__,
+                    )
+                    break
+                deleted = int(result.rowcount or 0)
+                stats[key] += deleted
+                if deleted < batch:
+                    break
+
+    logger.info("meta_tracking_prune_done", **stats)
+    return stats

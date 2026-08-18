@@ -127,5 +127,8 @@ class TestFunnelMappingHelper:
         assert _funnel_step_to_meta_event(step) == expected
 
     def test_unknown_step_returns_none(self):
-        assert _funnel_step_to_meta_event("order_delivered") is None
+        # `order_delivered` is mapped now (DeliveredOrder — the true COD
+        # conversion moment), so it is no longer an example of an unmapped
+        # step. `view_cart` is still deliberately unmapped.
+        assert _funnel_step_to_meta_event("view_cart") is None
         assert _funnel_step_to_meta_event("totally_made_up") is None

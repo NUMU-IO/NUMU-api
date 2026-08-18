@@ -142,7 +142,19 @@ async def handle_order_status_changed_for_meta_capi(
                 return
 
             meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
-            if not (meta_cfg.get("capi_enabled") and meta_cfg.get("pixel_id")):
+            # Resolve through `resolve_pixels`, not the legacy top-level
+            # `pixel_id`. A store configured ONLY via the multi-pixel
+            # `pixels[]` array has no top-level id, so this guard silently
+            # skipped the entire COD-aware path for them: `purchase_trigger`
+            # never fired, `lead_trigger` never fired, and the always-on
+            # Refund event never fired — so Meta's reported revenue was never
+            # corrected for RTO/returns. Every other call site already
+            # resolves this way.
+            from src.application.services.meta_pixel_resolver import resolve_pixels
+
+            if not (
+                meta_cfg.get("capi_enabled") and resolve_pixels(meta_cfg, mode="capi")
+            ):
                 log.debug("meta_capi_status_skipped_capi_off")
                 return
 
