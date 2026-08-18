@@ -24,6 +24,8 @@ Create Date: 2026-08-17
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "meta_pixel_dedup_20260817"
@@ -45,8 +47,13 @@ def upgrade() -> None:
     # built without a dedupe pass.
     op.execute(f'ALTER TABLE {_SCHEMA}.{_TABLE} DROP CONSTRAINT IF EXISTS "{_OLD}"')
 
-    exists = conn.exec_driver_sql(
-        "SELECT 1 FROM pg_constraint WHERE conname = %(name)s",
+    # `sa.text()` with a `:name` bind, NOT `exec_driver_sql` with `%(name)s`.
+    # `exec_driver_sql` passes the string to the DBAPI verbatim, so psycopg2
+    # paramstyle reaches asyncpg — which uses `$1` — and Postgres rejects it
+    # with `syntax error at or near "%"`. Migrations here run under asyncpg,
+    # so the driver-agnostic form is the only correct one.
+    exists = conn.execute(
+        sa.text("SELECT 1 FROM pg_constraint WHERE conname = :name"),
         {"name": _NEW},
     ).scalar()
     if not exists:
@@ -64,15 +71,15 @@ def downgrade() -> None:
     # than one pixel while the wider key was in force. If any did, the narrow
     # constraint cannot be recreated — fail loudly rather than deleting a
     # merchant's conversion log to force the rollback through.
-    dupes = conn.exec_driver_sql(
-        f"""
-        SELECT COUNT(*) FROM (
-            SELECT store_id, event_id
-            FROM {_SCHEMA}.{_TABLE}
-            GROUP BY store_id, event_id
-            HAVING COUNT(*) > 1
-        ) d
-        """
+    dupes = conn.execute(
+        sa.text(f"""
+            SELECT COUNT(*) FROM (
+                SELECT store_id, event_id
+                FROM {_SCHEMA}.{_TABLE}
+                GROUP BY store_id, event_id
+                HAVING COUNT(*) > 1
+            ) d
+        """)
     ).scalar()
     if dupes:
         raise RuntimeError(
