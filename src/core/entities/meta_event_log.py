@@ -27,6 +27,12 @@ class MetaEventLog(BaseEntity):
       3. On transient failure, ``last_error`` + ``attempt_count`` are
          updated and the task retries; ``sent_at`` stays null until a
          non-retried response lands.
+
+    Since the outbox lifecycle landed, the row is also the *queue entry*:
+    ``status`` says whether delivery is still owed, ``next_retry_at`` when
+    it may next be attempted (and, while claimed, doubles as the worker's
+    lease), and ``expires_at`` the instant past which sending would
+    double-count the conversion instead of merging with it.
     """
 
     tenant_id: UUID
@@ -46,6 +52,16 @@ class MetaEventLog(BaseEntity):
     attempt_count: int = 1
     last_error: str | None = None
     sent_at: datetime | None = None
+
+    # ── Outbox lifecycle ─────────────────────────────────────────────
+    # See `core.services.meta_delivery_policy` for the vocabulary and the
+    # rules. Defaults describe a freshly-persisted, not-yet-attempted event
+    # at standard priority — the shape every enqueue site creates.
+    status: str = "pending"
+    next_retry_at: datetime | None = None
+    expires_at: datetime | None = None
+    priority: int = 1
+    failure_kind: str | None = None
 
     def is_successful(self) -> bool:
         """True iff Meta acknowledged the event with a 2xx response."""

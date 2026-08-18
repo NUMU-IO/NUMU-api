@@ -194,9 +194,19 @@ def test_serialize_public_store_normalizes_merchant_seo_overrides() -> None:
     assert payload["seo"]["business_type"] == "FashionStore"
 
 
-def test_serialize_public_store_preserves_raw_settings_for_legacy_readers() -> None:
-    """Phase 4 adds `seo` but keeps `settings.seo` untouched so theme
-    settings consumers and tracking config still work."""
+def test_serialize_public_store_exposes_seo_once_at_the_top_level() -> None:
+    """`seo` reaches the browser as its own block, NOT twice.
+
+    It used to be echoed under `settings` as well, "for legacy readers".
+    There are none: the storefront reads `store.seo` (layout.tsx,
+    lib/seo.ts, lib/json-ld.ts) and no V3 theme reads `settings.seo` at all.
+    The duplicate only widened a PUBLIC, UNAUTHENTICATED payload, and the
+    allowlist that now guards it exists because that payload was shipping
+    `password_protected.password_hash`.
+
+    Tracking config is a different matter and IS still needed here — the
+    pixel and the domain-verification meta tag are rendered from it.
+    """
     store = _StubStore(
         settings={
             "tracking": {"meta": {"domain_verification_token": "fb-abc"}},
@@ -204,7 +214,12 @@ def test_serialize_public_store_preserves_raw_settings_for_legacy_readers() -> N
         }
     )
     payload = _serialize_public_store(store)
-    assert payload["settings"]["seo"]["seo_title"] == "test"
+
+    assert payload["seo"]["seo_title"] == "test"
+    assert "seo" not in payload["settings"], (
+        "settings.seo is a second copy of a block already exposed at the top "
+        "level; re-adding it re-opens a surface the allowlist deliberately closed"
+    )
     assert (
         payload["settings"]["tracking"]["meta"]["domain_verification_token"] == "fb-abc"
     )

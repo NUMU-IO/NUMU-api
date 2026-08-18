@@ -242,7 +242,11 @@ class TestFunnelStepMapping:
         }
         # Meta has no standard event for the shipping step. Sent as a custom
         # event so the address-complete moment still contributes match keys.
-        custom = {"AddShippingInfo"}
+        # NOT Meta standard events. A custom event still carries full
+        # `user_data` and still counts toward the dataset's match quality —
+        # the reason each exists is in FUNNEL_STEP_TO_META_EVENT. Keep this
+        # set explicit so adding another custom event is a deliberate act.
+        custom = {"AddShippingInfo", "DeliveredOrder"}
         assert set(FUNNEL_STEP_TO_META_EVENT.values()) == standard | custom
 
     # Phase 22 — pin per-event mappings so a future rename can't silently

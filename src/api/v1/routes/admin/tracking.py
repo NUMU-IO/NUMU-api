@@ -51,6 +51,13 @@ class StoreTrackingRow(BaseModel):
     failure_rate_24h: float | None = None
     last_event_at: datetime | None = None
 
+    # Outbox backlog. The failure rate above says whether this store's sends
+    # are working; these say whether anything is stuck behind them. A store
+    # can post a clean rate while a hundred conversions wait on the ladder.
+    undelivered: int = 0
+    dead_lettered: int = 0
+    expired: int = 0
+
     worst_emq: float | None = None
     emq_captured_at: datetime | None = None
 
@@ -64,6 +71,11 @@ class MetaTrackingOverview(BaseModel):
     stores_failing_24h: int
     stores_below_emq_threshold: int
     emq_threshold: float
+    # Fleet-wide outbox backlog. The single number ops should alert on: it is
+    # zero in steady state, and non-zero means events are owed to Meta right
+    # now, whatever any individual store's badge says.
+    events_undelivered: int = 0
+    events_dead_lettered: int = 0
     rows: list[StoreTrackingRow]
 
 
@@ -130,6 +142,23 @@ async def meta_tracking_overview(
         str(r.store_id): (r.total or 0, r.failed or 0, r.last_at) for r in event_rows
     }
 
+    # Outbox state per store in the window. One grouped query for the whole
+    # fleet, joined in Python like the other two aggregates.
+    delivery_rows = (
+        await db.execute(
+            select(
+                MetaEventLogModel.store_id,
+                MetaEventLogModel.status,
+                func.count().label("n"),
+            )
+            .where(MetaEventLogModel.created_at >= cutoff)
+            .group_by(MetaEventLogModel.store_id, MetaEventLogModel.status)
+        )
+    ).all()
+    delivery_by_store: dict[str, dict[str, int]] = {}
+    for r in delivery_rows:
+        delivery_by_store.setdefault(str(r.store_id), {})[str(r.status)] = int(r.n or 0)
+
     # Worst (lowest) recent EMQ per store — the number that matters is the
     # weakest event, not an average that hides it.
     emq_rows = (
@@ -153,6 +182,7 @@ async def meta_tracking_overview(
 
     rows: list[StoreTrackingRow] = []
     configured = failing = with_events = below_emq = 0
+    fleet_undelivered = fleet_dead = 0
 
     for store in stores:
         meta_cfg = ((store.settings or {}).get("tracking") or {}).get("meta") or {}
@@ -164,6 +194,13 @@ async def meta_tracking_overview(
         sid = str(store.id)
         total, failed, last_at = events_by_store.get(sid, (0, 0, None))
         worst_emq, emq_at = emq_by_store.get(sid, (None, None))
+
+        by_status = delivery_by_store.get(sid, {})
+        undelivered = by_status.get("pending", 0) + by_status.get("retrying", 0)
+        dead_lettered = by_status.get("dead_letter", 0)
+        expired = by_status.get("expired", 0)
+        fleet_undelivered += undelivered
+        fleet_dead += dead_lettered
 
         rate = (failed / total) if total else None
         if total:
@@ -190,13 +227,20 @@ async def meta_tracking_overview(
             failures_24h=failed,
             failure_rate_24h=rate,
             last_event_at=last_at,
+            undelivered=undelivered,
+            dead_lettered=dead_lettered,
+            expired=expired,
             worst_emq=worst_emq,
             emq_captured_at=emq_at,
         )
 
         if only_problems:
-            healthy = (rate is None or rate <= 0.1) and (
-                worst_emq is None or worst_emq >= emq_threshold
+            # A backlog is a problem even when every settled send succeeded —
+            # that is exactly the shape of an outage in progress.
+            healthy = (
+                (rate is None or rate <= 0.1)
+                and (worst_emq is None or worst_emq >= emq_threshold)
+                and not dead_lettered
             )
             if healthy and total:
                 continue
@@ -213,6 +257,8 @@ async def meta_tracking_overview(
             stores_failing_24h=failing,
             stores_below_emq_threshold=below_emq,
             emq_threshold=emq_threshold,
+            events_undelivered=fleet_undelivered,
+            events_dead_lettered=fleet_dead,
             rows=rows,
         ),
         message="Meta tracking overview",

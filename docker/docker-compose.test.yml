@@ -116,12 +116,15 @@ services:
     image: redis:7-alpine
     container_name: numu-redis-master-test
     restart: unless-stopped
+    # volatile-lru, not allkeys-lru: this Redis is the Celery broker as well
+    # as the cache, and allkeys-lru can evict queued tasks. See the long note
+    # in docker-compose.prod.yml.
     command: >
       redis-server
       --appendonly yes
       --appendfsync everysec
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_master_data:/data

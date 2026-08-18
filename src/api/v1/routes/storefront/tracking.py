@@ -1297,6 +1297,14 @@ def _request_host(body: TrackPageViewRequest) -> str | None:
     return None
 
 
+# Events /track may receive that are conversions, and so are written to the
+# outbox before they are enqueued. `order_completed` normally arrives from the
+# payment webhook, but the storefront's confirmation page can fire it first —
+# and when it does, that fire is the only record of the sale until the webhook
+# lands.
+_PRE_PERSISTED_EVENTS = frozenset({"Purchase", "DeliveredOrder"})
+
+
 async def _maybe_enqueue_meta_capi(
     *,
     store: Store,
@@ -1331,7 +1339,7 @@ async def _maybe_enqueue_meta_capi(
     from src.application.services.meta_pixel_resolver import resolve_pixels
     from src.infrastructure.messaging.tasks.meta_capi import (
         FUNNEL_STEP_TO_META_EVENT,
-        meta_capi_send_event,
+        enqueue_capi_event,
     )
 
     meta_event_name = FUNNEL_STEP_TO_META_EVENT.get(step)
@@ -1444,8 +1452,18 @@ async def _maybe_enqueue_meta_capi(
     event_time_int = int(event_time.timestamp())
 
     # Fan out — one task per capi-enabled pixel.
+    #
+    # Through the shared enqueue door so this path gets the same queue and
+    # priority treatment as every other. Browse events are enqueued without
+    # a session: they are the platform's hottest path, they already have an
+    # independent browser-pixel leg, and a synchronous INSERT per pixel per
+    # pageview is not a price worth paying for them. `order_completed`
+    # arriving here IS a conversion and does get persisted first.
     for pixel in pixels:
-        meta_capi_send_event.delay(
+        await enqueue_capi_event(
+            session=session if meta_event_name in _PRE_PERSISTED_EVENTS else None,
+            store=store,
+            tenant_id=getattr(store, "tenant_id", None),
             store_id=str(store.id),
             pixel_id=pixel.pixel_id,
             event_name=meta_event_name,

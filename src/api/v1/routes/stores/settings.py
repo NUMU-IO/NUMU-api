@@ -3409,6 +3409,11 @@ async def delete_instapay_qr_image(
 import secrets as _stdlib_secrets  # noqa: E402 — alias avoids name clash
 from datetime import timedelta  # noqa: E402
 
+# Window the delivery counters cover. Matches the recent-failure window the
+# admin fleet view already uses, so "failing in the last day" and "stuck in
+# the last day" are the same day.
+_DELIVERY_WINDOW_HOURS = 24
+
 from sqlalchemy import select as _select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: E402
 from sqlalchemy.orm.attributes import flag_modified as _flag_modified  # noqa: E402
@@ -3419,6 +3424,7 @@ from src.api.v1.schemas.tenant.channels import (  # noqa: E402
     TikTokShopStatusResponse,
 )
 from src.api.v1.schemas.tenant.tracking import (  # noqa: E402
+    MetaDeliveryHealth,
     MetaEventLogEntry,
     MetaMatchKeyCoverage,
     MetaMatchQualityEvent,
@@ -3526,15 +3532,29 @@ async def _build_meta_response(
 
         log_repo = MetaEventLogRepository(db)
         recent = await log_repo.recent_for_store(store.id, limit=20)
-        if not recent:
+        if mode == "pixel_only":
+            # Derived from the SERVER event log, which a pixel-only store
+            # never writes to — so "configured_no_events" was permanently
+            # wrong and read as broken for a working setup.
+            status_label = "browser_only"
+        elif not recent:
             status_label = "configured_no_events"
         else:
-            last_5_failed = sum(
-                1
-                for r in recent[:5]
-                if r.response_status is None or r.response_status >= 400
-            ) == min(5, len(recent[:5]))
-            if last_5_failed and len(recent) >= 5:
+            # Report "failing" on the FAILURE RATE, with no minimum-volume
+            # floor. The old rule needed 5 recent events before it would ever
+            # say "failing", so a low-volume store whose every event 4xx'd
+            # rendered a green "connected" badge indefinitely — which is
+            # exactly the store most likely to have a broken setup and least
+            # likely to notice.
+            #
+            # In-flight rows (response_status IS NULL) are NOT counted as
+            # failures: they are pending, and treating them as errors would
+            # flash red on every burst of traffic.
+            settled = [r for r in recent if r.response_status is not None]
+            failed = sum(1 for r in settled if r.response_status >= 400)
+            if not settled:
+                status_label = "pending"
+            elif failed / len(settled) > 0.5:
                 status_label = "failing"
             else:
                 status_label = "connected"
@@ -4015,7 +4035,7 @@ async def send_meta_test_event(
     (no CAPI to test). This is intentional — the test-event flow only
     makes sense for modes that have a CAPI fan-out path.
     """
-    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_send_event
+    from src.infrastructure.messaging.tasks.meta_capi import enqueue_capi_event
 
     cfg = _meta_cfg(store)
     has_token = await _has_active_capi_credential(db, store.tenant_id)
@@ -4065,7 +4085,14 @@ async def send_meta_test_event(
         "user_agent": "NUMU-Test-Event/1.0",
     }
 
-    meta_capi_send_event.delay(
+    # `session=None`: a synthetic diagnostic must not be written to the
+    # outbox. Persisting it would put a fake Purchase into the retry ladder
+    # and into the merchant's delivery counts, where it would read as a real
+    # owed conversion.
+    await enqueue_capi_event(
+        session=None,
+        store=store,
+        tenant_id=getattr(store, "tenant_id", None),
         store_id=str(store.id),
         pixel_id=pixel_id,
         event_name="Purchase",
@@ -4399,24 +4426,43 @@ async def get_meta_tracking_status(
 
     repo = MetaEventLogRepository(db)
     recent = await repo.recent_for_store(store.id, limit=20)
-    failed = sum(
-        1 for r in recent if r.response_status is None or r.response_status >= 400
+    # Outbox state over a fixed window, alongside the recent-rows rate. The
+    # two answer different questions: the rate says whether sends are working
+    # now, the counters say whether anything is stuck. A store can look
+    # perfectly healthy on its last 20 rows while a backlog of conversions
+    # sits behind it on the retry ladder.
+    counts = await repo.delivery_counts(
+        since=datetime.now(UTC) - timedelta(hours=_DELIVERY_WINDOW_HOURS),
+        store_id=store.id,
     )
-    failure_rate = (failed / len(recent)) if recent else 0.0
+    # Only SETTLED rows count toward the failure rate. An in-flight row
+    # (response_status IS NULL) is pending, not failed — counting it as a
+    # failure made the rate spike on every burst of traffic.
+    settled = [r for r in recent if r.response_status is not None]
+    failed = sum(1 for r in settled if r.response_status >= 400)
+    failure_rate = (failed / len(settled)) if settled else 0.0
 
     if mode == "off":
         status_label = "disabled"
+    elif mode == "pixel_only":
+        # The status is derived from the SERVER event log, which a pixel-only
+        # store never writes to. Reporting "configured_no_events" for it was
+        # permanently wrong — the merchant reads a red state for a working
+        # setup. Say what is true: we can see the browser pixel is configured,
+        # and we cannot observe its fires from here.
+        status_label = "browser_only"
     elif not recent:
         status_label = "configured_no_events"
-    elif (
-        len(recent) >= 5
-        and sum(
-            1
-            for r in recent[:5]
-            if r.response_status is None or r.response_status >= 400
-        )
-        == 5
-    ):
+    elif not settled:
+        # Events queued but none acknowledged yet — distinct from both
+        # "nothing configured" and "everything is fine".
+        status_label = "pending"
+    elif failure_rate > 0.5:
+        # No minimum-volume floor. The old rule required 5 recent events
+        # before it would ever say "failing", so a low-volume store whose
+        # every event 4xx'd showed a green "connected" badge indefinitely —
+        # precisely the store most likely to be misconfigured and least
+        # likely to notice.
         status_label = "failing"
     else:
         status_label = "connected"
@@ -4428,6 +4474,14 @@ async def get_meta_tracking_status(
             last_validated_at=cred.last_validated_at if cred else None,
             recent_failure_rate=round(failure_rate, 4),
             recent_event_count=len(recent),
+            delivery=MetaDeliveryHealth(
+                pending=counts.get("pending", 0),
+                retrying=counts.get("retrying", 0),
+                dead_letter=counts.get("dead_letter", 0),
+                expired=counts.get("expired", 0),
+                failed=counts.get("failed", 0),
+                window_hours=_DELIVERY_WINDOW_HOURS,
+            ),
         ),
         message="Meta tracking status retrieved",
     )

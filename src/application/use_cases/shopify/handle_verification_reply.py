@@ -105,10 +105,13 @@ async def _maybe_enqueue_meta_capi_whatsapp_lead(
             return
 
         from src.infrastructure.messaging.tasks.meta_capi import (
-            meta_capi_send_event,
+            enqueue_capi_event,
         )
 
-        meta_capi_send_event.delay(
+        await enqueue_capi_event(
+            session=session,
+            store=store,
+            tenant_id=getattr(store, "tenant_id", None),
             store_id=str(store_id),
             pixel_id=pixel_id,
             event_name="Lead",

@@ -37,7 +37,21 @@ from src.api.v1.schemas.tenant.tracking_validation import (
 # Activation mode is derived from the two persisted booleans
 # (``pixel_enabled``, ``capi_enabled``) — see meta_tracking_resolver.py.
 TrackingMode = Literal["off", "pixel_only", "capi_only", "both"]
-TrackingStatus = Literal["disabled", "configured_no_events", "connected", "failing"]
+# `pending` and `browser_only` are additive — widening a Literal cannot break
+# an existing client, and both replace a badge that used to lie:
+#   pending      — events queued, none acknowledged by the vendor yet. Was
+#                  reported as "connected", i.e. green before anything landed.
+#   browser_only — the store runs pixel-only, so the SERVER event log will
+#                  always be empty by design. It used to render
+#                  "configured_no_events" forever, which reads as broken.
+TrackingStatus = Literal[
+    "disabled",
+    "configured_no_events",
+    "connected",
+    "failing",
+    "pending",
+    "browser_only",
+]
 
 # Wave 2 Phase 12 — COD-aware Purchase / Lead timing. Each is optional
 # (None = legacy behavior: paymob/fawry webhooks remain the sole
@@ -563,6 +577,32 @@ class MetaEventLogEntry(BaseModel):
     request_payload_redacted: dict
 
 
+class MetaDeliveryHealth(BaseModel):
+    """What the outbox still owes Meta, and what it gave up on.
+
+    The failure rate above is computed over the last 20 rows, so it answers
+    "is this store healthy right now". These counters answer the question it
+    cannot: "is anything stuck". A store can show a perfectly clean recent
+    window while a hundred conversions sit in the retry ladder behind it.
+    """
+
+    # Persisted, delivery not yet acknowledged.
+    pending: int = 0
+    # Failed retryably; waiting on the backoff ladder.
+    retrying: int = 0
+    # Retryable, but the attempt budget ran out. Meta or the network was
+    # down — not a merchant misconfiguration.
+    dead_letter: int = 0
+    # Past the point where sending would merge rather than double-count, so
+    # deliberately never sent. Not an error.
+    expired: int = 0
+    # Permanently rejected: bad payload, dead token, unknown pixel. The only
+    # bucket here that a merchant can act on.
+    failed: int = 0
+    # Window the counts cover.
+    window_hours: int = 24
+
+
 class MetaTrackingStatusResponse(BaseModel):
     """Live status badge for the dashboard header (plan §7.5)."""
 
@@ -573,6 +613,7 @@ class MetaTrackingStatusResponse(BaseModel):
     recent_failure_rate: float = 0.0
     # Total recent events considered when computing the failure rate.
     recent_event_count: int = 0
+    delivery: MetaDeliveryHealth = Field(default_factory=MetaDeliveryHealth)
 
 
 class MetaMatchKeyCoverage(BaseModel):
