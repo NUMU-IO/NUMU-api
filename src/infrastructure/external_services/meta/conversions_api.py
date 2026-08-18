@@ -1,6 +1,5 @@
 """Meta Conversions API (CAPI) client for server-side event tracking."""
 
-import hashlib
 from typing import Any
 from uuid import UUID
 
@@ -10,20 +9,47 @@ from src.infrastructure.external_services.meta.graph_client import MetaGraphClie
 logger = get_logger(__name__)
 
 
+# Kept as thin wrappers over the ONE hashing implementation
+# (`meta/hashing.py`). They used to normalize differently from it, which meant
+# the omnichannel WhatsApp CAPI path and the storefront CAPI path sent
+# DIFFERENT digests for the same shopper — so Meta saw two people:
+#
+#   * `hash_phone` stripped to digits with no country code, so an Egyptian
+#     "01001234567" hashed as `01001234567` while the main path sends
+#     `201001234567`. Never matched.
+#   * `hash_name` lowercased but kept punctuation, against Meta's
+#     "no punctuation" rule.
+#   * `external_id` was not hashed at all — sent as raw plaintext.
+#
+# One implementation is the point: normalization only works if every producer
+# agrees on it.
+
+
 def hash_email(email: str) -> str:
-    """Hash email using SHA-256 (lowercase)."""
-    return hashlib.sha256(email.lower().encode("utf-8")).hexdigest()
+    """SHA-256 of a trimmed, lowercased email — Meta's `em` rule."""
+    from src.infrastructure.external_services.meta.hashing import _h
+
+    return _h(email) or ""
 
 
 def hash_phone(phone: str) -> str:
-    """Hash phone number using SHA-256 (digits only, lowercase)."""
-    digits = "".join(c for c in phone if c.isdigit())
-    return hashlib.sha256(digits.encode("utf-8")).hexdigest()
+    """SHA-256 of the MENA-normalized E.164-without-plus form."""
+    from src.infrastructure.external_services.meta.hashing import (
+        _h,
+        _normalize_mena_phone,
+    )
+
+    return _h(_normalize_mena_phone(phone)) or ""
 
 
 def hash_name(name: str) -> str:
-    """Hash name using SHA-256 (lowercase)."""
-    return hashlib.sha256(name.lower().encode("utf-8")).hexdigest()
+    """SHA-256 of the lowercase, punctuation-free form — Meta's `fn`/`ln` rule."""
+    from src.infrastructure.external_services.meta.hashing import (
+        _h,
+        _normalize_meta_text,
+    )
+
+    return _h(_normalize_meta_text(name, strip_spaces=False)) or ""
 
 
 class CapiClient:
@@ -66,7 +92,13 @@ class CapiClient:
         if last_name := user_data.get("last_name"):
             user_data_hashed["ln"] = [hash_name(last_name)]
         if external_id := user_data.get("external_id"):
-            user_data_hashed["external_id"] = [str(external_id)]
+            # HASHED. This sent the raw value, so the omnichannel path's
+            # external_id could never join the storefront path's hashed one.
+            from src.infrastructure.external_services.meta.hashing import _h
+
+            digest = _h(str(external_id))
+            if digest:
+                user_data_hashed["external_id"] = [digest]
 
         data: dict[str, Any] = {
             "data": [

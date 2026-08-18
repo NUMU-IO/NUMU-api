@@ -37,7 +37,21 @@ from src.api.v1.schemas.tenant.tracking_validation import (
 # Activation mode is derived from the two persisted booleans
 # (``pixel_enabled``, ``capi_enabled``) — see meta_tracking_resolver.py.
 TrackingMode = Literal["off", "pixel_only", "capi_only", "both"]
-TrackingStatus = Literal["disabled", "configured_no_events", "connected", "failing"]
+# `pending` and `browser_only` are additive — widening a Literal cannot break
+# an existing client, and both replace a badge that used to lie:
+#   pending      — events queued, none acknowledged by the vendor yet. Was
+#                  reported as "connected", i.e. green before anything landed.
+#   browser_only — the store runs pixel-only, so the SERVER event log will
+#                  always be empty by design. It used to render
+#                  "configured_no_events" forever, which reads as broken.
+TrackingStatus = Literal[
+    "disabled",
+    "configured_no_events",
+    "connected",
+    "failing",
+    "pending",
+    "browser_only",
+]
 
 # Wave 2 Phase 12 — COD-aware Purchase / Lead timing. Each is optional
 # (None = legacy behavior: paymob/fawry webhooks remain the sole

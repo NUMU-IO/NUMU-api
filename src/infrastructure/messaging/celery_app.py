@@ -531,6 +531,16 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.meta_match_quality_poll",
         "schedule": crontab(minute=40, hour="*/6"),
     },
+    # ─── Meta tracking retention ───────────────────────────────────────
+    # `meta_event_log` had NO retention policy: one row per event per pixel,
+    # kept forever, on a table the dedup lookups and failure sweeps read on
+    # every send. It is a delivery log, not a business record — the
+    # conversions live in `orders`. Nightly at a quiet hour, well clear of
+    # the hourly sweeps.
+    "meta-tracking-prune": {
+        "task": "tasks.meta_tracking_prune",
+        "schedule": crontab(hour=3, minute=50),
+    },
     # ─── TikTok Events API: catch orphaned CompletePayment events ──────
     # Hourly sweep finds paid orders without a CompletePayment row in the
     # TikTok event log and re-enqueues them. Offset from the Meta sweep

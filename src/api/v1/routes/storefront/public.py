@@ -711,6 +711,90 @@ async def platform_indexing_block_reason(session, store) -> str | None:
         return None
 
 
+# Top-level `settings` keys the storefront and BYOT themes actually read.
+# Everything else stays server-side.
+#
+# This endpoint is PUBLIC and unauthenticated, and it used to return
+# `store.settings` verbatim — the entire merchant configuration blob. That
+# included `password_protected.password_hash`: an unsalted SHA-256 of a
+# merchant-chosen password, readable by anyone who could guess a subdomain,
+# and trivially crackable offline. A pre-launch store's gate was therefore
+# public. It also leaked operational internals (`test_event_code`, debug
+# windows, ad-account and page ids) that no shopper needs.
+#
+# An allowlist rather than a denylist: a new setting must be opted IN to
+# reach the browser, so the next `password_hash`-shaped field cannot leak by
+# simply existing.
+_PUBLIC_SETTINGS_KEYS: frozenset[str] = frozenset({
+    "policies",  # /policies/[handle], llms.txt, sitemap
+    "checkout_fields",  # checkout renders + validates against these
+    "favicon_url",  # layout metadata
+    "external_theme",  # BYOT bundle resolution
+    "meta_pixel_id",  # legacy flat pixel ids (Online Store → Preferences)
+    "tiktok_pixel_id",
+    "currencies",  # presentment-currency switcher
+    "cookie_banner",  # merchant-authored consent copy
+})
+
+# Inside `tracking.{meta,tiktok}`, only what the browser genuinely needs to
+# fire a pixel and honour consent. Notably NOT `test_event_code` (would route
+# live events to Meta's test tool if a shopper replayed it), `debug_mode*`,
+# `ad_account_id`, `page_id`, or the COD trigger config.
+_PUBLIC_TRACKING_KEYS: frozenset[str] = frozenset({
+    "pixel_id",
+    "pixel_enabled",
+    "capi_enabled",
+    "pixels",
+    "consent_required",
+    "consent_settings",
+    "domain_verification_token",  # emitted as a <meta> tag — public by design
+})
+
+
+def _public_settings(raw: dict | None) -> dict:
+    """Project `store.settings` down to what a browser may see."""
+    settings = raw or {}
+    out: dict = {key: settings[key] for key in _PUBLIC_SETTINGS_KEYS if key in settings}
+
+    tracking = settings.get("tracking")
+    if isinstance(tracking, dict):
+        projected: dict = {}
+        for channel in ("meta", "tiktok"):
+            cfg = tracking.get(channel)
+            if isinstance(cfg, dict):
+                projected[channel] = {
+                    k: v for k, v in cfg.items() if k in _PUBLIC_TRACKING_KEYS
+                }
+        if projected:
+            out["tracking"] = projected
+
+    # The gate's existence is public; its secret is not. The storefront asks
+    # the API to verify a submitted password (see `verify_store_password`)
+    # rather than comparing hashes it was handed.
+    protection = settings.get("password_protected")
+    if isinstance(protection, dict):
+        out["password_protected"] = {
+            "enabled": bool(protection.get("enabled")),
+            "has_password": bool(protection.get("password_hash")),
+        }
+
+    return out
+
+
+def _reproject_cached(payload: dict) -> dict:
+    """Re-apply the settings projection to a cached payload.
+
+    Entries written before the projection existed hold the FULL settings blob,
+    including `password_protected.password_hash`. Without this they would keep
+    serving that hash publicly until their TTL expired — a deploy that fixes a
+    leak only for new cache writes has not fixed the leak. Projecting on read
+    is idempotent, so it costs nothing once the cache has turned over.
+    """
+    if not isinstance(payload, dict) or "settings" not in payload:
+        return payload
+    return {**payload, "settings": _public_settings(payload.get("settings"))}
+
+
 def _serialize_public_store(
     store,
     *,
@@ -762,7 +846,7 @@ def _serialize_public_store(
         "status": store.status.value
         if hasattr(store.status, "value")
         else str(store.status),
-        "settings": raw_settings,
+        "settings": _public_settings(raw_settings),
         "seo": seo_normalized,
         "theme_settings": store.theme_settings,
         "business_hours": store.business_hours or {},
@@ -802,7 +886,7 @@ async def get_store_by_subdomain(
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
     if isinstance(cached, dict):
         return SuccessResponse(
-            data=cached,
+            data=_reproject_cached(cached),
             message="Store retrieved successfully",
         )
 
@@ -852,7 +936,7 @@ async def get_store_by_domain(
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
     if isinstance(cached, dict):
         return SuccessResponse(
-            data=cached,
+            data=_reproject_cached(cached),
             message="Store retrieved successfully",
         )
 
@@ -2423,4 +2507,55 @@ async def get_store_payment_methods(
             "cod_deposit_policy": deposit_payload,
         },
         message="Payment methods retrieved",
+    )
+
+
+class VerifyStorePasswordRequest(BaseModel):
+    """Plaintext password a visitor typed into the pre-launch gate."""
+
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+@lookup_router.post(
+    "/store-by-subdomain/{subdomain}/verify-password",
+    response_model=SuccessResponse,
+    summary="Verify a pre-launch storefront password",
+    operation_id="verify_store_password",
+)
+async def verify_store_password(
+    subdomain: Annotated[str, Path(description="Store subdomain")],
+    payload: VerifyStorePasswordRequest,
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Check a submitted pre-launch password. Public, rate-limited upstream.
+
+    The comparison moved here because the storefront used to do it itself,
+    which required the API to hand it `password_protected.password_hash` —
+    and that endpoint is public, so the hash was readable by anyone who could
+    guess a subdomain. An unsalted SHA-256 of a merchant-chosen password is
+    not a meaningful barrier once you have it.
+
+    Returns only a boolean. No hash, no token, nothing the caller could use
+    to skip the check next time — the storefront mints its own unlock cookie
+    from a secret the browser never sees.
+    """
+    import hashlib
+    import hmac as _hmac
+
+    store = await store_repo.get_by_subdomain(subdomain.lower())
+    protection = (
+        ((store.settings or {}).get("password_protected") or {}) if store else {}
+    )
+    stored = protection.get("password_hash") if isinstance(protection, dict) else None
+
+    if not store or store.status != StoreStatus.ACTIVE or not stored:
+        # Same answer whether the store is missing, inactive, or simply has
+        # no password set — this endpoint must not be a store-existence oracle.
+        return SuccessResponse(data={"verified": False}, message="Not verified")
+
+    submitted = hashlib.sha256(payload.password.encode()).hexdigest()
+    verified = _hmac.compare_digest(submitted, str(stored))
+    return SuccessResponse(
+        data={"verified": verified},
+        message="Verified" if verified else "Not verified",
     )

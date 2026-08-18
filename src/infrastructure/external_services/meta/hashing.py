@@ -116,6 +116,46 @@ _LETTER_MAP: dict[str, str] = {
 # use longest-prefix matching at call time.
 _MENA_COUNTRY_CODES: tuple[str, ...] = ("966", "971", "212", "213", "20")
 
+# ISO-3166-1 alpha-2 → E.164 dial code, for numbers typed in NATIONAL format
+# with no country prefix ("0501234567").
+#
+# Such a number used to be assumed Egyptian unconditionally, so a Saudi
+# merchant's customer hashed as `20501234567` instead of `966501234567` and
+# could never match. The store's own country is the only signal available at
+# hash time, and it is the right one: a store sells into its market.
+_COUNTRY_TO_DIAL_CODE: dict[str, str] = {
+    "EG": "20",
+    "SA": "966",
+    "AE": "971",
+    "MA": "212",
+    "DZ": "213",
+    "KW": "965",
+    "QA": "974",
+    "BH": "973",
+    "OM": "968",
+    "JO": "962",
+    "LB": "961",
+    "LY": "218",
+    "TN": "216",
+    "IQ": "964",
+    "PS": "970",
+    "SD": "249",
+    "YE": "967",
+    "SY": "963",
+}
+
+# Egypt remains the fallback: it is the platform's home market and the
+# behaviour every existing store already has.
+_DEFAULT_DIAL_CODE = "20"
+
+
+def dial_code_for_country(country: str | None) -> str:
+    """E.164 dial code for a store's ISO-2 country, or Egypt's."""
+    if not country:
+        return _DEFAULT_DIAL_CODE
+    return _COUNTRY_TO_DIAL_CODE.get(str(country).strip().upper(), _DEFAULT_DIAL_CODE)
+
+
 # Arabic-Indic + Eastern Arabic-Indic digit normalization. Without this,
 # a phone entered in Arabic-script digits hashes to a different SHA-256
 # than the same phone entered in ASCII — silently destroys browser/CAPI
@@ -343,7 +383,7 @@ def _h_each(values: list[str] | None) -> list[str] | None:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_mena_phone(phone: str) -> str:
+def _normalize_mena_phone(phone: str, default_cc: str = _DEFAULT_DIAL_CODE) -> str:
     """Normalize a MENA mobile number to E.164-without-plus form.
 
     Accepts any of:
@@ -387,11 +427,12 @@ def _normalize_mena_phone(phone: str) -> str:
                 subscriber = subscriber[1:]
             return cc + subscriber
 
-    # No country prefix → assume Egypt + strip a leading 0 (backward
-    # compatible with the legacy ``_normalize_eg_phone`` contract).
+    # No country prefix → use the STORE's country, falling back to Egypt.
+    # Assuming Egypt unconditionally silently broke every non-Egyptian store:
+    # the digest was well-formed, present, and unmatchable.
     if digits.startswith("0"):
         digits = digits[1:]
-    return "20" + digits
+    return (default_cc or _DEFAULT_DIAL_CODE) + digits
 
 
 def _normalize_eg_phone(phone: str) -> str:
@@ -431,7 +472,11 @@ def hash_user_data(raw: dict) -> dict:
     """
     return {
         "em": [_h(raw["email"])] if raw.get("email") else None,
-        "ph": [_h(_normalize_mena_phone(raw["phone"]))] if raw.get("phone") else None,
+        "ph": (
+            [_h(_normalize_mena_phone(raw["phone"], _phone_cc(raw)))]
+            if raw.get("phone")
+            else None
+        ),
         "fn": _h_each(_normalize_name(raw.get("first_name"), field="fn")),
         "ln": _h_each(_normalize_name(raw.get("last_name"), field="ln")),
         # ct/st strip spaces as well as punctuation — Meta's spec differs
@@ -466,6 +511,18 @@ def hash_user_data(raw: dict) -> dict:
         "client_user_agent": raw.get("user_agent"),
         "external_id": _external_ids(raw),
     }
+
+
+def _phone_cc(raw: dict) -> str:
+    """Dial code for national-format phones on this event.
+
+    Prefers an explicit ``default_phone_cc`` the caller threaded through from
+    the store, then the event's own ``country_code``, then Egypt.
+    """
+    explicit = raw.get("default_phone_cc")
+    if explicit:
+        return str(explicit)
+    return dial_code_for_country(raw.get("country_code"))
 
 
 def _country_hash(raw_country: str | None) -> list[str] | None:
