@@ -600,6 +600,38 @@ def _derive_domain_status(cf_state: dict) -> tuple[str, bool, list[str]]:
     return "pending_dns", False, []
 
 
+async def _revalidate_on_domain_activation(store: Store) -> None:
+    """Bust the storefront cache when a custom domain first goes active.
+
+    Scope is ``layout`` because the canonical origin is decided per-request from
+    the store payload and therefore affects every page, not one route: the
+    homepage, all 264 product/collection URLs, and the sitemap all carry the old
+    host until the cache is cleared.
+
+    Best-effort. A merchant's domain is already live and serving; failing the
+    status poll because a cache bust did not land would be a worse outcome than
+    a canonical that self-corrects on the next revalidation window.
+    """
+    if not store.subdomain:
+        return
+    try:
+        from src.infrastructure.external_services.nextjs_revalidation import (
+            revalidate_on_customization_publish,
+        )
+
+        await revalidate_on_customization_publish(
+            subdomain=store.subdomain,
+            store_id=str(store.id),
+            custom_domain=store.custom_domain,
+        )
+        logger.info(
+            "custom_domain_activated_revalidated",
+            extra={"subdomain": store.subdomain, "domain": store.custom_domain},
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("custom_domain_revalidate_failed", exc_info=True)
+
+
 def _build_custom_domain_response(
     store: Store, cf_state: dict | None
 ) -> CustomDomainStatusResponse:
@@ -645,9 +677,21 @@ def _build_custom_domain_response(
 
 def _persist_domain_state(
     store: Store, domain: str | None, cf_state: dict | None
-) -> None:
+) -> bool:
     """Write the custom-domain block into store.settings (reassigning a new
-    dict so SQLAlchemy detects the JSONB change)."""
+    dict so SQLAlchemy detects the JSONB change).
+
+    Returns True when this call flips the domain to ``active``, so the caller
+    can bust the storefront cache. Without that, the storefront keeps serving
+    pages rendered before the domain existed: every ``rel=canonical`` still
+    points at ``<sub>.numueg.app``, so Google indexes the subdomain and the
+    custom domain never ranks — the precise opposite of why a merchant
+    connects one. It is silent, too: the domain resolves, serves 200 and looks
+    entirely correct.
+    """
+    was_active = ((store.settings or {}).get("custom_domain") or {}).get(
+        "status"
+    ) == "active"
     settings_copy = dict(store.settings or {})
     if domain is None:
         settings_copy.pop("custom_domain", None)
@@ -664,6 +708,12 @@ def _persist_domain_state(
             "updated_at": datetime.now(UTC).isoformat(),
         }
     store.settings = settings_copy
+
+    now_active = (
+        domain is not None
+        and (settings_copy.get("custom_domain") or {}).get("status") == "active"
+    )
+    return now_active and not was_active
 
 
 @router.get(
@@ -687,7 +737,8 @@ async def get_custom_domain(
             # Persist the refreshed lifecycle so the hub has a value even if a
             # later poll can't reach CF.
             prev = cd.get("status")
-            _persist_domain_state(store, store.custom_domain, cf_state)
+            if _persist_domain_state(store, store.custom_domain, cf_state):
+                await _revalidate_on_domain_activation(store)
             new = (store.settings or {}).get("custom_domain", {}).get("status")
             if new != prev:
                 await store_repo.update(store)
@@ -738,7 +789,8 @@ async def connect_custom_domain(
         ) from e
 
     store.custom_domain = domain
-    _persist_domain_state(store, domain, cf_state)
+    if _persist_domain_state(store, domain, cf_state):
+        await _revalidate_on_domain_activation(store)
     await store_repo.update(store)
     await cache.invalidate_store(
         store_id=store.id,
