@@ -474,7 +474,12 @@ class Settings(BaseSettings):
 
     # Rate limiting
     rate_limit_enabled: bool = True
-    rate_limit_requests_per_minute: int = 100  # Authenticated general
+    # Authenticated general tier. 300, not 100: the merchant hub's
+    # dashboard legitimately fires ~70 parallel requests on load plus
+    # continuous realtime-snapshot polling, so 100/min still tripped on
+    # normal navigation between pages. Applies per IP — offices/NAT share
+    # one, so the ceiling must fit several concurrent merchants.
+    rate_limit_requests_per_minute: int = 300  # Authenticated general
     rate_limit_anon_requests_per_minute: int = 60  # Anonymous general
     rate_limit_auth_requests_per_minute: int = 5  # Login/register/refresh
     rate_limit_checkout_requests_per_minute: int = 10  # Storefront checkout
