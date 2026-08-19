@@ -768,6 +768,23 @@ def _public_settings(raw: dict | None) -> dict:
         if projected:
             out["tracking"] = projected
 
+    # Custom domain: the storefront decides its canonical origin from
+    # `settings.custom_domain.status` (see seo.ts verifiedCustomHost), and only
+    # `active` counts. Omitting this block did not fail loudly — it made every
+    # page on a merchant's own domain canonicalise back to <sub>.numueg.app, so
+    # Google indexed the subdomain and the custom domain could never rank. The
+    # site looked perfect: 200, correct content, valid certificate.
+    #
+    # Projected rather than passed through: `hostname` and `status` are what the
+    # browser needs, while `cf_id` is an internal Cloudflare identifier and
+    # `cname_target`/`updated_at` are operational detail no shopper needs.
+    domain_cfg = settings.get("custom_domain")
+    if isinstance(domain_cfg, dict):
+        out["custom_domain"] = {
+            "hostname": domain_cfg.get("hostname"),
+            "status": domain_cfg.get("status"),
+        }
+
     # The gate's existence is public; its secret is not. The storefront asks
     # the API to verify a submitted password (see `verify_store_password`)
     # rather than comparing hashes it was handed.

@@ -50,19 +50,31 @@ def _get_cache() -> RedisCacheService:
 AUTH_ENDPOINTS = {
     "/api/v1/auth/login",
     "/api/v1/auth/register",
-    "/api/v1/auth/refresh",
     "/api/v1/admin/auth/login",
+}
+
+# Token refresh is credential-EXCHANGE, not credential-GUESSING: it only
+# succeeds with a valid signed refresh token already in hand, so the
+# brute-force math the 5/min auth tier defends against doesn't apply.
+# It sat in AUTH_ENDPOINTS anyway — and a merchant hub with several open
+# tabs fires parallel refreshes the moment an access token expires, so
+# the 6th one 429'd, the client read the failed refresh as
+# "session expired", and the merchant got logged out mid-work.
+REFRESH_ENDPOINTS = {
+    "/api/v1/auth/refresh",
     "/api/v1/admin/auth/refresh",
 }
 
 # Store-scoped customer auth routes (/api/v1/storefront/store/{store_id}/auth/…)
 # have a dynamic store id, so an exact-string set can never match them.
-# Mirrors the merchant surface above: login/register/refresh.
+# Mirrors the merchant surface above: login/register.
 CUSTOMER_AUTH_SUFFIXES = (
     "/auth/login",
     "/auth/register",
-    "/auth/refresh",
 )
+
+# Customer refresh, same reasoning as REFRESH_ENDPOINTS.
+CUSTOMER_REFRESH_SUFFIX = "/auth/refresh"
 
 SKIP_RATE_LIMIT = {
     "/",
@@ -88,6 +100,15 @@ def _is_auth_endpoint(path: str) -> bool:
         return True
     return path.startswith("/api/v1/storefront/store/") and path.endswith(
         CUSTOMER_AUTH_SUFFIXES
+    )
+
+
+def _is_token_refresh(path: str) -> bool:
+    """Token-refresh endpoints (merchant, admin, customer)."""
+    if path in REFRESH_ENDPOINTS:
+        return True
+    return path.startswith("/api/v1/storefront/store/") and path.endswith(
+        CUSTOMER_REFRESH_SUFFIX
     )
 
 
@@ -337,11 +358,15 @@ def rate_limit_exceeded_response(
 # the per-IP minute bucket. The two checks compose: a request must
 # pass BOTH to be allowed.
 
+# NOTE: refresh is deliberately NOT here (nor in the strict per-IP auth
+# tier). Credential-stuffing probes guessable secrets; refresh only
+# succeeds with a valid signed token already in hand, so throttling it
+# per-identifier just logged out real merchants whose parallel tabs
+# refreshed together. It has its own generous per-IP "refresh" tier.
 SENSITIVE_PER_USER_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
-    "/api/v1/auth/refresh",
 }
 
 # Customer-facing equivalents (store-id is dynamic; we match by suffix).
@@ -349,7 +374,6 @@ SENSITIVE_CUSTOMER_SUFFIXES = (
     "/auth/login",
     "/auth/forgot-password",
     "/auth/reset-password",
-    "/auth/refresh",
     "/auth/register",
 )
 
@@ -565,7 +589,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Determine tier and limit
-        if _is_auth_endpoint(path):
+        if _is_token_refresh(path):
+            # Refresh exchanges an existing signed token — no guessing
+            # surface — and parallel tabs legitimately refresh together.
+            # 30/IP/min absorbs a multi-tab refresh storm while still
+            # capping replay abuse of a stolen refresh cookie.
+            tier = "refresh"
+            limit = 30
+        elif _is_auth_endpoint(path):
             tier = "auth"
             limit = settings.rate_limit_auth_requests_per_minute
         elif _is_checkout(path):
@@ -606,7 +637,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             limit = 20
         else:
             tier = "general"
-            has_auth = "authorization" in request.headers
+            # Authenticated = Authorization header OR an auth COOKIE. The
+            # merchant hub and storefront accounts authenticate via
+            # HttpOnly cookies (access_token / customer_access_token), so
+            # the header-only check classified every logged-in merchant as
+            # anonymous — the dashboard's parallel burst (products +
+            # orders + analytics + realtime polling) then blew the anon
+            # 60/min and the merchant saw 429s mid-work. The cookie's mere
+            # presence is enough for tiering (real verification happens in
+            # the auth dependency; a junk cookie still only buys the
+            # authed BUCKET, and the per-user layers below still apply).
+            has_auth = (
+                "authorization" in request.headers
+                or "access_token" in request.cookies
+                or "customer_access_token" in request.cookies
+            )
             if has_auth:
                 limit = settings.rate_limit_requests_per_minute
             else:
