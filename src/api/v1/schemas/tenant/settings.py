@@ -233,6 +233,10 @@ class SaveInstapayCredentialsRequest(BaseModel):
     ipa: str | None = Field(default=None, min_length=3, max_length=80)
     ipa_display_name: str | None = Field(None, max_length=100)
     fallback_phone: str | None = Field(None, max_length=20)
+    # Master switch for auto-approval. ``None`` leaves whatever is
+    # stored (or the rail's default) alone, so a partial save can
+    # never silently enable it.
+    auto_approve_enabled: bool | None = None
     auto_approve_threshold_cents: int = Field(50_000, ge=0, le=10_000_000)
     auto_approve_daily_cap_cents: int = Field(500_000, ge=0, le=100_000_000)
     auto_approve_daily_count: int = Field(10, ge=0, le=1_000)
@@ -270,6 +274,7 @@ class InstapayCredentialsResponse(BaseModel):
     ipa_masked: str | None = None
     ipa_display_name: str | None = None
     fallback_phone: str | None = None
+    auto_approve_enabled: bool = True
     auto_approve_threshold_cents: int | None = None
     auto_approve_daily_cap_cents: int | None = None
     auto_approve_daily_count: int | None = None
@@ -318,6 +323,10 @@ class SaveVodafoneCashCredentialsRequest(BaseModel):
     wallet_number: str | None = Field(default=None, min_length=8, max_length=20)
     display_name: str | None = Field(None, max_length=100)
     fallback_phone: str | None = Field(None, max_length=20)
+    # Master switch for auto-approval. ``None`` leaves whatever is
+    # stored (or the rail's default) alone, so a partial save can
+    # never silently enable it.
+    auto_approve_enabled: bool | None = None
     auto_approve_threshold_cents: int = Field(50_000, ge=0, le=10_000_000)
     auto_approve_daily_cap_cents: int = Field(500_000, ge=0, le=100_000_000)
     auto_approve_daily_count: int = Field(10, ge=0, le=1_000)
@@ -348,6 +357,7 @@ class VodafoneCashCredentialsResponse(BaseModel):
     wallet_number_masked: str | None = None
     display_name: str | None = None
     fallback_phone: str | None = None
+    auto_approve_enabled: bool = True
     auto_approve_threshold_cents: int | None = None
     auto_approve_daily_cap_cents: int | None = None
     auto_approve_daily_count: int | None = None

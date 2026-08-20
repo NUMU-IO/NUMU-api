@@ -47,6 +47,7 @@ from src.infrastructure.external_services.manual_transfer.payment_service import
     DEFAULT_AUTO_APPROVE_DAILY_COUNT,
     DEFAULT_AUTO_APPROVE_THRESHOLD_CENTS,
     default_amount_tolerance_bps,
+    default_auto_approve_enabled,
     human_name,
 )
 
@@ -78,6 +79,10 @@ class ManualConfigInput:
     destination: str | None = None
     fallback_phone: str | None = None
     display_name: str | None = None
+    # ``None`` means "leave at the rail's default" — which is how an
+    # existing block with no stored value is read, so turning this on
+    # for Vodafone Cash is always a deliberate merchant action.
+    auto_approve_enabled: bool | None = None
     auto_approve_threshold_cents: int = DEFAULT_AUTO_APPROVE_THRESHOLD_CENTS
     auto_approve_daily_cap_cents: int = DEFAULT_AUTO_APPROVE_DAILY_CAP_CENTS
     auto_approve_daily_count: int = DEFAULT_AUTO_APPROVE_DAILY_COUNT
@@ -207,6 +212,15 @@ async def build_config_block(
         # InstaPay-era alias, kept populated so older readers of the
         # settings blob (and the InstaPay response model) still work.
         "ipa_display_name": data.display_name,
+        "auto_approve_enabled": (
+            data.auto_approve_enabled
+            if data.auto_approve_enabled is not None
+            else bool(
+                existing.get(
+                    "auto_approve_enabled", default_auto_approve_enabled(method)
+                )
+            )
+        ),
         "auto_approve_threshold_cents": data.auto_approve_threshold_cents,
         "auto_approve_daily_cap_cents": data.auto_approve_daily_cap_cents,
         "auto_approve_daily_count": data.auto_approve_daily_count,
@@ -304,6 +318,9 @@ async def read_config_view(
         "destination_masked": mask_destination(method, destination),
         "display_name": block.get("display_name") or block.get("ipa_display_name"),
         "fallback_phone": fallback_phone,
+        "auto_approve_enabled": bool(
+            block.get("auto_approve_enabled", default_auto_approve_enabled(method))
+        ),
         "auto_approve_threshold_cents": block.get("auto_approve_threshold_cents"),
         "auto_approve_daily_cap_cents": block.get("auto_approve_daily_cap_cents"),
         "auto_approve_daily_count": block.get("auto_approve_daily_count"),

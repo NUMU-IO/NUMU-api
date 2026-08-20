@@ -160,6 +160,21 @@ def generate_reference_code(prefix: str = "NU") -> str:
     return f"{prefix}-{suffix}"
 
 
+def default_auto_approve_enabled(method: ManualPaymentMethod) -> bool:
+    """Whether a rail auto-approves proofs before a merchant has opted in.
+
+    InstaPay: yes — unchanged, merchants have relied on it for months and
+    a bank receipt carries enough chrome to make a convincing fake real
+    work.
+
+    Vodafone Cash: no. A wallet confirmation is a plain SMS screenshot,
+    and with no OCR provider assigned nothing inspects the image at all,
+    so "auto-approve under 500 EGP" means "approve any photo under 500
+    EGP". The merchant turns it on once they trust what they are seeing.
+    """
+    return method is ManualPaymentMethod.INSTAPAY
+
+
 def default_amount_tolerance_bps(method: ManualPaymentMethod) -> int:
     """Per-rail default for the declared/OCR amount-match tolerance."""
     if method is ManualPaymentMethod.VODAFONE_CASH:

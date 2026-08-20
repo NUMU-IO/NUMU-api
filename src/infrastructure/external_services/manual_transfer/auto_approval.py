@@ -51,6 +51,14 @@ class AutoApprovalConfig:
     threshold_cents: int
     daily_cap_cents: int
     daily_count_cap: int
+    # Master switch. When off NOTHING auto-approves, whatever the
+    # thresholds say — every proof waits for a human.
+    #
+    # This is the only gate that does not depend on the OCR provider,
+    # which matters: with no provider assigned, every OCR cross-check
+    # below silently no-ops, and a store can end up approving on an
+    # amount threshold alone — i.e. on nothing the image says.
+    enabled: bool = True
     amount_mismatch_tolerance_bps: int | None = 100
     # Phase C OCR cross-checks. Each rule is gated by its bool flag
     # *and* requires the OCR result to be ``ok`` with a non-null
@@ -133,6 +141,7 @@ def evaluate(
     """Return the auto-approval decision for a freshly submitted proof.
 
     Rules, in order:
+      0. Auto-approval switched on at all (short-circuits when off).
       1. Intent not expired (hard block — customer should re-start).
       2. Amount ≤ threshold (soft — route to review).
       3. Declared amount matches order total within tolerance (soft).
@@ -146,6 +155,16 @@ def evaluate(
     if intent.is_expired(now=facts.now):
         reasons.append("intent_expired")
         hard_block = True
+
+    # Checked first and short-circuiting: when the merchant has not
+    # opted in, the thresholds below are not a second opinion — there
+    # is simply no auto-approval to reason about.
+    if not config.enabled:
+        return AutoApprovalDecision(
+            approved=False,
+            reasons=[*reasons, "auto_approval_disabled"],
+            soft_block=not hard_block,
+        )
 
     if facts.order_total_cents > config.threshold_cents:
         reasons.append("amount_above_auto_approve_threshold")
