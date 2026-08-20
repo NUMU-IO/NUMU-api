@@ -2988,6 +2988,7 @@ def _manual_input(request, *, destination) -> ManualConfigInput:
         fallback_phone=request.fallback_phone,
         display_name=getattr(request, "ipa_display_name", None)
         or getattr(request, "display_name", None),
+        auto_approve_enabled=request.auto_approve_enabled,
         auto_approve_threshold_cents=request.auto_approve_threshold_cents,
         auto_approve_daily_cap_cents=request.auto_approve_daily_cap_cents,
         auto_approve_daily_count=request.auto_approve_daily_count,
@@ -3018,6 +3019,7 @@ def _instapay_response(view: dict) -> InstapayCredentialsResponse:
         ipa_masked=view.get("destination_masked"),
         ipa_display_name=view.get("display_name"),
         fallback_phone=view.get("fallback_phone"),
+        auto_approve_enabled=view.get("auto_approve_enabled", True),
         auto_approve_threshold_cents=view.get("auto_approve_threshold_cents"),
         auto_approve_daily_cap_cents=view.get("auto_approve_daily_cap_cents"),
         auto_approve_daily_count=view.get("auto_approve_daily_count"),
@@ -3051,6 +3053,7 @@ def _vodafone_response(view: dict) -> VodafoneCashCredentialsResponse:
         wallet_number_masked=view.get("destination_masked"),
         display_name=view.get("display_name"),
         fallback_phone=view.get("fallback_phone"),
+        auto_approve_enabled=view.get("auto_approve_enabled", True),
         auto_approve_threshold_cents=view.get("auto_approve_threshold_cents"),
         auto_approve_daily_cap_cents=view.get("auto_approve_daily_cap_cents"),
         auto_approve_daily_count=view.get("auto_approve_daily_count"),

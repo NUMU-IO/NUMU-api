@@ -24,9 +24,14 @@ from src.core.entities.instapay import (
 )
 from src.infrastructure.external_services.manual_transfer import (
     MANUAL_TRANSFER_METHODS,
+    AutoApprovalConfig,
+    AutoApprovalDecision,
+    AutoApprovalFacts,
     InvalidDestinationError,
     ManualTransferPaymentService,
     default_amount_tolerance_bps,
+    default_auto_approve_enabled,
+    evaluate,
     generate_reference_code,
     mask_destination,
     normalize_destination,
@@ -406,3 +411,171 @@ def test_resume_link_omits_the_query_when_there_is_no_reference():
     # rather than sending "?ref=None" upstream.
     url = resume_url(IP, base_url="https://vionne.numueg.app/", order_id="abc-123")
     assert url == "https://vionne.numueg.app/instapay/abc-123"
+
+
+# ── Auto-approval is opt-in on a wallet rail ─────────────────────────
+
+
+def _intent(method=VC):
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    return ManualPaymentIntent.new(
+        tenant_id=uuid4(),
+        store_id=uuid4(),
+        order_id=uuid4(),
+        reference_code="VF-ABC123",
+        display_destination="01012345678",
+        amount_cents=15_001,
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+        qr_payload="",
+        method=method,
+    )
+
+
+def _proof():
+    from uuid import uuid4
+
+    from src.core.entities.instapay import PaymentProof
+
+    return PaymentProof.new(
+        tenant_id=uuid4(),
+        store_id=uuid4(),
+        order_id=uuid4(),
+        proof_image_key="k",
+        proof_image_hash=b"h",
+        transaction_ref="123456789",
+    )
+
+
+def _config(**kw) -> AutoApprovalConfig:
+    base = {
+        "threshold_cents": 50_000,
+        "daily_cap_cents": 500_000,
+        "daily_count_cap": 10,
+    }
+    base.update(kw)
+    return AutoApprovalConfig(**base)
+
+
+def _facts(total=15_001) -> AutoApprovalFacts:
+    return AutoApprovalFacts(
+        order_total_cents=total,
+        daily_auto_approved_count=0,
+        daily_auto_approved_cents=0,
+    )
+
+
+def test_wallet_rail_does_not_auto_approve_before_the_merchant_opts_in():
+    """The exact case a merchant hit: any photo, order under the threshold.
+
+    With no OCR provider every image rule no-ops, so the only gates left
+    were an amount threshold and daily caps — neither of which looks at
+    the receipt. A 150 EGP order sailed through on an arbitrary picture.
+    """
+    decision: AutoApprovalDecision = evaluate(
+        intent=_intent(),
+        proof=_proof(),
+        config=_config(enabled=False),
+        facts=_facts(),
+    )
+    assert decision.approved is False
+    assert "auto_approval_disabled" in decision.reasons
+    # Soft: it goes to the merchant, it is not thrown back at the buyer.
+    assert decision.soft_block is True
+
+
+def test_the_switch_beats_every_threshold():
+    # Well under the threshold, caps untouched — still not approved.
+    decision = evaluate(
+        intent=_intent(),
+        proof=_proof(),
+        config=_config(enabled=False, threshold_cents=10_000_000),
+        facts=_facts(total=1),
+    )
+    assert decision.approved is False
+
+
+def test_turning_it_on_restores_auto_approval():
+    decision = evaluate(
+        intent=_intent(),
+        proof=_proof(),
+        config=_config(enabled=True),
+        facts=_facts(),
+    )
+    assert decision.approved is True
+    assert decision.reasons == []
+
+
+def test_instapay_is_unchanged():
+    # Months of live behaviour: on by default, and still approves.
+    assert default_auto_approve_enabled(IP) is True
+    decision = evaluate(
+        intent=_intent(IP), proof=_proof(), config=_config(), facts=_facts()
+    )
+    assert decision.approved is True
+
+
+def test_vodafone_cash_defaults_to_off():
+    assert default_auto_approve_enabled(VC) is False
+
+
+@pytest.mark.asyncio
+async def test_a_new_wallet_config_stores_auto_approval_off():
+    block, _ = await build_config_block(
+        method=VC, existing={}, data=ManualConfigInput(destination="01012345678")
+    )
+    assert block["auto_approve_enabled"] is False
+    view = await read_config_view(method=VC, block=block)
+    assert view["auto_approve_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_store_configured_before_the_switch_existed_reads_as_off():
+    """The merchant who reported this already has a saved block.
+
+    Their stored config predates the flag, so the fallback is what
+    protects them — a code default alone would not have.
+    """
+    legacy = {
+        "enabled": True,
+        "is_configured": True,
+        "encrypted_credentials": None,
+        "auto_approve_threshold_cents": 50_000,
+    }
+    view = await read_config_view(
+        method=VC, block={**legacy, "encrypted_credentials": None}
+    )
+    # No credentials -> not configured; the interesting case is the block
+    # read through build_config_block, below.
+    assert view["is_configured"] is False
+
+    block, _ = await build_config_block(
+        method=VC,
+        existing={"auto_approve_threshold_cents": 50_000},
+        data=ManualConfigInput(destination="01012345678"),
+    )
+    assert block["auto_approve_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_merchant_can_turn_it_on_and_it_sticks():
+    block, _ = await build_config_block(
+        method=VC,
+        existing={},
+        data=ManualConfigInput(destination="01012345678", auto_approve_enabled=True),
+    )
+    assert block["auto_approve_enabled"] is True
+    # A later partial save that omits the flag must not switch it back off.
+    updated, _ = await build_config_block(
+        method=VC, existing=block, data=ManualConfigInput(auto_approve_daily_count=3)
+    )
+    assert updated["auto_approve_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_instapay_config_keeps_auto_approval_on():
+    block, _ = await build_config_block(
+        method=IP, existing={}, data=ManualConfigInput(destination="merchant@cib")
+    )
+    assert block["auto_approve_enabled"] is True

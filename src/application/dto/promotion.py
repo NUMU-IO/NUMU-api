@@ -78,10 +78,18 @@ class PromotionTargetInput(BaseModel):
       eligibility checker and read by the discount calculator instead,
       to restrict which cart lines participate: BOGO's "customer buys X
       / customer gets Y", and MULTIBUY's eligible set (`buy_set`).
+    * `"leg:<i>"` — a BUNDLE leg's catalogue, positionally aligned with
+      `discount_rule.bundle_legs`. `"leg:0"` scopes the first leg.
 
     Only catalog kinds (PRODUCT / CATEGORY) are meaningful as line
     filters; a role on an audience/geo row is ignored rather than
     failing the promotion.
+
+    On a MULTIBUY the server PROMOTES untagged inclusion catalog rows to
+    `buy_set` on write (see `use_cases.promotions.target_roles`) — a
+    client that leaves `role` unset gets the offer it meant rather than
+    an eligibility gate that hides the promotion from an empty cart.
+    BUNDLE legs are never inferred: send them tagged.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -17,18 +17,21 @@ from uuid import UUID
 from src.application.dto.promotion import PromotionDisplayOutput
 from src.application.dto.promotion_resolution import (
     ActivePromotionsOutput,
+    EligibleLegOutput,
     ResolvedPromotionOutput,
     VisitorContextInput,
 )
 from src.application.use_cases.promotions._mapping import display_to_output
 from src.core.entities.promotion import Promotion
 from src.core.entities.promotion_display import PromotionDisplay
+from src.core.entities.promotion_target import leg_index
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.services.promotion_eligibility_checker import EligibilityContext
 from src.core.services.promotion_resolver import (
     PromotionResolver,
     ResolvedPromotion,
 )
+from src.core.value_objects.discount_rule import DiscountRuleKind
 
 
 def _fingerprint(promotion_id: UUID, version: int) -> str:
@@ -106,7 +109,22 @@ class ResolveActivePromotionsUseCase:
     ) -> ResolvedPromotionOutput:
         promo: Promotion = item.promotion
         translated = self._pick_translation(promo, locale)
+        legs = self._eligible_legs(item)
         product_ids, category_ids = self._eligible_sets(item)
+        if legs:
+            # A bundle's "eligible set" is everything any leg accepts. Reported
+            # so a theme that predates per-leg support still filters the cart
+            # correctly instead of counting the whole catalogue.
+            product_ids = list(
+                dict.fromkeys(
+                    product_ids + [i for leg in legs for i in leg.product_ids]
+                )
+            )
+            category_ids = list(
+                dict.fromkeys(
+                    category_ids + [i for leg in legs for i in leg.category_ids]
+                )
+            )
         return ResolvedPromotionOutput(
             promotion_id=promo.id,
             surface=promo.surface,
@@ -119,6 +137,7 @@ class ResolveActivePromotionsUseCase:
             fingerprint=_fingerprint(promo.id, promo.version),
             eligible_product_ids=product_ids,
             eligible_category_ids=category_ids,
+            eligible_legs=legs,
         )
 
     @staticmethod
@@ -140,6 +159,40 @@ class ResolveActivePromotionsUseCase:
             categories.extend(str(cid) for cid in value.get("category_ids", []))
         # De-dupe, preserving order — several targets may name the same id.
         return list(dict.fromkeys(products)), list(dict.fromkeys(categories))
+
+    @staticmethod
+    def _eligible_legs(item: ResolvedPromotion) -> list[EligibleLegOutput]:
+        """Per-leg catalogue scopes for a BUNDLE; empty for every other kind.
+
+        Built from `bundle_legs` rather than from the roles present, so the
+        output always has one entry per declared leg — a leg whose targets were
+        never saved reports empty lists rather than vanishing and shifting every
+        later leg's index. `discount_calculator._build_leg_filters` sizes itself
+        the same way, so the theme and the math agree on what leg 2 is.
+        """
+        rule = item.promotion.discount_rule
+        if rule is None or rule.kind != DiscountRuleKind.BUNDLE:
+            return []
+
+        products: list[list[str]] = [[] for _ in rule.bundle_legs]
+        categories: list[list[str]] = [[] for _ in rule.bundle_legs]
+        for target in getattr(item, "targets", None) or []:
+            index = leg_index(getattr(target, "role", None))
+            if index is None or index >= len(rule.bundle_legs):
+                continue
+            value = getattr(target, "target_value", None) or {}
+            products[index].extend(str(pid) for pid in value.get("product_ids", []))
+            categories[index].extend(str(cid) for cid in value.get("category_ids", []))
+
+        return [
+            EligibleLegOutput(
+                quantity=leg.quantity,
+                label=leg.label,
+                product_ids=list(dict.fromkeys(products[i])),
+                category_ids=list(dict.fromkeys(categories[i])),
+            )
+            for i, leg in enumerate(rule.bundle_legs)
+        ]
 
     @staticmethod
     def _pick_translation(promo: Promotion, locale: str) -> dict[str, Any]:

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from src.core.entities.promotion import Promotion
-from src.core.entities.promotion_target import PromotionTarget
+from src.core.entities.promotion_target import PromotionTarget, leg_index
 from src.core.enums.promotion_enums import PromotionSurface, TargetKind
 from src.core.value_objects.discount_rule import (
     CartLine,
@@ -118,8 +118,9 @@ class DiscountCalculator:
             for p in codes:
                 assert p.discount_rule is not None
                 buy_f, get_f = _build_line_filters(p, targets_by_promotion)
+                leg_f = _build_leg_filters(p, targets_by_promotion)
                 result = p.discount_rule.calculate(
-                    context, buy_filter=buy_f, get_filter=get_f
+                    context, buy_filter=buy_f, get_filter=get_f, leg_filters=leg_f
                 )
                 if (
                     best_result is None
@@ -148,6 +149,10 @@ class DiscountCalculator:
                         ))
 
         # Automatic discounts — stack additively, capped at subtotal ----------
+        autos, tier_losers = _resolve_multibuy_tier_rivalry(
+            autos, targets_by_promotion, context
+        )
+        rejected.extend(tier_losers)
         auto_running = 0
         auto_ids: list[UUID] = []
         for p in autos:
@@ -163,8 +168,9 @@ class DiscountCalculator:
                 customer_id=context.customer_id,
             )
             buy_f, get_f = _build_line_filters(p, targets_by_promotion)
+            leg_f = _build_leg_filters(p, targets_by_promotion)
             result = p.discount_rule.calculate(
-                sub_context, buy_filter=buy_f, get_filter=get_f
+                sub_context, buy_filter=buy_f, get_filter=get_f, leg_filters=leg_f
             )
             if result.free_shipping:
                 free_shipping = True
@@ -293,3 +299,171 @@ def _build_line_filters(
     buy_f: LineFilter | None = _make(buy_pids, buy_cids) if has_buy else None
     get_f: LineFilter | None = _make(get_pids, get_cids) if has_get else None
     return buy_f, get_f
+
+
+def _build_leg_filters(
+    promo: Promotion,
+    targets_by_promotion: dict[UUID, list[PromotionTarget]] | None,
+) -> list[LineFilter | None] | None:
+    """One line filter per BUNDLE leg, positionally aligned with `bundle_legs`.
+
+    Leg `i`'s scope is every target tagged `role="leg:{i}"`, unioned the same
+    way `_build_line_filters` unions a buy_set: product allow-list OR category
+    allow-list.
+
+    Returns `None` for anything that is not a BUNDLE, and `None` for a leg with
+    no targets — a bundle whose legs are all unscoped is a misconfiguration the
+    merchant can see (every leg matches everything, so it prices like a
+    multibuy), and failing closed would instead produce a promotion that is
+    live, advertised, and silently worth nothing.
+
+    The list is sized from `bundle_legs`, NOT from the roles present, so a
+    stale `leg:3` left behind by an edit that shortened the bundle is dropped
+    rather than shifting every later leg's scope by one.
+    """
+    rule = promo.discount_rule
+    if rule is None or rule.kind != DiscountRuleKind.BUNDLE:
+        return None
+
+    leg_count = len(rule.bundle_legs)
+    pids: list[set[UUID]] = [set() for _ in range(leg_count)]
+    cids: list[set[UUID]] = [set() for _ in range(leg_count)]
+
+    for t in (targets_by_promotion or {}).get(promo.id, []):
+        index = leg_index(t.role)
+        if index is None or index >= leg_count:
+            continue
+        if t.target_kind == TargetKind.PRODUCT:
+            pids[index].update(UUID(s) for s in t.target_value.get("product_ids", []))
+        elif t.target_kind == TargetKind.CATEGORY:
+            cids[index].update(UUID(s) for s in t.target_value.get("category_ids", []))
+
+    def _make(allowed_p: set[UUID], allowed_c: set[UUID]) -> LineFilter:
+        def f(line: CartLine) -> bool:
+            if allowed_p and line.product_id in allowed_p:
+                return True
+            if (
+                allowed_c
+                and line.category_id is not None
+                and line.category_id in allowed_c
+            ):
+                return True
+            return False
+
+        return f
+
+    return [
+        _make(pids[i], cids[i]) if (pids[i] or cids[i]) else None
+        for i in range(leg_count)
+    ]
+
+
+def _multibuy_scope_key(
+    promo: Promotion,
+    targets_by_promotion: dict[UUID, list[PromotionTarget]] | None,
+) -> str | None:
+    """A stable identity for "which catalogue this multibuy is about".
+
+    None for anything that is not a MULTIBUY. Built from the SORTED `buy_set`
+    ids so it does not depend on target row order, and so two promotions
+    written against the same collection collide exactly.
+
+    An unscoped multibuy hashes to the empty scope and therefore rivals other
+    unscoped ones — which is right: two store-wide "any N for P" offers are
+    tiers of one ladder in exactly the same way.
+    """
+    rule = promo.discount_rule
+    if rule is None or rule.kind != DiscountRuleKind.MULTIBUY:
+        return None
+    pids: set[str] = set()
+    cids: set[str] = set()
+    for t in (targets_by_promotion or {}).get(promo.id, []):
+        if t.role != "buy_set":
+            continue
+        if t.target_kind == TargetKind.PRODUCT:
+            pids.update(str(v) for v in t.target_value.get("product_ids", []))
+        elif t.target_kind == TargetKind.CATEGORY:
+            cids.update(str(v) for v in t.target_value.get("category_ids", []))
+    return "p:" + ",".join(sorted(pids)) + "|c:" + ",".join(sorted(cids))
+
+
+def _resolve_multibuy_tier_rivalry(
+    autos: list[Promotion],
+    targets_by_promotion: dict[UUID, list[PromotionTarget]] | None,
+    context: DiscountContext,
+) -> tuple[list[Promotion], list[tuple[UUID, str]]]:
+    """Keep at most one multibuy per catalogue scope.
+
+    ## Why this exists
+
+    Promotions v2 had no multi-tier multibuy, so the only way to build the
+    ordinary "2 caps for 968, 3 caps for 1,320" ladder was two promotions over
+    the same collection. Automatic promotions stack additively and two multibuy
+    rules do not share unit allocation, so a cart with three caps fired BOTH:
+    the 2-for took the top two units, the 3-for took all three, and the cart
+    was charged 1,188 against an advertised 1,320. Silent, on every such order,
+    and paid for by the merchant.
+
+    `DiscountRule.multibuy_tiers` is the real fix, and one rule cannot do this
+    to itself. This is the net under the promotions already live, which no
+    migration can safely rewrite: intent is not recoverable from two rows that
+    look like a ladder and might, in principle, have been meant to stack.
+
+    ## Why "same scope" is the right grouping
+
+    It is the key the storefront's Build-a-Bundle chooser already groups on to
+    draw two tiers as one card, so the engine and the page agree about what
+    counts as one offer. Multibuys over DIFFERENT scopes ("2 caps" and "2
+    tees") are genuinely separate offers and both still apply.
+
+    The survivor is whichever rule yields the largest discount for THIS cart —
+    the same "single best" rule the coupon branch uses, evaluated against the
+    full context. Losers are reported in `rejected` with a reason naming the
+    fix, so a merchant reading the promotion debug output learns their ladder
+    should be one promotion rather than wondering why a tier stopped applying.
+    """
+    by_scope: dict[str, list[Promotion]] = {}
+    passthrough: set[UUID] = set()
+    for promo in autos:
+        key = _multibuy_scope_key(promo, targets_by_promotion)
+        if key is None:
+            passthrough.add(promo.id)
+        else:
+            by_scope.setdefault(key, []).append(promo)
+
+    if all(len(group) == 1 for group in by_scope.values()):
+        return autos, []
+
+    winners: set[UUID] = set()
+    losers: list[tuple[UUID, str]] = []
+    for group in by_scope.values():
+        if len(group) == 1:
+            winners.add(group[0].id)
+            continue
+        best: Promotion | None = None
+        best_cents = -1
+        for promo in group:
+            assert promo.discount_rule is not None
+            buy_f, get_f = _build_line_filters(promo, targets_by_promotion)
+            result = promo.discount_rule.calculate(
+                context, buy_filter=buy_f, get_filter=get_f
+            )
+            if result.discount_cents > best_cents:
+                best = promo
+                best_cents = result.discount_cents
+        assert best is not None
+        winners.add(best.id)
+        losers.extend(
+            (
+                promo.id,
+                "another multibuy tier over the same catalogue saved more — "
+                "combine the tiers on one promotion (multibuy_tiers)",
+            )
+            for promo in group
+            if promo.id != best.id
+        )
+
+    # Preserve the caller's ordering: position decides who keeps their full
+    # amount when the subtotal-overflow trim unwinds from the back.
+    kept = [p for p in autos if p.id in winners or p.id in passthrough]
+    return kept, losers

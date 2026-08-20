@@ -864,7 +864,9 @@ async def reorder_customer_order(
                     )
                 )
                 continue
-            if not variant.is_in_stock:
+            # Ask the product, not the variant: the oversell flag lives on
+            # the product and a variant cannot see it.
+            if not product.variant_is_in_stock(variant):
                 skipped.append(
                     ReorderSkippedItem(
                         product_id=str(line.product_id),

@@ -35,6 +35,28 @@ class VisitorContextInput(BaseModel):
     locale: str = "ar"
 
 
+class EligibleLegOutput(BaseModel):
+    """One leg of a BUNDLE, with the catalogue a shopper may fill it from.
+
+    Positionally aligned with `DiscountRule.bundle_legs` — index `i` here is
+    leg `i` there, and is the leg the promotion's `role="leg:{i}"` targets
+    scope. A theme renders "1 tee + 1 cap" from `quantity`/`label` and offers a
+    picker per leg from the ids.
+
+    Both id lists empty = that leg accepts anything in the store. That is a
+    misconfiguration rather than a feature (see
+    `discount_calculator._build_leg_filters`), but it is reported honestly
+    instead of hidden, so the merchant can see it on their own bundle page.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    quantity: int
+    label: str | None = None
+    product_ids: list[str] = Field(default_factory=list)
+    category_ids: list[str] = Field(default_factory=list)
+
+
 class ResolvedPromotionOutput(BaseModel):
     """One promotion + the chosen display, ready to render."""
 
@@ -60,6 +82,11 @@ class ResolvedPromotionOutput(BaseModel):
     # already see by browsing the catalogue.
     eligible_product_ids: list[str] = Field(default_factory=list)
     eligible_category_ids: list[str] = Field(default_factory=list)
+    # BUNDLE only, and empty for every other kind. The flat lists above stay
+    # populated for a bundle too — as the UNION across legs — so a theme that
+    # only knows about `eligible_*` still counts the right cart lines and only
+    # a theme that wants per-leg pickers has to learn this field.
+    eligible_legs: list[EligibleLegOutput] = Field(default_factory=list)
 
 
 class ActivePromotionsOutput(BaseModel):

@@ -73,6 +73,7 @@ from src.infrastructure.external_services.manual_transfer import (
     DEFAULT_AUTO_APPROVE_THRESHOLD_CENTS,
     AutoApprovalConfig,
     default_amount_tolerance_bps,
+    default_auto_approve_enabled,
     get_merchant_manual_credentials,
 )
 from src.infrastructure.external_services.manual_transfer import (
@@ -262,6 +263,16 @@ async def submit_instapay_proof(
         .get(manual_settings_key(manual_method), {})
     )
     auto_config = AutoApprovalConfig(
+        # Absent on stores configured before this existed, so it falls
+        # back to the rail's default — off for Vodafone Cash, on for
+        # InstaPay. A store only auto-approves wallet proofs after the
+        # merchant deliberately switches it on.
+        enabled=bool(
+            payment_settings.get(
+                "auto_approve_enabled",
+                default_auto_approve_enabled(manual_method),
+            )
+        ),
         threshold_cents=int(
             payment_settings.get(
                 "auto_approve_threshold_cents",

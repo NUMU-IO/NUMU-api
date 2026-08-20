@@ -72,6 +72,7 @@ class _UncappedRule(DiscountRule):
         *,
         buy_filter: LineFilter | None = None,
         get_filter: LineFilter | None = None,
+        leg_filters: list[LineFilter | None] | None = None,
     ) -> DiscountResult:
         return DiscountResult(
             discount_cents=self.value_cents or 0, explanation="uncapped test rule"
