@@ -36,6 +36,9 @@ import httpx
 import sentry_sdk
 
 from src.core.logging import get_logger
+from src.core.services.tiktok_delivery_policy import (
+    classify_response as classify_tiktok_response,
+)
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -457,16 +460,24 @@ async def _send_event(
     # ── 6. Decide next move ──────────────────────────────────────────
     # Success requires BOTH a 2xx HTTP status AND a zero business code —
     # TikTok answers 200 with a non-zero ``code`` on logical errors.
-    if 200 <= response_status < 300 and response_code == 0:
+    #
+    # Which is precisely why the retry decision cannot be made from the HTTP
+    # status alone. This used to retry only on 429/5xx and call everything
+    # else permanent, so a TikTok-side server error — delivered as HTTP 200
+    # with a 5xxxx body code — was dropped without a single retry. See
+    # `tiktok_delivery_policy` for the code table and for why 40100 defaults
+    # to retryable.
+    kind = classify_tiktok_response(response_status, response_code, response_body)
+
+    if kind is None:
         return {"status": "sent", "request_id": request_id}
 
-    # Transient transport failures → let Celery retry.
-    if response_status == 429 or response_status >= 500:
+    if kind.retryable:
         try:
             raise task.retry(
                 countdown=_backoff_from_response(resp.headers, task.request.retries),
                 exc=httpx.HTTPStatusError(
-                    f"Events API returned {response_status}",
+                    f"Events API returned http={response_status} code={response_code}",
                     request=resp.request,
                     response=resp,
                 ),
@@ -474,9 +485,10 @@ async def _send_event(
         except Exception:
             raise
 
-    # HTTP 2xx-but-nonzero-code, or 4xx → permanent failure. Surface to
-    # Sentry so support can see it without digging through Celery logs.
-    status_class = "code_error" if 200 <= response_status < 300 else "4xx"
+    # Permanent. Surface to Sentry so support can see it without digging
+    # through Celery logs. `status_class` is now the failure KIND, so a dead
+    # token and a malformed payload no longer share one bucket.
+    status_class = kind.value
     sentry_sdk.set_tag("tiktok_capi.status_class", status_class)
     sentry_sdk.set_tag("tiktok_capi.http_status", response_status)
     sentry_sdk.set_tag("tiktok_capi.code", response_code)
