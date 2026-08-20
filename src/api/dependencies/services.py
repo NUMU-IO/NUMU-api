@@ -196,13 +196,16 @@ def get_ai_service():
 
 
 def get_proof_vision_service_for_store(store_settings: dict):
-    """Pick a vision OCR provider for an InstaPay proof submission.
+    """Pick a vision OCR provider for a manual-rail proof submission.
 
-    The provider is admin-assigned per-store via
-    ``store.settings.payment.instapay.ocr_provider``. Merchants
-    cannot self-select — the merchant credentials PUT silently drops
-    that field, see :func:`save_instapay_credentials`. Falls back to
-    a Noop provider (status="skipped") whenever:
+    The provider is admin-assigned per-store and mirrored onto every
+    manual rail's settings block (see
+    ``admin_set_instapay_ocr_provider``), so we read the first rail
+    that has one rather than hardcoding ``instapay`` — a store that
+    only ever configured Vodafone Cash still gets OCR. Merchants
+    cannot self-select: the merchant credentials PUT silently drops
+    that field. Falls back to a Noop provider (status="skipped")
+    whenever:
 
       * the store has no provider assigned, or
       * the assigned provider is unknown / typo, or
@@ -220,8 +223,14 @@ def get_proof_vision_service_for_store(store_settings: dict):
         NoopProofVisionService,
     )
 
-    instapay_settings = (store_settings or {}).get("payment", {}).get("instapay", {})
-    provider = (instapay_settings.get("ocr_provider") or "").strip().lower()
+    payment_settings = (store_settings or {}).get("payment", {})
+    provider = ""
+    for rail in ("instapay", "vodafone_cash"):
+        rail_settings = payment_settings.get(rail) or {}
+        candidate = (rail_settings.get("ocr_provider") or "").strip().lower()
+        if candidate:
+            provider = candidate
+            break
 
     impl: IProofVisionService
     if provider == "google_vision":

@@ -18,6 +18,7 @@ class PaymentProvider(StrEnum):
     KASHIER = "kashier"  # Kashier payment gateway
     FAWATERAK = "fawaterak"  # Fawaterak payment gateway
     INSTAPAY = "instapay"  # InstaPay (manual IPA + proof upload)
+    VODAFONE_CASH = "vodafone_cash"  # Wallet number + proof upload (manual)
     # Saudi (KSA) payment methods — Phase 3
     MOYASAR = "moyasar"  # Moyasar gateway (card, mada, Apple Pay) — implemented
     HYPERPAY = "hyperpay"  # HyperPay/COPYandPAY (card, mada, Apple Pay) — stub

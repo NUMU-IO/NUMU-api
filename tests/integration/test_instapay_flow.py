@@ -33,8 +33,8 @@ from src.application.use_cases.payments.submit_payment_proof import (
 )
 from src.core.entities.customer import Customer
 from src.core.entities.instapay import (
-    InstapayIntent,
-    InstapayIntentStatus,
+    ManualPaymentIntent,
+    ManualPaymentIntentStatus,
     PaymentProof,
     PaymentProofStatus,
 )
@@ -59,7 +59,7 @@ from src.infrastructure.repositories.customer_repository import (
     CustomerRepository,
 )
 from src.infrastructure.repositories.instapay_intent_repository import (
-    InstapayIntentRepository,
+    ManualPaymentIntentRepository,
 )
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.payment_proof_repository import (
@@ -140,15 +140,15 @@ def _make_intent(
     order: Order,
     *,
     expires_in_min: int = 30,
-    status: InstapayIntentStatus = InstapayIntentStatus.AWAITING_PAYMENT,
-) -> InstapayIntent:
-    return InstapayIntent(
+    status: ManualPaymentIntentStatus = ManualPaymentIntentStatus.AWAITING_PAYMENT,
+) -> ManualPaymentIntent:
+    return ManualPaymentIntent(
         id=uuid4(),
         tenant_id=order.tenant_id,
         store_id=order.store_id,
         order_id=order.id,
         reference_code=generate_reference_code(),
-        display_ipa="merchant@cib",
+        display_destination="merchant@cib",
         amount_cents=order.total,
         expires_at=datetime.now(UTC) + timedelta(minutes=expires_in_min),
         qr_payload="instapay://pay?...",
@@ -192,7 +192,7 @@ async def seeded(test_session: AsyncSession):
     store_repo = StoreRepository(test_session)
     customer_repo = CustomerRepository(test_session)
     order_repo = OrderRepository(test_session)
-    intent_repo = InstapayIntentRepository(test_session)
+    intent_repo = ManualPaymentIntentRepository(test_session)
 
     await store_repo.create(store)
     await customer_repo.create(customer)
@@ -230,7 +230,7 @@ async def test_auto_approve_flips_order_to_paid(_bus, seeded):
         uc = SubmitPaymentProofUseCase(
             session=seeded["session"],
             order_repo=OrderRepository(seeded["session"]),
-            intent_repo=InstapayIntentRepository(seeded["session"]),
+            intent_repo=ManualPaymentIntentRepository(seeded["session"]),
             proof_repo=PaymentProofRepository(seeded["session"]),
             storage_service=storage,
         )
@@ -256,10 +256,10 @@ async def test_auto_approve_flips_order_to_paid(_bus, seeded):
     assert reloaded.metadata.get("instapay", {}).get("auto_approved") is True
 
     # Intent flipped to PAID
-    intent_after = await InstapayIntentRepository(seeded["session"]).get_by_order_id(
-        seeded["order"].id
-    )
-    assert intent_after.status == InstapayIntentStatus.PAID
+    intent_after = await ManualPaymentIntentRepository(
+        seeded["session"]
+    ).get_by_order_id(seeded["order"].id)
+    assert intent_after.status == ManualPaymentIntentStatus.PAID
 
     # R2 upload happened exactly once; no delete (no race)
     assert storage.upload_file.await_count == 1
@@ -295,7 +295,7 @@ async def test_large_order_routes_to_merchant_review(seeded):
     uc = SubmitPaymentProofUseCase(
         session=seeded["session"],
         order_repo=order_repo,
-        intent_repo=InstapayIntentRepository(seeded["session"]),
+        intent_repo=ManualPaymentIntentRepository(seeded["session"]),
         proof_repo=PaymentProofRepository(seeded["session"]),
         storage_service=storage,
     )
@@ -356,7 +356,7 @@ async def test_duplicate_image_hash_409_deletes_r2_object(seeded):
     uc = SubmitPaymentProofUseCase(
         session=session,
         order_repo=OrderRepository(session),
-        intent_repo=InstapayIntentRepository(session),
+        intent_repo=ManualPaymentIntentRepository(session),
         proof_repo=proof_repo,
         storage_service=storage,
     )
@@ -399,7 +399,7 @@ async def test_idempotent_replay_returns_same_proof(seeded):
     uc = SubmitPaymentProofUseCase(
         session=session,
         order_repo=OrderRepository(session),
-        intent_repo=InstapayIntentRepository(session),
+        intent_repo=ManualPaymentIntentRepository(session),
         proof_repo=PaymentProofRepository(session),
         storage_service=storage,
     )
@@ -452,7 +452,7 @@ async def test_expiry_sweeper_handles_mixed_buckets(test_session: AsyncSession):
     store_repo = StoreRepository(test_session)
     customer_repo = CustomerRepository(test_session)
     order_repo = OrderRepository(test_session)
-    intent_repo = InstapayIntentRepository(test_session)
+    intent_repo = ManualPaymentIntentRepository(test_session)
 
     # Store + customer shared by both orders
     store = _make_store()
@@ -463,34 +463,34 @@ async def test_expiry_sweeper_handles_mixed_buckets(test_session: AsyncSession):
     # Order 1 — expired, never uploaded
     order1 = _make_order(store, customer)
     await order_repo.create(order1)
-    intent1 = InstapayIntent(
+    intent1 = ManualPaymentIntent(
         id=uuid4(),
         tenant_id=store.tenant_id,
         store_id=store.id,
         order_id=order1.id,
         reference_code=generate_reference_code(),
-        display_ipa="merchant@cib",
+        display_destination="merchant@cib",
         amount_cents=order1.total,
         expires_at=datetime.now(UTC) - timedelta(hours=1),
         qr_payload="instapay://",
-        status=InstapayIntentStatus.AWAITING_PAYMENT,
+        status=ManualPaymentIntentStatus.AWAITING_PAYMENT,
     )
     await intent_repo.create(intent1)
 
     # Order 2 — proof uploaded, merchant never reviewed, past grace
     order2 = _make_order(store, customer)
     await order_repo.create(order2)
-    intent2 = InstapayIntent(
+    intent2 = ManualPaymentIntent(
         id=uuid4(),
         tenant_id=store.tenant_id,
         store_id=store.id,
         order_id=order2.id,
         reference_code=generate_reference_code(),
-        display_ipa="merchant@cib",
+        display_destination="merchant@cib",
         amount_cents=order2.total,
         expires_at=datetime.now(UTC) - timedelta(hours=72),
         qr_payload="instapay://",
-        status=InstapayIntentStatus.PROOF_RECEIVED,
+        status=ManualPaymentIntentStatus.PROOF_RECEIVED,
     )
     await intent_repo.create(intent2)
     await test_session.commit()
@@ -540,8 +540,8 @@ async def test_expiry_sweeper_handles_mixed_buckets(test_session: AsyncSession):
     # Intents transitioned to EXPIRED
     intent_after_1 = await intent_repo.get_by_order_id(order1.id)
     intent_after_2 = await intent_repo.get_by_order_id(order2.id)
-    assert intent_after_1.status == InstapayIntentStatus.EXPIRED
-    assert intent_after_2.status == InstapayIntentStatus.EXPIRED
+    assert intent_after_1.status == ManualPaymentIntentStatus.EXPIRED
+    assert intent_after_2.status == ManualPaymentIntentStatus.EXPIRED
 
 
 # ---------------------------------------------------------------------------

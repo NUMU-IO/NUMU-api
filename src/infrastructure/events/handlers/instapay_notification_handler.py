@@ -1,4 +1,4 @@
-"""Customer notification handlers for InstaPay proof lifecycle events.
+"""Customer notification handlers for manual-rail proof lifecycle events.
 
 Four handlers — two per event, email + WhatsApp — so a failure on one
 channel doesn't swallow the other. Each opens its own DB session with
@@ -9,12 +9,14 @@ so a PDF / templating failure doesn't swallow the payment-received
 confirmation.
 
 The retry URL passed to the rejection email points at the storefront's
-InstaPay page for that order, computed from the store's own custom
-domain or subdomain.
+resume page for that order's rail (``/instapay/<id>`` or
+``/vodafone_cash/<id>``), computed from the store's own custom domain or
+subdomain.
 """
 
 from __future__ import annotations
 
+from src.core.entities.instapay import ManualPaymentMethod
 from src.core.events.payment_events import (
     PaymentProofApprovedEvent,
     PaymentProofRejectedEvent,
@@ -22,6 +24,7 @@ from src.core.events.payment_events import (
 from src.core.interfaces.services.messaging_service import MessageRecipient
 from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
+from src.infrastructure.external_services.manual_transfer import resume_url
 from src.infrastructure.external_services.resend.email_service import (
     ResendEmailService,
 )
@@ -47,6 +50,33 @@ def _storefront_base_url(store) -> str:
     if getattr(store, "subdomain", None):
         return f"https://{store.subdomain}.numueg.app"
     return "https://numueg.app"
+
+
+def _event_method(event) -> ManualPaymentMethod:
+    """Which manual rail this event's order was paid on.
+
+    Falls back to InstaPay for events replayed from before the second
+    rail existed, which carry no ``payment_method``.
+    """
+    raw = getattr(event, "payment_method", None)
+    try:
+        return ManualPaymentMethod(raw)
+    except ValueError:
+        return ManualPaymentMethod.INSTAPAY
+
+
+def _manual_resume_url(event, store) -> str:
+    """Link back to the storefront page where a proof can be re-uploaded.
+
+    Carries the intent reference as ``?ref=`` — it is what authorizes
+    the page for a customer who isn't signed in, which is most of them.
+    """
+    return resume_url(
+        _event_method(event),
+        base_url=_storefront_base_url(store),
+        order_id=event.order_id,
+        reference_code=getattr(event, "reference_code", None),
+    )
 
 
 async def _load_customer_and_store(tenant_id, store_id, customer_id):
@@ -107,6 +137,7 @@ async def handle_payment_proof_approved(event: PaymentProofApprovedEvent) -> Non
             language=language,
             store_id=event.store_id,
             tenant_id=event.tenant_id,
+            method=_event_method(event).value,
         )
         log.info("instapay_approve_email_sent")
     except Exception:
@@ -141,7 +172,7 @@ async def handle_payment_proof_rejected(event: PaymentProofRejectedEvent) -> Non
 
     retry_url = event.retry_url
     if retry_url is None and store is not None and event.can_retry:
-        retry_url = f"{_storefront_base_url(store)}/instapay/{event.order_id}"
+        retry_url = _manual_resume_url(event, store)
 
     try:
         svc = ResendEmailService()
@@ -156,6 +187,7 @@ async def handle_payment_proof_rejected(event: PaymentProofRejectedEvent) -> Non
             language=language,
             store_id=event.store_id,
             tenant_id=event.tenant_id,
+            method=_event_method(event).value,
         )
         log.info("instapay_reject_email_sent", can_retry=event.can_retry)
     except Exception:
@@ -269,10 +301,7 @@ async def handle_whatsapp_payment_proof_rejected(
     is_ar = language == "ar"
     retry_line = ""
     if event.can_retry and store is not None:
-        retry_url = (
-            event.retry_url
-            or f"{_storefront_base_url(store)}/instapay/{event.order_id}"
-        )
+        retry_url = event.retry_url or _manual_resume_url(event, store)
         retry_line = (
             f"\nارفع إثبات جديد: {retry_url}"
             if is_ar

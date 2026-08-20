@@ -1,15 +1,28 @@
-"""Domain entities for the InstaPay manual-verification flow.
+"""Domain entities for the manual-verification ("push payment") flow.
 
-InstaPay (Egypt's instant-payment network) has no merchant-facing API today,
-so orders sit in PENDING while the customer pushes funds to the merchant's
-IPA out-of-band and then uploads a screenshot + transaction reference. Two
-objects back that workflow:
+Some Egyptian rails have no merchant-facing API, so orders sit in PENDING
+while the customer pushes funds to the merchant out-of-band and then
+uploads a screenshot + transaction reference. Two rails use this today
+(see :class:`ManualPaymentMethod`):
 
-  * ``InstapayIntent`` — one per order. Stores the ref code, the snapshot
-    of the merchant IPA, expiry deadline, and the pre-rendered QR payload.
+  * **InstaPay** — funds land on the merchant's IPA (``merchant@cib``).
+  * **Vodafone Cash** — funds land on the merchant's wallet number
+    (``010…``). Same shape, different destination string, no QR (the
+    customer dials ``*9#`` or uses the Ana Vodafone app).
+
+Two objects back the workflow:
+
+  * ``ManualPaymentIntent`` — one per order. Stores the ref code, the
+    snapshot of the merchant's destination, expiry deadline, and — for
+    InstaPay only — the pre-rendered QR payload.
   * ``PaymentProof`` — one-or-many per order (re-upload allowed after
     reject). Stores the uploaded screenshot key, its SHA-256 for dedup,
     the customer-supplied transaction reference, and the review decision.
+
+``InstapayIntent`` / ``InstapayIntentStatus`` remain as aliases at the
+bottom of this module: the entity predates the second rail, and keeping
+the old names bound to the same objects means there is exactly ONE code
+path rather than a fork per method.
 
 These are framework-agnostic dataclasses; persistence lives in
 ``infrastructure/database/models/tenant/{instapay_intent,payment_proof}.py``.
@@ -23,8 +36,38 @@ from enum import StrEnum
 from uuid import UUID, uuid4
 
 
-class InstapayIntentStatus(StrEnum):
-    """Lifecycle of a single-order InstaPay intent."""
+class ManualPaymentMethod(StrEnum):
+    """Out-of-band rails NUMU notarizes rather than integrates.
+
+    Stored as a plain ``varchar`` on ``instapay_intents.method`` (not a
+    PG enum) so adding the third rail — bank transfer is the obvious
+    next one — is an app-level change, not an ``ALTER TYPE`` that has
+    to be coordinated with a deploy.
+    """
+
+    INSTAPAY = "instapay"
+    VODAFONE_CASH = "vodafone_cash"
+
+    @property
+    def reference_prefix(self) -> str:
+        """Short prefix for this rail's per-order reference code.
+
+        Distinct per method so a merchant reading a transfer note can
+        tell at a glance which rail it belongs to.
+        """
+        return _REFERENCE_PREFIXES[self]
+
+
+_REFERENCE_PREFIXES: dict[ManualPaymentMethod, str] = {
+    # "NU" predates the second rail and is baked into live reference
+    # codes + merchant muscle memory — do not repurpose it.
+    ManualPaymentMethod.INSTAPAY: "NU",
+    ManualPaymentMethod.VODAFONE_CASH: "VF",
+}
+
+
+class ManualPaymentIntentStatus(StrEnum):
+    """Lifecycle of a single-order manual-payment intent."""
 
     AWAITING_PAYMENT = "awaiting_payment"
     PROOF_RECEIVED = "proof_received"
@@ -44,19 +87,28 @@ class PaymentProofStatus(StrEnum):
 
 
 @dataclass
-class InstapayIntent:
-    """Per-order payload displayed to the customer at checkout."""
+class ManualPaymentIntent:
+    """Per-order payload displayed to the customer at checkout.
+
+    ``display_destination`` is the rail-specific string the customer
+    sends money to — an IPA for InstaPay, a wallet number for Vodafone
+    Cash. It is a *snapshot*: if the merchant later edits their wallet
+    number, in-flight intents keep pointing at the destination the
+    customer was actually shown.
+    """
 
     id: UUID
     tenant_id: UUID
     store_id: UUID
     order_id: UUID
     reference_code: str
-    display_ipa: str
+    display_destination: str
     amount_cents: int
     expires_at: datetime
+    # Empty string for rails with no scannable payload (Vodafone Cash).
     qr_payload: str
-    status: InstapayIntentStatus = InstapayIntentStatus.AWAITING_PAYMENT
+    status: ManualPaymentIntentStatus = ManualPaymentIntentStatus.AWAITING_PAYMENT
+    method: ManualPaymentMethod = ManualPaymentMethod.INSTAPAY
     display_phone: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -68,39 +120,46 @@ class InstapayIntent:
         store_id: UUID,
         order_id: UUID,
         reference_code: str,
-        display_ipa: str,
+        display_destination: str,
         amount_cents: int,
         expires_at: datetime,
         qr_payload: str,
+        method: ManualPaymentMethod = ManualPaymentMethod.INSTAPAY,
         display_phone: str | None = None,
-    ) -> InstapayIntent:
+    ) -> ManualPaymentIntent:
         return cls(
             id=uuid4(),
             tenant_id=tenant_id,
             store_id=store_id,
             order_id=order_id,
             reference_code=reference_code,
-            display_ipa=display_ipa,
+            display_destination=display_destination,
             amount_cents=amount_cents,
             expires_at=expires_at,
             qr_payload=qr_payload,
+            method=method,
             display_phone=display_phone,
         )
+
+    @property
+    def display_ipa(self) -> str:
+        """Back-compat read alias for :attr:`display_destination`."""
+        return self.display_destination
 
     def is_expired(self, *, now: datetime | None = None) -> bool:
         return (now or datetime.now(UTC)) >= self.expires_at
 
     def mark_proof_received(self) -> None:
-        self.status = InstapayIntentStatus.PROOF_RECEIVED
+        self.status = ManualPaymentIntentStatus.PROOF_RECEIVED
 
     def mark_paid(self) -> None:
-        self.status = InstapayIntentStatus.PAID
+        self.status = ManualPaymentIntentStatus.PAID
 
     def mark_expired(self) -> None:
-        self.status = InstapayIntentStatus.EXPIRED
+        self.status = ManualPaymentIntentStatus.EXPIRED
 
     def mark_cancelled(self) -> None:
-        self.status = InstapayIntentStatus.CANCELLED
+        self.status = ManualPaymentIntentStatus.CANCELLED
 
 
 @dataclass
@@ -217,3 +276,12 @@ class PaymentProof:
     @property
     def can_retry(self) -> bool:
         return self.status == PaymentProofStatus.REJECTED
+
+
+# ── Back-compat aliases ──────────────────────────────────────────────
+#
+# The entity was born InstaPay-only. These names are bound to the very
+# same objects (not subclasses, not copies), so old imports keep working
+# and there is still exactly one implementation to maintain.
+InstapayIntent = ManualPaymentIntent
+InstapayIntentStatus = ManualPaymentIntentStatus

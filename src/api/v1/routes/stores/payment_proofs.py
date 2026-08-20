@@ -45,8 +45,11 @@ from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.payment_proof import (
     PaymentProofModel,
 )
+from src.infrastructure.external_services.manual_transfer import (
+    MANUAL_TRANSFER_METHODS,
+)
 from src.infrastructure.repositories.instapay_intent_repository import (
-    InstapayIntentRepository,
+    ManualPaymentIntentRepository,
 )
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.payment_proof_repository import (
@@ -226,7 +229,7 @@ async def approve_payment_proof(
     storage_service: Annotated[IStorageService, Depends(get_storage_service)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
 ) -> SuccessResponse[PaymentProofResponse]:
-    intent_repo = InstapayIntentRepository(db)
+    intent_repo = ManualPaymentIntentRepository(db)
     proof_repo = PaymentProofRepository(db)
 
     # Verify the proof actually belongs to this store (defence in depth —
@@ -266,7 +269,7 @@ async def reject_payment_proof(
     storage_service: Annotated[IStorageService, Depends(get_storage_service)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
 ) -> SuccessResponse[PaymentProofResponse]:
-    intent_repo = InstapayIntentRepository(db)
+    intent_repo = ManualPaymentIntentRepository(db)
     proof_repo = PaymentProofRepository(db)
 
     proof = await proof_repo.get_by_id(proof_id)
@@ -436,7 +439,7 @@ class PendingVerificationPage(BaseModel):
     "/orders/pending-instapay-review",
     operation_id="merchant_list_pending_instapay_orders",
     response_model=SuccessResponse[PendingVerificationPage],
-    summary="List InstaPay orders awaiting merchant review",
+    summary="List manual-payment orders awaiting merchant review",
 )
 async def list_pending_instapay_orders(
     store: Annotated[Store, Depends(verify_store_ownership)],
@@ -444,7 +447,10 @@ async def list_pending_instapay_orders(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ) -> SuccessResponse[PendingVerificationPage]:
-    """List InstaPay orders whose most recent proof is awaiting merchant review.
+    """List manual-rail orders whose latest proof is awaiting merchant review.
+
+    Covers InstaPay and Vodafone Cash. Path keeps its historical name so
+    the hub's existing call site is untouched.
 
     Powers the merchant hub's "Pending verification" filter chip. We
     self-join payment_proofs to find only the *latest* proof per order
@@ -476,7 +482,11 @@ async def list_pending_instapay_orders(
         )
         .where(
             OrderModel.store_id == store.id,
-            OrderModel.payment_method == "instapay",
+            # Both manual rails land here — a Vodafone Cash order whose
+            # proof is awaiting review is the same merchant task as an
+            # InstaPay one, and filtering on "instapay" alone would have
+            # made those orders invisible in the hub.
+            OrderModel.payment_method.in_(sorted(MANUAL_TRANSFER_METHODS)),
             PaymentProofModel.status == PaymentProofStatus.AWAITING_REVIEW,
         )
     )

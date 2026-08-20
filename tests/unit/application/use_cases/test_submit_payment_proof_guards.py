@@ -25,8 +25,8 @@ from src.application.use_cases.payments.submit_payment_proof import (
     SubmitPaymentProofUseCase,
 )
 from src.core.entities.instapay import (
-    InstapayIntent,
-    InstapayIntentStatus,
+    ManualPaymentIntent,
+    ManualPaymentIntentStatus,
 )
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.infrastructure.external_services.instapay.auto_approval import (
@@ -67,19 +67,19 @@ def _order(
 
 def _intent(
     *, store_id: UUID, order_id: UUID, expires_in_min: int = 30
-) -> InstapayIntent:
+) -> ManualPaymentIntent:
     now = datetime.now(UTC)
-    return InstapayIntent(
+    return ManualPaymentIntent(
         id=uuid4(),
         tenant_id=uuid4(),
         store_id=store_id,
         order_id=order_id,
         reference_code="NU-TESTXX",
-        display_ipa="merchant@cib",
+        display_destination="merchant@cib",
         amount_cents=10_000,
         expires_at=now + timedelta(minutes=expires_in_min),
         qr_payload="instapay://pay?...",
-        status=InstapayIntentStatus.AWAITING_PAYMENT,
+        status=ManualPaymentIntentStatus.AWAITING_PAYMENT,
     )
 
 

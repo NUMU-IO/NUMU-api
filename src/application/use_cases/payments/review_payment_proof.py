@@ -19,7 +19,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.instapay import (
-    InstapayIntent,
+    ManualPaymentIntent,
     PaymentProof,
     PaymentProofStatus,
 )
@@ -37,8 +37,11 @@ from src.infrastructure.external_services.instapay.metrics import (
     proof_review_latency_seconds,
     proof_submissions_total,
 )
+from src.infrastructure.external_services.manual_transfer import (
+    human_name as manual_human_name,
+)
 from src.infrastructure.repositories.instapay_intent_repository import (
-    InstapayIntentRepository,
+    ManualPaymentIntentRepository,
 )
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.payment_proof_repository import (
@@ -57,7 +60,7 @@ class ReviewDecision(StrEnum):
 class ReviewPaymentProofResult:
     proof: PaymentProof
     order: Order
-    intent: InstapayIntent
+    intent: ManualPaymentIntent
 
 
 class ReviewPaymentProofUseCase:
@@ -66,7 +69,7 @@ class ReviewPaymentProofUseCase:
         *,
         session: AsyncSession,
         order_repo: OrderRepository,
-        intent_repo: InstapayIntentRepository,
+        intent_repo: ManualPaymentIntentRepository,
         proof_repo: PaymentProofRepository,
     ) -> None:
         self.session = session
@@ -126,15 +129,16 @@ class ReviewPaymentProofUseCase:
             intent.mark_paid()
             await self.intent_repo.update(intent)
 
+            _method = intent.method.value
             order.mark_as_paid(
                 payment_id=intent.reference_code,
-                payment_method="instapay",
+                payment_method=_method,
             )
-            instapay_meta = dict(order.metadata.get("instapay") or {})
-            instapay_meta["reference_code"] = intent.reference_code
-            instapay_meta["reviewed_by"] = str(reviewer_user_id)
-            instapay_meta["proof_id"] = str(proof.id)
-            order.metadata["instapay"] = instapay_meta
+            manual_meta = dict(order.metadata.get(_method) or {})
+            manual_meta["reference_code"] = intent.reference_code
+            manual_meta["reviewed_by"] = str(reviewer_user_id)
+            manual_meta["proof_id"] = str(proof.id)
+            order.metadata[_method] = manual_meta
             await self.order_repo.update(order)
 
             self.session.add(
@@ -143,8 +147,11 @@ class ReviewPaymentProofUseCase:
                     store_id=order.store_id,
                     order_id=order.id,
                     channel="online",
-                    gateway="instapay",
-                    display_name=f"InstaPay {intent.display_ipa}",
+                    gateway=_method,
+                    display_name=(
+                        f"{manual_human_name(intent.method)} "
+                        f"{intent.display_destination}"
+                    ),
                     amount_cents=order.total,
                     currency=order.currency,
                     status="success",
@@ -154,9 +161,10 @@ class ReviewPaymentProofUseCase:
             )
             await self.session.flush()
 
-            # Funnel: order_completed — InstaPay has no gateway webhook to
-            # emit this, and the customer may never revisit the thank-you
-            # page after uploading a proof. Fail-open inside the helper.
+            # Funnel: order_completed — manual rails have no gateway
+            # webhook to emit this, and the customer may never revisit
+            # the thank-you page after uploading a proof. Fail-open
+            # inside the helper.
             from src.application.services.funnel_emit_service import (
                 emit_order_completed,
             )
@@ -167,7 +175,7 @@ class ReviewPaymentProofUseCase:
             await emit_order_completed(
                 order,
                 FunnelEventRepository(self.session),
-                payment_method="instapay",
+                payment_method=_method,
             )
 
             try:
@@ -181,7 +189,7 @@ class ReviewPaymentProofUseCase:
                         store_id=order.store_id,
                         customer_id=order.customer_id,
                         payment_id=intent.reference_code,
-                        payment_method="instapay",
+                        payment_method=_method,
                         total=float(order.total),
                     )
                 )
@@ -194,6 +202,7 @@ class ReviewPaymentProofUseCase:
                         store_id=order.store_id,
                         customer_id=order.customer_id,
                         reference_code=intent.reference_code,
+                        payment_method=intent.method.value,
                         amount_cents=order.total,
                         currency=order.currency,
                         auto_approved=False,
@@ -242,6 +251,7 @@ class ReviewPaymentProofUseCase:
                         store_id=order.store_id,
                         customer_id=order.customer_id,
                         reference_code=intent.reference_code,
+                        payment_method=intent.method.value,
                         rejection_reason=rejection_reason.strip(),
                         can_retry=can_retry,
                     )

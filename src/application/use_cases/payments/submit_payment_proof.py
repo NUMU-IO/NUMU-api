@@ -30,7 +30,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.instapay import (
-    InstapayIntent,
+    ManualPaymentIntent,
+    ManualPaymentMethod,
     PaymentProof,
     PaymentProofStatus,
 )
@@ -58,13 +59,19 @@ from src.infrastructure.external_services.instapay.metrics import (
     proof_review_latency_seconds,
     proof_submissions_total,
 )
+from src.infrastructure.external_services.manual_transfer import (
+    MANUAL_TRANSFER_METHODS,
+)
+from src.infrastructure.external_services.manual_transfer import (
+    human_name as manual_human_name,
+)
 from src.infrastructure.external_services.vision import (
     IProofVisionService,
     NoopProofVisionService,
     ProofVisionResult,
 )
 from src.infrastructure.repositories.instapay_intent_repository import (
-    InstapayIntentRepository,
+    ManualPaymentIntentRepository,
 )
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.payment_proof_repository import (
@@ -103,7 +110,7 @@ class SubmitPaymentProofResult:
 
     proof: PaymentProof
     order: Order
-    intent: InstapayIntent
+    intent: ManualPaymentIntent
     decision: AutoApprovalDecision
     signed_image_url: str
     created: bool  # False when served from idempotency
@@ -115,7 +122,7 @@ class SubmitPaymentProofUseCase:
         *,
         session: AsyncSession,
         order_repo: OrderRepository,
-        intent_repo: InstapayIntentRepository,
+        intent_repo: ManualPaymentIntentRepository,
         proof_repo: PaymentProofRepository,
         storage_service: IStorageService,
     ) -> None:
@@ -237,30 +244,38 @@ class SubmitPaymentProofUseCase:
                 detail="Order is cancelled. Please contact the merchant.",
             )
         # (#8) Defensive: refuse a proof for an order that wasn't placed
-        # as InstaPay. Two valid paths reach this code with a real proof:
-        #   1. Full InstaPay checkout — ``payment_method == "instapay"``.
-        #   2. COD-with-deposit where the customer chose InstaPay as the
-        #      deposit gateway — ``payment_method == "cod"`` AND
-        #      ``deposit_gateway == "instapay"``. The order is COD; the
-        #      deposit (a precursor) is what the proof attests to.
+        # on a manual rail. Two valid paths reach this code with a real
+        # proof:
+        #   1. Full manual checkout — ``payment_method`` is one of
+        #      ``MANUAL_TRANSFER_METHODS`` (instapay / vodafone_cash).
+        #   2. COD-with-deposit where the customer paid the deposit on a
+        #      manual rail — ``payment_method == "cod"`` AND
+        #      ``deposit_gateway`` is a manual rail. The order is COD;
+        #      the deposit (a precursor) is what the proof attests to.
+        #      Only InstaPay is an allowed deposit gateway today — see
+        #      ``DepositGateway`` in schemas/tenant/settings.py — but
+        #      testing the set keeps the two in step if that changes.
         # Any other combination is genuinely off-flow and we reject. The
-        # matching ``InstapayIntent`` check below is the actual safety
-        # net; this method-level check just yields a clearer error.
-        is_full_instapay = order.payment_method == "instapay"
-        is_instapay_deposit = (
-            order.payment_method == "cod" and order.deposit_gateway == "instapay"
+        # matching intent check below is the actual safety net; this
+        # method-level check just yields a clearer error.
+        is_full_manual = order.payment_method in MANUAL_TRANSFER_METHODS
+        is_manual_deposit = (
+            order.payment_method == "cod"
+            and order.deposit_gateway in MANUAL_TRANSFER_METHODS
         )
-        if order.payment_method and not (is_full_instapay or is_instapay_deposit):
+        if order.payment_method and not (is_full_manual or is_manual_deposit):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="This order was not placed with InstaPay.",
+                detail=(
+                    "This order was not placed with a transfer-based payment method."
+                ),
             )
 
         intent = await self.intent_repo.get_by_order_id(order_id)
         if intent is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No InstaPay intent exists for this order.",
+                detail="No manual payment intent exists for this order.",
             )
         # (#4) Reject expired intents *before* we spend R2 bandwidth
         # on the upload. The Celery sweeper will transition the intent
@@ -326,7 +341,19 @@ class SubmitPaymentProofUseCase:
         # (test paths) we use a Noop directly so the rest of the
         # method stays uniform.
         vision: IProofVisionService = vision_service or NoopProofVisionService()
-        ocr_result: ProofVisionResult = await vision.extract(image_bytes)
+        # Tell the parsers what the recipient identifier looks like on
+        # this rail: an IPA on InstaPay, an 01X wallet number on
+        # Vodafone Cash. Without this the recipient-match rule would
+        # scan a Vodafone slip for a "name@bank" string and always
+        # come up empty.
+        ocr_result: ProofVisionResult = await vision.extract(
+            image_bytes,
+            destination_kind=(
+                "wallet_number"
+                if intent.method is ManualPaymentMethod.VODAFONE_CASH
+                else "ipa"
+            ),
+        )
 
         # (#1) Serialize the cap evaluation + proof write per store so
         # two concurrent uploads can't both see "count=9, cap=10" and
@@ -474,19 +501,19 @@ class SubmitPaymentProofUseCase:
             intent.mark_paid()
             await self.intent_repo.update(intent)
 
+            _method = intent.method.value
             order.mark_as_paid(
                 payment_id=intent.reference_code,
-                payment_method="instapay",
+                payment_method=_method,
             )
-            # Keep all InstaPay-specific metadata under a single sub-dict
-            # so future additions don't scatter keys across the Order
-            # blob and so a later cleanup (or field removal) is a single
-            # dict delete.
-            instapay_meta = dict(order.metadata.get("instapay") or {})
-            instapay_meta["reference_code"] = intent.reference_code
-            instapay_meta["auto_approved"] = True
-            instapay_meta["proof_id"] = str(proof.id)
-            order.metadata["instapay"] = instapay_meta
+            # Keep each rail's metadata under its own sub-dict (keyed by
+            # method) so future additions don't scatter keys across the
+            # Order blob and so a later cleanup is a single dict delete.
+            manual_meta = dict(order.metadata.get(_method) or {})
+            manual_meta["reference_code"] = intent.reference_code
+            manual_meta["auto_approved"] = True
+            manual_meta["proof_id"] = str(proof.id)
+            order.metadata[_method] = manual_meta
             await self.order_repo.update(order)
 
             self.session.add(
@@ -495,8 +522,11 @@ class SubmitPaymentProofUseCase:
                     store_id=order.store_id,
                     order_id=order.id,
                     channel="online",
-                    gateway="instapay",
-                    display_name=f"InstaPay {intent.display_ipa}",
+                    gateway=_method,
+                    display_name=(
+                        f"{manual_human_name(intent.method)} "
+                        f"{intent.display_destination}"
+                    ),
                     amount_cents=order.total,
                     currency=order.currency,
                     status="success",
@@ -507,9 +537,9 @@ class SubmitPaymentProofUseCase:
             await self.session.flush()
 
             # Funnel: order_completed — same rationale as the manual-review
-            # path (ReviewPaymentProofUseCase): InstaPay has no gateway
-            # webhook, so the OCR auto-approve must emit the funnel event
-            # itself. Fail-open inside the helper.
+            # path (ReviewPaymentProofUseCase): manual rails have no
+            # gateway webhook, so the OCR auto-approve must emit the
+            # funnel event itself. Fail-open inside the helper.
             from src.application.services.funnel_emit_service import (
                 emit_order_completed,
             )
@@ -520,7 +550,7 @@ class SubmitPaymentProofUseCase:
             await emit_order_completed(
                 order,
                 FunnelEventRepository(self.session),
-                payment_method="instapay",
+                payment_method=_method,
             )
 
             try:
@@ -534,7 +564,7 @@ class SubmitPaymentProofUseCase:
                         store_id=order.store_id,
                         customer_id=order.customer_id,
                         payment_id=intent.reference_code,
-                        payment_method="instapay",
+                        payment_method=_method,
                         total=float(order.total),
                     )
                 )
@@ -550,6 +580,7 @@ class SubmitPaymentProofUseCase:
                         store_id=order.store_id,
                         customer_id=order.customer_id,
                         reference_code=intent.reference_code,
+                        payment_method=intent.method.value,
                         amount_cents=order.total,
                         currency=order.currency,
                         auto_approved=True,

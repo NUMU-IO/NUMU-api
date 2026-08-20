@@ -126,6 +126,9 @@ class ProofVisionResult:
     provider: str
     processed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     extracted_amount_cents: int | None = None
+    # The recipient identifier read off the receipt: an IPA on
+    # InstaPay, a wallet number on Vodafone Cash. Name is
+    # historical and matches the persisted column.
     extracted_ipa: str | None = None
     raw_text: str = ""
     # Phase C extras — populated by the same parsers as
@@ -310,6 +313,65 @@ def parse_ipa(raw: str) -> str | None:
     return None
 
 
+# Egyptian mobile-wallet numbers as they appear on a Vodafone Cash
+# confirmation: 11 digits starting 01, often spaced or partially masked.
+# We accept all four Egyptian prefixes when *reading* a receipt (a
+# customer may have sent from an Orange/Etisalat/WE wallet to a Vodafone
+# one, and both numbers appear on the slip); the recipient-match rule is
+# what decides whether the number found is the merchant's.
+_WALLET_RE = re.compile(r"(?<!\d)(01[0125])[\s.-]?(\d{4})[\s.-]?(\d{4})(?!\d)")
+
+
+def parse_wallet_number(raw: str) -> str | None:
+    """Extract the recipient wallet number from OCR text.
+
+    Same From/To anchoring as :func:`parse_ipa`, and for the same
+    reason: a Vodafone Cash slip shows the sender's number too, and
+    returning it would false-positive the recipient-match rule on
+    every single transfer.
+
+    Arabic-Indic digits are folded first — the Ana Vodafone app renders
+    them on an Arabic UI, which is most Egyptian merchants' default.
+    Returns a normalized ``01XXXXXXXXX`` (separators stripped) so the
+    comparison against the merchant's stored number is a plain string
+    equality.
+    """
+    if not raw:
+        return None
+
+    text = raw.translate(_DIGIT_FOLD)
+    from_anchors = [m.start() for m in _FROM_RE.finditer(text)]
+    to_anchors = [m.start() for m in _TO_RE.finditer(text)]
+
+    for match in _WALLET_RE.finditer(text):
+        number = "".join(match.groups())
+        pos = match.start()
+        last_from = max((p for p in from_anchors if p < pos), default=-1)
+        last_to = max((p for p in to_anchors if p < pos), default=-1)
+
+        # Closest preceding anchor is "To" -> recipient, take it. No
+        # anchors at all -> nothing to classify on, treat as recipient
+        # (mirrors parse_ipa). Otherwise keep scanning.
+        if last_to > last_from:
+            return number
+        if last_from < 0 and last_to < 0:
+            return number
+
+    return None
+
+
+def parse_destination(raw: str, kind: str = "ipa") -> str | None:
+    """Dispatch to the parser for the rail's destination kind.
+
+    ``kind`` is ``"ipa"`` (InstaPay) or ``"wallet_number"`` (Vodafone
+    Cash) — the value the checkout/status payloads already carry as
+    ``destination_kind``.
+    """
+    if kind == "wallet_number":
+        return parse_wallet_number(raw)
+    return parse_ipa(raw)
+
+
 _NOTE_RE = re.compile(
     r"(?:^|\n)\s*(?:Note|Reason|Memo|ملاحظة|السبب)\b[\s:.\-]*(.+?)(?=\n\s*"
     r"(?:Reference|Date|From|To|Note|Account|POWERED|Status|Amount|Transfer)"
@@ -431,8 +493,15 @@ class IProofVisionService(ABC):
         image_bytes: bytes,
         *,
         hint_currency: str = "EGP",
+        destination_kind: str = "ipa",
     ) -> ProofVisionResult:
-        """Run OCR on the sanitized image; never raise for provider faults."""
+        """Run OCR on the sanitized image; never raise for provider faults.
+
+        ``destination_kind`` tells the parsers what the recipient
+        identifier looks like on this rail — an IPA on InstaPay, a
+        wallet number on Vodafone Cash. Defaults to ``"ipa"`` so
+        existing call sites are unchanged.
+        """
 
 
 # ── Noop ─────────────────────────────────────────────────────────────
@@ -452,6 +521,7 @@ class NoopProofVisionService(IProofVisionService):
         image_bytes: bytes,
         *,
         hint_currency: str = "EGP",
+        destination_kind: str = "ipa",
     ) -> ProofVisionResult:
         return ProofVisionResult.skipped(provider=self.PROVIDER_NAME)
 
@@ -489,6 +559,7 @@ class GoogleVisionProofService(IProofVisionService):
         image_bytes: bytes,
         *,
         hint_currency: str = "EGP",
+        destination_kind: str = "ipa",
     ) -> ProofVisionResult:
         body = {
             "requests": [
@@ -554,7 +625,7 @@ class GoogleVisionProofService(IProofVisionService):
             status="ok",
             provider=self.PROVIDER_NAME,
             extracted_amount_cents=parse_amount_egp(text),
-            extracted_ipa=parse_ipa(text),
+            extracted_ipa=parse_destination(text, destination_kind),
             extracted_note=parse_note(text),
             extracted_transaction_ref=parse_transaction_ref(text),
             extracted_recipient_name=parse_recipient_name(text),
@@ -604,6 +675,7 @@ class _HFProofServiceBase(IProofVisionService):
         image_bytes: bytes,
         *,
         hint_currency: str = "EGP",
+        destination_kind: str = "ipa",
     ) -> ProofVisionResult:
         try:
             from gradio_client import Client, handle_file
@@ -644,7 +716,7 @@ class _HFProofServiceBase(IProofVisionService):
             status="ok",
             provider=self.PROVIDER_NAME,
             extracted_amount_cents=parse_amount_egp(text),
-            extracted_ipa=parse_ipa(text),
+            extracted_ipa=parse_destination(text, destination_kind),
             extracted_note=parse_note(text),
             extracted_transaction_ref=parse_transaction_ref(text),
             extracted_recipient_name=parse_recipient_name(text),
