@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from src.core.entities.instapay import (
-    InstapayIntent,
-    InstapayIntentStatus,
+    ManualPaymentIntent,
+    ManualPaymentIntentStatus,
     PaymentProof,
 )
 from src.infrastructure.external_services.instapay.auto_approval import (
@@ -22,19 +22,19 @@ from src.infrastructure.external_services.instapay.auto_approval import (
 )
 
 
-def _intent(expires_in_min: int = 30) -> InstapayIntent:
+def _intent(expires_in_min: int = 30) -> ManualPaymentIntent:
     now = datetime.now(UTC)
-    return InstapayIntent(
+    return ManualPaymentIntent(
         id=uuid4(),
         tenant_id=uuid4(),
         store_id=uuid4(),
         order_id=uuid4(),
         reference_code="NU-TESTXX",
-        display_ipa="merchant@cib",
+        display_destination="merchant@cib",
         amount_cents=10_000,
         expires_at=now + timedelta(minutes=expires_in_min),
         qr_payload="instapay://pay?...",
-        status=InstapayIntentStatus.AWAITING_PAYMENT,
+        status=ManualPaymentIntentStatus.AWAITING_PAYMENT,
     )
 
 

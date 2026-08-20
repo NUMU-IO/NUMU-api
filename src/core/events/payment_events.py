@@ -1,4 +1,8 @@
-"""Domain events for the InstaPay proof-verification flow.
+"""Domain events for the manual-rail proof-verification flow.
+
+Serves InstaPay and Vodafone Cash; ``payment_method`` on each event
+says which, so notification handlers can name the rail in customer
+copy and link to the right resume page.
 
 Kept in a separate module from ``order_events`` because they're
 lifecycle events of a *payment proof* rather than the order itself —
@@ -37,6 +41,10 @@ class PaymentProofApprovedEvent(DomainEvent):
     amount_cents: int
     currency: str = "EGP"
     auto_approved: bool = False
+    # Which manual rail this proof belongs to ("instapay" /
+    # "vodafone_cash"). Defaulted so events replayed from before the
+    # second rail existed still deserialize.
+    payment_method: str = "instapay"
 
 
 class PaymentProofRejectedEvent(DomainEvent):
@@ -57,3 +65,7 @@ class PaymentProofRejectedEvent(DomainEvent):
     rejection_reason: str
     can_retry: bool = True
     retry_url: str | None = None
+    # Which manual rail this proof belongs to ("instapay" /
+    # "vodafone_cash"). Defaulted so events replayed from before the
+    # second rail existed still deserialize.
+    payment_method: str = "instapay"

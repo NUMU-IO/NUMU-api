@@ -1,15 +1,19 @@
-"""Customer-facing proof-upload endpoint for InstaPay orders.
+"""Customer-facing proof-upload endpoint for manual-rail orders.
 
 URL: ``POST /storefront/store/{store_id}/orders/{order_id}/payment-proof``
 
-The customer (a) pays via their bank app to the merchant's IPA, then (b)
-returns to the storefront and uploads a screenshot of the transfer
-receipt plus the bank-issued transaction reference. The route:
+Serves both manual rails — InstaPay and Vodafone Cash. The customer
+(a) sends funds to the merchant's destination out-of-band (a bank app
+for InstaPay; ``*9#`` or the Ana Vodafone app for Vodafone Cash), then
+(b) returns to the storefront and uploads a screenshot of the receipt
+plus the transaction reference. The route:
 
   1. Validates the upload (magic bytes, size) — reusing the same helper
      as product image uploads so we don't diverge on accepted formats.
-  2. Resolves the merchant's InstaPay auto-approval config from
-     ``store.settings``.
+  2. Reads the rail off the order's intent and resolves *that* rail's
+     auto-approval config from ``store.settings`` — never a hardcoded
+     ``["payment"]["instapay"]`` lookup, which would silently apply
+     InstaPay's thresholds to a Vodafone Cash proof.
   3. Delegates to :class:`SubmitPaymentProofUseCase`, which handles
      dedup, storage, auto-rules, and the order-paid transition.
 
@@ -56,22 +60,26 @@ from src.application.use_cases.payments.submit_payment_proof import (
 )
 from src.config import settings
 from src.core.entities.customer import Customer
+from src.core.entities.instapay import ManualPaymentMethod
 from src.core.interfaces.services.storage_service import IStorageService
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services.image.proof_sanitizer import (
     ProofImageDecodeError,
     sanitize_proof_image,
 )
-from src.infrastructure.external_services.instapay.auto_approval import (
-    AutoApprovalConfig,
-)
-from src.infrastructure.external_services.instapay.payment_service import (
+from src.infrastructure.external_services.manual_transfer import (
     DEFAULT_AUTO_APPROVE_DAILY_CAP_CENTS,
     DEFAULT_AUTO_APPROVE_DAILY_COUNT,
     DEFAULT_AUTO_APPROVE_THRESHOLD_CENTS,
+    AutoApprovalConfig,
+    default_amount_tolerance_bps,
+    get_merchant_manual_credentials,
+)
+from src.infrastructure.external_services.manual_transfer import (
+    settings_key as manual_settings_key,
 )
 from src.infrastructure.repositories.instapay_intent_repository import (
-    InstapayIntentRepository,
+    ManualPaymentIntentRepository,
 )
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.payment_proof_repository import (
@@ -153,7 +161,7 @@ class SubmitProofResponse(BaseModel):
     operation_id="storefront_submit_instapay_proof",
     response_model=SuccessResponse[SubmitProofResponse],
     status_code=status.HTTP_201_CREATED,
-    summary="Submit InstaPay payment proof",
+    summary="Submit payment proof (InstaPay / Vodafone Cash)",
 )
 async def submit_instapay_proof(
     store_id: Annotated[UUID, Path()],
@@ -185,13 +193,17 @@ async def submit_instapay_proof(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Order not found."
         )
-    auth_intent_repo = InstapayIntentRepository(db)
+    auth_intent_repo = ManualPaymentIntentRepository(db)
     auth_intent = await auth_intent_repo.get_by_order_id(order_id)
     if auth_intent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No InstaPay intent exists for this order.",
+            detail="No payment intent exists for this order.",
         )
+    # The rail is a property of the intent, not of the request — a
+    # customer can't talk us into scoring their proof against the
+    # other rail's thresholds.
+    manual_method = auth_intent.method
     customer_match = bool(
         optional_customer and order_for_auth.customer_id == optional_customer.id
     )
@@ -244,7 +256,11 @@ async def submit_instapay_proof(
     # Resolve per-store auto-approval thresholds from settings (the same
     # JSONB block the checkout branch read). Module defaults apply when
     # the merchant left a field unset.
-    payment_settings = (store.settings or {}).get("payment", {}).get("instapay", {})
+    payment_settings = (
+        (store.settings or {})
+        .get("payment", {})
+        .get(manual_settings_key(manual_method), {})
+    )
     auto_config = AutoApprovalConfig(
         threshold_cents=int(
             payment_settings.get(
@@ -273,8 +289,12 @@ async def submit_instapay_proof(
         require_ocr_ipa_match=bool(
             payment_settings.get("require_ocr_ipa_match", False)
         ),
+        # Rail-specific default: Vodafone charges the sender a transfer
+        # fee, so a 1% window would soft-block nearly every wallet
+        # payment. See DEFAULT_VC_AMOUNT_TOLERANCE_BPS.
         ocr_amount_tolerance_bps=int(
-            payment_settings.get("ocr_amount_tolerance_bps", 100)
+            payment_settings.get("ocr_amount_tolerance_bps")
+            or default_amount_tolerance_bps(manual_method)
         ),
         # Phase C extras
         require_note_contains_reference=bool(
@@ -300,23 +320,22 @@ async def submit_instapay_proof(
     # we don't pre-resolve any sensitive keys here.
     vision_service = get_proof_vision_service_for_store(store.settings or {})
 
-    # Decrypt the merchant's IPA so the OCR-IPA-match rule can
-    # compare against it. Soft-fail: if decryption blows up the
-    # rule simply no-ops (it's also gated on the merchant's opt-in
-    # flag, so no observable behaviour change for stores that
-    # haven't enabled it).
+    # Decrypt the merchant's destination on this rail (IPA for
+    # InstaPay, wallet number for Vodafone Cash) so the OCR
+    # recipient-match rule can compare against it. Soft-fail: if
+    # decryption blows up the rule simply no-ops (it's also gated on
+    # the merchant's opt-in flag, so no observable behaviour change
+    # for stores that haven't enabled it).
     merchant_ipa: str | None = None
     try:
-        from src.infrastructure.external_services.instapay import (
-            get_merchant_instapay_credentials,
+        creds = await get_merchant_manual_credentials(
+            store.settings or {}, manual_method
         )
-
-        creds = await get_merchant_instapay_credentials(store.settings or {})
-        merchant_ipa = creds.get("ipa")
+        merchant_ipa = creds.get("destination")
     except Exception:
         merchant_ipa = None
 
-    intent_repo = InstapayIntentRepository(db)
+    intent_repo = ManualPaymentIntentRepository(db)
     proof_repo = PaymentProofRepository(db)
     use_case = SubmitPaymentProofUseCase(
         session=db,
@@ -379,7 +398,8 @@ class CustomerProofRequirements(BaseModel):
     # ``require_ocr_amount_match`` → amount must be visible in the
     # uploaded screenshot.
     screenshot_must_show_amount: bool = False
-    # ``require_ocr_ipa_match`` → recipient IPA must be visible.
+    # ``require_ocr_ipa_match`` → the recipient identifier must be
+    # visible: the IPA on InstaPay, the wallet number on Vodafone Cash.
     screenshot_must_show_recipient_ipa: bool = False
     # ``require_recipient_name_match`` → recipient name must be visible.
     screenshot_must_show_recipient_name: bool = False
@@ -389,9 +409,30 @@ class CustomerProofRequirements(BaseModel):
 
 
 class InstapayStatusResponse(BaseModel):
+    """Live state of a manual-rail payment for one order.
+
+    Name is historical (InstaPay was the first rail). ``method`` and
+    ``destination_kind`` tell the storefront which rail it is looking
+    at; ``ipa`` stays populated for InstaPay so existing clients keep
+    working, and is null on Vodafone Cash.
+    """
+
     order_id: UUID
+    # Shown on the resume page — a customer recognises ORD-482913, not
+    # the order UUID that is in their address bar.
+    order_number: str = ""
     reference_code: str
-    ipa: str
+    # "instapay" | "vodafone_cash"
+    method: str = "instapay"
+    # The string the customer sends money to, rail-neutral.
+    destination: str = ""
+    # "ipa" | "wallet_number" — drives the field label the storefront
+    # renders above ``destination``.
+    destination_kind: str = "ipa"
+    # False on Vodafone Cash: transfers start at *9# or in the Ana
+    # Vodafone app, so the page must not render a QR block at all.
+    supports_qr: bool = True
+    ipa: str | None = None
     ipa_display_name: str | None = None
     fallback_phone: str | None = None
     amount_cents: int
@@ -405,6 +446,11 @@ class InstapayStatusResponse(BaseModel):
     # present (defaults all-false), so the storefront can render
     # without conditional null-checks.
     customer_requirements: CustomerProofRequirements = CustomerProofRequirements()
+    # The scannable payload persisted on the intent. Returned so the
+    # resume page renders the SAME QR the post-checkout page does —
+    # without it, a customer who saw a QR at checkout and came back via
+    # their email would find it missing. Null on rails with no QR.
+    qr_payload: str | None = None
     # Public URL of the merchant's uploaded InstaPay QR image (taken
     # from inside their InstaPay app). The page falls back to showing
     # the IPA + reference when this is null.
@@ -430,7 +476,7 @@ class InstapayStatusResponse(BaseModel):
     "/orders/{order_id}/instapay-status",
     operation_id="storefront_get_instapay_status",
     response_model=SuccessResponse[InstapayStatusResponse],
-    summary="Get current InstaPay intent + latest proof status",
+    summary="Get current manual-payment intent + latest proof status",
 )
 async def get_instapay_status(
     store_id: Annotated[UUID, Path()],
@@ -443,7 +489,7 @@ async def get_instapay_status(
         str | None,
         Query(
             description=(
-                "InstaPay reference_code (returned in checkout payment_data) — "
+                "Intent reference_code (returned in checkout payment_data) — "
                 "lets guest checkouts read their own status without a customer "
                 "session. Logged-in customers can omit it; the customer_id "
                 "match is checked first."
@@ -458,14 +504,14 @@ async def get_instapay_status(
             status_code=status.HTTP_404_NOT_FOUND, detail="Order not found."
         )
 
-    intent_repo = InstapayIntentRepository(db)
+    intent_repo = ManualPaymentIntentRepository(db)
     proof_repo = PaymentProofRepository(db)
 
     intent = await intent_repo.get_by_order_id(order_id)
     if intent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No InstaPay intent exists for this order.",
+            detail="No payment intent exists for this order.",
         )
 
     # Authorize: either the request is from the order's owning customer,
@@ -514,7 +560,9 @@ async def get_instapay_status(
         store = await store_repo.get_by_id(store_id)
         if store is not None:
             instapay_settings = (
-                (store.settings or {}).get("payment", {}).get("instapay", {})
+                (store.settings or {})
+                .get("payment", {})
+                .get(manual_settings_key(intent.method), {})
             )
             qr_image_url = instapay_settings.get("qr_image_url")
             qr_link_url = instapay_settings.get("qr_link_url")
@@ -549,7 +597,9 @@ async def get_instapay_status(
     # ``amount_cents`` already holds the deposit amount; we just need
     # to surface the order total + balance so the storefront can show
     # both numbers without extra round-trips.
-    is_deposit = order.payment_method == "cod" and order.deposit_gateway == "instapay"
+    is_deposit = (
+        order.payment_method == "cod" and order.deposit_gateway == intent.method.value
+    )
     order_total_cents = order.total if is_deposit else None
     balance_due_cents = (
         max(0, order.total - intent.amount_cents) if is_deposit else None
@@ -558,8 +608,26 @@ async def get_instapay_status(
     return SuccessResponse(
         data=InstapayStatusResponse(
             order_id=order.id,
+            order_number=order.order_number,
             reference_code=intent.reference_code,
-            ipa=intent.display_ipa,
+            method=intent.method.value,
+            destination=intent.display_destination,
+            destination_kind=(
+                "wallet_number"
+                if intent.method is ManualPaymentMethod.VODAFONE_CASH
+                else "ipa"
+            ),
+            supports_qr=intent.method is ManualPaymentMethod.INSTAPAY,
+            qr_payload=(
+                intent.qr_payload or None
+                if intent.method is ManualPaymentMethod.INSTAPAY
+                else None
+            ),
+            ipa=(
+                intent.display_destination
+                if intent.method is ManualPaymentMethod.INSTAPAY
+                else None
+            ),
             ipa_display_name=ipa_display_name,
             fallback_phone=intent.display_phone,
             amount_cents=intent.amount_cents,
@@ -569,8 +637,12 @@ async def get_instapay_status(
             intent_status=intent.status.value,
             payment_status=order.payment_status.value,
             latest_proof=latest_dict,
-            qr_image_url=qr_image_url,
-            qr_link_url=qr_link_url,
+            qr_image_url=(
+                qr_image_url if intent.method is ManualPaymentMethod.INSTAPAY else None
+            ),
+            qr_link_url=(
+                qr_link_url if intent.method is ManualPaymentMethod.INSTAPAY else None
+            ),
             is_deposit=is_deposit,
             order_total_cents=order_total_cents,
             balance_due_cents=balance_due_cents,

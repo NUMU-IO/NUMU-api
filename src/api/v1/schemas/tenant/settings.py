@@ -296,6 +296,73 @@ class InstapayCredentialsResponse(BaseModel):
     recipient_name_token: str | None = None
 
 
+class SaveVodafoneCashCredentialsRequest(BaseModel):
+    """Save merchant Vodafone Cash configuration.
+
+    Vodafone Cash is a *manual* rail on NUMU, exactly like InstaPay: the
+    merchant publishes a wallet number, the customer pushes funds from
+    their own wallet (``*9#`` or the Ana Vodafone app), then uploads the
+    confirmation screenshot. There is no API key — Vodafone's merchant
+    API needs a commercial partnership and an aggregator, which is a
+    different product from this one.
+
+    So the single sensitive field is the wallet number itself: swap it
+    and you redirect a merchant's takings. Everything else is policy the
+    merchant tunes.
+
+    `wallet_number` is optional so merchants can update display or
+    threshold fields without re-typing it (the UI shows it masked).
+    First-time saves must include it; the handler enforces that.
+    """
+
+    wallet_number: str | None = Field(default=None, min_length=8, max_length=20)
+    display_name: str | None = Field(None, max_length=100)
+    fallback_phone: str | None = Field(None, max_length=20)
+    auto_approve_threshold_cents: int = Field(50_000, ge=0, le=10_000_000)
+    auto_approve_daily_cap_cents: int = Field(500_000, ge=0, le=100_000_000)
+    auto_approve_daily_count: int = Field(10, ge=0, le=1_000)
+    # OCR opt-in cross-checks, same engine as InstaPay.
+    require_ocr_amount_match: bool = False
+    # "The screenshot's recipient must be my wallet number." Field name
+    # is shared with InstaPay (where it means the IPA) so one rules
+    # engine and one stored key serve both rails.
+    require_ocr_ipa_match: bool = False
+    # Vodafone charges the SENDER a transfer fee, so what lands on the
+    # merchant's wallet is routinely short of the order total. Default
+    # 300 bps (3%) rather than InstaPay's 100 — a 1% window would push
+    # essentially every order into manual review.
+    ocr_amount_tolerance_bps: int = Field(300, ge=0, le=5_000)
+    require_note_contains_reference: bool = False
+    require_transaction_ref_match: bool = False
+    require_recipient_name_match: bool = False
+    recipient_name_token: str | None = Field(None, max_length=80)
+
+
+class VodafoneCashCredentialsResponse(BaseModel):
+    """Masked Vodafone Cash config (the wallet number is the only secret)."""
+
+    is_configured: bool
+    enabled: bool = False
+    # ``010****5678`` — enough for the merchant to recognise their own
+    # number without the dashboard echoing it in full.
+    wallet_number_masked: str | None = None
+    display_name: str | None = None
+    fallback_phone: str | None = None
+    auto_approve_threshold_cents: int | None = None
+    auto_approve_daily_cap_cents: int | None = None
+    auto_approve_daily_count: int | None = None
+    last_configured: str | None = None
+    # Read-only here; admins assign the provider.
+    ocr_provider: str | None = None
+    require_ocr_amount_match: bool = False
+    require_ocr_ipa_match: bool = False
+    ocr_amount_tolerance_bps: int = 300
+    require_note_contains_reference: bool = False
+    require_transaction_ref_match: bool = False
+    require_recipient_name_match: bool = False
+    recipient_name_token: str | None = None
+
+
 class SaveKashierCredentialsRequest(BaseModel):
     """Save Kashier gateway credentials for a store."""
 

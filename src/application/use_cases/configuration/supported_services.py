@@ -32,7 +32,11 @@ SERVICE_INFO = {
     },
     ServiceName.VODAFONE_CASH: {
         "display_name": "Vodafone Cash",
-        "description": "Egypt's leading mobile wallet service for instant payments.",
+        "description": (
+            "Egypt's leading mobile wallet. Manual rail on NUMU: publish "
+            "your wallet number, the customer transfers and uploads a "
+            "receipt. No API keys — just the number."
+        ),
         "documentation_url": None,
     },
     ServiceName.STRIPE: {
