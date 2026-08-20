@@ -1,11 +1,16 @@
-"""Email templates for the InstaPay proof-verification flow.
+"""Email templates for the manual-rail proof-verification flow.
+
+Serves both manual rails — InstaPay and Vodafone Cash. The rail changes
+two things in the copy: what the destination is called ("InstaPay
+address (IPA)" vs "Vodafone Cash number") and how the customer starts
+the transfer (their bank app vs ``*9#`` / the Ana Vodafone app).
 
 Three customer-facing emails:
 
 1. ``instapay_instructions_html`` — appended to the order-confirmation
-   email (not stand-alone). Renders the IPA / QR / reference / expiry
-   block so a customer who closed the tab still has what they need to
-   pay.
+   email (not stand-alone). Renders the destination / reference /
+   expiry block so a customer who closed the tab still has what they
+   need to pay.
 2. ``payment_confirmed_html`` — fires when a proof is approved
    (auto or manual). Short; confirms the money arrived.
 3. ``payment_rejected_html`` — fires when a merchant rejects a proof.
@@ -22,9 +27,43 @@ from src.infrastructure.external_services.resend.email_templates._base import (
     wrap,
 )
 
+# Localized rail names for the confirmed/rejected copy. Both emails
+# name the rail mid-sentence, so a Vodafone Cash customer must not be
+# told their "InstaPay payment" was confirmed.
+_RAIL_NAMES = {
+    "instapay": {"ar": "انستاباي", "en": "InstaPay"},
+    "vodafone_cash": {"ar": "فودافون كاش", "en": "Vodafone Cash"},
+}
+
+
+def rail_name(method: str, language: str) -> str:
+    """Customer-facing name of a manual rail, defaulting to InstaPay."""
+    names = _RAIL_NAMES.get(method) or _RAIL_NAMES["instapay"]
+    return names.get(language, names["ar"])
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 1. InstaPay instructions block (embedded in order confirmation)
 # ─────────────────────────────────────────────────────────────────────────
+
+# Per-rail overrides on top of _INSTA_INSTRUCTIONS. Only the two lines
+# that actually differ — the destination's name and how you start the
+# transfer. Everything else (reference, amount, expiry) is identical.
+_VODAFONE_OVERRIDES = {
+    "ar": {
+        "title": "ادفع عبر فودافون كاش",
+        "intro": "حوّل المبلغ إلى الرقم التالي — اطلب ‎*9#‎ أو من تطبيق «أنا فودافون»:",
+        "ipa_label": "رقم محفظة فودافون كاش",
+    },
+    "en": {
+        "title": "Pay with Vodafone Cash",
+        "intro": (
+            "Transfer the amount to this wallet number — dial *9# or use "
+            "the Ana Vodafone app:"
+        ),
+        "ipa_label": "Vodafone Cash number",
+    },
+}
 
 _INSTA_INSTRUCTIONS = {
     "ar": {
@@ -60,14 +99,23 @@ def instapay_instructions_html(
     resume_url: str | None = None,
     fallback_phone: str | None = None,
     language: str = "ar",
+    method: str = "instapay",
 ) -> str:
-    """Render the IPA / QR / reference block as HTML.
+    """Render the destination / reference block as HTML.
+
+    ``ipa`` is the rail's destination — an InstaPay address, or a
+    Vodafone Cash wallet number when ``method="vodafone_cash"``. The
+    parameter keeps its name because the caller's payload key is
+    historical; ``method`` is what selects the copy.
 
     Designed to slot into the main order-confirmation email body as a
     self-contained <div>. No <html>/<body> wrapper — the caller's
     template provides those.
     """
     c = _INSTA_INSTRUCTIONS.get(language, _INSTA_INSTRUCTIONS["ar"])
+    if method == "vodafone_cash":
+        overrides = _VODAFONE_OVERRIDES.get(language, _VODAFONE_OVERRIDES["ar"])
+        c = {**c, **overrides}
     amount_display = f"{currency} {amount_cents / 100:,.2f}"
     expires_display = ""
     if isinstance(expires_at, datetime):
@@ -116,13 +164,13 @@ _PAYMENT_CONFIRMED = {
         "greeting_default": "أهلاً بيك،",
         "greeting": "أهلاً {customer_name}،",
         "body": (
-            "أكدنا استلام دفعتك عبر انستاباي للطلب "
+            "أكدنا استلام دفعتك عبر {rail} للطلب "
             "<strong>#{order_number}</strong> "
             "بمبلغ <strong>{amount}</strong>. "
             "التاجر بدأ في تجهيز طلبك، وهتوصلك رسالة أخرى لما يتشحن."
         ),
         "ref_label": "الكود المرجعي",
-        "preheader": "تم تأكيد دفعتك عبر انستاباي",
+        "preheader": "تم تأكيد دفعتك عبر {rail}",
     },
     "en": {
         "title": "Payment Received",
@@ -130,14 +178,14 @@ _PAYMENT_CONFIRMED = {
         "greeting_default": "Hi there,",
         "greeting": "Hi {customer_name},",
         "body": (
-            "We've confirmed your InstaPay payment for order "
+            "We've confirmed your {rail} payment for order "
             "<strong>#{order_number}</strong> — "
             "<strong>{amount}</strong>. "
             "The merchant is preparing your order; you'll get another "
             "email when it ships."
         ),
         "ref_label": "Reference",
-        "preheader": "Your InstaPay payment is confirmed",
+        "preheader": "Your {rail} payment is confirmed",
     },
 }
 
@@ -151,8 +199,10 @@ def payment_confirmed_html(
     store_name: str = "NUMU",
     customer_name: str | None = None,
     language: str = "ar",
+    method: str = "instapay",
 ) -> str:
     c = _PAYMENT_CONFIRMED.get(language, _PAYMENT_CONFIRMED["ar"])
+    rail = rail_name(method, language)
     greeting = (
         c["greeting"].format(customer_name=customer_name)
         if customer_name
@@ -163,14 +213,14 @@ def payment_confirmed_html(
     {header(c["title"], c["subtitle"], badge=f"#{order_number}", language=language)}
     <div class="body">
         <p class="lead">{greeting}</p>
-        <p>{c["body"].format(order_number=order_number, amount=amount)}</p>
+        <p>{c["body"].format(order_number=order_number, amount=amount, rail=rail)}</p>
 
         <div class="panel">
             <p class="label">{c["ref_label"]}</p>
             <p class="value" style="font-family:monospace">{reference_code}</p>
         </div>
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(body, language=language, preheader=c["preheader"].format(rail=rail))
 
 
 def payment_confirmed_subject(
@@ -202,7 +252,7 @@ _PAYMENT_REJECTED = {
         ),
         "no_retry_body": ("لو تعتقد إن في خطأ، تواصل مع التاجر مباشرة."),
         "btn": "رفع إثبات جديد",
-        "preheader": "تعذر تأكيد دفعتك عبر انستاباي",
+        "preheader": "تعذر تأكيد دفعتك عبر {rail}",
     },
     "en": {
         "title": "We couldn't confirm your payment",
@@ -223,7 +273,7 @@ _PAYMENT_REJECTED = {
             "If you believe this is a mistake, please contact the merchant directly."
         ),
         "btn": "Upload new proof",
-        "preheader": "Your InstaPay proof was rejected",
+        "preheader": "Your {rail} proof was rejected",
     },
 }
 
@@ -237,8 +287,10 @@ def payment_rejected_html(
     store_name: str = "NUMU",
     customer_name: str | None = None,
     language: str = "ar",
+    method: str = "instapay",
 ) -> str:
     c = _PAYMENT_REJECTED.get(language, _PAYMENT_REJECTED["ar"])
+    rail = rail_name(method, language)
     greeting = (
         c["greeting"].format(customer_name=customer_name)
         if customer_name
@@ -265,7 +317,7 @@ def payment_rejected_html(
         <p>{body_copy}</p>
         {cta}
     </div>"""
-    return wrap(body, language=language, preheader=c["preheader"])
+    return wrap(body, language=language, preheader=c["preheader"].format(rail=rail))
 
 
 def payment_rejected_subject(

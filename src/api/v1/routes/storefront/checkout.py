@@ -82,6 +82,12 @@ from src.core.exceptions import EntityNotFoundError
 from src.core.value_objects.geography import resolve_governorate
 from src.core.value_objects.phone import PhoneNumber
 from src.infrastructure.cache.redis_cache import RedisCacheService
+from src.infrastructure.external_services.manual_transfer import (
+    MANUAL_TRANSFER_METHODS,
+)
+from src.infrastructure.external_services.manual_transfer import (
+    resume_url as _manual_resume_url,
+)
 from src.infrastructure.repositories import (
     AbandonedCheckoutRepository,
     CouponRepository,
@@ -2410,38 +2416,49 @@ async def checkout(
                 detail="Fawry payment is not available for this store. Please choose another payment method.",
             )
 
-    elif _dispatch_method == "instapay":
-        # InstaPay (manual IPA + proof upload). No gateway call — we just
-        # persist the InstapayIntent and hand the storefront the IPA + QR
-        # + reference code to show the customer. Funds move out-of-band;
-        # customer confirms via the proof-upload endpoint.
+    elif _dispatch_method in MANUAL_TRANSFER_METHODS:
+        # Manual rails — InstaPay (IPA) and Vodafone Cash (wallet
+        # number). No gateway call: we persist a ManualPaymentIntent and
+        # hand the storefront the destination + reference code (plus a
+        # QR on InstaPay, the only rail that has one) to show the
+        # customer. Funds move out-of-band; the customer confirms via
+        # the proof-upload endpoint.
+        #
+        # One branch, both rails — every difference is data carried on
+        # the service (see manual_transfer/payment_service.py).
         try:
             from sqlalchemy.exc import IntegrityError as _IntegrityError
 
             from src.application.use_cases.payments.submit_payment_proof import (  # noqa: F401 (keeps module importable at startup)
                 SubmitPaymentProofUseCase,
             )
-            from src.core.entities.instapay import InstapayIntent
-            from src.infrastructure.external_services.instapay import (
-                InstapayPaymentService,
-                get_merchant_instapay_credentials,
+            from src.core.entities.instapay import (
+                ManualPaymentIntent,
+                ManualPaymentMethod,
             )
-            from src.infrastructure.external_services.instapay.payment_service import (
+            from src.infrastructure.external_services.manual_transfer import (
+                ManualTransferPaymentService,
                 generate_reference_code,
+                get_merchant_manual_credentials,
+                human_name,
             )
             from src.infrastructure.repositories.instapay_intent_repository import (
-                InstapayIntentRepository,
+                ManualPaymentIntentRepository,
             )
 
-            credentials = await get_merchant_instapay_credentials(store.settings)
-            instapay_service = InstapayPaymentService(
-                ipa=credentials["ipa"],
-                ipa_display_name=credentials.get("ipa_display_name"),
+            _manual_method = ManualPaymentMethod(_dispatch_method)
+            credentials = await get_merchant_manual_credentials(
+                store.settings, _manual_method
+            )
+            manual_service = ManualTransferPaymentService(
+                destination=credentials["destination"],
+                method=_manual_method,
+                display_name=credentials.get("display_name"),
                 fallback_phone=credentials.get("fallback_phone"),
                 qr_image_url=credentials.get("qr_image_url"),
                 qr_link_url=credentials.get("qr_link_url"),
             )
-            intent_repo = InstapayIntentRepository(order_repo.session)
+            intent_repo = ManualPaymentIntentRepository(order_repo.session)
 
             # Reference codes are short enough (~10^9 combinations) that
             # collisions are rare but not impossible, and a collision
@@ -2453,18 +2470,19 @@ async def checkout(
             qr_payload = ""
             expires_at = None
             for _ in range(5):
-                candidate = generate_reference_code()
-                cand_payload, cand_expires_at = instapay_service.build_intent_payload(
+                candidate = generate_reference_code(_manual_method.reference_prefix)
+                cand_payload, cand_expires_at = manual_service.build_intent_payload(
                     amount_cents=_gateway_amount,
                     reference_code=candidate,
                     note=f"Order {created_order.order_number}",
                 )
-                intent_entity = InstapayIntent.new(
+                intent_entity = ManualPaymentIntent.new(
                     tenant_id=created_order.tenant_id,
                     store_id=created_order.store_id,
                     order_id=created_order.id,
                     reference_code=candidate,
-                    display_ipa=credentials["ipa"],
+                    method=_manual_method,
+                    display_destination=credentials["destination"],
                     display_phone=credentials.get("fallback_phone"),
                     amount_cents=_gateway_amount,
                     expires_at=cand_expires_at,
@@ -2484,16 +2502,22 @@ async def checkout(
             if not reference_code or expires_at is None:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Could not allocate an InstaPay reference. Please retry.",
+                    detail=(
+                        f"Could not allocate a {human_name(_manual_method)} "
+                        "reference. Please retry."
+                    ),
                 )
 
             created_order.payment_id = reference_code
-            created_order.metadata["instapay"] = {
+            # Keyed by method so an InstaPay order keeps its historical
+            # ``metadata["instapay"]`` block and a Vodafone Cash order
+            # gets its own — nothing to disambiguate later.
+            created_order.metadata[_dispatch_method] = {
                 "reference_code": reference_code,
             }
             await order_repo.update(created_order)
 
-            payment_data = instapay_service.to_checkout_payload(
+            payment_data = manual_service.to_checkout_payload(
                 reference_code=reference_code,
                 qr_payload=qr_payload,
                 amount_cents=_gateway_amount,
@@ -2511,10 +2535,14 @@ async def checkout(
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"InstaPay payment initiation failed: {e}")
+            _label = human_name(_manual_method)
+            logger.error(f"{_label} payment initiation failed: {e}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="InstaPay is not available for this store. Please choose another payment method.",
+                detail=(
+                    f"{_label} is not available for this store. "
+                    "Please choose another payment method."
+                ),
             )
 
     elif _dispatch_method == "moyasar":
@@ -2679,22 +2707,39 @@ async def checkout(
                 "timezone": (store.settings or {}).get("timezone"),
             }
 
-            # InstaPay: include IPA / ref / amount / expiry + a direct
-            # resume link in the confirmation email so a customer who
-            # closed the tab can still complete the payment.
+            # Manual rails: include the destination / ref / amount /
+            # expiry + a direct resume link in the confirmation email so
+            # a customer who closed the tab can still complete payment.
+            # The email template reads ``order_details["instapay"]`` —
+            # kept as the key for both rails so one template renders
+            # both; ``method`` / ``destination_kind`` tell it which
+            # labels to use.
             if (
-                request.payment_method == "instapay"
-                and isinstance(payment_data, dict)
-                and payment_data.get("provider") == "instapay"
+                isinstance(payment_data, dict)
+                and payment_data.get("type") == "manual_verification"
+                and payment_data.get("provider") in MANUAL_TRANSFER_METHODS
             ):
+                _pm = payment_data["provider"]
                 order_details["instapay"] = {
+                    "method": _pm,
+                    "destination": payment_data.get("destination"),
+                    "destination_kind": payment_data.get("destination_kind"),
+                    # Legacy key the existing template reads; null on
+                    # Vodafone Cash so the IPA line is skipped there.
                     "ipa": payment_data.get("ipa"),
                     "reference_code": payment_data.get("reference_code"),
                     "amount_cents": payment_data.get("amount_cents"),
                     "currency": payment_data.get("currency", currency),
                     "expires_at": payment_data.get("expires_at"),
                     "fallback_phone": payment_data.get("fallback_phone"),
-                    "resume_url": f"{base_storefront_url}/instapay/{created_order.id}",
+                    # ``?ref=`` is what authorizes the page for a guest
+                    # following this link — see manual_transfer.resume_url.
+                    "resume_url": _manual_resume_url(
+                        ManualPaymentMethod(_pm),
+                        base_url=base_storefront_url,
+                        order_id=created_order.id,
+                        reference_code=payment_data.get("reference_code"),
+                    ),
                 }
 
             async def _send_order_email():

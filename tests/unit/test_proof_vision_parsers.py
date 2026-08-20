@@ -18,8 +18,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from src.core.entities.instapay import (
-    InstapayIntent,
-    InstapayIntentStatus,
+    ManualPaymentIntent,
+    ManualPaymentIntentStatus,
     PaymentProof,
 )
 from src.infrastructure.external_services.instapay.auto_approval import (
@@ -400,18 +400,18 @@ def test_parse_ipa_qr_paid_arab_bank_receipt():
 # ── Auto-approval rules ──────────────────────────────────────────────
 
 
-def _intent(*, expired: bool = False) -> InstapayIntent:
+def _intent(*, expired: bool = False) -> ManualPaymentIntent:
     now = datetime.now(UTC)
-    return InstapayIntent(
+    return ManualPaymentIntent(
         id=uuid4(),
         tenant_id=uuid4(),
         store_id=uuid4(),
         order_id=uuid4(),
         reference_code="NU-TEST",
-        display_ipa="merchant@cib",
+        display_destination="merchant@cib",
         display_phone=None,
         amount_cents=50_000,
-        status=InstapayIntentStatus.AWAITING_PAYMENT,
+        status=ManualPaymentIntentStatus.AWAITING_PAYMENT,
         expires_at=now - timedelta(minutes=1)
         if expired
         else now + timedelta(minutes=10),

@@ -3,7 +3,7 @@
 This module provides validators for Egyptian and regional payment gateways:
 - Fawry: Egypt's leading payment network
 - Paymob: Egypt's payment infrastructure provider
-- Vodafone Cash: Mobile wallet payments
+- Vodafone Cash: Mobile wallet, manual transfer + proof (no API)
 - Stripe: International payments
 - Tap: MENA region payment gateway
 """
@@ -236,14 +236,29 @@ class PaymobValidator(GatewayValidator):
 
 
 class VodafoneCashValidator(GatewayValidator):
-    """Validator for Vodafone Cash mobile wallet credentials.
+    """Validator for Vodafone Cash — a MANUAL wallet rail, not a gateway.
 
-    Vodafone Cash is Egypt's leading mobile wallet service.
+    This used to demand ``merchant_id`` / ``api_key`` / ``pin`` and note
+    that "full validation requires API partnership". That modelled the
+    wrong product. Vodafone's merchant API needs a commercial
+    partnership and an aggregator; NUMU does not use it, and a merchant
+    could never supply those fields — so ``is_configured`` could never
+    become true, and the ``vodafone_cash_enabled`` toggle in payment
+    settings was permanently unreachable. The feature looked half-built
+    when in fact only this validator was wrong.
 
-    Required credentials:
-    - merchant_id: Vodafone Cash merchant identifier
-    - api_key: API key for authentication
-    - pin: Merchant PIN for transactions
+    What NUMU actually runs is the same out-of-band flow as InstaPay:
+    the merchant publishes a wallet number, the customer sends funds
+    from their own wallet (``*9#`` or the Ana Vodafone app), and a
+    screenshot plus reference code is verified by OCR rules or by the
+    merchant. So the only credential is the wallet number, and the only
+    validation possible is its format.
+
+    The merchant-facing write path is
+    ``PUT /stores/{id}/settings/payment/vodafone-cash/credentials``,
+    which normalizes and stores the number. This validator exists for
+    the generic ``/configuration`` surface (BYO credentials, admin
+    tooling) so that surface reports the same verdict.
     """
 
     @property
@@ -252,34 +267,51 @@ class VodafoneCashValidator(GatewayValidator):
 
     @property
     def required_fields(self) -> list[str]:
-        return ["merchant_id", "api_key", "pin"]
+        return ["wallet_number"]
+
+    @property
+    def optional_fields(self) -> list[str]:
+        return ["display_name", "fallback_phone"]
 
     async def validate(self, credentials: dict[str, Any]) -> ValidationResult:
-        """Validate Vodafone Cash credentials.
+        """Validate the wallet number's format.
 
-        Note: Vodafone Cash API access requires special partnership.
-        This validator performs basic structure validation.
+        There is no endpoint to call — no API means nothing to
+        round-trip against. A well-formed Vodafone Egypt number is the
+        complete verdict, and it is a real one: it catches the typo
+        that would otherwise send a customer's money to a stranger.
         """
         structure_result = self.validate_structure(credentials)
         if not structure_result.is_valid:
             return structure_result
 
-        # Vodafone Cash requires special API access
-        # For now, we validate structure and format
-        merchant_id = credentials["merchant_id"]
+        from src.core.entities.instapay import ManualPaymentMethod
+        from src.infrastructure.external_services.manual_transfer.destinations import (
+            InvalidDestinationError,
+            mask_destination,
+            normalize_wallet_number,
+        )
 
-        # Basic format validation
-        if not merchant_id.isdigit():
+        try:
+            wallet_number = normalize_wallet_number(credentials["wallet_number"])
+        except InvalidDestinationError as exc:
             return ValidationResult.failure(
-                message="Vodafone Cash merchant ID must be numeric",
+                message=str(exc),
                 error_code="INVALID_FORMAT",
             )
 
         return ValidationResult.success(
-            message="Vodafone Cash credentials structure validated",
+            message="Vodafone Cash wallet number validated",
             details={
-                "merchant_id": merchant_id,
-                "note": "Full validation requires API partnership",
+                "wallet_number": mask_destination(
+                    ManualPaymentMethod.VODAFONE_CASH, wallet_number
+                ),
+                "mode": "manual_transfer",
+                "note": (
+                    "Vodafone Cash on NUMU is a manual rail: the customer "
+                    "transfers to this number and uploads a receipt. No API "
+                    "credentials are involved."
+                ),
             },
         )
 

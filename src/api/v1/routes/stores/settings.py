@@ -56,6 +56,7 @@ from src.api.v1.schemas.tenant.settings import (
     SaveKashierCredentialsRequest,
     SaveMoyasarCredentialsRequest,
     SavePaymobCredentialsRequest,
+    SaveVodafoneCashCredentialsRequest,
     ShippingCarrierStatus,
     ShippingSettingsResponse,
     ShippingZone,
@@ -70,15 +71,30 @@ from src.api.v1.schemas.tenant.settings import (
     UpdateShippingSettingsRequest,
     UpdateShippingZoneRequest,
     UpdateWhatsAppSettingsRequest,
+    VodafoneCashCredentialsResponse,
     WhatsAppNotifications,
     WhatsAppSettingsResponse,
 )
 from src.application.use_cases.onboarding.auto_complete import (
     try_complete_onboarding_step,
 )
+from src.core.entities.instapay import ManualPaymentMethod
 from src.core.entities.onboarding import OnboardingStepKey
 from src.core.entities.store import Store
 from src.infrastructure.cache import StorefrontCache
+from src.infrastructure.external_services.manual_transfer.merchant_config import (
+    ManualConfigError,
+    ManualConfigInput,
+    build_config_block,
+    cleared_config_block,
+    read_config_view,
+)
+from src.infrastructure.external_services.manual_transfer.payment_service import (
+    human_name as manual_human_name,
+)
+from src.infrastructure.external_services.manual_transfer.payment_service import (
+    settings_key as manual_settings_key,
+)
 from src.infrastructure.repositories import (
     OnboardingRepository,
     ProductRepository,
@@ -435,10 +451,16 @@ async def update_payment_settings(
             )
         payment_settings.setdefault("moyasar", {})["enabled"] = request.moyasar_enabled
     if request.vodafone_cash_enabled is not None:
-        if not payment_settings["vodafone_cash"]["is_configured"]:
+        # "Contact administrator" was a leftover from when Vodafone Cash
+        # was scaffolded as an API gateway needing a partnership. It is a
+        # manual rail: the merchant configures it themselves by saving a
+        # wallet number, which is what sets is_configured.
+        if not payment_settings.get("vodafone_cash", {}).get("is_configured"):
             raise HTTPException(
                 status_code=400,
-                detail="Vodafone Cash is not configured. Contact administrator.",
+                detail=(
+                    "Vodafone Cash is not configured. Save your wallet number first."
+                ),
             )
         payment_settings["vodafone_cash"]["enabled"] = request.vodafone_cash_enabled
     if request.bank_transfer_enabled is not None:
@@ -2947,7 +2969,163 @@ async def update_checkout_fields(
     return SuccessResponse(data=cfg, message="Checkout fields updated")
 
 
-# ============ InstaPay Credentials ============
+# ============ Manual rails: InstaPay + Vodafone Cash ============
+#
+# Both are "push payment" rails with no usable merchant API: publish a
+# destination, the customer sends funds out-of-band, then uploads a
+# screenshot that OCR rules or the merchant verify. The two rails share
+# one implementation in
+# ``infrastructure/external_services/manual_transfer/merchant_config.py``;
+# only the request/response shapes differ, because the merchant-facing
+# nouns do ("IPA" vs "wallet number") and the InstaPay-era response model
+# is already consumed by the hub.
+
+
+def _manual_input(request, *, destination) -> ManualConfigInput:
+    """Map either rail's request model onto the shared config input."""
+    return ManualConfigInput(
+        destination=destination,
+        fallback_phone=request.fallback_phone,
+        display_name=getattr(request, "ipa_display_name", None)
+        or getattr(request, "display_name", None),
+        auto_approve_threshold_cents=request.auto_approve_threshold_cents,
+        auto_approve_daily_cap_cents=request.auto_approve_daily_cap_cents,
+        auto_approve_daily_count=request.auto_approve_daily_count,
+        qr_link_url=getattr(request, "qr_link_url", None),
+        require_ocr_amount_match=request.require_ocr_amount_match,
+        require_ocr_ipa_match=request.require_ocr_ipa_match,
+        ocr_amount_tolerance_bps=request.ocr_amount_tolerance_bps,
+        require_note_contains_reference=request.require_note_contains_reference,
+        require_transaction_ref_match=request.require_transaction_ref_match,
+        require_recipient_name_match=request.require_recipient_name_match,
+        recipient_name_token=request.recipient_name_token,
+    )
+
+
+def _instapay_response(view: dict) -> InstapayCredentialsResponse:
+    """Render the shared config view in the InstaPay-era response shape."""
+    if not view.get("is_configured"):
+        return InstapayCredentialsResponse(is_configured=False)
+    if view.get("unreadable"):
+        return InstapayCredentialsResponse(
+            is_configured=True,
+            enabled=view.get("enabled", False),
+            last_configured=view.get("last_configured"),
+        )
+    return InstapayCredentialsResponse(
+        is_configured=True,
+        enabled=view["enabled"],
+        ipa_masked=view.get("destination_masked"),
+        ipa_display_name=view.get("display_name"),
+        fallback_phone=view.get("fallback_phone"),
+        auto_approve_threshold_cents=view.get("auto_approve_threshold_cents"),
+        auto_approve_daily_cap_cents=view.get("auto_approve_daily_cap_cents"),
+        auto_approve_daily_count=view.get("auto_approve_daily_count"),
+        last_configured=view.get("last_configured"),
+        qr_image_url=view.get("qr_image_url"),
+        qr_link_url=view.get("qr_link_url"),
+        ocr_provider=view.get("ocr_provider"),
+        require_ocr_amount_match=view["require_ocr_amount_match"],
+        require_ocr_ipa_match=view["require_ocr_ipa_match"],
+        ocr_amount_tolerance_bps=view["ocr_amount_tolerance_bps"],
+        require_note_contains_reference=view["require_note_contains_reference"],
+        require_transaction_ref_match=view["require_transaction_ref_match"],
+        require_recipient_name_match=view["require_recipient_name_match"],
+        recipient_name_token=view.get("recipient_name_token"),
+    )
+
+
+def _vodafone_response(view: dict) -> VodafoneCashCredentialsResponse:
+    """Render the shared config view in the Vodafone Cash response shape."""
+    if not view.get("is_configured"):
+        return VodafoneCashCredentialsResponse(is_configured=False)
+    if view.get("unreadable"):
+        return VodafoneCashCredentialsResponse(
+            is_configured=True,
+            enabled=view.get("enabled", False),
+            last_configured=view.get("last_configured"),
+        )
+    return VodafoneCashCredentialsResponse(
+        is_configured=True,
+        enabled=view["enabled"],
+        wallet_number_masked=view.get("destination_masked"),
+        display_name=view.get("display_name"),
+        fallback_phone=view.get("fallback_phone"),
+        auto_approve_threshold_cents=view.get("auto_approve_threshold_cents"),
+        auto_approve_daily_cap_cents=view.get("auto_approve_daily_cap_cents"),
+        auto_approve_daily_count=view.get("auto_approve_daily_count"),
+        last_configured=view.get("last_configured"),
+        ocr_provider=view.get("ocr_provider"),
+        require_ocr_amount_match=view["require_ocr_amount_match"],
+        require_ocr_ipa_match=view["require_ocr_ipa_match"],
+        ocr_amount_tolerance_bps=view["ocr_amount_tolerance_bps"],
+        require_note_contains_reference=view["require_note_contains_reference"],
+        require_transaction_ref_match=view["require_transaction_ref_match"],
+        require_recipient_name_match=view["require_recipient_name_match"],
+        recipient_name_token=view.get("recipient_name_token"),
+    )
+
+
+async def _save_manual_credentials(
+    *,
+    method: ManualPaymentMethod,
+    request,
+    destination: str | None,
+    store: Store,
+    store_repo: StoreRepository,
+    onboarding_repo: OnboardingRepository,
+) -> dict:
+    """Persist one rail's config and return the masked view.
+
+    Shared by both rails so the partial-update carry-forward, the
+    destination validation, the encryption and the enabled-state
+    preservation can only ever behave one way.
+    """
+    key = manual_settings_key(method)
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+
+    try:
+        block, _destination = await build_config_block(
+            method=method,
+            existing=payment_settings.get(key) or {},
+            data=_manual_input(request, destination=destination),
+        )
+    except ManualConfigError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    payment_settings[key] = block
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
+    )
+    logger.info(f"{manual_human_name(method)} credentials saved for store {store.id}")
+
+    return await read_config_view(method=method, block=block)
+
+
+async def _delete_manual_credentials(
+    *,
+    method: ManualPaymentMethod,
+    store: Store,
+    store_repo: StoreRepository,
+) -> None:
+    """Clear one rail's config and disable it at checkout.
+
+    Existing ``instapay_intents`` rows are not touched — they belong to
+    orders already placed, and the merchant still needs to review their
+    proofs. New orders can no longer choose the rail.
+    """
+    store_settings = store.settings or {}
+    payment_settings = store_settings.get("payment", _get_default_payment_settings())
+    payment_settings[manual_settings_key(method)] = cleared_config_block()
+    store_settings["payment"] = payment_settings
+    store.settings = store_settings
+    await store_repo.update(store)
+    logger.info(f"{manual_human_name(method)} credentials removed for store {store.id}")
 
 
 @router.put(
@@ -2971,167 +3149,24 @@ async def save_instapay_credentials(
     they're policy knobs the merchant sees in the dashboard, not
     secrets.
 
-    `request.ipa` and `request.fallback_phone` are both optional —
-    when omitted, the existing encrypted blob is decrypted and those
-    values carry forward. This lets the merchant edit display name,
-    thresholds, or toggle enabled without re-typing the IPA (the UI
-    shows it masked; it can never unmask to its true form).
-    First-time saves must include `ipa`.
+    `request.ipa` and `request.fallback_phone` are both optional — when
+    omitted, the existing encrypted blob is decrypted and those values
+    carry forward. This lets the merchant edit display name, thresholds,
+    or toggle enabled without re-typing the IPA (the UI shows it masked;
+    it can never unmask to its true form). First-time saves must include
+    `ipa`, and it is now format-checked (`name@bank`) — a typo'd IPA
+    silently misroutes a customer's money.
     """
-    from src.infrastructure.external_services.secrets.secrets_manager import (
-        get_secrets_manager,
+    view = await _save_manual_credentials(
+        method=ManualPaymentMethod.INSTAPAY,
+        request=request,
+        destination=request.ipa,
+        store=store,
+        store_repo=store_repo,
+        onboarding_repo=onboarding_repo,
     )
-
-    secrets = get_secrets_manager()
-
-    store_settings = store.settings or {}
-    payment_settings = store_settings.get("payment", _get_default_payment_settings())
-    existing = payment_settings.get("instapay") or {}
-
-    # Determine the IPA + fallback phone to persist. On update, missing
-    # fields carry forward from the previously-encrypted blob so the
-    # UI can do partial updates.
-    ipa_to_save: str | None = request.ipa
-    phone_to_save: str | None = request.fallback_phone
-
-    needs_existing = ipa_to_save is None or phone_to_save is None
-    if needs_existing:
-        if not existing.get("encrypted_credentials"):
-            # First-time configuration — ipa must be supplied.
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=("InstaPay address (IPA) is required for the first save."),
-            )
-        try:
-            prev_key_id = existing["encryption_key_id"]
-            prev_encrypted = base64.b64decode(existing["encrypted_credentials"])
-            prev_creds = await secrets.decrypt(prev_encrypted, prev_key_id)
-        except Exception:
-            # If the prior blob can't be decrypted (key rotation issue,
-            # corrupt bytes), force the merchant to supply a fresh IPA
-            # rather than silently corrupting the record.
-            logger.error(
-                "Failed to decrypt existing InstaPay credentials for "
-                f"store {store.id} during partial update"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Could not read existing InstaPay credentials. Please "
-                    "re-enter your IPA to save."
-                ),
-            )
-        if ipa_to_save is None:
-            ipa_to_save = prev_creds.get("ipa")
-        if phone_to_save is None:
-            phone_to_save = prev_creds.get("fallback_phone")
-
-    if not ipa_to_save:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="InstaPay address (IPA) is required.",
-        )
-
-    key_id = await secrets.get_current_key_id()
-    credential_data = {
-        "ipa": ipa_to_save,
-        "fallback_phone": phone_to_save,
-    }
-    encrypted = await secrets.encrypt(credential_data, key_id)
-    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
-
-    # qr_link_url: ``None`` from the request means "leave alone";
-    # empty string means "clear"; any non-empty value overwrites.
-    if request.qr_link_url is None:
-        qr_link_to_save = existing.get("qr_link_url")
-    else:
-        qr_link_to_save = request.qr_link_url.strip() or None
-
-    payment_settings["instapay"] = {
-        # Preserve the current enabled state on credential updates —
-        # merchants editing thresholds shouldn't accidentally unmute
-        # a disabled InstaPay option at checkout. First-time saves
-        # still fall through to True via the `or True` below (new
-        # credentials are worth enabling by default).
-        "enabled": bool(existing.get("enabled", True)) if existing else True,
-        "is_configured": True,
-        "last_configured": datetime.now(UTC).isoformat(),
-        "encrypted_credentials": encrypted_b64,
-        "encryption_key_id": key_id,
-        "ipa_display_name": request.ipa_display_name,
-        "auto_approve_threshold_cents": request.auto_approve_threshold_cents,
-        "auto_approve_daily_cap_cents": request.auto_approve_daily_cap_cents,
-        "auto_approve_daily_count": request.auto_approve_daily_count,
-        # The QR image is uploaded via a dedicated endpoint, so a
-        # credentials PUT must not erase a previously-uploaded URL.
-        "qr_image_url": existing.get("qr_image_url"),
-        "qr_link_url": qr_link_to_save,
-        # Phase C — merchant-facing OCR opt-in flags. The provider
-        # itself is admin-managed and intentionally NOT read from the
-        # request, so a merchant can't self-promote onto a paid tier.
-        "ocr_provider": existing.get("ocr_provider"),
-        "require_ocr_amount_match": request.require_ocr_amount_match,
-        "require_ocr_ipa_match": request.require_ocr_ipa_match,
-        "ocr_amount_tolerance_bps": request.ocr_amount_tolerance_bps,
-        # Phase C extras
-        "require_note_contains_reference": (request.require_note_contains_reference),
-        "require_transaction_ref_match": (request.require_transaction_ref_match),
-        "require_recipient_name_match": (request.require_recipient_name_match),
-        "recipient_name_token": (
-            request.recipient_name_token.strip()
-            if request.recipient_name_token
-            else None
-        ),
-    }
-
-    store_settings["payment"] = payment_settings
-    store.settings = store_settings
-    await store_repo.update(store)
-
-    await try_complete_onboarding_step(
-        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
-    )
-
-    logger.info(f"InstaPay credentials saved for store {store.id}")
-
     return SuccessResponse(
-        data=InstapayCredentialsResponse(
-            is_configured=True,
-            enabled=bool(payment_settings["instapay"]["enabled"]),
-            ipa_masked=secrets.mask_credential(ipa_to_save),
-            ipa_display_name=request.ipa_display_name,
-            fallback_phone=phone_to_save,
-            auto_approve_threshold_cents=request.auto_approve_threshold_cents,
-            auto_approve_daily_cap_cents=request.auto_approve_daily_cap_cents,
-            auto_approve_daily_count=request.auto_approve_daily_count,
-            last_configured=payment_settings["instapay"]["last_configured"],
-            qr_image_url=payment_settings["instapay"].get("qr_image_url"),
-            qr_link_url=payment_settings["instapay"].get("qr_link_url"),
-            ocr_provider=payment_settings["instapay"].get("ocr_provider"),
-            require_ocr_amount_match=bool(
-                payment_settings["instapay"].get("require_ocr_amount_match", False)
-            ),
-            require_ocr_ipa_match=bool(
-                payment_settings["instapay"].get("require_ocr_ipa_match", False)
-            ),
-            ocr_amount_tolerance_bps=int(
-                payment_settings["instapay"].get("ocr_amount_tolerance_bps", 100)
-            ),
-            require_note_contains_reference=bool(
-                payment_settings["instapay"].get(
-                    "require_note_contains_reference", False
-                )
-            ),
-            require_transaction_ref_match=bool(
-                payment_settings["instapay"].get("require_transaction_ref_match", False)
-            ),
-            require_recipient_name_match=bool(
-                payment_settings["instapay"].get("require_recipient_name_match", False)
-            ),
-            recipient_name_token=payment_settings["instapay"].get(
-                "recipient_name_token"
-            ),
-        ),
+        data=_instapay_response(view),
         message="InstaPay credentials saved successfully",
     )
 
@@ -3146,75 +3181,20 @@ async def get_instapay_credentials(
     store: Annotated[Store, Depends(get_current_store)],
 ):
     """Get masked InstaPay config status for the store."""
-    store_settings = store.settings or {}
-    instapay_settings = store_settings.get("payment", {}).get("instapay", {})
-
-    if not instapay_settings.get("encrypted_credentials"):
+    block = (store.settings or {}).get("payment", {}).get("instapay", {})
+    view = await read_config_view(method=ManualPaymentMethod.INSTAPAY, block=block)
+    if not view.get("is_configured"):
         return SuccessResponse(
-            data=InstapayCredentialsResponse(is_configured=False),
+            data=_instapay_response(view),
             message="InstaPay credentials not configured",
         )
-
-    from src.infrastructure.external_services.secrets.secrets_manager import (
-        get_secrets_manager,
-    )
-
-    secrets = get_secrets_manager()
-    key_id = instapay_settings["encryption_key_id"]
-    encrypted = base64.b64decode(instapay_settings["encrypted_credentials"])
-
-    try:
-        creds = await secrets.decrypt(encrypted, key_id)
-    except Exception:
+    if view.get("unreadable"):
         logger.error(f"Failed to decrypt InstaPay credentials for store {store.id}")
         return SuccessResponse(
-            data=InstapayCredentialsResponse(
-                is_configured=True,
-                enabled=bool(instapay_settings.get("enabled")),
-                last_configured=instapay_settings.get("last_configured"),
-            ),
+            data=_instapay_response(view),
             message="InstaPay credentials configured but unreadable",
         )
-
-    return SuccessResponse(
-        data=InstapayCredentialsResponse(
-            is_configured=True,
-            enabled=bool(instapay_settings.get("enabled")),
-            ipa_masked=secrets.mask_credential(creds.get("ipa", "")),
-            ipa_display_name=instapay_settings.get("ipa_display_name"),
-            fallback_phone=creds.get("fallback_phone"),
-            auto_approve_threshold_cents=instapay_settings.get(
-                "auto_approve_threshold_cents"
-            ),
-            auto_approve_daily_cap_cents=instapay_settings.get(
-                "auto_approve_daily_cap_cents"
-            ),
-            auto_approve_daily_count=instapay_settings.get("auto_approve_daily_count"),
-            last_configured=instapay_settings.get("last_configured"),
-            qr_image_url=instapay_settings.get("qr_image_url"),
-            qr_link_url=instapay_settings.get("qr_link_url"),
-            ocr_provider=instapay_settings.get("ocr_provider"),
-            require_ocr_amount_match=bool(
-                instapay_settings.get("require_ocr_amount_match", False)
-            ),
-            require_ocr_ipa_match=bool(
-                instapay_settings.get("require_ocr_ipa_match", False)
-            ),
-            ocr_amount_tolerance_bps=int(
-                instapay_settings.get("ocr_amount_tolerance_bps", 100)
-            ),
-            require_note_contains_reference=bool(
-                instapay_settings.get("require_note_contains_reference", False)
-            ),
-            require_transaction_ref_match=bool(
-                instapay_settings.get("require_transaction_ref_match", False)
-            ),
-            require_recipient_name_match=bool(
-                instapay_settings.get("require_recipient_name_match", False)
-            ),
-            recipient_name_token=instapay_settings.get("recipient_name_token"),
-        )
-    )
+    return SuccessResponse(data=_instapay_response(view))
 
 
 @router.delete(
@@ -3227,31 +3207,115 @@ async def delete_instapay_credentials(
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Remove the stored InstaPay IPA and disable InstaPay at checkout.
-
-    Existing ``instapay_intents`` rows are not touched — they belong
-    to already-placed orders and the merchant still needs to see /
-    review their proofs. New orders can no longer choose InstaPay
-    until credentials are re-saved.
-    """
-    store_settings = store.settings or {}
-    payment_settings = store_settings.get("payment", _get_default_payment_settings())
-
-    payment_settings["instapay"] = {
-        "enabled": False,
-        "is_configured": False,
-        "last_configured": None,
-    }
-
-    store_settings["payment"] = payment_settings
-    store.settings = store_settings
-    await store_repo.update(store)
-
-    logger.info(f"InstaPay credentials removed for store {store.id}")
-
+    """Remove the stored InstaPay IPA and disable InstaPay at checkout."""
+    await _delete_manual_credentials(
+        method=ManualPaymentMethod.INSTAPAY,
+        store=store,
+        store_repo=store_repo,
+    )
     return SuccessResponse(
         data=InstapayCredentialsResponse(is_configured=False),
         message="InstaPay credentials removed successfully",
+    )
+
+
+# ============ Vodafone Cash Credentials ============
+#
+# Deliberately NOT wired to the gateway-validator path. A
+# ``VodafoneCashValidator`` existed that demanded merchant_id/api_key/pin
+# — Vodafone's merchant API, which requires a commercial partnership and
+# an aggregator. It could never return is_configured=True, which made
+# the enable toggle above unreachable and made the feature look
+# half-built. The rail NUMU actually runs is manual, and a wallet number
+# is the only thing to validate.
+
+
+@router.put(
+    "/payment/vodafone-cash/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Save Vodafone Cash credentials",
+    operation_id="save_vodafone_cash_credentials",
+)
+async def save_vodafone_cash_credentials(
+    request: SaveVodafoneCashCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save Vodafone Cash configuration for the store.
+
+    The wallet number is normalized to ``010XXXXXXXX`` (accepting
+    ``+20``/``0020`` prefixes, separators, and Arabic-Indic digits — all
+    of which merchants paste out of the Ana Vodafone app) and rejected
+    if it isn't a Vodafone Egypt mobile number. Storing it normalized
+    matters downstream: the OCR match rule compares against this exact
+    string, and the checkout panel offers it as a tap-to-copy value that
+    has to be dialable as-is.
+
+    `wallet_number` is optional on updates and carries forward from the
+    encrypted blob; first-time saves must include it.
+    """
+    view = await _save_manual_credentials(
+        method=ManualPaymentMethod.VODAFONE_CASH,
+        request=request,
+        destination=request.wallet_number,
+        store=store,
+        store_repo=store_repo,
+        onboarding_repo=onboarding_repo,
+    )
+    return SuccessResponse(
+        data=_vodafone_response(view),
+        message="Vodafone Cash settings saved successfully",
+    )
+
+
+@router.get(
+    "/payment/vodafone-cash/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Get Vodafone Cash credentials status",
+    operation_id="get_vodafone_cash_credentials",
+)
+async def get_vodafone_cash_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get masked Vodafone Cash config status for the store."""
+    block = (store.settings or {}).get("payment", {}).get("vodafone_cash", {})
+    view = await read_config_view(method=ManualPaymentMethod.VODAFONE_CASH, block=block)
+    if not view.get("is_configured"):
+        return SuccessResponse(
+            data=_vodafone_response(view),
+            message="Vodafone Cash settings not configured",
+        )
+    if view.get("unreadable"):
+        logger.error(f"Failed to decrypt Vodafone Cash settings for store {store.id}")
+        return SuccessResponse(
+            data=_vodafone_response(view),
+            message="Vodafone Cash settings configured but unreadable",
+        )
+    return SuccessResponse(data=_vodafone_response(view))
+
+
+@router.delete(
+    "/payment/vodafone-cash/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Remove Vodafone Cash credentials",
+    operation_id="delete_vodafone_cash_credentials",
+)
+async def delete_vodafone_cash_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove the stored wallet number and disable Vodafone Cash."""
+    await _delete_manual_credentials(
+        method=ManualPaymentMethod.VODAFONE_CASH,
+        store=store,
+        store_repo=store_repo,
+    )
+    return SuccessResponse(
+        data=VodafoneCashCredentialsResponse(is_configured=False),
+        message="Vodafone Cash settings removed successfully",
     )
 
 

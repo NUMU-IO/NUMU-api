@@ -63,7 +63,14 @@ EGYPT = Market(
     default_language="ar",
     default_vat_rate=0.14,
     tax_country_code="EG",
-    payment_providers=("paymob", "fawry", "kashier", "instapay", "cod"),
+    payment_providers=(
+        "paymob",
+        "fawry",
+        "kashier",
+        "instapay",
+        "vodafone_cash",
+        "cod",
+    ),
     timezone="Africa/Cairo",
 )
 

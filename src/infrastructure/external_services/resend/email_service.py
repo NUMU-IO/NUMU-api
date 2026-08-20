@@ -873,8 +873,12 @@ class ResendEmailService(IEmailService):
         language: str = "ar",
         store_id: UUID | None = None,
         tenant_id: UUID | None = None,
+        method: str = "instapay",
     ) -> bool:
         """Send a short "payment received" email after proof approval.
+
+        ``method`` names the manual rail so the copy says "Vodafone
+        Cash" rather than "InstaPay" on a wallet payment.
 
         Fires in parallel with (and independently of) the invoice email,
         so the customer learns about approval even when PDF generation
@@ -893,6 +897,7 @@ class ResendEmailService(IEmailService):
             store_name=store_name,
             customer_name=customer_name,
             language=language,
+            method=method,
         )
         legacy_subject = payment_confirmed_subject(
             order_number, store_name=store_name, language=language
@@ -964,8 +969,13 @@ class ResendEmailService(IEmailService):
         tenant_id: UUID | None = None,
         amount_cents: int | None = None,
         currency: str = "EGP",
+        method: str = "instapay",
     ) -> bool:
-        """Notify the customer that the merchant rejected their proof."""
+        """Notify the customer that the merchant rejected their proof.
+
+        method names the manual rail so the copy matches how the
+        customer actually paid.
+        """
         from src.infrastructure.external_services.resend.email_templates.instapay import (
             payment_rejected_html,
             payment_rejected_subject,
@@ -979,6 +989,7 @@ class ResendEmailService(IEmailService):
             store_name=store_name,
             customer_name=customer_name,
             language=language,
+            method=method,
         )
         legacy_subject = payment_rejected_subject(
             order_number, store_name=store_name, language=language

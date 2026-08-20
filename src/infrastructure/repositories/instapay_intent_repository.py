@@ -1,4 +1,4 @@
-"""Repository for InstapayIntent rows."""
+"""Repository for ManualPaymentIntent rows (InstaPay / Vodafone Cash)."""
 
 from __future__ import annotations
 
@@ -8,15 +8,24 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.instapay import InstapayIntent, InstapayIntentStatus
+from src.core.entities.instapay import (
+    ManualPaymentIntent,
+    ManualPaymentIntentStatus,
+    ManualPaymentMethod,
+)
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models.tenant.instapay_intent import (
     InstapayIntentModel,
 )
 
 
-class InstapayIntentRepository:
-    """Persist and query InstaPay per-order intents."""
+class ManualPaymentIntentRepository:
+    """Persist and query per-order manual-payment intents.
+
+    Method-agnostic on purpose: the expiry sweeper, the proof-upload
+    authorization check and the reference-code uniqueness check all
+    behave identically whichever rail an intent is on.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -27,14 +36,15 @@ class InstapayIntentRepository:
             return query.where(InstapayIntentModel.tenant_id == tid)
         return query
 
-    def _to_entity(self, model: InstapayIntentModel) -> InstapayIntent:
-        return InstapayIntent(
+    def _to_entity(self, model: InstapayIntentModel) -> ManualPaymentIntent:
+        return ManualPaymentIntent(
             id=model.id,
             tenant_id=model.tenant_id,
             store_id=model.store_id,
             order_id=model.order_id,
             reference_code=model.reference_code,
-            display_ipa=model.display_ipa,
+            method=ManualPaymentMethod(model.method),
+            display_destination=model.display_destination,
             display_phone=model.display_phone,
             amount_cents=model.amount_cents,
             expires_at=model.expires_at,
@@ -43,14 +53,15 @@ class InstapayIntentRepository:
             created_at=model.created_at,
         )
 
-    async def create(self, intent: InstapayIntent) -> InstapayIntent:
+    async def create(self, intent: ManualPaymentIntent) -> ManualPaymentIntent:
         model = InstapayIntentModel(
             id=intent.id,
             tenant_id=intent.tenant_id,
             store_id=intent.store_id,
             order_id=intent.order_id,
             reference_code=intent.reference_code,
-            display_ipa=intent.display_ipa,
+            method=intent.method.value,
+            display_destination=intent.display_destination,
             display_phone=intent.display_phone,
             amount_cents=intent.amount_cents,
             expires_at=intent.expires_at,
@@ -62,7 +73,7 @@ class InstapayIntentRepository:
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def get_by_order_id(self, order_id: UUID) -> InstapayIntent | None:
+    async def get_by_order_id(self, order_id: UUID) -> ManualPaymentIntent | None:
         query = select(InstapayIntentModel).where(
             InstapayIntentModel.order_id == order_id
         )
@@ -70,7 +81,9 @@ class InstapayIntentRepository:
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
-    async def get_by_reference_code(self, reference_code: str) -> InstapayIntent | None:
+    async def get_by_reference_code(
+        self, reference_code: str
+    ) -> ManualPaymentIntent | None:
         query = select(InstapayIntentModel).where(
             InstapayIntentModel.reference_code == reference_code
         )
@@ -91,7 +104,7 @@ class InstapayIntentRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none() is not None
 
-    async def update(self, intent: InstapayIntent) -> InstapayIntent:
+    async def update(self, intent: ManualPaymentIntent) -> ManualPaymentIntent:
         """Persist whatever the entity currently says — idiomatic path.
 
         The entity's ``mark_paid`` / ``mark_expired`` / ``mark_cancelled``
@@ -112,7 +125,7 @@ class InstapayIntentRepository:
     async def update_status(
         self,
         intent_id: UUID,
-        status: InstapayIntentStatus,
+        status: ManualPaymentIntentStatus,
     ) -> None:
         """Legacy shortcut — kept for the sweeper which doesn't load entities.
 
@@ -131,7 +144,7 @@ class InstapayIntentRepository:
 
     async def list_expired_awaiting_payment(
         self, *, now: datetime | None = None, limit: int = 100
-    ) -> list[InstapayIntent]:
+    ) -> list[ManualPaymentIntent]:
         """Find intents past expiry that never received a proof.
 
         Used by the Celery beat sweeper. Intentionally does NOT call
@@ -145,7 +158,8 @@ class InstapayIntentRepository:
         query = (
             select(InstapayIntentModel)
             .where(
-                InstapayIntentModel.status == InstapayIntentStatus.AWAITING_PAYMENT,
+                InstapayIntentModel.status
+                == ManualPaymentIntentStatus.AWAITING_PAYMENT,
                 InstapayIntentModel.expires_at <= cutoff,
             )
             .limit(limit)
@@ -159,7 +173,7 @@ class InstapayIntentRepository:
         grace_hours: int = 48,
         now: datetime | None = None,
         limit: int = 100,
-    ) -> list[InstapayIntent]:
+    ) -> list[ManualPaymentIntent]:
         """Find intents in PROOF_RECEIVED that have been sitting unreviewed.
 
         The customer uploaded a proof in time but the merchant never
@@ -177,10 +191,15 @@ class InstapayIntentRepository:
         query = (
             select(InstapayIntentModel)
             .where(
-                InstapayIntentModel.status == InstapayIntentStatus.PROOF_RECEIVED,
+                InstapayIntentModel.status == ManualPaymentIntentStatus.PROOF_RECEIVED,
                 InstapayIntentModel.expires_at <= cutoff,
             )
             .limit(limit)
         )
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
+
+
+# Back-compat alias — same class, older name. See
+# ``src.core.entities.instapay`` for why the InstaPay-era names survive.
+InstapayIntentRepository = ManualPaymentIntentRepository

@@ -458,7 +458,10 @@ def new_order_email_html(
         )
 
         instapay_block = instapay_instructions_html(
-            ipa=instapay.get("ipa", ""),
+            # ``destination`` is the rail-neutral key; ``ipa`` is the
+            # legacy one and is null on Vodafone Cash.
+            ipa=instapay.get("destination") or instapay.get("ipa", ""),
+            method=instapay.get("method", "instapay"),
             reference_code=instapay.get("reference_code", ""),
             amount_cents=int(instapay.get("amount_cents", 0)),
             currency=instapay.get("currency", currency),

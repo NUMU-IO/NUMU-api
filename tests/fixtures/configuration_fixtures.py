@@ -88,12 +88,17 @@ def invalid_paymob_credentials() -> dict[str, Any]:
 
 @pytest.fixture
 def valid_vodafone_cash_credentials() -> dict[str, Any]:
-    """Valid Vodafone Cash credentials."""
+    """Valid Vodafone Cash credentials.
+
+    Vodafone Cash on NUMU is a manual rail, not an API gateway: the
+    merchant publishes a wallet number and the customer transfers to
+    it. The wallet number is the only credential. (This fixture used
+    to carry merchant_id/api_key/pin — Vodafone's partner API, which
+    NUMU does not use and no merchant could supply.)
+    """
     return {
-        "merchant_id": "123456",  # Must be numeric for validation
-        "api_key": "vf_api_key_abcdef123456",
-        "pin": "1234",
-        "environment": "sandbox",
+        "wallet_number": "01012345678",
+        "display_name": "Vionne Store",
     }
 
 

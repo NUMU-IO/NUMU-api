@@ -255,46 +255,80 @@ class TestPaymobValidator:
 
 
 class TestVodafoneCashValidator:
-    """Test suite for VodafoneCashValidator."""
+    """Test suite for VodafoneCashValidator.
+
+    Vodafone Cash is a MANUAL rail on NUMU (publish a wallet number,
+    customer transfers, proof is verified) — not an API gateway. There
+    is no endpoint to round-trip against, so validation is a format
+    check on the wallet number, and that is the complete verdict.
+    """
 
     @pytest.fixture
     def validator(self) -> VodafoneCashValidator:
         """Create a VodafoneCashValidator instance."""
         return VodafoneCashValidator()
 
+    def test_requires_only_a_wallet_number(self, validator: VodafoneCashValidator):
+        assert validator.required_fields == ["wallet_number"]
+
     @pytest.mark.asyncio
     async def test_validate_success(
         self,
         validator: VodafoneCashValidator,
         valid_vodafone_cash_credentials: dict,
-        mock_httpx_response_success: MagicMock,
     ):
-        """Test successful Vodafone Cash credential validation."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_instance = AsyncMock()
-            mock_instance.post = AsyncMock(return_value=mock_httpx_response_success)
-            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
-            mock_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = mock_instance
+        """A well-formed Vodafone Egypt wallet number validates.
 
-            result = await validator.validate(valid_vodafone_cash_credentials)
+        Note there is no httpx mock here, unlike the gateway
+        validators: nothing is called over the network because there
+        is nothing to call.
+        """
+        result = await validator.validate(valid_vodafone_cash_credentials)
 
-            assert result.is_valid is True
-            assert result.status == ValidationStatus.VALID
+        assert result.is_valid is True
+        assert result.status == ValidationStatus.VALID
+        # The number is masked in the details — it identifies where a
+        # merchant's takings land.
+        assert result.details["wallet_number"] == "010****5678"
+        assert result.details["mode"] == "manual_transfer"
 
     @pytest.mark.asyncio
-    async def test_validate_missing_pin(
+    async def test_validate_missing_wallet_number(
         self,
         validator: VodafoneCashValidator,
         valid_vodafone_cash_credentials: dict,
     ):
-        """Test Vodafone Cash validation with missing PIN."""
         credentials = valid_vodafone_cash_credentials.copy()
-        del credentials["pin"]
+        del credentials["wallet_number"]
 
         result = await validator.validate(credentials)
 
         assert result.is_valid is False
+
+    @pytest.mark.asyncio
+    async def test_validate_rejects_a_non_vodafone_number(
+        self,
+        validator: VodafoneCashValidator,
+    ):
+        """An Orange/Etisalat number is a typo, not a Vodafone wallet.
+
+        Worth rejecting loudly: a wrong number here sends every
+        customer's payment to a stranger.
+        """
+        result = await validator.validate({"wallet_number": "01112345678"})
+
+        assert result.is_valid is False
+        assert result.error_code == "INVALID_FORMAT"
+
+    @pytest.mark.asyncio
+    async def test_validate_normalizes_international_form(
+        self,
+        validator: VodafoneCashValidator,
+    ):
+        result = await validator.validate({"wallet_number": "+20 101 234 5678"})
+
+        assert result.is_valid is True
+        assert result.details["wallet_number"] == "010****5678"
 
     def test_get_display_info(
         self,
@@ -304,10 +338,7 @@ class TestVodafoneCashValidator:
         """Test Vodafone Cash display info generation."""
         display_info = validator.get_display_info(valid_vodafone_cash_credentials)
 
-        assert "merchant_id" in display_info
-        # API key should be masked
-        if "api_key" in display_info:
-            assert "***" in display_info["api_key"]
+        assert "wallet_number" in display_info
 
 
 # =============================================================================

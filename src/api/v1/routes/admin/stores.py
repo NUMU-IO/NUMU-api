@@ -42,6 +42,10 @@ from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = logging.getLogger(__name__)
 
+from src.infrastructure.external_services.manual_transfer import (
+    MANUAL_TRANSFER_METHODS,
+)
+
 router = APIRouter()
 
 
@@ -775,7 +779,7 @@ class AdminOcrProviderResponse(BaseModel):
 @router.put(
     "/{store_id}/instapay/ocr-provider",
     response_model=SuccessResponse[AdminOcrProviderResponse],
-    summary="Assign the OCR provider for a store's InstaPay proofs",
+    summary="Assign the OCR provider for a store's manual-payment proofs",
     operation_id="admin_set_instapay_ocr_provider",
 )
 async def admin_set_instapay_ocr_provider(
@@ -784,7 +788,12 @@ async def admin_set_instapay_ocr_provider(
     admin_id: Annotated[UUID, Depends(require_admin)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ) -> SuccessResponse[AdminOcrProviderResponse]:
-    """Persist ``store.settings.payment.instapay.ocr_provider``.
+    """Persist the store's OCR provider across every manual rail.
+
+    Which OCR engine reads a store's proofs is a store-level decision,
+    not a per-rail one, so this writes the same value to the InstaPay
+    *and* Vodafone Cash settings blocks. Path keeps its ``instapay``
+    segment for the existing backoffice call site.
 
     ``provider="none"`` clears the field. Anything else must match
     one of the registered impls; unknown values are rejected at the
@@ -808,11 +817,13 @@ async def admin_set_instapay_ocr_provider(
 
     store_settings = store.settings or {}
     payment_settings = store_settings.get("payment") or {}
-    instapay_settings = payment_settings.get("instapay") or {}
     # ``"none"`` is the UX wire value for "disabled" — store as null
     # so a per-store JSONB scan doesn't have to distinguish the two.
-    instapay_settings["ocr_provider"] = None if provider == "none" else provider
-    payment_settings["instapay"] = instapay_settings
+    resolved = None if provider == "none" else provider
+    for rail in MANUAL_TRANSFER_METHODS:
+        rail_settings = payment_settings.get(rail) or {}
+        rail_settings["ocr_provider"] = resolved
+        payment_settings[rail] = rail_settings
     store_settings["payment"] = payment_settings
     store.settings = store_settings
     await store_repo.update(store)
@@ -821,13 +832,13 @@ async def admin_set_instapay_ocr_provider(
         "admin_set_instapay_ocr_provider admin=%s store=%s provider=%s",
         admin_id,
         store_id,
-        instapay_settings["ocr_provider"],
+        resolved,
     )
 
     return SuccessResponse(
         data=AdminOcrProviderResponse(
             store_id=str(store.id),
-            provider=instapay_settings["ocr_provider"],
+            provider=resolved,
         ),
         message="OCR provider updated",
     )
