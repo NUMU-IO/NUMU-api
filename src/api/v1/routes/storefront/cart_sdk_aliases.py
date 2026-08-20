@@ -254,7 +254,9 @@ async def sdk_add_cart_item(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Variant not found for this product.",
             )
-        if not variant.is_in_stock:
+        # `product.variant_is_in_stock`, not `variant.is_in_stock`: the
+        # oversell flag lives on the product, and the variant cannot see it.
+        if not product.variant_is_in_stock(variant):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This variant is out of stock.",
@@ -273,9 +275,16 @@ async def sdk_add_cart_item(
         # adds and the in-cart stepper would otherwise push a line past the
         # variant's inventory. `add_item` increments any existing line, so cap
         # the delta to what's still available.
+        # An overselling product has no ceiling to cap against — skip the cap
+        # entirely rather than let it re-impose the sold-out behaviour the
+        # guard above just lifted.
         existing = cart.get_item(request.product_id, request.variant_id)
         existing_qty = existing.quantity if existing else 0
-        allowed = max(0, variant.inventory_quantity - existing_qty)
+        allowed = (
+            request.quantity
+            if product.continue_selling_when_out_of_stock
+            else max(0, variant.inventory_quantity - existing_qty)
+        )
         if allowed <= 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -563,7 +572,7 @@ async def sdk_recover_cart(
             if (
                 variant is None
                 or variant.product_id != product.id
-                or not variant.is_in_stock
+                or not product.variant_is_in_stock(variant)
             ):
                 continue
             unit_price_cents = variant.price.cents
@@ -574,10 +583,16 @@ async def sdk_recover_cart(
                 variant_name = " / ".join(
                     str(v) for v in variant.option_values.values() if v
                 )
-            # Cap to remaining stock net of anything already in the cart.
+            # Cap to remaining stock net of anything already in the cart —
+            # unless the merchant is deliberately overselling, in which case
+            # there is no ceiling to cap against.
             existing = cart.get_item(product_id, variant_id)
             existing_qty = existing.quantity if existing else 0
-            allowed = max(0, variant.inventory_quantity - existing_qty)
+            allowed = (
+                want_qty
+                if product.continue_selling_when_out_of_stock
+                else max(0, variant.inventory_quantity - existing_qty)
+            )
             if allowed <= 0:
                 continue
             add_qty = min(want_qty, allowed)

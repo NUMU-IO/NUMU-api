@@ -99,6 +99,16 @@ class Product(BaseEntity):
         return v
 
     @property
+    def continue_selling_when_out_of_stock(self) -> bool:
+        """Has the merchant opted into overselling this product?
+
+        The flag lives on the PRODUCT (`attributes`), never on a variant, so
+        the product is the only object that can answer stock questions about
+        its own variants. See :meth:`variant_is_in_stock`.
+        """
+        return bool((self.attributes or {}).get("continue_selling_when_out_of_stock"))
+
+    @property
     def is_in_stock(self) -> bool:
         # Merchants can opt into oversell via the
         # `continue_selling_when_out_of_stock` flag — when set, the product
@@ -106,9 +116,29 @@ class Product(BaseEntity):
         # `is_out_of_stock` deliberately keep reflecting actual quantity
         # so merchant-side analytics still flag inventory that needs
         # restocking.
-        if (self.attributes or {}).get("continue_selling_when_out_of_stock"):
+        if self.continue_selling_when_out_of_stock:
             return True
         return self.quantity > 0
+
+    def variant_is_in_stock(self, variant: Any) -> bool:
+        """Is `variant` buyable right now?
+
+        ``ProductVariant.is_in_stock`` is a bare ``inventory_quantity > 0``
+        and the variant entity holds no reference back to its product, so it
+        cannot see the oversell flag. The result was a product that reported
+        itself IN stock (the flag is set) while every one of its variants
+        reported OUT — the storefront card offered a quick-add, the PDP
+        greyed out Add-to-cart, and the cart route 400'd anything that got
+        through. Ask the product, and the two levels agree.
+
+        Merchant-facing reads (`/stores/**`, inventory reports) deliberately
+        keep using ``variant.is_in_stock`` directly, for the same reason
+        ``is_low_stock`` still tracks real quantity: a merchant needs to see
+        what actually has to be restocked.
+        """
+        if self.continue_selling_when_out_of_stock:
+            return True
+        return bool(getattr(variant, "is_in_stock", True))
 
     @property
     def is_low_stock(self) -> bool:

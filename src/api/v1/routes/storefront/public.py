@@ -1355,7 +1355,11 @@ async def get_product_by_slug(
     # only on products that haven't been backfilled yet (shouldn't
     # happen post-migration); theme code branches on
     # `variants.length === 0` to fall back to product-level price.
-    variant_summaries = await _resolve_variants_for_product(session, product.id)
+    variant_summaries = await _resolve_variants_for_product(
+        session,
+        product.id,
+        continue_selling=product.continue_selling_when_out_of_stock,
+    )
 
     response = ProductResponse(
         id=str(product.id),
@@ -1458,7 +1462,7 @@ def _resolve_options_for_product(product) -> list[dict]:
 
 
 async def _resolve_variants_for_product(
-    session: AsyncSession, product_id: UUID
+    session: AsyncSession, product_id: UUID, *, continue_selling: bool = False
 ) -> list[dict]:
     """Helper — load variants and shape into ProductVariantSummary dicts.
 
@@ -1469,6 +1473,14 @@ async def _resolve_variants_for_product(
     Uses the caller's request-scoped session instead of opening a fresh
     AsyncSessionLocal — saves one pool checkout and connection-bound
     setup per PDP request.
+
+    ``continue_selling`` is the PRODUCT's oversell flag. On the storefront,
+    ``is_in_stock`` has to mean "you can buy this" — the same thing it means
+    one level up on ``product.is_in_stock`` — or a theme reading both gets
+    two contradictory answers about the same product and either greys out a
+    buyable size or offers one the cart will refuse. ``inventory_quantity``
+    is still the true count, and merchant-facing routes still read it
+    directly.
     """
     from src.infrastructure.repositories.variant_repository import VariantRepository
 
@@ -1489,7 +1501,7 @@ async def _resolve_variants_for_product(
             "sku": v.sku,
             "barcode": v.barcode,
             "inventory_quantity": v.inventory_quantity,
-            "is_in_stock": v.is_in_stock,
+            "is_in_stock": continue_selling or v.is_in_stock,
             "image_url": v.image_url,
             "weight": v.weight,
         }
