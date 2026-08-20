@@ -11,6 +11,9 @@ from src.application.use_cases.promotions._mapping import promotion_to_output
 from src.application.use_cases.promotions._validation import (
     validate_surface_payload,
 )
+from src.application.use_cases.promotions.target_roles import (
+    normalize_target_roles,
+)
 from src.core.entities.promotion import Promotion
 from src.core.entities.promotion_display import PromotionDisplay
 from src.core.entities.promotion_target import PromotionTarget
@@ -173,6 +176,11 @@ class CreatePromotionUseCase:
             )
             for t in payload.targets
         ]
+        # Multibuy scope arrives untagged from a UI that has no "role" control.
+        # Untagged, it is an eligibility gate — the offer then hides from every
+        # empty-cart shopper and forms its group from ANY two cart lines. See
+        # target_roles.normalize_target_roles.
+        targets = normalize_target_roles(created.discount_rule, targets)
         saved_displays = await self._display_repo.replace_for_promotion(
             created.id, displays
         )

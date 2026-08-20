@@ -7,6 +7,9 @@ from src.application.use_cases.promotions._mapping import promotion_to_output
 from src.application.use_cases.promotions._validation import (
     validate_surface_payload,
 )
+from src.application.use_cases.promotions.target_roles import (
+    normalize_target_roles,
+)
 from src.core.entities.promotion_display import PromotionDisplay
 from src.core.entities.promotion_target import PromotionTarget
 from src.core.events.base import EventBus
@@ -134,6 +137,9 @@ class UpdatePromotionUseCase:
                 )
                 for t in payload.targets
             ]
+            # Same normalisation as create — an edit that re-sends the targets
+            # must not silently demote the scope back to an eligibility gate.
+            targets = normalize_target_roles(saved.discount_rule, targets)
             await self._target_repo.replace_for_promotion(saved.id, targets)
         if payload.translations is not None:
             await self._translation_repo.replace_for_promotion(
