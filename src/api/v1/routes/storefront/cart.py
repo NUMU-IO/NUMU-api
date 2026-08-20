@@ -479,7 +479,9 @@ async def add_cart_item(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Variant not found for this product.",
             )
-        if not variant.is_in_stock:
+        # `product.variant_is_in_stock`, not `variant.is_in_stock`: the
+        # oversell flag lives on the product, and the variant cannot see it.
+        if not product.variant_is_in_stock(variant):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This variant is out of stock.",
@@ -499,7 +501,15 @@ async def add_cart_item(
     # push a line past the variant's inventory (add_item increments any
     # existing line). Product-level (no-variant) lines keep product stock rules.
     add_qty = request.quantity
-    if request.variant_id and variant is not None:
+    # An overselling product has no ceiling to cap against — that is the whole
+    # point of the flag — so the cap only applies when inventory is being
+    # tracked. Without this the cap re-imposes the sold-out behaviour the
+    # guard above just lifted.
+    if (
+        request.variant_id
+        and variant is not None
+        and not product.continue_selling_when_out_of_stock
+    ):
         existing = cart.get_item(request.product_id, request.variant_id)
         existing_qty = existing.quantity if existing else 0
         allowed = max(0, variant.inventory_quantity - existing_qty)
