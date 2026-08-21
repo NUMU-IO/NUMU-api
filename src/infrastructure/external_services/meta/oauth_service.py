@@ -158,7 +158,9 @@ class MetaOAuthService:
         url = f"https://graph.facebook.com/{self.api_version}/me/accounts"
         params = {
             "access_token": access_token,
-            "fields": "id,name,access_token,tasks,perms",
+            # NOTE: `perms` was removed from the Page node ages ago (`tasks`
+            # replaced it); requesting it 400s the whole call on v25.0.
+            "fields": "id,name,access_token,tasks",
         }
 
         logger.debug("meta_get_pages")
