@@ -42,7 +42,16 @@ class MetaOAuthService:
         state: str,
         redirect_uri: str | None = None,
     ) -> str:
-        """Build the Facebook Login for Business authorization URL."""
+        """Build the Facebook Login for Business authorization URL.
+
+        When META_LOGIN_CONFIG_ID is set, the configuration defines the
+        requested permissions and ``scope`` must be omitted. Without it we
+        fall back to the classic scope-based dialog. Previously an unset
+        config id was interpolated as the literal string ``config_id=None``,
+        which Meta rejects with an opaque "Login Error".
+        """
+        from urllib.parse import urlencode
+
         redirect = redirect_uri or self.redirect_uri
         if not redirect:
             raise ValueError("Redirect URI not configured")
@@ -53,24 +62,24 @@ class MetaOAuthService:
             "redirect_uri": redirect,
             "state": state,
             "response_type": "code",
-            "scope": ",".join([
+        }
+        if self.login_config_id:
+            params["config_id"] = self.login_config_id
+        else:
+            # Inbox v1 permission set — keep in sync with the App Review
+            # submission (docs/omnichannel/meta-app-review.md).
+            params["scope"] = ",".join([
                 "pages_messaging",
                 "pages_show_list",
                 # Required for POST /{page-id}/subscribed_apps (webhook attach)
                 "pages_manage_metadata",
                 "instagram_basic",
                 "instagram_manage_messages",
-                "instagram_manage_insights",
                 "whatsapp_business_messaging",
                 "whatsapp_business_management",
-                "catalog_management",
-                "business_management",
-            ]),
-            "config_id": self.login_config_id,
-        }
+            ])
 
-        query_string = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{base_url}?{query_string}"
+        return f"{base_url}?{urlencode(params)}"
 
     def generate_state(self) -> str:
         """Generate a secure state parameter for OAuth."""
