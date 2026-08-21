@@ -84,6 +84,9 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
         )
         model = result.scalar_one()
         model.status = entity.status.value
+        model.participant_name = entity.participant_name
+        model.participant_avatar_url = entity.participant_avatar_url
+        model.participant_phone_e164 = entity.participant_phone_e164
         model.last_message_at = entity.last_message_at
         model.last_message_preview = entity.last_message_preview
         model.unread_count = entity.unread_count
