@@ -39,6 +39,7 @@ class ChannelConnectionRepositoryImpl(ChannelConnectionRepository):
             token_expires_at=model.token_expires_at,
             last_error=model.last_error,
             meta_business_id=model.meta_business_id,
+            linked_page_id=model.linked_page_id,
             catalog_id=model.catalog_id,
             payment_configuration_id=model.payment_configuration_id,
             created_at=model.created_at,
@@ -75,6 +76,7 @@ class ChannelConnectionRepositoryImpl(ChannelConnectionRepository):
             token_expires_at=entity.token_expires_at,
             last_error=entity.last_error,
             meta_business_id=entity.meta_business_id,
+            linked_page_id=entity.linked_page_id,
             catalog_id=entity.catalog_id,
             payment_configuration_id=entity.payment_configuration_id,
             created_at=entity.created_at,
@@ -101,6 +103,7 @@ class ChannelConnectionRepositoryImpl(ChannelConnectionRepository):
         model.token_expires_at = entity.token_expires_at
         model.last_error = entity.last_error
         model.meta_business_id = entity.meta_business_id
+        model.linked_page_id = entity.linked_page_id
         model.catalog_id = entity.catalog_id
         model.payment_configuration_id = entity.payment_configuration_id
         model.updated_at = entity.updated_at

@@ -43,6 +43,7 @@ class ChannelConnectionModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta_business_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    linked_page_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     catalog_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_configuration_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
