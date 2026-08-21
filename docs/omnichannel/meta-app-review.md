@@ -11,6 +11,7 @@ the omnichannel inbox: business verification + review together typically take
 | `pages_show_list` | List the merchant's Pages in the connect wizard | Usually granted with login |
 | `pages_messaging` | Read + reply to Page (Messenger) conversations | **Advanced Access required** |
 | `pages_manage_metadata` | `POST /{page-id}/subscribed_apps` to attach our webhook | **Advanced Access required**; without it the subscription call in `ConnectMetaUseCase` fails |
+| `pages_read_engagement` | Read the Page node — required for the `instagram_business_account` lookup (IG discovery) | **Advanced Access required**; verified live 2026-08-21: without it even `GET /{page-id}?fields=id,name` 400s |
 | `instagram_basic` | Resolve the IG Professional account linked to the Page | |
 | `instagram_manage_messages` | Read + reply to Instagram DMs | **Advanced Access required** |
 
