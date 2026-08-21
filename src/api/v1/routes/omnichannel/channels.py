@@ -38,7 +38,7 @@ def _build_connection_response(conn: ChannelConnection) -> ChannelConnectionDTO:
         external_account_id=conn.external_account_id,
         external_account_name=conn.external_account_name,
         external_phone_number_id=conn.external_phone_number_id,
-        is_active=conn.is_active,
+        is_active=conn.is_active(),
         token_expires_at=conn.token_expires_at.isoformat()
         if conn.token_expires_at
         else None,
