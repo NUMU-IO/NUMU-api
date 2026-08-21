@@ -147,10 +147,13 @@ async def link_customer(
         raise EntityNotFoundError("Customer not found")
 
     thread.customer_id = dto.customer_id
-    # A linked customer is the better identity: show their real name and
-    # phone in the inbox instead of the social handle.
+    # A linked customer is the better identity: show their real phone in
+    # the inbox instead of nothing. customer.phone is a PhoneNumber value
+    # object, so take its canonical E.164 string.
     if customer.phone and not thread.participant_phone_e164:
-        thread.participant_phone_e164 = customer.phone
+        thread.participant_phone_e164 = getattr(customer.phone, "value", None) or str(
+            customer.phone
+        )
     await thread_repo.update(thread)
 
     return SuccessResponse(data=None, message="Conversation linked to customer")
