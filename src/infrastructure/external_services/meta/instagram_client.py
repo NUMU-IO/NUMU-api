@@ -9,10 +9,19 @@ logger = get_logger(__name__)
 
 
 class InstagramClient:
-    """Client for Instagram Direct Message API."""
+    """Client for Instagram Direct Message API.
 
-    def __init__(self, ig_user_id: str, access_token: str):
+    Sends run through the LINKED FACEBOOK PAGE node with the page token:
+    ``POST /{page-id}/messages``. The IG user node rejects the same call
+    with "(#3) Application does not have the capability" (verified
+    against the live Graph API 2026-08-21).
+    """
+
+    def __init__(self, ig_user_id: str, access_token: str, page_id: str | None = None):
         self.ig_user_id = ig_user_id
+        # Fall back to the IG id only so a misconfigured connection fails
+        # loudly at Meta rather than silently addressing the wrong node.
+        self.page_id = page_id or ig_user_id
         self.client = MetaGraphClient(access_token)
 
     async def close(self) -> None:
@@ -24,7 +33,7 @@ class InstagramClient:
         text: str,
     ) -> dict[str, Any]:
         """Send a text message to an Instagram user."""
-        endpoint = f"{self.ig_user_id}/messages"
+        endpoint = f"{self.page_id}/messages"
         data = {
             # Meta rejects the legacy "igid" key: the IG Messaging API takes
             # the IGSID under "id", same shape as Messenger.
@@ -45,7 +54,7 @@ class InstagramClient:
         attachment_url: str,
     ) -> dict[str, Any]:
         """Send an attachment (image, video)."""
-        endpoint = f"{self.ig_user_id}/messages"
+        endpoint = f"{self.page_id}/messages"
         data = {
             # Meta rejects the legacy "igid" key: the IG Messaging API takes
             # the IGSID under "id", same shape as Messenger.
@@ -72,7 +81,7 @@ class InstagramClient:
         product_id: str,
     ) -> dict[str, Any]:
         """Send a product catalog item."""
-        endpoint = f"{self.ig_user_id}/messages"
+        endpoint = f"{self.page_id}/messages"
         data = {
             # Meta rejects the legacy "igid" key: the IG Messaging API takes
             # the IGSID under "id", same shape as Messenger.
@@ -96,7 +105,7 @@ class InstagramClient:
 
     async def mark_seen(self, recipient_igid: str, message_id: str) -> dict[str, Any]:
         """Mark a message as seen."""
-        endpoint = f"{self.ig_user_id}/messages"
+        endpoint = f"{self.page_id}/messages"
         data = {
             # Meta rejects the legacy "igid" key: the IG Messaging API takes
             # the IGSID under "id", same shape as Messenger.
