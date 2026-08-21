@@ -1,6 +1,6 @@
 """ConnectMeta use case - handles OAuth flow for connecting channels."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.application.dto.omnichannel import ConnectMetaCallbackDTO
@@ -116,6 +116,18 @@ class ConnectMetaUseCase:
             )
             connections.append(conn)
 
+            # Attach our app to the page's messaging webhooks — without this
+            # Meta never delivers a single event, regardless of the app-level
+            # callback configuration. Instagram DMs ride on the linked page's
+            # subscription.
+            subscribed = await self.oauth_service.subscribe_page_to_webhook(
+                page_id=page_id,
+                page_access_token=page_token,
+            )
+            if subscribed:
+                conn.webhook_subscribed_at = datetime.now(UTC)
+                await self.channel_connection_repository.update(conn)
+
             ig_account = await self.oauth_service.get_instagram_business_account(
                 page_id=page_id,
                 page_access_token=page_token,
@@ -130,6 +142,9 @@ class ConnectMetaUseCase:
                     expires_at=long_lived.get("expires_at"),
                     scopes=["instagram_basic", "instagram_manage_messages"],
                 )
+                if subscribed:
+                    ig_conn.webhook_subscribed_at = datetime.now(UTC)
+                    await self.channel_connection_repository.update(ig_conn)
                 connections.append(ig_conn)
 
         waba_accounts = await self.oauth_service.get_whatsapp_business_accounts(

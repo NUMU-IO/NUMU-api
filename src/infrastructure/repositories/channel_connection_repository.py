@@ -175,6 +175,23 @@ class ChannelConnectionRepositoryImpl(ChannelConnectionRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_by_channel_and_external_account(
+        self,
+        channel: ChannelType,
+        external_account_id: str,
+    ) -> ChannelConnection | None:
+        result = await self.session.execute(
+            select(ChannelConnectionModel)
+            .where(
+                ChannelConnectionModel.channel == channel.value,
+                ChannelConnectionModel.external_account_id == external_account_id,
+            )
+            .order_by(ChannelConnectionModel.created_at.desc())
+            .limit(1)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def update_status(
         self,
         connection_id: UUID,

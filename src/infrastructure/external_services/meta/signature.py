@@ -1,12 +1,54 @@
 """Meta webhook signature verification."""
 
+import base64
 import hashlib
 import hmac
+import json
 
 from src.config import settings
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def parse_signed_request(
+    signed_request: str,
+    app_secret: str | None = None,
+) -> dict | None:
+    """Parse and verify a Meta ``signed_request`` payload.
+
+    Used by the deauthorize and data-deletion callbacks. Format is
+    ``<base64url signature>.<base64url json payload>`` signed with
+    HMAC-SHA256 over the raw payload segment using the app secret.
+
+    Returns the decoded payload dict, or None if the signature is
+    invalid or the request is malformed.
+    """
+    secret = app_secret or settings.meta_app_secret
+    if not secret:
+        logger.warning("meta_signed_request_no_secret")
+        return None
+    if not signed_request or "." not in signed_request:
+        return None
+
+    encoded_sig, payload = signed_request.split(".", 1)
+    try:
+        sig = base64.urlsafe_b64decode(encoded_sig + "=" * (-len(encoded_sig) % 4))
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except (ValueError, json.JSONDecodeError):
+        logger.warning("meta_signed_request_malformed")
+        return None
+
+    expected = hmac.new(
+        secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).digest()
+    if not hmac.compare_digest(sig, expected):
+        logger.warning("meta_signed_request_invalid_signature")
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    return data
 
 
 def verify_x_hub_signature(
