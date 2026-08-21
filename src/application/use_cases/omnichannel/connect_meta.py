@@ -82,6 +82,9 @@ class ConnectMetaUseCase:
         store = await self.store_repository.get_by_id(store_id)
         if not store:
             raise ValidationError("Store not found")
+        if not store.tenant_id:
+            raise ValidationError("Store has no tenant")
+        tenant_id = store.tenant_id
 
         tokens = await self.oauth_service.exchange_code_for_tokens(
             code=dto.code,
@@ -107,6 +110,7 @@ class ConnectMetaUseCase:
 
             conn = await self._create_connection(
                 store_id=store_id,
+                tenant_id=tenant_id,
                 channel=ChannelType.FACEBOOK,
                 external_account_id=page_id,
                 external_account_name=page_name,
@@ -135,6 +139,7 @@ class ConnectMetaUseCase:
             if ig_account:
                 ig_conn = await self._create_connection(
                     store_id=store_id,
+                    tenant_id=tenant_id,
                     channel=ChannelType.INSTAGRAM,
                     external_account_id=ig_account["id"],
                     external_account_name=ig_account.get("name", page_name),
@@ -162,6 +167,7 @@ class ConnectMetaUseCase:
             for phone in phones:
                 wa_conn = await self._create_connection(
                     store_id=store_id,
+                    tenant_id=tenant_id,
                     channel=ChannelType.WHATSAPP,
                     external_account_id=waba_id,
                     external_account_name=waba.get("business_name", "WhatsApp"),
@@ -181,6 +187,7 @@ class ConnectMetaUseCase:
     async def _create_connection(
         self,
         store_id: UUID,
+        tenant_id: UUID,
         channel: ChannelType,
         external_account_id: str,
         external_account_name: str,
@@ -213,7 +220,7 @@ class ConnectMetaUseCase:
             return await self.channel_connection_repository.update(existing)
 
         entity = ChannelConnection(
-            tenant_id=store_id,
+            tenant_id=tenant_id,
             store_id=store_id,
             channel=channel,
             status=ConnectionStatus.ACTIVE,
