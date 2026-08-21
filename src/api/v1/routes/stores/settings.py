@@ -90,6 +90,9 @@ from src.infrastructure.external_services.manual_transfer.merchant_config import
     read_config_view,
 )
 from src.infrastructure.external_services.manual_transfer.payment_service import (
+    default_auto_approve_enabled,
+)
+from src.infrastructure.external_services.manual_transfer.payment_service import (
     human_name as manual_human_name,
 )
 from src.infrastructure.external_services.manual_transfer.payment_service import (
@@ -3003,10 +3006,23 @@ def _manual_input(request, *, destination) -> ManualConfigInput:
     )
 
 
+def _rail_auto_approve(view: dict, method: ManualPaymentMethod) -> bool:
+    """Read the switch, falling back to the RAIL's default — never to True.
+
+    A response that means "I don't know" must not read as "on" for a
+    control that decides whether money gets accepted on an unverified
+    screenshot.
+    """
+    return bool(view.get("auto_approve_enabled", default_auto_approve_enabled(method)))
+
+
 def _instapay_response(view: dict) -> InstapayCredentialsResponse:
     """Render the shared config view in the InstaPay-era response shape."""
     if not view.get("is_configured"):
-        return InstapayCredentialsResponse(is_configured=False)
+        return InstapayCredentialsResponse(
+            is_configured=False,
+            auto_approve_enabled=_rail_auto_approve(view, ManualPaymentMethod.INSTAPAY),
+        )
     if view.get("unreadable"):
         return InstapayCredentialsResponse(
             is_configured=True,
@@ -3019,7 +3035,7 @@ def _instapay_response(view: dict) -> InstapayCredentialsResponse:
         ipa_masked=view.get("destination_masked"),
         ipa_display_name=view.get("display_name"),
         fallback_phone=view.get("fallback_phone"),
-        auto_approve_enabled=view.get("auto_approve_enabled", True),
+        auto_approve_enabled=_rail_auto_approve(view, ManualPaymentMethod.INSTAPAY),
         auto_approve_threshold_cents=view.get("auto_approve_threshold_cents"),
         auto_approve_daily_cap_cents=view.get("auto_approve_daily_cap_cents"),
         auto_approve_daily_count=view.get("auto_approve_daily_count"),
@@ -3040,7 +3056,12 @@ def _instapay_response(view: dict) -> InstapayCredentialsResponse:
 def _vodafone_response(view: dict) -> VodafoneCashCredentialsResponse:
     """Render the shared config view in the Vodafone Cash response shape."""
     if not view.get("is_configured"):
-        return VodafoneCashCredentialsResponse(is_configured=False)
+        return VodafoneCashCredentialsResponse(
+            is_configured=False,
+            auto_approve_enabled=_rail_auto_approve(
+                view, ManualPaymentMethod.VODAFONE_CASH
+            ),
+        )
     if view.get("unreadable"):
         return VodafoneCashCredentialsResponse(
             is_configured=True,
@@ -3053,7 +3074,9 @@ def _vodafone_response(view: dict) -> VodafoneCashCredentialsResponse:
         wallet_number_masked=view.get("destination_masked"),
         display_name=view.get("display_name"),
         fallback_phone=view.get("fallback_phone"),
-        auto_approve_enabled=view.get("auto_approve_enabled", True),
+        auto_approve_enabled=_rail_auto_approve(
+            view, ManualPaymentMethod.VODAFONE_CASH
+        ),
         auto_approve_threshold_cents=view.get("auto_approve_threshold_cents"),
         auto_approve_daily_cap_cents=view.get("auto_approve_daily_cap_cents"),
         auto_approve_daily_count=view.get("auto_approve_daily_count"),
