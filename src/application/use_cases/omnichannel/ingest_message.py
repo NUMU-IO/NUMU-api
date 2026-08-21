@@ -1,5 +1,6 @@
 """Ingest inbound message use case."""
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -47,6 +48,8 @@ class IngestInboundMessageUseCase:
         body: str | None,
         attachment_url: str | None,
         external_timestamp: int,
+        profile_fetcher: Callable[[], Awaitable[tuple[str | None, str | None]]]
+        | None = None,
     ) -> ChannelMessage:
         """Ingest an inbound message.
 
@@ -81,6 +84,18 @@ class IngestInboundMessageUseCase:
 
         timestamp = datetime.fromtimestamp(external_timestamp, tz=UTC)
 
+        # Webhook events don't carry the sender's display name; resolve it
+        # from the Graph profile API once per thread (new thread, or an
+        # existing one that never got a name).
+        profile_name = sender_name
+        profile_avatar: str | None = None
+        needs_profile = thread is None or not thread.participant_name
+        if needs_profile and not profile_name and profile_fetcher:
+            try:
+                profile_name, profile_avatar = await profile_fetcher()
+            except Exception:  # noqa: BLE001 — profile is cosmetic, never fatal
+                profile_name, profile_avatar = None, None
+
         if not thread:
             thread = MessageThread(
                 tenant_id=connection.tenant_id,
@@ -88,7 +103,8 @@ class IngestInboundMessageUseCase:
                 channel=connection.channel,
                 channel_connection_id=connection_id,
                 external_participant_id=sender_id,
-                participant_name=sender_name,
+                participant_name=profile_name,
+                participant_avatar_url=profile_avatar,
                 status=ThreadStatus.OPEN,
                 last_message_at=timestamp,
                 last_message_preview=body[:100] if body else "Attachment",
@@ -96,6 +112,11 @@ class IngestInboundMessageUseCase:
             )
             await self.message_thread_repository.create(thread)
         else:
+            if not thread.participant_name and profile_name:
+                thread.participant_name = profile_name
+                thread.participant_avatar_url = (
+                    thread.participant_avatar_url or profile_avatar
+                )
             thread.last_message_at = timestamp
             thread.last_message_preview = body[:100] if body else "Attachment"
             thread.unread_count = (thread.unread_count or 0) + 1
