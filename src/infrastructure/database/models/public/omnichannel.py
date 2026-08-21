@@ -85,6 +85,11 @@ class MessageThreadModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
         ForeignKey("public.users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    customer_id: Mapped[UUID_T | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.customers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Column is `metadata` in the DB (see 20260416_000001_omnichannel_inbox);
     # the Python attribute is renamed because `metadata` collides with
     # SQLAlchemy's DeclarativeBase.metadata.
