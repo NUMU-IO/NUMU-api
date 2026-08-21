@@ -185,9 +185,13 @@ class BackfillConversationsUseCase:
             "fields": f"participants,updated_time,messages.limit(50){{{_MESSAGE_FIELDS}}}",
             "limit": _CONVERSATION_PAGE_SIZE,
         }
+        node = connection.external_account_id
         if connection.channel == ChannelType.INSTAGRAM:
+            # Instagram conversations live on the linked Page node, same as
+            # sends — the IG user node rejects the call with (#3).
             params["platform"] = "instagram"
-        return f"{connection.external_account_id}/conversations", params
+            node = connection.linked_page_id or node
+        return f"{node}/conversations", params
 
     async def _ingest_conversation(
         self,

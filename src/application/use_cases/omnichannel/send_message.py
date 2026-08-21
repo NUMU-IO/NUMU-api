@@ -255,6 +255,9 @@ class SendMessageUseCase:
         client = InstagramClient(
             ig_user_id=connection.external_account_id or "",
             access_token=access_token,
+            # Sends go through the linked Page node; the IG user node
+            # returns "(#3) does not have the capability".
+            page_id=connection.linked_page_id,
         )
 
         try:

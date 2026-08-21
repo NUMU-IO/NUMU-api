@@ -149,6 +149,7 @@ class ConnectMetaUseCase:
                     access_token=page_token,
                     expires_at=long_lived.get("expires_at"),
                     scopes=["instagram_basic", "instagram_manage_messages"],
+                    linked_page_id=page_id,
                 )
                 if subscribed:
                     ig_conn.webhook_subscribed_at = datetime.now(UTC)
@@ -234,6 +235,7 @@ class ConnectMetaUseCase:
         scopes: list[str],
         external_phone_number_id: str | None = None,
         meta_business_id: str | None = None,
+        linked_page_id: str | None = None,
     ) -> ChannelConnection:
         existing = await self.channel_connection_repository.get_by_external_account(
             store_id=store_id,
@@ -255,6 +257,7 @@ class ConnectMetaUseCase:
             existing.status = ConnectionStatus.ACTIVE
             existing.external_phone_number_id = external_phone_number_id
             existing.meta_business_id = meta_business_id
+            existing.linked_page_id = linked_page_id or existing.linked_page_id
             return await self.channel_connection_repository.update(existing)
 
         entity = ChannelConnection(
@@ -270,5 +273,6 @@ class ConnectMetaUseCase:
             scopes=scopes,
             token_expires_at=expires_at,
             meta_business_id=meta_business_id,
+            linked_page_id=linked_page_id,
         )
         return await self.channel_connection_repository.create(entity)

@@ -43,6 +43,9 @@ class ChannelConnection(BaseEntity):
     token_expires_at: datetime | None = None
     last_error: str | None = None
     meta_business_id: str | None = None
+    # Instagram only: the Facebook Page this IG account is linked to.
+    # IG sends and conversation reads run through the PAGE node.
+    linked_page_id: str | None = None
     catalog_id: str | None = None
     payment_configuration_id: str | None = None
 
