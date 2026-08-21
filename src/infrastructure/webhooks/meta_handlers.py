@@ -66,6 +66,55 @@ async def handle_message_webhook(
         )
         return
 
+    async def _fetch_sender_profile() -> tuple[str | None, str | None]:
+        """Resolve the sender's display name + avatar from the Graph API.
+
+        Uses the connection's own (page/IG) token. Cosmetic only — any
+        failure is swallowed by the caller.
+        """
+        from src.infrastructure.external_services.meta.graph_client import (
+            MetaGraphClient,
+        )
+        from src.infrastructure.external_services.secrets.secrets_manager import (
+            SecretsManager,
+        )
+
+        if not (connection.encrypted_credentials and connection.credential_key_id):
+            return None, None
+        decrypted = await SecretsManager().decrypt(
+            connection.encrypted_credentials, connection.credential_key_id
+        )
+        token = decrypted.get("access_token", "")
+        if not token:
+            return None, None
+
+        client = MetaGraphClient(token)
+        try:
+            if channel == ChannelType.INSTAGRAM:
+                data = await client.get(
+                    str(sender_id), params={"fields": "name,username,profile_pic"}
+                )
+                name = data.get("name") or data.get("username")
+                avatar = data.get("profile_pic")
+            else:
+                data = await client.get(
+                    str(sender_id),
+                    params={"fields": "first_name,last_name,profile_pic"},
+                )
+                name = (
+                    " ".join(
+                        p for p in (data.get("first_name"), data.get("last_name")) if p
+                    )
+                    or None
+                )
+                avatar = data.get("profile_pic")
+            # Some Graph variants wrap the picture as {data: {url}}.
+            if isinstance(avatar, dict):
+                avatar = (avatar.get("data") or {}).get("url")
+            return name, avatar
+        finally:
+            await client.close()
+
     # Messenger/IG events carry text as a plain string (unlike WhatsApp's
     # ``text.body``); attachments declare their own type.
     text = message_data.get("text")
@@ -95,6 +144,7 @@ async def handle_message_webhook(
         body=text,
         attachment_url=attachment_url,
         external_timestamp=timestamp,
+        profile_fetcher=_fetch_sender_profile,
     )
 
 
