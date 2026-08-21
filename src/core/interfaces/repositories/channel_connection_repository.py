@@ -42,6 +42,20 @@ class ChannelConnectionRepository(BaseRepository[ChannelConnection]):
         ...
 
     @abstractmethod
+    async def get_by_channel_and_external_account(
+        self,
+        channel: ChannelType,
+        external_account_id: str,
+    ) -> ChannelConnection | None:
+        """Get connection by channel and external account ID, across stores.
+
+        Webhook events carry only the page/IG account id — no store or
+        tenant context — so this is the entry-point lookup for inbound
+        message routing.
+        """
+        ...
+
+    @abstractmethod
     async def update_status(
         self,
         connection_id: UUID,

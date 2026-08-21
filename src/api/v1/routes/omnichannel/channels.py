@@ -29,7 +29,7 @@ from src.infrastructure.repositories import (
 router = APIRouter(tags=["Omnichannel"])
 
 
-async def _build_connection_response(conn: ChannelConnection) -> ChannelConnectionDTO:
+def _build_connection_response(conn: ChannelConnection) -> ChannelConnectionDTO:
     """Build ChannelConnectionDTO from entity."""
     return ChannelConnectionDTO(
         id=conn.id,
