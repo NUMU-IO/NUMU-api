@@ -64,6 +64,39 @@ class IAbandonedCheckoutRepository(BaseRepository[AbandonedCheckout]):
         ...
 
     @abstractmethod
+    async def mark_recovered_for_shopper(
+        self,
+        *,
+        store_id: UUID,
+        session_fingerprint: str | None,
+        email: str | None,
+        phone: str | None,
+        order_id: UUID | None = None,
+        when: datetime | None = None,
+    ) -> int:
+        """Flip every open cart matching (fingerprint OR email OR phone) to
+        recovered. Returns the number of rows updated. Used by the checkout
+        success path — one order recovers all of that shopper's open carts.
+        """
+        ...
+
+    @abstractmethod
+    async def recently_recovered_for_shopper(
+        self,
+        *,
+        store_id: UUID,
+        session_fingerprint: str | None,
+        email: str | None,
+        phone: str | None,
+        within_seconds: int,
+    ) -> bool:
+        """Whether a cart of this shopper was recovered within the window.
+        Lets the cart-track upsert ignore post-order echoes instead of
+        re-creating the just-converted cart as a new abandoned row.
+        """
+        ...
+
+    @abstractmethod
     async def mark_stale_as_abandoned(
         self, store_id: UUID, threshold_seconds: int
     ) -> int:

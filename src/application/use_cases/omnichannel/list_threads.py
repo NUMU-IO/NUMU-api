@@ -78,6 +78,7 @@ class ListThreadsUseCase:
                     if t.last_message_at
                     else None,
                     unread_count=t.unread_count,
+                    customer_id=t.customer_id,
                 )
                 for t in threads
             ],
@@ -124,4 +125,5 @@ class GetThreadUseCase:
             if thread.last_message_at
             else None,
             unread_count=thread.unread_count,
+            customer_id=thread.customer_id,
         )

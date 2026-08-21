@@ -33,6 +33,8 @@ class MessageThread(BaseEntity):
     last_message_preview: str | None = None
     unread_count: int = 0
     assigned_user_id: UUID | None = None
+    # Set only by an explicit agent action — never inferred from names.
+    customer_id: UUID | None = None
     metadata: dict[str, Any] = {}
 
     def mark_unread(self) -> None:

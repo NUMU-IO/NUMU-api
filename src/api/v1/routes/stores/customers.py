@@ -417,6 +417,7 @@ class JourneyTouchResponse(BaseModel):
     utm_content: str | None = None
     gclid: str | None = None
     fbclid: str | None = None
+    ttclid: str | None = None
     referrer: str | None = None
     landing_path: str | None = None
     campaign_id: str | None = None
@@ -509,6 +510,7 @@ async def get_customer_journey(
             utm_content=t.utm_content,
             gclid=t.gclid,
             fbclid=t.fbclid,
+            ttclid=t.ttclid,
             referrer=t.referrer,
             landing_path=t.landing_path,
             campaign_id=str(t.campaign_id) if t.campaign_id else None,

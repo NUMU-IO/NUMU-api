@@ -52,6 +52,10 @@ class AttributionTouch(BaseModel):
     utm_content: str | None = Field(default=None, max_length=_UTM_MAX)
     gclid: str | None = Field(default=None, max_length=_CLICK_ID_MAX)
     fbclid: str | None = Field(default=None, max_length=_CLICK_ID_MAX)
+    # TikTok's click id. A TikTok ad click carries ONLY this — no UTMs — so
+    # until it was part of the touch a TikTok landing updated nothing and the
+    # visit inherited whatever click came before it (usually Meta's).
+    ttclid: str | None = Field(default=None, max_length=_CLICK_ID_MAX)
     referrer: str | None = Field(default=None, max_length=_REFERRER_MAX)
     landing_path: str | None = Field(default=None, max_length=_LANDING_PATH_MAX)
 

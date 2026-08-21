@@ -104,6 +104,12 @@ class MarkReadDTO(BaseModel):
     thread_id: UUID
 
 
+class LinkCustomerDTO(BaseModel):
+    """Request DTO for linking a conversation to a customer."""
+
+    customer_id: UUID
+
+
 class ResolveThreadDTO(BaseModel):
     """Request DTO for resolving a thread."""
 
@@ -177,6 +183,7 @@ class MessageThreadDTO(BaseModel):
     last_message_preview: str | None
     last_message_at: str | None
     unread_count: int
+    customer_id: UUID | None = None
 
 
 class ChannelMessageDTO(BaseModel):

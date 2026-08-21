@@ -7,16 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
+    get_customer_repository,
     get_message_thread_repository,
 )
 from src.api.responses import SuccessResponse
+from src.application.dto.omnichannel import LinkCustomerDTO
 from src.application.use_cases.omnichannel import (
     GetThreadUseCase,
     ListThreadsUseCase,
     MarkThreadReadUseCase,
     ResolveThreadUseCase,
 )
+from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.repositories import MessageThreadRepositoryImpl
+from src.infrastructure.repositories.customer_repository import CustomerRepository
 
 router = APIRouter(tags=["Omnichannel"])
 
@@ -113,6 +117,65 @@ async def resolve_thread(
     use_case = ResolveThreadUseCase(message_thread_repository=thread_repo)
     await use_case.execute(thread_id=thread_id)
     return SuccessResponse(data=None, message="Thread resolved")
+
+
+@router.post(
+    "/{thread_id}/customer",
+    response_model=SuccessResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def link_customer(
+    thread_id: UUID,
+    store_id: UUID,
+    dto: LinkCustomerDTO,
+    db: AsyncSession = Depends(get_db),
+    thread_repo: MessageThreadRepositoryImpl = Depends(get_message_thread_repository),
+    customer_repo: CustomerRepository = Depends(get_customer_repository),
+) -> SuccessResponse:
+    """Link this conversation to a customer record.
+
+    Deliberate and reversible: Meta gives us no phone number, and guessing
+    from a display name would merge two different people into one customer
+    history. An agent confirms who they're talking to, then links.
+    """
+    thread = await thread_repo.get_by_id(thread_id)
+    if not thread or thread.store_id != store_id:
+        raise EntityNotFoundError("Thread not found")
+
+    customer = await customer_repo.get_by_id(dto.customer_id)
+    if not customer or customer.store_id != store_id:
+        raise EntityNotFoundError("Customer not found")
+
+    thread.customer_id = dto.customer_id
+    # A linked customer is the better identity: show their real name and
+    # phone in the inbox instead of the social handle.
+    if customer.phone and not thread.participant_phone_e164:
+        thread.participant_phone_e164 = customer.phone
+    await thread_repo.update(thread)
+
+    return SuccessResponse(data=None, message="Conversation linked to customer")
+
+
+@router.delete(
+    "/{thread_id}/customer",
+    response_model=SuccessResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def unlink_customer(
+    thread_id: UUID,
+    store_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    thread_repo: MessageThreadRepositoryImpl = Depends(get_message_thread_repository),
+) -> SuccessResponse:
+    """Remove the customer link from this conversation."""
+    thread = await thread_repo.get_by_id(thread_id)
+    if not thread or thread.store_id != store_id:
+        raise EntityNotFoundError("Thread not found")
+
+    thread.customer_id = None
+    await thread_repo.update(thread)
+
+    return SuccessResponse(data=None, message="Customer link removed")
 
 
 __all__ = ["router"]

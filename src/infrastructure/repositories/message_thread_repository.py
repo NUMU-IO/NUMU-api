@@ -36,6 +36,7 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
             last_message_preview=model.last_message_preview,
             unread_count=model.unread_count,
             assigned_user_id=model.assigned_user_id,
+            customer_id=model.customer_id,
             metadata=model.thread_metadata or {},
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -70,6 +71,7 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
             last_message_preview=entity.last_message_preview,
             unread_count=entity.unread_count,
             assigned_user_id=entity.assigned_user_id,
+            customer_id=entity.customer_id,
             thread_metadata=entity.metadata,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
@@ -91,6 +93,7 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
         model.last_message_preview = entity.last_message_preview
         model.unread_count = entity.unread_count
         model.assigned_user_id = entity.assigned_user_id
+        model.customer_id = entity.customer_id
         model.thread_metadata = entity.metadata
         model.updated_at = entity.updated_at
         await self.session.flush()
