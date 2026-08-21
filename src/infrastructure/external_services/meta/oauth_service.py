@@ -56,6 +56,8 @@ class MetaOAuthService:
             "scope": ",".join([
                 "pages_messaging",
                 "pages_show_list",
+                # Required for POST /{page-id}/subscribed_apps (webhook attach)
+                "pages_manage_metadata",
                 "instagram_basic",
                 "instagram_manage_messages",
                 "instagram_manage_insights",
@@ -251,22 +253,21 @@ class MetaOAuthService:
         self,
         page_id: str,
         page_access_token: str,
-        callback_url: str,
-        verify_token: str,
     ) -> bool:
-        """Subscribe a Facebook Page to webhook callbacks."""
-        url = f"https://graph.facebook.com/{self.api_version}/{page_id}/subscriptions"
+        """Subscribe our app to a Facebook Page's messaging webhooks.
+
+        The callback URL and verify token are app-level settings configured
+        once in the Meta App Dashboard; per page we only attach the app via
+        ``/{page-id}/subscribed_apps``. Instagram DMs ride on the linked
+        page's subscription.
+        """
+        url = f"https://graph.facebook.com/{self.api_version}/{page_id}/subscribed_apps"
         data = {
-            "object": "page",
-            "callback_url": callback_url,
-            "verify_token": verify_token,
-            "fields": "messages,messaging_postbacks,messaging_handovers,message_deliveries,message_reads",
+            "subscribed_fields": "messages,messaging_postbacks,message_deliveries,message_reads",
             "access_token": page_access_token,
         }
 
-        logger.info(
-            "meta_subscribe_page_webhook", page_id=page_id, callback_url=callback_url
-        )
+        logger.info("meta_subscribe_page_webhook", page_id=page_id)
 
         response = await self._client.post(url, json=data)
         if response.status_code == 200:
