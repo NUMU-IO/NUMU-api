@@ -26,7 +26,9 @@ class InstagramClient:
         """Send a text message to an Instagram user."""
         endpoint = f"{self.ig_user_id}/messages"
         data = {
-            "recipient": {"igid": recipient_igid},
+            # Meta rejects the legacy "igid" key: the IG Messaging API takes
+            # the IGSID under "id", same shape as Messenger.
+            "recipient": {"id": recipient_igid},
             "message": {"text": text},
         }
 
@@ -45,7 +47,9 @@ class InstagramClient:
         """Send an attachment (image, video)."""
         endpoint = f"{self.ig_user_id}/messages"
         data = {
-            "recipient": {"igid": recipient_igid},
+            # Meta rejects the legacy "igid" key: the IG Messaging API takes
+            # the IGSID under "id", same shape as Messenger.
+            "recipient": {"id": recipient_igid},
             "message": {
                 "attachment": {
                     "type": attachment_type,
@@ -70,7 +74,9 @@ class InstagramClient:
         """Send a product catalog item."""
         endpoint = f"{self.ig_user_id}/messages"
         data = {
-            "recipient": {"igid": recipient_igid},
+            # Meta rejects the legacy "igid" key: the IG Messaging API takes
+            # the IGSID under "id", same shape as Messenger.
+            "recipient": {"id": recipient_igid},
             "message": {
                 "attachment": {
                     "type": "template",
@@ -92,7 +98,9 @@ class InstagramClient:
         """Mark a message as seen."""
         endpoint = f"{self.ig_user_id}/messages"
         data = {
-            "recipient": {"igid": recipient_igid},
+            # Meta rejects the legacy "igid" key: the IG Messaging API takes
+            # the IGSID under "id", same shape as Messenger.
+            "recipient": {"id": recipient_igid},
             "message": {"mark_seen": {"message_id": message_id}},
         }
 

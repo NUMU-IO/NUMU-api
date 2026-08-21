@@ -209,6 +209,7 @@ class ChannelConnectionRepositoryImpl(ChannelConnectionRepository):
         model.status = status.value
         model.last_error = error
         await self.session.flush()
+        await self.session.refresh(model)
         return self._to_entity(model)
 
     async def list_by_tenant(

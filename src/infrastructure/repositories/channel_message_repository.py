@@ -163,6 +163,7 @@ class ChannelMessageRepositoryImpl(ChannelMessageRepository):
         model.error_code = error_code
         model.error_message = error_message
         await self.session.flush()
+        await self.session.refresh(model)
         return self._to_entity(model)
 
     async def count_by_thread(self, thread_id: UUID) -> int:
