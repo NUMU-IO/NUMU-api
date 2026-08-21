@@ -15,10 +15,13 @@ from src.core.interfaces.repositories.channel_connection_repository import (
     ChannelConnectionRepository,
 )
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.logging import get_logger
 from src.infrastructure.external_services.meta import MetaOAuthService
 from src.infrastructure.external_services.secrets.secrets_manager import (
     SecretsManager,
 )
+
+logger = get_logger(__name__)
 
 
 class ConnectMetaUseCase:
@@ -152,35 +155,46 @@ class ConnectMetaUseCase:
                     await self.channel_connection_repository.update(ig_conn)
                 connections.append(ig_conn)
 
-        waba_accounts = await self.oauth_service.get_whatsapp_business_accounts(
-            access_token=access_token,
-        )
-        for waba in waba_accounts:
-            waba_id = waba["id"]
-            business_id = waba.get("business_id")
-
-            phones = await self.oauth_service.get_whatsapp_phone_numbers(
-                waba_id=waba_id,
+        # WABA discovery via /me/businesses requires business_management,
+        # which the v1 inbox scope deliberately omits. WhatsApp has its own
+        # connect rails (platform WABA / BYO), so a failure here must never
+        # sink the FB/IG connections that already succeeded.
+        try:
+            waba_accounts = await self.oauth_service.get_whatsapp_business_accounts(
                 access_token=access_token,
             )
+            for waba in waba_accounts:
+                waba_id = waba["id"]
+                business_id = waba.get("business_id")
 
-            for phone in phones:
-                wa_conn = await self._create_connection(
-                    store_id=store_id,
-                    tenant_id=tenant_id,
-                    channel=ChannelType.WHATSAPP,
-                    external_account_id=waba_id,
-                    external_account_name=waba.get("business_name", "WhatsApp"),
+                phones = await self.oauth_service.get_whatsapp_phone_numbers(
+                    waba_id=waba_id,
                     access_token=access_token,
-                    expires_at=long_lived.get("expires_at"),
-                    external_phone_number_id=phone["id"],
-                    scopes=[
-                        "whatsapp_business_messaging",
-                        "whatsapp_business_management",
-                    ],
-                    meta_business_id=business_id,
                 )
-                connections.append(wa_conn)
+
+                for phone in phones:
+                    wa_conn = await self._create_connection(
+                        store_id=store_id,
+                        tenant_id=tenant_id,
+                        channel=ChannelType.WHATSAPP,
+                        external_account_id=waba_id,
+                        external_account_name=waba.get("business_name", "WhatsApp"),
+                        access_token=access_token,
+                        expires_at=long_lived.get("expires_at"),
+                        external_phone_number_id=phone["id"],
+                        scopes=[
+                            "whatsapp_business_messaging",
+                            "whatsapp_business_management",
+                        ],
+                        meta_business_id=business_id,
+                    )
+                    connections.append(wa_conn)
+        except Exception as exc:
+            # Don't log str(exc): httpx embeds the full URL, token included.
+            logger.info(
+                "meta_connect_waba_discovery_skipped",
+                error_type=type(exc).__name__,
+            )
 
         return connections
 
