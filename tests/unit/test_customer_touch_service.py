@@ -222,3 +222,33 @@ class TestUtmsEqual:
             )
             == expected_equal
         )
+
+
+class TestTikTokClickIdSignal:
+    """A TikTok ad click carries ONLY ``ttclid`` — it must count as a touch.
+
+    Before ``ttclid`` was part of the contract such a landing recorded no
+    touch, so the journey kept the previous (usually Meta) click as the
+    visit's source.
+    """
+
+    def test_only_ttclid(self):
+        assert _has_attribution_signal(
+            utm_source=None,
+            utm_medium=None,
+            utm_campaign=None,
+            gclid=None,
+            fbclid=None,
+            referrer=None,
+            ttclid="E.C.P.v2abc",
+        )
+
+    def test_ttclid_defaults_to_none_for_legacy_callers(self):
+        assert not _has_attribution_signal(
+            utm_source=None,
+            utm_medium=None,
+            utm_campaign=None,
+            gclid=None,
+            fbclid=None,
+            referrer=None,
+        )

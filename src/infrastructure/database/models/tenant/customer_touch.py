@@ -59,6 +59,7 @@ class CustomerTouchModel(Base, UUIDMixin, TenantMixin):
     utm_content: Mapped[str | None] = mapped_column(String(200), nullable=True)
     gclid: Mapped[str | None] = mapped_column(String(256), nullable=True)
     fbclid: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    ttclid: Mapped[str | None] = mapped_column(String(256), nullable=True)
     referrer: Mapped[str | None] = mapped_column(String(500), nullable=True)
     landing_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     campaign_id: Mapped[str | None] = mapped_column(

@@ -43,6 +43,7 @@ def _has_attribution_signal(
     gclid: str | None,
     fbclid: str | None,
     referrer: str | None,
+    ttclid: str | None = None,
 ) -> bool:
     """Decide whether a request carries enough to count as a touch.
 
@@ -53,7 +54,15 @@ def _has_attribution_signal(
     """
     return any(
         v and v.strip()
-        for v in (utm_source, utm_medium, utm_campaign, gclid, fbclid, referrer)
+        for v in (
+            utm_source,
+            utm_medium,
+            utm_campaign,
+            gclid,
+            fbclid,
+            ttclid,
+            referrer,
+        )
     )
 
 
@@ -103,6 +112,7 @@ async def maybe_capture_touch(
     landing_path: str | None,
     campaign_id: UUID | None,
     ts: datetime | None = None,
+    ttclid: str | None = None,
 ) -> CustomerTouchModel | None:
     """Append a customer_touches row when this event represents a real
     new touch; skip otherwise.
@@ -129,6 +139,7 @@ async def maybe_capture_touch(
         utm_campaign=utm_campaign,
         gclid=gclid,
         fbclid=fbclid,
+        ttclid=ttclid,
         referrer=referrer,
     ):
         return None
@@ -202,6 +213,7 @@ async def maybe_capture_touch(
         utm_content=utm_content,
         gclid=gclid,
         fbclid=fbclid,
+        ttclid=ttclid,
         referrer=referrer,
         landing_path=landing_path,
         campaign_id=campaign_id,
