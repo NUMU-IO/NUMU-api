@@ -14,6 +14,9 @@ from src.core.entities.channel_connection import ChannelType
 
 logger = logging.getLogger(__name__)
 
+# Attachment types that map straight onto MessageType.
+_KNOWN_TYPES = {"image", "video", "audio", "document", "sticker"}
+
 
 async def handle_message_webhook(
     db: AsyncSession,
@@ -120,8 +123,16 @@ async def handle_message_webhook(
     text = message_data.get("text")
     attachments = message_data.get("attachments") or []
     attachment = attachments[0] if attachments else {}
-    message_type = "text" if text else attachment.get("type", "text")
     attachment_url = (attachment.get("payload") or {}).get("url")
+    if text:
+        message_type = "text"
+    else:
+        # Instagram sends shared posts, reels and story replies with types
+        # our enum has no name for ("share", "ig_reel", "story_mention").
+        # Storing them as documents keeps the attachment link instead of
+        # rendering an empty bubble.
+        raw_type = attachment.get("type", "text")
+        message_type = raw_type if raw_type in _KNOWN_TYPES else "document"
 
     # Messenger timestamps are epoch milliseconds; ingest expects seconds.
     timestamp = event.get("timestamp") or 0

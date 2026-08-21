@@ -4,6 +4,8 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from src.core.entities.channel_message import (
     ChannelMessage,
     MessageDirection,
@@ -142,7 +144,19 @@ class IngestInboundMessageUseCase:
             status=MessageStatus.RECEIVED,
             raw_payload={},
         )
-        await self.channel_message_repository.create(message)
+        try:
+            await self.channel_message_repository.create(message)
+        except IntegrityError:
+            # Meta redelivers, and two retries can clear the existence check
+            # above before either inserts. The unique index is the real
+            # guard; losing the race just means it's already stored.
+            existing = await self.channel_message_repository.get_by_external_id(
+                channel=connection.channel,
+                external_message_id=external_message_id,
+            )
+            if existing:
+                return existing
+            raise
 
         if self.realtime_publisher:
             await self.realtime_publisher.publish(

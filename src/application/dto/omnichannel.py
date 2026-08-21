@@ -20,6 +20,13 @@ class ConnectMetaCallbackDTO(BaseModel):
     redirect_uri: str
 
 
+class ConnectAssetsDTO(BaseModel):
+    """Request DTO for connecting the Pages a merchant selected."""
+
+    state: str
+    page_ids: list[str]
+
+
 class DisconnectChannelDTO(BaseModel):
     """Request DTO for disconnecting a channel."""
 
@@ -153,6 +160,9 @@ class ChannelConnectionDTO(BaseModel):
     external_phone_number_id: str | None
     is_active: bool
     token_expires_at: str | None
+    linked_page_id: str | None = None
+    webhook_subscribed_at: str | None = None
+    last_error: str | None = None
 
 
 class MessageThreadDTO(BaseModel):

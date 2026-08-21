@@ -13,6 +13,7 @@ from src.api.dependencies.repositories import (
 from src.api.responses import SuccessResponse
 from src.application.dto.omnichannel import (
     ChannelConnectionDTO,
+    ConnectAssetsDTO,
     ConnectMetaCallbackDTO,
     ConnectMetaDTO,
 )
@@ -43,6 +44,11 @@ def _build_connection_response(conn: ChannelConnection) -> ChannelConnectionDTO:
         token_expires_at=conn.token_expires_at.isoformat()
         if conn.token_expires_at
         else None,
+        linked_page_id=conn.linked_page_id,
+        webhook_subscribed_at=conn.webhook_subscribed_at.isoformat()
+        if conn.webhook_subscribed_at
+        else None,
+        last_error=conn.last_error,
     )
 
 
@@ -81,12 +87,42 @@ async def meta_callback(
     ),
     store_repo: StoreRepository = Depends(get_store_repository),
 ) -> SuccessResponse:
-    """Handle OAuth callback - exchange code for tokens."""
+    """Exchange the OAuth code and list the Pages available to connect.
+
+    Nothing is connected yet — the merchant picks which assets they want,
+    then POSTs them to /connect-assets.
+    """
     use_case = ConnectMetaUseCase(
         channel_connection_repository=channel_connection_repo,
         store_repository=store_repo,
     )
-    connections = await use_case.handle_callback(dto=dto, store_id=store_id)
+    assets = await use_case.list_available_assets(dto=dto, store_id=store_id)
+    return SuccessResponse(
+        data={"state": dto.state, "assets": assets},
+        message=None,
+    )
+
+
+@router.post("/connect-assets", status_code=status.HTTP_200_OK)
+async def connect_assets(
+    dto: ConnectAssetsDTO,
+    store_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    channel_connection_repo: ChannelConnectionRepositoryImpl = Depends(
+        get_channel_connection_repository
+    ),
+    store_repo: StoreRepository = Depends(get_store_repository),
+) -> SuccessResponse:
+    """Connect the Pages (and their linked Instagram accounts) chosen."""
+    use_case = ConnectMetaUseCase(
+        channel_connection_repository=channel_connection_repo,
+        store_repository=store_repo,
+    )
+    connections = await use_case.connect_assets(
+        state=dto.state,
+        store_id=store_id,
+        page_ids=dto.page_ids,
+    )
     return SuccessResponse(
         data=[_build_connection_response(conn) for conn in connections],
         message="Channels connected successfully",
