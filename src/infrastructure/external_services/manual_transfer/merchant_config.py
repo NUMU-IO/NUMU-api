@@ -284,7 +284,15 @@ async def read_config_view(
     """
     block = block or {}
     if not block.get("encrypted_credentials"):
-        return {"is_configured": False, "enabled": False}
+        # `auto_approve_enabled` is included even here. Omitting it let the
+        # response fall through to a Pydantic default, and the hub then
+        # echoed that back on the merchant's first save — switching
+        # auto-approval on during setup. Never let "unknown" mean "on".
+        return {
+            "is_configured": False,
+            "enabled": False,
+            "auto_approve_enabled": default_auto_approve_enabled(method),
+        }
 
     from src.infrastructure.external_services.secrets.secrets_manager import (
         get_secrets_manager,
@@ -310,6 +318,9 @@ async def read_config_view(
             "enabled": bool(block.get("enabled")),
             "last_configured": block.get("last_configured"),
             "unreadable": True,
+            "auto_approve_enabled": bool(
+                block.get("auto_approve_enabled", default_auto_approve_enabled(method))
+            ),
         }
 
     view: dict[str, Any] = {

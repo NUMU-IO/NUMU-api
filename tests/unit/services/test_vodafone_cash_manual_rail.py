@@ -579,3 +579,80 @@ async def test_instapay_config_keeps_auto_approval_on():
         method=IP, existing={}, data=ManualConfigInput(destination="merchant@cib")
     )
     assert block["auto_approve_enabled"] is True
+
+
+# ── The first-time-setup round trip ──────────────────────────────────
+#
+# The regression a merchant actually hit: auto-approval defaulted OFF, yet a
+# fake picture still marked their order PAID. The default was fine; the
+# ROUND TRIP switched it on.
+#
+#   open the card (nothing configured)  -> API says auto_approve_enabled
+#   -> hub hydrates whatever it was told
+#   -> merchant saves their wallet number, echoing it back
+#   -> stored
+#
+# Any layer that answers "on" when it means "I don't know" turns setup into
+# an opt-in the merchant never made.
+
+
+@pytest.mark.asyncio
+async def test_the_not_configured_view_reports_auto_approval_off():
+    """This is the value the hub hydrates from before anything is saved."""
+    view = await read_config_view(method=VC, block={})
+    assert view["auto_approve_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_block_still_reports_off():
+    view = await read_config_view(
+        method=VC,
+        block={"encrypted_credentials": "not-base64", "encryption_key_id": "gone"},
+    )
+    assert view.get("unreadable") is True
+    assert view["auto_approve_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_setting_up_the_rail_does_not_switch_auto_approval_on():
+    """Replays the whole loop, echoing the API's answer back like the hub does."""
+    # 1. Merchant opens the card. Nothing configured yet.
+    view = await read_config_view(method=VC, block={})
+    hydrated = view["auto_approve_enabled"]
+
+    # 2. They type a wallet number and save. The hub sends back what it was
+    #    given — which is exactly how the bug propagated.
+    block, _ = await build_config_block(
+        method=VC,
+        existing={},
+        data=ManualConfigInput(
+            destination="01012345678", auto_approve_enabled=hydrated
+        ),
+    )
+
+    # 3. Nothing they did asked for auto-approval.
+    assert block["auto_approve_enabled"] is False
+
+    # 4. And the proof engine agrees, which is the part that costs money.
+    decision = evaluate(
+        intent=_intent(),
+        proof=_proof(),
+        config=_config(enabled=block["auto_approve_enabled"]),
+        facts=_facts(),
+    )
+    assert decision.approved is False
+    assert "auto_approval_disabled" in decision.reasons
+
+
+@pytest.mark.asyncio
+async def test_the_same_loop_keeps_instapay_on():
+    view = await read_config_view(method=IP, block={})
+    block, _ = await build_config_block(
+        method=IP,
+        existing={},
+        data=ManualConfigInput(
+            destination="merchant@cib",
+            auto_approve_enabled=view["auto_approve_enabled"],
+        ),
+    )
+    assert block["auto_approve_enabled"] is True

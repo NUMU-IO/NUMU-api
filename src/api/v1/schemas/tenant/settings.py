@@ -357,7 +357,11 @@ class VodafoneCashCredentialsResponse(BaseModel):
     wallet_number_masked: str | None = None
     display_name: str | None = None
     fallback_phone: str | None = None
-    auto_approve_enabled: bool = True
+    # OFF is the safe answer for a wallet rail, and the safe answer for
+    # a response that does not know. Defaulting this to True let a
+    # not-yet-configured store report auto-approval as on, which the
+    # hub then echoed back on the merchant's first save.
+    auto_approve_enabled: bool = False
     auto_approve_threshold_cents: int | None = None
     auto_approve_daily_cap_cents: int | None = None
     auto_approve_daily_count: int | None = None
