@@ -79,7 +79,7 @@ class SendMessageUseCase:
 
         if connection.channel == ChannelType.WHATSAPP:
             await self._check_24_hour_window(thread, connection)
-            await self._send_whatsapp(
+            provider_response = await self._send_whatsapp(
                 connection,
                 thread,
                 message,
@@ -89,11 +89,11 @@ class SendMessageUseCase:
                 template_params,
             )
         elif connection.channel == ChannelType.FACEBOOK:
-            await self._send_messenger(
+            provider_response = await self._send_messenger(
                 connection, thread, message, attachment_type, attachment_url
             )
         elif connection.channel == ChannelType.INSTAGRAM:
-            await self._send_instagram(
+            provider_response = await self._send_instagram(
                 connection, thread, message, attachment_type, attachment_url
             )
         else:
@@ -115,6 +115,10 @@ class SendMessageUseCase:
             direction=MessageDirection.OUTBOUND,
             channel=connection.channel,
             sender_external_id=connection.external_account_id,
+            # Meta's id for this message: lets its echo webhook dedupe
+            # against the row we just wrote, and lets delivery/read
+            # receipts find it later.
+            external_message_id=(provider_response or {}).get("message_id"),
             type=msg_type,
             body=message,
             attachment_url=attachment_url,
@@ -157,7 +161,7 @@ class SendMessageUseCase:
         attachment_url: str | None,
         template_name: str | None,
         template_params: dict | None,
-    ) -> None:
+    ) -> dict | None:
         from src.infrastructure.external_services.secrets import SecretsManager
 
         secrets = SecretsManager()
@@ -175,7 +179,7 @@ class SendMessageUseCase:
 
         try:
             if template_name:
-                await client.send_template(
+                return await client.send_template(
                     recipient_phone=thread.participant_phone_e164 or "",
                     template_name=template_name,
                     language="ar_AR",
@@ -184,12 +188,12 @@ class SendMessageUseCase:
                     else None,
                 )
             elif attachment_type == "image":
-                await client.send_image(
+                return await client.send_image(
                     recipient_phone=thread.participant_phone_e164 or "",
                     image_url=attachment_url,
                 )
             else:
-                await client.send_text(
+                return await client.send_text(
                     recipient_phone=thread.participant_phone_e164 or "",
                     text=message,
                 )
@@ -203,7 +207,7 @@ class SendMessageUseCase:
         message: str,
         attachment_type: str | None,
         attachment_url: str | None,
-    ) -> None:
+    ) -> dict | None:
         from src.infrastructure.external_services.secrets import SecretsManager
 
         secrets = SecretsManager()
@@ -221,13 +225,13 @@ class SendMessageUseCase:
 
         try:
             if attachment_url:
-                await client.send_attachment(
+                return await client.send_attachment(
                     recipient_id=thread.external_participant_id,
                     attachment_type=attachment_type or "image",
                     attachment_url=attachment_url,
                 )
             else:
-                await client.send_text(
+                return await client.send_text(
                     recipient_id=thread.external_participant_id,
                     text=message,
                 )
@@ -241,7 +245,7 @@ class SendMessageUseCase:
         message: str,
         attachment_type: str | None,
         attachment_url: str | None,
-    ) -> None:
+    ) -> dict | None:
         from src.infrastructure.external_services.secrets import SecretsManager
 
         secrets = SecretsManager()
@@ -263,13 +267,13 @@ class SendMessageUseCase:
         try:
             if attachment_url:
                 att_type = "image" if attachment_type in ("image", "video") else "image"
-                await client.send_attachment(
+                return await client.send_attachment(
                     recipient_igid=thread.external_participant_id,
                     attachment_type=att_type,
                     attachment_url=attachment_url,
                 )
             else:
-                await client.send_text(
+                return await client.send_text(
                     recipient_igid=thread.external_participant_id,
                     text=message,
                 )
