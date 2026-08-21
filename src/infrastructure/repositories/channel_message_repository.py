@@ -83,8 +83,13 @@ class ChannelMessageRepositoryImpl(ChannelMessageRepository):
             raw_payload=entity.raw_payload,
             created_at=entity.created_at,
         )
-        self.session.add(model)
-        await self.session.flush()
+        # SAVEPOINT: the (channel, external_message_id) unique index fires
+        # when Meta redelivers a webhook, and an un-nested failed flush
+        # would poison the whole request transaction. Inside begin_nested
+        # only the savepoint rolls back, so the caller can handle the
+        # IntegrityError and carry on.
+        async with self.session.begin_nested():
+            self.session.add(model)
         return entity
 
     async def update(self, entity: ChannelMessage) -> ChannelMessage:
