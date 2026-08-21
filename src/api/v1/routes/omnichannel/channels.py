@@ -21,6 +21,7 @@ from src.application.use_cases.omnichannel import (
     DisconnectChannelUseCase,
 )
 from src.core.entities.channel_connection import ChannelConnection
+from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.repositories import (
     ChannelConnectionRepositoryImpl,
     StoreRepository,
@@ -90,6 +91,32 @@ async def meta_callback(
         data=[_build_connection_response(conn) for conn in connections],
         message="Channels connected successfully",
     )
+
+
+@router.post("/{connection_id}/sync-history", status_code=status.HTTP_202_ACCEPTED)
+async def sync_history(
+    connection_id: UUID,
+    store_id: UUID,
+    since_days: int = Query(90, ge=1, le=365),
+    channel_connection_repo: ChannelConnectionRepositoryImpl = Depends(
+        get_channel_connection_repository
+    ),
+) -> SuccessResponse:
+    """Re-import past conversations for a connection.
+
+    Runs automatically after connecting; this endpoint is the manual
+    re-run (history deeper than the default window, or after a gap).
+    """
+    from src.infrastructure.messaging.tasks.omnichannel_tasks import (
+        backfill_conversations,
+    )
+
+    connection = await channel_connection_repo.get_by_id(connection_id)
+    if not connection or connection.store_id != store_id:
+        raise EntityNotFoundError("Connection not found")
+
+    backfill_conversations.delay(str(connection_id), since_days)
+    return SuccessResponse(data=None, message="History sync started")
 
 
 @router.delete("/{connection_id}", status_code=status.HTTP_200_OK)

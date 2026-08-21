@@ -196,7 +196,31 @@ class ConnectMetaUseCase:
                 error_type=type(exc).__name__,
             )
 
+        self._schedule_backfill(connections)
         return connections
+
+    def _schedule_backfill(self, connections: list[ChannelConnection]) -> None:
+        """Queue history backfill so the inbox isn't empty on day one.
+
+        Delayed because these rows are still uncommitted here — the task
+        opens its own session and would not see them yet. Never fatal: a
+        queue failure must not fail the connect flow.
+        """
+        from src.infrastructure.messaging.tasks.omnichannel_tasks import (
+            backfill_conversations,
+        )
+
+        for conn in connections:
+            if conn.channel == ChannelType.WHATSAPP:
+                continue
+            try:
+                backfill_conversations.apply_async(args=[str(conn.id)], countdown=20)
+            except Exception as exc:
+                logger.warning(
+                    "meta_connect_backfill_enqueue_failed",
+                    channel=conn.channel.value,
+                    error_type=type(exc).__name__,
+                )
 
     async def _create_connection(
         self,
