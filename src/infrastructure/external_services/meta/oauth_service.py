@@ -73,6 +73,9 @@ class MetaOAuthService:
                 "pages_show_list",
                 # Required for POST /{page-id}/subscribed_apps (webhook attach)
                 "pages_manage_metadata",
+                # Required to read the Page node at all — including the
+                # instagram_business_account field used for IG discovery.
+                "pages_read_engagement",
                 "instagram_basic",
                 "instagram_manage_messages",
                 "whatsapp_business_messaging",
