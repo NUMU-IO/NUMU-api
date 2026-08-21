@@ -180,6 +180,10 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
             return None
         model.status = status.value
         await self.session.flush()
+        # updated_at carries a server-side onupdate, so flushing an UPDATE
+        # expires it — reading it back in _to_entity would trigger a lazy
+        # load outside the async greenlet (MissingGreenlet).
+        await self.session.refresh(model)
         return self._to_entity(model)
 
     async def mark_read(self, thread_id: UUID) -> MessageThread | None:
@@ -191,6 +195,7 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
             return None
         model.unread_count = 0
         await self.session.flush()
+        await self.session.refresh(model)
         return self._to_entity(model)
 
     async def increment_unread(self, thread_id: UUID) -> MessageThread | None:
@@ -202,6 +207,7 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
             return None
         model.unread_count = (model.unread_count or 0) + 1
         await self.session.flush()
+        await self.session.refresh(model)
         return self._to_entity(model)
 
     async def update_last_message(
@@ -219,4 +225,5 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
         model.last_message_preview = message_preview
         model.last_message_at = message_at
         await self.session.flush()
+        await self.session.refresh(model)
         return self._to_entity(model)
