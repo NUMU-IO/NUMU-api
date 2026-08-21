@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote, unquote, urlparse
 from uuid import UUID
 
@@ -51,6 +51,9 @@ from src.application.dto.order import (
 )
 from src.application.services.attribution_sanitizer import sanitize_utm
 from src.application.services.campaign_resolver import resolve_campaign_id
+from src.application.services.click_id_attribution import (
+    effective_utm_source_medium,
+)
 from src.application.services.cod_trust_service import (
     CodTrustDecision,
     LocationSignals,
@@ -1743,6 +1746,12 @@ async def checkout(
     _first = request.attribution.first_touch if request.attribution else None
     _eff_utm_source = sanitize_utm(_last.utm_source if _last else request.utm_source)
     _eff_utm_medium = sanitize_utm(_last.utm_medium if _last else request.utm_medium)
+    # Untagged ad clicks: derive the platform from the click id on the last
+    # touch (ttclid → tiktok, fbclid → facebook, gclid → google) so the order
+    # names the same source the funnel rows and abandoned checkout already do.
+    _eff_utm_source, _eff_utm_medium = effective_utm_source_medium(
+        _last, _eff_utm_source, _eff_utm_medium
+    )
     _eff_utm_campaign = sanitize_utm(
         _last.utm_campaign if _last else request.utm_campaign
     )
@@ -2867,29 +2876,46 @@ async def checkout(
 
     # ── Abandoned-checkout reconciliation ────────────────────────────────
     # The storefront writes an `abandoned_checkouts` row when the customer
-    # adds items to the cart (POST /cart/track). If we find a matching
-    # un-recovered row for this (session_fingerprint, email) pair, mark it
-    # recovered with the resulting order_id so it disappears from the
-    # merchant's Abandoned Checkouts page. Fire-and-forget on failure.
+    # adds items to the cart (POST /cart/track). Mark EVERY un-recovered row
+    # for this shopper (session_fingerprint OR email OR phone) recovered with
+    # the resulting order_id so none of them linger on the merchant's
+    # Abandoned Checkouts page. Fire-and-forget on failure.
+    #
+    # Shopper-wide, not "the most recent row": a recovery-link visitor lands
+    # with a fresh fingerprint, the identity layer writes a phone-only row
+    # long before email exists, and a returning shopper's earlier session
+    # can hold its own row — any of those left a second row "Abandoned"
+    # with the same items and value after the order was placed.
     try:
-        candidate_email = (
+        # `Customer.email` / `.phone` are VALUE OBJECTS (`Email.value`,
+        # `PhoneNumber.value`), not strings. The previous reconciliation put
+        # `current_customer.email` straight into a SQL `==`; asyncpg could not
+        # bind the object, the exception was swallowed by this try, and no
+        # logged-in shopper's cart was ever marked recovered — which, with
+        # phone-first OTP signing most shoppers in, was nearly every order.
+        # Guests (plain `guest_email` string) were the only ones that worked.
+        candidate_email = _vo_str(
             current_customer.email if current_customer else request.guest_email
         )
-        # Phone joins the match so a recovery-link visitor (fresh
-        # fingerprint, no email) completing the order marks the ORIGINAL
-        # phone-bearing row recovered — previously the ghost row got
-        # marked and the real one sat "abandoned" forever.
-        active_cart = await abandoned_repo.find_active_for_session(
+        candidate_phone = _vo_str(
+            (request.shipping_address.phone or None)
+            if request.shipping_address
+            else None
+        )
+        if not candidate_phone and current_customer is not None:
+            candidate_phone = _vo_str(getattr(current_customer, "phone", None))
+        recovered_rows = await abandoned_repo.mark_recovered_for_shopper(
             store_id=store_id,
             session_fingerprint=request.session_fingerprint,
             email=candidate_email,
-            phone=(request.shipping_address.phone or None)
-            if request.shipping_address
-            else None,
+            phone=candidate_phone,
+            order_id=created_order.id,
         )
-        if active_cart is not None:
-            await abandoned_repo.mark_recovered(
-                active_cart.id, order_id=created_order.id
+        if recovered_rows:
+            logger.info(
+                "abandoned_checkouts_recovered_by_order order_id=%s rows=%s",
+                created_order.id,
+                recovered_rows,
             )
     except Exception as e:
         logger.warning(f"Failed to mark abandoned checkout as recovered: {e}")
@@ -2985,6 +3011,21 @@ async def checkout(
 # Cart tracking — feeds the merchant hub's Abandoned Checkouts page.
 # ============================================================================
 
+# How long after a shopper's cart is recovered by an order that a cart-track
+# POST with no open row is treated as a post-order echo and dropped rather
+# than re-creating the just-ordered cart as a new abandoned row.
+_POST_ORDER_ECHO_SECONDS = 600
+
+
+def _vo_str(value: Any) -> str | None:
+    """Plain string from a value object (`Email`, `PhoneNumber`) or a str."""
+    if value is None:
+        return None
+    raw = getattr(value, "value", value)
+    if not isinstance(raw, str):
+        raw = str(raw)
+    return raw.strip() or None
+
 
 class CartTrackLineItem(BaseModel):
     """Snapshot of a single cart line item sent from the storefront."""
@@ -3077,6 +3118,21 @@ async def cart_track(
             phone=request.phone,
             checkout_id=request.recovered_from_id,
         )
+
+        # No open row, but this shopper converted moments ago: the POST is
+        # the checkout's in-flight enrichment or a debounced cart-change
+        # echo that read the cart before the order cleared it. Creating a
+        # row here re-listed the cart that had JUST been ordered as a new
+        # "Abandoned" checkout. A genuinely new cart started inside the
+        # window is picked up by its next change once the window closes.
+        if existing is None and await abandoned_repo.recently_recovered_for_shopper(
+            store_id=store_id,
+            session_fingerprint=request.session_fingerprint,
+            email=candidate_email,
+            phone=request.phone,
+            within_seconds=_POST_ORDER_ECHO_SECONDS,
+        ):
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
         now = datetime.now(UTC)
         line_items_payload = [li.model_dump(mode="json") for li in request.line_items]

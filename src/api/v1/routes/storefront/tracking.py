@@ -32,6 +32,9 @@ from src.application.services.campaign_auto_match import (
     resolve_via_auto_match,
 )
 from src.application.services.campaign_resolver import resolve_campaign_id
+from src.application.services.click_id_attribution import (
+    effective_utm_source_medium,
+)
 from src.application.services.device_classifier import classify as classify_device
 from src.config import settings
 from src.core.entities.attribution import AttributionSnapshot
@@ -518,6 +521,12 @@ async def track_page_view(
         # impossible).
         f_utm_source = sanitize_utm(last_touch.utm_source if last_touch else None)
         f_utm_medium = sanitize_utm(last_touch.utm_medium if last_touch else None)
+        # Ad clicks carry a click id, not UTMs. Derive the platform from it
+        # so a TikTok/Meta/Google session is bucketed under its platform —
+        # and the journey touch below is recorded — instead of "Direct".
+        f_utm_source, f_utm_medium = effective_utm_source_medium(
+            last_touch, f_utm_source, f_utm_medium
+        )
         f_utm_campaign = sanitize_utm(last_touch.utm_campaign if last_touch else None)
         f_utm_term = sanitize_utm(last_touch.utm_term if last_touch else None)
         f_utm_content = sanitize_utm(last_touch.utm_content if last_touch else None)
@@ -600,6 +609,7 @@ async def track_page_view(
             utm_content=f_utm_content,
             gclid=f_gclid,
             fbclid=f_fbclid,
+            ttclid=last_touch.ttclid if last_touch else None,
             referrer=f_referrer,
             landing_path=f_landing_path,
             campaign_id=f_campaign_id,
@@ -640,6 +650,7 @@ async def track_page_view(
             ip=raw_ip,
             user_agent=ua,
             session=funnel_repo.session,
+            landing_ttclid=last_touch.ttclid if last_touch else None,
         )
     except Exception:
         logger.exception(
@@ -745,6 +756,10 @@ async def track_analytics_event(
         last_touch = attribution.last_touch if attribution else None
         e_utm_source = sanitize_utm(last_touch.utm_source if last_touch else None)
         e_utm_medium = sanitize_utm(last_touch.utm_medium if last_touch else None)
+        # Same click-id fallback as track_page_view — both rows must agree.
+        e_utm_source, e_utm_medium = effective_utm_source_medium(
+            last_touch, e_utm_source, e_utm_medium
+        )
         e_utm_campaign = sanitize_utm(last_touch.utm_campaign if last_touch else None)
         e_utm_term = sanitize_utm(last_touch.utm_term if last_touch else None)
         e_utm_content = sanitize_utm(last_touch.utm_content if last_touch else None)
@@ -1490,9 +1505,15 @@ async def _maybe_enqueue_tiktok_capi(
     ip: str | None,
     user_agent: str,
     session,
+    landing_ttclid: str | None = None,
 ) -> None:
     """Enqueue ``tiktok_capi_send_event`` when this store has the TikTok
     Events API configured. Sibling of ``_maybe_enqueue_meta_capi``.
+
+    ``landing_ttclid`` is the click id from the attribution envelope's
+    last touch — the fallback when the ``ttclid`` cookie is absent (it is
+    only written once ``<TikTokPixel>`` mounts, i.e. when the store has a
+    browser pixel configured; an Events-API-only store never had it).
 
     Mapping (funnel step → TikTok event) lives in the task module's
     ``FUNNEL_STEP_TO_TIKTOK_EVENT`` (e.g. order_completed → CompletePayment,
@@ -1524,8 +1545,8 @@ async def _maybe_enqueue_tiktok_capi(
 
     # Compose user_data from request signals + explicit body.user_data.
     user_data = dict(body.user_data or {})
-    if "ttclid" not in user_data and body.ttclid:
-        user_data["ttclid"] = body.ttclid
+    if "ttclid" not in user_data and (body.ttclid or landing_ttclid):
+        user_data["ttclid"] = body.ttclid or landing_ttclid
     if "ttp" not in user_data and body.ttp:
         user_data["ttp"] = body.ttp
     if "ip" not in user_data and ip:

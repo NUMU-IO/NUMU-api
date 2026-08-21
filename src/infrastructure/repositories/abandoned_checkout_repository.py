@@ -147,9 +147,20 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
         model.utm_campaign = entity.utm_campaign
         model.last_activity_at = entity.last_activity_at
         model.abandoned_at = entity.abandoned_at
-        model.recovered_at = entity.recovered_at
-        model.recovery_email_sent_at = entity.recovery_email_sent_at
-        model.recovered_order_id = entity.recovered_order_id
+        # Recovery is monotonic — an upsert may SET these, never clear them.
+        #
+        # The storefront's cart-track POST and the order request overlap at
+        # checkout (the submit handler fires both). Under READ COMMITTED the
+        # cart-track UPDATE blocks on the row the order has just flipped to
+        # recovered, then proceeds with the entity it loaded BEFORE that flip
+        # — and wrote `recovered_at = NULL` back. The order existed, the row
+        # sat "Abandoned" on the merchant's page regardless.
+        if entity.recovered_at is not None:
+            model.recovered_at = entity.recovered_at
+        if entity.recovery_email_sent_at is not None:
+            model.recovery_email_sent_at = entity.recovery_email_sent_at
+        if entity.recovered_order_id is not None:
+            model.recovered_order_id = entity.recovered_order_id
         model.extra_data = entity.extra_data
         await self.session.flush()
         await self.session.refresh(model)
@@ -325,6 +336,121 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
         result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
+
+    @staticmethod
+    def _shopper_clauses(
+        session_fingerprint: str | None,
+        email: str | None,
+        phone: str | None,
+    ) -> list:
+        """OR-able predicates identifying one shopper's rows.
+
+        Email compares case-insensitively (the checkout form and the cart
+        tracker can capitalise differently). Phone matches exactly OR on the
+        last 9 digits, so "+20 100 123 4567", "01001234567" and
+        "+201001234567" — all real inputs for one number — line up.
+        """
+        # Callers may hand over `Email` / `PhoneNumber` value objects.
+        email = getattr(email, "value", email)
+        phone = getattr(phone, "value", phone)
+        clauses: list = []
+        if session_fingerprint:
+            clauses.append(
+                AbandonedCheckoutModel.extra_data["session_fingerprint"].astext
+                == session_fingerprint
+            )
+        if email and email.strip():
+            clauses.append(
+                func.lower(AbandonedCheckoutModel.email) == email.strip().lower()
+            )
+        if phone and phone.strip():
+            clauses.append(AbandonedCheckoutModel.phone == phone)
+            digits = "".join(ch for ch in phone if ch.isdigit())
+            if len(digits) >= 9:
+                clauses.append(
+                    func.right(
+                        func.regexp_replace(
+                            AbandonedCheckoutModel.phone, r"\D", "", "g"
+                        ),
+                        9,
+                    )
+                    == digits[-9:]
+                )
+        return clauses
+
+    async def mark_recovered_for_shopper(
+        self,
+        *,
+        store_id: UUID,
+        session_fingerprint: str | None,
+        email: str | None,
+        phone: str | None,
+        order_id: UUID | None = None,
+        when: datetime | None = None,
+    ) -> int:
+        """Flip EVERY open cart of this shopper to recovered.
+
+        Order-time reconciliation used to recover only the single most
+        recent matching row. A shopper with two open rows — the common
+        shape once the identity layer writes a phone-only row early and a
+        later session writes another — converted, and the other row stayed
+        "Abandoned" with the same items and value. One order recovers all
+        of that shopper's open carts; the merchant is not going to win them
+        back twice.
+        """
+        clauses = self._shopper_clauses(session_fingerprint, email, phone)
+        if not clauses:
+            return 0
+        now = datetime.now(UTC)
+        values: dict = {"recovered_at": when or now, "updated_at": now}
+        if order_id is not None:
+            values["recovered_order_id"] = order_id
+        stmt = (
+            update(AbandonedCheckoutModel)
+            .where(
+                AbandonedCheckoutModel.store_id == store_id,
+                AbandonedCheckoutModel.recovered_at.is_(None),
+                or_(*clauses),
+            )
+            .values(**values)
+        )
+        tid = get_tenant_id()
+        if tid:
+            stmt = stmt.where(AbandonedCheckoutModel.tenant_id == tid)
+        result = await self.session.execute(stmt)
+        return result.rowcount or 0
+
+    async def recently_recovered_for_shopper(
+        self,
+        *,
+        store_id: UUID,
+        session_fingerprint: str | None,
+        email: str | None,
+        phone: str | None,
+        within_seconds: int,
+    ) -> bool:
+        """Whether one of this shopper's carts was recovered very recently.
+
+        The cart-track upsert calls this when it finds no open row: a POST
+        landing just after the order (the checkout's in-flight enrichment,
+        a debounced cart-change echo) would otherwise re-create the same
+        cart as a brand-new "abandoned" row seconds after it converted.
+        """
+        clauses = self._shopper_clauses(session_fingerprint, email, phone)
+        if not clauses:
+            return False
+        cutoff = datetime.now(UTC) - timedelta(seconds=within_seconds)
+        query = (
+            select(AbandonedCheckoutModel.id)
+            .where(
+                AbandonedCheckoutModel.store_id == store_id,
+                AbandonedCheckoutModel.recovered_at >= cutoff,
+                or_(*clauses),
+            )
+            .limit(1)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return result.scalar_one_or_none() is not None
 
     async def mark_stale_as_abandoned(
         self, store_id: UUID, threshold_seconds: int
