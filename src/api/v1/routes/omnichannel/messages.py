@@ -12,9 +12,7 @@ from src.api.dependencies.repositories import (
     get_message_thread_repository,
 )
 from src.api.responses import SuccessResponse
-from src.application.dto.omnichannel import (
-    SendMessageDTO,
-)
+from src.application.dto.omnichannel import SendMessageBodyDTO
 from src.application.use_cases.omnichannel import (
     ListMessagesUseCase,
     SendMessageUseCase,
@@ -57,8 +55,9 @@ async def list_messages(
 
 @router.post("/send", status_code=status.HTTP_200_OK)
 async def send_message(
-    dto: SendMessageDTO,
+    payload: SendMessageBodyDTO,
     store_id: UUID,
+    thread_id: UUID,
     db: AsyncSession = Depends(get_db),
     message_repo: ChannelMessageRepositoryImpl = Depends(
         get_channel_message_repository
@@ -70,8 +69,8 @@ async def send_message(
 ) -> SuccessResponse:
     """Send a message to a thread.
 
-    POST /stores/{store_id}/inbox/threads/{thread_id}/messages
-    Body: { "text", "media_upload_id", "template_id", "template_variables", "product_id" }
+    POST /stores/{store_id}/threads/{thread_id}/messages/send
+    Body: { "type", "text", ... } — thread id comes from the path.
     """
     use_case = SendMessageUseCase(
         channel_connection_repository=connection_repo,
@@ -79,12 +78,12 @@ async def send_message(
         channel_message_repository=message_repo,
     )
     message = await use_case.execute(
-        thread_id=dto.thread_id,
-        message=dto.message,
-        attachment_type=dto.attachment_type,
-        attachment_url=dto.attachment_url,
-        template_name=dto.template_name,
-        template_params=dto.template_params,
+        thread_id=thread_id,
+        message=payload.text or "",
+        attachment_type=payload.attachment_type,
+        attachment_url=payload.attachment_url,
+        template_name=payload.template_name,
+        template_params=payload.template_params,
     )
     return SuccessResponse(
         data=message,
