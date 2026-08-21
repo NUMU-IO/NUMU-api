@@ -58,36 +58,44 @@ def verify_x_hub_signature(
 ) -> bool:
     """Verify X-Hub-Signature-256 header from Meta webhooks.
 
+    Facebook Page events are signed with the Facebook app secret;
+    Instagram-product deliveries are signed with the linked Instagram
+    app's own secret — a valid HMAC under either accepts the payload.
+
     Args:
         payload: Raw request body (bytes or str)
         signature: The X-Hub-Signature-256 header value
-        app_secret: Meta app secret (defaults to settings)
+        app_secret: Explicit secret override (skips the settings pair)
 
     Returns:
         True if signature is valid, False otherwise
     """
-    secret = app_secret or settings.meta_app_secret
-    if not secret:
+    if app_secret:
+        secrets = [app_secret]
+    else:
+        secrets = [
+            s for s in (settings.meta_app_secret, settings.meta_ig_app_secret) if s
+        ]
+    if not secrets:
         logger.warning("meta_signature_verify_no_secret")
         return False
 
     if isinstance(payload, str):
         payload = payload.encode("utf-8")
 
-    expected_signature = (
+    expected_signatures = [
         "sha256="
-        + hmac.new(
-            secret.encode("utf-8"),
-            payload,
-            hashlib.sha256,
-        ).hexdigest()
-    )
+        + hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+        for secret in secrets
+    ]
 
-    if not hmac.compare_digest(signature, expected_signature):
+    if not any(
+        hmac.compare_digest(signature, expected) for expected in expected_signatures
+    ):
         logger.warning(
             "meta_signature_invalid",
-            expected_prefix=expected_signature[:20],
             received_prefix=signature[:20],
+            secrets_tried=len(expected_signatures),
         )
         return False
 

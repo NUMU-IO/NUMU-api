@@ -527,6 +527,10 @@ class Settings(BaseSettings):
     # Meta (Facebook/Instagram) Graph API
     meta_app_id: str | None = None
     meta_app_secret: str | None = None
+    # Secret of the linked Instagram app (App Dashboard → Instagram product).
+    # Instagram-product webhook deliveries are HMAC-signed with THIS secret,
+    # not the Facebook app secret — verification accepts either.
+    meta_ig_app_secret: str | None = None
     meta_config_id: str | None = None  # Embedded Signup configuration ID
     # The ONE Graph API version every Meta call uses — CAPI events, OAuth,
     # Custom Audiences, EMQ, Custom Conversions, ad promote. There are no
