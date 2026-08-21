@@ -38,6 +38,22 @@ class SendMessageDTO(BaseModel):
     template_params: dict | None = None
 
 
+class SendMessageBodyDTO(BaseModel):
+    """Body for POST /threads/{thread_id}/messages/send.
+
+    Matches the hub composer's payload; the thread id comes from the
+    route path, not the body. Unknown fields (media_upload_id,
+    template_id, product_id) are ignored until those features land.
+    """
+
+    type: str = "text"
+    text: str | None = None
+    attachment_type: str | None = None
+    attachment_url: str | None = None
+    template_name: str | None = None
+    template_params: dict | None = None
+
+
 class IngestMessageDTO(BaseModel):
     """Request DTO for ingesting inbound message."""
 
