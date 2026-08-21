@@ -1,5 +1,6 @@
 """Omnichannel use cases."""
 
+from .backfill_conversations import BackfillConversationsUseCase
 from .connect_meta import ConnectMetaUseCase
 from .disconnect_channel import DisconnectChannelUseCase
 from .ingest_message import IngestInboundMessageUseCase
@@ -12,6 +13,7 @@ from .sync_catalog import SyncCatalogUseCase
 from .templates import CreateTemplateUseCase, ListTemplatesUseCase
 
 __all__ = [
+    "BackfillConversationsUseCase",
     "ConnectMetaUseCase",
     "DisconnectChannelUseCase",
     "IngestInboundMessageUseCase",

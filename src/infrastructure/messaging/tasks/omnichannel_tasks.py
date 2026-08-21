@@ -35,6 +35,61 @@ def refresh_meta_token(connection_id: str) -> dict:
     return asyncio.run(_refresh())
 
 
+@celery_app.task(
+    name="omnichannel.backfill_conversations",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_kwargs={"max_retries": 3},
+)
+def backfill_conversations(
+    connection_id: str,
+    since_days: int = 90,
+    max_conversations: int = 100,
+) -> dict:
+    """Seed the inbox with a connection's existing Meta conversations.
+
+    Runs after a merchant connects a Page/IG account so the inbox isn't
+    empty on day one. Idempotent — messages are keyed on their Meta id,
+    so retries and concurrent webhooks can't duplicate anything.
+    """
+    import asyncio
+    from uuid import UUID as _UUID
+
+    from sqlalchemy import text
+
+    from src.application.use_cases.omnichannel.backfill_conversations import (
+        BackfillConversationsUseCase,
+    )
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories import (
+        ChannelConnectionRepositoryImpl,
+        ChannelMessageRepositoryImpl,
+        MessageThreadRepositoryImpl,
+    )
+
+    async def _run() -> dict:
+        async with AsyncSessionLocal() as session:
+            # No tenant context in a background job; the connection row
+            # carries the tenant_id every write is scoped to.
+            await session.execute(text("SET search_path TO public"))
+            await session.execute(
+                text("SELECT set_config('app.rls_bypass', 'true', true)")
+            )
+            result = await BackfillConversationsUseCase(
+                channel_connection_repository=ChannelConnectionRepositoryImpl(session),
+                message_thread_repository=MessageThreadRepositoryImpl(session),
+                channel_message_repository=ChannelMessageRepositoryImpl(session),
+            ).execute(
+                connection_id=_UUID(connection_id),
+                since_days=since_days,
+                max_conversations=max_conversations,
+            )
+            await session.commit()
+            return result
+
+    return asyncio.run(_run())
+
+
 @celery_app.task(name="omnichannel.process_inbound")
 def process_inbound_message(message_id: str) -> dict:
     """Process incoming message - create thread, notifications."""
