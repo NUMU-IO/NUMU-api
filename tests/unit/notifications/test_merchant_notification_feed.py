@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import src.application.services.notification_feed as feed_mod
 import src.infrastructure.events.handlers.notification_feed_handler as handler_mod
 from src.application.services.notification_feed import emit_notification
 from src.core.entities.order import OrderStatus
@@ -34,6 +35,13 @@ def patched_sessions(test_engine, monkeypatch):
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
     monkeypatch.setattr(handler_mod, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(feed_mod, "AsyncSessionLocal", factory)
+
+    async def _noop_publish(result):
+        return None
+
+    monkeypatch.setattr(feed_mod, "_publish_realtime", _noop_publish)
+    monkeypatch.setattr(feed_mod, "_enqueue_push", lambda result: None)
     return factory
 
 
@@ -178,8 +186,8 @@ async def test_emit_dedupes_and_honours_muted_categories(test_session):
         "data": {"order_number": "ORD-1"},
         "dedupe_key": "order.new:1",
     }
-    assert await emit_notification(test_session, **kwargs) is True
-    assert await emit_notification(test_session, **kwargs) is False
+    assert (await emit_notification(test_session, **kwargs)).written is True
+    assert (await emit_notification(test_session, **kwargs)).written is False
     assert (
         await emit_notification(
             test_session,
@@ -187,14 +195,12 @@ async def test_emit_dedupes_and_honours_muted_categories(test_session):
             category="logistics",
             kind="shipment.shipped",
         )
-        is False
-    )
+    ).written is False
     assert (
         await emit_notification(
             test_session, store_id=uuid4(), category="orders", kind="order.new"
         )
-        is False
-    )
+    ).written is False
     with pytest.raises(ValueError):
         await emit_notification(
             test_session, store_id=store.id, category="bogus", kind="x"

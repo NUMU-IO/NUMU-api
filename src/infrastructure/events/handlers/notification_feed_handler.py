@@ -2,8 +2,11 @@
 
 Sibling of ``order_activity_handler`` (which writes the per-order
 timeline). These write the store-wide feed behind the hub's bell.
-Each handler opens its own session (post-commit dispatch) and is
-best-effort: a failure here must never surface to the publisher.
+
+Each handler reads an order snapshot in its own session, then hands
+off to ``emit_notification_standalone`` which writes + commits + fans
+out (SSE publish, web-push for important kinds). Best-effort: a failure
+here must never surface to the publisher.
 """
 
 from __future__ import annotations
@@ -12,7 +15,9 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from src.application.services.notification_feed import emit_notification
+from src.application.services.notification_feed import (
+    emit_notification_standalone,
+)
 from src.core.events.order_events import (
     OrderCreatedEvent,
     OrderPaidEvent,
@@ -35,18 +40,23 @@ def _name_from_address(address: dict | None) -> str | None:
     return name or None
 
 
-async def _order_snapshot(session, order_id: UUID) -> dict:
+async def _order_snapshot(order_id: UUID) -> dict:
     """Customer name + money for the title; empty dict if the order is gone."""
-    row = await session.execute(
-        select(
-            OrderModel.order_number,
-            OrderModel.total,
-            OrderModel.currency,
-            OrderModel.payment_method,
-            OrderModel.shipping_address,
-        ).where(OrderModel.id == order_id)
-    )
-    found = row.first()
+    try:
+        async with AsyncSessionLocal() as session:
+            row = await session.execute(
+                select(
+                    OrderModel.order_number,
+                    OrderModel.total,
+                    OrderModel.currency,
+                    OrderModel.payment_method,
+                    OrderModel.shipping_address,
+                ).where(OrderModel.id == order_id)
+            )
+            found = row.first()
+    except Exception:
+        logger.exception("notification_feed_snapshot_failed", order_id=str(order_id))
+        return {}
     if found is None:
         return {}
     order_number, total, currency, payment_method, address = found
@@ -60,54 +70,43 @@ async def _order_snapshot(session, order_id: UUID) -> dict:
 
 
 async def handle_order_created_notification(event: OrderCreatedEvent) -> None:
-    try:
-        async with AsyncSessionLocal() as session, session.begin():
-            snap = await _order_snapshot(session, event.order_id)
-            await emit_notification(
-                session,
-                store_id=event.store_id,
-                category="orders",
-                kind="order.new",
-                data={
-                    "order_number": event.order_number,
-                    "total_cents": snap.get("total_cents", int(event.total * 100)),
-                    "currency": snap.get("currency") or event.currency,
-                    "payment_method": snap.get("payment_method"),
-                    "customer_name": snap.get("customer_name"),
-                },
-                link=f"/orders/{event.order_id}",
-                entity_type="order",
-                entity_id=event.order_id,
-                dedupe_key=f"order.new:{event.order_id}",
-            )
-    except Exception:
-        logger.exception("notification_feed_order_created_failed")
+    snap = await _order_snapshot(event.order_id)
+    await emit_notification_standalone(
+        store_id=event.store_id,
+        category="orders",
+        kind="order.new",
+        data={
+            "order_number": event.order_number,
+            "total_cents": snap.get("total_cents", int(event.total * 100)),
+            "currency": snap.get("currency") or event.currency,
+            "payment_method": snap.get("payment_method"),
+            "customer_name": snap.get("customer_name"),
+        },
+        link=f"/orders/{event.order_id}",
+        entity_type="order",
+        entity_id=event.order_id,
+        dedupe_key=f"order.new:{event.order_id}",
+    )
 
 
 async def handle_order_paid_notification(event: OrderPaidEvent) -> None:
-    try:
-        async with AsyncSessionLocal() as session, session.begin():
-            snap = await _order_snapshot(session, event.order_id)
-            await emit_notification(
-                session,
-                store_id=event.store_id,
-                category="payments",
-                kind="payment.received",
-                data={
-                    "order_number": event.order_number,
-                    "total_cents": snap.get("total_cents", int(event.total * 100)),
-                    "currency": snap.get("currency") or "EGP",
-                    "payment_method": event.payment_method
-                    or snap.get("payment_method"),
-                    "customer_name": snap.get("customer_name"),
-                },
-                link=f"/orders/{event.order_id}",
-                entity_type="order",
-                entity_id=event.order_id,
-                dedupe_key=f"payment.received:{event.order_id}",
-            )
-    except Exception:
-        logger.exception("notification_feed_order_paid_failed")
+    snap = await _order_snapshot(event.order_id)
+    await emit_notification_standalone(
+        store_id=event.store_id,
+        category="payments",
+        kind="payment.received",
+        data={
+            "order_number": event.order_number,
+            "total_cents": snap.get("total_cents", int(event.total * 100)),
+            "currency": snap.get("currency") or "EGP",
+            "payment_method": event.payment_method or snap.get("payment_method"),
+            "customer_name": snap.get("customer_name"),
+        },
+        link=f"/orders/{event.order_id}",
+        entity_type="order",
+        entity_id=event.order_id,
+        dedupe_key=f"payment.received:{event.order_id}",
+    )
 
 
 # new_status → (category, kind, important)
@@ -126,52 +125,42 @@ async def handle_order_status_notification(event: OrderStatusChangedEvent) -> No
     if mapping is None:
         return
     category, kind, important = mapping
-    try:
-        async with AsyncSessionLocal() as session, session.begin():
-            snap = await _order_snapshot(session, event.order_id)
-            await emit_notification(
-                session,
-                store_id=event.store_id,
-                category=category,
-                kind=kind,
-                data={
-                    "order_number": event.order_number,
-                    "customer_name": event.customer_name or snap.get("customer_name"),
-                    "total_cents": snap.get("total_cents"),
-                    "currency": snap.get("currency"),
-                    "previous_status": event.previous_status,
-                    "reason": event.reason,
-                    "carrier": event.carrier,
-                    "tracking_number": event.tracking_number,
-                },
-                link=f"/orders/{event.order_id}",
-                entity_type="order",
-                entity_id=event.order_id,
-                important=important,
-                dedupe_key=f"{kind}:{event.order_id}",
-            )
-    except Exception:
-        logger.exception("notification_feed_status_failed", status=event.new_status)
+    snap = await _order_snapshot(event.order_id)
+    await emit_notification_standalone(
+        store_id=event.store_id,
+        category=category,
+        kind=kind,
+        data={
+            "order_number": event.order_number,
+            "customer_name": event.customer_name or snap.get("customer_name"),
+            "total_cents": snap.get("total_cents"),
+            "currency": snap.get("currency"),
+            "previous_status": event.previous_status,
+            "reason": event.reason,
+            "carrier": event.carrier,
+            "tracking_number": event.tracking_number,
+        },
+        link=f"/orders/{event.order_id}",
+        entity_type="order",
+        entity_id=event.order_id,
+        important=important,
+        dedupe_key=f"{kind}:{event.order_id}",
+    )
 
 
 async def handle_kill_switch_notification(event: TrustKillSwitchFiredEvent) -> None:
-    try:
-        async with AsyncSessionLocal() as session, session.begin():
-            await emit_notification(
-                session,
-                store_id=event.store_id,
-                tenant_id=event.tenant_id,
-                category="system",
-                kind="trust.kill_switch",
-                data={
-                    "rate_pct": event.rate_pct,
-                    "rto_count": event.rto_count,
-                    "auto_approve_count": event.auto_approve_count,
-                    "reason": event.reason,
-                },
-                link="/trust-network",
-                important=True,
-                dedupe_key=f"trust.kill_switch:{event.event_id}",
-            )
-    except Exception:
-        logger.exception("notification_feed_kill_switch_failed")
+    await emit_notification_standalone(
+        store_id=event.store_id,
+        tenant_id=event.tenant_id,
+        category="system",
+        kind="trust.kill_switch",
+        data={
+            "rate_pct": event.rate_pct,
+            "rto_count": event.rto_count,
+            "auto_approve_count": event.auto_approve_count,
+            "reason": event.reason,
+        },
+        link="/trust-network",
+        important=True,
+        dedupe_key=f"trust.kill_switch:{event.event_id}",
+    )

@@ -10,11 +10,14 @@ task; the hub renders copy from ``kind`` + ``data``.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import (
@@ -23,7 +26,12 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.responses import SuccessResponse
-from src.application.services.notification_feed import SETTINGS_KEY
+from src.application.services.notification_feed import (
+    SETTINGS_KEY,
+    notification_channel,
+    push_important_enabled,
+)
+from src.config import settings as app_settings
 from src.core.entities.store import Store
 from src.infrastructure.database.models.tenant.merchant_notification import (
     NOTIFICATION_CATEGORIES,
@@ -82,12 +90,16 @@ class NotificationPreferencesResponse(BaseModel):
     muted_categories: list[str]
     email_new_order: bool
     push_new_order: bool
+    # Web-push for important feed rows (cancelled / payment failed /
+    # returned / kill-switch). Opt-out; default on.
+    push_important: bool
 
 
 class NotificationPreferencesUpdate(BaseModel):
     muted_categories: list[Category] | None = None
     email_new_order: bool | None = None
     push_new_order: bool | None = None
+    push_important: bool | None = None
 
 
 def _to_response(m: MerchantNotificationModel) -> NotificationItemResponse:
@@ -191,6 +203,88 @@ async def mark_all_read(
     return SuccessResponse(data=MarkReadResponse(updated=updated))
 
 
+STREAM_HEARTBEAT_S = 25.0
+STREAM_FALLBACK_POLL_S = 20.0
+# SSE framing: one `data:` line per event, blank line terminates the frame;
+# a comment line (`: ping`) keeps proxies from idling the connection out.
+SSE_PING = ": ping" + "\n" * 2
+
+
+def sse_frame(payload: dict) -> str:
+    return "data: " + json.dumps(payload) + "\n" * 2
+
+
+@router.get(
+    "/stream",
+    summary="SSE stream: one event per new notification (plus heartbeats)",
+    operation_id="stream_merchant_notifications",
+)
+async def stream_notifications(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+):
+    """Server-Sent Events.
+
+    Relays the Redis channel ``store:{id}:notifications`` that
+    ``notification_feed.fanout`` publishes to after each commit; the hub
+    invalidates its queries on every frame. Without Redis the stream
+    degrades to a 20 s tick so the client still refetches.
+    """
+    store_id = store.id
+
+    async def event_generator():
+        pubsub = None
+        publisher = None
+        try:
+            if app_settings.redis_host:
+                try:
+                    from src.infrastructure.realtime.redis_pubsub import (
+                        RealtimePublisher,
+                    )
+
+                    publisher = RealtimePublisher()
+                    pubsub = await publisher.subscribe(notification_channel(store_id))
+                except Exception:  # noqa: BLE001 — fall back to ticking
+                    pubsub = None
+            yield sse_frame({"type": "connected"})
+            while True:
+                if pubsub is not None:
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=STREAM_HEARTBEAT_S
+                    )
+                    if message:
+                        raw = message.get("data")
+                        if isinstance(raw, bytes | bytearray):
+                            raw = raw.decode("utf-8")
+                        try:
+                            yield sse_frame(json.loads(raw))
+                        except (ValueError, TypeError):
+                            continue
+                    else:
+                        yield SSE_PING
+                else:
+                    await asyncio.sleep(STREAM_FALLBACK_POLL_S)
+                    yield sse_frame({"type": "tick"})
+        except asyncio.CancelledError:
+            return
+        finally:
+            if publisher is not None and pubsub is not None:
+                try:
+                    await publisher.unsubscribe(notification_channel(store_id), pubsub)
+                    await publisher.redis.aclose()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 def _prefs_from_settings(settings: dict | None) -> NotificationPreferencesResponse:
     s = settings or {}
     center = s.get(SETTINGS_KEY) or {}
@@ -204,6 +298,7 @@ def _prefs_from_settings(settings: dict | None) -> NotificationPreferencesRespon
         ],
         email_new_order=bool(email),
         push_new_order=bool(push),
+        push_important=push_important_enabled(s),
     )
 
 
@@ -244,9 +339,12 @@ async def update_preferences(
         email = dict(settings.get("email_notifications") or {})
         email["new_order"] = body.email_new_order
         settings["email_notifications"] = email
-    if body.push_new_order is not None:
+    if body.push_new_order is not None or body.push_important is not None:
         push = dict(settings.get("push_notifications") or {})
-        push["new_order"] = body.push_new_order
+        if body.push_new_order is not None:
+            push["new_order"] = body.push_new_order
+        if body.push_important is not None:
+            push["important"] = body.push_important
         settings["push_notifications"] = push
     store.settings = settings
     await store_repo.update(store)
